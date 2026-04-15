@@ -1,0 +1,32 @@
+{
+  "eval_id": 0,
+  "eval_name": "eval-trade-generation",
+  "configuration": "with_skill",
+  "expectations": [
+    {
+      "text": "has-scores-table",
+      "passed": true,
+      "evidence": "Has a Scores table with 1-5 ratings for 7 dimensions"
+    },
+    {
+      "text": "has-code-suggestions",
+      "passed": true,
+      "evidence": "Multiple code snippets with Current/Suggested patterns"
+    },
+    {
+      "text": "has-top-recommendations",
+      "passed": true,
+      "evidence": "Has 'Top 3 Recommendations' section"
+    },
+    {
+      "text": "identifies-correct-files",
+      "passed": true,
+      "evidence": "Lists trade_service.py as primary"
+    },
+    {
+      "text": "has-severity-ratings",
+      "passed": true,
+      "evidence": "Every finding has 'Severity: High/Medium/Low'"
+    }
+  ]
+}

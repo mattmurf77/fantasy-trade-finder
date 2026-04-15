@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/seed_test_user.py --dry-run)",
+      "Bash(python3 scripts/seed_test_user.py --dry-run)",
+      "Bash(python3 scripts/seed_test_user.py --clear)",
+      "Bash(python3 tmp_check_db.py)",
+      "Bash(python3 tmp_check_db2.py)",
+      "Bash(python3 scripts/create_test_league.py --dry-run)",
+      "Bash(python3 scripts/create_test_league.py --clear)",
+      "Bash(python3 scripts/seed_test_user_2.py --dry-run)",
+      "Bash(python3 scripts/seed_test_user_2.py --clear)",
+      "Bash(python3 -)",
+      "Bash(python3 -c ':*)"
+    ]
+  }
+}

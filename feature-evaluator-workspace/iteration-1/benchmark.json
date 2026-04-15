@@ -1,0 +1,81 @@
+{
+  "skill_name": "feature-evaluator",
+  "iteration": 1,
+  "configurations": [
+    {
+      "name": "with_skill",
+      "evals": [
+        {
+          "eval_name": "eval-trade-generation",
+          "pass_rate": 1.0,
+          "passed": 5,
+          "total": 5,
+          "time_seconds": 86.5,
+          "total_tokens": 54362
+        },
+        {
+          "eval_name": "eval-ranking-system",
+          "pass_rate": 1.0,
+          "passed": 5,
+          "total": 5,
+          "time_seconds": 100.1,
+          "total_tokens": 57762
+        },
+        {
+          "eval_name": "eval-ranking-screen-ui",
+          "pass_rate": 1.0,
+          "passed": 5,
+          "total": 5,
+          "time_seconds": 61.6,
+          "total_tokens": 43508
+        }
+      ],
+      "aggregate": {
+        "mean_pass_rate": 1.0,
+        "stddev_pass_rate": 0.0,
+        "mean_time_seconds": 82.73,
+        "mean_tokens": 51877.33
+      }
+    },
+    {
+      "name": "without_skill",
+      "evals": [
+        {
+          "eval_name": "eval-trade-generation",
+          "pass_rate": 0.6,
+          "passed": 3,
+          "total": 5,
+          "time_seconds": 326.0,
+          "total_tokens": 57790
+        },
+        {
+          "eval_name": "eval-ranking-system",
+          "pass_rate": 0.6,
+          "passed": 3,
+          "total": 5,
+          "time_seconds": 359.9,
+          "total_tokens": 47168
+        },
+        {
+          "eval_name": "eval-ranking-screen-ui",
+          "pass_rate": 0.6,
+          "passed": 3,
+          "total": 5,
+          "time_seconds": 59.5,
+          "total_tokens": 45966
+        }
+      ],
+      "aggregate": {
+        "mean_pass_rate": 0.6,
+        "stddev_pass_rate": 0.0,
+        "mean_time_seconds": 248.47,
+        "mean_tokens": 50308.0
+      }
+    }
+  ],
+  "delta": {
+    "pass_rate": 0.4,
+    "time_seconds": -165.74,
+    "tokens": 1569.33
+  }
+}

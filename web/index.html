@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dynasty Rankings — Fantasy Trade Finder</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════
+       LOGIN SCREEN
+  ════════════════════════════════════════════════════ -->
+  <div class="auth-screen" id="auth-screen">
+    <div class="auth-card">
+      <div class="auth-logo">Dynasty <span>Trade Finder</span></div>
+      <div class="auth-subtitle">Enter your Sleeper username to import your roster and get personalised trade ideas.</div>
+
+      <div class="auth-field">
+        <div class="auth-label">SLEEPER USERNAME</div>
+        <input
+          class="auth-input"
+          id="username-input"
+          type="text"
+          placeholder="e.g. dynastyking99"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+        />
+        <div class="auth-error" id="auth-error"></div>
+      </div>
+
+      <button class="auth-btn" id="auth-btn" onclick="handleLogin()">
+        Connect with Sleeper →
+      </button>
+
+      <div class="auth-note">
+        No account required — Sleeper's API is public.<br>
+        Your data stays on your device.
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       LEAGUE SELECTION SCREEN
+  ════════════════════════════════════════════════════ -->
+  <div class="league-screen hidden" id="league-screen">
+    <div class="league-card">
+      <div class="league-header">
+        <div class="league-title">Choose a League</div>
+        <div class="league-subtitle" id="league-subtitle">Select which league to use for trade suggestions</div>
+      </div>
+      <div class="league-list" id="league-list">
+        <div class="league-loading">Loading your leagues…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       INIT LOADING OVERLAY
+  ════════════════════════════════════════════════════ -->
+  <div class="init-overlay hidden" id="init-overlay">
+    <div class="init-spinner"></div>
+    <div class="init-label" id="init-label">Importing your roster…</div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       MAIN APP
+  ════════════════════════════════════════════════════ -->
+
+  <header>
+    <div class="logo">Dynasty <span>Trade Finder</span></div>
+    <div class="header-right">
+      <button class="view-btn" onclick="openRankings()">📋 Rankings</button>
+
+      <!-- Notification bell -->
+      <div class="notif-bell-wrap" id="notif-bell-wrap">
+        <button class="notif-bell-btn" id="notif-bell-btn"
+                onclick="toggleNotifPanel(event)" title="Notifications">
+          🔔
+          <span class="notif-badge" id="notif-badge"></span>
+        </button>
+        <!-- Panel — slides down from the bell -->
+        <div class="notif-panel" id="notif-panel">
+          <div class="notif-panel-header">
+            <span class="notif-panel-title">Notifications</span>
+            <button class="notif-mark-all-btn" onclick="markAllNotifsRead()">Mark all read</button>
+          </div>
+          <div class="notif-list" id="notif-list">
+            <div class="notif-empty">No notifications yet</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Account chip — injected by JS after login -->
+      <div id="account-chip-container"></div>
+    </div>
+  </header>
+
+  <!-- Top-level nav -->
+  <div class="nav-tabs" style="max-width:980px;width:100%;">
+    <button class="nav-tab active" onclick="switchView('rank', this)">Rank Players</button>
+    <button class="nav-tab"        onclick="switchView('trades', this)">
+      Find a Trade
+      <span class="liked-badge"   id="liked-badge">0</span>
+    </button>
+    <button class="nav-tab"        onclick="switchView('matches', this)">
+      Matches
+      <span class="matches-badge" id="matches-badge">0</span>
+    </button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       VIEW: RANK
+  ════════════════════════════════════════════════════ -->
+  <div class="view active" id="view-rank">
+
+  <div class="tabs" style="margin-top:20px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+    <button class="tab active" onclick="switchPosition('RB', this)">RB</button>
+    <button class="tab"        onclick="switchPosition('WR', this)">WR</button>
+    <button class="tab"        onclick="switchPosition('QB', this)">QB</button>
+    <button class="tab"        onclick="switchPosition('TE', this)">TE</button>
+    <button class="tab" onclick="openRookieBoard()" style="margin-left:auto;background:rgba(34,197,94,0.1);border-color:rgba(34,197,94,0.3);color:#22c55e;">📋 Rookies</button>
+  </div>
+
+  <div class="progress-wrap">
+    <div class="progress-meta">
+      <span id="progress-label">Loading…</span>
+      <span id="progress-status"></span>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+    </div>
+
+    <!-- Overall unlock progress — segmented by position -->
+    <div class="unlock-bar-wrap" id="unlock-bar-wrap">
+      <div class="unlock-bar-header">
+        <span class="unlock-bar-title">🔓 Find a Trade</span>
+        <span class="unlock-bar-pct" id="unlock-bar-pct">0%</span>
+      </div>
+      <div class="unlock-bar-track">
+        <div class="unlock-segment" data-pos="QB">
+          <div class="unlock-segment-fill" id="unlock-fill-QB"></div>
+        </div>
+        <div class="unlock-segment" data-pos="RB">
+          <div class="unlock-segment-fill" id="unlock-fill-RB"></div>
+        </div>
+        <div class="unlock-segment" data-pos="WR">
+          <div class="unlock-segment-fill" id="unlock-fill-WR"></div>
+        </div>
+        <div class="unlock-segment" data-pos="TE">
+          <div class="unlock-segment-fill" id="unlock-fill-TE"></div>
+        </div>
+      </div>
+      <div class="unlock-bar-labels">
+        <span class="unlock-label" id="unlock-label-QB">QB <span class="unlock-label-count">0/10</span></span>
+        <span class="unlock-label" id="unlock-label-RB">RB <span class="unlock-label-count">0/10</span></span>
+        <span class="unlock-label" id="unlock-label-WR">WR <span class="unlock-label-count">0/10</span></span>
+        <span class="unlock-label" id="unlock-label-TE">TE <span class="unlock-label-count">0/10</span></span>
+      </div>
+    </div>
+  </div>
+
+  <p class="instruction" id="instruction">
+    Tap players in order of preference — <strong>best first</strong>
+  </p>
+
+  <div class="arena">
+    <div class="card" id="card-a" onclick="selectCard('a')">
+      <div class="rank-badge" id="badge-a"></div>
+      <div class="pos-badge" id="posbadge-a"></div>
+      <div class="card-name" id="name-a">—</div>
+      <div class="card-meta">
+        <span class="card-team" id="team-a"></span>
+        <span id="meta-a"></span>
+      </div>
+      <div class="player-extra" id="extra-a"></div>
+    </div>
+
+    <div class="card" id="card-b" onclick="selectCard('b')">
+      <div class="rank-badge" id="badge-b"></div>
+      <div class="pos-badge" id="posbadge-b"></div>
+      <div class="card-name" id="name-b">—</div>
+      <div class="card-meta">
+        <span class="card-team" id="team-b"></span>
+        <span id="meta-b"></span>
+      </div>
+      <div class="player-extra" id="extra-b"></div>
+    </div>
+
+    <div class="card" id="card-c" onclick="selectCard('c')">
+      <div class="rank-badge" id="badge-c"></div>
+      <div class="pos-badge" id="posbadge-c"></div>
+      <div class="card-name" id="name-c">—</div>
+      <div class="card-meta">
+        <span class="card-team" id="team-c"></span>
+        <span id="meta-c"></span>
+      </div>
+      <div class="player-extra" id="extra-c"></div>
+    </div>
+  </div>
+
+  <div class="auto-confirm-row" style="text-align:center; margin-bottom:6px;">
+    <button class="skip-btn" id="auto-confirm-toggle" onclick="toggleAutoConfirm()"
+            style="font-size:0.82rem; padding:4px 14px; border-radius:8px; cursor:pointer;">
+      ⚡ Auto-advance OFF
+    </button>
+  </div>
+  <div class="submit-row">
+    <button class="submit-btn" id="submit-btn" onclick="submitRanking()">
+      Confirm ranking →
+    </button>
+    <button class="skip-btn" onclick="loadTrio()">Skip ↩</button>
+  </div>
+
+  </div> <!-- end view-rank -->
+
+  <!-- ═══════════════════════════════════════════════════
+       ROOKIE BOARD OVERLAY
+  ════════════════════════════════════════════════════ -->
+  <div class="rookie-overlay" id="rookie-overlay" onclick="closeRookieBoard(event)">
+    <div class="rookie-panel">
+      <div class="rookie-panel-header">
+        <div class="panel-title">📋 Rookie Draft Board</div>
+        <button class="close-btn" onclick="closeRookieBoard()">✕</button>
+      </div>
+      <div class="rookie-filter-tabs" id="rookie-filter-tabs">
+        <button class="rookie-filter-tab active" onclick="filterRookies('ALL', this)">All</button>
+        <button class="rookie-filter-tab qb-color" onclick="filterRookies('QB', this)">QB</button>
+        <button class="rookie-filter-tab rb-color" onclick="filterRookies('RB', this)">RB</button>
+        <button class="rookie-filter-tab wr-color" onclick="filterRookies('WR', this)">WR</button>
+        <button class="rookie-filter-tab te-color" onclick="filterRookies('TE', this)">TE</button>
+      </div>
+      <div class="rookie-list" id="rookie-list">
+        <div class="panel-empty">Loading rookies…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       VIEW: TRADES
+  ════════════════════════════════════════════════════ -->
+  <div class="view" id="view-trades">
+    <div class="trades-wrap" id="trades-wrap">
+      <!-- Ranking gate — filled by JS; hidden until progress check runs -->
+      <div class="trades-gate" id="trades-gate"></div>
+
+      <div class="trades-header">
+        <div class="trades-title">Find a Trade</div>
+        <button class="generate-btn" id="gen-btn" onclick="generateTrades()">
+          ⚡ Find a Trade
+        </button>
+      </div>
+
+      <!-- Fairness threshold slider -->
+      <div class="fairness-row" id="fairness-row">
+        <span class="fairness-label">Trade balance</span>
+        <input  type="range" class="fairness-slider" id="fairness-slider"
+                min="50" max="100" step="5" value="75"
+                oninput="onFairnessSlider(this.value)" />
+        <span class="fairness-value" id="fairness-value">75%</span>
+        <div class="fairness-equal-wrap">
+          <input type="checkbox" id="fairness-equal-chk"
+                 onchange="onFairnessEqualChk(this.checked)" />
+          <label for="fairness-equal-chk">Equal only</label>
+        </div>
+      </div>
+
+      <!-- Player Picker — select players to trade away -->
+      <div class="player-picker-section" id="player-picker-section" style="display:none">
+        <div class="player-picker-header">
+          <div>
+            <div class="player-picker-title">
+              Select players to trade away
+              <span class="selected-count-badge" id="picker-count-badge" style="display:none">0</span>
+            </div>
+            <div class="player-picker-sub">Pick specific players from your roster, then hit Find a Trade</div>
+          </div>
+          <button class="player-picker-clear" id="picker-clear-btn" onclick="clearPinnedPlayers()" style="display:none">Clear all</button>
+        </div>
+        <div class="player-picker-pos-filters" id="picker-pos-filters">
+          <button class="picker-pos-tab active" onclick="filterPickerPos('ALL', this)">All</button>
+          <button class="picker-pos-tab" onclick="filterPickerPos('QB', this)">QB</button>
+          <button class="picker-pos-tab" onclick="filterPickerPos('RB', this)">RB</button>
+          <button class="picker-pos-tab" onclick="filterPickerPos('WR', this)">WR</button>
+          <button class="picker-pos-tab" onclick="filterPickerPos('TE', this)">TE</button>
+          <button class="picker-pos-tab" onclick="filterPickerPos('PICK', this)">Picks</button>
+        </div>
+        <div class="player-picker-chips" id="picker-chips"></div>
+      </div>
+
+      <!-- League switcher — hidden until leagues are loaded -->
+      <div class="league-switcher-row" id="league-switcher-row" style="display:none">
+        <span class="league-switcher-label">League</span>
+        <select class="league-select" id="league-select" onchange="switchToLeague(this.selectedIndex)"></select>
+        <span class="league-switch-status" id="league-switch-status"></span>
+        <button class="outlook-gear-btn" id="outlook-gear-btn"
+                onclick="showOutlookModal(false)"
+                title="Team outlook settings">⚙</button>
+        <span class="outlook-badge" id="outlook-badge"></span>
+      </div>
+
+      <!-- Leaguemate ranking coverage — hidden until data is loaded -->
+      <div class="coverage-row" id="coverage-row" style="display:none">
+        <div class="coverage-bar-wrap">
+          <div class="coverage-bar-fill" id="coverage-bar" style="width:0%"></div>
+        </div>
+        <span class="coverage-label" id="coverage-label"></span>
+      </div>
+
+      <div id="trades-list">
+        <div class="trades-empty">
+          <strong>No trades yet</strong>
+          Hit "Find a Trade" to generate personalised trade suggestions<br>
+          based on your rankings vs your leaguemates.
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       VIEW: MATCHES
+  ════════════════════════════════════════════════════ -->
+  <div class="view" id="view-matches">
+    <div class="trades-wrap" id="matches-wrap">
+      <div class="matches-section" id="matches-section">
+        <div class="matches-section-title">Mutual Matches</div>
+        <div id="matches-list">
+          <div class="trades-empty">
+            <strong>No matches yet</strong>
+            When you and a leaguemate both like the same trade,<br>
+            it will show up here.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Team Outlook Modal — 2-step flow: Step 1 = outlook, Step 2 = positional prefs -->
+  <div class="outlook-overlay hidden" id="outlook-overlay">
+    <div class="outlook-card">
+
+      <!-- ── STEP 1: Team Outlook ────────────────────────────────────── -->
+      <div id="outlook-step-1">
+        <div class="outlook-card-header">
+          <div class="outlook-card-icon">🏈</div>
+          <div class="outlook-card-title" id="outlook-modal-title">
+            What's your team outlook for this league?
+          </div>
+          <div class="outlook-card-sub">
+            This shapes which trades surface for you — you can change it anytime.
+          </div>
+        </div>
+
+        <div class="outlook-options">
+          <button class="outlook-option-btn" data-value="championship"
+                  onclick="selectOutlookStep1('championship')">
+            <span class="outlook-option-emoji">🏆</span>
+            <span class="outlook-option-text">
+              <div class="outlook-option-name">Championship or Bust</div>
+              <div class="outlook-option-desc">Strongly prefer proven veterans</div>
+            </span>
+          </button>
+          <button class="outlook-option-btn" data-value="contender"
+                  onclick="selectOutlookStep1('contender')">
+            <span class="outlook-option-emoji">💪</span>
+            <span class="outlook-option-text">
+              <div class="outlook-option-name">Contender</div>
+              <div class="outlook-option-desc">Slight lean toward veterans</div>
+            </span>
+          </button>
+          <button class="outlook-option-btn" data-value="rebuilder"
+                  onclick="selectOutlookStep1('rebuilder')">
+            <span class="outlook-option-emoji">🔨</span>
+            <span class="outlook-option-text">
+              <div class="outlook-option-name">Rebuilder</div>
+              <div class="outlook-option-desc">Prefer young talent over veterans</div>
+            </span>
+          </button>
+          <button class="outlook-option-btn" data-value="jets"
+                  onclick="selectOutlookStep1('jets')">
+            <span class="outlook-option-emoji">🟢</span>
+            <span class="outlook-option-text">
+              <div class="outlook-option-name">NY Jets</div>
+              <div class="outlook-option-desc">Young talent only — 25 and under</div>
+            </span>
+          </button>
+          <button class="outlook-option-btn" data-value="not_sure"
+                  onclick="selectOutlookStep1('not_sure')">
+            <span class="outlook-option-emoji">🤷</span>
+            <span class="outlook-option-text">
+              <div class="outlook-option-name">Not Sure</div>
+              <div class="outlook-option-desc">No adjustment — pure ELO scoring</div>
+            </span>
+          </button>
+        </div>
+
+        <button class="outlook-dismiss-btn" id="outlook-dismiss-btn"
+                onclick="dismissOutlookModal()" style="display:none">
+          Cancel
+        </button>
+      </div>
+
+      <!-- ── STEP 2: Positional Preferences ────────────────────────── -->
+      <div id="outlook-step-2" style="display:none">
+        <div class="pos-pref-title">Positional preferences</div>
+        <div class="pos-pref-sub">
+          Optional — helps surface trades that match your roster needs.
+        </div>
+
+        <div class="pos-pref-sections">
+          <!-- Acquire -->
+          <div class="pos-pref-section">
+            <div class="pos-pref-section-title">Positions I want</div>
+            <div class="pos-pref-checks">
+              <label class="pos-pref-check-label">
+                <input type="checkbox" data-side="acquire" data-pos="QB"> QB
+              </label>
+              <label class="pos-pref-check-label">
+                <input type="checkbox" data-side="acquire" data-pos="RB"> RB
+              </label>
+              <label class="pos-pref-check-label">
+                <input type="checkbox" data-side="acquire" data-pos="WR"> WR
+              </label>
+              <label class="pos-pref-check-label">
+                <input type="checkbox" data-side="acquire" data-pos="TE"> TE
+              </label>
+              <label class="pos-pref-check-label">
+                <input type="checkbox" data-side="acquire" data-pos="PICK"> Picks
+              </label>
+            </div>
+          </div>
+
+          <!-- Trade away -->
+          <div class="pos-pref-section">
+            <div class="pos-pref-section-title">Positions to move</div>
+            <div class="pos-pref-checks">
+              <label class="pos-pref-check-label">
+                <input type="checkbox" data-side="away" data-pos="QB"> QB
+              </label>
+              <label class="pos-pref-check-label">
+                <input type="checkbox" data-side="away" data-pos="RB"> RB
+              </label>
+              <label class="pos-pref-check-label">
+                <input type="checkbox" data-side="away" data-pos="WR"> WR
+              </label>
+              <label class="pos-pref-check-label">
+                <input type="checkbox" data-side="away" data-pos="TE"> TE
+              </label>
+              <label class="pos-pref-check-label">
+                <input type="checkbox" data-side="away" data-pos="PICK"> Picks
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <button class="pos-pref-save-btn" id="pos-pref-save-btn"
+                onclick="saveOutlookWithPositions()">
+          Save preferences
+        </button>
+        <button class="pos-pref-skip-link" onclick="skipPositionalPrefs()">
+          Skip for now
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Match overlay — shown when a mutual trade match is detected -->
+  <div class="match-overlay hidden" id="match-overlay">
+    <div class="match-card">
+      <div class="match-emoji">🎉</div>
+      <div class="match-headline">It's a Match!</div>
+      <div class="match-sub" id="match-sub">
+        You and <strong id="match-partner-name"></strong> both want this trade!
+      </div>
+      <div class="match-trade-detail" id="match-trade-detail"></div>
+      <div class="match-actions">
+        <button class="match-dismiss-btn" onclick="dismissMatch()">Dismiss</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rankings overlay -->
+  <div class="overlay" id="overlay" onclick="closeRankings(event)">
+    <div class="rankings-panel">
+      <div class="panel-header">
+        <div class="panel-title" id="panel-title">Rankings</div>
+        <button class="close-btn" onclick="closeRankings()">✕</button>
+      </div>
+      <div id="rankings-list"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- ═══════════════════════════════════════════════════
+       DEBUG LOG DRAWER
+  ════════════════════════════════════════════════════ -->
+  <div id="log-drawer">
+    <div id="log-inner">
+      <div id="log-handle" onclick="logDrawer.toggle()">
+        <span id="log-toggle-icon">▲</span>
+        <span id="log-title">🔍 Debug Log</span>
+        <span id="log-count">0 entries</span>
+        <div id="log-actions" onclick="event.stopPropagation()">
+          <button class="log-action-btn" onclick="logDrawer.fetchBackend()">↓ Server logs</button>
+          <button class="log-action-btn" onclick="logDrawer.copy()">⎘ Copy</button>
+          <button class="log-action-btn" onclick="logDrawer.clear()">✕ Clear</button>
+        </div>
+      </div>
+      <div id="log-body"></div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

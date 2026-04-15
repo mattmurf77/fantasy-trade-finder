@@ -1,0 +1,23 @@
+{
+  "skill_name": "project-reorganizer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Hey, I have this Flask task manager app and all the files are just sitting in the root folder — app.py, db.py, auth.py, seed script, the HTML, a notes doc, and the sqlite db. Can you reorganize it so backend code, frontend stuff, data files, and docs are separated properly?",
+      "expected_output": "Files moved into backend/, frontend/ (or static/), data/, docs/, and scripts/ directories. All imports updated (from db import → from .db import or similar). A run.py or equivalent entry point created at root. Cross-reference tables produced before any moves.",
+      "files": ["project-reorganizer-workspace/test-projects/flat-flask-api/"]
+    },
+    {
+      "id": 2,
+      "prompt": "This Express.js inventory API has everything flat — server.js, database.js, middleware.js, utils.js, a seed script, static HTML, and some design docs. Please restructure it into a proper layout with source code separated from scripts, docs, and data files.",
+      "expected_output": "Files moved into src/ (or similar), public/ (static), scripts/, docs/ directories. All require() paths updated. package.json main field updated if needed. Cross-reference tables produced before any moves.",
+      "files": ["project-reorganizer-workspace/test-projects/flat-express-api/"]
+    },
+    {
+      "id": 3,
+      "prompt": "I've got a Python project that's a mix of a FastAPI web service and some data science scripts (training, analysis) all in the same folder alongside a PRD, experiment log, and model artifacts. Can you organize it so the web app code is separate from the ML scripts and the reference docs?",
+      "expected_output": "Web app files (api.py, model.py, data_processor.py) moved into a backend package. Scripts (train_model.py, analyze_results.py) into scripts/. Docs (PRD.md, EXPERIMENT_LOG.md) into docs/. Data artifacts (model pkl, results csv) into data/ or models/. All imports updated. Cross-reference tables produced.",
+      "files": ["project-reorganizer-workspace/test-projects/mixed-python-project/"]
+    }
+  ]
+}

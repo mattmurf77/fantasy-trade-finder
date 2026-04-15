@@ -1,0 +1,32 @@
+{
+  "eval_id": 2,
+  "eval_name": "eval-ranking-screen-ui",
+  "configuration": "without_skill",
+  "expectations": [
+    {
+      "text": "has-scores-table",
+      "passed": false,
+      "evidence": "Uses x/10 metrics table, not 1-5 dimension scores"
+    },
+    {
+      "text": "has-code-suggestions",
+      "passed": true,
+      "evidence": "Many code snippets"
+    },
+    {
+      "text": "has-top-recommendations",
+      "passed": false,
+      "evidence": "Has 'Summary of Recommendations (Priority Order)' with 12 items, not a focused top 3"
+    },
+    {
+      "text": "identifies-correct-files",
+      "passed": true,
+      "evidence": "Identifies RankPlayersScreen.js"
+    },
+    {
+      "text": "has-severity-ratings",
+      "passed": true,
+      "evidence": "Uses High/Medium/Low severity"
+    }
+  ]
+}

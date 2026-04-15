@@ -1,0 +1,27 @@
+{
+  "eval_id": 1,
+  "eval_name": "eval-ranking-system",
+  "prompt": "How good is the ranking system code? Any improvements?",
+  "assertions": [
+    {
+      "text": "has-scores-table",
+      "description": "Report includes a dimension scores table with numeric ratings (1-5 scale)"
+    },
+    {
+      "text": "has-code-suggestions",
+      "description": "Report includes at least 3 concrete code snippets showing suggested improvements"
+    },
+    {
+      "text": "has-top-recommendations",
+      "description": "Report includes a prioritized 'Top 3 Recommendations' section"
+    },
+    {
+      "text": "identifies-correct-files",
+      "description": "Report identifies the correct primary file under review"
+    },
+    {
+      "text": "has-severity-ratings",
+      "description": "Each finding includes a severity rating (High/Medium/Low)"
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "skill_name": "feature-evaluator",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Evaluate the trade generation feature",
+      "expected_output": "A structured markdown report analyzing trade_service.py across dimensions like structure, performance, error handling, and security, with specific code suggestions and scores.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "has-scores-table",
+          "text": "Report includes a dimension scores table with numeric ratings (1-5 scale)",
+          "type": "contains_pattern"
+        },
+        {
+          "id": "has-code-suggestions",
+          "text": "Report includes at least 3 concrete code snippets showing suggested improvements (not just descriptions)",
+          "type": "content_check"
+        },
+        {
+          "id": "has-top-recommendations",
+          "text": "Report includes a prioritized 'Top 3 Recommendations' section",
+          "type": "contains_pattern"
+        },
+        {
+          "id": "identifies-correct-files",
+          "text": "Report identifies trade_service.py as the primary file under review",
+          "type": "contains_pattern"
+        },
+        {
+          "id": "has-severity-ratings",
+          "text": "Each finding includes a severity rating (High/Medium/Low)",
+          "type": "content_check"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "How good is the ranking system code? Any improvements?",
+      "expected_output": "A structured markdown report analyzing ranking_service.py with findings on the Elo algorithm implementation, code structure, and actionable improvement suggestions.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "has-scores-table",
+          "text": "Report includes a dimension scores table with numeric ratings (1-5 scale)",
+          "type": "contains_pattern"
+        },
+        {
+          "id": "has-code-suggestions",
+          "text": "Report includes at least 3 concrete code snippets showing suggested improvements",
+          "type": "content_check"
+        },
+        {
+          "id": "has-top-recommendations",
+          "text": "Report includes a prioritized 'Top 3 Recommendations' section",
+          "type": "contains_pattern"
+        },
+        {
+          "id": "identifies-correct-files",
+          "text": "Report identifies ranking_service.py as the primary file under review",
+          "type": "contains_pattern"
+        },
+        {
+          "id": "has-severity-ratings",
+          "text": "Each finding includes a severity rating (High/Medium/Low)",
+          "type": "content_check"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Review the player ranking screen on mobile",
+      "expected_output": "A structured markdown report analyzing RankPlayersScreen.js covering React Native best practices, component structure, performance, and state management.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "has-scores-table",
+          "text": "Report includes a dimension scores table with numeric ratings (1-5 scale)",
+          "type": "contains_pattern"
+        },
+        {
+          "id": "has-code-suggestions",
+          "text": "Report includes at least 3 concrete code snippets showing suggested improvements",
+          "type": "content_check"
+        },
+        {
+          "id": "has-top-recommendations",
+          "text": "Report includes a prioritized 'Top 3 Recommendations' section",
+          "type": "contains_pattern"
+        },
+        {
+          "id": "identifies-correct-files",
+          "text": "Report identifies RankPlayersScreen.js as the primary file under review",
+          "type": "contains_pattern"
+        },
+        {
+          "id": "has-severity-ratings",
+          "text": "Each finding includes a severity rating (High/Medium/Low)",
+          "type": "content_check"
+        }
+      ]
+    }
+  ]
+}

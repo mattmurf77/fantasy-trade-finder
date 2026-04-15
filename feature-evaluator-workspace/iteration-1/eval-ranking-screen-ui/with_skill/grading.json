@@ -1,0 +1,32 @@
+{
+  "eval_id": 2,
+  "eval_name": "eval-ranking-screen-ui",
+  "configuration": "with_skill",
+  "expectations": [
+    {
+      "text": "has-scores-table",
+      "passed": true,
+      "evidence": "Dimension scores table with 1-5 ratings"
+    },
+    {
+      "text": "has-code-suggestions",
+      "passed": true,
+      "evidence": "Multiple code examples"
+    },
+    {
+      "text": "has-top-recommendations",
+      "passed": true,
+      "evidence": "'Top 3 Recommendations' section"
+    },
+    {
+      "text": "identifies-correct-files",
+      "passed": true,
+      "evidence": "Identifies RankPlayersScreen.js"
+    },
+    {
+      "text": "has-severity-ratings",
+      "passed": true,
+      "evidence": "Every finding has severity"
+    }
+  ]
+}

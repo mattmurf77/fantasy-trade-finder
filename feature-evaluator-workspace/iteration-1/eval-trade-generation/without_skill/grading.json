@@ -1,0 +1,32 @@
+{
+  "eval_id": 0,
+  "eval_name": "eval-trade-generation",
+  "configuration": "without_skill",
+  "expectations": [
+    {
+      "text": "has-scores-table",
+      "passed": false,
+      "evidence": "Uses a severity table but no 1-5 dimension scores"
+    },
+    {
+      "text": "has-code-suggestions",
+      "passed": true,
+      "evidence": "Multiple concrete code examples"
+    },
+    {
+      "text": "has-top-recommendations",
+      "passed": false,
+      "evidence": "Has 'Performance Recommendations (Priority Order)' but not a top 3 format"
+    },
+    {
+      "text": "identifies-correct-files",
+      "passed": true,
+      "evidence": "Identifies trade_service.py"
+    },
+    {
+      "text": "has-severity-ratings",
+      "passed": true,
+      "evidence": "Uses High/Medium/Low severities"
+    }
+  ]
+}

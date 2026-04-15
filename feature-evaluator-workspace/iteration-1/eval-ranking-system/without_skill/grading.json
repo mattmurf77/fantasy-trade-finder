@@ -1,0 +1,32 @@
+{
+  "eval_id": 1,
+  "eval_name": "eval-ranking-system",
+  "configuration": "without_skill",
+  "expectations": [
+    {
+      "text": "has-scores-table",
+      "passed": false,
+      "evidence": "Uses letter grades (A-, B+, C+) not 1-5 scale"
+    },
+    {
+      "text": "has-code-suggestions",
+      "passed": true,
+      "evidence": "Extensive code examples with fixes"
+    },
+    {
+      "text": "has-top-recommendations",
+      "passed": false,
+      "evidence": "Has 'Recommended Changes by Priority' table, not top 3 section"
+    },
+    {
+      "text": "identifies-correct-files",
+      "passed": true,
+      "evidence": "Identifies ranking_service.py"
+    },
+    {
+      "text": "has-severity-ratings",
+      "passed": true,
+      "evidence": "Uses High/Medium/Low"
+    }
+  ]
+}

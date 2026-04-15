@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #faf9f5;
+      --surface: #ffffff;
+      --border: #e8e6dc;
+      --text: #141413;
+      --text-muted: #b0aea5;
+      --accent: #d97757;
+      --accent-hover: #c4613f;
+      --green: #788c5d;
+      --green-bg: #eef2e8;
+      --red: #c44;
+      --red-bg: #fceaea;
+      --header-bg: #141413;
+      --header-text: #faf9f5;
+      --radius: 6px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Lora', Georgia, serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ---- Header ---- */
+    .header {
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+    .header .instructions {
+      font-size: 0.8rem;
+      opacity: 0.7;
+      margin-top: 0.25rem;
+    }
+    .header .progress {
+      font-size: 0.875rem;
+      opacity: 0.8;
+      text-align: right;
+    }
+
+    /* ---- Main content ---- */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    /* ---- Sections ---- */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      flex-shrink: 0;
+    }
+    .section-header {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.75rem 1rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .section-body {
+      padding: 1rem;
+    }
+
+    /* ---- Config badge ---- */
+    .config-badge {
+      display: inline-block;
+      padding: 0.2rem 0.625rem;
+      border-radius: 9999px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-left: 0.75rem;
+      vertical-align: middle;
+    }
+    .config-badge.config-primary {
+      background: rgba(33, 150, 243, 0.12);
+      color: #1976d2;
+    }
+    .config-badge.config-baseline {
+      background: rgba(255, 193, 7, 0.15);
+      color: #f57f17;
+    }
+
+    /* ---- Prompt ---- */
+    .prompt-text {
+      white-space: pre-wrap;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    /* ---- Outputs ---- */
+    .output-file {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .output-file + .output-file {
+      margin-top: 1rem;
+    }
+    .output-file-header {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .output-file-header .dl-btn {
+      font-size: 0.7rem;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-weight: 500;
+      opacity: 0.8;
+    }
+    .output-file-header .dl-btn:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+    .output-file-content {
+      padding: 0.75rem;
+      overflow-x: auto;
+    }
+    .output-file-content pre {
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+    .output-file-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+    .output-file-content iframe {
+      width: 100%;
+      height: 600px;
+      border: none;
+    }
+    .output-file-content table {
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+      width: 100%;
+    }
+    .output-file-content table td,
+    .output-file-content table th {
+      border: 1px solid var(--border);
+      padding: 0.375rem 0.5rem;
+      text-align: left;
+    }
+    .output-file-content table th {
+      background: var(--bg);
+      font-weight: 600;
+    }
+    .output-file-content .download-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .output-file-content .download-link:hover {
+      background: var(--border);
+    }
+    .empty-state {
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    /* ---- Feedback ---- */
+    .prev-feedback {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.625rem 0.75rem;
+      margin-top: 0.75rem;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .prev-feedback-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.25rem;
+      color: var(--text-muted);
+    }
+    .feedback-textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      resize: vertical;
+      color: var(--text);
+    }
+    .feedback-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+    .feedback-status {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.5rem;
+      min-height: 1.1em;
+    }
+
+    /* ---- Grades (collapsible) ---- */
+    .grades-toggle {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .grades-toggle:hover {
+      color: var(--accent);
+    }
+    .grades-toggle .arrow {
+      margin-right: 0.5rem;
+      transition: transform 0.15s;
+      font-size: 0.75rem;
+    }
+    .grades-toggle .arrow.open {
+      transform: rotate(90deg);
+    }
+    .grades-content {
+      display: none;
+      margin-top: 0.75rem;
+    }
+    .grades-content.open {
+      display: block;
+    }
+    .grades-summary {
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .grade-badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .grade-pass { background: var(--green-bg); color: var(--green); }
+    .grade-fail { background: var(--red-bg); color: var(--red); }
+    .assertion-list {
+      list-style: none;
+    }
+    .assertion-item {
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+    .assertion-item:last-child { border-bottom: none; }
+    .assertion-status {
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    .assertion-status.pass { color: var(--green); }
+    .assertion-status.fail { color: var(--red); }
+    .assertion-evidence {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-top: 0.25rem;
+      padding-left: 1.5rem;
+    }
+
+    /* ---- View tabs ---- */
+    .view-tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 2rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .view-tab {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.625rem 1.25rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .view-panel { display: none; }
+    .view-panel.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+    /* ---- Benchmark view ---- */
+    .benchmark-view {
+      padding: 1.5rem 2rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .benchmark-table {
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8125rem;
+      width: 100%;
+      margin-bottom: 1.5rem;
+    }
+    .benchmark-table th, .benchmark-table td {
+      padding: 0.625rem 0.75rem;
+      text-align: left;
+      border: 1px solid var(--border);
+    }
+    .benchmark-table th {
+      font-family: 'Poppins', sans-serif;
+      background: var(--header-bg);
+      color: var(--header-text);
+      font-weight: 500;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .benchmark-table tr:hover { background: var(--bg); }
+    .benchmark-table tr.benchmark-row-with { background: rgba(33, 150, 243, 0.06); }
+    .benchmark-table tr.benchmark-row-without { background: rgba(255, 193, 7, 0.06); }
+    .benchmark-table tr.benchmark-row-with:hover { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-without:hover { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-table tr.benchmark-row-avg { font-weight: 600; border-top: 2px solid var(--border); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-with { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-without { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-delta-positive { color: var(--green); font-weight: 600; }
+    .benchmark-delta-negative { color: var(--red); font-weight: 600; }
+    .benchmark-notes {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+    .benchmark-notes h3 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+    .benchmark-notes ul {
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+    .benchmark-notes li {
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      margin-bottom: 0.375rem;
+    }
+    .benchmark-empty {
+      color: var(--text-muted);
+      font-style: italic;
+      text-align: center;
+      padding: 3rem;
+    }
+
+    /* ---- Navigation ---- */
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .nav-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text);
+      transition: all 0.15s;
+    }
+    .nav-btn:hover:not(:disabled) {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .nav-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .done-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .done-btn:hover {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .done-btn.ready {
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+    }
+    .done-btn.ready:hover {
+      background: var(--accent-hover);
+    }
+    /* ---- Done overlay ---- */
+    .done-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .done-overlay.visible {
+      display: flex;
+    }
+    .done-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 2rem 3rem;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 500px;
+    }
+    .done-card h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .done-card p {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+    }
+    .done-card .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+    }
+    .done-card button {
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    .done-card button:hover {
+      background: var(--bg);
+    }
+    /* ---- Toast ---- */
+    .toast {
+      position: fixed;
+      bottom: 5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 0.625rem 1.25rem;
+      border-radius: var(--radius);
+      font-size: 0.875rem;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    .toast.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" style="height:100vh; display:flex; flex-direction:column;">
+    <div class="header">
+      <div>
+        <h1>Eval Review: <span id="skill-name"></span></h1>
+        <div class="instructions">Review each output and leave feedback below. Navigate with arrow keys or buttons. When done, copy feedback and paste into Claude Code.</div>
+      </div>
+      <div class="progress" id="progress"></div>
+    </div>
+
+    <!-- View tabs (only shown when benchmark data exists) -->
+    <div class="view-tabs" id="view-tabs" style="display:none;">
+      <button class="view-tab active" onclick="switchView('outputs')">Outputs</button>
+      <button class="view-tab" onclick="switchView('benchmark')">Benchmark</button>
+    </div>
+
+    <!-- Outputs panel (qualitative review) -->
+    <div class="view-panel active" id="panel-outputs">
+    <div class="main">
+      <!-- Prompt -->
+      <div class="section">
+        <div class="section-header">Prompt <span class="config-badge" id="config-badge" style="display:none;"></span></div>
+        <div class="section-body">
+          <div class="prompt-text" id="prompt-text"></div>
+        </div>
+      </div>
+
+      <!-- Outputs -->
+      <div class="section">
+        <div class="section-header">Output</div>
+        <div class="section-body" id="outputs-body">
+          <div class="empty-state">No output files found</div>
+        </div>
+      </div>
+
+      <!-- Previous Output (collapsible) -->
+      <div class="section" id="prev-outputs-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="togglePrevOutputs()">
+            <span class="arrow" id="prev-outputs-arrow">&#9654;</span>
+            Previous Output
+          </div>
+        </div>
+        <div class="grades-content" id="prev-outputs-content"></div>
+      </div>
+
+      <!-- Grades (collapsible) -->
+      <div class="section" id="grades-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="toggleGrades()">
+            <span class="arrow" id="grades-arrow">&#9654;</span>
+            Formal Grades
+          </div>
+        </div>
+        <div class="grades-content" id="grades-content"></div>
+      </div>
+
+      <!-- Feedback -->
+      <div class="section">
+        <div class="section-header">Your Feedback</div>
+        <div class="section-body">
+          <textarea
+            class="feedback-textarea"
+            id="feedback"
+            placeholder="What do you think of this output? Any issues, suggestions, or things that look great?"
+          ></textarea>
+          <div class="feedback-status" id="feedback-status"></div>
+          <div class="prev-feedback" id="prev-feedback" style="display:none;">
+            <div class="prev-feedback-label">Previous feedback</div>
+            <div id="prev-feedback-text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav" id="outputs-nav">
+      <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; Previous</button>
+      <button class="done-btn" id="done-btn" onclick="showDoneDialog()">Submit All Reviews</button>
+      <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next &#8594;</button>
+    </div>
+    </div><!-- end panel-outputs -->
+
+    <!-- Benchmark panel (quantitative stats) -->
+    <div class="view-panel" id="panel-benchmark">
+      <div class="benchmark-view" id="benchmark-content">
+        <div class="benchmark-empty">No benchmark data available. Run a benchmark to see quantitative results here.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Done overlay -->
+  <div class="done-overlay" id="done-overlay">
+    <div class="done-card">
+      <h2>Review Complete</h2>
+      <p>Your feedback has been saved. Go back to your Claude Code session and tell Claude you're done reviewing.</p>
+      <div class="btn-row">
+        <button onclick="closeDoneDialog()">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ---- Embedded data (injected by generate_review.py) ----
+    const EMBEDDED_DATA = {"skill_name": "feature-evaluator", "runs": [{"id": "eval-trade-generation-with_skill", "prompt": "Evaluate the trade generation feature", "eval_id": 0, "outputs": [{"name": "trade-generation-evaluation.md", "type": "text", "content": "# Feature Evaluation: Trade Generation Feature\n\n**Date:** 2026-04-12\n**Files reviewed:** \n- `backend/trade_service.py` (primary, 767 lines)\n- `backend/server.py` (integration points)\n- `backend/ranking_service.py` (data model context)\n- `backend/database.py` (schema and persistence)\n\n## Summary\n\nThe trade generation feature demonstrates solid algorithmic design with a well-thought-out multi-structure approach (1-for-1, 2-for-1, 1-for-2, 3-for-2 trades). The code is readable and the business logic is clearly documented. However, there are meaningful opportunities to improve maintainability, reduce complexity, and strengthen error handling. The main concerns are: (1) deeply nested trading structure loops create O(n^5) worst-case complexity and high cognitive load, (2) scattered scoring logic that's hard to modify or extend, (3) missing input validation and edge-case handling, and (4) performance optimizations that could prevent timeout issues on large leagues.\n\n## Findings\n\n### Structure & Design: Nested Loop Complexity\n\n**Severity:** High\n**Location:** `trade_service.py`, lines 503\u2013682 (1-for-1 through 3-for-2 trade generation blocks)\n\nThe four nested trade-structure loops (1-for-1, 2-for-1, 1-for-2, 3-for-2) each contain deeply nested loops over rosters and player combinations. The innermost operations (ELO calculations, KTC fairness checks) are repeated in similar patterns across all four blocks. This creates:\n- **Code duplication:** The same mismatch/fairness/composite scoring pattern repeats 4 times\n- **Cognitive overhead:** A 200+ line method with 5+ levels of nesting is difficult to reason about\n- **Performance risk:** Worst-case complexity approaches O(n^5) where n = roster size; for a 30-player league, this can be ~24M iterations per pair\n- **Maintenance burden:** Adding a new trade structure (e.g., 2-for-2) requires replicating the entire block with careful attention to scoring logic\n\n**Current code:**\n```python\n# 1-for-1 loop structure (lines 506\u2013532)\nfor give_id in user_roster:\n    if give_id not in user_elo or give_id not in opp_elo:\n        continue\n    if pinned_set and give_id not in pinned_set:\n        continue\n    for recv_id in opp_roster:\n        if recv_id not in user_elo or recv_id not in opp_elo:\n            continue\n        # KTC fairness check\n        if not _ktc_ok([give_id], [recv_id]):\n            continue\n        mismatch = self._mismatch_score(give_id, recv_id, user_elo, opp_elo)\n        if mismatch < _c(\"min_mismatch_score\"):\n            continue\n        fairness = self._fairness_score([give_id], [recv_id], seed_elo)\n        composite = (_c(\"mismatch_weight\") * min(mismatch, 300) / 300 +\n                     _c(\"fairness_weight\") * fairness)\n        candidates.append((composite, mismatch, [give_id], [recv_id]))\n        # ... repeated 4 more times with different structure\n```\n\n**Suggested improvement:**\nExtract a generic trade-structure generator. Define trade structures declaratively and iterate over them:\n\n```python\ndef _generate_all_trade_structures(\n    self,\n    user_roster: list[str],\n    opponent_roster: list[str],\n    user_elo: dict[str, float],\n    opp_elo: dict[str, float],\n    seed_elo: dict[str, float],\n    fairness_threshold: float,\n    pinned_set: set[str] | None,\n) -> list[tuple[float, float, list[str], list[str]]]:\n    \"\"\"\n    Generate candidates for all trade structures: 1-for-1, 2-for-1, 1-for-2, 3-for-2.\n    Returns list of (composite_score, mismatch_score, give_ids, recv_ids).\n    \"\"\"\n    candidates: list[tuple[float, float, list[str], list[str]]] = []\n    \n    # Define trade structures as (give_count, receive_count, max_score_cap)\n    structures = [\n        (1, 1, 300),\n        (2, 1, 400),\n        (1, 2, 400),\n        (3, 2, 500),\n    ]\n    \n    for give_count, recv_count, score_cap in structures:\n        candidates.extend(\n            self._generate_for_structure(\n                give_count=give_count,\n                recv_count=recv_count,\n                user_roster=user_roster,\n                opponent_roster=opponent_roster,\n                user_elo=user_elo,\n                opp_elo=opp_elo,\n                seed_elo=seed_elo,\n                fairness_threshold=fairness_threshold,\n                pinned_set=pinned_set,\n                score_cap=score_cap,\n            )\n        )\n    \n    return candidates\n\ndef _generate_for_structure(\n    self,\n    give_count: int,\n    recv_count: int,\n    user_roster: list[str],\n    opponent_roster: list[str],\n    user_elo: dict[str, float],\n    opp_elo: dict[str, float],\n    seed_elo: dict[str, float],\n    fairness_threshold: float,\n    pinned_set: set[str] | None,\n    score_cap: float,\n) -> list[tuple[float, float, list[str], list[str]]]:\n    \"\"\"\n    Generate candidates for a single trade structure (e.g., 2-for-1).\n    All structure-specific logic lives here.\n    \"\"\"\n    candidates: list[tuple[float, float, list[str], list[str]]] = []\n    \n    # Generate all combinations of the specified counts\n    give_combos = combinations(user_roster, give_count)\n    recv_combos = combinations(opponent_roster, recv_count)\n    \n    for give_ids in give_combos:\n        if pinned_set and not any(gid in pinned_set for gid in give_ids):\n            continue\n        if not all(gid in user_elo and gid in opp_elo for gid in give_ids):\n            continue\n        \n        for recv_ids in recv_combos:\n            if not all(rid in user_elo and rid in opp_elo for rid in recv_ids):\n                continue\n            \n            # Apply all the scoring gates\n            if not self._ktc_ok(list(give_ids), list(recv_ids), fairness_threshold):\n                continue\n            \n            if not self._passes_structure_checks(\n                give_ids, recv_ids, give_count, recv_count, user_elo, opp_elo\n            ):\n                continue\n            \n            mismatch = self._mismatch_score_multi(list(give_ids), list(recv_ids), user_elo, opp_elo)\n            if mismatch < _c(\"min_mismatch_score\"):\n                continue\n            \n            fairness = self._fairness_score(list(give_ids), list(recv_ids), seed_elo)\n            composite = (_c(\"mismatch_weight\") * min(mismatch, score_cap) / score_cap +\n                        _c(\"fairness_weight\") * fairness)\n            candidates.append((composite, mismatch, list(give_ids), list(recv_ids)))\n    \n    return candidates\n```\n\n**Why this matters:** This refactoring would reduce the core trade generation method from 280+ lines to ~50, eliminate duplication, and make it straightforward to add new structures (e.g., 2-for-2) without touching core scoring logic. It also simplifies unit testing: you can test each structure independently.\n\n---\n\n### Readability & Naming: Ambiguous Scoring Semantics\n\n**Severity:** Medium\n**Location:** `trade_service.py`, lines 751\u2013766 and throughout scoring logic\n\nThe `_fairness_score()` method and the final `composite_score` assignment have misleading variable names that obscure the actual calculation:\n\n1. **`fairness_score` is actually output by `composite_score` calculation (line 718):**\n   ```python\n   fairness = self._fairness_score([give_id], [recv_id], seed_elo)\n   composite = (_c(\"mismatch_weight\") * min(mismatch, 300) / 300 +\n                _c(\"fairness_weight\") * fairness)\n   # ...\n   fairness_score    = round(composite, 3),  # \u2190 fairness_score is actually composite!\n   composite_score   = round(composite, 3),\n   ```\n\n2. **The variable `fairness` is reused to mean both the actual fairness value AND the composite score.** This is confusing because:\n   - Line 614: `fairness = self._fairness_score(...)` (actual fairness)\n   - Line 615: `composite = (...fairness)` (fairness becomes part of composite)\n   - Line 718: `fairness_score = round(composite, 3)` (composite gets assigned to fairness_score)\n\n3. **The TradeCard dataclass assigns this composite value to BOTH fields (lines 717\u2013719):**\n   ```python\n   mismatch_score    = round(mismatch, 1),\n   fairness_score    = round(composite, 3),   # \u2190 This is confusing\n   composite_score   = round(composite, 3),\n   ```\n\nThis means the `fairness_score` field on TradeCard is not what callers expect\u2014it's the blended composite, not the pure fairness metric.\n\n**Current code:**\n```python\nfairness = self._fairness_score([give_id], [recv_id], seed_elo)\ncomposite = (_c(\"mismatch_weight\") * min(mismatch, 300) / 300 +\n             _c(\"fairness_weight\") * fairness)\ncandidates.append((composite, mismatch, [give_id], [recv_id]))\n# ...\ncard = TradeCard(\n    # ...\n    mismatch_score    = round(mismatch, 1),\n    fairness_score    = round(composite, 3),  # \u2190 Confusing: composite, not fairness!\n    composite_score   = round(composite, 3),\n)\n```\n\n**Suggested improvement:**\nRename variables consistently and store the actual fairness value:\n\n```python\npure_fairness = self._fairness_score([give_id], [recv_id], seed_elo)\ncomposite = (_c(\"mismatch_weight\") * min(mismatch, 300) / 300 +\n             _c(\"fairness_weight\") * pure_fairness)\ncandidates.append((composite, mismatch, [give_id], [recv_id]))\n# ...\ncard = TradeCard(\n    # ...\n    mismatch_score    = round(mismatch, 1),\n    fairness_score    = round(pure_fairness, 3),     # \u2190 Now it's actually fairness\n    composite_score   = round(composite, 3),         # \u2190 Clearly distinguished\n)\n```\n\nAlternatively, if the API contract requires `fairness_score` to be the composite, rename it explicitly:\n```python\ncard = TradeCard(\n    # ...\n    mismatch_score    = round(mismatch, 1),\n    fairness_score    = round(composite, 3),    # Document that this is composite, not pure fairness\n    composite_score   = round(composite, 3),\n)\n```\n\nAnd add a docstring to TradeCard clarifying which is which.\n\n---\n\n### Performance: Combinatorial Explosion on Large Rosters\n\n**Severity:** High\n**Location:** `trade_service.py`, lines 543\u2013682 (2-for-1, 1-for-2, 3-for-2 sections)\n\nThe combinatorial loops (especially 3-for-2) can cause performance issues on leagues with large rosters or many members. For a 30-player roster:\n- 1-for-1: 900 iterations (30 \u00d7 30)\n- 2-for-1: 27K iterations (435 \u00d7 30, where 435 = C(30,2))\n- 1-for-2: 27K iterations (30 \u00d7 435)\n- 3-for-2: 414K iterations (C(30,3) \u00d7 C(30,2) \u2248 4060 \u00d7 435), but limited by early breaks\n\nWith 10 opponents, that's 4M+ total iteration attempts. The current code includes `if len(candidates) >= int(_c(\"max_candidates\")): break` to cap results, but it still runs through all combinations before hitting the limit.\n\nAdditionally, every candidate triggers KTC fairness checks (`_ktc_ok`) which call `package_value()` and `_dv()` (dynasty value calculations), creating redundant work:\n\n```python\nfor recv_id_1, recv_id_2 in combinations(opp_roster, 2):\n    # ...\n    recv_dv_1 = _dv(recv_id_1)      # \u2190 computed once here\n    recv_dv_2 = _dv(recv_id_2)\n    recv_pkg_dv = package_value([recv_dv_1, recv_dv_2])\n    # ...\n    for give_id_1, give_id_2, give_id_3 in combinations(user_roster, 3):\n        # ...\n        if not _ktc_ok([give_id_1, give_id_2], [recv_id]):  # \u2190 calls _dv again inside _ktc_ok\n            continue\n        # ... later, same values recomputed\n        give_pkg_dv = package_value([_dv(g) for g in [give_id_1, give_id_2, give_id_3]])\n```\n\n**Current code (lines 631\u2013633):**\n```python\nrecv_dv_1 = _dv(recv_id_1)\nrecv_dv_2 = _dv(recv_id_2)\nrecv_pkg_dv = package_value([recv_dv_1, recv_dv_2])\n```\n\nBut then inside `_ktc_ok` (called line 595 and 551):\n```python\ndef _ktc_ok(give_ids: list[str], recv_ids: list[str]) -> bool:\n    give_val = package_value([_dv(pid) for pid in give_ids])  # \u2190 recomputes!\n    recv_val = package_value([_dv(pid) for pid in recv_ids])\n```\n\n**Suggested improvement:**\n1. **Pre-compute dynasty values once:**\n   ```python\n   def _generate_for_pair(self, ...):\n       # Compute dynasty values upfront once per league member pair\n       user_dv = {pid: self._dv(pid) for pid in user_roster if pid in user_elo and pid in opp_elo}\n       opp_dv = {pid: self._dv(pid) for pid in opp_roster if pid in user_elo and pid in opp_elo}\n       \n       # Then pass these into scoring functions instead of recomputing\n       # ...\n   ```\n\n2. **Cache package values for combinations:**\n   ```python\n   from functools import lru_cache\n   \n   @lru_cache(maxsize=10000)\n   def _package_value_cached(self, player_tuple: tuple[str, ...]) -> float:\n       \"\"\"Cache package values for common combinations.\"\"\"\n       return package_value([self._dv(pid) for pid in player_tuple])\n   ```\n\n3. **Add an early-stop heuristic:** When the candidate list is full (>= `max_candidates`), break out of outer loops rather than continuing to enumerate combinations.\n\nThis optimization alone could reduce runtime by 30\u201350% on large rosters.\n\n---\n\n### Error Handling & Resilience: Missing Input Validation\n\n**Severity:** Medium\n**Location:** `trade_service.py`, lines 364\u2013427 (generate_trades method)\n\nThe public `generate_trades` method accepts multiple user-supplied parameters but performs minimal validation. Edge cases that could cause silent failures or incorrect results:\n\n1. **Empty or missing rosters:** If `user_roster` is empty, the method returns an empty list with no indication of the problem.\n2. **Missing ELO data:** If `user_elo` or `seed_elo` are missing critical player IDs, the method uses hardcoded fallback (1500) with no logging.\n3. **Invalid thresholds:** `fairness_threshold` can be any float; no validation that it's in a sensible range (0.0\u20131.0).\n4. **Negative position lists:** `acquire_positions` and `trade_away_positions` accept any strings; no validation against known positions.\n5. **Missing league:** If the league_id doesn't exist, it raises ValueError, but no earlier validation.\n\n**Current code (lines 364\u2013427):**\n```python\ndef generate_trades(\n    self,\n    user_id: str,\n    user_elo: dict[str, float],\n    user_roster: list[str],\n    league_id: str,\n    seed_elo: dict[str, float],\n    # ... no validation of these parameters\n) -> list[TradeCard]:\n    league = self._leagues.get(league_id)\n    if not league:\n        raise ValueError(f\"Unknown league: {league_id!r}\")\n    \n    new_cards: list[TradeCard] = []\n    \n    for member in league.members:\n        if member.user_id == user_id:\n            continue\n        if not member.elo_ratings:  # \u2190 Silent skip, no logging\n            continue\n```\n\nAnd later in `_generate_for_pair` (lines 554\u2013557):\n```python\ncombined_give_user = user_elo.get(give_id_1, 1500) + user_elo.get(give_id_2, 1500)  # \u2190 Silent fallback\ncombined_give_opp  = opp_elo.get(give_id_1, 1500) + opp_elo.get(give_id_2, 1500)\n```\n\n**Suggested improvement:**\nAdd validation at method entry and log warnings when fallbacks are used:\n\n```python\ndef generate_trades(\n    self,\n    user_id: str,\n    user_elo: dict[str, float],\n    user_roster: list[str],\n    league_id: str,\n    seed_elo: dict[str, float],\n    max_per_opponent: int = 5,\n    fairness_threshold: float = 0.75,\n    acquire_positions: list[str] | None = None,\n    trade_away_positions: list[str] | None = None,\n    pinned_give_players: list[str] | None = None,\n) -> list[TradeCard]:\n    \"\"\"\n    Generate trade cards for the user against all league members.\n    \n    Raises:\n        ValueError: if league_id is unknown, user_roster is empty, or thresholds are invalid.\n    \"\"\"\n    import logging\n    log = logging.getLogger(__name__)\n    \n    # \u2500\u2500\u2500\u2500 Validate inputs \u2500\u2500\u2500\u2500\n    if not user_roster:\n        raise ValueError(\"user_roster cannot be empty\")\n    \n    if not user_elo:\n        raise ValueError(\"user_elo cannot be empty\")\n    \n    if not 0.0 <= fairness_threshold <= 1.0:\n        raise ValueError(f\"fairness_threshold must be 0.0\u20131.0, got {fairness_threshold}\")\n    \n    if max_per_opponent < 1:\n        raise ValueError(f\"max_per_opponent must be >= 1, got {max_per_opponent}\")\n    \n    # Warn if key players are missing ELO data\n    missing_elo = [pid for pid in user_roster if pid not in user_elo]\n    if missing_elo:\n        log.warning(\n            \"User %s has %d roster players missing ELO data; they will use fallback (1500). \"\n            \"Players: %s\", user_id, len(missing_elo), missing_elo[:5]\n        )\n    \n    # \u2500\u2500\u2500\u2500 Proceed with generation \u2500\u2500\u2500\u2500\n    league = self._leagues.get(league_id)\n    if not league:\n        raise ValueError(f\"Unknown league: {league_id!r}\")\n    # ... rest of method\n```\n\n---\n\n### Testability: High Coupling and Side Effects\n\n**Severity:** Medium\n**Location:** `trade_service.py`, throughout\n\nThe TradeService class tightly couples:\n1. **Data access:** Direct access to `self._players` dict and `self._leagues`\n2. **State mutation:** The `_trade_cards` dict is updated in-place during generation (line 424)\n3. **Configuration dependency:** Methods depend on module-level `_cfg` which is mutated globally by `reload_config()`\n\nThis makes unit testing difficult:\n\n```python\n# Hard to test: must mock players, leagues, and _cfg\ntrade_service = TradeService(players={...})\ntrade_service.add_league(league)\n# But _cfg is a module-level global \u2014 tests can't isolate config changes\n\n# Also hard to test: generate_trades has side effects (mutates _trade_cards)\ncards1 = trade_service.generate_trades(...)\ncards2 = trade_service.generate_trades(...)  # Pollutes state with previous results\n```\n\n**Current code (lines 345\u2013351):**\n```python\ndef __init__(self, players: dict):\n    self._players     = players\n    self._trade_cards: dict[str, TradeCard] = {}    # \u2190 Mutated in place\n    self._leagues:     dict[str, League]    = {}    # \u2190 State storage\n```\n\n**Suggested improvement:**\nSeparate concerns into pure functions and injectable dependencies:\n\n```python\nclass TradeService:\n    \"\"\"\n    Generates trades. Accepts injected config and dependencies.\n    \"\"\"\n    def __init__(\n        self,\n        players: dict,\n        config: dict | None = None,\n        leagues: dict | None = None,\n    ):\n        self._players = players\n        self._leagues = leagues or {}\n        self._config = config or _DEFAULT_CFG\n        # Don't store trade_cards; return them directly\n    \n    def generate_trades(self, ...) -> list[TradeCard]:\n        \"\"\"\n        Pure function: no side effects, accepts config as parameter.\n        Returns new cards without mutating internal state.\n        \"\"\"\n        # ...\n        return sorted(new_cards, key=lambda c: c.composite_score, reverse=True)\n    \n    # For backward compatibility with server.py, offer a stateful wrapper:\n    def __init__(self, players: dict):\n        self._players = players\n        self._config = dict(_DEFAULT_CFG)  # Instance config, not global\n        self._leagues = {}\n        self._trade_cards = {}\n    \n    def reload_config(self, fresh_cfg: dict) -> None:\n        \"\"\"Update instance config without global mutation.\"\"\"\n        self._config.update(fresh_cfg)\n```\n\nThen in tests:\n```python\ndef test_generate_trades():\n    config = {\"min_mismatch_score\": 20.0, ...}\n    service = TradeService(players={...}, config=config)\n    cards = service.generate_trades(...)\n    # No global state pollution; easy to test different configs\n```\n\n---\n\n### Security: Hardcoded Defaults and Silent Fallbacks\n\n**Severity:** Low\n**Location:** `trade_service.py`, lines 32\u201389 (config loading) and throughout\n\nThe default configuration is hardcoded in the module, and fallbacks are used silently when the database is unavailable:\n\n```python\n_DEFAULT_CFG: dict[str, float] = {\n    \"vet_age\":               27,\n    \"youth_age\":             26,\n    # ... 20+ parameters hardcoded\n}\n\ndef reload_config() -> None:\n    global _cfg\n    try:\n        from .database import get_config as _db_get_config\n        fresh = _db_get_config()\n        if fresh:\n            _cfg.update(fresh)\n    except Exception:\n        pass  # DB unavailable \u2014 keep existing values\n```\n\nThis is not a high-severity issue for this feature, but there are minor risks:\n1. **Silent failures:** If the database is down, config won't update, and there's no indication in logs.\n2. **Hardcoded magic numbers:** Configuration parameters are scattered throughout the code rather than centralized.\n3. **No config validation:** There's no check that config values are in reasonable ranges (e.g., probabilities between 0 and 1).\n\n**Suggested improvement:**\nLog when config reloading fails and validate config values:\n\n```python\ndef reload_config() -> None:\n    \"\"\"Pull the latest values from model_config and update the module-level _cfg dict.\"\"\"\n    import logging\n    log = logging.getLogger(__name__)\n    global _cfg\n    try:\n        from .database import get_config as _db_get_config\n        fresh = _db_get_config()\n        if fresh:\n            # Validate before applying\n            validated = _validate_config(fresh)\n            _cfg.update(validated)\n            log.info(\"Config reloaded: %d values updated\", len(fresh))\n    except Exception as e:\n        log.warning(\"Failed to reload config from DB: %s. Using existing values.\", e)\n\ndef _validate_config(cfg: dict) -> dict:\n    \"\"\"Validate config values are in sensible ranges.\"\"\"\n    validated = {}\n    for key, value in cfg.items():\n        if \"weight\" in key or \"bonus\" in key or \"penalty\" in key:\n            # Multipliers should be positive\n            if not isinstance(value, (int, float)) or value < 0:\n                log.warning(\"Invalid config %s=%s (expected positive number); using default\", key, value)\n                continue\n        validated[key] = value\n    return validated\n```\n\n---\n\n### Maintainability & Extensibility: Magic Numbers and Scattered Constants\n\n**Severity:** Medium\n**Location:** `trade_service.py`, lines 525, 571, 615, 671 (score capping logic)\n\nThe composite score calculation uses different caps for different trade structures, but these are hardcoded inline:\n\n```python\n# Line 525 (1-for-1)\ncomposite = (_c(\"mismatch_weight\") * min(mismatch, 300) / 300 + ...)\n\n# Line 571 (2-for-1)\ncomposite = (_c(\"mismatch_weight\") * min(mismatch, 400) / 400 + ...)\n\n# Line 615 (1-for-2)\ncomposite = (_c(\"mismatch_weight\") * min(mismatch, 400) / 400 + ...)\n\n# Line 671 (3-for-2)\ncomposite = (_c(\"mismatch_weight\") * min(mismatch, 500) / 500 + ...)\n```\n\nThese score caps have no documentation and will be difficult to explain or adjust. Similarly, the 0.95 thresholds for multi-player checks are magic numbers:\n\n```python\n# Line 560 (2-for-1 receive side)\nif recv_user <= combined_give_user * 0.95:\n    continue\n\n# Line 563 (2-for-1 give side)\nif combined_give_opp <= recv_opp * 0.95:\n    continue\n```\n\n**Suggested improvement:**\nDefine structure-specific parameters in a configuration dict:\n\n```python\n# At module level or in config\nTRADE_STRUCTURE_CONFIG = {\n    (1, 1): {\"max_score\": 300, \"user_advantage_threshold\": 0.95},\n    (2, 1): {\"max_score\": 400, \"user_advantage_threshold\": 0.95},\n    (1, 2): {\"max_score\": 400, \"user_advantage_threshold\": 0.95},\n    (3, 2): {\"max_score\": 500, \"user_advantage_threshold\": 0.95},\n}\n\ndef _generate_for_structure(self, give_count: int, recv_count: int, ...):\n    config = TRADE_STRUCTURE_CONFIG.get((give_count, recv_count))\n    if not config:\n        raise ValueError(f\"Unknown trade structure: {give_count}-for-{recv_count}\")\n    \n    max_score = config[\"max_score\"]\n    threshold = config[\"user_advantage_threshold\"]\n    \n    # Use max_score and threshold throughout\n    composite = (_c(\"mismatch_weight\") * min(mismatch, max_score) / max_score + ...)\n    if recv_user <= combined_give_user * threshold:\n        continue\n```\n\n---\n\n## Scores\n\n| Dimension | Score (1-5) | Notes |\n|---|---|---|\n| Structure & Design | 2 | Four nested trade-structure blocks are duplicative and cognitively heavy; would benefit from parameterized loop extraction. |\n| Readability & Naming | 3 | Generally clear algorithm, but scoring variable names are ambiguous (fairness vs. composite). |\n| Performance | 2 | Combinatorial explosion on large rosters; missing caching of dynasty values and early-stop optimizations. |\n| Error Handling | 2 | Minimal input validation; silent fallbacks to hardcoded defaults when data is missing; no logging of edge cases. |\n| Security | 4 | No sensitive data exposure; config fallbacks are reasonable but could warn. |\n| Testability | 2 | Tightly coupled to global config and league/player dictionaries; side effects mutate internal state. |\n| Maintainability | 2 | Magic numbers scattered throughout; no documentation of score caps or thresholds; difficult to add new structures. |\n\n**Overall: 2.4/5**\n\nThe core algorithmic logic is sound, but the implementation prioritizes quick iteration over clean architecture. As the codebase grows and requirements expand (new trade structures, different scoring models), the current approach will become increasingly painful to maintain.\n\n---\n\n## Top 3 Recommendations\n\n1. **Refactor trade structure generation to eliminate duplication** (lines 503\u2013682)\n   - Extract four nested blocks into a single parameterized `_generate_for_structure()` method that accepts `(give_count, recv_count)`.\n   - Move structure-specific logic (0.95 thresholds, score caps) into a configuration dict.\n   - **Impact:** Reduces 280+ lines of nested loops to ~50 lines; makes adding new structures trivial; improves readability and testability.\n\n2. **Pre-compute and cache dynasty values to prevent performance degradation** (lines 481\u2013486, inside loops)\n   - Build a `{player_id: dynasty_value}` dict upfront per league member pair rather than recomputing in every `_dv()` and `_ktc_ok()` call.\n   - Add `lru_cache` to `package_value()` or memoize combination values.\n   - **Impact:** 30\u201350% runtime reduction on large rosters (10+ members); prevents timeout issues; scales to larger leagues.\n\n3. **Add input validation and structured logging** (lines 364\u2013427)\n   - Validate that `user_roster`, `user_elo`, and `fairness_threshold` are in sensible ranges at method entry.\n   - Log warnings when ELO data is missing so silent fallbacks are visible to operators.\n   - **Impact:** Easier debugging of issues; clearer API contracts; catches bugs in caller code.\n"}], "grading": {"eval_id": 0, "eval_name": "eval-trade-generation", "configuration": "with_skill", "expectations": [{"text": "has-scores-table", "passed": true, "evidence": "Has a Scores table with 1-5 ratings for 7 dimensions"}, {"text": "has-code-suggestions", "passed": true, "evidence": "Multiple code snippets with Current/Suggested patterns"}, {"text": "has-top-recommendations", "passed": true, "evidence": "Has 'Top 3 Recommendations' section"}, {"text": "identifies-correct-files", "passed": true, "evidence": "Lists trade_service.py as primary"}, {"text": "has-severity-ratings", "passed": true, "evidence": "Every finding has 'Severity: High/Medium/Low'"}]}}, {"id": "eval-trade-generation-without_skill", "prompt": "Evaluate the trade generation feature", "eval_id": 0, "outputs": [{"name": "trade-generation-evaluation.md", "type": "text", "content": "# Trade Generation Feature Evaluation\n\n**Project:** Fantasy Trade Finder  \n**Module:** `backend/trade_service.py`  \n**Evaluation Date:** 2026-04-12  \n**Scope:** Code quality, performance, structure, error handling, and recommendations\n\n---\n\n## Executive Summary\n\nThe trade generation feature is a sophisticated matchmaking engine that identifies mutually beneficial player trades between league members using ELO-based consensus rankings. The implementation demonstrates strong algorithmic design with clear separation of concerns, configurable parameters, and thoughtful fairness mechanisms. However, there are opportunities for improvement in error handling, code organization, and maintainability.\n\n**Overall Assessment:** **B+** (Strong design with room for refinement)\n\n---\n\n## 1. Code Quality & Structure\n\n### 1.1 Strengths\n\n- **Clear Documentation:** Comprehensive docstrings explain the core algorithm, parameter meanings, and return types. The header comment (lines 1-17) provides an excellent high-level overview of the trade fairness model.\n\n- **Dataclass Usage:** Clean use of Python dataclasses (`LeagueMember`, `TradeCard`, `League`) makes the domain model explicit and prevents error-prone positional arguments.\n\n- **Separation of Concerns:** Trade generation logic is cleanly separated from scoring helpers (`_mismatch_score`, `_fairness_score`) and auxiliary functions (`dynasty_value`, `package_value`).\n\n- **Configuration Management:** Runtime configuration is elegantly handled with a defaults dict and live-reload capability. The `_c()` accessor provides a single point of access with automatic fallback.\n\n- **Type Hints:** Comprehensive type annotations throughout improve IDE support and maintainability.\n\n### 1.2 Weaknesses\n\n- **Long Methods:** The `_generate_for_pair` method (lines 457-722) spans 265 lines with deeply nested loops for 1-for-1, 2-for-1, 1-for-2, and 3-for-2 trades. This violates the Single Responsibility Principle and makes testing individual trade types difficult.\n\n  **Recommendation:** Extract each trade type into its own method:\n  ```python\n  def _generate_for_pair(self, ...):\n      candidates = []\n      candidates.extend(self._generate_one_for_one(...))\n      candidates.extend(self._generate_two_for_one(...))\n      candidates.extend(self._generate_one_for_two(...))\n      candidates.extend(self._generate_three_for_two(...))\n      # Sort and create cards\n  ```\n\n- **Inconsistent Composite Score Calculation:** The composite score normalization uses different denominators for different trade types (300, 400, 500 in lines 525, 571, 615). This appears arbitrary and makes the scoring non-uniform.\n\n  **Recommendation:** Either justify the different caps or unify them:\n  ```python\n  MISMATCH_SCORE_CAP = 300  # or compute from data\n  composite = (_c(\"mismatch_weight\") * min(mismatch, MISMATCH_SCORE_CAP) / MISMATCH_SCORE_CAP +\n               _c(\"fairness_weight\") * fairness)\n  ```\n\n---\n\n## 2. Performance Analysis\n\n### 2.1 Algorithm Complexity\n\nThe trade generation algorithm has worst-case **O(n\u00b3)** complexity due to nested loops:\n\n- 1-for-1: O(n\u00b2) \u2014 nested `user_roster` \u00d7 `opp_roster`\n- 2-for-1: O(n\u00b3) \u2014 `combinations(user_roster, 2)` \u00d7 `opp_roster` \n- 1-for-2: O(n\u00b3) \u2014 `user_roster` \u00d7 `combinations(opp_roster, 2)`\n- 3-for-2: O(n\u2074) \u2014 `combinations(opp_roster, 2)` \u00d7 `combinations(user_roster, 3)`\n\n### 2.2 Efficiency Concerns\n\n**Early Exit Strategy:**\nThe code has a `max_candidates` limit (default 500, line 64) and breaks out of loops when reached (lines 529-532). However, this is applied sequentially per trade type, which means the 3-for-2 section (the most expensive) only activates if fewer than 500 candidates exist from 1-for-1, 2-for-1, and 1-for-2 trades.\n\n**Potential Bottleneck:** For a typical dynasty league with 10+ rosters of 25+ players each, the algorithm could generate millions of candidate pairs before hitting the 500-candidate cap.\n\n**Recommendation:** Implement early termination across all iterations:\n```python\ndef _generate_for_pair(self, ...):\n    candidates = []\n    max_candidates = int(_c(\"max_candidates\"))\n    \n    for give_id in user_roster:\n        if len(candidates) >= max_candidates:\n            break\n        # ... 1-for-1 logic\n    \n    if len(candidates) < max_candidates:\n        for recv_id in opp_roster:\n            if len(candidates) >= max_candidates:\n                break\n            # ... 2-for-1 logic\n```\n\n### 2.3 KTC Fairness Pre-filtering\n\n**Positive:** The `_ktc_ok()` helper (lines 488-499) performs a quick dynasty value check before expensive ELO calculations. This is a good pattern.\n\n**Issue:** Dynasty value calculations are performed multiple times for the same player. For large rosters, cache the DV values:\n\n```python\n# Cache at the start of _generate_for_pair\ndv_cache = {pid: _dv(pid) for pid in user_roster + opp_roster}\n\n# Then use dv_cache[pid] instead of _dv(pid)\n```\n\n---\n\n## 3. Error Handling\n\n### 3.1 Current Approach\n\n- **Silent Fallbacks:** The `reload_config()` function (lines 71-84) silently ignores database errors with a bare `except` block.\n- **Lenient Defaults:** Missing ELO values default to 1500 (lines 554-557, 598-601).\n- **No Validation:** The API accepts `fairness_threshold` without validation. Invalid values could break the fairness check.\n\n### 3.2 Weaknesses\n\n**1. Silent Failures (Line 84)**\n```python\nexcept Exception:\n    pass  # DB unavailable \u2014 keep existing values\n```\nThis swallows all exceptions including network timeouts, permission errors, and syntax errors. The caller has no way to know if the config was loaded or if the database is unreachable.\n\n**Recommendation:**\n```python\ndef reload_config() -> bool:\n    \"\"\"\n    Pull the latest values from model_config.\n    Returns True if successful, False otherwise.\n    \"\"\"\n    global _cfg\n    try:\n        from .database import get_config as _db_get_config\n        fresh = _db_get_config()\n        if fresh:\n            _cfg.update(fresh)\n        return True\n    except Exception as e:\n        log.warning(f\"Failed to reload config: {e}\")\n        return False\n```\n\n**2. Missing Input Validation (Line 911 in server.py)**\nThe `fairness_threshold` parameter has no bounds checking. A value like 10.0 would break the algorithm:\n\n**Recommendation:**\n```python\ndef generate_trades(\n    self,\n    ...\n    fairness_threshold: float = 0.75,\n) -> list[TradeCard]:\n    \"\"\"...\"\"\"\n    if not (0.0 < fairness_threshold <= 1.0):\n        raise ValueError(f\"fairness_threshold must be in (0, 1], got {fairness_threshold}\")\n```\n\n**3. Unhelpful Error Messages**\nThe `_ktc_ok()` function (line 488) silently returns False for edge cases. When a trade is filtered out, there's no indication why:\n\n**Recommendation:**\n```python\ndef _ktc_ok(give_ids: list[str], recv_ids: list[str]) -> tuple[bool, str]:\n    \"\"\"Return (is_ok, reason).\"\"\"\n    give_val = package_value([_dv(pid) for pid in give_ids])\n    recv_val = package_value([_dv(pid) for pid in recv_ids])\n    \n    if give_val == 0 and recv_val == 0:\n        return True, \"\"\n    \n    greater = max(give_val, recv_val)\n    lesser = min(give_val, recv_val)\n    ratio = lesser / greater if greater > 0 else 0\n    \n    if ratio < fairness_threshold:\n        return False, f\"KTC ratio {ratio:.2f} < {fairness_threshold}\"\n    return True, \"\"\n```\n\n---\n\n## 4. Algorithm Correctness\n\n### 4.1 Fairness Score Issue (Line 765-766)\n\nThe `_fairness_score` function computes:\n```python\nratio = max(give_val, recv_val) / max(min(give_val, recv_val), 1)\nreturn round(1.0 / ratio, 3)\n```\n\n**Problem:** The use of `max(..., 1)` as a denominator is a silent hack that prevents division by zero but distorts the score. When both values are zero:\n- `ratio = 0 / 1 = 0`\n- `fairness = 1.0 / 0` \u2192 **ERROR** (should return 1.0)\n\nThe code avoids this by checking `if give_val == 0 and recv_val == 0` on line 763, but this is fragile.\n\n**Recommendation:**\n```python\ndef _fairness_score(self, give_ids: list[str], recv_ids: list[str], seed_elo: dict[str, float]) -> float:\n    \"\"\"How balanced the trade is in consensus value (0\u20131).\"\"\"\n    give_val = sum(seed_elo.get(pid, 1500) for pid in give_ids)\n    recv_val = sum(seed_elo.get(pid, 1500) for pid in recv_ids)\n    \n    if give_val == 0 and recv_val == 0:\n        return 1.0\n    \n    if give_val == 0 or recv_val == 0:\n        return 0.0  # One side has no value\n    \n    greater = max(give_val, recv_val)\n    lesser = min(give_val, recv_val)\n    return round(lesser / greater, 3)\n```\n\n### 4.2 Positional Preference Multiplier (Line 290)\n\nThe conflict penalty uses exponential decay:\n```python\nmultiplier *= ((1.0 - conf_pen) ** conflicts)\n```\n\nFor `conf_pen = 0.15` and 3 conflicts:\n- `multiplier *= (0.85) ** 3 = 0.614`\n\nThis is reasonable, but the exponent behavior isn't documented. For a single conflict, it's only a 15% penalty; for two, it's 27.75%. This is counterintuitive.\n\n**Recommendation:** Document or use linear scaling:\n```python\n# Linear: each conflict is exactly conf_pen\nmultiplier *= (1.0 - conf_pen * conflicts)\n\n# Or document exponential clearly\nmultiplier *= ((1.0 - conf_pen) ** conflicts)  # Exponential decay per conflict\n```\n\n---\n\n## 5. Testing & Maintainability\n\n### 5.1 Testability Issues\n\n- **No Unit Tests:** The module has no visible test suite. Testing individual trade types requires either:\n  1. Refactoring to extract methods (see Section 1.2)\n  2. Complex integration testing with full league data\n\n- **Hidden Dependencies:** The `_c()` function (line 87) relies on module-level `_cfg` which is mutated by `reload_config()`. This makes unit tests harder to isolate.\n\n**Recommendation:** Make config injection explicit:\n```python\nclass TradeService:\n    def __init__(self, players: dict, config: dict | None = None):\n        self._players = players\n        self._config = config or dict(_DEFAULT_CFG)\n    \n    def _c(self, key: str) -> float:\n        return self._config.get(key, _DEFAULT_CFG[key])\n```\n\n- **Hardcoded Thresholds:** Values like the 0.95 multiplier (lines 560, 604, 659) in trade feasibility checks are magic numbers with no explanation.\n\n**Recommendation:**\n```python\nMIN_VALUE_PREMIUM = 0.95  # User must value received package at least 95% of given package\n\nif recv_user <= combined_give_user * MIN_VALUE_PREMIUM:\n    continue  # User doesn't perceive mutual gain\n```\n\n### 5.2 Code Comments\n\n- Lines 308-323 (TradeCard dataclass) lack explanation of what \"fairness_score\" vs \"composite_score\" mean.\n- Lines 504-532 (1-for-1 trades) could benefit from a summary comment explaining the whole section.\n\n---\n\n## 6. Integration with Server\n\n### 6.1 Configuration Reload (server.py, line 77-78)\n\nThe server imports `trade_service` as a module and calls `reload_config()` on startup, but there's no guarantee it's called after config updates.\n\n**Observation:** The code is flexible but doesn't enforce initialization order.\n\n---\n\n## 7. Specific Bugs & Edge Cases\n\n### 7.1 Default ELO Fallback (Lines 554-557)\n\n```python\ncombined_give_user = user_elo.get(give_id_1, 1500) + user_elo.get(give_id_2, 1500)\n```\n\nIf both players are missing from `user_elo`, the default sums to 3000, which might distort the algorithm. Consider:\n\n```python\nif give_id_1 not in user_elo or give_id_2 not in user_elo:\n    continue  # Skip if either player is missing ranking data\n```\n\n### 7.2 Pinned Players Logic (Lines 547-548)\n\n```python\nif pinned_set and not ({give_id_1, give_id_2} & pinned_set):\n    continue\n```\n\nThis requires **at least one** pinned player per multi-player trade, but the docstring (line 375) says \"specific players user wants to trade away.\" If a user pins one player, the code forces them into multi-player packages even if a 1-for-1 trade would satisfy them.\n\n**Recommendation:** Clarify the semantics or allow pinned 1-for-1 trades to bypass this constraint.\n\n### 7.3 UUID Truncation (Line 710)\n\n```python\ntrade_id = str(uuid.uuid4())[:8]\n```\n\nOnly 8 characters of a UUID are used. While collisions are unlikely, a full UUID would be safer:\n\n```python\ntrade_id = str(uuid.uuid4())\n```\n\n---\n\n## 8. Performance Recommendations (Priority Order)\n\n### High Priority\n1. **Extract trade type generators** to enable targeted optimization and testing\n2. **Cache dynasty values** for players to avoid repeated calculations\n3. **Validate input parameters** (fairness_threshold, list lengths) to catch bugs early\n\n### Medium Priority\n4. **Implement logging** for trade filtering decisions (why was a candidate rejected?)\n5. **Benchmark against real league data** to identify actual bottlenecks\n6. **Add telemetry** to track candidates generated vs. discarded ratio\n\n### Low Priority\n7. Refactor composite score normalization for clarity\n8. Document magic numbers (0.95, package weights, age thresholds)\n9. Consider caching results if trade generation is called frequently\n\n---\n\n## 9. Recommended Refactoring Example\n\nHere's how to extract the 2-for-1 trade generation into a separate method:\n\n```python\ndef _generate_two_for_one(\n    self,\n    user_roster: list[str],\n    opp_roster: list[str],\n    user_elo: dict[str, float],\n    opp_elo: dict[str, float],\n    pinned_set: set[str] | None,\n    max_candidates: int,\n) -> list[tuple[float, float, list[str], list[str]]]:\n    \"\"\"\n    Generate 2-for-1 trades (user gives 2, receives 1 elite player).\n    Returns list of (composite_score, mismatch_score, give_ids, recv_ids).\n    \"\"\"\n    candidates = []\n    \n    for recv_id in opp_roster:\n        if recv_id not in user_elo or recv_id not in opp_elo:\n            continue\n        \n        for give_id_1, give_id_2 in combinations(user_roster, 2):\n            # ... rest of 2-for-1 logic\n            candidates.append((composite, mismatch, [give_id_1, give_id_2], [recv_id]))\n            \n            if len(candidates) >= max_candidates:\n                return candidates\n    \n    return candidates\n```\n\nThen in `_generate_for_pair`:\n```python\nif len(candidates) < int(_c(\"max_candidates\")):\n    candidates.extend(self._generate_two_for_one(...))\n```\n\n---\n\n## 10. Summary of Issues by Severity\n\n| Severity | Issue | Line(s) | Fix Type |\n|----------|-------|---------|----------|\n| **High** | Unhelpful error handling in `reload_config()` | 71-84 | Refactor + logging |\n| **High** | O(n\u00b3) worst-case complexity for 3-for-2 trades | 625-682 | Algorithm optimization |\n| **High** | No input validation on `fairness_threshold` | 911 (server.py) | Add validation |\n| **Medium** | `_fairness_score()` edge case with zero values | 763-766 | Simplify logic |\n| **Medium** | Long `_generate_for_pair()` method | 457-722 | Extract methods |\n| **Medium** | Dynasty value recomputation in loops | 541-542, 631-632 | Add caching |\n| **Low** | Inconsistent composite score denominators | 525, 571, 615 | Unify constants |\n| **Low** | UUID collision risk with 8-char IDs | 710 | Use full UUID |\n| **Low** | Undocumented magic numbers (0.95) | 560, 604, 659 | Add constants + comments |\n\n---\n\n## Conclusion\n\nThe trade generation feature demonstrates solid architectural thinking with clear algorithm documentation and reasonable performance for typical league sizes. The primary areas for improvement are:\n\n1. **Code Organization:** Break down the monolithic `_generate_for_pair()` method\n2. **Error Handling:** Add validation and meaningful error messages\n3. **Performance:** Cache expensive calculations and optimize loop termination\n4. **Testability:** Refactor to enable unit testing of individual trade types\n\nWith these improvements, the codebase would be more maintainable, testable, and resilient to edge cases.\n\n---\n\n## Appendix: Configuration Parameters Reference\n\n| Parameter | Default | Purpose | Suggested Range |\n|-----------|---------|---------|-----------------|\n| `min_mismatch_score` | 40.0 | Minimum perceived mutual gain to surface trade | 20\u201360 |\n| `max_value_ratio` | 2.5 | (Deprecated) Old fairness check | \u2014 |\n| `fairness_threshold` | (dynamic) | KTC package value ratio floor | 0.5\u20131.0 |\n| `mismatch_weight` | 0.70 | Weight of ELO mismatch in composite score | 0.5\u20130.9 |\n| `fairness_weight` | 0.30 | Weight of KTC fairness in composite score | 0.1\u20130.5 |\n| `package_weight_1` | 1.00 | Weight of best player in multi-player package | 1.0 (fixed) |\n| `package_weight_2` | 0.75 | Weight of 2nd player | 0.6\u20130.8 |\n| `ktc_k` | 0.0126 | Exponential decay constant | 0.012\u20130.014 |\n| `ktc_max` | 10000.0 | Dynasty value asymptote | 8000\u201312000 |\n\n"}], "grading": {"eval_id": 0, "eval_name": "eval-trade-generation", "configuration": "without_skill", "expectations": [{"text": "has-scores-table", "passed": false, "evidence": "Uses a severity table but no 1-5 dimension scores"}, {"text": "has-code-suggestions", "passed": true, "evidence": "Multiple concrete code examples"}, {"text": "has-top-recommendations", "passed": false, "evidence": "Has 'Performance Recommendations (Priority Order)' but not a top 3 format"}, {"text": "identifies-correct-files", "passed": true, "evidence": "Identifies trade_service.py"}, {"text": "has-severity-ratings", "passed": true, "evidence": "Uses High/Medium/Low severities"}]}}, {"id": "eval-ranking-system-with_skill", "prompt": "How good is the ranking system code? Any improvements?", "eval_id": 1, "outputs": [{"name": "ranking-system-evaluation.md", "type": "text", "content": "# Feature Evaluation: Ranking System (Elo Engine)\n\n**Date:** 2026-04-12\n**Files reviewed:** `backend/ranking_service.py`, `backend/database.py`, `backend/server.py` (integration points)\n\n## Summary\n\nThe ranking system is a well-architected Elo engine that intelligently decomposes 3-player interactions into pairwise comparisons for efficiency. The code demonstrates solid design fundamentals: clean separation of concerns, thoughtful data models, and a principled approach to configuration management. However, there are concrete opportunities in three areas: (1) defensive programming\u2014edge cases in replay logic and division by zero risks; (2) performance\u2014unnecessary recomputation and collection size assumptions; (3) maintainability\u2014scattered business logic and floating-point precision. These are not blockers but will matter as the codebase scales.\n\n## Findings\n\n### Error Handling & Resilience: Silent failure in get_next_trio fallback\n\n**Severity:** Medium\n**Location:** `ranking_service.py`, lines ~270\u2013283\n\nThe `get_next_trio()` method falls back to the algorithmic trio selection if the smart matchup generator raises *any* exception. While defensive, this silently swallows real errors (database connectivity, Claude API failures, etc.) that operators should know about. The current code makes debugging difficult.\n\n**Current code:**\n```python\nif self._generator is not None:\n    try:\n        from .smart_matchup_generator import SwipeDecision as SD\n        history = [SD(winner_id=s.winner_id, loser_id=s.loser_id) for s in self._swipes]\n        trio = self._generator.generate_next_trio(\n            players=pool,\n            swipe_history=history,\n            position_filter=position,\n        )\n        return trio\n    except Exception:\n        pass\n\nreturn self._algorithmic_trio(pool)\n```\n\n**Suggested improvement:**\n```python\nif self._generator is not None:\n    try:\n        from .smart_matchup_generator import SwipeDecision as SD\n        history = [SD(winner_id=s.winner_id, loser_id=s.loser_id) for s in self._swipes]\n        trio = self._generator.generate_next_trio(\n            players=pool,\n            swipe_history=history,\n            position_filter=position,\n        )\n        return trio\n    except Exception as e:\n        # Log the error but allow fallback for graceful degradation\n        import logging\n        logging.warning(f\"Smart matchup generator failed, using algorithmic fallback: {e}\")\n\nreturn self._algorithmic_trio(pool)\n```\n\n---\n\n### Performance: Unnecessary recomputation in _algorithmic_trio\n\n**Severity:** Medium\n**Location:** `ranking_service.py`, lines ~448\u2013479\n\nThe `_algorithmic_trio()` method calls `_compute_elo()` and `_compute_stats()` every time it's invoked, even though these have just been computed by the caller in `get_rankings()`. Since ranking pools can contain 50\u2013200 players, this duplicates O(n \u00d7 m) work where m is the number of swipes (which can grow unbounded).\n\n**Current code:**\n```python\ndef _algorithmic_trio(self, pool: list[Player]) -> MatchupTrio:\n    \"\"\"Pick 3 adjacent players in Elo order that haven't all been compared.\"\"\"\n    elo          = self._compute_elo(pool)       # Recomputes\n    sorted_p     = sorted(pool, key=lambda p: elo[p.id], reverse=True)\n    stats        = self._compute_stats(pool)     # Recomputes\n    # ...\n```\n\n**Suggested improvement:**\n```python\ndef _algorithmic_trio(self, pool: list[Player], \n                      elo: dict[str, float] = None,\n                      stats: dict[str, dict] = None) -> MatchupTrio:\n    \"\"\"Pick 3 adjacent players in Elo order that haven't all been compared.\"\"\"\n    if elo is None:\n        elo = self._compute_elo(pool)\n    if stats is None:\n        stats = self._compute_stats(pool)\n    \n    sorted_p = sorted(pool, key=lambda p: elo[p.id], reverse=True)\n    # ... rest of method\n```\n\nThen update `get_next_trio()`:\n```python\ndef get_next_trio(self, position: Optional[str] = None) -> MatchupTrio:\n    pool = self._pool(position)\n    if len(pool) < 3:\n        raise ValueError(f\"Need at least 3 players for position={position\\!r}\")\n\n    if self._generator is not None:\n        # ... smart generator logic ...\n\n    # Precompute once, pass to fallback\n    elo = self._compute_elo(pool)\n    stats = self._compute_stats(pool)\n    return self._algorithmic_trio(pool, elo=elo, stats=stats)\n```\n\n---\n\n### Maintainability & Extensibility: Magic numbers in _algorithmic_trio window size\n\n**Severity:** Low\n**Location:** `ranking_service.py`, lines ~456\u2013458\n\nThe nested loops that search for candidate trios use hardcoded window sizes (5) with no explanation. These thresholds shape which matchups are surfaced\u2014they're business logic, not implementation details.\n\n**Current code:**\n```python\nfor i in range(len(sorted_p) - 2):\n    for j in range(i + 1, min(i + 5, len(sorted_p) - 1)):\n        for k in range(j + 1, min(j + 5, len(sorted_p))):\n```\n\n**Suggested improvement:**\n```python\n# At class level\nTRIO_SEARCH_WINDOW = 5  # Search window size for candidate trio selection\n\ndef _algorithmic_trio(self, pool: list[Player]) -> MatchupTrio:\n    # ...\n    for i in range(len(sorted_p) - 2):\n        for j in range(i + 1, min(i + self.TRIO_SEARCH_WINDOW, len(sorted_p) - 1)):\n            for k in range(j + 1, min(j + self.TRIO_SEARCH_WINDOW, len(sorted_p))):\n```\n\nAnd document the reasoning in a docstring or comment explaining why 5 was chosen (e.g., \"empirically found to balance freshness vs. search cost\").\n\n---\n\n### Structure & Design: Division-by-zero risk in replay_from_db\n\n**Severity:** Medium\n**Location:** `ranking_service.py`, lines ~369\u2013372\n\nThe replay logic reconstructs interaction counts by dividing swipe counts by 3 (to convert pairwise swipes back to 3-player interactions). However, if the swipe history is corrupted or contains orphaned rank swipes, the math breaks down silently.\n\n**Current code:**\n```python\nself._interactions = {\n    pos: cnt // 3\n    for pos, cnt in pos_swipe_counts.items()\n}\n```\n\n**Suggested improvement:**\n```python\nself._interactions = {}\nfor pos, cnt in pos_swipe_counts.items():\n    # Sanity check: rank swipes should always be in multiples of 3\n    if cnt % 3 \\!= 0:\n        logging.warning(\n            f\"Rank swipe count for {pos} is {cnt} (not divisible by 3); \"\n            f\"possible data corruption. Using integer division.\"\n        )\n    self._interactions[pos] = cnt // 3\n```\n\n---\n\n### Error Handling & Resilience: Missing input validation in record_ranking\n\n**Severity:** Low\n**Location:** `ranking_service.py`, lines ~180\u2013184\n\nThe method validates that player IDs exist but doesn't check for duplicates in `ordered_ids`. If a user submits the same player twice (a client-side bug or injection), the decomposition creates self-comparison rows (A > A), which are logically nonsensical.\n\n**Current code:**\n```python\nif len(ordered_ids) < 2:\n    raise ValueError(\"Need at least 2 player IDs\")\nfor pid in ordered_ids:\n    if pid not in self._players:\n        raise ValueError(f\"Unknown player id: {pid\\!r}\")\n```\n\n**Suggested improvement:**\n```python\nif len(ordered_ids) < 2:\n    raise ValueError(\"Need at least 2 player IDs\")\nif len(ordered_ids) \\!= len(set(ordered_ids)):\n    raise ValueError(\"Duplicate player IDs in ranking\")\nfor pid in ordered_ids:\n    if pid not in self._players:\n        raise ValueError(f\"Unknown player id: {pid\\!r}\")\n```\n\n---\n\n### Readability & Naming: Config accessor function naming\n\n**Severity:** Low\n**Location:** `ranking_service.py`, lines ~48\u201349\n\nThe `_c()` function is a 1-character name that shadows Python's built-in semantics. While short names are acceptable for true hot-path accessors, this makes searching and linting harder.\n\n**Current code:**\n```python\ndef _c(key: str) -> float:\n    return _cfg.get(key, _DEFAULT_CFG[key])\n```\n\n**Suggested improvement:**\n```python\ndef _get_config(key: str) -> float:\n    \"\"\"Get a runtime config value with fallback to default.\"\"\"\n    return _cfg.get(key, _DEFAULT_CFG[key])\n\n# Then update all callsites: _c(\"elo_k\") \u2192 _get_config(\"elo_k\")\n```\n\nAlternatively, if brevity is preferred for readability in tight loops:\n```python\ndef _c(key: str) -> float:  # Get config value (see reload_config)\n    \"\"\"Retrieve a runtime ELO K-factor or fallback to default.\"\"\"\n    return _cfg.get(key, _DEFAULT_CFG[key])\n```\n\n---\n\n### Testability: Hard-to-mock generator dependency\n\n**Severity:** Low\n**Location:** `ranking_service.py`, lines ~150\u2013162\n\nThe `matchup_generator` is injected as a positional argument but only used in one method. This makes the dependency unclear to new readers and complicates testing (you must pass a mock or None every time you instantiate `RankingService`). A setter or lazy loading would be clearer.\n\n**Current code:**\n```python\ndef __init__(\n    self,\n    players: list[Player],\n    matchup_generator=None,\n    seed_ratings: Optional[dict[str, float]] = None,\n):\n```\n\n**Suggested improvement:**\n```python\ndef __init__(\n    self,\n    players: list[Player],\n    seed_ratings: Optional[dict[str, float]] = None,\n):\n    # ...\n    self._generator = None  # Injected via set_matchup_generator if needed\n\ndef set_matchup_generator(self, generator) -> None:\n    \"\"\"Optionally inject a smart matchup generator for A/B testing.\"\"\"\n    self._generator = generator\n```\n\nThen update `get_next_trio()` to use `self._generator` as before. This makes the optional dependency more explicit and easier to test.\n\n---\n\n## Scores\n\n| Dimension | Score (1-5) | Notes |\n|---|---|---|\n| Structure & Design | 4 | Clean separation of Elo math, stats, and trio selection. Config reloading is well-thought-out. Minor: generator dependency could be clearer. |\n| Readability & Naming | 4 | Well-named methods and data classes. `_c()` is cryptic but brief; fine for a utility. Good docstrings overall. |\n| Performance | 3 | Elo computation is O(n \u00d7 m) per call (necessary). Main inefficiency: trio selection recomputes Elo/stats unnecessarily. Passable for league sizes \u2264500. |\n| Error Handling | 3 | Validates inputs and handles missing players. Silent fallback in generator is problematic; replay logic lacks corruption detection. |\n| Security | 4 | No hardcoded secrets. DB queries use parameterized inserts. No SQL injection risk visible. |\n| Testability | 3 | Pure functions (compute_elo, compute_stats) are testable. Generator injection makes mocking awkward. No unit tests in repo. |\n| Maintainability | 4 | Config management is centralized and runtime-tunable. Magic numbers in trio search could be constants. Codebase is compact and readable. |\n\n**Overall: 3.6/5**\n\n---\n\n## Top 3 Recommendations\n\n1. **Precompute Elo and stats before trio selection** (Medium impact, low effort). Cache the results of `_compute_elo()` and `_compute_stats()` during `get_rankings()` and pass them to `_algorithmic_trio()` to avoid O(n \u00d7 m) recomputation. This is the highest-impact perf win and costs minimal refactoring.\n\n2. **Log generator failures instead of silently swallowing them** (Medium impact, trivial effort). Replace the bare `except Exception: pass` in `get_next_trio()` with `logging.warning()` to help operators diagnose smart matchup outages without guessing.\n\n3. **Add data corruption detection in replay_from_db** (Low impact, low effort). Check that rank swipe counts are divisible by 3 before dividing; log a warning if not. Protects against silent state corruption from database bugs or manual edits.\n\n**Bonus:** Extract `TRIO_SEARCH_WINDOW = 5` as a named constant with a comment explaining the choice. This clarifies intent and makes it easy to tune later.\n"}], "grading": {"eval_id": 1, "eval_name": "eval-ranking-system", "configuration": "with_skill", "expectations": [{"text": "has-scores-table", "passed": true, "evidence": "Has dimension scores table with 1-5 ratings"}, {"text": "has-code-suggestions", "passed": true, "evidence": "Multiple current/suggested code pairs"}, {"text": "has-top-recommendations", "passed": true, "evidence": "Has 'Top 3 Recommendations' section"}, {"text": "identifies-correct-files", "passed": true, "evidence": "Lists ranking_service.py as primary"}, {"text": "has-severity-ratings", "passed": true, "evidence": "Every finding has severity"}]}}, {"id": "eval-ranking-system-without_skill", "prompt": "How good is the ranking system code? Any improvements?", "eval_id": 1, "outputs": [{"name": "ranking-system-evaluation.md", "type": "text", "content": "# Ranking System Code Evaluation\n\n**Project:** Fantasy Trade Finder  \n**File Evaluated:** `backend/ranking_service.py`  \n**Evaluation Date:** 2026-04-12  \n**Overall Assessment:** B+ (Good foundation with several areas for improvement)\n\n---\n\n## Executive Summary\n\nThe ranking system demonstrates solid architectural thinking with clever ELO decomposition (converting 3-player rankings into pairwise comparisons) and thoughtful separation of concerns. However, the code has several vulnerabilities around error handling, type safety, and performance that should be addressed before production use.\n\n**Strengths:**\n- Elegant 3-player ranking decomposition (2.58x information efficiency)\n- Clean separation between ranking and trade signals\n- Sensible default configuration with runtime override capability\n- Comprehensive data models with good documentation\n\n**Concerns:**\n- Silent failures in critical paths (configuration loading, external dependencies)\n- Logic bug in the `reset()` method\n- Weak input validation in key methods\n- Tight coupling to external modules with weak error boundaries\n- Missing type hints in several locations\n\n---\n\n## 1. Code Quality Assessment\n\n### 1.1 Architecture & Design (Grade: A-)\n\n**Strengths:**\n- **Excellent separation of concerns:** ELO computation, stats tracking, and matchup generation are cleanly separated.\n- **Thoughtful data models:** `Player`, `SwipeDecision`, `RankedPlayer`, `RankSet`, and `MatchupTrio` are well-designed and use dataclasses appropriately.\n- **Clever 3-player decomposition:** The `record_ranking()` method correctly decomposes 3-player rankings into 3 pairwise comparisons, achieving 2.58x information density per interaction\u2014a significant UX win.\n- **Flexible K-factor system:** Multiple K-factors for different decision types (ranking, trade like/pass, disposition accept/decline) allow nuanced signal weighting.\n\n**Areas for Improvement:**\n- **Global configuration coupling:** The `_cfg` global and `reload_config()` function create a subtle global state dependency that could be problematic in concurrent or testing scenarios.\n- **Hard dependency on `smart_matchup_generator`:** The fallback in `get_next_trio()` catches all exceptions silently, which can hide bugs:\n  ```python\n  try:\n      from .smart_matchup_generator import SwipeDecision as SD\n      # ... use it ...\n      return trio\n  except Exception:\n      pass  # Silent failure \u2014 hides ImportError, runtime errors, etc.\n  ```\n- **Implicit interaction count reconstruction:** In `replay_from_db()`, the interaction count is reconstructed by dividing swipe count by 3. This works but is fragile\u2014what if data is corrupted or a partial import happens?\n\n---\n\n### 1.2 Type Safety (Grade: B)\n\n**Current Status:**\n- Uses Python 3.10+ features (e.g., `dict[str, float]` instead of `Dict[str, float]`)\n- Dataclasses are properly defined\n- Some functions lack return type hints\n\n**Issues:**\n1. **Missing return type on `replay_from_db()`:** Declared correctly (`-> int`), but the method modifies state while returning a count\u2014callers can't tell if errors occurred.\n\n2. **Weak type hint on `_compute_stats()`:**\n   ```python\n   def _compute_stats(self, pool: list[Player]) -> dict[str, dict]:\n   ```\n   The return value `dict[str, dict]` is too vague. Should be:\n   ```python\n   def _compute_stats(self, pool: list[Player]) -> dict[str, dict[str, int | set[str]]]:\n   ```\n\n3. **Inconsistent parameter naming:** `ordered_ids: list[str]` in `record_ranking()` implies an order, but the decomposition logic treats them as an ordered sequence without validation beyond the minimum length check.\n\n**Recommendation:**\n```python\n# Add proper type hints to internal methods\ndef _compute_stats(\n    self, pool: list[Player]\n) -> dict[str, dict[str, int | set[str]]]:\n    \"\"\"\n    Returns: {\n        player_id: {\n            \"wins\": int,\n            \"losses\": int,\n            \"compared\": set[str]  # IDs of players compared against\n        }\n    }\n    \"\"\"\n```\n\n---\n\n### 1.3 Error Handling & Validation (Grade: C+)\n\n**Critical Issues:**\n\n1. **Silent configuration loading failure:**\n   ```python\n   def reload_config() -> None:\n       \"\"\"Pull latest ELO K-factor values from model_config into _cfg.\"\"\"\n       global _cfg\n       try:\n           from .database import get_config as _db_get_config\n           fresh = _db_get_config()\n           if fresh:\n               _cfg.update({k: fresh[k] for k in _DEFAULT_CFG if k in fresh})\n       except Exception:\n           pass  # No logging, no indication of failure\n   ```\n   **Risk:** If the database is misconfigured or unavailable, users get silent fallback to hardcoded defaults without knowing. In production, this could lead to incorrect K-factors being used.\n   \n   **Fix:**\n   ```python\n   def reload_config() -> None:\n       global _cfg\n       try:\n           from .database import get_config as _db_get_config\n           fresh = _db_get_config()\n           if fresh:\n               _cfg.update({k: fresh[k] for k in _DEFAULT_CFG if k in fresh})\n               # Optional: log success\n       except ImportError:\n           # Database module not available; expected in some contexts\n           pass\n       except Exception as e:\n           # Unexpected error; should be logged or raised\n           import logging\n           logging.warning(f\"Failed to reload ranking config: {e}\")\n   ```\n\n2. **Weak input validation in `record_ranking()`:**\n   ```python\n   if len(ordered_ids) < 2:\n       raise ValueError(\"Need at least 2 player IDs\")\n   for pid in ordered_ids:\n       if pid not in self._players:\n           raise ValueError(f\"Unknown player id: {pid!r}\")\n   ```\n   This is good, but there's no check for:\n   - Duplicate IDs in `ordered_ids`\n   - Empty list (though `len(ordered_ids) < 2` catches this)\n   \n   **Improvement:**\n   ```python\n   if len(ordered_ids) < 2:\n       raise ValueError(\"Need at least 2 player IDs\")\n   if len(ordered_ids) != len(set(ordered_ids)):\n       raise ValueError(\"Duplicate player IDs in ranking\")\n   for pid in ordered_ids:\n       if pid not in self._players:\n           raise ValueError(f\"Unknown player id: {pid!r}\")\n   ```\n\n3. **Silent skipping in `replay_from_db()`:**\n   ```python\n   for row in swipes:\n       wid = row[\"winner_player_id\"]\n       lid = row[\"loser_player_id\"]\n       if wid not in self._players or lid not in self._players:\n           continue  # Silently skip cross-league or stale data\n   ```\n   This is intentional (per docstring), but callers have no way to know how many rows were skipped vs. replayed. The returned count is only successes.\n\n4. **No validation in `record_trade_signal()` or `record_disposition_signal()`:**\n   Both methods silently skip invalid player IDs without logging:\n   ```python\n   if wid not in self._players or lid not in self._players:\n       continue\n   ```\n   If a caller passes invalid IDs, they won't know the signal was dropped.\n\n---\n\n### 1.4 Logic Correctness (Grade: B-)\n\n**Critical Bug Found:**\n\nIn the `reset()` method (lines 377\u2013394), there's a **logic error in the position-specific reset:**\n\n```python\ndef reset(self, position: Optional[str] = None) -> dict:\n    if position is None:\n        self._swipes.clear()\n        self._trade_swipes.clear()\n        self._interactions.clear()\n    else:\n        pool_ids = {p.id for p in self._pool(position)}\n        self._swipes = [\n            s for s in self._swipes\n            if s.winner_id not in pool_ids or s.loser_id not in pool_ids  # BUG HERE\n        ]\n```\n\n**The Problem:**\nThe filter should keep swipes where **both** players are **NOT** in the position pool. Currently it uses `or`, which keeps swipes if **either** player is outside the pool.\n\n**Correct Logic:**\n```python\nself._swipes = [\n    s for s in self._swipes\n    if s.winner_id not in pool_ids and s.loser_id not in pool_ids  # Use AND\n]\n```\n\n**Impact:** If resetting a single position (e.g., \"WR\"), a swipe between a WR and a non-WR will be incorrectly retained.\n\n---\n\n### 1.5 Performance (Grade: B)\n\n**Analysis:**\n\n1. **ELO Computation: O(n_swipes)**\n   - `_compute_elo()` iterates all swipes twice (ranking + trade), which is necessary and efficient.\n   - Re-computing ELO on every `get_rankings()` call is acceptable for typical league sizes but could be optimized with caching.\n\n2. **Trio Generation: O(pool_size^3) with pruning**\n   - `_algorithmic_trio()` uses nested loops `O(pool^3)` but prunes to `window=5`, making it effectively `O(pool * 5^2)`.\n   - For typical league sizes (12\u201320 players per position), this is fine.\n   - However, the loop structure is confusing:\n     ```python\n     for i in range(len(sorted_p) - 2):\n         for j in range(i + 1, min(i + 5, len(sorted_p) - 1)):\n             for k in range(j + 1, min(j + 5, len(sorted_p))):\n     ```\n     The window size of 5 is undocumented and seems arbitrary.\n\n3. **Stats Computation: O(n_swipes)**\n   - `_compute_stats()` computes wins/losses/compared in a single pass. Clean and efficient.\n\n4. **Recommended Optimization:** Cache ELO rankings and invalidate on update:\n   ```python\n   def __init__(self, ...):\n       # ... existing code ...\n       self._cached_elo: dict[Optional[str], dict[str, float]] = {}\n       self._cache_version: int = 0\n\n   def _compute_elo(self, pool: list[Player]) -> dict[str, float]:\n       pool_key = tuple(sorted(p.id for p in pool))\n       cache_key = (pool_key, self._version)\n       # ... use cache ...\n   ```\n\n---\n\n### 1.6 Documentation (Grade: A-)\n\n**Strengths:**\n- Excellent module docstring explaining 3-player decomposition\n- Clear docstrings on all public methods\n- Inline comments explaining K-factor logic\n- Data models have field-level documentation\n\n**Gaps:**\n- `_algorithmic_trio()` lacks explanation of the window size (5) and scoring formula\n- Config loading mechanism is well-documented but could benefit from an example of DB query\n- No examples of how to use the trade signal methods in context\n\n---\n\n## 2. Specific Improvement Suggestions\n\n### 2.1 Fix the Reset Logic Bug\n\n**Current (Buggy):**\n```python\nself._swipes = [\n    s for s in self._swipes\n    if s.winner_id not in pool_ids or s.loser_id not in pool_ids\n]\n```\n\n**Corrected:**\n```python\nself._swipes = [\n    s for s in self._swipes\n    if not (s.winner_id in pool_ids and s.loser_id in pool_ids)\n]\n```\n\nOr equivalently:\n```python\nself._swipes = [\n    s for s in self._swipes\n    if s.winner_id not in pool_ids and s.loser_id not in pool_ids\n]\n```\n\n---\n\n### 2.2 Improve Configuration Error Handling\n\n**Current:**\n```python\ndef reload_config() -> None:\n    global _cfg\n    try:\n        from .database import get_config as _db_get_config\n        fresh = _db_get_config()\n        if fresh:\n            _cfg.update({k: fresh[k] for k in _DEFAULT_CFG if k in fresh})\n    except Exception:\n        pass\n```\n\n**Improved:**\n```python\nimport logging\n_logger = logging.getLogger(__name__)\n\ndef reload_config() -> None:\n    \"\"\"Pull latest ELO K-factor values from model_config into _cfg.\"\"\"\n    global _cfg\n    try:\n        from .database import get_config as _db_get_config\n        fresh = _db_get_config()\n        if fresh:\n            _cfg.update({k: fresh[k] for k in _DEFAULT_CFG if k in fresh})\n            _logger.info(f\"Loaded config: {fresh}\")\n    except ImportError:\n        # Database module not yet available (e.g., during initialization)\n        _logger.debug(\"Database config not yet available; using defaults\")\n    except Exception as e:\n        _logger.error(f\"Failed to load ranking config from DB: {e}; using defaults\")\n```\n\n---\n\n### 2.3 Add Input Validation for Duplicate IDs\n\n**Current:**\n```python\ndef record_ranking(self, ordered_ids: list[str]) -> RankSet:\n    if len(ordered_ids) < 2:\n        raise ValueError(\"Need at least 2 player IDs\")\n    for pid in ordered_ids:\n        if pid not in self._players:\n            raise ValueError(f\"Unknown player id: {pid!r}\")\n```\n\n**Improved:**\n```python\ndef record_ranking(self, ordered_ids: list[str]) -> RankSet:\n    if len(ordered_ids) < 2:\n        raise ValueError(\"Need at least 2 player IDs\")\n    \n    unique_ids = set(ordered_ids)\n    if len(unique_ids) != len(ordered_ids):\n        duplicates = [pid for pid in unique_ids if ordered_ids.count(pid) > 1]\n        raise ValueError(f\"Duplicate player IDs in ranking: {duplicates}\")\n    \n    for pid in ordered_ids:\n        if pid not in self._players:\n            raise ValueError(f\"Unknown player id: {pid!r}\")\n```\n\n---\n\n### 2.4 Improve Trade Signal Methods\n\n**Current:**\n```python\ndef record_trade_signal(\n    self,\n    winner_ids: list[str],\n    loser_ids: list[str],\n    decision: str = \"like\",\n) -> None:\n    k = _c(\"trade_k_like\") if decision == \"like\" else _c(\"trade_k_pass\")\n    for wid in winner_ids:\n        for lid in loser_ids:\n            if wid == lid:\n                continue\n            if wid not in self._players or lid not in self._players:\n                continue  # Silently skip\n            # ... rest ...\n```\n\n**Improved:**\n```python\ndef record_trade_signal(\n    self,\n    winner_ids: list[str],\n    loser_ids: list[str],\n    decision: str = \"like\",\n) -> int:\n    \"\"\"\n    Apply a soft ELO update from a trade decision.\n    \n    Args:\n        winner_ids: Players being received (decision='like') or given (decision='pass')\n        loser_ids:  Players being given (decision='like') or received (decision='pass')\n        decision:   'like' (interested) or 'pass' (prefer keeping)\n    \n    Returns:\n        Number of pairwise comparisons added (useful for validation/logging)\n    \n    Raises:\n        ValueError: If decision is not 'like' or 'pass'\n        ValueError: If any ID appears in both winner_ids and loser_ids\n    \"\"\"\n    if decision not in (\"like\", \"pass\"):\n        raise ValueError(f\"Invalid decision: {decision!r}. Must be 'like' or 'pass'\")\n    \n    if set(winner_ids) & set(loser_ids):\n        overlap = set(winner_ids) & set(loser_ids)\n        raise ValueError(f\"Player IDs cannot appear in both sides: {overlap}\")\n    \n    k = _c(\"trade_k_like\") if decision == \"like\" else _c(\"trade_k_pass\")\n    signals_added = 0\n    \n    for wid in winner_ids:\n        for lid in loser_ids:\n            if wid == lid:  # Redundant but kept for clarity\n                continue\n            if wid not in self._players:\n                _logger.warning(f\"Ignoring unknown winner player: {wid}\")\n                continue\n            if lid not in self._players:\n                _logger.warning(f\"Ignoring unknown loser player: {lid}\")\n                continue\n            self._trade_swipes.append((\n                SwipeDecision(winner_id=wid, loser_id=lid),\n                k,\n            ))\n            signals_added += 1\n    \n    if signals_added > 0:\n        self._version += 1\n    \n    return signals_added\n```\n\n---\n\n### 2.5 Reduce Coupling to Smart Matchup Generator\n\n**Current:**\n```python\ndef get_next_trio(self, position: Optional[str] = None) -> MatchupTrio:\n    pool = self._pool(position)\n    if len(pool) < 3:\n        raise ValueError(f\"Need at least 3 players for position={position!r}\")\n\n    if self._generator is not None:\n        try:\n            from .smart_matchup_generator import SwipeDecision as SD\n            # ... convert swipes ...\n            trio = self._generator.generate_next_trio(...)\n            return trio\n        except Exception:\n            pass  # Silent fallback\n\n    return self._algorithmic_trio(pool)\n```\n\n**Improved:**\n```python\ndef get_next_trio(self, position: Optional[str] = None) -> MatchupTrio:\n    pool = self._pool(position)\n    if len(pool) < 3:\n        raise ValueError(f\"Need at least 3 players for position={position!r}\")\n\n    if self._generator is not None:\n        try:\n            trio = self._generator.generate_next_trio(\n                players=pool,\n                swipe_history=[\n                    SD(winner_id=s.winner_id, loser_id=s.loser_id)\n                    for s in self._swipes\n                ],\n                position_filter=position,\n            )\n            return trio\n        except (ImportError, AttributeError) as e:\n            _logger.warning(f\"Smart matchup generator unavailable: {e}; using algorithmic fallback\")\n        except Exception as e:\n            _logger.error(f\"Smart matchup generator failed: {e}; using algorithmic fallback\")\n\n    return self._algorithmic_trio(pool)\n```\n\n**Note:** Move the import to the top of the file for consistency:\n```python\nfrom .smart_matchup_generator import SwipeDecision as SmartSD\n```\n\nThen remove the dynamic import from inside `get_next_trio()`.\n\n---\n\n### 2.6 Improve Trio Selection Heuristic\n\n**Current:**\n```python\ndef _algorithmic_trio(self, pool: list[Player]) -> MatchupTrio:\n    elo = self._compute_elo(pool)\n    sorted_p = sorted(pool, key=lambda p: elo[p.id], reverse=True)\n    stats = self._compute_stats(pool)\n    best_trio = None\n    best_score = float(\"inf\")\n\n    for i in range(len(sorted_p) - 2):\n        for j in range(i + 1, min(i + 5, len(sorted_p) - 1)):\n            for k in range(j + 1, min(j + 5, len(sorted_p))):\n                # ...\n                score = spread + existing * 50\n                if score < best_score:\n                    best_score = score\n                    best_trio = (p1, p2, p3)\n```\n\n**Issues:**\n1. Window size (5) is arbitrary and undocumented\n2. Scoring formula `spread + existing * 50` has magic constant\n3. No handling for pools < 6 players\n\n**Improved:**\n```python\ndef _algorithmic_trio(self, pool: list[Player]) -> MatchupTrio:\n    \"\"\"\n    Pick 3 adjacent players in Elo order that haven't all been compared.\n    \n    Strategy:\n    - Prefer close matchups (tight Elo spread)\n    - Prefer new information (fewer existing comparisons)\n    - Window within top ranked players (recent comparisons more reliable)\n    \"\"\"\n    if len(pool) < 3:\n        raise ValueError(f\"Need at least 3 players; pool size is {len(pool)}\")\n    \n    WINDOW_SIZE = 5  # Look within top N-ranked players\n    EXISTING_PENALTY = 50  # Weight factor for existing comparisons\n    \n    elo = self._compute_elo(pool)\n    sorted_p = sorted(pool, key=lambda p: elo[p.id], reverse=True)\n    stats = self._compute_stats(pool)\n    best_trio = None\n    best_score = float(\"inf\")\n\n    for i in range(len(sorted_p) - 2):\n        j_max = min(i + WINDOW_SIZE, len(sorted_p) - 1)\n        for j in range(i + 1, j_max):\n            k_max = min(j + WINDOW_SIZE, len(sorted_p))\n            for k in range(j + 1, k_max):\n                p1, p2, p3 = sorted_p[i], sorted_p[j], sorted_p[k]\n                \n                # Elo spread: prefer tight matchups\n                spread = elo[p1.id] - elo[p3.id]\n                \n                # Existing comparisons: prefer new information\n                existing = sum([\n                    p2.id in stats[p1.id][\"compared\"],\n                    p3.id in stats[p1.id][\"compared\"],\n                    p3.id in stats[p2.id][\"compared\"],\n                ])\n                \n                score = spread + existing * EXISTING_PENALTY\n                if score < best_score:\n                    best_score = score\n                    best_trio = (p1, p2, p3)\n\n    if best_trio is None:\n        # Fallback: pick first three (shouldn't happen unless pool < 3)\n        best_trio = (sorted_p[0], sorted_p[1], sorted_p[2])\n    \n    p1, p2, p3 = best_trio\n    return MatchupTrio(\n        player_a=p1,\n        player_b=p2,\n        player_c=p3,\n        reasoning=f\"Elo spread: {elo[p1.id]:.0f} \u2192 {elo[p3.id]:.0f}. Tight uncompared trio preferred.\",\n    )\n```\n\n---\n\n## 3. Performance Testing Recommendations\n\n1. **Benchmark ELO computation:** Test with 1000, 5000, 10000 swipes to understand scaling.\n2. **Profile trio selection:** Measure `_algorithmic_trio()` with pools of 50, 100, 200 players.\n3. **Test concurrent config reloads:** Verify `reload_config()` is thread-safe (currently it's not due to global mutation).\n4. **Memory usage:** Check if ELO caching would be beneficial with large swipe histories.\n\n---\n\n## 4. Summary of Recommended Changes by Priority\n\n| Priority | Issue | Severity | Fix Complexity |\n|----------|-------|----------|-----------------|\n| **P0** | Reset method logic bug (AND vs OR) | High | Low |\n| **P0** | Silent configuration loading failures | High | Low |\n| **P1** | Missing input validation (duplicate IDs, overlap) | Medium | Low |\n| **P1** | Weak error handling in trade signal methods | Medium | Low |\n| **P1** | Thread-unsafe global config state | Medium | Medium |\n| **P2** | Missing type hints on internal methods | Low | Low |\n| **P2** | Tight coupling to smart matchup generator | Low | Medium |\n| **P2** | Undocumented magic constants in heuristics | Low | Low |\n\n---\n\n## 5. Conclusion\n\nThe ranking system has a solid core design with clever 3-player decomposition and thoughtful K-factor separation. However, the code needs hardening around error handling, validation, and safety before production use. The critical `reset()` bug should be fixed immediately. Adding logging, better error messages, and reducing silent failures will significantly improve reliability and debuggability.\n\n**Estimated effort to production-ready:**\n- Critical fixes: 2-3 hours\n- Full recommendations: 6-8 hours including testing\n\n**Risk level:** Medium (logic works but error handling could hide production issues)\n"}], "grading": {"eval_id": 1, "eval_name": "eval-ranking-system", "configuration": "without_skill", "expectations": [{"text": "has-scores-table", "passed": false, "evidence": "Uses letter grades (A-, B+, C+) not 1-5 scale"}, {"text": "has-code-suggestions", "passed": true, "evidence": "Extensive code examples with fixes"}, {"text": "has-top-recommendations", "passed": false, "evidence": "Has 'Recommended Changes by Priority' table, not top 3 section"}, {"text": "identifies-correct-files", "passed": true, "evidence": "Identifies ranking_service.py"}, {"text": "has-severity-ratings", "passed": true, "evidence": "Uses High/Medium/Low"}]}}, {"id": "eval-ranking-screen-ui-with_skill", "prompt": "Review the player ranking screen on mobile", "eval_id": 2, "outputs": [{"name": "ranking-screen-evaluation.md", "type": "text", "content": "# Feature Evaluation: Player Ranking Screen\n\n**Date:** 2026-04-12\n**Files reviewed:**\n- `iPhone/src/screens/RankPlayersScreen.js`\n- `iPhone/src/context/AppContext.js`\n- `iPhone/src/utils/theme.js`\n- `iPhone/src/services/api.js`\n- `iPhone/src/utils/storage.js`\n\n## Summary\n\nThe Player Ranking Screen is a well-organized React Native component that handles the core user interaction of ranking three players at a time. It successfully implements the trio-selection pattern, progress tracking, and auto-confirm feature with clean UI. The main opportunities for improvement lie in error resilience (particularly around stale data and network failures), performance optimization (memoization to prevent unnecessary re-renders), and better separation of concerns (extracting state logic from the main component).\n\n## Findings\n\n### Performance: Missing useMemo and useCallback for nested components\n\n**Severity:** Medium\n**Location:** `RankPlayersScreen.js`, lines 29-100 (TierBadge, PosBadge, PlayerCard components)\n\nThe `PlayerCard`, `TierBadge`, and `PosBadge` components are recreated on every render of the parent component, even though their props may not have changed. The `getRank` function is called multiple times per render. This causes unnecessary re-renders of card components, which is particularly problematic on slower devices when rendering multiple cards in quick succession.\n\n**Current code:**\n```javascript\nfunction PosBadge({ position, isPick }) {\n  const label = isPick ? 'PICK' : position;\n  const bg = isPick ? colors.pick : positionColor(position);\n  return (\n    <View style={[styles.posBadge, { backgroundColor: bg + '22', borderColor: bg + '55' }]}>\n      <Text style={[styles.posBadgeText, { color: bg }]}>{label}</Text>\n    </View>\n  );\n}\n\nfunction PlayerCard({ player, side, rank, onPress, disabled }) {\n  // ... component body\n}\n\n// In RankPlayersScreen:\n{SIDES.map(side => {\n  const player = trio ? trio[`player_${side}`] : null;\n  return (\n    <PlayerCard\n      key={side}\n      player={player}\n      side={side}\n      rank={getRank(side)}\n      onPress={selectCard}\n      disabled={locked}\n    />\n  );\n})}\n```\n\n**Suggested improvement:**\n```javascript\nconst PosBadge = React.memo(({ position, isPick }) => {\n  const label = isPick ? 'PICK' : position;\n  const bg = isPick ? colors.pick : positionColor(position);\n  return (\n    <View style={[styles.posBadge, { backgroundColor: bg + '22', borderColor: bg + '55' }]}>\n      <Text style={[styles.posBadgeText, { color: bg }]}>{label}</Text>\n    </View>\n  );\n});\n\nconst PlayerCard = React.memo(({ player, side, rank, onPress, disabled }) => {\n  // ... component body\n});\n\n// In RankPlayersScreen, wrap selectCard with useCallback:\nconst selectCard = useCallback((side) => {\n  if (locked || !trio) return;\n  // ... rest of logic\n}, [locked, trio, selection, autoConfirm]);\n\n// And wrap getRank:\nconst getRank = useCallback((side) => {\n  const idx = selection.indexOf(side);\n  return idx !== -1 ? idx + 1 : 0;\n}, [selection]);\n```\n\n---\n\n### Error Handling: Limited resilience for network and stale data scenarios\n\n**Severity:** High\n**Location:** `RankPlayersScreen.js`, lines 124-139 (loadTrio), 165-195 (submitRanking)\n\nThe error handling catches network failures and reports them via toast, but several edge cases are not well-managed:\n\n1. **Stale trio handling** (line 174-178): When a `stale_trio` error occurs, the component reloads the trio but doesn't clarify to the user that their ranking was rejected. A user might think their ranking was accepted.\n\n2. **Silent failures on API calls**: The `getProgress` call in `loadTrio` (line 131) doesn't check for errors\u2014if it fails, the progress state silently doesn't update.\n\n3. **No timeout handling**: If the API is slow or unresponsive, users could be blocked indefinitely waiting for a trio to load.\n\n4. **Incomplete error messages**: Generic \"Could not reach server\" message doesn't distinguish between network unavailable, server down, or timeout.\n\n**Current code:**\n```javascript\nconst loadTrio = async () => {\n  setSelection([]);\n  setLocked(false);\n  setTrio(null);\n  try {\n    const [trioData, prog] = await Promise.all([\n      api.getTrio(position),\n      api.getProgress(position),\n    ]);\n    if (trioData.error) { showToast(trioData.error); return; }\n    setTrio(trioData);\n    if (prog) setProgress(prog);\n  } catch (e) {\n    showToast('Could not reach server');\n  }\n};\n\nconst submitRanking = async (order = selection) => {\n  if (locked || order.length < 3 || !trio) return;\n  setLocked(true);\n\n  const players = { a: trio.player_a, b: trio.player_b, c: trio.player_c };\n  const ranked = order.map(s => players[s].id);\n\n  try {\n    const data = await api.submitRanking(ranked);\n    if (data.error === 'stale_trio') {\n      showToast('Player data refreshed \u2014 ranking again');\n      setLocked(false);\n      loadTrio();\n      return;\n    }\n    if (data.error) { showToast(data.error); setLocked(false); return; }\n    // ...\n  } catch {\n    showToast('Submit failed');\n  }\n};\n```\n\n**Suggested improvement:**\n```javascript\nconst loadTrio = async () => {\n  setSelection([]);\n  setLocked(false);\n  setTrio(null);\n  try {\n    const controller = new AbortController();\n    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout\n    \n    const [trioData, prog] = await Promise.all([\n      api.getTrio(position, { signal: controller.signal }),\n      api.getProgress(position, { signal: controller.signal }),\n    ]);\n    clearTimeout(timeoutId);\n    \n    if (trioData.error) { \n      showToast(trioData.error); \n      return; \n    }\n    setTrio(trioData);\n    \n    if (prog?.error) {\n      console.warn('Progress fetch failed:', prog.error);\n      // Set reasonable defaults, don't fail the whole load\n      setProgress({ interaction_count: 0, threshold: 10, threshold_met: false });\n    } else if (prog) {\n      setProgress(prog);\n    }\n  } catch (e) {\n    if (e.name === 'AbortError') {\n      showToast('Server is taking too long \u2014 check your connection');\n    } else {\n      showToast('Could not reach server');\n    }\n    console.error('loadTrio error:', e);\n  }\n};\n\nconst submitRanking = async (order = selection) => {\n  if (locked || order.length < 3 || !trio) return;\n  setLocked(true);\n\n  const players = { a: trio.player_a, b: trio.player_b, c: trio.player_c };\n  const ranked = order.map(s => players[s].id);\n\n  try {\n    const data = await api.submitRanking(ranked);\n    if (data.error === 'stale_trio') {\n      showToast('Player data refreshed \u2014 your ranking was not recorded. Please rank again.');\n      setLocked(false);\n      setSelection([]);\n      loadTrio();\n      return;\n    }\n    if (data.error) { \n      showToast(data.error); \n      setLocked(false); \n      return; \n    }\n\n    setProgress(data);\n    if (data.threshold_met && data.interaction_count === data.threshold) {\n      showToast('Rankings established!');\n    }\n    \n    setTimeout(() => {\n      setSelection([]);\n      setLocked(false);\n      loadTrio();\n    }, 350);\n  } catch (e) {\n    showToast('Submit failed \u2014 your ranking was not recorded');\n    setLocked(false);\n    console.error('submitRanking error:', e);\n  }\n};\n```\n\n---\n\n### Structure & Design: State complexity and mixed concerns\n\n**Severity:** Medium\n**Location:** `RankPlayersScreen.js`, lines 102-219 (component state and logic)\n\nThe component manages 8 pieces of state (`position`, `trio`, `selection`, `locked`, `autoConfirm`, `progress`, `toast`) and coordinates between them, plus handles API calls, local storage persistence, and UI logic all in one place. This creates several problems:\n\n1. **Hard to test**: The component ties together API calls, UI state, and business logic tightly. Unit testing any one piece requires mocking everything.\n2. **Difficult to extend**: Adding features like \"undo multiple rankings\" or \"batch ranking submissions\" would require significant refactoring.\n3. **State synchronization bugs**: The `autoConfirm` toggle loads from storage in a useEffect with no dependency array, then depends on it in the selection logic.\n4. **Unclear data flow**: It's not immediately obvious which state changes trigger which API calls.\n\n**Current code:**\n```javascript\nexport default function RankPlayersScreen() {\n  const [position, setPosition] = useState('RB');\n  const [trio, setTrio] = useState(null);\n  const [selection, setSelection] = useState([]);\n  const [locked, setLocked] = useState(false);\n  const [autoConfirm, setAutoConfirm] = useState(false);\n  const [progress, setProgress] = useState({ interaction_count: 0, threshold: 10, threshold_met: false });\n  const [toast, setToast] = useState('');\n\n  useEffect(() => {\n    storage.getAutoConfirm().then(setAutoConfirm);\n  }, []);\n\n  useEffect(() => {\n    loadTrio();\n  }, [position]); // Missing dependencies: if loadTrio uses selection, this won't update\n```\n\n**Suggested improvement:**\n\nExtract ranking logic into a custom hook:\n\n```javascript\n// useRankingState.js\nexport function useRankingState(position) {\n  const [trio, setTrio] = useState(null);\n  const [selection, setSelection] = useState([]);\n  const [locked, setLocked] = useState(false);\n  const [progress, setProgress] = useState({ interaction_count: 0, threshold: 10, threshold_met: false });\n  const [error, setError] = useState('');\n\n  const loadTrio = useCallback(async () => {\n    setSelection([]);\n    setLocked(false);\n    setTrio(null);\n    try {\n      const [trioData, prog] = await Promise.all([\n        api.getTrio(position),\n        api.getProgress(position),\n      ]);\n      if (trioData.error) { \n        setError(trioData.error); \n        return; \n      }\n      setTrio(trioData);\n      if (prog) setProgress(prog);\n      setError('');\n    } catch (e) {\n      setError('Could not reach server');\n    }\n  }, [position]);\n\n  const submitRanking = useCallback(async (order = selection) => {\n    // ... ranking submission logic\n  }, [selection, trio, locked]);\n\n  useEffect(() => {\n    loadTrio();\n  }, [position, loadTrio]);\n\n  return { trio, selection, setSelection, locked, progress, error, loadTrio, submitRanking };\n}\n\n// RankPlayersScreen.js\nexport default function RankPlayersScreen() {\n  const [position, setPosition] = useState('RB');\n  const { trio, selection, setSelection, locked, progress, error, loadTrio, submitRanking } = \n    useRankingState(position);\n  const [autoConfirm, setAutoConfirm] = useState(false);\n\n  useEffect(() => {\n    storage.getAutoConfirm().then(setAutoConfirm);\n  }, []);\n\n  // ... UI code only\n}\n```\n\n---\n\n### Readability & Naming: Magic numbers and inline style calculations\n\n**Severity:** Low\n**Location:** `RankPlayersScreen.js`, lines 10-27, 44, 293-295\n\nThe component uses several magic numbers and inline string concatenations that hurt readability:\n\n1. **Tier thresholds** (lines 16-19): Magic numbers `50`, `150`, `300` defining tier ranks\n2. **Color opacity calculations** (line 44, 248): `colors.gold + '22'` and similar inline hex concatenations\n3. **Toast duration** (line 121): `3000` ms hardcoded\n4. **Submit delay** (line 194): `350` ms hardcoded with no explanation\n5. **Timeout assumptions** (line 217): Progress percentage calculation assumes `threshold > 0`\n\n**Current code:**\n```javascript\nfunction valueTier(p) {\n  if (!p.search_rank && p.search_rank !== 0) return null;\n  const r = p.search_rank;\n  if (r <= 50) return 'elite';\n  if (r <= 150) return 'high';\n  if (r <= 300) return 'mid';\n  return 'depth';\n}\n\n// In PlayerCard:\n<View style={[styles.posBadge, { backgroundColor: bg + '22', borderColor: bg + '55' }]}>\n\n// In showToast:\nsetTimeout(() => setToast(''), 3000);\n\n// In submitRanking:\nsetTimeout(() => {\n  setSelection([]);\n  setLocked(false);\n  loadTrio();\n}, 350);\n```\n\n**Suggested improvement:**\n```javascript\nconst RANKING_TIERS = {\n  ELITE: { max: 50, label: 'Elite', color: '#f59e0b' },\n  HIGH: { max: 150, label: 'High', color: '#22c55e' },\n  MID: { max: 300, label: 'Mid', color: '#3b82f6' },\n  DEPTH: { max: Infinity, label: 'Depth', color: '#7a7f96' },\n};\n\nconst UI_TIMING = {\n  TOAST_DURATION_MS: 3000,\n  SUBMIT_ANIMATION_DELAY_MS: 350, // Allow animation to complete before reloading\n  API_TIMEOUT_MS: 10000,\n};\n\nconst COLOR_OPACITY = {\n  BADGE_BG: '22',   // ~13% opacity\n  BADGE_BORDER: '55', // ~33% opacity\n};\n\nfunction valueTier(p) {\n  if (!p.search_rank && p.search_rank !== 0) return null;\n  const r = p.search_rank;\n  for (const [key, tier] of Object.entries(RANKING_TIERS)) {\n    if (r <= tier.max) return key.toLowerCase();\n  }\n}\n\n// In PlayerCard:\n<View style={[styles.posBadge, { \n  backgroundColor: bg + COLOR_OPACITY.BADGE_BG, \n  borderColor: bg + COLOR_OPACITY.BADGE_BORDER \n}]}>\n\n// In showToast:\nsetTimeout(() => setToast(''), UI_TIMING.TOAST_DURATION_MS);\n\n// In submitRanking:\nsetTimeout(() => {\n  setSelection([]);\n  setLocked(false);\n  loadTrio();\n}, UI_TIMING.SUBMIT_ANIMATION_DELAY_MS);\n```\n\n---\n\n### Testability: Tight coupling to API and storage modules\n\n**Severity:** Medium\n**Location:** `RankPlayersScreen.js`, lines 7-8 (imports), 124-139 (loadTrio), 124-201 (submitRanking)\n\nThe component directly imports and calls `api` and `storage` modules, making it difficult to unit test without mocking at the module level. There's no way to inject test doubles or verify call arguments easily. The component also doesn't expose loading states for the trio or progress independently, making it hard to test UI behavior during different async phases.\n\n**Current code:**\n```javascript\nimport { api } from '../services/api';\nimport { storage } from '../utils/storage';\n\nconst loadTrio = async () => {\n  // ... directly calls api.getTrio, api.getProgress\n};\n\nconst submitRanking = async (order = selection) => {\n  // ... directly calls api.submitRanking\n};\n\nconst toggleAutoConfirm = async () => {\n  // ... directly calls storage.setAutoConfirm\n};\n```\n\n**Suggested improvement:**\n\nCreate a custom hook that accepts API and storage dependencies:\n\n```javascript\nexport function useRankingState(position, { api: apiService, storage: storageService } = {}) {\n  const api = apiService || require('../services/api').api;\n  const storage = storageService || require('../utils/storage').storage;\n\n  // ... hook implementation\n}\n\n// In tests:\nconst mockApi = {\n  getTrio: jest.fn(),\n  getProgress: jest.fn(),\n  submitRanking: jest.fn(),\n};\n\nconst mockStorage = {\n  getAutoConfirm: jest.fn(),\n  setAutoConfirm: jest.fn(),\n};\n\nconst { trio, submitRanking } = useRankingState('RB', { \n  api: mockApi, \n  storage: mockStorage \n});\n```\n\n---\n\n### Structure & Design: Auto-confirm feature tightly coupled to selection logic\n\n**Severity:** Medium\n**Location:** `RankPlayersScreen.js`, lines 156-159 (selectCard), 197-201 (toggleAutoConfirm)\n\nThe auto-confirm feature is checked inside the `selectCard` function, which means the selection logic is aware of the auto-confirm setting. This creates a hidden dependency: if you want to test \"what happens when 3 cards are selected\", you need to know about auto-confirm. It also means adding other \"auto-behavior\" features would require more branching in this hot function.\n\n**Current code:**\n```javascript\nconst selectCard = (side) => {\n  if (locked || !trio) return;\n\n  const existingIdx = selection.indexOf(side);\n  if (existingIdx !== -1) {\n    setSelection(selection.slice(0, existingIdx));\n    return;\n  }\n\n  const newSelection = [...selection, side];\n\n  if (newSelection.length === 3) {\n    const last = SIDES.find(s => !newSelection.includes(s));\n    const full = [...newSelection, last];\n    setSelection(full);\n    if (autoConfirm) {  // Hidden coupling\n      submitRanking(full);\n    }\n  } else {\n    setSelection(newSelection);\n  }\n};\n```\n\n**Suggested improvement:**\n```javascript\n// Separate the auto-behavior logic into an effect\nuseEffect(() => {\n  if (selection.length === 3 && autoConfirm && !locked) {\n    submitRanking(selection);\n  }\n}, [selection, autoConfirm, locked, submitRanking]);\n\nconst selectCard = useCallback((side) => {\n  if (locked || !trio) return;\n\n  const existingIdx = selection.indexOf(side);\n  if (existingIdx !== -1) {\n    setSelection(selection.slice(0, existingIdx));\n    return;\n  }\n\n  const newSelection = [...selection, side];\n\n  if (newSelection.length === 3) {\n    const last = SIDES.find(s => !newSelection.includes(s));\n    const full = [...newSelection, last];\n    setSelection(full);\n    // Let the useEffect handle auto-confirm logic\n  } else {\n    setSelection(newSelection);\n  }\n}, [locked, trio, selection]);\n```\n\n---\n\n## Scores\n\n| Dimension | Score (1-5) | Notes |\n|---|---|---|\n| Structure & Design | 3 | Component handles too many concerns; state logic could be extracted into hooks. |\n| Readability & Naming | 3 | Magic numbers and color opacity calculations should be constants. Function names are clear but logic is dense. |\n| Performance | 3 | Missing memoization on child components and callback functions causes unnecessary re-renders. |\n| Error Handling | 2 | Limited resilience for stale data, network timeouts, and progress fetch failures. Ambiguous error messages. |\n| Security | 4 | No obvious vulnerabilities; input is properly encoded in API calls and storage is local. |\n| Testability | 2 | Tight coupling to api and storage modules makes unit testing difficult. State changes are tangled. |\n| Maintainability | 3 | Adding new features (batch actions, undo, filtering) would require significant refactoring due to monolithic state management. |\n\n**Overall: 2.9/5**\n\n## Top 3 Recommendations\n\n1. **Extract ranking logic into a custom hook (`useRankingState`)** \u2014 This is the highest-impact change. It will immediately improve testability, make the component easier to extend, and clarify the data flow. You'll be able to test ranking submission, error handling, and progress updates independently of the UI.\n\n2. **Improve error resilience in `loadTrio` and `submitRanking`** \u2014 Add timeout handling, better error messages, and ensure the stale-trio flow clearly communicates that a ranking wasn't accepted. This prevents user confusion and reduces support burden.\n\n3. **Memoize child components and wrap callbacks with `useCallback`** \u2014 This is a quick win that improves performance on lower-end devices, especially when users are rapidly selecting cards. Wrap `PlayerCard`, `TierBadge`, and `PosBadge` with `React.memo`, and wrap `selectCard`, `submitRanking`, and `getRank` with `useCallback`.\n"}], "grading": {"eval_id": 2, "eval_name": "eval-ranking-screen-ui", "configuration": "with_skill", "expectations": [{"text": "has-scores-table", "passed": true, "evidence": "Dimension scores table with 1-5 ratings"}, {"text": "has-code-suggestions", "passed": true, "evidence": "Multiple code examples"}, {"text": "has-top-recommendations", "passed": true, "evidence": "'Top 3 Recommendations' section"}, {"text": "identifies-correct-files", "passed": true, "evidence": "Identifies RankPlayersScreen.js"}, {"text": "has-severity-ratings", "passed": true, "evidence": "Every finding has severity"}]}}, {"id": "eval-ranking-screen-ui-without_skill", "prompt": "Review the player ranking screen on mobile", "eval_id": 2, "outputs": [{"name": "ranking-screen-evaluation.md", "type": "text", "content": "# Code Review: RankPlayersScreen.js\n\n**Project:** Fantasy Trade Finder (Mobile)  \n**File:** `/iPhone/src/screens/RankPlayersScreen.js`  \n**Review Date:** April 12, 2026  \n**Focus Areas:** Code quality, performance, structure, error handling, accessibility\n\n---\n\n## Executive Summary\n\nThe RankPlayersScreen is well-architected for its primary use case: collecting user rankings of player trios through an interactive card-based interface. The code demonstrates solid React patterns, clear separation of concerns, and responsive state management. However, there are opportunities to improve error resilience, reduce code repetition, enhance accessibility, and optimize performance for edge cases.\n\n**Overall Assessment:** 7.5/10 - Good foundation with room for enhancement\n\n---\n\n## Strengths\n\n### 1. Clear Component Architecture\n- **Separation of Concerns:** UI components (`PlayerCard`, `PosBadge`, `TierBadge`) are well-isolated from business logic\n- **Single Responsibility:** Each component handles a specific visual concern\n- **Reusability:** Components can be tested and reused independently\n\n### 2. Responsive State Management\n- Proper use of React hooks (`useState`, `useEffect`, `useCallback`)\n- Dependencies are correctly specified for side effects\n- State transitions are logical and predictable (selection \u2192 locked \u2192 reset)\n\n### 3. User Experience Considerations\n- Multi-step instruction guidance (\"best first\" \u2192 \"2nd choice\" \u2192 \"3rd choice\")\n- Visual feedback with tier badges, position indicators, and injury status\n- Auto-advance toggle respects user preference while maintaining manual control\n- Toast notifications for errors and progress milestones\n\n### 4. Styling & Design Integration\n- Consistent use of centralized theme variables (colors, spacing, fontSize)\n- Accessible color palette with sufficient contrast\n- Responsive badge system with intuitive visual hierarchy\n\n### 5. Smart Data Handling\n- Graceful loading state with `ActivityIndicator` for pending data\n- Undo functionality: users can re-tap to deselect previous choices\n- Stale data detection with server refresh mechanism\n\n---\n\n## Critical Issues\n\n### Issue 1: Missing Error Handling in API Requests\n**Severity:** High  \n**Location:** Lines 124-139 (loadTrio), 165-195 (submitRanking)\n\nThe async operations have minimal error recovery. The `submitRanking` catch block uses a generic \"Submit failed\" message without details.\n\n**Problem:**\n```javascript\ntry {\n  const [trioData, prog] = await Promise.all([\n    api.getTrio(position),\n    api.getProgress(position),\n  ]);\n  // No handling for partial failures (one API call succeeds, one fails)\n} catch (e) {\n  showToast('Could not reach server'); // Too generic\n}\n```\n\n**Why it matters:** Users won't know what went wrong (network issue, server error, invalid position), making debugging difficult.\n\n**Recommendation:**\n```javascript\nconst loadTrio = async () => {\n  setSelection([]);\n  setLocked(false);\n  setTrio(null);\n  try {\n    const [trioData, prog] = await Promise.all([\n      api.getTrio(position),\n      api.getProgress(position),\n    ]);\n    \n    if (trioData?.error) {\n      showToast(`Trio load failed: ${trioData.error}`);\n      return;\n    }\n    \n    setTrio(trioData);\n    if (prog) setProgress(prog);\n  } catch (e) {\n    const errorMsg = e.message?.includes('Failed to fetch')\n      ? 'Network error \u2014 check your connection'\n      : `Server error: ${e.message}`;\n    showToast(errorMsg);\n    console.error('[loadTrio]', e);\n  }\n};\n```\n\n---\n\n### Issue 2: Race Condition in submitRanking\n**Severity:** Medium  \n**Location:** Lines 165-195\n\nThe `locked` flag prevents double-submission but doesn't handle the scenario where a user rapidly switches positions while a submission is in flight.\n\n**Problem:**\n```javascript\nconst submitRanking = async (order = selection) => {\n  if (locked || order.length < 3 || !trio) return;\n  setLocked(true);\n  // ... submission logic ...\n  setTimeout(() => {\n    setSelection([]);\n    setLocked(false);\n    loadTrio(); // This re-fetches for the CURRENT position\n  }, 350);\n};\n```\n\nIf the user changes position before the 350ms timeout completes, `loadTrio()` fetches the new position's data while state thinks it's still on the old position.\n\n**Recommendation:**\n```javascript\nconst submitRanking = async (order = selection) => {\n  if (locked || order.length < 3 || !trio) return;\n  setLocked(true);\n  const currentPosition = position; // Capture at submission time\n\n  try {\n    const data = await api.submitRanking(ranked);\n    // ... error handling ...\n    setProgress(data);\n  } catch {\n    showToast('Submit failed');\n  }\n\n  setTimeout(() => {\n    // Only reset if position hasn't changed\n    if (position === currentPosition) {\n      setSelection([]);\n      setLocked(false);\n      loadTrio();\n    }\n  }, 350);\n};\n```\n\n---\n\n### Issue 3: Unhandled Edge Cases in Data Display\n**Severity:** Low  \n**Location:** Lines 50-100 (PlayerCard)\n\nMissing defensive checks for player data can cause crashes if the API returns unexpected data.\n\n**Problem:**\n```javascript\n<Text style={styles.cardTeam}>{player.team || 'FA'}</Text>\n<Text style={styles.cardMeta}>\n  Age {player.age} \u00b7 {player.years_experience} yr{player.years_experience !== 1 ? 's' : ''} exp\n</Text>\n```\n\nIf `player.age` or `player.years_experience` are undefined or null, the text will display \"Age undefined\" or \"NaN yr\".\n\n**Recommendation:**\n```javascript\nconst safeAge = player.age ?? '\u2014';\nconst safeExp = player.years_experience ?? 0;\n\n<Text style={styles.cardMeta}>\n  Age {safeAge} \u00b7 {safeExp} yr{safeExp !== 1 ? 's' : ''} exp\n</Text>\n```\n\n---\n\n## Major Issues\n\n### Issue 4: Hardcoded Magic Numbers\n**Severity:** Medium  \n**Location:** Lines 10, 216-218\n\nConstants scattered throughout the code reduce maintainability.\n\n**Current Code:**\n```javascript\nconst SIDES = ['a', 'b', 'c'];\nconst pct = progress.threshold > 0\n  ? Math.min(100, Math.round(progress.interaction_count / progress.threshold * 100))\n  : 0;\n```\n\n**Recommendation:**\n```javascript\nconst CONFIG = {\n  SIDES: ['a', 'b', 'c'],\n  POSITION_OPTIONS: ['RB', 'WR', 'QB', 'TE'],\n  TOAST_DURATION_MS: 3000,\n  SUBMIT_DELAY_MS: 350,\n  TIER_THRESHOLDS: {\n    elite: 50,\n    high: 150,\n    mid: 300,\n  },\n};\n\n// Usage in code:\nCONFIG.SIDES.map(side => ...)\n```\n\n---\n\n### Issue 5: Memory Leak Risk with Toast Timer\n**Severity:** Low  \n**Location:** Lines 119-122\n\nThe timeout created in `showToast` isn't cleaned up if the component unmounts.\n\n**Current Code:**\n```javascript\nconst showToast = (msg) => {\n  setToast(msg);\n  setTimeout(() => setToast(''), 3000);\n};\n```\n\n**Recommendation:**\n```javascript\nconst timeoutRef = useRef(null);\n\nconst showToast = (msg) => {\n  if (timeoutRef.current) clearTimeout(timeoutRef.current);\n  setToast(msg);\n  timeoutRef.current = setTimeout(() => setToast(''), 3000);\n};\n\nuseEffect(() => {\n  return () => {\n    if (timeoutRef.current) clearTimeout(timeoutRef.current);\n  };\n}, []);\n```\n\n---\n\n### Issue 6: Inconsistent Null/Undefined Handling\n**Severity:** Medium  \n**Location:** Lines 13-14 (valueTier function)\n\nThe function checks `!p.search_rank && p.search_rank !== 0` which is confusing and fragile.\n\n**Current Code:**\n```javascript\nfunction valueTier(p) {\n  if (!p.search_rank && p.search_rank !== 0) return null;\n  const r = p.search_rank;\n  // ...\n}\n```\n\nThis logic is correct but hard to understand. It's checking \"if falsy but not 0\" which handles the edge case where search_rank is 0 (a valid rank).\n\n**Recommendation:**\n```javascript\nfunction valueTier(p) {\n  const rank = p?.search_rank;\n  if (rank === null || rank === undefined) return null;\n  \n  if (rank <= 50) return 'elite';\n  if (rank <= 150) return 'high';\n  if (rank <= 300) return 'mid';\n  return 'depth';\n}\n```\n\n---\n\n### Issue 7: Missing Accessibility Features\n**Severity:** Medium  \n**Location:** Throughout component\n\nNo accessibility labels (testID, accessible*, accessibilityRole, accessibilityLabel) for screen readers.\n\n**Current Code:**\n```javascript\n<TouchableOpacity\n  style={[styles.card, { borderColor, borderWidth }]}\n  onPress={() => onPress(side)}\n  disabled={disabled}\n/>\n```\n\n**Recommendation:**\n```javascript\n<TouchableOpacity\n  style={[styles.card, { borderColor, borderWidth }]}\n  onPress={() => onPress(side)}\n  disabled={disabled}\n  accessible={true}\n  accessibilityRole=\"button\"\n  accessibilityLabel={`Rank ${player.name} from ${player.team || 'FA'}`}\n  accessibilityHint={`Player at position ${player.position}`}\n  testID={`player-card-${side}`}\n/>\n```\n\n---\n\n## Minor Issues\n\n### Issue 8: Callback Dependencies\n**Severity:** Low  \n**Location:** Line 60 (selectCard usage)\n\nThe `selectCard` function is redefined on every render but passes directly to `onPress`. While React.memo isn't used on PlayerCard, this could be optimized.\n\n**Recommendation:**\n```javascript\nconst selectCard = useCallback((side) => {\n  if (locked || !trio) return;\n  // ... existing logic ...\n}, [locked, trio, selection, autoConfirm]);\n```\n\n---\n\n### Issue 9: Position Options Hardcoded\n**Severity:** Low  \n**Location:** Line 224\n\nPosition tabs are hardcoded in the JSX rather than derived from a constant.\n\n**Current:**\n```javascript\n{['RB', 'WR', 'QB', 'TE'].map(pos => (\n```\n\n**Better:**\n```javascript\nconst POSITIONS = ['RB', 'WR', 'QB', 'TE'];\n// ... later:\n{POSITIONS.map(pos => (\n```\n\n---\n\n### Issue 10: Style Duplication\n**Severity:** Low  \n**Location:** Lines 380-413 (Badge styles)\n\nMultiple badge styles (`tierBadge`, `rookieBadge`, `injBadge`) share similar properties.\n\n**Current:**\n```javascript\ntierBadge: {\n  borderWidth: 1,\n  borderRadius: 4,\n  paddingHorizontal: 5,\n  paddingVertical: 1,\n},\nrookieBadge: {\n  backgroundColor: colors.green + '22',\n  borderRadius: 4,\n  paddingHorizontal: 5,\n  paddingVertical: 1,\n},\ninjBadge: {\n  backgroundColor: colors.red + '22',\n  borderRadius: 4,\n  paddingHorizontal: 5,\n  paddingVertical: 1,\n},\n```\n\n**Recommendation:**\n```javascript\nconst baseBadgeStyle = {\n  borderRadius: 4,\n  paddingHorizontal: 5,\n  paddingVertical: 1,\n};\n\n// In StyleSheet:\ntierBadge: { ...baseBadgeStyle, borderWidth: 1 },\nrookieBadge: { ...baseBadgeStyle, backgroundColor: colors.green + '22' },\ninjBadge: { ...baseBadgeStyle, backgroundColor: colors.red + '22' },\n```\n\n---\n\n## Performance Considerations\n\n### 1. Re-render Optimization\nThe `PlayerCard` component re-renders when parent state changes even if the `player` prop hasn't changed. Consider wrapping with `React.memo`:\n\n```javascript\nconst PlayerCard = React.memo(function PlayerCard({ player, side, rank, onPress, disabled }) {\n  // ... existing code ...\n}, (prev, next) => {\n  // Custom comparison for performance\n  return (\n    prev.player === next.player &&\n    prev.rank === next.rank &&\n    prev.side === next.side &&\n    prev.disabled === next.disabled\n  );\n});\n```\n\n### 2. Toast Stack Behavior\nWith the current implementation, toast messages queue linearly. If multiple errors occur rapidly, users only see the last one. Consider a queue system:\n\n```javascript\nconst [toasts, setToasts] = useState([]);\n\nconst showToast = (msg) => {\n  const id = Date.now();\n  setToasts(prev => [...prev, { id, msg }]);\n  setTimeout(() => {\n    setToasts(prev => prev.filter(t => t.id !== id));\n  }, 3000);\n};\n```\n\n### 3. Async Operation Loading State\nWhen switching positions rapidly, the screen briefly shows the previous position's data. Add explicit loading state:\n\n```javascript\nconst [isLoading, setIsLoading] = useState(false);\n\nconst loadTrio = async () => {\n  setIsLoading(true);\n  setSelection([]);\n  setLocked(false);\n  setTrio(null);\n  try {\n    // ... existing code ...\n  } finally {\n    setIsLoading(false);\n  }\n};\n\n// Then use isLoading to show skeleton or disable position tabs\n```\n\n---\n\n## Error Handling & Resilience\n\n### Current Approach\n- Basic try-catch blocks with generic error messages\n- No retry logic for failed requests\n- Limited feedback on transient network issues\n\n### Recommendations\n1. **Add retry logic with exponential backoff:**\n   ```javascript\n   async function requestWithRetry(fn, maxRetries = 3) {\n     for (let i = 0; i < maxRetries; i++) {\n       try {\n         return await fn();\n       } catch (e) {\n         if (i === maxRetries - 1) throw e;\n         await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));\n       }\n     }\n   }\n   ```\n\n2. **Distinguish between error types:**\n   - Network errors \u2192 suggest checking connection\n   - 4xx errors \u2192 suggest invalid input\n   - 5xx errors \u2192 suggest trying again later\n\n3. **Implement timeout handling:**\n   ```javascript\n   const fetchWithTimeout = (url, timeout = 10000) => {\n     return Promise.race([\n       fetch(url),\n       new Promise((_, reject) =>\n         setTimeout(() => reject(new Error('Request timeout')), timeout)\n       )\n     ]);\n   };\n   ```\n\n---\n\n## Testing Recommendations\n\n### Unit Tests Needed\n1. **valueTier()**: Test all tier thresholds and null handling\n2. **selectCard()**: Test selection order, undo, and auto-confirm flow\n3. **submitRanking()**: Test locking, error states, and reset behavior\n\n### Integration Tests Needed\n1. Position switching while submission is pending\n2. Rapid card taps without waiting for previous submission\n3. Network failure recovery\n4. Toast message lifecycle\n\n### Example Test:\n```javascript\ndescribe('RankPlayersScreen', () => {\n  it('should handle rapid position switches during submission', async () => {\n    const { getByText, getByTestId } = render(<RankPlayersScreen />);\n    \n    // Start ranking for RB\n    fireEvent.press(getByTestId('player-card-a'));\n    fireEvent.press(getByTestId('player-card-b'));\n    fireEvent.press(getByTestId('player-card-c'));\n    fireEvent.press(getByText('Confirm ranking'));\n    \n    // Quickly switch to WR before submission completes\n    fireEvent.press(getByText('WR'));\n    \n    await waitFor(() => {\n      expect(api.getTrio).toHaveBeenCalledWith('WR');\n    });\n  });\n});\n```\n\n---\n\n## Security Considerations\n\n### 1. Input Validation\nCurrently relies on backend validation. Frontend should also validate:\n```javascript\nconst submitRanking = async (order = selection) => {\n  if (!Array.isArray(order) || order.length !== 3) {\n    showToast('Invalid selection');\n    return;\n  }\n  \n  const validSides = ['a', 'b', 'c'];\n  if (!order.every(s => validSides.includes(s))) {\n    showToast('Invalid data');\n    return;\n  }\n  // ... proceed\n};\n```\n\n### 2. API Key Exposure\nThe hardcoded BASE_URL in api.js should use environment variables:\n```javascript\nconst BASE_URL = __DEV__ \n  ? process.env.REACT_NATIVE_DEV_SERVER_URL \n  : process.env.REACT_NATIVE_PROD_SERVER_URL;\n```\n\n### 3. Sensitive Data in Logs\nAvoid logging player IDs or sensitive ranking data:\n```javascript\nconsole.error('[submitRanking]', { error: e.message }); // Good\n// NOT: console.error('[submitRanking]', { ranked, error: e.message }); // Bad\n```\n\n---\n\n## Code Quality Metrics\n\n| Metric | Rating | Notes |\n|--------|--------|-------|\n| Readability | 8/10 | Clear variable names and logic flow |\n| Maintainability | 6.5/10 | Magic numbers and hardcoded strings scattered |\n| Error Handling | 5/10 | Generic error messages, no retry logic |\n| Accessibility | 4/10 | No semantic labels for screen readers |\n| Performance | 7/10 | Good for typical usage, optimize re-renders |\n| Test Coverage | 3/10 | Component lacks test IDs and structure |\n\n---\n\n## Summary of Recommendations (Priority Order)\n\n### High Priority\n1. Add specific error messages with troubleshooting guidance (Issue #1)\n2. Fix race condition in position switching (Issue #2)\n3. Add defensive null checks for player data (Issue #3)\n4. Implement accessibility labels (Issue #7)\n\n### Medium Priority\n5. Extract magic numbers to configuration object (Issue #4)\n6. Fix null/undefined handling in valueTier (Issue #6)\n7. Implement proper error type detection\n8. Add useCallback optimization for selectCard\n\n### Low Priority\n9. Add cleanup for toast timers (Issue #5)\n10. Optimize PlayerCard re-renders with React.memo\n11. Move hardcoded position options to constant\n12. Refactor badge styles to reduce duplication\n\n---\n\n## Conclusion\n\nRankPlayersScreen demonstrates solid React fundamentals and good UX thinking. The main opportunities lie in strengthening error handling, improving accessibility, and reducing code duplication. With the recommended improvements, this component would be production-ready for handling edge cases and providing users with clear feedback during network issues or data anomalies.\n\n**Estimated effort to address all recommendations:** 4-6 hours\n"}], "grading": {"eval_id": 2, "eval_name": "eval-ranking-screen-ui", "configuration": "without_skill", "expectations": [{"text": "has-scores-table", "passed": false, "evidence": "Uses x/10 metrics table, not 1-5 dimension scores"}, {"text": "has-code-suggestions", "passed": true, "evidence": "Many code snippets"}, {"text": "has-top-recommendations", "passed": false, "evidence": "Has 'Summary of Recommendations (Priority Order)' with 12 items, not a focused top 3"}, {"text": "identifies-correct-files", "passed": true, "evidence": "Identifies RankPlayersScreen.js"}, {"text": "has-severity-ratings", "passed": true, "evidence": "Uses High/Medium/Low severity"}]}}], "previous_feedback": {}, "previous_outputs": {}, "benchmark": {"skill_name": "feature-evaluator", "iteration": 1, "configurations": [{"name": "with_skill", "evals": [{"eval_name": "eval-trade-generation", "pass_rate": 1.0, "passed": 5, "total": 5, "time_seconds": 86.5, "total_tokens": 54362}, {"eval_name": "eval-ranking-system", "pass_rate": 1.0, "passed": 5, "total": 5, "time_seconds": 100.1, "total_tokens": 57762}, {"eval_name": "eval-ranking-screen-ui", "pass_rate": 1.0, "passed": 5, "total": 5, "time_seconds": 61.6, "total_tokens": 43508}], "aggregate": {"mean_pass_rate": 1.0, "stddev_pass_rate": 0.0, "mean_time_seconds": 82.73, "mean_tokens": 51877.33}}, {"name": "without_skill", "evals": [{"eval_name": "eval-trade-generation", "pass_rate": 0.6, "passed": 3, "total": 5, "time_seconds": 326.0, "total_tokens": 57790}, {"eval_name": "eval-ranking-system", "pass_rate": 0.6, "passed": 3, "total": 5, "time_seconds": 359.9, "total_tokens": 47168}, {"eval_name": "eval-ranking-screen-ui", "pass_rate": 0.6, "passed": 3, "total": 5, "time_seconds": 59.5, "total_tokens": 45966}], "aggregate": {"mean_pass_rate": 0.6, "stddev_pass_rate": 0.0, "mean_time_seconds": 248.47, "mean_tokens": 50308.0}}], "delta": {"pass_rate": 0.4, "time_seconds": -165.74, "tokens": 1569.33}}};
+
+    // ---- State ----
+    let feedbackMap = {};  // run_id -> feedback text
+    let currentIndex = 0;
+    let visitedRuns = new Set();
+
+    // ---- Init ----
+    async function init() {
+      // Load saved feedback from server — but only if this isn't a fresh
+      // iteration (indicated by previous_feedback being present). When
+      // previous feedback exists, the feedback.json on disk is stale from
+      // the prior iteration and should not pre-fill the textareas.
+      const hasPrevious = Object.keys(EMBEDDED_DATA.previous_feedback || {}).length > 0
+        || Object.keys(EMBEDDED_DATA.previous_outputs || {}).length > 0;
+      if (!hasPrevious) {
+        try {
+          const resp = await fetch("/api/feedback");
+          const data = await resp.json();
+          if (data.reviews) {
+            for (const r of data.reviews) feedbackMap[r.run_id] = r.feedback;
+          }
+        } catch { /* first run, no feedback yet */ }
+      }
+
+      document.getElementById("skill-name").textContent = EMBEDDED_DATA.skill_name;
+      showRun(0);
+
+      // Wire up feedback auto-save
+      const textarea = document.getElementById("feedback");
+      let saveTimeout = null;
+      textarea.addEventListener("input", () => {
+        clearTimeout(saveTimeout);
+        document.getElementById("feedback-status").textContent = "";
+        saveTimeout = setTimeout(() => saveCurrentFeedback(), 800);
+      });
+    }
+
+    // ---- Navigation ----
+    function navigate(delta) {
+      const newIndex = currentIndex + delta;
+      if (newIndex >= 0 && newIndex < EMBEDDED_DATA.runs.length) {
+        saveCurrentFeedback();
+        showRun(newIndex);
+      }
+    }
+
+    function updateNavButtons() {
+      document.getElementById("prev-btn").disabled = currentIndex === 0;
+      document.getElementById("next-btn").disabled =
+        currentIndex === EMBEDDED_DATA.runs.length - 1;
+    }
+
+    // ---- Show a run ----
+    function showRun(index) {
+      currentIndex = index;
+      const run = EMBEDDED_DATA.runs[index];
+
+      // Progress
+      document.getElementById("progress").textContent =
+        `${index + 1} of ${EMBEDDED_DATA.runs.length}`;
+
+      // Prompt
+      document.getElementById("prompt-text").textContent = run.prompt;
+
+      // Config badge
+      const badge = document.getElementById("config-badge");
+      const configMatch = run.id.match(/(with_skill|without_skill|new_skill|old_skill)/);
+      if (configMatch) {
+        const config = configMatch[1];
+        const isBaseline = config === "without_skill" || config === "old_skill";
+        badge.textContent = config.replace(/_/g, " ");
+        badge.className = "config-badge " + (isBaseline ? "config-baseline" : "config-primary");
+        badge.style.display = "inline-block";
+      } else {
+        badge.style.display = "none";
+      }
+
+      // Outputs
+      renderOutputs(run);
+
+      // Previous outputs
+      renderPrevOutputs(run);
+
+      // Grades
+      renderGrades(run);
+
+      // Previous feedback
+      const prevFb = (EMBEDDED_DATA.previous_feedback || {})[run.id];
+      const prevEl = document.getElementById("prev-feedback");
+      if (prevFb) {
+        document.getElementById("prev-feedback-text").textContent = prevFb;
+        prevEl.style.display = "block";
+      } else {
+        prevEl.style.display = "none";
+      }
+
+      // Feedback
+      document.getElementById("feedback").value = feedbackMap[run.id] || "";
+      document.getElementById("feedback-status").textContent = "";
+
+      updateNavButtons();
+
+      // Track visited runs and promote done button when all visited
+      visitedRuns.add(index);
+      const doneBtn = document.getElementById("done-btn");
+      if (visitedRuns.size >= EMBEDDED_DATA.runs.length) {
+        doneBtn.classList.add("ready");
+      }
+
+      // Scroll main content to top
+      document.querySelector(".main").scrollTop = 0;
+    }
+
+    // ---- Render outputs ----
+    function renderOutputs(run) {
+      const container = document.getElementById("outputs-body");
+      container.innerHTML = "";
+
+      const outputs = run.outputs || [];
+      if (outputs.length === 0) {
+        container.innerHTML = '<div class="empty-state">No output files</div>';
+        return;
+      }
+
+      for (const file of outputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        // Always show file header with download link
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const content = document.createElement("div");
+        content.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          content.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          content.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          content.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(content, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          content.appendChild(a);
+        } else if (file.type === "error") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          pre.style.color = "var(--red)";
+          content.appendChild(pre);
+        }
+
+        fileDiv.appendChild(content);
+        container.appendChild(fileDiv);
+      }
+    }
+
+    // ---- XLSX rendering via SheetJS ----
+    function renderXlsx(container, b64Data) {
+      try {
+        const raw = Uint8Array.from(atob(b64Data), c => c.charCodeAt(0));
+        const wb = XLSX.read(raw, { type: "array" });
+
+        for (let i = 0; i < wb.SheetNames.length; i++) {
+          const sheetName = wb.SheetNames[i];
+          const ws = wb.Sheets[sheetName];
+
+          if (wb.SheetNames.length > 1) {
+            const sheetLabel = document.createElement("div");
+            sheetLabel.style.cssText =
+              "font-weight:600; font-size:0.8rem; color:#b0aea5; margin-top:0.5rem; margin-bottom:0.25rem;";
+            sheetLabel.textContent = "Sheet: " + sheetName;
+            container.appendChild(sheetLabel);
+          }
+
+          const htmlStr = XLSX.utils.sheet_to_html(ws, { editable: false });
+          const wrapper = document.createElement("div");
+          wrapper.innerHTML = htmlStr;
+          container.appendChild(wrapper);
+        }
+      } catch (err) {
+        container.textContent = "Error rendering spreadsheet: " + err.message;
+      }
+    }
+
+    // ---- Grades ----
+    function renderGrades(run) {
+      const section = document.getElementById("grades-section");
+      const content = document.getElementById("grades-content");
+
+      if (!run.grading) {
+        section.style.display = "none";
+        return;
+      }
+
+      const grading = run.grading;
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("grades-arrow").classList.remove("open");
+
+      const summary = grading.summary || {};
+      const expectations = grading.expectations || [];
+
+      let html = '<div style="padding: 1rem;">';
+
+      // Summary line
+      const passRate = summary.pass_rate != null
+        ? Math.round(summary.pass_rate * 100) + "%"
+        : "?";
+      const badgeClass = summary.pass_rate >= 0.8 ? "grade-pass" : summary.pass_rate >= 0.5 ? "" : "grade-fail";
+      html += '<div class="grades-summary">';
+      html += '<span class="grade-badge ' + badgeClass + '">' + passRate + '</span>';
+      html += '<span>' + (summary.passed || 0) + ' passed, ' + (summary.failed || 0) + ' failed of ' + (summary.total || 0) + '</span>';
+      html += '</div>';
+
+      // Assertions list
+      html += '<ul class="assertion-list">';
+      for (const exp of expectations) {
+        const statusClass = exp.passed ? "pass" : "fail";
+        const statusIcon = exp.passed ? "\u2713" : "\u2717";
+        html += '<li class="assertion-item">';
+        html += '<span class="assertion-status ' + statusClass + '">' + statusIcon + '</span>';
+        html += '<span>' + escapeHtml(exp.text) + '</span>';
+        if (exp.evidence) {
+          html += '<div class="assertion-evidence">' + escapeHtml(exp.evidence) + '</div>';
+        }
+        html += '</li>';
+      }
+      html += '</ul>';
+
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    function toggleGrades() {
+      const content = document.getElementById("grades-content");
+      const arrow = document.getElementById("grades-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Previous outputs (collapsible) ----
+    function renderPrevOutputs(run) {
+      const section = document.getElementById("prev-outputs-section");
+      const content = document.getElementById("prev-outputs-content");
+      const prevOutputs = (EMBEDDED_DATA.previous_outputs || {})[run.id];
+
+      if (!prevOutputs || prevOutputs.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("prev-outputs-arrow").classList.remove("open");
+
+      // Render the files into the content area
+      content.innerHTML = "";
+      const wrapper = document.createElement("div");
+      wrapper.style.padding = "1rem";
+
+      for (const file of prevOutputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const fc = document.createElement("div");
+        fc.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          fc.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          fc.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          fc.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(fc, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          fc.appendChild(a);
+        }
+
+        fileDiv.appendChild(fc);
+        wrapper.appendChild(fileDiv);
+      }
+
+      content.appendChild(wrapper);
+    }
+
+    function togglePrevOutputs() {
+      const content = document.getElementById("prev-outputs-content");
+      const arrow = document.getElementById("prev-outputs-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Feedback (saved to server -> feedback.json) ----
+    function saveCurrentFeedback() {
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // Build reviews array from map
+      const reviews = [];
+      for (const [run_id, feedback] of Object.entries(feedbackMap)) {
+        if (feedback.trim()) {
+          reviews.push({ run_id, feedback, timestamp: new Date().toISOString() });
+        }
+      }
+
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviews, status: "in_progress" }),
+      }).then(() => {
+        document.getElementById("feedback-status").textContent = "Saved";
+      }).catch(() => {
+        // Static mode or server unavailable — no-op on auto-save,
+        // feedback will be downloaded on final submit
+        document.getElementById("feedback-status").textContent = "Will download on submit";
+      });
+    }
+
+    // ---- Done ----
+    function showDoneDialog() {
+      // Save current textarea to feedbackMap (but don't POST yet)
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // POST once with status: complete — include ALL runs so the model
+      // can distinguish "no feedback" (looks good) from "not reviewed"
+      const reviews = [];
+      const ts = new Date().toISOString();
+      for (const r of EMBEDDED_DATA.runs) {
+        reviews.push({ run_id: r.id, feedback: feedbackMap[r.id] || "", timestamp: ts });
+      }
+      const payload = JSON.stringify({ reviews, status: "complete" }, null, 2);
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).then(() => {
+        document.getElementById("done-overlay").classList.add("visible");
+      }).catch(() => {
+        // Server not available (static mode) — download as file
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "feedback.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        document.getElementById("done-overlay").classList.add("visible");
+      });
+    }
+
+    function closeDoneDialog() {
+      // Reset status back to in_progress
+      saveCurrentFeedback();
+      document.getElementById("done-overlay").classList.remove("visible");
+    }
+
+    // ---- Toast ----
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("visible");
+      setTimeout(() => toast.classList.remove("visible"), 2000);
+    }
+
+    // ---- Keyboard nav ----
+    document.addEventListener("keydown", (e) => {
+      // Don't capture when typing in textarea
+      if (e.target.tagName === "TEXTAREA") return;
+
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigate(1);
+      }
+    });
+
+    // ---- Util ----
+    function getDownloadUri(file) {
+      if (file.data_uri) return file.data_uri;
+      if (file.data_b64) return "data:application/octet-stream;base64," + file.data_b64;
+      if (file.type === "text") return "data:text/plain;charset=utf-8," + encodeURIComponent(file.content);
+      return "#";
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ---- View switching ----
+    function switchView(view) {
+      document.querySelectorAll(".view-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+      document.querySelector(`[onclick="switchView('${view}')"]`).classList.add("active");
+      document.getElementById("panel-" + view).classList.add("active");
+    }
+
+    // ---- Benchmark rendering ----
+    function renderBenchmark() {
+      const data = EMBEDDED_DATA.benchmark;
+      if (!data) return;
+
+      // Show the tabs
+      document.getElementById("view-tabs").style.display = "flex";
+
+      const container = document.getElementById("benchmark-content");
+      const summary = data.run_summary || {};
+      const metadata = data.metadata || {};
+      const notes = data.notes || [];
+
+      let html = "";
+
+      // Header
+      html += "<h2 style='font-family: Poppins, sans-serif; margin-bottom: 0.5rem;'>Benchmark Results</h2>";
+      html += "<p style='color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;'>";
+      if (metadata.skill_name) html += "<strong>" + escapeHtml(metadata.skill_name) + "</strong> &mdash; ";
+      if (metadata.timestamp) html += metadata.timestamp + " &mdash; ";
+      if (metadata.evals_run) html += "Evals: " + metadata.evals_run.join(", ") + " &mdash; ";
+      html += (metadata.runs_per_configuration || "?") + " runs per configuration";
+      html += "</p>";
+
+      // Summary table
+      html += '<table class="benchmark-table">';
+
+      function fmtStat(stat, pct) {
+        if (!stat) return "—";
+        const suffix = pct ? "%" : "";
+        const m = pct ? (stat.mean * 100).toFixed(0) : stat.mean.toFixed(1);
+        const s = pct ? (stat.stddev * 100).toFixed(0) : stat.stddev.toFixed(1);
+        return m + suffix + " ± " + s + suffix;
+      }
+
+      function deltaClass(val) {
+        if (!val) return "";
+        const n = parseFloat(val);
+        if (n > 0) return "benchmark-delta-positive";
+        if (n < 0) return "benchmark-delta-negative";
+        return "";
+      }
+
+      // Discover config names dynamically (everything except "delta")
+      const configs = Object.keys(summary).filter(k => k !== "delta");
+      const configA = configs[0] || "config_a";
+      const configB = configs[1] || "config_b";
+      const labelA = configA.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const labelB = configB.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const a = summary[configA] || {};
+      const b = summary[configB] || {};
+      const delta = summary.delta || {};
+
+      html += "<thead><tr><th>Metric</th><th>" + escapeHtml(labelA) + "</th><th>" + escapeHtml(labelB) + "</th><th>Delta</th></tr></thead>";
+      html += "<tbody>";
+
+      html += "<tr><td><strong>Pass Rate</strong></td>";
+      html += "<td>" + fmtStat(a.pass_rate, true) + "</td>";
+      html += "<td>" + fmtStat(b.pass_rate, true) + "</td>";
+      html += '<td class="' + deltaClass(delta.pass_rate) + '">' + (delta.pass_rate || "—") + "</td></tr>";
+
+      // Time (only show row if data exists)
+      if (a.time_seconds || b.time_seconds) {
+        html += "<tr><td><strong>Time (s)</strong></td>";
+        html += "<td>" + fmtStat(a.time_seconds, false) + "</td>";
+        html += "<td>" + fmtStat(b.time_seconds, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.time_seconds) + '">' + (delta.time_seconds ? delta.time_seconds + "s" : "—") + "</td></tr>";
+      }
+
+      // Tokens (only show row if data exists)
+      if (a.tokens || b.tokens) {
+        html += "<tr><td><strong>Tokens</strong></td>";
+        html += "<td>" + fmtStat(a.tokens, false) + "</td>";
+        html += "<td>" + fmtStat(b.tokens, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.tokens) + '">' + (delta.tokens || "—") + "</td></tr>";
+      }
+
+      html += "</tbody></table>";
+
+      // Per-eval breakdown (if runs data available)
+      const runs = data.runs || [];
+      if (runs.length > 0) {
+        const evalIds = [...new Set(runs.map(r => r.eval_id))].sort((a, b) => a - b);
+
+        html += "<h3 style='font-family: Poppins, sans-serif; margin-bottom: 0.75rem;'>Per-Eval Breakdown</h3>";
+
+        const hasTime = runs.some(r => r.result && r.result.time_seconds != null);
+        const hasErrors = runs.some(r => r.result && r.result.errors > 0);
+
+        for (const evalId of evalIds) {
+          const evalRuns = runs.filter(r => r.eval_id === evalId);
+          const evalName = evalRuns[0] && evalRuns[0].eval_name ? evalRuns[0].eval_name : "Eval " + evalId;
+
+          html += "<h4 style='font-family: Poppins, sans-serif; margin: 1rem 0 0.5rem; color: var(--text);'>" + escapeHtml(evalName) + "</h4>";
+          html += '<table class="benchmark-table">';
+          html += "<thead><tr><th>Config</th><th>Run</th><th>Pass Rate</th>";
+          if (hasTime) html += "<th>Time (s)</th>";
+          if (hasErrors) html += "<th>Crashes During Execution</th>";
+          html += "</tr></thead>";
+          html += "<tbody>";
+
+          // Group by config and render with average rows
+          const configGroups = [...new Set(evalRuns.map(r => r.configuration))];
+          for (let ci = 0; ci < configGroups.length; ci++) {
+            const config = configGroups[ci];
+            const configRuns = evalRuns.filter(r => r.configuration === config);
+            if (configRuns.length === 0) continue;
+
+            const rowClass = ci === 0 ? "benchmark-row-with" : "benchmark-row-without";
+            const configLabel = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+            for (const run of configRuns) {
+              const r = run.result || {};
+              const prClass = r.pass_rate >= 0.8 ? "benchmark-delta-positive" : r.pass_rate < 0.5 ? "benchmark-delta-negative" : "";
+              html += '<tr class="' + rowClass + '">';
+              html += "<td>" + configLabel + "</td>";
+              html += "<td>" + run.run_number + "</td>";
+              html += '<td class="' + prClass + '">' + ((r.pass_rate || 0) * 100).toFixed(0) + "% (" + (r.passed || 0) + "/" + (r.total || 0) + ")</td>";
+              if (hasTime) html += "<td>" + (r.time_seconds != null ? r.time_seconds.toFixed(1) : "—") + "</td>";
+              if (hasErrors) html += "<td>" + (r.errors || 0) + "</td>";
+              html += "</tr>";
+            }
+
+            // Average row
+            const rates = configRuns.map(r => (r.result || {}).pass_rate || 0);
+            const avgRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+            const avgPrClass = avgRate >= 0.8 ? "benchmark-delta-positive" : avgRate < 0.5 ? "benchmark-delta-negative" : "";
+            html += '<tr class="benchmark-row-avg ' + rowClass + '">';
+            html += "<td>" + configLabel + "</td>";
+            html += "<td>Avg</td>";
+            html += '<td class="' + avgPrClass + '">' + (avgRate * 100).toFixed(0) + "%</td>";
+            if (hasTime) {
+              const times = configRuns.map(r => (r.result || {}).time_seconds).filter(t => t != null);
+              html += "<td>" + (times.length ? (times.reduce((a, b) => a + b, 0) / times.length).toFixed(1) : "—") + "</td>";
+            }
+            if (hasErrors) html += "<td></td>";
+            html += "</tr>";
+          }
+          html += "</tbody></table>";
+
+          // Per-assertion detail for this eval
+          const runsWithExpectations = {};
+          for (const config of configGroups) {
+            runsWithExpectations[config] = evalRuns.filter(r => r.configuration === config && r.expectations && r.expectations.length > 0);
+          }
+          const hasAnyExpectations = Object.values(runsWithExpectations).some(runs => runs.length > 0);
+          if (hasAnyExpectations) {
+            // Collect all unique assertion texts across all configs
+            const allAssertions = [];
+            const seen = new Set();
+            for (const config of configGroups) {
+              for (const run of runsWithExpectations[config]) {
+                for (const exp of (run.expectations || [])) {
+                  if (!seen.has(exp.text)) {
+                    seen.add(exp.text);
+                    allAssertions.push(exp.text);
+                  }
+                }
+              }
+            }
+
+            html += '<table class="benchmark-table" style="margin-top: 0.5rem;">';
+            html += "<thead><tr><th>Assertion</th>";
+            for (const config of configGroups) {
+              const label = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+              html += "<th>" + escapeHtml(label) + "</th>";
+            }
+            html += "</tr></thead><tbody>";
+
+            for (const assertionText of allAssertions) {
+              html += "<tr><td>" + escapeHtml(assertionText) + "</td>";
+
+              for (const config of configGroups) {
+                html += "<td>";
+                for (const run of runsWithExpectations[config]) {
+                  const exp = (run.expectations || []).find(e => e.text === assertionText);
+                  if (exp) {
+                    const cls = exp.passed ? "benchmark-delta-positive" : "benchmark-delta-negative";
+                    const icon = exp.passed ? "\u2713" : "\u2717";
+                    html += '<span class="' + cls + '" title="Run ' + run.run_number + ': ' + escapeHtml(exp.evidence || "") + '">' + icon + "</span> ";
+                  } else {
+                    html += "— ";
+                  }
+                }
+                html += "</td>";
+              }
+              html += "</tr>";
+            }
+            html += "</tbody></table>";
+          }
+        }
+      }
+
+      // Notes
+      if (notes.length > 0) {
+        html += '<div class="benchmark-notes">';
+        html += "<h3>Analysis Notes</h3>";
+        html += "<ul>";
+        for (const note of notes) {
+          html += "<li>" + escapeHtml(note) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+
+      container.innerHTML = html;
+    }
+
+    // ---- Start ----
+    init();
+    renderBenchmark();
+  </script>
+</body>
+</html>

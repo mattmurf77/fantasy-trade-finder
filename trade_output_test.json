@@ -1,0 +1,26 @@
+[
+  {
+    "opponent": "mattmurf77",
+    "give": [
+      {
+        "name": "Ladd McConkey",
+        "pos": "WR",
+        "team": "LAC",
+        "ktc": 5198
+      }
+    ],
+    "give_pkg_ktc": 5198.0,
+    "receive": [
+      {
+        "name": "Drake Maye",
+        "pos": "QB",
+        "team": "NE",
+        "ktc": 5803
+      }
+    ],
+    "recv_pkg_ktc": 5803.0,
+    "value_pct": 89.6,
+    "mismatch": 68.9,
+    "composite": 0.454
+  }
+]
