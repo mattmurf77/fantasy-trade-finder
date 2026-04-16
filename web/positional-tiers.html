@@ -1135,11 +1135,14 @@
           </div>
           <div class="pool-chip-meta">${ageStr ? ageStr + ' &middot; ' : ''}${player.team}</div>
           <div class="tier-assign-row">
-            ${TIERS.map(t =>
-              `<button class="tier-assign-btn" data-tier="${t}"
+            ${TIERS.map(t => {
+              // 5-char max labels so all fit uniformly in the narrow card
+              const shortLabels = { elite: 'Elite', starter: 'Start', solid: 'Solid', depth: 'Depth', bench: 'Bench' };
+              const label = shortLabels[t] || (t.charAt(0).toUpperCase() + t.slice(1, 5));
+              return `<button class="tier-assign-btn" data-tier="${t}"
                 onclick="event.stopPropagation(); assignToTier('${player.id}', '${t}')"
-                title="Add to ${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</button>`
-            ).join('')}
+                title="Add to ${t}">${label}</button>`;
+            }).join('')}
           </div>
         `;
       }

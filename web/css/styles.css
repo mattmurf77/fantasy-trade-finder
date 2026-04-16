@@ -577,16 +577,27 @@
     .nav-tab:hover { color: var(--text); }
     .nav-tab.active { color: var(--text); border-bottom-color: var(--accent); }
 
-    /* Mobile: tighter padding/font so tabs fit in max 2 rows with whole labels */
+    /* Mobile: force a clean 2x2 grid so Matches never sits alone on its own row */
     @media (max-width: 480px) {
-      .nav-tabs { gap: 2px !important; flex-wrap: wrap; }
-      .nav-tab {
-        padding: 10px 12px;
-        font-size: 13px;
-        flex: 1 1 auto;
-        justify-content: center;
+      .nav-tabs {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr;
+        gap: 2px !important;
+        padding: 0 8px;
+        border-bottom: none;
       }
+      .nav-tab {
+        padding: 10px 8px;
+        font-size: 13px;
+        justify-content: center;
+        border-bottom: 2px solid var(--border);
+      }
+      .nav-tab.active { border-bottom-color: var(--accent); }
       .liked-badge, .matches-badge { font-size: 10px; padding: 2px 5px; }
+    }
+    /* Tiny phones (<360px): single column stack */
+    @media (max-width: 360px) {
+      .nav-tabs { grid-template-columns: 1fr; }
     }
 
     /* ── View sections ── */
@@ -967,13 +978,31 @@
     /* Mobile: tighter header and content padding */
     @media (max-width: 480px) {
       header { padding: 16px 12px 0; gap: 8px; }
-      .logo { font-size: 16px; }
+      .logo { font-size: 15px; white-space: nowrap; }
       .header-right { gap: 6px; }
       .view-btn { padding: 6px 10px; font-size: 12px; }
-      .account-chip { padding: 6px 8px; }
-      .nav-tabs { padding: 0 12px; }
+      .account-chip { padding: 6px 8px; max-width: 110px; }
+      .account-chip .account-name { max-width: 70px; overflow: hidden; text-overflow: ellipsis; }
+      .nav-tabs { padding: 0 8px; }
       /* Position tabs on view-rank: tighter gap and margin */
-      #rank-position-tabs { gap: 4px !important; margin-top: 12px !important; }
+      #rank-position-tabs { gap: 4px !important; margin-top: 12px !important; padding: 0 8px; }
+
+      /* Trio cards: stack vertically so names never truncate */
+      .arena {
+        flex-direction: column !important;
+        gap: 10px !important;
+        padding: 12px 12px 8px !important;
+      }
+      .card {
+        min-height: auto !important;
+        padding: 14px 16px !important;
+      }
+      .card-name { font-size: 18px !important; word-break: normal !important; }
+
+      /* Find a Trade: outlook badge must not escape container */
+      .league-switcher-row { flex-wrap: wrap; padding: 0 12px; }
+      .outlook-badge { max-width: 100%; white-space: normal; }
+      .fairness-row { flex-wrap: wrap; padding: 0 12px; gap: 8px; }
     }
 
     /* ── Tabs ── */
