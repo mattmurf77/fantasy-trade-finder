@@ -1,5 +1,12 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    /* Lock layout to the viewport width on every device — prevents any
+       rogue element from creating horizontal scroll on mobile */
+    html, body {
+      max-width: 100vw;
+      overflow-x: hidden;
+    }
+
     :root {
       --bg:       #0f1117;
       --surface:  #1a1d27;
