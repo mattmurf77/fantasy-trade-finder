@@ -511,13 +511,22 @@
 
     async function selectRankingMethod(method) {
       // Save the chosen method to the backend
+      let methodSaved = true;
       try {
-        await apiFetch('/api/ranking-method', {
+        const res = await apiFetch('/api/ranking-method', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ method }),
         });
-      } catch (_) { /* proceed anyway */ }
+        if (!res.ok) methodSaved = false;
+      } catch (e) {
+        methodSaved = false;
+        logDrawer.warn(`Failed to save ranking method: ${e.message}`);
+      }
+
+      if (!methodSaved) {
+        showToast('\u26A0\uFE0F Could not save your choice — you may see this screen again');
+      }
 
       hideMethodScreen();
 
@@ -656,7 +665,12 @@
         const progRes = await apiFetch('/api/rankings/progress');
         if (progRes.ok) {
           const prog = await progRes.json();
-          if (!prog.unlocked && !prog.ranking_method) {
+          // Only show the method screen for truly fresh users:
+          // - Not yet unlocked (no pending method-based unlock)
+          // - Has never chosen a method
+          // - Has never ranked a single player (pre-existing users skip this)
+          const hasExistingRankings = (prog.total_completed || 0) > 0;
+          if (!prog.unlocked && !prog.ranking_method && !hasExistingRankings) {
             showMethodScreen = true;
           }
         }
@@ -1010,29 +1024,38 @@
       const sub     = document.getElementById('celebration-sub');
       const actions = document.getElementById('celebration-actions');
 
+      // Build actions safely via DOM API — no string interpolation into onclick
+      actions.innerHTML = '';
+      const makeBtn = (label, cls, handler) => {
+        const b = document.createElement('button');
+        b.className = 'celebration-btn ' + cls;
+        b.textContent = label;
+        b.addEventListener('click', handler);
+        return b;
+      };
+
       if (allDone) {
         emoji.textContent = '\uD83C\uDFC6';  // trophy
         title.textContent = 'All positions ranked!';
         sub.textContent   = 'Your dynasty rankings are fully established. Time to find some trades!';
-        actions.innerHTML = `
-          <button class="celebration-btn secondary" onclick="closeCelebration()">
-            Continue ranking ${completedPosition}
-          </button>
-          <button class="celebration-btn primary" onclick="closeCelebration(); document.querySelector('.nav-tab[onclick*=\\'trades\\']').click();">
-            Give me some offers \u2192
-          </button>`;
+        actions.appendChild(makeBtn(`Continue ranking ${completedPosition}`, 'secondary', closeCelebration));
+        actions.appendChild(makeBtn('Give me some offers \u2192', 'primary', () => {
+          closeCelebration();
+          const tradesTab = document.querySelector('.nav-tab[onclick*="trades"]');
+          if (tradesTab) tradesTab.click();
+        }));
       } else {
         const nextPos = POSITION_ORDER.find(p => !completedPositions.includes(p));
         emoji.textContent = '\uD83C\uDF89';  // party popper
         title.textContent = `${completedPosition} rankings complete!`;
         sub.textContent   = `${completedPositions.length}/4 positions done.${nextPos ? ` ${nextPos} is next.` : ''}`;
-        actions.innerHTML = `
-          <button class="celebration-btn secondary" onclick="closeCelebration()">
-            Keep ranking ${completedPosition}
-          </button>
-          ${nextPos ? `<button class="celebration-btn primary" onclick="closeCelebration(); switchToPosition('${nextPos}');">
-            Proceed to ${nextPos} \u2192
-          </button>` : ''}`;
+        actions.appendChild(makeBtn(`Keep ranking ${completedPosition}`, 'secondary', closeCelebration));
+        if (nextPos) {
+          actions.appendChild(makeBtn(`Proceed to ${nextPos} \u2192`, 'primary', () => {
+            closeCelebration();
+            switchToPosition(nextPos);
+          }));
+        }
       }
 
       overlay.classList.remove('hidden');
@@ -1403,18 +1426,33 @@
     }
 
     // ── Renumber visible ranks and submit reorder to backend ────────
+    // Debounce guard — if a save is already in flight, queue exactly one more
+    // attempt to capture the final state after rapid reorders.
+    let _rtInFlight = false;
+    let _rtQueued   = false;
+
     function _rtRenumberAndSubmit() {
       const tbody = document.getElementById('rankings-tbody');
       const rows  = Array.from(tbody.querySelectorAll('tr'));
-      const orderedIds = rows.map(r => r.dataset.playerId);
 
-      // Update visible rank numbers in the editable cells
+      // Always update visible rank numbers immediately for responsive UI
       rows.forEach((r, i) => {
         const editCell = r.querySelector('.rt-editable-cell');
         if (editCell) editCell.textContent = i + 1;
       });
 
-      // Submit to backend, then reload table to reflect updated ELO values
+      // If a save is in flight, just mark that another one is needed
+      if (_rtInFlight) { _rtQueued = true; return; }
+
+      _rtSubmitNow();
+    }
+
+    function _rtSubmitNow() {
+      const tbody = document.getElementById('rankings-tbody');
+      const rows  = Array.from(tbody.querySelectorAll('tr'));
+      const orderedIds = rows.map(r => r.dataset.playerId);
+
+      _rtInFlight = true;
       apiFetch('/api/rankings/reorder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1422,8 +1460,23 @@
           position: _rankingsTablePos || null,
           ordered_ids: orderedIds,
         }),
-      }).then(() => loadRankingsTable())
-        .catch(() => showToast('Failed to save reorder'));
+      })
+        .then(() => {
+          if (_rtQueued) {
+            // A reorder happened while we were saving — send the latest state
+            _rtQueued = false;
+            _rtInFlight = false;
+            _rtSubmitNow();
+          } else {
+            _rtInFlight = false;
+            loadRankingsTable();
+          }
+        })
+        .catch(() => {
+          _rtInFlight = false;
+          _rtQueued   = false;
+          showToast('Failed to save reorder');
+        });
     }
 
     // ── Rookie board ────────────────────────────────────────────────
@@ -1864,6 +1917,14 @@
       btn.classList.add('active');
       document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
       document.getElementById('view-' + view).classList.add('active');
+
+      // Defensively dismiss any open celebration modal — prevents
+      // _celebrationActive from stranding a permanent block on loadTrio().
+      const celebOverlay = document.getElementById('celebration-overlay');
+      if (celebOverlay && !celebOverlay.classList.contains('hidden')) {
+        celebOverlay.classList.add('hidden');
+        _celebrationActive = false;
+      }
       if (view === 'trades') {
         renderLeagueSwitcher();
         refreshCoverage();

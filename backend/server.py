@@ -614,6 +614,8 @@ app = Flask(__name__, static_folder=str(_PROJECT_ROOT / "web"), static_url_path=
 # ---------------------------------------------------------------------------
 
 _sessions: dict[str, dict] = {}  # token → per-session dict
+_sessions_lock = threading.Lock()  # guards all _sessions reads/writes
+_player_sync_lock = threading.Lock()  # serialises concurrent player DB syncs
 
 
 class _SessionExpired(Exception):
@@ -629,7 +631,8 @@ def handle_session_expired(e):
 def _require_session() -> dict:
     """Return the active session dict, or raise _SessionExpired (→ 401)."""
     token = request.headers.get("X-Session-Token", "")
-    sess = _sessions.get(token)
+    with _sessions_lock:
+        sess = _sessions.get(token)
     if sess is None:
         raise _SessionExpired()
     return sess
@@ -640,10 +643,11 @@ def _cleanup_loop() -> None:
     while True:
         time.sleep(300)  # check every 5 min
         cutoff = time.time() - 4 * 3600
-        stale = [t for t, s in list(_sessions.items())
-                 if s.get("last_active", 0) < cutoff]
-        for t in stale:
-            _sessions.pop(t, None)
+        with _sessions_lock:
+            stale = [t for t, s in _sessions.items()
+                     if s.get("last_active", 0) < cutoff]
+            for t in stale:
+                _sessions.pop(t, None)
         if stale:
             log.info("Cleaned up %d stale session(s)", len(stale))
 
@@ -2018,12 +2022,16 @@ def sleeper_players():
 
         _sleeper_cache = relevant
 
-        # Sync to players DB table so /api/players has data
+        # Sync to players DB table so /api/players has data.
+        # Lock prevents two concurrent cold clients from running sync_players twice.
         try:
-            if needs_player_sync():
-                adp_map = _fetch_sleeper_adp()
-                count = sync_players(relevant, adp_map=adp_map or None)
-                log.info("  ✅ synced %d players to DB after cache fetch", count)
+            with _player_sync_lock:
+                if needs_player_sync():
+                    adp_map = _fetch_sleeper_adp()
+                    count = sync_players(relevant, adp_map=adp_map or None)
+                    log.info("  ✅ synced %d players to DB after cache fetch", count)
+                else:
+                    log.info("  player DB already fresh — skipping sync")
         except Exception as sync_err:
             log.warning("  player DB sync after fetch failed: %s", sync_err)
 
@@ -2074,7 +2082,8 @@ def session_init():
 
     # ── Resolve existing session (league-switch reuses same token) ────────
     incoming_token = request.headers.get("X-Session-Token", "")
-    existing_sess  = _sessions.get(incoming_token)
+    with _sessions_lock:
+        existing_sess  = _sessions.get(incoming_token)
 
     # ── Build universal ranking pool (once) ────────────────────────────
     # Rankings are user-level, not league-specific.  The ranking service
@@ -2213,30 +2222,23 @@ def session_init():
     new_trade_svc.add_league(new_league)
 
     # ── Create or update session ─────────────────────────────────────────
-    if existing_sess:
-        token = incoming_token
-        existing_sess.update({
-            "user_id":      user_id,
-            "league":       new_league,
-            "players":      ranking_pool,
-            "user_roster":  new_user_roster,
-            "service":      new_service,
-            "trade_svc":    new_trade_svc,
-            "display_name": display_name,
-            "last_active":  time.time(),
-        })
-    else:
-        token = secrets.token_urlsafe(32)
-        _sessions[token] = {
-            "user_id":      user_id,
-            "league":       new_league,
-            "players":      ranking_pool,
-            "user_roster":  new_user_roster,
-            "service":      new_service,
-            "trade_svc":    new_trade_svc,
-            "display_name": display_name,
-            "last_active":  time.time(),
-        }
+    session_payload = {
+        "user_id":      user_id,
+        "league":       new_league,
+        "players":      ranking_pool,
+        "user_roster":  new_user_roster,
+        "service":      new_service,
+        "trade_svc":    new_trade_svc,
+        "display_name": display_name,
+        "last_active":  time.time(),
+    }
+    with _sessions_lock:
+        if existing_sess:
+            token = incoming_token
+            existing_sess.update(session_payload)
+        else:
+            token = secrets.token_urlsafe(32)
+            _sessions[token] = session_payload
 
     # ── Persist user + league snapshot ──────────────────────────────────
     try:
@@ -2305,7 +2307,8 @@ def session_init():
 @app.route("/api/session/ping", methods=["GET"])
 def session_ping():
     """GET /api/session/ping — check whether the current session is alive."""
-    sess = _sessions.get(request.headers.get("X-Session-Token", ""))
+    with _sessions_lock:
+        sess = _sessions.get(request.headers.get("X-Session-Token", ""))
     if not sess:
         return jsonify({"ok": False}), 401
     sess["last_active"] = time.time()

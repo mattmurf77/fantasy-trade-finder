@@ -102,7 +102,8 @@
     }
 
     .pos-tab {
-      padding: 7px 16px;
+      padding: 10px 18px;
+      min-height: 44px;
       border-radius: 8px;
       font-size: 13px;
       font-weight: 600;
@@ -417,9 +418,9 @@
     }
 
     .chip-arrow-btn {
-      width: 22px;
-      height: 22px;
-      border-radius: 5px;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
       background: rgba(79,124,255,0.1);
       color: var(--accent);
       border: none;
@@ -430,6 +431,9 @@
       justify-content: center;
       transition: background 0.12s;
       padding: 0;
+    }
+    @media (pointer: coarse) {
+      .chip-arrow-btn { width: 36px; height: 36px; font-size: 13px; }
     }
     .chip-arrow-btn:hover { background: rgba(79,124,255,0.22); }
 
@@ -471,10 +475,11 @@
     .tier-assign-btn {
       flex: 1;
       min-width: 0;
-      padding: 4px 2px;
+      min-height: 32px;
+      padding: 6px 2px;
       border-radius: 5px;
       border: 1px solid;
-      font-size: 8px;
+      font-size: 9px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.2px;
@@ -484,6 +489,9 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    @media (pointer: coarse) {
+      .tier-assign-btn { min-height: 40px; font-size: 10px; }
     }
     /* Always show tier colors on buttons */
     .tier-assign-btn[data-tier="elite"]   { border-color: rgba(251,191,36,0.3); color: #fbbf24; background: rgba(251,191,36,0.06); }
@@ -552,16 +560,54 @@
       box-shadow: 0 10px 30px rgba(0,0,0,0.4);
     }
 
-    /* ── Bottom action bar ── */
+    /* ── Bottom action bar — sticky at viewport bottom ── */
     .bottom-bar {
-      background: var(--surface);
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(26, 29, 39, 0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       border-top: 1px solid var(--border);
-      padding: 14px 24px;
+      padding: 12px 24px calc(12px + env(safe-area-inset-bottom)) 24px;
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 12px;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+      transform: translateY(100%);
+      opacity: 0;
+      transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.2s;
+      pointer-events: none;
     }
+    .bottom-bar.visible {
+      transform: translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .unsaved-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 20px;
+      background: rgba(251,146,60,0.15);
+      color: #fb923c;
+      font-size: 12px;
+      font-weight: 700;
+      margin-right: auto;
+    }
+    .unsaved-pill::before {
+      content: "";
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #fb923c;
+      box-shadow: 0 0 8px rgba(251,146,60,0.6);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
     .save-btn {
       background: var(--accent);
@@ -570,11 +616,15 @@
       color: #fff;
       cursor: pointer;
       font-size: 14px;
-      font-weight: 600;
-      padding: 11px 28px;
-      transition: opacity 0.15s;
+      font-weight: 700;
+      padding: 0 24px;
+      min-height: 44px;
+      min-width: 140px;
+      transition: opacity 0.15s, transform 0.1s;
     }
     .save-btn:hover { opacity: 0.88; }
+    .save-btn:active { transform: scale(0.98); }
+    .save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .reset-btn {
       background: transparent;
@@ -584,10 +634,46 @@
       cursor: pointer;
       font-size: 13px;
       font-weight: 600;
-      padding: 10px 20px;
+      padding: 0 18px;
+      min-height: 44px;
       transition: border-color 0.15s, color 0.15s;
     }
     .reset-btn:hover { border-color: var(--red); color: var(--red); }
+
+    /* Bottom padding on layout so sticky bar never covers the last tier */
+    .tier-layout {
+      padding-bottom: calc(96px + env(safe-area-inset-bottom));
+    }
+
+    /* Toast for save errors/status */
+    .tier-toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-80px);
+      z-index: 600;
+      padding: 12px 20px;
+      border-radius: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      opacity: 0;
+      transition: opacity 0.25s, transform 0.25s;
+      pointer-events: none;
+      max-width: calc(100vw - 32px);
+    }
+    .tier-toast.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    .tier-toast.error {
+      background: rgba(239,68,68,0.15);
+      border-color: var(--red);
+      color: #fca5a5;
+    }
 
     /* ── Undo toast ── */
     .undo-toast {
@@ -693,7 +779,7 @@
     <div class="player-pool" id="player-pool">
       <div class="pool-header">
         <div class="pool-title">Unassigned Players</div>
-        <input class="pool-search" id="pool-search" type="text" placeholder="Search players..." oninput="filterPool(this.value)" />
+        <input class="pool-search" id="pool-search" type="search" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search players..." oninput="filterPool(this.value)" />
       </div>
       <!-- Tier legend/key — between search and player grid -->
       <div class="tier-legend">
@@ -781,8 +867,9 @@
   </div>
 
   <!-- ── Bottom action bar ── -->
-  <div class="bottom-bar">
-    <button class="reset-btn" onclick="resetCurrentPos()">Reset to Defaults</button>
+  <div class="bottom-bar" id="bottom-bar">
+    <span class="unsaved-pill" id="unsaved-pill">Unsaved changes</span>
+    <button class="reset-btn" onclick="resetCurrentPos()">Reset</button>
     <button class="save-btn" id="save-btn" onclick="saveTiers()">Save Tiers</button>
   </div>
 
@@ -926,6 +1013,22 @@
 
     let undoStack = [];     // {playerId, fromTier (null = pool), toTier}
     let draggedId = null;
+
+    // Per-position dirty flag — drives the sticky save bar visibility
+    let dirtyPositions = new Set();
+    function markDirty(pos) {
+      dirtyPositions.add(pos || currentPos);
+      updateSaveBar();
+    }
+    function clearDirty(pos) {
+      dirtyPositions.delete(pos || currentPos);
+      updateSaveBar();
+    }
+    function updateSaveBar() {
+      const bar = document.getElementById('bottom-bar');
+      if (!bar) return;
+      bar.classList.toggle('visible', dirtyPositions.has(currentPos));
+    }
 
     // ══════════════════════════════════════════════════════
     //  RENDERING
@@ -1114,19 +1217,23 @@
       undoStack.push({ playerId, fromTier, toTier: targetTier });
       showUndo(playerId);
 
+      markDirty();
       render();
     }
 
     function removeFromTier(playerId) {
       const state = tierState[currentPos];
+      let changed = false;
       TIERS.forEach(t => {
         const idx = state[t].indexOf(playerId);
         if (idx !== -1) {
           undoStack.push({ playerId, fromTier: t, toTier: null });
           state[t].splice(idx, 1);
           showUndo(playerId);
+          changed = true;
         }
       });
+      if (changed) markDirty();
       render();
     }
 
@@ -1226,6 +1333,7 @@
       btn.classList.add('active');
       undoStack = [];
       render();
+      updateSaveBar();  // save bar reflects the new position's dirty state
     }
 
     // ══════════════════════════════════════════════════════
@@ -1242,6 +1350,7 @@
       // Re-seed from default Elo-based tiers (not empty)
       tierState[currentPos] = autoAssignTiers(currentPos);
       undoStack = [];
+      markDirty();
       render();
     }
 
@@ -1276,11 +1385,12 @@
         });
         const data = await res.json();
         if (!res.ok || data.error) {
-          alert('Save failed: ' + (data.error || 'Unknown error'));
+          showTierToast('Save failed: ' + (data.error || 'Unknown error'), 'error');
           return;
         }
 
         savedPositions.add(currentPos);
+        clearDirty(currentPos);
         updatePosTabs();
 
         if (data.all_done) {
@@ -1295,7 +1405,7 @@
           }
         }
       } catch (e) {
-        alert('Save failed: ' + e.message);
+        showTierToast('Save failed: ' + e.message, 'error');
       } finally {
         btn.textContent = 'Save Tiers';
         btn.disabled = false;
@@ -1304,6 +1414,23 @@
 
     function closeTierCelebration() {
       document.getElementById('tier-celebration').classList.add('hidden');
+    }
+
+    // Simple toast for save failures + status messages
+    let _toastTimer = null;
+    function showTierToast(msg, kind) {
+      let el = document.getElementById('tier-toast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'tier-toast';
+        el.className = 'tier-toast';
+        document.body.appendChild(el);
+      }
+      el.textContent = msg;
+      el.classList.toggle('error', kind === 'error');
+      el.classList.add('visible');
+      clearTimeout(_toastTimer);
+      _toastTimer = setTimeout(() => el.classList.remove('visible'), 3500);
     }
 
     function updatePosTabs() {

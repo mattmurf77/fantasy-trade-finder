@@ -555,7 +555,8 @@
       margin-bottom: 0;
     }
     .nav-tab {
-      padding: 10px 22px;
+      padding: 12px 22px;
+      min-height: 44px;
       border-radius: 8px 8px 0 0;
       border: none;
       background: none;
@@ -957,7 +958,8 @@
     }
 
     .tab {
-      padding: 8px 20px;
+      padding: 10px 20px;
+      min-height: 44px;
       border-radius: 8px;
       border: 1px solid var(--border);
       background: var(--surface);
@@ -966,6 +968,9 @@
       font-weight: 600;
       cursor: pointer;
       transition: all 0.15s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
     .tab:hover  { color: var(--text); border-color: #3a3d4a; }
     .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -1767,7 +1772,7 @@
       display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
     }
     .celebration-btn {
-      padding: 10px 20px; border-radius: 10px; font-weight: 600;
+      padding: 12px 22px; min-height: 44px; border-radius: 10px; font-weight: 600;
       cursor: pointer; border: none; font-size: 0.95rem;
     }
     .celebration-btn.primary {

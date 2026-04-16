@@ -481,21 +481,37 @@ def get_ranking_method(user_id: str) -> str | None:
 
 
 def save_tiers_position(user_id: str, position: str) -> list[str]:
-    """Mark a position as tier-saved for this user. Returns updated list of saved positions."""
+    """Mark a position as tier-saved for this user. Returns updated list of saved positions.
+
+    Uses SELECT FOR UPDATE on Postgres (and a serialized transaction on SQLite)
+    to prevent the read-modify-write race where two concurrent saves for
+    different positions could each overwrite the other.
+    """
+    is_postgres = not DATABASE_URL.startswith("sqlite")
     with engine.begin() as conn:
-        row = conn.execute(
-            select(users_table.c.tiers_saved).where(
-                users_table.c.sleeper_user_id == user_id
-            )
-        ).fetchone()
+        if is_postgres:
+            # Row-level lock held until transaction commits
+            row = conn.execute(
+                text("SELECT tiers_saved FROM users WHERE sleeper_user_id = :uid FOR UPDATE"),
+                {"uid": user_id},
+            ).fetchone()
+        else:
+            # SQLite serializes writes at the DB level — a single BEGIN IMMEDIATE
+            # transaction prevents concurrent read-modify-write on the same row
+            row = conn.execute(
+                select(users_table.c.tiers_saved).where(
+                    users_table.c.sleeper_user_id == user_id
+                )
+            ).fetchone()
+
         saved = json.loads(row.tiers_saved) if row and row.tiers_saved else []
         if position not in saved:
             saved.append(position)
-        conn.execute(
-            update(users_table)
-            .where(users_table.c.sleeper_user_id == user_id)
-            .values(tiers_saved=json.dumps(saved))
-        )
+            conn.execute(
+                update(users_table)
+                .where(users_table.c.sleeper_user_id == user_id)
+                .values(tiers_saved=json.dumps(saved))
+            )
         return saved
 
 
