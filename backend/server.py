@@ -63,7 +63,7 @@ from .database import (
     init_db,
     upsert_user, upsert_league,
     save_ranking_swipes, save_trade_swipes,
-    save_trade_decision, load_swipe_decisions,
+    save_trade_decision, load_swipe_decisions, load_trade_decisions,
     upsert_league_members, upsert_member_rankings,
     load_member_rankings, load_league_members, get_ranking_coverage,
     check_for_match, match_already_exists,
@@ -79,10 +79,12 @@ from .database import (
     load_local_leagues_for_user,
     load_local_league_rosters,
     load_local_league_users,
+    set_ranking_method, get_ranking_method,
+    save_tiers_position, get_tiers_saved,
 )
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
-from .trade_service import TradeService, League, LeagueMember, team_outlook_multiplier
+from .trade_service import TradeService, League, LeagueMember
 
 # ---------------------------------------------------------------------------
 # Demo Player Pool (used until Sleeper roster is loaded)
@@ -840,15 +842,133 @@ def get_rankings_progress():
     threshold       = service.POSITION_THRESHOLDS.get("QB", 10)  # all are 10 now
     total_required  = threshold * len(POSITIONS)
     total_completed = sum(counts.values())
-    unlocked        = all(counts[p] >= threshold for p in POSITIONS)
+
+    # Unlock logic depends on the user's chosen ranking method
+    g_user_id = sess["user_id"]
+    ranking_method = None
+    try:
+        ranking_method = get_ranking_method(g_user_id)
+    except Exception:
+        pass
+
+    if ranking_method == "manual":
+        unlocked = True
+    elif ranking_method == "tiers":
+        try:
+            saved = get_tiers_saved(g_user_id)
+            unlocked = all(p in saved for p in POSITIONS)
+        except Exception:
+            unlocked = False
+    else:
+        # 'trio' or null — original threshold logic
+        unlocked = all(counts[p] >= threshold for p in POSITIONS)
 
     return jsonify({
         **counts,
         "threshold":        threshold,
         "unlocked":         unlocked,
+        "ranking_method":   ranking_method,
         "total_required":   total_required,
         "total_completed":  total_completed,
     })
+
+
+@app.route("/api/ranking-method", methods=["POST"])
+def set_ranking_method_route():
+    """POST /api/ranking-method {method: 'trio'|'manual'|'tiers'}"""
+    sess = _require_session()
+    g_user_id = sess["user_id"]
+    body   = request.get_json(force=True) or {}
+    method = body.get("method", "")
+    if method not in ("trio", "manual", "tiers"):
+        return jsonify({"error": f"Invalid method: {method!r}"}), 400
+    try:
+        set_ranking_method(g_user_id, method)
+        log.info("ranking-method set for %s: %s", g_user_id, method)
+        return jsonify({"ok": True, "method": method})
+    except Exception as e:
+        log.error("set ranking-method error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/tiers/save", methods=["POST"])
+def save_tiers_route():
+    """POST /api/tiers/save {position: 'RB', tiers: {elite: [...ids], starter: [...], ...}}
+
+    Converts tier assignments into ELO overrides and marks the position as saved.
+    """
+    sess = _require_session()
+    service   = sess["service"]
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    body      = request.get_json(force=True) or {}
+    position  = body.get("position")
+    tiers     = body.get("tiers", {})
+
+    if position not in ("QB", "RB", "WR", "TE"):
+        return jsonify({"error": f"Invalid position: {position!r}"}), 400
+
+    # Build an ordered list from tiers: elite first, bench last
+    tier_order = ["elite", "starter", "solid", "depth", "bench"]
+    ordered_ids = []
+    for tier_name in tier_order:
+        ordered_ids.extend(tiers.get(tier_name, []))
+
+    if not ordered_ids:
+        return jsonify({"error": "No players in any tier"}), 400
+
+    try:
+        # Apply as a reorder (assigns linearly spaced ELO values)
+        service.apply_reorder(position=position, ordered_ids=ordered_ids)
+
+        # Persist updated ELO snapshot
+        try:
+            if g_league and g_league.league_id not in ("league_demo",):
+                all_rankings = service.get_rankings(position=None)
+                ranking_payload = [
+                    {"player_id": rp.player.id, "elo": rp.elo}
+                    for rp in all_rankings.rankings
+                ]
+                upsert_member_rankings(
+                    user_id   = g_user_id,
+                    league_id = g_league.league_id,
+                    rankings  = ranking_payload,
+                )
+        except Exception as db_err:
+            log.warning("member_rankings publish after tiers save failed: %s", db_err)
+
+        # Mark this position as saved
+        saved = save_tiers_position(g_user_id, position)
+        all_done = all(p in saved for p in ("QB", "RB", "WR", "TE"))
+
+        log.info("tiers/save %s for %s — saved positions: %s, all_done=%s",
+                 position, g_user_id, saved, all_done)
+
+        return jsonify({
+            "ok":       True,
+            "position": position,
+            "saved":    saved,
+            "all_done": all_done,
+            "count":    len(ordered_ids),
+        })
+    except Exception as e:
+        log.error("tiers/save error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/tiers/status")
+def tiers_status_route():
+    """GET /api/tiers/status — which positions have saved tiers for the current user."""
+    sess = _require_session()
+    g_user_id = sess["user_id"]
+    try:
+        saved = get_tiers_saved(g_user_id)
+        return jsonify({
+            "saved":    saved,
+            "all_done": all(p in saved for p in ("QB", "RB", "WR", "TE")),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/reset", methods=["POST"])
@@ -860,6 +980,50 @@ def reset():
     body     = request.get_json(force=True) or {}
     position = body.get("position") or None
     return jsonify(service.reset(position=position))
+
+
+@app.route("/api/rankings/reorder", methods=["POST"])
+def reorder_rankings():
+    """POST /api/rankings/reorder {position, ordered_ids}
+
+    Apply a manual reorder to the user's rankings.  The ordered_ids list
+    represents the user's desired ranking from best (index 0) to worst.
+    ELO values are overridden to match the desired order.
+    """
+    sess = _require_session()
+    service    = sess["service"]
+    g_user_id  = sess["user_id"]
+    g_league   = sess["league"]
+    body       = request.get_json(force=True) or {}
+    position   = body.get("position")   # None = overall
+    ordered_ids = body.get("ordered_ids", [])
+
+    if len(ordered_ids) < 2:
+        return jsonify({"error": "Need at least 2 player IDs"}), 400
+
+    try:
+        service.apply_reorder(position=position, ordered_ids=ordered_ids)
+
+        # Persist updated ELO snapshot
+        try:
+            if g_league and g_league.league_id not in ("league_demo",):
+                all_rankings = service.get_rankings(position=None)
+                ranking_payload = [
+                    {"player_id": rp.player.id, "elo": rp.elo}
+                    for rp in all_rankings.rankings
+                ]
+                upsert_member_rankings(
+                    user_id   = g_user_id,
+                    league_id = g_league.league_id,
+                    rankings  = ranking_payload,
+                )
+        except Exception as db_err:
+            log.warning("member_rankings publish after reorder failed: %s", db_err)
+
+        return jsonify({"ok": True, "count": len(ordered_ids)})
+    except Exception as e:
+        log.error("reorder_rankings error: %s", e)
+        return jsonify({"error": str(e)}), 400
 
 
 @app.route("/")
@@ -1046,23 +1210,6 @@ def generate_trades():
             trade_away_positions = trade_away_positions,
             pinned_give_players  = pinned_give or None,
         )
-
-        # ── Apply team outlook multiplier ────────────────────────────────
-        if outlook:
-            player_ages = {p.id: p.age for p in g_players}
-            for card in cards:
-                mult = team_outlook_multiplier(
-                    give_player_ids    = card.give_player_ids,
-                    receive_player_ids = card.receive_player_ids,
-                    outlook            = outlook,
-                    player_ages        = player_ages,
-                )
-                if mult != 1.0:
-                    card.composite_score = round(card.composite_score * mult, 4)
-            # Re-sort after score adjustments
-            cards.sort(key=lambda c: c.composite_score, reverse=True)
-            log.info("  trade gen: outlook=%s acquire=%s away=%s applied to %d cards",
-                     outlook, acquire_positions, trade_away_positions, len(cards))
 
         players_dict  = {p.id: p for p in g_players}
         result        = [trade_card_to_dict(c, players_dict) for c in cards]
@@ -2039,8 +2186,20 @@ def session_init():
         new_service = existing_service
         log.info("  ✅ ranking service preserved (same user, universal pool)")
 
-    # Trade service is always rebuilt per league (league-specific rosters)
-    new_trade_svc = TradeService(players=players_dict)
+    # Trade service is always rebuilt per league (league-specific rosters).
+    # Load past trade decisions (last 7 days) so already-swiped trades don't reappear.
+    past_decision_keys: set = set()
+    try:
+        past_td = load_trade_decisions(user_id=user_id, league_id=league_id, since_days=7)
+        for td in past_td:
+            key = (frozenset(td["give_player_ids"]), frozenset(td["receive_player_ids"]))
+            past_decision_keys.add(key)
+        if past_decision_keys:
+            log.info("  loaded %d past trade decisions (7-day window)", len(past_decision_keys))
+    except Exception as db_err:
+        log.warning("  could not load past trade decisions: %s", db_err)
+
+    new_trade_svc = TradeService(players=players_dict, past_decision_keys=past_decision_keys)
     new_trade_svc.add_league(new_league)
 
     # ── Create or update session ─────────────────────────────────────────

@@ -51,6 +51,8 @@ users_table = Table("users", metadata,
     Column("display_name",    String),
     Column("avatar",          String),
     Column("created_at",      String),
+    Column("ranking_method",  String),   # null | 'trio' | 'manual' | 'tiers'
+    Column("tiers_saved",     String),   # JSON list of positions saved, e.g. '["RB","WR"]'
 )
 
 leagues_table = Table("leagues", metadata,
@@ -302,10 +304,13 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── Tier Engine ──────────────────────────────────────────────────────
     ("tier_engine_enabled",    1.0,    "Feature flag: 1=tier-based trio filtering, 0=legacy (full pool)"),
     ("smart_matchup_enabled",  1.0,    "Feature flag: 1=Claude-powered matchup selection, 0=algorithmic only"),
-    ("tier_size",             16.0,    "Players per tier in pre-unlock phase (top N by seed Elo per position)"),
-    ("mix_in_rate_base",       0.20,   "Base probability of including a lower-tier player post-unlock"),
-    ("mix_in_rate_max",        0.60,   "Maximum mix-in probability as top-tier comparisons saturate"),
+    ("tier_size",             24.0,    "Players per tier in pre-unlock phase (top N by seed Elo per position)"),
+    ("mix_in_rate_base",       0.35,   "Base probability of including a lower-tier player post-unlock"),
+    ("mix_in_rate_max",        0.80,   "Maximum mix-in probability as top-tier comparisons saturate"),
     ("mix_in_saturation_pct",  0.70,   "Comparison saturation % at which mix-in rate reaches max"),
+    ("mix_in_pre_unlock_start", 5.0,   "Interaction count at which pre-unlock mix-in begins"),
+    # ── Trade ELO gap filter ─────────────────────────────────────────────
+    ("trade_elo_gap_max",    250.0,   "Max user-ELO gap between give/receive sides before rejecting a trade (0=disabled)"),
 ]
 
 
@@ -329,6 +334,8 @@ def _migrate_db() -> None:
         ("trade_matches",      "user_b_decided_at",    "VARCHAR"),
         ("league_preferences", "acquire_positions",    "TEXT"),
         ("league_preferences", "trade_away_positions", "TEXT"),
+        ("users",              "ranking_method",        "VARCHAR"),
+        ("users",              "tiers_saved",           "TEXT"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -450,6 +457,59 @@ def upsert_user(
                 avatar=avatar,
                 created_at=_now(),
             ))
+
+
+def set_ranking_method(user_id: str, method: str) -> None:
+    """Save the user's chosen ranking method ('trio', 'manual', 'tiers')."""
+    with engine.begin() as conn:
+        conn.execute(
+            update(users_table)
+            .where(users_table.c.sleeper_user_id == user_id)
+            .values(ranking_method=method)
+        )
+
+
+def get_ranking_method(user_id: str) -> str | None:
+    """Return the user's stored ranking method, or None if not set."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.ranking_method).where(
+                users_table.c.sleeper_user_id == user_id
+            )
+        ).fetchone()
+        return row.ranking_method if row else None
+
+
+def save_tiers_position(user_id: str, position: str) -> list[str]:
+    """Mark a position as tier-saved for this user. Returns updated list of saved positions."""
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(users_table.c.tiers_saved).where(
+                users_table.c.sleeper_user_id == user_id
+            )
+        ).fetchone()
+        saved = json.loads(row.tiers_saved) if row and row.tiers_saved else []
+        if position not in saved:
+            saved.append(position)
+        conn.execute(
+            update(users_table)
+            .where(users_table.c.sleeper_user_id == user_id)
+            .values(tiers_saved=json.dumps(saved))
+        )
+        return saved
+
+
+def get_tiers_saved(user_id: str) -> list[str]:
+    """Return list of positions that have saved tiers, e.g. ['RB', 'WR']."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.tiers_saved).where(
+                users_table.c.sleeper_user_id == user_id
+            )
+        ).fetchone()
+        if row and row.tiers_saved:
+            return json.loads(row.tiers_saved)
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -615,10 +675,13 @@ def save_trade_decision(
 def load_trade_decisions(
     user_id: str,
     league_id: str | None = None,
+    since_days: int | None = None,
 ) -> list[dict]:
     """
-    Load trade decisions for a user, optionally filtered by league.
+    Load trade decisions for a user, optionally filtered by league and age.
     JSON fields are automatically decoded back to lists.
+
+    since_days: if set, only return decisions from the last N days.
     """
     with engine.connect() as conn:
         q = select(trade_decisions_table).where(
@@ -626,6 +689,9 @@ def load_trade_decisions(
         )
         if league_id:
             q = q.where(trade_decisions_table.c.league_id == league_id)
+        if since_days is not None:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=since_days)).isoformat()
+            q = q.where(trade_decisions_table.c.created_at >= cutoff)
         rows = conn.execute(q.order_by(trade_decisions_table.c.id)).fetchall()
 
     result = []

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Set Your Rankings — Fantasy Trade Finder</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --border:   #2a2d3a;
+      --text:     #e8eaf0;
+      --muted:    #7a7f96;
+      --accent:   #4f7cff;
+      --green:    #22c55e;
+      --red:      #ef4444;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    /* ── Page header ── */
+    .page-header {
+      text-align: center;
+      margin-bottom: 36px;
+    }
+
+    .page-logo {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.4px;
+      margin-bottom: 10px;
+    }
+    .page-logo span { color: var(--accent); }
+
+    .page-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .page-subtitle {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.5;
+      max-width: 440px;
+    }
+
+    /* ── Tile wrapper ── */
+    .tile-wrapper {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 28px;
+      width: 100%;
+      max-width: 560px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    /* ── Individual tiles ── */
+    .tile {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px 24px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s, transform 0.15s;
+      display: flex;
+      align-items: flex-start;
+      gap: 18px;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .tile:hover {
+      border-color: var(--accent);
+      background: rgba(79, 124, 255, 0.06);
+      transform: translateY(-2px);
+    }
+
+    .tile:active {
+      transform: translateY(0);
+    }
+
+    .tile-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      flex-shrink: 0;
+    }
+
+    .tile-icon.guided    { background: rgba(79, 124, 255, 0.15); }
+    .tile-icon.manual    { background: rgba(34, 197, 94, 0.15); }
+    .tile-icon.tiers     { background: rgba(168, 85, 247, 0.15); }
+
+    .tile-content {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .tile-label {
+      font-size: 16px;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+
+    .tile-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .tile-arrow {
+      color: var(--muted);
+      font-size: 18px;
+      flex-shrink: 0;
+      align-self: center;
+      transition: color 0.2s, transform 0.2s;
+    }
+
+    .tile:hover .tile-arrow {
+      color: var(--accent);
+      transform: translateX(3px);
+    }
+
+    /* ── Recommended badge ── */
+    .tile-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: rgba(79, 124, 255, 0.12);
+      border-radius: 6px;
+      padding: 3px 8px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+
+    /* ── Footer note ── */
+    .footer-note {
+      margin-top: 20px;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="page-header">
+    <div class="page-logo">Dynasty <span>Trade Finder</span></div>
+    <div class="page-title">How do you want to set your rankings?</div>
+    <div class="page-subtitle">Your rankings power every trade suggestion. Pick the method that works best for you.</div>
+  </div>
+
+  <div class="tile-wrapper">
+
+    <!-- Option 1: Guided Journey -->
+    <a class="tile" href="#trio-ranking" onclick="navigateTo('trio')">
+      <div class="tile-icon guided">🧭</div>
+      <div class="tile-content">
+        <div class="tile-label">
+          Guide me through the Journey
+          <span class="tile-badge">Recommended</span>
+        </div>
+        <div class="tile-desc">Rank players through quick 3-player matchups. We'll walk you through it position by position — no dynasty knowledge required.</div>
+      </div>
+      <div class="tile-arrow">&#8250;</div>
+    </a>
+
+    <!-- Option 2: Manual Rankings -->
+    <a class="tile" href="#manual-rankings" onclick="navigateTo('rankings')">
+      <div class="tile-icon manual">📋</div>
+      <div class="tile-content">
+        <div class="tile-label">Let me set the rankings myself</div>
+        <div class="tile-desc">Jump straight into the full rankings list and drag players into your preferred order. Best if you already know your valuations.</div>
+      </div>
+      <div class="tile-arrow">&#8250;</div>
+    </a>
+
+    <!-- Option 3: Positional Tiers -->
+    <a class="tile" href="#positional-tiers" onclick="navigateTo('tiers')">
+      <div class="tile-icon tiers">🏷️</div>
+      <div class="tile-content">
+        <div class="tile-label">Let me set positional tiers</div>
+        <div class="tile-desc">Group players into tiers within each position — elite, starter, depth, etc. A fast way to express your rankings at a high level.</div>
+      </div>
+      <div class="tile-arrow">&#8250;</div>
+    </a>
+
+  </div>
+
+  <div class="footer-note">
+    You can always change your method later or refine rankings from the Rankings tab.
+  </div>
+
+  <script>
+    function navigateTo(destination) {
+      // Placeholder navigation — wire up to your actual routing
+      const routes = {
+        trio:     '/rank',       // trio ranking experience
+        rankings: '/rankings',   // rankings tab
+        tiers:    '/tiers'       // positional tiers (new page)
+      };
+
+      console.log(`Navigating to: ${routes[destination]}`);
+
+      // Uncomment when integrating into the main app:
+      // window.location.href = routes[destination];
+    }
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Positional Tiers — Fantasy Trade Finder</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --border:   #2a2d3a;
+      --text:     #e8eaf0;
+      --muted:    #7a7f96;
+      --accent:   #4f7cff;
+      --green:    #22c55e;
+      --red:      #ef4444;
+      --qb: #f97316;
+      --rb: #22c55e;
+      --wr: #3b82f6;
+      --te: #a855f7;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    .tier-header {
+      padding: 20px 24px 0;
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .tier-header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color 0.15s;
+      cursor: pointer;
+    }
+    .back-link:hover { color: var(--accent); }
+
+    .page-logo {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    .page-logo span { color: var(--accent); }
+
+    .tier-title-row {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+
+    .tier-title-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .tier-page-title {
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .tier-page-subtitle {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    /* ── Position tabs ── */
+    .pos-tabs {
+      display: flex;
+      gap: 6px;
+      padding: 12px 24px 0;
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .pos-tab {
+      padding: 7px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .pos-tab:hover { border-color: #3a3d4a; color: var(--text); }
+    .pos-tab.active { border-color: var(--accent); color: var(--accent); background: rgba(79,124,255,0.08); }
+
+    .pos-tab.active[data-pos="QB"] { border-color: var(--qb); color: var(--qb); background: rgba(249,115,22,0.08); }
+    .pos-tab.active[data-pos="RB"] { border-color: var(--rb); color: var(--rb); background: rgba(34,197,94,0.08); }
+    .pos-tab.active[data-pos="WR"] { border-color: var(--wr); color: var(--wr); background: rgba(59,130,246,0.08); }
+    .pos-tab.active[data-pos="TE"] { border-color: var(--te); color: var(--te); background: rgba(168,85,247,0.08); }
+
+    /* ── Progress indicator ── */
+    .progress-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 24px;
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .progress-track {
+      flex: 1;
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 3px;
+      transition: width 0.4s ease;
+    }
+
+    .progress-text {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    /* ── Main layout: pool on top, tier rows below ── */
+    .tier-layout {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      padding: 0 24px 24px;
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* ── Tier rows (Kanban-style horizontal lanes) ── */
+    .tier-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 0;
+      padding-bottom: 12px;
+    }
+
+    .tier-row {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      display: flex;
+      align-items: stretch;
+      min-height: 72px;
+      overflow: hidden;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .tier-row.drag-over {
+      border-color: var(--accent);
+      box-shadow: 0 0 16px rgba(79,124,255,0.15);
+    }
+
+    .tier-label-area {
+      width: 110px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 8px;
+      gap: 4px;
+      border-right: 1px solid var(--border);
+      user-select: none;
+    }
+
+    .tier-label-name {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+    }
+
+    .tier-label-desc {
+      font-size: 10px;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.3;
+    }
+
+    .tier-label-count {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* Tier colour accents */
+    .tier-row[data-tier="elite"]   .tier-label-area { background: rgba(251,191,36,0.06); }
+    .tier-row[data-tier="elite"]   .tier-label-name { color: #fbbf24; }
+
+    .tier-row[data-tier="starter"] .tier-label-area { background: rgba(34,197,94,0.06); }
+    .tier-row[data-tier="starter"] .tier-label-name { color: #22c55e; }
+
+    .tier-row[data-tier="solid"]   .tier-label-area { background: rgba(56,189,248,0.06); }
+    .tier-row[data-tier="solid"]   .tier-label-name { color: #38bdf8; }
+
+    .tier-row[data-tier="depth"]   .tier-label-area { background: rgba(251,146,60,0.06); }
+    .tier-row[data-tier="depth"]   .tier-label-name { color: #fb923c; }
+
+    .tier-row[data-tier="bench"]   .tier-label-area { background: rgba(122,127,150,0.03); }
+    .tier-row[data-tier="bench"]   .tier-label-name { color: #555a6e; }
+
+    /* Drop zone within each tier row */
+    .tier-drop-zone {
+      flex: 1;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      align-content: flex-start;
+      gap: 8px;
+      padding: 10px;
+      min-height: 52px;
+      position: relative;
+    }
+
+    .tier-drop-zone.empty::after {
+      content: "Drag players here";
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: #3a3d50;
+      pointer-events: none;
+    }
+
+    /* ── Top: Unassigned player pool (full width, grid) ── */
+    .player-pool {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      display: flex;
+      flex-direction: column;
+      max-height: 420px;
+      order: -1;  /* always above tier rows */
+    }
+
+    .pool-header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .pool-title {
+      font-size: 14px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .pool-search {
+      flex: 1;
+      max-width: 300px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .pool-search:focus { border-color: var(--accent); }
+    .pool-search::placeholder { color: #3e4258; }
+
+    .pool-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      align-content: flex-start;
+      gap: 8px;
+    }
+
+    .pool-empty {
+      padding: 24px 12px;
+      text-align: center;
+      font-size: 13px;
+      color: #3a3d50;
+      width: 100%;
+    }
+
+    /* ── Player chip (used in both pool and tier zones) ── */
+    .player-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      cursor: grab;
+      transition: border-color 0.15s, background 0.15s, transform 0.1s, opacity 0.15s;
+      user-select: none;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .player-chip:hover {
+      border-color: #3a3d4a;
+      background: rgba(255,255,255,0.07);
+    }
+    .player-chip:active { cursor: grabbing; }
+    .player-chip.dragging {
+      opacity: 0.4;
+      transform: scale(0.96);
+    }
+
+    .chip-pos {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .chip-pos.qb { background: rgba(249,115,22,0.15); color: var(--qb); }
+    .chip-pos.rb { background: rgba(34,197,94,0.15);  color: var(--rb); }
+    .chip-pos.wr { background: rgba(59,130,246,0.15); color: var(--wr); }
+    .chip-pos.te { background: rgba(168,85,247,0.15); color: var(--te); }
+
+    .chip-name {
+      font-weight: 600;
+      line-height: 1;
+    }
+
+    .chip-team {
+      font-size: 11px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .chip-elo {
+      font-size: 10px;
+      font-weight: 700;
+      color: #555a6e;
+      background: rgba(255,255,255,0.04);
+      padding: 1px 5px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+
+    .chip-remove {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(239,68,68,0.12);
+      color: var(--red);
+      border: none;
+      cursor: pointer;
+      font-size: 12px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.12s;
+      line-height: 1;
+      padding: 0;
+    }
+    .chip-remove:hover { background: rgba(239,68,68,0.25); }
+    .tier-drop-zone .player-chip .chip-remove { display: flex; }
+
+    .chip-age {
+      font-size: 11px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    /* Arrow buttons — hidden for pool chips, always visible for tier chips */
+    .chip-arrows {
+      display: none;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+    .chip-arrows.tier-arrows {
+      display: flex;
+    }
+
+    .chip-arrow-btn {
+      width: 22px;
+      height: 22px;
+      border-radius: 5px;
+      background: rgba(79,124,255,0.1);
+      color: var(--accent);
+      border: none;
+      cursor: pointer;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.12s;
+      padding: 0;
+    }
+    .chip-arrow-btn:hover { background: rgba(79,124,255,0.22); }
+
+    /* ── Pool player card (larger, with tier-assign tiles) ── */
+    .pool-list .player-chip {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+      padding: 10px 12px;
+      flex: 1 1 170px;   /* grow to fill row, shrink allowed, min basis 170px */
+      max-width: 240px;  /* cap so they don't get absurdly wide */
+      min-width: 0;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .pool-chip-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .pool-chip-top .chip-name {
+      flex: 1;
+      min-width: 0;
+      white-space: normal;
+      word-break: break-word;
+      line-height: 1.2;
+    }
+    .pool-chip-meta {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .tier-assign-row {
+      display: flex;
+      gap: 3px;
+      margin-top: 2px;
+    }
+    .tier-assign-btn {
+      flex: 1;
+      min-width: 0;
+      padding: 4px 2px;
+      border-radius: 5px;
+      border: 1px solid;
+      font-size: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.2px;
+      cursor: pointer;
+      transition: all 0.12s;
+      text-align: center;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    /* Always show tier colors on buttons */
+    .tier-assign-btn[data-tier="elite"]   { border-color: rgba(251,191,36,0.3); color: #fbbf24; background: rgba(251,191,36,0.06); }
+    .tier-assign-btn[data-tier="starter"] { border-color: rgba(34,197,94,0.3);  color: #22c55e; background: rgba(34,197,94,0.06); }
+    .tier-assign-btn[data-tier="solid"]   { border-color: rgba(56,189,248,0.3); color: #38bdf8; background: rgba(56,189,248,0.06); }
+    .tier-assign-btn[data-tier="depth"]   { border-color: rgba(251,146,60,0.3); color: #fb923c; background: rgba(251,146,60,0.06); }
+    .tier-assign-btn[data-tier="bench"]   { border-color: rgba(122,127,150,0.3); color: #7a7f96; background: rgba(122,127,150,0.04); }
+    /* Hover — intensify */
+    .tier-assign-btn[data-tier="elite"]:hover   { background: rgba(251,191,36,0.18); border-color: #fbbf24; }
+    .tier-assign-btn[data-tier="starter"]:hover  { background: rgba(34,197,94,0.18);  border-color: #22c55e; }
+    .tier-assign-btn[data-tier="solid"]:hover    { background: rgba(56,189,248,0.18); border-color: #38bdf8; }
+    .tier-assign-btn[data-tier="depth"]:hover    { background: rgba(251,146,60,0.18); border-color: #fb923c; }
+    .tier-assign-btn[data-tier="bench"]:hover    { background: rgba(122,127,150,0.14); border-color: #7a7f96; }
+
+    /* ── Tier legend/key (inside pool, between search and grid) ── */
+    .tier-legend {
+      padding: 0 12px;
+    }
+    .tier-legend-inner {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+      padding: 12px 20px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #1e2a4a 0%, #2a1e3a 50%, #3a2a1a 100%);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+    .tier-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .tier-legend-swatch {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 5px 12px;
+      border-radius: 7px;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      border: 1.5px solid;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    }
+    .tier-legend-swatch[data-tier="elite"]   { border-color: #fbbf24; color: #fcd34d; background: rgba(251,191,36,0.2); box-shadow: 0 0 8px rgba(251,191,36,0.25); }
+    .tier-legend-swatch[data-tier="starter"] { border-color: #22c55e; color: #4ade80; background: rgba(34,197,94,0.2);  box-shadow: 0 0 8px rgba(34,197,94,0.25); }
+    .tier-legend-swatch[data-tier="solid"]   { border-color: #38bdf8; color: #7dd3fc; background: rgba(56,189,248,0.2); box-shadow: 0 0 8px rgba(56,189,248,0.25); }
+    .tier-legend-swatch[data-tier="depth"]   { border-color: #fb923c; color: #fdba74; background: rgba(251,146,60,0.2); box-shadow: 0 0 8px rgba(251,146,60,0.25); }
+    .tier-legend-swatch[data-tier="bench"]   { border-color: #6b7280; color: #9ca3af; background: rgba(107,114,128,0.2); box-shadow: 0 0 8px rgba(107,114,128,0.15); }
+    .tier-legend-desc {
+      color: rgba(255,255,255,0.6);
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    /* ── Ghost element while dragging ── */
+    .drag-ghost {
+      position: fixed;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.92;
+      transform: rotate(2deg) scale(1.04);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    }
+
+    /* ── Bottom action bar ── */
+    .bottom-bar {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+
+    .save-btn {
+      background: var(--accent);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 11px 28px;
+      transition: opacity 0.15s;
+    }
+    .save-btn:hover { opacity: 0.88; }
+
+    .reset-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 20px;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .reset-btn:hover { border-color: var(--red); color: var(--red); }
+
+    /* ── Undo toast ── */
+    .undo-toast {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: #1e2130;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 18px;
+      font-size: 13px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s, transform 0.25s;
+      z-index: 500;
+    }
+    .undo-toast.show {
+      opacity: 1;
+      pointer-events: all;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .undo-btn {
+      background: rgba(79,124,255,0.15);
+      color: var(--accent);
+      border: none;
+      border-radius: 6px;
+      padding: 5px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .undo-btn:hover { background: rgba(79,124,255,0.28); }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3a3d4a; }
+
+    /* ── Touch / mobile responsive ── */
+    @media (max-width: 768px) {
+      .player-pool { max-height: 300px; }
+      .pool-list .player-chip { flex: 1 1 100%; max-width: 100%; }
+
+      .tier-label-area { width: 80px; padding: 8px 4px; }
+      .tier-label-name { font-size: 12px; }
+      .tier-label-desc { display: none; }
+
+      .pool-header { flex-direction: column; gap: 8px; }
+      .pool-search { max-width: 100%; }
+    }
+
+    @media (pointer: coarse) {
+      .chip-arrows { display: flex; }
+      .player-chip { min-height: 40px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Header ── -->
+  <div class="tier-header">
+    <div class="tier-header-top">
+      <a class="back-link" href="/">&#8249; Back</a>
+      <div class="page-logo">Dynasty <span>Trade Finder</span></div>
+    </div>
+    <div class="tier-title-row">
+      <div class="tier-title-group">
+        <div class="tier-page-title">Set Positional Tiers</div>
+        <div class="tier-page-subtitle">Players are pre-sorted into tiers based on consensus dynasty values. Adjust them to match your own rankings.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Position tabs ── -->
+  <div class="pos-tabs" id="pos-tabs">
+    <button class="pos-tab active" data-pos="RB" onclick="switchPos('RB', this)">RB</button>
+    <button class="pos-tab" data-pos="WR" onclick="switchPos('WR', this)">WR</button>
+    <button class="pos-tab" data-pos="QB" onclick="switchPos('QB', this)">QB</button>
+    <button class="pos-tab" data-pos="TE" onclick="switchPos('TE', this)">TE</button>
+  </div>
+
+  <!-- ── Progress bar ── -->
+  <div class="progress-row">
+    <div class="progress-track">
+      <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+    </div>
+    <div class="progress-text" id="progress-text">0 of 0 players placed</div>
+  </div>
+
+  <!-- ── Main layout ── -->
+  <div class="tier-layout">
+
+    <!-- Unassigned player pool (above tiers) -->
+    <div class="player-pool" id="player-pool">
+      <div class="pool-header">
+        <div class="pool-title">Unassigned Players</div>
+        <input class="pool-search" id="pool-search" type="text" placeholder="Search players..." oninput="filterPool(this.value)" />
+      </div>
+      <!-- Tier legend/key — between search and player grid -->
+      <div class="tier-legend">
+        <div class="tier-legend-inner">
+          <span class="tier-legend-item">
+            <span class="tier-legend-swatch" data-tier="elite">Elite</span>
+            <span class="tier-legend-desc">League winners</span>
+          </span>
+          <span class="tier-legend-item">
+            <span class="tier-legend-swatch" data-tier="starter">Starter</span>
+            <span class="tier-legend-desc">Weekly locks</span>
+          </span>
+          <span class="tier-legend-item">
+            <span class="tier-legend-swatch" data-tier="solid">Solid</span>
+            <span class="tier-legend-desc">Flex / matchup</span>
+          </span>
+          <span class="tier-legend-item">
+            <span class="tier-legend-swatch" data-tier="depth">Depth</span>
+            <span class="tier-legend-desc">Bye-week fills</span>
+          </span>
+          <span class="tier-legend-item">
+            <span class="tier-legend-swatch" data-tier="bench">Bench</span>
+            <span class="tier-legend-desc">Stashes</span>
+          </span>
+        </div>
+      </div>
+      <div class="pool-list" id="pool-list"></div>
+    </div>
+
+    <!-- Tier rows -->
+    <div class="tier-rows" id="tier-rows">
+
+      <div class="tier-row" data-tier="elite">
+        <div class="tier-label-area">
+          <div class="tier-label-name">Elite</div>
+          <div class="tier-label-desc">League winners</div>
+          <div class="tier-label-count" id="count-elite">0</div>
+        </div>
+        <div class="tier-drop-zone empty" id="zone-elite"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'elite')"></div>
+      </div>
+
+      <div class="tier-row" data-tier="starter">
+        <div class="tier-label-area">
+          <div class="tier-label-name">Starter</div>
+          <div class="tier-label-desc">Weekly locks</div>
+          <div class="tier-label-count" id="count-starter">0</div>
+        </div>
+        <div class="tier-drop-zone empty" id="zone-starter"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'starter')"></div>
+      </div>
+
+      <div class="tier-row" data-tier="solid">
+        <div class="tier-label-area">
+          <div class="tier-label-name">Solid</div>
+          <div class="tier-label-desc">Flex / matchup plays</div>
+          <div class="tier-label-count" id="count-solid">0</div>
+        </div>
+        <div class="tier-drop-zone empty" id="zone-solid"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'solid')"></div>
+      </div>
+
+      <div class="tier-row" data-tier="depth">
+        <div class="tier-label-area">
+          <div class="tier-label-name">Depth</div>
+          <div class="tier-label-desc">Bye-week fill-ins</div>
+          <div class="tier-label-count" id="count-depth">0</div>
+        </div>
+        <div class="tier-drop-zone empty" id="zone-depth"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'depth')"></div>
+      </div>
+
+      <div class="tier-row" data-tier="bench">
+        <div class="tier-label-area">
+          <div class="tier-label-name">Bench</div>
+          <div class="tier-label-desc">Roster stashes</div>
+          <div class="tier-label-count" id="count-bench">0</div>
+        </div>
+        <div class="tier-drop-zone empty" id="zone-bench"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'bench')"></div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- ── Bottom action bar ── -->
+  <div class="bottom-bar">
+    <button class="reset-btn" onclick="resetCurrentPos()">Reset to Defaults</button>
+    <button class="save-btn" id="save-btn" onclick="saveTiers()">Save Tiers</button>
+  </div>
+
+  <!-- ── Undo toast ── -->
+  <div class="undo-toast" id="undo-toast">
+    <span id="undo-text">Player moved</span>
+    <button class="undo-btn" onclick="undoLastMove()">Undo</button>
+  </div>
+
+
+  <!-- Celebration overlay -->
+  <div class="celebration-overlay hidden" id="tier-celebration">
+    <div class="celebration-card">
+      <div class="celebration-emoji">&#127942;</div>
+      <div class="celebration-title">All positions tiered!</div>
+      <div class="celebration-sub">Your dynasty tiers are set. Time to find some trades!</div>
+      <div class="celebration-actions">
+        <button class="celebration-btn secondary" onclick="closeTierCelebration()">Refine tiers</button>
+        <button class="celebration-btn primary" onclick="window.location.href='/'">Give me some offers &#8594;</button>
+      </div>
+    </div>
+  </div>
+  <style>
+    .celebration-overlay { position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);backdrop-filter:blur(6px); }
+    .celebration-overlay.hidden { display:none; }
+    .celebration-card { background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px 28px 28px;max-width:400px;width:90%;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,0.6);animation:popIn 0.3s cubic-bezier(0.175,0.885,0.32,1.275); }
+    @keyframes popIn{from{transform:scale(0.8);opacity:0;}to{transform:scale(1);opacity:1;}}
+    .celebration-emoji { font-size:56px;line-height:1;margin-bottom:12px; }
+    .celebration-title { font-size:20px;font-weight:800;color:var(--text);margin-bottom:6px; }
+    .celebration-sub { font-size:14px;color:var(--muted);margin-bottom:20px;line-height:1.5; }
+    .celebration-actions { display:flex;gap:10px;justify-content:center;flex-wrap:wrap; }
+    .celebration-btn { padding:10px 20px;border-radius:10px;font-weight:600;cursor:pointer;border:none;font-size:0.95rem; }
+    .celebration-btn.primary { background:var(--accent);color:white; }
+    .celebration-btn.primary:hover { filter:brightness(1.1); }
+    .celebration-btn.secondary { background:rgba(255,255,255,0.08);color:var(--text);border:1px solid rgba(255,255,255,0.15); }
+    .celebration-btn.secondary:hover { background:rgba(255,255,255,0.14); }
+    .pos-tab .check { color:var(--green);margin-left:4px;font-size:12px; }
+  </style>
+
+  <script>
+    // ══════════════════════════════════════════════════════
+    //  REAL API integration — fetches players from backend
+    // ══════════════════════════════════════════════════════
+    const SAMPLE_PLAYERS = {
+      RB: [
+        { id: 'rb1',  name: 'Bijan Robinson',    team: 'ATL', pos: 'RB', elo: 1810 },
+        { id: 'rb2',  name: 'Breece Hall',        team: 'NYJ', pos: 'RB', elo: 1755 },
+        { id: 'rb3',  name: 'Jahmyr Gibbs',       team: 'DET', pos: 'RB', elo: 1740 },
+        { id: 'rb4',  name: 'Jonathan Taylor',    team: 'IND', pos: 'RB', elo: 1680 },
+        { id: 'rb5',  name: 'Saquon Barkley',     team: 'PHI', pos: 'RB', elo: 1660 },
+        { id: 'rb6',  name: 'Kenneth Walker III', team: 'SEA', pos: 'RB', elo: 1620 },
+        { id: 'rb7',  name: 'De\'Von Achane',     team: 'MIA', pos: 'RB', elo: 1610 },
+        { id: 'rb8',  name: 'Travis Etienne',     team: 'JAX', pos: 'RB', elo: 1560 },
+        { id: 'rb9',  name: 'Isiah Pacheco',      team: 'KC',  pos: 'RB', elo: 1520 },
+        { id: 'rb10', name: 'Josh Jacobs',        team: 'GB',  pos: 'RB', elo: 1490 },
+        { id: 'rb11', name: 'Kyren Williams',     team: 'LAR', pos: 'RB', elo: 1450 },
+        { id: 'rb12', name: 'Rachaad White',      team: 'TB',  pos: 'RB', elo: 1390 },
+        { id: 'rb13', name: 'Rhamondre Stevenson',team: 'NE',  pos: 'RB', elo: 1370 },
+        { id: 'rb14', name: 'Aaron Jones',        team: 'MIN', pos: 'RB', elo: 1320 },
+        { id: 'rb15', name: 'Javonte Williams',   team: 'DEN', pos: 'RB', elo: 1280 },
+      ],
+      WR: [
+        { id: 'wr1',  name: 'Ja\'Marr Chase',    team: 'CIN', pos: 'WR', elo: 1830 },
+        { id: 'wr2',  name: 'CeeDee Lamb',       team: 'DAL', pos: 'WR', elo: 1790 },
+        { id: 'wr3',  name: 'Amon-Ra St. Brown', team: 'DET', pos: 'WR', elo: 1750 },
+        { id: 'wr4',  name: 'Tyreek Hill',       team: 'MIA', pos: 'WR', elo: 1700 },
+        { id: 'wr5',  name: 'A.J. Brown',        team: 'PHI', pos: 'WR', elo: 1680 },
+        { id: 'wr6',  name: 'Garrett Wilson',    team: 'NYJ', pos: 'WR', elo: 1620 },
+        { id: 'wr7',  name: 'Puka Nacua',        team: 'LAR', pos: 'WR', elo: 1610 },
+        { id: 'wr8',  name: 'Marvin Harrison Jr',team: 'ARI', pos: 'WR', elo: 1590 },
+        { id: 'wr9',  name: 'Chris Olave',       team: 'NO',  pos: 'WR', elo: 1530 },
+        { id: 'wr10', name: 'DeVonta Smith',     team: 'PHI', pos: 'WR', elo: 1500 },
+        { id: 'wr11', name: 'Drake London',      team: 'ATL', pos: 'WR', elo: 1470 },
+        { id: 'wr12', name: 'DK Metcalf',        team: 'SEA', pos: 'WR', elo: 1440 },
+      ],
+      QB: [
+        { id: 'qb1', name: 'Patrick Mahomes',   team: 'KC',  pos: 'QB', elo: 1820 },
+        { id: 'qb2', name: 'Josh Allen',        team: 'BUF', pos: 'QB', elo: 1790 },
+        { id: 'qb3', name: 'Lamar Jackson',     team: 'BAL', pos: 'QB', elo: 1760 },
+        { id: 'qb4', name: 'Joe Burrow',        team: 'CIN', pos: 'QB', elo: 1730 },
+        { id: 'qb5', name: 'Jalen Hurts',       team: 'PHI', pos: 'QB', elo: 1690 },
+        { id: 'qb6', name: 'C.J. Stroud',       team: 'HOU', pos: 'QB', elo: 1650 },
+        { id: 'qb7', name: 'Anthony Richardson',team: 'IND', pos: 'QB', elo: 1580 },
+        { id: 'qb8', name: 'Caleb Williams',    team: 'CHI', pos: 'QB', elo: 1560 },
+        { id: 'qb9', name: 'Jayden Daniels',    team: 'WAS', pos: 'QB', elo: 1540 },
+        { id: 'qb10',name: 'Jordan Love',       team: 'GB',  pos: 'QB', elo: 1500 },
+      ],
+      TE: [
+        { id: 'te1', name: 'Sam LaPorta',      team: 'DET', pos: 'TE', elo: 1720 },
+        { id: 'te2', name: 'Travis Kelce',     team: 'KC',  pos: 'TE', elo: 1700 },
+        { id: 'te3', name: 'Trey McBride',     team: 'ARI', pos: 'TE', elo: 1620 },
+        { id: 'te4', name: 'Mark Andrews',     team: 'BAL', pos: 'TE', elo: 1580 },
+        { id: 'te5', name: 'George Kittle',    team: 'SF',  pos: 'TE', elo: 1560 },
+        { id: 'te6', name: 'Dallas Goedert',   team: 'PHI', pos: 'TE', elo: 1460 },
+        { id: 'te7', name: 'Kyle Pitts',       team: 'ATL', pos: 'TE', elo: 1420 },
+        { id: 'te8', name: 'Dalton Kincaid',   team: 'BUF', pos: 'TE', elo: 1400 },
+      ],
+    };
+
+    const TIERS = ['elite', 'starter', 'solid', 'depth', 'bench'];
+
+    // ── Elo thresholds for auto-tiering ──
+    // Players are sorted by Elo descending, then bucketed using these cutoffs.
+    // Thresholds are applied per-position so each position gets its own curve.
+    const ELO_TIER_THRESHOLDS = {
+      elite:   1700,   // top dynasty assets
+      starter: 1580,   // reliable weekly starters
+      solid:   1460,   // flex-worthy / matchup plays
+      depth:   1350,   // bye-week fill-ins
+      // everything below 1350 → bench
+    };
+
+    function autoAssignTiers(pos) {
+      const players = (SAMPLE_PLAYERS[pos] || []).slice();
+      // Sort by Elo descending so highest-rated appear first in each tier
+      players.sort((a, b) => b.elo - a.elo);
+
+      const tiers = {};
+      TIERS.forEach(t => tiers[t] = []);
+
+      players.forEach(p => {
+        if      (p.elo >= ELO_TIER_THRESHOLDS.elite)   tiers.elite.push(p.id);
+        else if (p.elo >= ELO_TIER_THRESHOLDS.starter)  tiers.starter.push(p.id);
+        else if (p.elo >= ELO_TIER_THRESHOLDS.solid)    tiers.solid.push(p.id);
+        else if (p.elo >= ELO_TIER_THRESHOLDS.depth)    tiers.depth.push(p.id);
+        // Players below depth threshold stay unassigned (in the pool),
+        // sorted by ELO so users can drag them into tiers as needed.
+      });
+
+      return tiers;
+    }
+
+    // ── State ──
+    let currentPos = 'RB';
+    // tierState[pos][tier] = [playerId, ...]
+    // Pre-populate every position from default Elo ratings
+    let tierState = {};
+    ['RB', 'WR', 'QB', 'TE'].forEach(pos => {
+      tierState[pos] = autoAssignTiers(pos);
+    });
+
+    let undoStack = [];     // {playerId, fromTier (null = pool), toTier}
+    let draggedId = null;
+
+    // ══════════════════════════════════════════════════════
+    //  RENDERING
+    // ══════════════════════════════════════════════════════
+    function render() {
+      const players = SAMPLE_PLAYERS[currentPos] || [];
+      const assigned = new Set();
+      TIERS.forEach(t => tierState[currentPos][t].forEach(id => assigned.add(id)));
+
+      // Render tier zones
+      TIERS.forEach(tier => {
+        const zone = document.getElementById(`zone-${tier}`);
+        const ids = tierState[currentPos][tier];
+        zone.innerHTML = '';
+        ids.forEach(id => {
+          const p = players.find(x => x.id === id);
+          if (p) zone.appendChild(createChip(p, tier));
+        });
+        zone.classList.toggle('empty', ids.length === 0);
+        document.getElementById(`count-${tier}`).textContent = ids.length;
+      });
+
+      // Render pool
+      renderPool('');
+      document.getElementById('pool-search').value = '';
+
+      // Update progress
+      const total = players.length;
+      const placed = assigned.size;
+      const pct = total ? Math.round((placed / total) * 100) : 0;
+      document.getElementById('progress-fill').style.width = pct + '%';
+      document.getElementById('progress-text').textContent = `${placed} of ${total} players placed`;
+
+      // Color the progress bar to match position
+      const posColors = { RB: 'var(--rb)', WR: 'var(--wr)', QB: 'var(--qb)', TE: 'var(--te)' };
+      document.getElementById('progress-fill').style.background = posColors[currentPos] || 'var(--accent)';
+    }
+
+    function renderPool(filter) {
+      const players = SAMPLE_PLAYERS[currentPos] || [];
+      const assigned = new Set();
+      TIERS.forEach(t => tierState[currentPos][t].forEach(id => assigned.add(id)));
+
+      const pool = document.getElementById('pool-list');
+      const unassigned = players
+        .filter(p => !assigned.has(p.id))
+        .sort((a, b) => b.elo - a.elo);  // highest ELO first
+      const filtered = filter
+        ? unassigned.filter(p => p.name.toLowerCase().includes(filter.toLowerCase()) || p.team.toLowerCase().includes(filter.toLowerCase()))
+        : unassigned;
+
+      pool.innerHTML = '';
+      if (filtered.length === 0) {
+        pool.innerHTML = `<div class="pool-empty">${unassigned.length === 0 ? 'All players placed!' : 'No matches'}</div>`;
+        return;
+      }
+      filtered.forEach(p => pool.appendChild(createChip(p, null)));
+    }
+
+    function createChip(player, tierName) {
+      // tierName: null = in pool (unassigned), or 'elite'/'starter'/'solid'/'depth'/'bench'
+      const inTier = !!tierName;
+      const chip = document.createElement('div');
+      chip.className = 'player-chip';
+      chip.setAttribute('draggable', 'true');
+      chip.dataset.id = player.id;
+
+      const posClass = player.pos.toLowerCase();
+      const tierIdx  = inTier ? TIERS.indexOf(tierName) : -1;
+      const isTop    = tierIdx === 0;
+      const isBottom = tierIdx === TIERS.length - 1;
+
+      // Build arrow buttons: only show relevant arrows when in a tier
+      let arrowsHtml = '';
+      if (inTier) {
+        const upBtn = isTop
+          ? ''
+          : `<button class="chip-arrow-btn" onclick="event.stopPropagation(); moveUp('${player.id}')" title="Move up tier">&#9650;</button>`;
+        const downBtn = isBottom
+          ? ''
+          : `<button class="chip-arrow-btn" onclick="event.stopPropagation(); moveDown('${player.id}')" title="Move down tier">&#9660;</button>`;
+        if (upBtn || downBtn) {
+          arrowsHtml = `<span class="chip-arrows tier-arrows">${upBtn}${downBtn}</span>`;
+        }
+      }
+
+      const ageStr = player.age ? `${player.age}` : '';
+
+      if (inTier) {
+        chip.innerHTML = `
+          <span class="chip-pos ${posClass}">${player.pos}</span>
+          <span class="chip-name">${player.name}</span>
+          ${ageStr ? `<span class="chip-age">${ageStr}</span>` : ''}
+          <span class="chip-team">${player.team}</span>
+          ${arrowsHtml}
+          <button class="chip-remove" onclick="event.stopPropagation(); removeFromTier('${player.id}')" title="Remove">&#10005;</button>
+        `;
+      } else {
+        // Pool card — larger with tier-assignment tiles
+        chip.innerHTML = `
+          <div class="pool-chip-top">
+            <span class="chip-pos ${posClass}">${player.pos}</span>
+            <span class="chip-name">${player.name}</span>
+          </div>
+          <div class="pool-chip-meta">${ageStr ? ageStr + ' &middot; ' : ''}${player.team}</div>
+          <div class="tier-assign-row">
+            ${TIERS.map(t =>
+              `<button class="tier-assign-btn" data-tier="${t}"
+                onclick="event.stopPropagation(); assignToTier('${player.id}', '${t}')"
+                title="Add to ${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</button>`
+            ).join('')}
+          </div>
+        `;
+      }
+
+      // Drag events
+      chip.addEventListener('dragstart', (e) => {
+        draggedId = player.id;
+        chip.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', player.id);
+      });
+      chip.addEventListener('dragend', () => {
+        chip.classList.remove('dragging');
+        draggedId = null;
+        document.querySelectorAll('.tier-row.drag-over').forEach(r => r.classList.remove('drag-over'));
+      });
+
+      // Pool chips use the tier-assign buttons instead of click-to-quick-assign
+
+      return chip;
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  DRAG & DROP HANDLERS
+    // ══════════════════════════════════════════════════════
+    function onDragOver(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      e.currentTarget.closest('.tier-row').classList.add('drag-over');
+    }
+
+    function onDragLeave(e) {
+      // Only remove if we actually left the zone
+      if (!e.currentTarget.contains(e.relatedTarget)) {
+        e.currentTarget.closest('.tier-row').classList.remove('drag-over');
+      }
+    }
+
+    function onDrop(e, targetTier) {
+      e.preventDefault();
+      const row = e.currentTarget.closest('.tier-row');
+      row.classList.remove('drag-over');
+
+      const playerId = e.dataTransfer.getData('text/plain') || draggedId;
+      if (!playerId) return;
+
+      assignToTier(playerId, targetTier);
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  TIER ASSIGNMENT LOGIC
+    // ══════════════════════════════════════════════════════
+    function assignToTier(playerId, targetTier) {
+      const state = tierState[currentPos];
+
+      // Find current tier (if any)
+      let fromTier = null;
+      TIERS.forEach(t => {
+        const idx = state[t].indexOf(playerId);
+        if (idx !== -1) {
+          fromTier = t;
+          state[t].splice(idx, 1);
+        }
+      });
+
+      // Skip if already in the same tier
+      if (fromTier === targetTier) {
+        render();
+        return;
+      }
+
+      state[targetTier].push(playerId);
+
+      // Push undo
+      undoStack.push({ playerId, fromTier, toTier: targetTier });
+      showUndo(playerId);
+
+      render();
+    }
+
+    function removeFromTier(playerId) {
+      const state = tierState[currentPos];
+      TIERS.forEach(t => {
+        const idx = state[t].indexOf(playerId);
+        if (idx !== -1) {
+          undoStack.push({ playerId, fromTier: t, toTier: null });
+          state[t].splice(idx, 1);
+          showUndo(playerId);
+        }
+      });
+      render();
+    }
+
+    function quickAssign(playerId) {
+      // Smart assign: put in the tier that could use more players,
+      // biased toward higher tiers first
+      const state = tierState[currentPos];
+      const tierCounts = TIERS.map(t => ({ tier: t, count: state[t].length }));
+
+      // Find the first tier that has room (fewer than others proportionally)
+      // Simple heuristic: fill elite first up to ~3, then starter up to ~5, etc.
+      const limits = { elite: 3, starter: 5, solid: 5, depth: 4, bench: 999 };
+      let target = 'bench';
+      for (const t of TIERS) {
+        if (state[t].length < limits[t]) {
+          target = t;
+          break;
+        }
+      }
+      assignToTier(playerId, target);
+    }
+
+    // ── Arrow-based tier movement (mobile fallback) ──
+    function moveUp(playerId) {
+      const state = tierState[currentPos];
+      let currentTier = null;
+      TIERS.forEach(t => { if (state[t].includes(playerId)) currentTier = t; });
+
+      if (!currentTier) {
+        // In pool — assign to bottom tier
+        assignToTier(playerId, TIERS[TIERS.length - 1]);
+        return;
+      }
+
+      const idx = TIERS.indexOf(currentTier);
+      if (idx <= 0) return; // already at top
+      assignToTier(playerId, TIERS[idx - 1]);
+    }
+
+    function moveDown(playerId) {
+      const state = tierState[currentPos];
+      let currentTier = null;
+      TIERS.forEach(t => { if (state[t].includes(playerId)) currentTier = t; });
+
+      if (!currentTier) return;
+
+      const idx = TIERS.indexOf(currentTier);
+      if (idx >= TIERS.length - 1) {
+        // At bottom tier — remove back to pool
+        removeFromTier(playerId);
+        return;
+      }
+      assignToTier(playerId, TIERS[idx + 1]);
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  UNDO
+    // ══════════════════════════════════════════════════════
+    let undoTimer = null;
+
+    function showUndo(playerId) {
+      const players = SAMPLE_PLAYERS[currentPos] || [];
+      const p = players.find(x => x.id === playerId);
+      const toast = document.getElementById('undo-toast');
+      document.getElementById('undo-text').textContent = p ? `${p.name} moved` : 'Player moved';
+      toast.classList.add('show');
+      clearTimeout(undoTimer);
+      undoTimer = setTimeout(() => toast.classList.remove('show'), 3500);
+    }
+
+    function undoLastMove() {
+      if (undoStack.length === 0) return;
+      const { playerId, fromTier, toTier } = undoStack.pop();
+      const state = tierState[currentPos];
+
+      // Remove from where it went
+      if (toTier) {
+        const idx = state[toTier].indexOf(playerId);
+        if (idx !== -1) state[toTier].splice(idx, 1);
+      }
+
+      // Put back where it was
+      if (fromTier) {
+        state[fromTier].push(playerId);
+      }
+
+      document.getElementById('undo-toast').classList.remove('show');
+      render();
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  POSITION SWITCHING
+    // ══════════════════════════════════════════════════════
+    function switchPos(pos, btn) {
+      currentPos = pos;
+      document.querySelectorAll('.pos-tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      undoStack = [];
+      render();
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  POOL SEARCH FILTER
+    // ══════════════════════════════════════════════════════
+    function filterPool(query) {
+      renderPool(query);
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  ACTIONS
+    // ══════════════════════════════════════════════════════
+    function resetCurrentPos() {
+      // Re-seed from default Elo-based tiers (not empty)
+      tierState[currentPos] = autoAssignTiers(currentPos);
+      undoStack = [];
+      render();
+    }
+
+    // Session token from the main app (stored in localStorage)
+    function _getSessionToken() {
+      return localStorage.getItem('fumble_session_token') || '';
+    }
+
+    const POS_ORDER = ['RB', 'WR', 'QB', 'TE'];
+    let savedPositions = new Set();  // track which positions have been saved
+
+    async function saveTiers() {
+      const tiers = {};
+      TIERS.forEach(tier => {
+        if (tierState[currentPos][tier].length > 0) {
+          tiers[tier] = tierState[currentPos][tier];
+        }
+      });
+
+      const btn = document.getElementById('save-btn');
+      btn.textContent = 'Saving...';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/tiers/save', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-Token': _getSessionToken(),
+          },
+          body: JSON.stringify({ position: currentPos, tiers }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          alert('Save failed: ' + (data.error || 'Unknown error'));
+          return;
+        }
+
+        savedPositions.add(currentPos);
+        updatePosTabs();
+
+        if (data.all_done) {
+          // All 4 positions saved — show celebration
+          document.getElementById('tier-celebration').classList.remove('hidden');
+        } else {
+          // Auto-advance to next unsaved position
+          const nextPos = POS_ORDER.find(p => !savedPositions.has(p));
+          if (nextPos) {
+            const nextBtn = document.querySelector(`.pos-tab[data-pos="${nextPos}"]`);
+            if (nextBtn) switchPos(nextPos, nextBtn);
+          }
+        }
+      } catch (e) {
+        alert('Save failed: ' + e.message);
+      } finally {
+        btn.textContent = 'Save Tiers';
+        btn.disabled = false;
+      }
+    }
+
+    function closeTierCelebration() {
+      document.getElementById('tier-celebration').classList.add('hidden');
+    }
+
+    function updatePosTabs() {
+      document.querySelectorAll('.pos-tab').forEach(tab => {
+        const pos = tab.dataset.pos;
+        const existing = tab.querySelector('.check');
+        if (savedPositions.has(pos) && !existing) {
+          tab.insertAdjacentHTML('beforeend', '<span class="check">&#10003;</span>');
+        }
+      });
+    }
+
+    // Load saved status from backend on page load
+    async function loadTiersStatus() {
+      try {
+        const res = await fetch('/api/tiers/status', {
+          headers: { 'X-Session-Token': _getSessionToken() },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          (data.saved || []).forEach(p => savedPositions.add(p));
+          updatePosTabs();
+        }
+      } catch (_) { /* ignore */ }
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  Also allow dropping back into the pool
+    // ══════════════════════════════════════════════════════
+    const poolEl = document.getElementById('player-pool');
+    poolEl.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      poolEl.style.borderColor = 'var(--accent)';
+    });
+    poolEl.addEventListener('dragleave', (e) => {
+      if (!poolEl.contains(e.relatedTarget)) {
+        poolEl.style.borderColor = '';
+      }
+    });
+    poolEl.addEventListener('drop', (e) => {
+      e.preventDefault();
+      poolEl.style.borderColor = '';
+      const playerId = e.dataTransfer.getData('text/plain') || draggedId;
+      if (playerId) removeFromTier(playerId);
+    });
+
+    // ══════════════════════════════════════════════════════
+    //  INIT — load real player data if available, then render
+    // ══════════════════════════════════════════════════════
+    // Convert search_rank to an approximate ELO using the same formula as
+    // data_loader.py: elo = 1200 + (dynasty_value / 10000) * 600
+    // where dynasty_value = 10000 * exp(-0.0126 * (rank - 1))
+    function rankToElo(rank) {
+      if (!rank || rank <= 0) return 1200;
+      const dv = 10000 * Math.exp(-0.0126 * (rank - 1));
+      return Math.round(1200 + (dv / 10000) * 600);
+    }
+
+    async function initFromAPI() {
+      const token = _getSessionToken();
+
+      // Load user's existing rankings if we have a session (has real ELO values)
+      const userElo = {};  // player_id → elo
+      if (token) {
+        for (const pos of POS_ORDER) {
+          try {
+            const res = await fetch(`/api/rankings?position=${pos}`, {
+              headers: { 'X-Session-Token': token },
+            });
+            if (!res.ok) continue;
+            const data = await res.json();
+            if (data.rankings) {
+              data.rankings.forEach(r => { userElo[r.id] = r.elo; });
+            }
+          } catch (_) { /* ignore */ }
+        }
+      }
+
+      // Load ALL players from the DB (full pool) per position — no auth needed
+      for (const pos of POS_ORDER) {
+        try {
+          const res = await fetch(`/api/players?position=${pos}`);
+          if (!res.ok) continue;
+          const players = await res.json();
+          if (players && players.length > 0) {
+            // Filter to dynasty-relevant players (those with a search_rank)
+            // and cap at top ~80 per position to keep the UI manageable
+            const relevant = players
+              .filter(p => p.search_rank && p.search_rank <= 300 && p.full_name)
+              .slice(0, 80)
+              .map(p => ({
+                id:   String(p.player_id),
+                name: p.full_name,
+                team: p.team || 'FA',
+                age:  p.age || '',
+                pos:  pos,
+                elo:  userElo[String(p.player_id)] || rankToElo(p.search_rank),
+              }));
+            if (relevant.length > 0) {
+              SAMPLE_PLAYERS[pos] = relevant;
+              tierState[pos] = autoAssignTiers(pos);
+            }
+          }
+        } catch (e) {
+          console.warn(`Failed to load players for ${pos}:`, e);
+        }
+      }
+
+      render();
+      if (token) loadTiersStatus();
+    }
+
+    initFromAPI();
+  </script>
+
+</body>
+</html>

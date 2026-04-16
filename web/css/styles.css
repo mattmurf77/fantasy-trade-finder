@@ -137,6 +137,57 @@
       pointer-events: none;
     }
 
+    /* ── Ranking Method Selection Screen ── */
+    .ranking-method-screen {
+      position: fixed; inset: 0;
+      background: var(--bg); z-index: 285;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 24px; transition: opacity 0.3s;
+    }
+    .ranking-method-screen.hidden { opacity: 0; pointer-events: none; }
+    .rm-header { text-align: center; margin-bottom: 36px; }
+    .rm-logo { font-size: 22px; font-weight: 700; letter-spacing: -0.4px; margin-bottom: 10px; }
+    .rm-logo span { color: var(--accent); }
+    .rm-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+    .rm-subtitle { font-size: 14px; color: var(--muted); line-height: 1.5; max-width: 440px; }
+    .rm-tiles {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
+      padding: 28px; width: 100%; max-width: 560px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .rm-tile {
+      background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 14px;
+      padding: 22px 24px; cursor: pointer;
+      transition: border-color 0.2s, background 0.2s, transform 0.15s;
+      display: flex; align-items: flex-start; gap: 18px;
+    }
+    .rm-tile:hover { border-color: var(--accent); background: rgba(79,124,255,0.06); transform: translateY(-2px); }
+    .rm-tile:active { transform: translateY(0); }
+    .rm-tile-icon {
+      width: 48px; height: 48px; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; flex-shrink: 0;
+    }
+    .rm-tile-icon.guided { background: rgba(79,124,255,0.15); }
+    .rm-tile-icon.manual { background: rgba(34,197,94,0.15); }
+    .rm-tile-icon.tiers  { background: rgba(168,85,247,0.15); }
+    .rm-tile-content { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+    .rm-tile-label { font-size: 16px; font-weight: 600; line-height: 1.3; }
+    .rm-tile-desc { font-size: 13px; color: var(--muted); line-height: 1.5; }
+    .rm-tile-arrow {
+      color: var(--muted); font-size: 18px; flex-shrink: 0; align-self: center;
+      transition: color 0.2s, transform 0.2s;
+    }
+    .rm-tile:hover .rm-tile-arrow { color: var(--accent); transform: translateX(3px); }
+    .rm-badge {
+      display: inline-block; font-size: 10px; font-weight: 700;
+      letter-spacing: 0.5px; text-transform: uppercase; color: var(--accent);
+      background: rgba(79,124,255,0.12); border-radius: 6px;
+      padding: 3px 8px; margin-left: 8px; vertical-align: middle;
+    }
+    .rm-footer { margin-top: 20px; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.5; }
+
     .league-card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -918,6 +969,9 @@
     }
     .tab:hover  { color: var(--text); border-color: #3a3d4a; }
     .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .tab.overall-tab { background: rgba(168,85,247,0.1); border-color: rgba(168,85,247,0.3); color: #a855f7; }
+    .tab.overall-tab.active { background: #a855f7; border-color: #a855f7; color: #fff; }
+    .tab.overall-tab.hidden { display: none; }
 
     /* ── Progress ── */
     .progress-wrap {
@@ -1681,6 +1735,110 @@
     }
     .match-dismiss-btn:hover { border-color: var(--text); color: var(--text); }
 
+    /* ── Ranking Celebration Modal ── */
+    .celebration-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.75);
+      backdrop-filter: blur(6px);
+      animation: fadeIn 0.25s ease;
+    }
+    .celebration-overlay.hidden { display: none; }
+    .celebration-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px 28px 28px;
+      max-width: 400px; width: 90%;
+      text-align: center;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+      animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    .celebration-emoji { font-size: 56px; line-height: 1; margin-bottom: 12px; }
+    .celebration-title {
+      font-size: 20px; font-weight: 800; color: var(--text);
+      margin-bottom: 6px;
+    }
+    .celebration-sub {
+      font-size: 14px; color: var(--muted);
+      margin-bottom: 20px; line-height: 1.5;
+    }
+    .celebration-actions {
+      display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+    }
+    .celebration-btn {
+      padding: 10px 20px; border-radius: 10px; font-weight: 600;
+      cursor: pointer; border: none; font-size: 0.95rem;
+    }
+    .celebration-btn.primary {
+      background: var(--accent); color: white;
+    }
+    .celebration-btn.primary:hover { filter: brightness(1.1); }
+    .celebration-btn.secondary {
+      background: rgba(255,255,255,0.08); color: var(--text);
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    .celebration-btn.secondary:hover { background: rgba(255,255,255,0.14); }
+
+    /* ── Rankings Table (editable) ── */
+    .rankings-table-wrap {
+      width: 100%; max-width: 980px; margin: 0 auto; padding: 16px 0;
+    }
+    .rankings-table-header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .rankings-table-title {
+      font-size: 18px; font-weight: 700; color: var(--text);
+    }
+    .rankings-pos-filters {
+      display: flex; gap: 4px; flex-wrap: wrap;
+    }
+    .rankings-table-empty {
+      text-align: center; padding: 48px 20px; color: var(--muted); font-size: 15px;
+    }
+    .rankings-table-empty.hidden { display: none; }
+    .rankings-table-container {
+      overflow-x: auto; border-radius: 12px; border: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .rankings-table {
+      width: 100%; border-collapse: collapse; font-size: 13px;
+    }
+    .rankings-table thead th {
+      position: sticky; top: 0; z-index: 2;
+      background: var(--bg); color: var(--muted);
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .rankings-table tbody tr {
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      transition: background 0.15s;
+    }
+    .rankings-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+    .rankings-table tbody tr.dragging { opacity: 0.4; background: rgba(79,124,255,0.08); }
+    .rankings-table tbody tr.drag-over-top { box-shadow: inset 0 2px 0 var(--accent); }
+    .rankings-table tbody tr.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--accent); }
+    .rankings-table td {
+      padding: 8px 12px; white-space: nowrap; color: var(--text);
+    }
+    .rt-rank-col { width: 36px; text-align: center; color: var(--muted); font-weight: 600; }
+    .rt-drag-col { width: 24px; text-align: center; cursor: grab; color: var(--muted); opacity: 0.5; }
+    .rt-drag-col:hover { opacity: 1; }
+    .rt-editable-col { width: 60px; }
+    .rt-editable-cell {
+      cursor: text; padding: 4px 8px; border-radius: 4px;
+      min-width: 36px; text-align: center; font-weight: 600;
+      background: rgba(79,124,255,0.06); border: 1px solid transparent;
+    }
+    .rt-editable-cell:hover { border-color: rgba(79,124,255,0.3); }
+    .rt-editable-cell:focus {
+      outline: none; border-color: var(--accent);
+      background: rgba(79,124,255,0.12); color: white;
+    }
+    .rt-player-name { font-weight: 500; }
+
     /* matches panel inside trades view */
     .matches-section {
       margin-top: 20px;
@@ -1910,6 +2068,17 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .player-picker-header:hover {
+      opacity: 0.85;
+    }
+    .picker-chevron {
+      display: inline-block;
+      font-size: 0.7em;
+      margin-right: 4px;
+      transition: transform 0.2s;
     }
     .player-picker-title {
       font-size: 14px;

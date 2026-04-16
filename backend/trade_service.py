@@ -63,6 +63,8 @@ _DEFAULT_CFG: dict[str, float] = {
     "mismatch_weight":       0.70,
     "fairness_weight":       0.30,
     "max_candidates":      500.0,
+    # Trade ELO gap filter
+    "trade_elo_gap_max":   250.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -343,13 +345,16 @@ class TradeService:
     (Sleeper API etc.). For the demo, leagues are simulated.
     """
 
-    def __init__(self, players: dict):
+    def __init__(self, players: dict, past_decision_keys: set | None = None):
         """
         players: { player_id: Player } — full player pool
+        past_decision_keys: set of (frozenset(give_ids), frozenset(receive_ids))
+            from past trade decisions — used to filter out already-swiped trades.
         """
         self._players     = players
         self._trade_cards: dict[str, TradeCard] = {}    # trade_id → TradeCard
         self._leagues:     dict[str, League]    = {}    # league_id → League
+        self._past_decision_keys = past_decision_keys or set()
 
     # ------------------------------------------------------------------
     # League management
@@ -420,6 +425,14 @@ class TradeService:
             )
             new_cards.extend(cards)
 
+        # Filter out trades the user has already swiped on (within memory window)
+        if self._past_decision_keys:
+            new_cards = [
+                c for c in new_cards
+                if (frozenset(c.give_player_ids), frozenset(c.receive_player_ids))
+                   not in self._past_decision_keys
+            ]
+
         # Store and return sorted by composite score
         for card in new_cards:
             self._trade_cards[card.trade_id] = card
@@ -433,6 +446,8 @@ class TradeService:
             if c.proposing_user_id == user_id
             and c.decision is None
             and (league_id is None or c.league_id == league_id)
+            and (frozenset(c.give_player_ids), frozenset(c.receive_player_ids))
+                not in self._past_decision_keys
         ]
         return sorted(cards, key=lambda c: c.composite_score, reverse=True)
 
@@ -505,6 +520,22 @@ class TradeService:
             lesser  = min(give_val, recv_val)
             return (lesser / greater) >= fairness_threshold
 
+        def _elo_gap_ok(give_ids: list[str], recv_ids: list[str]) -> bool:
+            """
+            Return True if the user's personal ELO gap between the best player
+            on each side is within the configured max.  Catches ridiculous trades
+            where consensus values are similar but the user's rankings diverge
+            (e.g. Charbonnet 1289 for Jeanty 1665).
+            """
+            max_gap = _c("trade_elo_gap_max")
+            if max_gap <= 0:
+                return True  # disabled
+            give_elos = [user_elo.get(pid, 1500) for pid in give_ids]
+            recv_elos = [user_elo.get(pid, 1500) for pid in recv_ids]
+            max_give = max(give_elos) if give_elos else 1500
+            max_recv = max(recv_elos) if recv_elos else 1500
+            return abs(max_recv - max_give) <= max_gap
+
         candidates: list[tuple[float, float, list[str], list[str]]] = []
 
         # ------------------------------------------------------------------
@@ -522,6 +553,10 @@ class TradeService:
 
                 # KTC fairness gate (replaces old MAX_VALUE_RATIO check)
                 if not _ktc_ok([give_id], [recv_id]):
+                    continue
+                # User-ELO gap gate — catches ridiculous trades where consensus
+                # is similar but user's personal rankings strongly diverge
+                if not _elo_gap_ok([give_id], [recv_id]):
                     continue
 
                 mismatch = self._mismatch_score(give_id, recv_id, user_elo, opp_elo)
@@ -563,6 +598,8 @@ class TradeService:
 
                     # Quick KTC pre-filter before expensive ELO math
                     if not _ktc_ok([give_id_1, give_id_2], [recv_id]):
+                        continue
+                    if not _elo_gap_ok([give_id_1, give_id_2], [recv_id]):
                         continue
 
                     combined_give_user = user_elo.get(give_id_1, 1500) + user_elo.get(give_id_2, 1500)
@@ -613,6 +650,8 @@ class TradeService:
 
                     # Quick KTC pre-filter
                     if not _ktc_ok([give_id], [recv_id_1, recv_id_2]):
+                        continue
+                    if not _elo_gap_ok([give_id], [recv_id_1, recv_id_2]):
                         continue
 
                     give_user = user_elo.get(give_id, 1500)
@@ -667,7 +706,9 @@ class TradeService:
                         continue
 
                     # Quick KTC pre-filter (cheap — avoids ELO math on bad pairs)
-                    give_pkg_dv = package_value([_dv(g) for g in [give_id_1, give_id_2, give_id_3]])
+                    give_ids_3 = [give_id_1, give_id_2, give_id_3]
+                    recv_ids_2 = [recv_id_1, recv_id_2]
+                    give_pkg_dv = package_value([_dv(g) for g in give_ids_3])
                     if give_pkg_dv == 0 and recv_pkg_dv == 0:
                         pass  # both zero — let ELO decide
                     else:
@@ -675,9 +716,11 @@ class TradeService:
                         lesser  = min(give_pkg_dv, recv_pkg_dv)
                         if greater > 0 and (lesser / greater) < fairness_threshold:
                             continue
+                    if not _elo_gap_ok(give_ids_3, recv_ids_2):
+                        continue
 
-                    combined_give_user = sum(user_elo.get(g, 1500) for g in [give_id_1, give_id_2, give_id_3])
-                    combined_give_opp  = sum(opp_elo.get(g, 1500) for g in [give_id_1, give_id_2, give_id_3])
+                    combined_give_user = sum(user_elo.get(g, 1500) for g in give_ids_3)
+                    combined_give_opp  = sum(opp_elo.get(g, 1500) for g in give_ids_3)
                     combined_recv_user = user_elo.get(recv_id_1, 1500) + user_elo.get(recv_id_2, 1500)
                     combined_recv_opp  = opp_elo.get(recv_id_1, 1500) + opp_elo.get(recv_id_2, 1500)
 
@@ -709,23 +752,31 @@ class TradeService:
 
         # ------------------------------------------------------------------
         # ------------------------------------------------------------------
-        # Apply positional preference multiplier then sort
+        # Apply positional preference hard filter (not a score multiplier)
         # ------------------------------------------------------------------
         _acq  = acquire_positions    or []
         _away = trade_away_positions or []
         if _acq or _away:
-            # Adjust composite score in-place before the final sort
-            adjusted: list[tuple[float, float, list[str], list[str]]] = []
+            filtered: list[tuple[float, float, list[str], list[str]]] = []
             for composite, mismatch, give_ids, recv_ids in candidates:
-                mult = positional_preference_multiplier(
-                    give_player_ids      = give_ids,
-                    receive_player_ids   = recv_ids,
-                    acquire_positions    = _acq,
-                    trade_away_positions = _away,
-                    player_db            = players,
-                )
-                adjusted.append((composite * mult, mismatch, give_ids, recv_ids))
-            candidates = adjusted
+                # If acquire_positions set, at least one received player must match
+                if _acq:
+                    recv_positions = [
+                        players[pid].position for pid in recv_ids
+                        if pid in players and players[pid].position
+                    ]
+                    if not any(p in _acq for p in recv_positions):
+                        continue
+                # If trade_away_positions set, at least one given player must match
+                if _away:
+                    give_positions = [
+                        players[pid].position for pid in give_ids
+                        if pid in players and players[pid].position
+                    ]
+                    if not any(p in _away for p in give_positions):
+                        continue
+                filtered.append((composite, mismatch, give_ids, recv_ids))
+            candidates = filtered
 
         # Sort and take top N
         # ------------------------------------------------------------------

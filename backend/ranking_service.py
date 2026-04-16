@@ -32,10 +32,11 @@ _DEFAULT_CFG: dict[str, float] = {
     # Tier engine
     "tier_engine_enabled":        1.0,
     "smart_matchup_enabled":      1.0,
-    "tier_size":                 16.0,
-    "mix_in_rate_base":           0.20,
-    "mix_in_rate_max":            0.60,
+    "tier_size":                 24.0,
+    "mix_in_rate_base":           0.35,
+    "mix_in_rate_max":            0.80,
     "mix_in_saturation_pct":      0.70,
+    "mix_in_pre_unlock_start":    5.0,
 }
 
 _cfg: dict[str, float] = dict(_DEFAULT_CFG)
@@ -169,6 +170,7 @@ class RankingService:
         self._version    = 0
         self._generator  = matchup_generator
         self._seed       = seed_ratings or {}
+        self._elo_overrides: dict[str, float] = {}  # manual reorder overrides
 
     # ------------------------------------------------------------------
     # Public API
@@ -294,7 +296,7 @@ class RankingService:
             except Exception:
                 pass
 
-        return self._algorithmic_trio(pool)
+        return self._algorithmic_trio(pool, position=position)
 
     def get_rankings(self, position: Optional[str] = None) -> RankSet:
         """Return current ordered rankings for a position."""
@@ -457,8 +459,20 @@ class RankingService:
         interactions = self._interactions.get(position, 0)
         threshold = self.POSITION_THRESHOLDS.get(position, 10)
 
-        # -- Pre-unlock: restrict to top tier only --
+        # -- Pre-unlock: top tier + early mix-in after a few interactions --
         if interactions < threshold:
+            pre_unlock_start = int(_c("mix_in_pre_unlock_start"))
+            if interactions >= pre_unlock_start and lower_tier:
+                # Introduce 1-2 fresh lower-tier players to broaden rankings
+                lower_stats = self._compute_stats(full_pool)
+                lower_by_freshness = sorted(
+                    lower_tier,
+                    key=lambda p: (
+                        len(lower_stats[p.id]["compared"]),
+                        -self._seed.get(p.id, self.ELO_INITIAL),
+                    ),
+                )
+                return list(top_tier) + lower_by_freshness[:2]
             return top_tier
 
         # -- Post-unlock: mix in lower-tier players progressively --
@@ -495,6 +509,12 @@ class RankingService:
         for _ in range(2):  # max 2 lower-tier players per pool refresh
             if random.random() < mix_rate:
                 mix_count += 1
+
+        # Force mix-in when the top tier is heavily compared
+        if mix_count == 0 and lower_tier:
+            min_comparisons = min(len(stats[p.id]["compared"]) for p in top_tier) if top_tier else 0
+            if min_comparisons >= 3:
+                mix_count = 1
 
         if mix_count == 0:
             return top_tier
@@ -578,6 +598,11 @@ class RankingService:
             ratings[w] += k * (1.0 - ea)
             ratings[l] += k * (0.0 - (1.0 - ea))
 
+        # Apply manual reorder overrides (from drag-and-drop or rank editing)
+        for pid, override_elo in self._elo_overrides.items():
+            if pid in ratings:
+                ratings[pid] = override_elo
+
         return ratings
 
     def _compute_stats(self, pool: list[Player]) -> dict[str, dict]:
@@ -593,13 +618,18 @@ class RankingService:
             stats[l]["compared"].add(w)
         return stats
 
-    def _algorithmic_trio(self, pool: list[Player]) -> MatchupTrio:
-        """Pick 3 adjacent players in Elo order that haven't all been compared."""
+    def _algorithmic_trio(self, pool: list[Player], position: Optional[str] = None) -> MatchupTrio:
+        """Pick 3 adjacent players in Elo order that haven't all been compared.
+
+        When position is None (cross-position / Overall mode), a diversity
+        bonus is applied to prefer trios spanning 2+ positions.
+        """
         elo          = self._compute_elo(pool)
         sorted_p     = sorted(pool, key=lambda p: elo[p.id], reverse=True)
         stats        = self._compute_stats(pool)
         best_trio    = None
         best_score   = float("inf")
+        cross_pos    = position is None  # Overall mode
 
         for i in range(len(sorted_p) - 2):
             for j in range(i + 1, min(i + 5, len(sorted_p) - 1)):
@@ -607,13 +637,23 @@ class RankingService:
                     p1, p2, p3 = sorted_p[i], sorted_p[j], sorted_p[k]
                     # Elo spread of the trio (smaller = tighter competition)
                     spread = elo[p1.id] - elo[p3.id]
-                    # Prefer trios with fewer existing comparisons
+                    # Prefer trios with fewer existing pairwise comparisons
                     existing = sum([
                         p2.id in stats[p1.id]["compared"],
                         p3.id in stats[p1.id]["compared"],
                         p3.id in stats[p2.id]["compared"],
                     ])
-                    score = spread + existing * 50
+                    # Penalise over-compared players — steers toward fresher faces
+                    total_comparisons = sum(
+                        len(stats[p.id]["compared"]) for p in [p1, p2, p3]
+                    )
+                    freshness_penalty = total_comparisons * 10
+                    # In Overall mode, bonus for trios spanning multiple positions
+                    diversity_bonus = 0
+                    if cross_pos:
+                        positions = {p1.position, p2.position, p3.position}
+                        diversity_bonus = -30 * (len(positions) - 1)  # reward multi-position
+                    score = spread + existing * 50 + freshness_penalty + diversity_bonus
                     if score < best_score:
                         best_score = score
                         best_trio  = (p1, p2, p3)
@@ -625,3 +665,34 @@ class RankingService:
             player_c=p3,
             reasoning="Tightest uncompared trio by Elo.",
         )
+
+    def apply_reorder(self, position: Optional[str], ordered_ids: list[str]) -> None:
+        """
+        Apply a manual reorder by setting ELO overrides that match the
+        desired ranking order.  ELO values are linearly interpolated
+        between the current max and min of the pool.
+        """
+        pool = self._pool(position)
+        if len(pool) < 2:
+            return
+
+        current_elo = self._compute_elo(pool)
+        pool_ids = {p.id for p in pool}
+
+        # Only include IDs that are actually in the pool
+        valid_ids = [pid for pid in ordered_ids if pid in pool_ids]
+        if len(valid_ids) < 2:
+            return
+
+        # Compute target ELO range from the current pool
+        elo_vals = list(current_elo.values())
+        max_elo = max(elo_vals)
+        min_elo = min(elo_vals)
+        spread = max(max_elo - min_elo, 100)  # at least 100 ELO spread
+
+        # Assign linearly spaced ELO values from max to min
+        for i, pid in enumerate(valid_ids):
+            target_elo = max_elo - (spread * i / max(len(valid_ids) - 1, 1))
+            self._elo_overrides[pid] = target_elo
+
+        self._version += 1

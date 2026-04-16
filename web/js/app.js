@@ -486,6 +486,55 @@
       document.getElementById('league-screen').classList.add('hidden');
     }
 
+    // ── Ranking Method Selection Screen ──────────────────────────────
+    function hideMethodScreen() {
+      document.getElementById('ranking-method-screen').classList.add('hidden');
+    }
+
+    function _enterMainApp() {
+      loadTrio();
+      // Restore auto-confirm toggle state from localStorage
+      {
+        const acBtn = document.getElementById('auto-confirm-toggle');
+        if (acBtn) {
+          acBtn.classList.toggle('active', autoConfirmEnabled);
+          acBtn.textContent = autoConfirmEnabled ? '\u26A1 Auto-advance ON' : '\u26A1 Auto-advance OFF';
+        }
+        const submitRow = document.querySelector('.submit-row');
+        if (submitRow) submitRow.style.display = autoConfirmEnabled ? 'none' : '';
+      }
+      renderLeagueSwitcher();
+      refreshCoverage();
+      initFairnessSlider();
+      _startNotifPolling();
+    }
+
+    async function selectRankingMethod(method) {
+      // Save the chosen method to the backend
+      try {
+        await apiFetch('/api/ranking-method', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method }),
+        });
+      } catch (_) { /* proceed anyway */ }
+
+      hideMethodScreen();
+
+      if (method === 'trio') {
+        // Go to Rank Players tab (default — trio flow)
+        _enterMainApp();
+      } else if (method === 'manual') {
+        // Go to Rankings tab — trade finder immediately available
+        _enterMainApp();
+        const rankingsTab = document.querySelector('.nav-tab[onclick*="rankings"]');
+        if (rankingsTab) rankingsTab.click();
+      } else if (method === 'tiers') {
+        // Navigate to the positional tiers page
+        window.location.href = '/positional-tiers.html';
+      }
+    }
+
     async function selectLeague(idx, el) {
       const lg         = _cachedLeagues[idx];
       const leagueId   = lg.league_id;
@@ -600,21 +649,25 @@
       renderAccountChip(user);
       logDrawer.info(`✅ League initialised — ${userPlayerIds.length} players imported`);
       showToast(`✅ Roster loaded — ${userPlayerIds.length} players imported`);
-      loadTrio();
-      // Restore auto-confirm toggle state from localStorage
-      {
-        const acBtn = document.getElementById('auto-confirm-toggle');
-        if (acBtn) {
-          acBtn.classList.toggle('active', autoConfirmEnabled);
-          acBtn.textContent = autoConfirmEnabled ? '⚡ Auto-advance ON' : '⚡ Auto-advance OFF';
+
+      // Check if user has unlocked the trade finder — if not, show ranking method selection
+      let showMethodScreen = false;
+      try {
+        const progRes = await apiFetch('/api/rankings/progress');
+        if (progRes.ok) {
+          const prog = await progRes.json();
+          if (!prog.unlocked && !prog.ranking_method) {
+            showMethodScreen = true;
+          }
         }
-        const submitRow = document.querySelector('.submit-row');
-        if (submitRow) submitRow.style.display = autoConfirmEnabled ? 'none' : '';
+      } catch (_) { /* proceed to main app on error */ }
+
+      if (showMethodScreen) {
+        document.getElementById('ranking-method-screen').classList.remove('hidden');
+        // Don't load the main app yet — wait for method selection
+      } else {
+        _enterMainApp();
       }
-      renderLeagueSwitcher();   // populate the in-app dropdown now that _cachedLeagues is set
-      refreshCoverage();        // show initial coverage count for this league
-      initFairnessSlider();     // load per-league fairness preference
-      _startNotifPolling();     // begin notification polling
     }
 
     // ── Init Session ────────────────────────────────────────────────
@@ -813,7 +866,7 @@
       setCardsLoading();
 
       try {
-        const res  = await apiFetch(`/api/trio?position=${currentPosition}`);
+        const res  = await apiFetch(`/api/trio?position=${currentPosition || ''}`);
         const data = await res.json();
         if (data.error) { showToast('⚠️ ' + data.error); return; }
         currentTrio = data;
@@ -918,7 +971,8 @@
         updateProgress(data);
 
         if (data.threshold_met && data.interaction_count === data.threshold) {
-          showToast(`🎉 ${currentPosition} rankings established!`);
+          _celebrationActive = true;
+          showRankingCelebration(currentPosition);
         }
         // Re-check the Find a Trade ranking gate (updates live if that tab is open)
         _onRankingSwipeComplete();
@@ -929,8 +983,73 @@
       setTimeout(() => {
         selectionOrder = [];
         locked = false;
-        loadTrio();
+        if (!_celebrationActive) loadTrio();
       }, 350);
+    }
+
+    // ── Ranking celebration modal ─────────────────────────────────────
+    const POSITION_ORDER = ['QB', 'RB', 'WR', 'TE'];
+    let _celebrationActive = false;
+
+    async function showRankingCelebration(completedPosition) {
+      // Fetch latest progress to determine which positions are done
+      let progress;
+      try {
+        const res = await apiFetch('/api/rankings/progress');
+        if (!res.ok) return;
+        progress = await res.json();
+      } catch (_) { return; }
+
+      const threshold = progress.threshold || 10;
+      const completedPositions = POSITION_ORDER.filter(p => (progress[p] || 0) >= threshold);
+      const allDone = completedPositions.length === 4;
+
+      const overlay = document.getElementById('celebration-overlay');
+      const emoji   = document.getElementById('celebration-emoji');
+      const title   = document.getElementById('celebration-title');
+      const sub     = document.getElementById('celebration-sub');
+      const actions = document.getElementById('celebration-actions');
+
+      if (allDone) {
+        emoji.textContent = '\uD83C\uDFC6';  // trophy
+        title.textContent = 'All positions ranked!';
+        sub.textContent   = 'Your dynasty rankings are fully established. Time to find some trades!';
+        actions.innerHTML = `
+          <button class="celebration-btn secondary" onclick="closeCelebration()">
+            Continue ranking ${completedPosition}
+          </button>
+          <button class="celebration-btn primary" onclick="closeCelebration(); document.querySelector('.nav-tab[onclick*=\\'trades\\']').click();">
+            Give me some offers \u2192
+          </button>`;
+      } else {
+        const nextPos = POSITION_ORDER.find(p => !completedPositions.includes(p));
+        emoji.textContent = '\uD83C\uDF89';  // party popper
+        title.textContent = `${completedPosition} rankings complete!`;
+        sub.textContent   = `${completedPositions.length}/4 positions done.${nextPos ? ` ${nextPos} is next.` : ''}`;
+        actions.innerHTML = `
+          <button class="celebration-btn secondary" onclick="closeCelebration()">
+            Keep ranking ${completedPosition}
+          </button>
+          ${nextPos ? `<button class="celebration-btn primary" onclick="closeCelebration(); switchToPosition('${nextPos}');">
+            Proceed to ${nextPos} \u2192
+          </button>` : ''}`;
+      }
+
+      overlay.classList.remove('hidden');
+    }
+
+    function closeCelebration() {
+      document.getElementById('celebration-overlay').classList.add('hidden');
+      _celebrationActive = false;
+      loadTrio();
+    }
+
+    function switchToPosition(pos) {
+      currentPosition = pos;
+      document.querySelectorAll('.tabs .tab').forEach(t => {
+        t.classList.toggle('active', t.textContent.trim() === pos);
+      });
+      loadTrio();
     }
 
     // ── Render helpers ──────────────────────────────────────────────
@@ -1009,7 +1128,7 @@
 
     // ── Progress ────────────────────────────────────────────────────
     async function loadProgress() {
-      const res  = await apiFetch(`/api/progress?position=${currentPosition}`);
+      const res  = await apiFetch(`/api/progress?position=${currentPosition || ''}`);
       const data = await res.json();
       updateProgress(data);
       // Also refresh the overall unlock bar
@@ -1053,6 +1172,12 @@
       const threshold = progress.threshold || 10;
       const positions = ['QB', 'RB', 'WR', 'TE'];
 
+      // Show/hide the "Overall" ranking tab based on unlock status
+      const overallTab = document.getElementById('overall-rank-tab');
+      if (overallTab) {
+        overallTab.classList.toggle('hidden', !progress.unlocked);
+      }
+
       // Hide once fully unlocked
       if (progress.unlocked) {
         wrap.classList.add('unlocked');
@@ -1092,6 +1217,20 @@
     }
 
     // ── Rankings panel ──────────────────────────────────────────────
+    /** Fetch all-position rankings to populate the ELO map for player picker sort order. */
+    async function refreshPlayerEloMap() {
+      try {
+        const res = await apiFetch('/api/rankings?position=');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.rankings) {
+          for (const r of data.rankings) {
+            _playerEloMap[r.id] = r.elo;
+          }
+        }
+      } catch (_) { /* non-critical — picker falls back to search_rank */ }
+    }
+
     async function openRankings() {
       const res  = await apiFetch(`/api/rankings?position=${currentPosition}`);
       const data = await res.json();
@@ -1103,6 +1242,8 @@
       if (!data.rankings || data.rankings.length === 0) {
         list.innerHTML = `<div class="panel-empty">No rankings yet — start ranking!</div>`;
       } else {
+        // Update ELO map while we have the data
+        for (const r of data.rankings) _playerEloMap[r.id] = r.elo;
         list.innerHTML = data.rankings.map(r => {
           const dcBadge  = buildDcBadge(r);
           const injBadge = buildInjuryBadge(r.injury_status);
@@ -1126,6 +1267,163 @@
       if (!event || event.target === document.getElementById('overlay')) {
         document.getElementById('overlay').classList.remove('open');
       }
+    }
+
+    // ── Rankings table (editable tab) ──────────────────────────────
+    let _rankingsTablePos = null;   // null = Overall, 'QB'/'RB'/'WR'/'TE' = position
+    let _rankingsData     = [];     // current data backing the table
+    let _draggedRow       = null;
+
+    function switchRankingsPos(pos, btn) {
+      document.querySelectorAll('.rankings-pos-filters .tab').forEach(t => t.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      _rankingsTablePos = pos === 'ALL' ? null : pos;
+      loadRankingsTable();
+    }
+
+    async function loadRankingsTable() {
+      const posParam = _rankingsTablePos || '';
+      try {
+        const res = await apiFetch(`/api/rankings?position=${posParam}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        _rankingsData = data.rankings || [];
+        // Update ELO map
+        for (const r of _rankingsData) _playerEloMap[r.id] = r.elo;
+        renderRankingsTable();
+      } catch (_) { /* ignore */ }
+    }
+
+    function renderRankingsTable() {
+      const tbody  = document.getElementById('rankings-tbody');
+      const empty  = document.getElementById('rankings-table-empty');
+      if (!tbody) return;
+
+      if (!_rankingsData.length) {
+        tbody.innerHTML = '';
+        if (empty) empty.classList.remove('hidden');
+        return;
+      }
+      if (empty) empty.classList.add('hidden');
+
+      tbody.innerHTML = _rankingsData.map((r, i) => {
+        const pos = (r.position || '?').toLowerCase();
+        return `<tr draggable="true" data-player-id="${r.id}" data-index="${i}">
+          <td class="rt-rank-col"><span class="rt-editable-cell" contenteditable="true"
+                data-player-id="${r.id}">${i + 1}</span></td>
+          <td class="rt-drag-col" title="Drag to reorder">\u2807</td>
+          <td class="rt-player-name">${escapeHtml(r.name || 'Unknown')}</td>
+          <td><span class="pos-badge ${pos}">${(r.position || '?').toUpperCase()}</span></td>
+          <td>${r.age || ''}</td>
+          <td>${escapeHtml(r.team || 'FA')}</td>
+          <td style="color:var(--muted)">${r.elo ? r.elo.toFixed(0) : ''}</td>
+        </tr>`;
+      }).join('');
+
+      // Attach drag-and-drop handlers
+      tbody.querySelectorAll('tr').forEach(row => {
+        row.addEventListener('dragstart', _rtDragStart);
+        row.addEventListener('dragover',  _rtDragOver);
+        row.addEventListener('drop',      _rtDrop);
+        row.addEventListener('dragend',   _rtDragEnd);
+      });
+
+      // Attach editable cell handlers
+      tbody.querySelectorAll('.rt-editable-cell').forEach(cell => {
+        cell.addEventListener('blur',    _rtOnRankEdit);
+        cell.addEventListener('keydown', e => {
+          if (e.key === 'Enter') { e.preventDefault(); cell.blur(); }
+        });
+      });
+    }
+
+    // ── Drag and drop ───────────────────────────────────────────────
+    function _rtDragStart(e) {
+      _draggedRow = e.target.closest('tr');
+      if (_draggedRow) _draggedRow.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    }
+
+    function _rtDragOver(e) {
+      e.preventDefault();
+      const row = e.target.closest('tr');
+      if (!row || row === _draggedRow) return;
+      const tbody = row.parentNode;
+      // Clear other indicators
+      tbody.querySelectorAll('.drag-over-top,.drag-over-bottom').forEach(r => {
+        r.classList.remove('drag-over-top', 'drag-over-bottom');
+      });
+      const rect = row.getBoundingClientRect();
+      const mid  = rect.top + rect.height / 2;
+      if (e.clientY < mid) {
+        row.classList.add('drag-over-top');
+        tbody.insertBefore(_draggedRow, row);
+      } else {
+        row.classList.add('drag-over-bottom');
+        tbody.insertBefore(_draggedRow, row.nextSibling);
+      }
+    }
+
+    function _rtDrop(e) { e.preventDefault(); }
+
+    function _rtDragEnd() {
+      if (_draggedRow) _draggedRow.classList.remove('dragging');
+      _draggedRow = null;
+      // Clear all drag indicators
+      document.querySelectorAll('.drag-over-top,.drag-over-bottom').forEach(r => {
+        r.classList.remove('drag-over-top', 'drag-over-bottom');
+      });
+      _rtRenumberAndSubmit();
+    }
+
+    // ── Rank editing ────────────────────────────────────────────────
+    function _rtOnRankEdit(e) {
+      const cell     = e.target;
+      const newRank  = parseInt(cell.textContent.trim(), 10);
+      const playerId = cell.dataset.playerId;
+      if (isNaN(newRank) || newRank < 1) {
+        renderRankingsTable();  // revert
+        return;
+      }
+      const tbody = document.getElementById('rankings-tbody');
+      const rows  = Array.from(tbody.querySelectorAll('tr'));
+      const currentRow = rows.find(r => r.dataset.playerId === playerId);
+      if (!currentRow) return;
+
+      // Remove and insert at new position
+      tbody.removeChild(currentRow);
+      const targetIndex = Math.min(newRank - 1, tbody.children.length);
+      const targetRow   = tbody.children[targetIndex];
+      if (targetRow) {
+        tbody.insertBefore(currentRow, targetRow);
+      } else {
+        tbody.appendChild(currentRow);
+      }
+      _rtRenumberAndSubmit();
+    }
+
+    // ── Renumber visible ranks and submit reorder to backend ────────
+    function _rtRenumberAndSubmit() {
+      const tbody = document.getElementById('rankings-tbody');
+      const rows  = Array.from(tbody.querySelectorAll('tr'));
+      const orderedIds = rows.map(r => r.dataset.playerId);
+
+      // Update visible rank numbers in the editable cells
+      rows.forEach((r, i) => {
+        const editCell = r.querySelector('.rt-editable-cell');
+        if (editCell) editCell.textContent = i + 1;
+      });
+
+      // Submit to backend, then reload table to reflect updated ELO values
+      apiFetch('/api/rankings/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          position: _rankingsTablePos || null,
+          ordered_ids: orderedIds,
+        }),
+      }).then(() => loadRankingsTable())
+        .catch(() => showToast('Failed to save reorder'));
     }
 
     // ── Rookie board ────────────────────────────────────────────────
@@ -1570,10 +1868,14 @@
         renderLeagueSwitcher();
         refreshCoverage();
         checkOutlookPrompt();   // show onboarding modal if no outlook set for this league
+        refreshPlayerEloMap();  // populate ELO sort for player picker
         // Check ranking gate; only refresh trades if already unlocked
         checkTradesGate().then(unlocked => {
           if (unlocked) refreshTrades();
         });
+      }
+      if (view === 'rankings') {
+        loadRankingsTable();
       }
       if (view === 'matches') {
         loadMatches();
@@ -1651,6 +1953,23 @@
 
     // ── Player Picker (trade-away selector) ──────────────────────────────
 
+    let _pickerCollapsed = true;   // collapsed by default
+
+    function togglePlayerPicker() {
+      _pickerCollapsed = !_pickerCollapsed;
+      const section = document.getElementById('player-picker-section');
+      const body    = document.getElementById('player-picker-body');
+      const chevron = document.getElementById('picker-chevron');
+      const sub     = document.getElementById('picker-sub');
+      if (body)    body.style.display    = _pickerCollapsed ? 'none' : '';
+      if (chevron) chevron.textContent   = _pickerCollapsed ? '\u25B6' : '\u25BC';
+      if (sub)     sub.style.display     = _pickerCollapsed ? 'none' : '';
+      if (section) section.classList.toggle('collapsed', _pickerCollapsed);
+    }
+
+    // Map of player_id → ELO for sorting picker chips by value
+    let _playerEloMap = {};
+
     function renderPlayerPicker() {
       const section = document.getElementById('player-picker-section');
       if (!section || !_myRoster.length) return;
@@ -1659,12 +1978,12 @@
       const chips = document.getElementById('picker-chips');
       if (!chips) return;
 
-      // Sort: by position group then by search_rank (best first)
-      const posOrder = { QB: 0, RB: 1, WR: 2, TE: 3, PICK: 4 };
+      // Sort by ELO value descending (highest value first).
+      // Falls back to search_rank if no ELO data available yet.
       const sorted = [..._myRoster].sort((a, b) => {
-        const pa = posOrder[a.position] ?? 5;
-        const pb = posOrder[b.position] ?? 5;
-        if (pa !== pb) return pa - pb;
+        const eloA = _playerEloMap[a.id] || 0;
+        const eloB = _playerEloMap[b.id] || 0;
+        if (eloA || eloB) return eloB - eloA;  // ELO descending
         return (a.search_rank || 999) - (b.search_rank || 999);
       });
 
