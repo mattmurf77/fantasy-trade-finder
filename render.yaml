@@ -1,10 +1,20 @@
+databases:
+  - name: fantasy-trade-finder-db
+    plan: free
+    databaseName: trade_finder
+    user: trade_finder_user
+
 services:
   - type: web
     name: fantasy-trade-finder
     runtime: python
     plan: free
     buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: gunicorn run:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    startCommand: gunicorn run:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.11"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fantasy-trade-finder-db
+          property: connectionString

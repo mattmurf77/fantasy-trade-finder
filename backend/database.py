@@ -30,6 +30,10 @@ _DB_PATH    = os.path.join(_DB_DIR, "trade_finder.db")
 _DEFAULT_URL = f"sqlite:///{_DB_PATH}"
 DATABASE_URL = os.environ.get("DATABASE_URL", _DEFAULT_URL)
 
+# Render provides postgres:// but SQLAlchemy requires postgresql://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 # connect_args only needed for SQLite (enables WAL mode for concurrent reads)
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
@@ -333,12 +337,19 @@ def _migrate_db() -> None:
             except Exception:
                 pass   # column already exists — safe to ignore
 
-        # Seed model_config defaults.  INSERT OR IGNORE keeps existing values.
+        # Seed model_config defaults — skip if key already exists.
         for key, value, description in _MODEL_CONFIG_DEFAULTS:
-            conn.execute(text(
-                "INSERT OR IGNORE INTO model_config (key, value, description) "
-                "VALUES (:key, :value, :description)"
-            ), {"key": key, "value": value, "description": description})
+            if DATABASE_URL.startswith("sqlite"):
+                conn.execute(text(
+                    "INSERT OR IGNORE INTO model_config (key, value, description) "
+                    "VALUES (:key, :value, :description)"
+                ), {"key": key, "value": value, "description": description})
+            else:
+                conn.execute(text(
+                    "INSERT INTO model_config (key, value, description) "
+                    "VALUES (:key, :value, :description) "
+                    "ON CONFLICT (key) DO NOTHING"
+                ), {"key": key, "value": value, "description": description})
 
 
 def init_db() -> None:
