@@ -555,7 +555,7 @@
       margin-bottom: 0;
     }
     .nav-tab {
-      padding: 12px 22px;
+      padding: 12px 20px;
       min-height: 44px;
       border-radius: 8px 8px 0 0;
       border: none;
@@ -568,9 +568,26 @@
       bottom: -1px;
       border-bottom: 2px solid transparent;
       transition: color 0.15s;
+      white-space: nowrap;          /* never break a label mid-word */
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
     }
     .nav-tab:hover { color: var(--text); }
     .nav-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+    /* Mobile: tighter padding/font so tabs fit in max 2 rows with whole labels */
+    @media (max-width: 480px) {
+      .nav-tabs { gap: 2px !important; flex-wrap: wrap; }
+      .nav-tab {
+        padding: 10px 12px;
+        font-size: 13px;
+        flex: 1 1 auto;
+        justify-content: center;
+      }
+      .liked-badge, .matches-badge { font-size: 10px; padding: 2px 5px; }
+    }
 
     /* ── View sections ── */
     .view { display: none; width: 100%; max-width: 980px; }
@@ -947,6 +964,18 @@
     }
     .view-btn:hover { background: var(--border); }
 
+    /* Mobile: tighter header and content padding */
+    @media (max-width: 480px) {
+      header { padding: 16px 12px 0; gap: 8px; }
+      .logo { font-size: 16px; }
+      .header-right { gap: 6px; }
+      .view-btn { padding: 6px 10px; font-size: 12px; }
+      .account-chip { padding: 6px 8px; }
+      .nav-tabs { padding: 0 12px; }
+      /* Position tabs on view-rank: tighter gap and margin */
+      #rank-position-tabs { gap: 4px !important; margin-top: 12px !important; }
+    }
+
     /* ── Tabs ── */
     .tabs {
       display: flex;
@@ -977,6 +1006,30 @@
     .tab.overall-tab { background: rgba(168,85,247,0.1); border-color: rgba(168,85,247,0.3); color: #a855f7; }
     .tab.overall-tab.active { background: #a855f7; border-color: #a855f7; color: #fff; }
     .tab.overall-tab.hidden { display: none; }
+
+    /* Accent variants for action tabs (Rookies, Tiers) */
+    .tab.tab-accent-green {
+      background: rgba(34,197,94,0.1);
+      border-color: rgba(34,197,94,0.3);
+      color: #22c55e;
+    }
+    .tab.tab-accent-green:hover { border-color: #22c55e; color: #4ade80; }
+    .tab.tab-accent-purple {
+      background: rgba(168,85,247,0.1);
+      border-color: rgba(168,85,247,0.3);
+      color: #a855f7;
+      text-decoration: none;
+    }
+    .tab.tab-accent-purple:hover { border-color: #a855f7; color: #c084fc; }
+
+    /* Mobile: compact position tabs */
+    @media (max-width: 480px) {
+      .tab {
+        padding: 10px 14px;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+    }
 
     /* ── Progress ── */
     .progress-wrap {
