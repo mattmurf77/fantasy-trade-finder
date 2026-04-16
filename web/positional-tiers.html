@@ -1564,9 +1564,13 @@
     async function initFromAPI() {
       const token = _getSessionToken();
 
-      // Load user's existing rankings if we have a session (has real ELO values)
-      const userElo = {};  // player_id → elo
+      // Use /api/rankings?position=XX as the primary source.
+      // That endpoint returns the universal player pool already filtered
+      // to players with a DynastyProcess value > 0 — which automatically
+      // excludes retired players (Roethlisberger, Brady, etc.) since
+      // DynastyProcess only tracks currently dynasty-relevant players.
       if (token) {
+        let anyLoaded = false;
         for (const pos of POS_ORDER) {
           try {
             const res = await fetch(`/api/rankings?position=${pos}`, {
@@ -1574,40 +1578,51 @@
             });
             if (!res.ok) continue;
             const data = await res.json();
-            if (data.rankings) {
-              data.rankings.forEach(r => { userElo[r.id] = r.elo; });
-            }
-          } catch (_) { /* ignore */ }
-        }
-      }
-
-      // Load ALL players from the DB (full pool) per position — no auth needed
-      for (const pos of POS_ORDER) {
-        try {
-          const res = await fetch(`/api/players?position=${pos}`);
-          if (!res.ok) continue;
-          const players = await res.json();
-          if (players && players.length > 0) {
-            // Filter to dynasty-relevant players (those with a search_rank)
-            // and cap at top ~80 per position to keep the UI manageable
-            const relevant = players
-              .filter(p => p.search_rank && p.search_rank <= 300 && p.full_name)
-              .slice(0, 80)
-              .map(p => ({
-                id:   String(p.player_id),
-                name: p.full_name,
-                team: p.team || 'FA',
-                age:  p.age || '',
-                pos:  pos,
-                elo:  userElo[String(p.player_id)] || rankToElo(p.search_rank),
+            if (data.rankings && data.rankings.length > 0) {
+              // Cap at top 80 per position to keep the UI manageable
+              const ranked = data.rankings.slice(0, 80).map(r => ({
+                id:   String(r.id),
+                name: r.name,
+                team: r.team || 'FA',
+                age:  r.age || '',
+                pos:  r.position || pos,
+                elo:  r.elo || 1500,
               }));
-            if (relevant.length > 0) {
-              SAMPLE_PLAYERS[pos] = relevant;
+              SAMPLE_PLAYERS[pos] = ranked;
               tierState[pos] = autoAssignTiers(pos);
+              anyLoaded = true;
             }
+          } catch (e) {
+            console.warn(`Failed to load rankings for ${pos}:`, e);
           }
-        } catch (e) {
-          console.warn(`Failed to load players for ${pos}:`, e);
+        }
+
+        // Safety net: if rankings returned nothing at all, fall back to
+        // /api/players but filter by search_rank <= 200 to reduce the
+        // retired-player leak (active players are almost always <200)
+        if (!anyLoaded) {
+          for (const pos of POS_ORDER) {
+            try {
+              const res = await fetch(`/api/players?position=${pos}`);
+              if (!res.ok) continue;
+              const players = await res.json();
+              const relevant = (players || [])
+                .filter(p => p.search_rank && p.search_rank <= 200 && p.full_name && p.team)
+                .slice(0, 80)
+                .map(p => ({
+                  id:   String(p.player_id),
+                  name: p.full_name,
+                  team: p.team || 'FA',
+                  age:  p.age || '',
+                  pos:  pos,
+                  elo:  rankToElo(p.search_rank),
+                }));
+              if (relevant.length > 0) {
+                SAMPLE_PLAYERS[pos] = relevant;
+                tierState[pos] = autoAssignTiers(pos);
+              }
+            } catch (_) { /* ignore */ }
+          }
         }
       }
 
