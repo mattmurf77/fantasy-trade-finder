@@ -734,6 +734,27 @@
       .pool-search { max-width: 100%; }
     }
 
+    /* ── Phone (≤480px): tighter tier rows so chips don't get cut off ── */
+    @media (max-width: 480px) {
+      .tier-header { padding: 14px 12px 0; }
+      .pos-tabs, .progress-row, .tier-layout { padding-left: 12px; padding-right: 12px; }
+      .tier-label-area { width: 64px; padding: 8px 2px; }
+      .tier-label-name { font-size: 11px; }
+      .tier-drop-zone { padding: 8px 6px; min-height: 56px; gap: 6px; }
+      .tier-drop-zone .player-chip {
+        /* Full-width chip inside tier row so arrows/remove aren't clipped */
+        width: 100%;
+        padding: 6px 10px;
+        gap: 6px;
+      }
+      .tier-drop-zone .chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+      .tier-drop-zone .chip-age { font-size: 10px; }
+      .tier-drop-zone .chip-team { font-size: 10px; }
+      /* Page title area slightly tighter */
+      .tier-page-title { font-size: 18px; }
+      .tier-page-subtitle { font-size: 12px; }
+    }
+
     @media (pointer: coarse) {
       .chip-arrows { display: flex; }
       .player-chip { min-height: 40px; }
