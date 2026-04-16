@@ -1163,15 +1163,21 @@
       const isTop    = tierIdx === 0;
       const isBottom = tierIdx === TIERS.length - 1;
 
-      // Build arrow buttons: only show relevant arrows when in a tier
+      // Helper: stop pointer/mouse/touch events from bubbling so the parent
+      // chip's dragstart doesn't fire when a user taps these controls —
+      // otherwise the chip gets dragged + dropped on the pool area and
+      // gets removed entirely instead of just moving tiers or assigning.
+      const stopDrag = `draggable="false" onpointerdown="event.stopPropagation()" ontouchstart="event.stopPropagation()" onmousedown="event.stopPropagation()"`;
+
+      // Build arrow buttons: only show relevant arrows when in a tier.
       let arrowsHtml = '';
       if (inTier) {
         const upBtn = isTop
           ? ''
-          : `<button class="chip-arrow-btn" onclick="event.stopPropagation(); moveUp('${player.id}')" title="Move up tier">&#9650;</button>`;
+          : `<button class="chip-arrow-btn" ${stopDrag} onclick="event.stopPropagation(); moveUp('${player.id}')" title="Move up tier">&#9650;</button>`;
         const downBtn = isBottom
           ? ''
-          : `<button class="chip-arrow-btn" onclick="event.stopPropagation(); moveDown('${player.id}')" title="Move down tier">&#9660;</button>`;
+          : `<button class="chip-arrow-btn" ${stopDrag} onclick="event.stopPropagation(); moveDown('${player.id}')" title="Move down tier">&#9660;</button>`;
         if (upBtn || downBtn) {
           arrowsHtml = `<span class="chip-arrows tier-arrows">${upBtn}${downBtn}</span>`;
         }
@@ -1186,7 +1192,7 @@
           ${ageStr ? `<span class="chip-age">${ageStr}</span>` : ''}
           <span class="chip-team">${player.team}</span>
           ${arrowsHtml}
-          <button class="chip-remove" onclick="event.stopPropagation(); removeFromTier('${player.id}')" title="Remove">&#10005;</button>
+          <button class="chip-remove" ${stopDrag} onclick="event.stopPropagation(); removeFromTier('${player.id}')" title="Remove">&#10005;</button>
         `;
       } else {
         // Pool card — larger with tier-assignment tiles
@@ -1201,7 +1207,7 @@
               // 5-char max labels so all fit uniformly in the narrow card
               const shortLabels = { elite: 'Elite', starter: 'Start', solid: 'Solid', depth: 'Depth', bench: 'Bench' };
               const label = shortLabels[t] || (t.charAt(0).toUpperCase() + t.slice(1, 5));
-              return `<button class="tier-assign-btn" data-tier="${t}"
+              return `<button class="tier-assign-btn" data-tier="${t}" ${stopDrag}
                 onclick="event.stopPropagation(); assignToTier('${player.id}', '${t}')"
                 title="Add to ${t}">${label}</button>`;
             }).join('')}
