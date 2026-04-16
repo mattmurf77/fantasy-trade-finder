@@ -672,9 +672,9 @@
 
   <!-- ── Position tabs ── -->
   <div class="pos-tabs" id="pos-tabs">
-    <button class="pos-tab active" data-pos="RB" onclick="switchPos('RB', this)">RB</button>
+    <button class="pos-tab active" data-pos="QB" onclick="switchPos('QB', this)">QB</button>
+    <button class="pos-tab" data-pos="RB" onclick="switchPos('RB', this)">RB</button>
     <button class="pos-tab" data-pos="WR" onclick="switchPos('WR', this)">WR</button>
-    <button class="pos-tab" data-pos="QB" onclick="switchPos('QB', this)">QB</button>
     <button class="pos-tab" data-pos="TE" onclick="switchPos('TE', this)">TE</button>
   </div>
 
@@ -916,7 +916,7 @@
     }
 
     // ── State ──
-    let currentPos = 'RB';
+    let currentPos = 'QB';
     // tierState[pos][tier] = [playerId, ...]
     // Pre-populate every position from default Elo ratings
     let tierState = {};
@@ -1250,7 +1250,7 @@
       return localStorage.getItem('fumble_session_token') || '';
     }
 
-    const POS_ORDER = ['RB', 'WR', 'QB', 'TE'];
+    const POS_ORDER = ['QB', 'RB', 'WR', 'TE'];
     let savedPositions = new Set();  // track which positions have been saved
 
     async function saveTiers() {

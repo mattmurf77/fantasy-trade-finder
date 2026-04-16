@@ -829,7 +829,7 @@
 
     const SIDES = ['a', 'b', 'c'];
 
-    let currentPosition = 'RB';
+    let currentPosition = 'QB';
     let currentTrio     = null;
     let selectionOrder  = [];
     let locked          = false;
