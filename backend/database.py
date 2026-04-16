@@ -330,14 +330,18 @@ def _migrate_db() -> None:
         ("league_preferences", "acquire_positions",    "TEXT"),
         ("league_preferences", "trade_away_positions", "TEXT"),
     ]
-    with engine.begin() as conn:
-        for table, col, col_type in migration_cols:
-            try:
+    # Each ALTER TABLE gets its own transaction so a "column already exists"
+    # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
+    # entire transaction as aborted on any error — even if Python catches it.
+    for table, col, col_type in migration_cols:
+        try:
+            with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-            except Exception:
-                pass   # column already exists — safe to ignore
+        except Exception:
+            pass   # column already exists — safe to ignore
 
-        # Seed model_config defaults — skip if key already exists.
+    # Seed model_config defaults in a single clean transaction.
+    with engine.begin() as conn:
         for key, value, description in _MODEL_CONFIG_DEFAULTS:
             if DATABASE_URL.startswith("sqlite"):
                 conn.execute(text(
