@@ -53,6 +53,10 @@ users_table = Table("users", metadata,
     Column("created_at",      String),
     Column("ranking_method",  String),   # null | 'trio' | 'manual' | 'tiers'
     Column("tiers_saved",     String),   # JSON list of positions saved, e.g. '["RB","WR"]'
+    Column("tier_overrides",  Text),     # JSON {player_id: elo_float} — user's
+                                          # tier/reorder assignments, replayed
+                                          # into RankingService._elo_overrides
+                                          # on session rebuild
 )
 
 leagues_table = Table("leagues", metadata,
@@ -336,6 +340,7 @@ def _migrate_db() -> None:
         ("league_preferences", "trade_away_positions", "TEXT"),
         ("users",              "ranking_method",        "VARCHAR"),
         ("users",              "tiers_saved",           "TEXT"),
+        ("users",              "tier_overrides",        "TEXT"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -526,6 +531,36 @@ def get_tiers_saved(user_id: str) -> list[str]:
         if row and row.tiers_saved:
             return json.loads(row.tiers_saved)
         return []
+
+
+def save_tier_overrides(user_id: str, overrides: dict[str, float]) -> None:
+    """
+    Persist the user's full tier/reorder override map as JSON.
+    Overrides is {player_id: elo_float}. Stored on the users row so it
+    survives session rebuilds and server restarts.
+    """
+    with engine.begin() as conn:
+        conn.execute(
+            update(users_table)
+            .where(users_table.c.sleeper_user_id == user_id)
+            .values(tier_overrides=json.dumps(overrides))
+        )
+
+
+def load_tier_overrides(user_id: str) -> dict[str, float]:
+    """Return {player_id: elo_float} for this user, or {} if none stored."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.tier_overrides).where(
+                users_table.c.sleeper_user_id == user_id
+            )
+        ).fetchone()
+        if row and row.tier_overrides:
+            try:
+                return {k: float(v) for k, v in json.loads(row.tier_overrides).items()}
+            except (json.JSONDecodeError, TypeError, ValueError):
+                return {}
+        return {}
 
 
 # ---------------------------------------------------------------------------

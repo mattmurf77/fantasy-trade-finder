@@ -81,6 +81,7 @@ from .database import (
     load_local_league_users,
     set_ranking_method, get_ranking_method,
     save_tiers_position, get_tiers_saved,
+    save_tier_overrides, load_tier_overrides,
 )
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
@@ -925,7 +926,14 @@ def save_tiers_route():
         # Apply as a reorder (assigns linearly spaced ELO values)
         service.apply_reorder(position=position, ordered_ids=ordered_ids)
 
-        # Persist updated ELO snapshot
+        # Persist the full tier override dict so it survives session rebuilds
+        try:
+            save_tier_overrides(g_user_id, service._elo_overrides)
+        except Exception as db_err:
+            log.warning("save_tier_overrides failed: %s", db_err)
+
+        # Persist updated ELO snapshot to member_rankings (used by leaguemates
+        # for trade generation)
         try:
             if g_league and g_league.league_id not in ("league_demo",):
                 all_rankings = service.get_rankings(position=None)
@@ -1007,6 +1015,12 @@ def reorder_rankings():
 
     try:
         service.apply_reorder(position=position, ordered_ids=ordered_ids)
+
+        # Persist override dict so it survives session rebuilds
+        try:
+            save_tier_overrides(g_user_id, service._elo_overrides)
+        except Exception as db_err:
+            log.warning("save_tier_overrides after reorder failed: %s", db_err)
 
         # Persist updated ELO snapshot
         try:
@@ -2201,6 +2215,20 @@ def session_init():
                 log.info("  (no stored swipe history for this user)")
         except Exception as db_err:
             log.warning("  DB replay failed — starting with fresh rankings: %s", db_err)
+
+        # Restore tier/reorder overrides from DB so tier saves survive rebuilds
+        try:
+            overrides = load_tier_overrides(user_id=user_id)
+            # Only keep overrides for players currently in the pool
+            valid_ids = {p.id for p in ranking_pool}
+            new_service._elo_overrides = {
+                pid: elo for pid, elo in overrides.items() if pid in valid_ids
+            }
+            if new_service._elo_overrides:
+                log.info("  ✅ restored %d tier overrides from DB",
+                         len(new_service._elo_overrides))
+        except Exception as db_err:
+            log.warning("  tier override restore failed: %s", db_err)
     else:
         new_service = existing_service
         log.info("  ✅ ranking service preserved (same user, universal pool)")

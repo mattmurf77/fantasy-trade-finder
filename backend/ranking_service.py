@@ -573,12 +573,21 @@ class RankingService:
 
     def _compute_elo(self, pool: list[Player]) -> dict[str, float]:
         pool_ids = {p.id for p in pool}
-        # Start each player from their consensus seed, or ELO_INITIAL if unknown
-        ratings  = {p.id: self._seed.get(p.id, self.ELO_INITIAL) for p in pool}
+        # Seed each player's starting ELO.  Manual overrides (from tier saves
+        # or drag-and-drop reorders) take priority over the DP consensus seed —
+        # they represent the user's explicit rankings and become the anchor
+        # point that subsequent swipes evolve from.
+        ratings: dict[str, float] = {}
+        for p in pool:
+            if p.id in self._elo_overrides:
+                ratings[p.id] = self._elo_overrides[p.id]
+            else:
+                ratings[p.id] = self._seed.get(p.id, self.ELO_INITIAL)
 
         elo_k = _c("elo_k")
 
-        # Regular ranking swipes — full K factor
+        # Regular ranking swipes — full K factor. Applied AFTER overrides so
+        # tier-saved players' ELOs can still evolve when the user ranks them.
         for s in self._swipes:
             w, l = s.winner_id, s.loser_id
             if w not in pool_ids or l not in pool_ids:
@@ -597,11 +606,6 @@ class RankingService:
             ea       = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
             ratings[w] += k * (1.0 - ea)
             ratings[l] += k * (0.0 - (1.0 - ea))
-
-        # Apply manual reorder overrides (from drag-and-drop or rank editing)
-        for pid, override_elo in self._elo_overrides.items():
-            if pid in ratings:
-                ratings[pid] = override_elo
 
         return ratings
 

@@ -588,89 +588,73 @@
       box-shadow: 0 10px 30px rgba(0,0,0,0.4);
     }
 
-    /* ── Bottom action bar — sticky at viewport bottom ── */
-    .bottom-bar {
+    /* ── Floating autosave status + reset — no manual save needed ── */
+    .autosave-bar {
       position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
+      bottom: calc(16px + env(safe-area-inset-bottom));
+      right: 16px;
       z-index: 100;
-      background: rgba(26, 29, 39, 0.92);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border-top: 1px solid var(--border);
-      padding: 12px 24px calc(12px + env(safe-area-inset-bottom)) 24px;
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 12px;
-      box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
-      transform: translateY(100%);
-      opacity: 0;
-      transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.2s;
+      gap: 10px;
       pointer-events: none;
     }
-    .bottom-bar.visible {
-      transform: translateY(0);
-      opacity: 1;
-      pointer-events: auto;
-    }
-    .unsaved-pill {
+    .autosave-pill {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 6px 10px;
+      padding: 8px 14px;
       border-radius: 20px;
-      background: rgba(251,146,60,0.15);
-      color: #fb923c;
       font-size: 12px;
       font-weight: 700;
-      margin-right: auto;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
     }
-    .unsaved-pill::before {
-      content: "";
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      background: #fb923c;
-      box-shadow: 0 0 8px rgba(251,146,60,0.6);
-      animation: pulse 1.5s ease-in-out infinite;
+    .autosave-pill.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .autosave-pill.pending,
+    .autosave-pill.saving {
+      background: rgba(79,124,255,0.15);
+      border-color: rgba(79,124,255,0.3);
+      color: var(--accent);
+    }
+    .autosave-pill.saved {
+      background: rgba(34,197,94,0.15);
+      border-color: rgba(34,197,94,0.3);
+      color: var(--green);
+    }
+    .autosave-pill.error {
+      background: rgba(239,68,68,0.15);
+      border-color: rgba(239,68,68,0.3);
+      color: var(--red);
     }
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-    .save-btn {
-      background: var(--accent);
-      border: none;
-      border-radius: 10px;
-      color: #fff;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 700;
-      padding: 0 24px;
-      min-height: 44px;
-      min-width: 140px;
-      transition: opacity 0.15s, transform 0.1s;
-    }
-    .save-btn:hover { opacity: 0.88; }
-    .save-btn:active { transform: scale(0.98); }
-    .save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
     .reset-btn {
-      background: transparent;
+      pointer-events: auto;
+      background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: 20px;
       color: var(--muted);
       cursor: pointer;
-      font-size: 13px;
-      font-weight: 600;
-      padding: 0 18px;
-      min-height: 44px;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 8px 14px;
+      min-height: 36px;
       transition: border-color 0.15s, color 0.15s;
     }
     .reset-btn:hover { border-color: var(--red); color: var(--red); }
 
     /* Bottom padding on layout so sticky bar never covers the last tier */
     .tier-layout {
-      padding-bottom: calc(96px + env(safe-area-inset-bottom));
+      padding-bottom: calc(72px + env(safe-area-inset-bottom));
     }
 
     /* Toast for save errors/status */
@@ -928,11 +912,10 @@
 
   </div>
 
-  <!-- ── Bottom action bar ── -->
-  <div class="bottom-bar" id="bottom-bar">
-    <span class="unsaved-pill" id="unsaved-pill">Unsaved changes</span>
-    <button class="reset-btn" onclick="resetCurrentPos()">Reset</button>
-    <button class="save-btn" id="save-btn" onclick="saveTiers()">Save Tiers</button>
+  <!-- ── Floating autosave status pill + Reset ── -->
+  <div class="autosave-bar">
+    <span class="autosave-pill" id="autosave-pill"></span>
+    <button class="reset-btn" onclick="resetCurrentPos()" title="Reset to default tiers">Reset</button>
   </div>
 
   <!-- ── Undo toast ── -->
@@ -1076,20 +1059,53 @@
     let undoStack = [];     // {playerId, fromTier (null = pool), toTier}
     let draggedId = null;
 
-    // Per-position dirty flag — drives the sticky save bar visibility
-    let dirtyPositions = new Set();
+    // ── Auto-save: every tier change triggers a debounced save ──
+    // Per-position debounce timers + in-flight guard so rapid changes
+    // collapse into a single backend request per position.
+    const _autoSaveTimers = {};   // position → setTimeout handle
+    const _autoSaveInFlight = {}; // position → bool
+    const _autoSaveQueued = {};   // position → bool (save needed after current one finishes)
+    const AUTO_SAVE_DELAY = 600;  // ms after the last change before saving
+
     function markDirty(pos) {
-      dirtyPositions.add(pos || currentPos);
-      updateSaveBar();
+      const position = pos || currentPos;
+      // Update the sticky status indicator immediately
+      updateStatusPill(position, 'pending');
+      // Debounce the actual network save
+      clearTimeout(_autoSaveTimers[position]);
+      _autoSaveTimers[position] = setTimeout(() => {
+        triggerAutoSave(position);
+      }, AUTO_SAVE_DELAY);
     }
     function clearDirty(pos) {
-      dirtyPositions.delete(pos || currentPos);
-      updateSaveBar();
+      const position = pos || currentPos;
+      clearTimeout(_autoSaveTimers[position]);
+      updateStatusPill(position, 'saved');
     }
-    function updateSaveBar() {
-      const bar = document.getElementById('bottom-bar');
-      if (!bar) return;
-      bar.classList.toggle('visible', dirtyPositions.has(currentPos));
+
+    // Simple status indicator in the bottom-right — no manual save button
+    function updateStatusPill(position, state) {
+      const pill = document.getElementById('autosave-pill');
+      if (!pill) return;
+      // Only show status for the currently viewed position
+      if (position !== currentPos) return;
+      if (state === 'pending') {
+        pill.textContent = 'Saving…';
+        pill.className = 'autosave-pill pending visible';
+      } else if (state === 'saving') {
+        pill.textContent = 'Saving…';
+        pill.className = 'autosave-pill saving visible';
+      } else if (state === 'saved') {
+        pill.textContent = '✓ Saved';
+        pill.className = 'autosave-pill saved visible';
+        // Fade out after a moment
+        setTimeout(() => {
+          if (pill.textContent === '✓ Saved') pill.classList.remove('visible');
+        }, 1500);
+      } else if (state === 'error') {
+        pill.textContent = '⚠ Save failed';
+        pill.className = 'autosave-pill error visible';
+      }
     }
 
     // ══════════════════════════════════════════════════════
@@ -1404,7 +1420,9 @@
       btn.classList.add('active');
       undoStack = [];
       render();
-      updateSaveBar();  // save bar reflects the new position's dirty state
+      // Hide any stale autosave status pill from the previous position
+      const pill = document.getElementById('autosave-pill');
+      if (pill) pill.classList.remove('visible');
     }
 
     // ══════════════════════════════════════════════════════
@@ -1433,17 +1451,25 @@
     const POS_ORDER = ['QB', 'RB', 'WR', 'TE'];
     let savedPositions = new Set();  // track which positions have been saved
 
-    async function saveTiers() {
+    async function triggerAutoSave(position) {
+      // If a save is already in flight for this position, queue one more
+      if (_autoSaveInFlight[position]) {
+        _autoSaveQueued[position] = true;
+        return;
+      }
+
       const tiers = {};
       TIERS.forEach(tier => {
-        if (tierState[currentPos][tier].length > 0) {
-          tiers[tier] = tierState[currentPos][tier];
+        if (tierState[position][tier].length > 0) {
+          tiers[tier] = tierState[position][tier];
         }
       });
 
-      const btn = document.getElementById('save-btn');
-      btn.textContent = 'Saving...';
-      btn.disabled = true;
+      // If the position has NO tier assignments, nothing to save
+      if (Object.keys(tiers).length === 0) return;
+
+      _autoSaveInFlight[position] = true;
+      updateStatusPill(position, 'saving');
 
       try {
         const res = await fetch('/api/tiers/save', {
@@ -1452,36 +1478,42 @@
             'Content-Type': 'application/json',
             'X-Session-Token': _getSessionToken(),
           },
-          body: JSON.stringify({ position: currentPos, tiers }),
+          body: JSON.stringify({ position, tiers }),
         });
         const data = await res.json();
+
         if (!res.ok || data.error) {
+          updateStatusPill(position, 'error');
           showTierToast('Save failed: ' + (data.error || 'Unknown error'), 'error');
           return;
         }
 
-        savedPositions.add(currentPos);
-        clearDirty(currentPos);
+        savedPositions.add(position);
         updatePosTabs();
+        updateStatusPill(position, 'saved');
 
-        if (data.all_done) {
-          // All 4 positions saved — show celebration
+        // Fire celebration when all 4 positions have tier assignments
+        if (data.all_done && !_celebrationShown) {
+          _celebrationShown = true;
           document.getElementById('tier-celebration').classList.remove('hidden');
-        } else {
-          // Auto-advance to next unsaved position
-          const nextPos = POS_ORDER.find(p => !savedPositions.has(p));
-          if (nextPos) {
-            const nextBtn = document.querySelector(`.pos-tab[data-pos="${nextPos}"]`);
-            if (nextBtn) switchPos(nextPos, nextBtn);
-          }
         }
       } catch (e) {
+        updateStatusPill(position, 'error');
         showTierToast('Save failed: ' + e.message, 'error');
       } finally {
-        btn.textContent = 'Save Tiers';
-        btn.disabled = false;
+        _autoSaveInFlight[position] = false;
+        // If another change came in while we were saving, re-run immediately
+        if (_autoSaveQueued[position]) {
+          _autoSaveQueued[position] = false;
+          triggerAutoSave(position);
+        }
       }
     }
+
+    let _celebrationShown = false;
+
+    // Keep saveTiers as a compatibility alias in case it's referenced elsewhere
+    function saveTiers() { triggerAutoSave(currentPos); }
 
     function closeTierCelebration() {
       document.getElementById('tier-celebration').classList.add('hidden');
