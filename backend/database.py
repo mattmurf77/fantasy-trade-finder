@@ -24,7 +24,9 @@ from datetime import timedelta
 # Engine — SQLite by default, PostgreSQL if DATABASE_URL is set
 # ---------------------------------------------------------------------------
 
-_DB_PATH    = os.path.join(os.path.dirname(__file__), "..", "data", "trade_finder.db")
+_DB_DIR     = os.path.join(os.path.dirname(__file__), "..", "data")
+os.makedirs(_DB_DIR, exist_ok=True)
+_DB_PATH    = os.path.join(_DB_DIR, "trade_finder.db")
 _DEFAULT_URL = f"sqlite:///{_DB_PATH}"
 DATABASE_URL = os.environ.get("DATABASE_URL", _DEFAULT_URL)
 
