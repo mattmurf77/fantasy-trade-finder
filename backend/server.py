@@ -2017,6 +2017,16 @@ def sleeper_players():
             log.warning("  could not write Sleeper cache: %s", e)
 
         _sleeper_cache = relevant
+
+        # Sync to players DB table so /api/players has data
+        try:
+            if needs_player_sync():
+                adp_map = _fetch_sleeper_adp()
+                count = sync_players(relevant, adp_map=adp_map or None)
+                log.info("  ✅ synced %d players to DB after cache fetch", count)
+        except Exception as sync_err:
+            log.warning("  player DB sync after fetch failed: %s", sync_err)
+
         return jsonify(relevant)
     except Exception as e:
         log.error("  sleeper_players fetch error: %s\n%s", e, traceback.format_exc())
