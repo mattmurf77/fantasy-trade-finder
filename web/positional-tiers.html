@@ -271,7 +271,8 @@
       border-radius: 14px;
       display: flex;
       flex-direction: column;
-      max-height: 420px;
+      max-height: 520px;
+      overflow: hidden;  /* keep rounded corners clean */
       order: -1;  /* always above tier rows */
     }
 
@@ -281,7 +282,7 @@
       align-items: stretch;
       border-bottom: 1px solid var(--border);
       min-height: 72px;
-      overflow: hidden;
+      flex-shrink: 0;  /* never squeeze the header inside the .player-pool max-height */
     }
 
     .pool-label-area {
@@ -308,6 +309,7 @@
     .pool-search-row {
       padding: 10px 12px;
       border-bottom: 1px solid var(--border);
+      flex-shrink: 0;  /* keep search visible, only pool-list should scroll */
     }
 
     .pool-search {
