@@ -778,6 +778,35 @@
       .chip-arrows { display: flex; }
       .player-chip { min-height: 40px; }
     }
+
+    /* Scoring format toggle (shared pattern with main app) */
+    .scoring-toggle {
+      display: inline-flex;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px;
+      gap: 2px;
+    }
+    .scoring-toggle-btn {
+      padding: 7px 14px;
+      border-radius: 999px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      min-height: 32px;
+      white-space: nowrap;
+    }
+    .scoring-toggle-btn:hover:not(.active) { color: var(--text); }
+    .scoring-toggle-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .scoring-toggle-btn.switching { opacity: 0.6; cursor: wait; }
   </style>
 </head>
 <body>
@@ -793,6 +822,8 @@
         <div class="tier-page-title">Set Positional Tiers</div>
         <div class="tier-page-subtitle">Players are pre-sorted into tiers based on consensus dynasty values. Adjust them to match your own rankings.</div>
       </div>
+      <!-- Scoring format toggle — rendered by inline JS below -->
+      <div id="scoring-toggle-wrap" style="margin-top:8px;"></div>
     </div>
   </div>
 
@@ -1662,6 +1693,64 @@
       if (token) loadTiersStatus();
     }
 
+    // ── Scoring format toggle (1QB PPR / SF TEP) ─────────────────────
+    const FORMAT_KEYS   = ['1qb_ppr', 'sf_tep'];
+    const FORMAT_LABELS = { '1qb_ppr': '🏈 1QB PPR', 'sf_tep': '🏟 SF TEP' };
+    const LS_ACTIVE_FORMAT = 'ftf_active_format';
+
+    function tierGetActiveFormat() {
+      const stored = localStorage.getItem(LS_ACTIVE_FORMAT);
+      return FORMAT_KEYS.includes(stored) ? stored : '1qb_ppr';
+    }
+
+    function renderTierScoringToggle() {
+      const wrap = document.getElementById('scoring-toggle-wrap');
+      if (!wrap) return;
+      const active = tierGetActiveFormat();
+      wrap.innerHTML = `
+        <div class="scoring-toggle">
+          ${FORMAT_KEYS.map(fmt => `
+            <button class="scoring-toggle-btn ${fmt === active ? 'active' : ''}"
+                    data-format="${fmt}"
+                    onclick="onTierScoringClick(this)">
+              ${FORMAT_LABELS[fmt]}
+            </button>`).join('')}
+        </div>`;
+    }
+
+    async function onTierScoringClick(btn) {
+      const fmt = btn.dataset.format;
+      if (!FORMAT_KEYS.includes(fmt)) return;
+      if (fmt === tierGetActiveFormat()) return;
+      btn.classList.add('switching');
+      try {
+        const res = await fetch('/api/scoring/switch', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-Token': _getSessionToken(),
+          },
+          body: JSON.stringify({ format: fmt }),
+        });
+        if (!res.ok) {
+          showTierToast('Failed to switch scoring format', 'error');
+          return;
+        }
+        localStorage.setItem(LS_ACTIVE_FORMAT, fmt);
+        renderTierScoringToggle();
+        // Wipe in-memory state so the new format's data gets loaded fresh
+        savedPositions = new Set();
+        dirtyPositions.clear();
+        document.querySelectorAll('.pos-tab .check').forEach(el => el.remove());
+        initFromAPI();
+      } catch (e) {
+        showTierToast('Switch failed: ' + e.message, 'error');
+      } finally {
+        btn.classList.remove('switching');
+      }
+    }
+
+    renderTierScoringToggle();
     initFromAPI();
   </script>
 

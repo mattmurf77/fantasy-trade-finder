@@ -82,6 +82,9 @@ from .database import (
     set_ranking_method, get_ranking_method,
     save_tiers_position, get_tiers_saved,
     save_tier_overrides, load_tier_overrides,
+    mark_format_unlocked, get_unlocked_formats,
+    set_league_scoring, get_league_scoring, get_league_summary,
+    SCORING_FORMATS, DEFAULT_SCORING,
 )
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
@@ -437,12 +440,18 @@ def _maybe_sync_players() -> None:
 # Trade generation still uses league-specific rosters.
 # ---------------------------------------------------------------------------
 
-# DP raw values — loaded alongside elo_map at startup
-dp_values: dict[str, float] = {}   # { normalised_name: raw_value }
+# DP raw values — loaded per scoring format (two independent rank sets)
+# Format keys: '1qb_ppr' and 'sf_tep'. Legacy globals below are aliases that
+# always point to the 1qb_ppr pool so existing references keep working.
+dp_values_by_format: dict[str, dict[str, float]] = {}   # {fmt: {name: value}}
+dp_elo_by_format:    dict[str, dict[str, float]] = {}   # {fmt: {name: elo}}
+g_universal_by_format: dict[str, dict] = {}             # {fmt: {'players': [...], 'seed': {...}}}
 
-# Universal player list — built from Sleeper cache × DP values
+# Backwards-compat aliases (default format). These reference the same lists
+# as g_universal_by_format['1qb_ppr'] after _ensure_universal_pools runs.
+dp_values: dict[str, float] = {}
 g_universal_players: list[Player] = []
-g_universal_seed: dict[str, float] = {}   # { player_id: initial_elo }
+g_universal_seed: dict[str, float] = {}
 
 
 def build_universal_pool(
@@ -579,26 +588,59 @@ def build_universal_pool(
     return players, seeds
 
 
-def _ensure_universal_pool() -> None:
-    """Build the universal pool if it hasn't been built yet (idempotent)."""
+def _ensure_universal_pools() -> None:
+    """Build the universal pool for BOTH scoring formats (idempotent).
+
+    Each format gets its own player list + seed map so 1QB PPR and SF TEP
+    rank sets stay completely independent.
+    """
     global g_universal_players, g_universal_seed, dp_values
 
-    if g_universal_players:
-        return  # already built
+    if g_universal_by_format.get("1qb_ppr") and g_universal_by_format.get("sf_tep"):
+        return  # both built
 
     cache = _load_sleeper_cache()
     if cache is None:
         return
 
-    # Load DP values if not already loaded
-    if not dp_values:
-        dp_values = load_consensus_values(scoring=scoring)
+    from .data_loader import SCORING_FORMATS as DL_SCORING_FORMATS
+    for fmt in DL_SCORING_FORMATS:
+        if fmt in g_universal_by_format:
+            continue
+        # Load per-format DP data
+        if fmt not in dp_values_by_format:
+            dp_values_by_format[fmt] = load_consensus_values(scoring=fmt)
+        if fmt not in dp_elo_by_format:
+            dp_elo_by_format[fmt] = load_consensus_elo(scoring=fmt)
 
-    g_universal_players, g_universal_seed = build_universal_pool(
-        sleeper_cache=cache,
-        dp_elo=elo_map,
-        dp_vals=dp_values,
-    )
+        players, seed = build_universal_pool(
+            sleeper_cache=cache,
+            dp_elo=dp_elo_by_format[fmt],
+            dp_vals=dp_values_by_format[fmt],
+        )
+        g_universal_by_format[fmt] = {"players": players, "seed": seed}
+        log.info("  universal pool built for %s: %d players", fmt, len(players))
+
+    # Maintain backwards-compat aliases pointing at the default 1qb_ppr pool
+    default = g_universal_by_format.get("1qb_ppr", {})
+    g_universal_players[:] = default.get("players", [])
+    g_universal_seed.clear()
+    g_universal_seed.update(default.get("seed", {}))
+    dp_values.clear()
+    dp_values.update(dp_values_by_format.get("1qb_ppr", {}))
+
+
+# Legacy single-pool entry point kept for any external callers. Calls through
+# to the dual-pool version.
+def _ensure_universal_pool() -> None:
+    _ensure_universal_pools()
+
+
+def _get_universal_pool(scoring_format: str) -> tuple[list[Player], dict[str, float]]:
+    """Return (players, seed) for a given scoring format. Builds on demand."""
+    _ensure_universal_pools()
+    pool = g_universal_by_format.get(scoring_format) or g_universal_by_format.get("1qb_ppr") or {}
+    return pool.get("players", []), pool.get("seed", {})
 
 
 # ---------------------------------------------------------------------------
@@ -630,13 +672,48 @@ def handle_session_expired(e):
 
 
 def _require_session() -> dict:
-    """Return the active session dict, or raise _SessionExpired (→ 401)."""
+    """Return the active session dict, or raise _SessionExpired (→ 401).
+
+    Also resolves the "effective format" for this request and syncs the
+    sess['service'] / sess['trade_svc'] aliases to match. Priority for the
+    effective format:
+      1. X-Scoring-Format request header (per-call override, no state change)
+      2. sess['active_format'] (set by /api/scoring/switch)
+      3. '1qb_ppr' default
+
+    The header path is useful when the frontend wants to peek at one
+    format's data without changing the user's active view.
+    """
     token = request.headers.get("X-Session-Token", "")
     with _sessions_lock:
         sess = _sessions.get(token)
     if sess is None:
         raise _SessionExpired()
+
+    # Resolve effective format for this single request
+    from .database import SCORING_FORMATS as DB_SCORING_FORMATS
+    header_fmt = request.headers.get("X-Scoring-Format", "")
+    if header_fmt in DB_SCORING_FORMATS:
+        effective_format = header_fmt
+    else:
+        effective_format = sess.get("active_format") or "1qb_ppr"
+
+    # Sync aliases so legacy endpoints that read sess['service'] / sess['trade_svc']
+    # automatically get the right format's instance for this request.
+    services = sess.get("services") or {}
+    trade_svcs = sess.get("trade_svcs") or {}
+    if effective_format in services:
+        sess["service"] = services[effective_format]
+    if effective_format in trade_svcs:
+        sess["trade_svc"] = trade_svcs[effective_format]
+    sess["_effective_format"] = effective_format
+
     return sess
+
+
+def _active_format(sess: dict) -> str:
+    """Return the format that `_require_session` resolved for this request."""
+    return sess.get("_effective_format") or sess.get("active_format") or "1qb_ppr"
 
 
 def _cleanup_loop() -> None:
@@ -745,10 +822,15 @@ def post_rank3():
 
     try:
         rank_set = service.record_ranking(ordered_ids=ranked_valid)
+        fmt = _active_format(sess)
 
         # Persist swipe history — lets rankings survive server restarts
         try:
-            save_ranking_swipes(user_id=g_user_id, ordered_ids=ranked_valid)
+            save_ranking_swipes(
+                user_id        = g_user_id,
+                ordered_ids    = ranked_valid,
+                scoring_format = fmt,
+            )
         except Exception as db_err:
             log.warning("DB write failed for ranking swipe (continuing): %s", db_err)
 
@@ -763,9 +845,10 @@ def post_rank3():
                     for rp in all_rankings.rankings
                 ]
                 upsert_member_rankings(
-                    user_id   = g_user_id,
-                    league_id = g_league.league_id,
-                    rankings  = ranking_payload,
+                    user_id        = g_user_id,
+                    league_id      = g_league.league_id,
+                    rankings       = ranking_payload,
+                    scoring_format = fmt,
                 )
         except Exception as db_err:
             log.warning("member_rankings auto-publish failed (continuing): %s", db_err)
@@ -837,6 +920,7 @@ def get_rankings_progress():
     sess = _require_session()
     sess["last_active"] = time.time()
     service = sess["service"]
+    fmt = _active_format(sess)
     POSITIONS = ("QB", "RB", "WR", "TE")
 
     counts: dict[str, int] = {}
@@ -860,7 +944,7 @@ def get_rankings_progress():
         unlocked = True
     elif ranking_method == "tiers":
         try:
-            saved = get_tiers_saved(g_user_id)
+            saved = get_tiers_saved(g_user_id, scoring_format=fmt)
             unlocked = all(p in saved for p in POSITIONS)
         except Exception:
             unlocked = False
@@ -868,11 +952,20 @@ def get_rankings_progress():
         # 'trio' or null — original threshold logic
         unlocked = all(counts[p] >= threshold for p in POSITIONS)
 
+    # Mark the format as unlocked once (monotonic) so the League Summary
+    # adoption counts can query users.unlocked_formats efficiently.
+    if unlocked:
+        try:
+            mark_format_unlocked(g_user_id, fmt)
+        except Exception as db_err:
+            log.warning("mark_format_unlocked failed: %s", db_err)
+
     return jsonify({
         **counts,
         "threshold":        threshold,
         "unlocked":         unlocked,
         "ranking_method":   ranking_method,
+        "scoring_format":   fmt,
         "total_required":   total_required,
         "total_completed":  total_completed,
     })
@@ -896,6 +989,33 @@ def set_ranking_method_route():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/scoring/switch", methods=["POST"])
+def switch_scoring_format():
+    """POST /api/scoring/switch {format: '1qb_ppr'|'sf_tep'}
+
+    Updates the session's active scoring format. Both formats' services
+    stay in memory; this just flips which one is "active" for subsequent
+    ranking/trade calls. Returns the new active format.
+    """
+    from .database import SCORING_FORMATS as DB_SCORING_FORMATS
+    sess = _require_session()
+    body = request.get_json(force=True) or {}
+    fmt  = body.get("format", "")
+    if fmt not in DB_SCORING_FORMATS:
+        return jsonify({"error": f"Invalid format: {fmt!r}. Must be one of {DB_SCORING_FORMATS}"}), 400
+    sess["active_format"] = fmt
+    # Re-sync aliases so the next reader uses the new format even before
+    # _require_session runs again.
+    services   = sess.get("services") or {}
+    trade_svcs = sess.get("trade_svcs") or {}
+    if fmt in services:
+        sess["service"] = services[fmt]
+    if fmt in trade_svcs:
+        sess["trade_svc"] = trade_svcs[fmt]
+    log.info("scoring/switch %s → %s", sess.get("user_id"), fmt)
+    return jsonify({"ok": True, "active_format": fmt})
+
+
 @app.route("/api/tiers/save", methods=["POST"])
 def save_tiers_route():
     """POST /api/tiers/save {position: 'RB', tiers: {elite: [...ids], starter: [...], ...}}
@@ -906,6 +1026,7 @@ def save_tiers_route():
     service   = sess["service"]
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
+    fmt       = _active_format(sess)
     body      = request.get_json(force=True) or {}
     position  = body.get("position")
     tiers     = body.get("tiers", {})
@@ -921,19 +1042,18 @@ def save_tiers_route():
     try:
         # apply_tiers assigns ELOs inside each tier's threshold band so that
         # when the frontend reloads and re-buckets by ELO, players land back
-        # in the tier the user chose (fixes the "bench → depth/elite" bug
-        # that apply_reorder caused because it spread linearly across the
-        # pool's min/max without regard for tier cutoffs).
+        # in the tier the user chose.
         service.apply_tiers(position=position, tiers=tiers)
 
-        # Persist the full tier override dict so it survives session rebuilds
+        # Persist the full tier override dict for THIS format so it survives
+        # session rebuilds. The other format's overrides are untouched.
         try:
-            save_tier_overrides(g_user_id, service._elo_overrides)
+            save_tier_overrides(g_user_id, service._elo_overrides, scoring_format=fmt)
         except Exception as db_err:
             log.warning("save_tier_overrides failed: %s", db_err)
 
-        # Persist updated ELO snapshot to member_rankings (used by leaguemates
-        # for trade generation)
+        # Persist updated ELO snapshot to member_rankings (per-format row) so
+        # leaguemates see this rank set when generating trades in this format.
         try:
             if g_league and g_league.league_id not in ("league_demo",):
                 all_rankings = service.get_rankings(position=None)
@@ -942,26 +1062,28 @@ def save_tiers_route():
                     for rp in all_rankings.rankings
                 ]
                 upsert_member_rankings(
-                    user_id   = g_user_id,
-                    league_id = g_league.league_id,
-                    rankings  = ranking_payload,
+                    user_id        = g_user_id,
+                    league_id      = g_league.league_id,
+                    rankings       = ranking_payload,
+                    scoring_format = fmt,
                 )
         except Exception as db_err:
             log.warning("member_rankings publish after tiers save failed: %s", db_err)
 
-        # Mark this position as saved
-        saved = save_tiers_position(g_user_id, position)
+        # Mark this position as saved for the active format
+        saved = save_tiers_position(g_user_id, position, scoring_format=fmt)
         all_done = all(p in saved for p in ("QB", "RB", "WR", "TE"))
 
-        log.info("tiers/save %s for %s — saved positions: %s, all_done=%s",
-                 position, g_user_id, saved, all_done)
+        log.info("tiers/save [%s] %s for %s — saved: %s, all_done=%s",
+                 fmt, position, g_user_id, saved, all_done)
 
         return jsonify({
-            "ok":       True,
-            "position": position,
-            "saved":    saved,
-            "all_done": all_done,
-            "count":    len(ordered_ids),
+            "ok":             True,
+            "position":       position,
+            "saved":          saved,
+            "all_done":       all_done,
+            "count":          total_assigned,
+            "scoring_format": fmt,
         })
     except Exception as e:
         log.error("tiers/save error: %s", e)
@@ -970,11 +1092,12 @@ def save_tiers_route():
 
 @app.route("/api/tiers/status")
 def tiers_status_route():
-    """GET /api/tiers/status — which positions have saved tiers for the current user."""
+    """GET /api/tiers/status — which positions have saved tiers for the active format."""
     sess = _require_session()
     g_user_id = sess["user_id"]
+    fmt = _active_format(sess)
     try:
-        saved = get_tiers_saved(g_user_id)
+        saved = get_tiers_saved(g_user_id, scoring_format=fmt)
         return jsonify({
             "saved":    saved,
             "all_done": all(p in saved for p in ("QB", "RB", "WR", "TE")),
@@ -1006,6 +1129,7 @@ def reorder_rankings():
     service    = sess["service"]
     g_user_id  = sess["user_id"]
     g_league   = sess["league"]
+    fmt        = _active_format(sess)
     body       = request.get_json(force=True) or {}
     position   = body.get("position")   # None = overall
     ordered_ids = body.get("ordered_ids", [])
@@ -1016,13 +1140,13 @@ def reorder_rankings():
     try:
         service.apply_reorder(position=position, ordered_ids=ordered_ids)
 
-        # Persist override dict so it survives session rebuilds
+        # Persist override dict for THIS format so it survives session rebuilds
         try:
-            save_tier_overrides(g_user_id, service._elo_overrides)
+            save_tier_overrides(g_user_id, service._elo_overrides, scoring_format=fmt)
         except Exception as db_err:
             log.warning("save_tier_overrides after reorder failed: %s", db_err)
 
-        # Persist updated ELO snapshot
+        # Persist updated ELO snapshot for this format
         try:
             if g_league and g_league.league_id not in ("league_demo",):
                 all_rankings = service.get_rankings(position=None)
@@ -1031,14 +1155,15 @@ def reorder_rankings():
                     for rp in all_rankings.rankings
                 ]
                 upsert_member_rankings(
-                    user_id   = g_user_id,
-                    league_id = g_league.league_id,
-                    rankings  = ranking_payload,
+                    user_id        = g_user_id,
+                    league_id      = g_league.league_id,
+                    rankings       = ranking_payload,
+                    scoring_format = fmt,
                 )
         except Exception as db_err:
             log.warning("member_rankings publish after reorder failed: %s", db_err)
 
-        return jsonify({"ok": True, "count": len(ordered_ids)})
+        return jsonify({"ok": True, "count": len(ordered_ids), "scoring_format": fmt})
     except Exception as e:
         log.error("reorder_rankings error: %s", e)
         return jsonify({"error": str(e)}), 400
@@ -1177,14 +1302,16 @@ def generate_trades():
     elo_map_rt = {rp.player.id: rp.elo for rp in user_elo.rankings}
     seed_map   = service._seed or {}
 
-    # ── Inject real leaguemate ELO from DB ──────────────────────────────
+    # ── Inject real leaguemate ELO from DB (for active scoring format) ───
     # For every member in the current league, replace their simulated ELO
-    # with their actual stored rankings if they have any.  Members with no
-    # stored rankings keep their random-biased values as a fallback.
+    # with their actual stored rankings for THIS format if they have any.
+    # Members with no stored rankings in this format keep their random-biased
+    # values as a fallback.
     real_count = 0
+    fmt = _active_format(sess)
     try:
         real_rankings = load_member_rankings(
-            league_id=league_id, exclude_user_id=g_user_id
+            league_id=league_id, exclude_user_id=g_user_id, scoring_format=fmt
         )
         if real_rankings:
             for member in g_league.members:
@@ -1308,10 +1435,11 @@ def swipe_trade():
                 decision           = decision,
             )
             save_trade_swipes(
-                user_id    = g_user_id,
-                winner_ids = win_ids,
-                loser_ids  = lose_ids,
-                k_factor   = k_factor,
+                user_id        = g_user_id,
+                winner_ids     = win_ids,
+                loser_ids      = lose_ids,
+                k_factor       = k_factor,
+                scoring_format = _active_format(sess),
             )
 
             # Mutual match detection — only on "like" decisions
@@ -1524,11 +1652,12 @@ def disposition_trade_match(match_id):
                 #    them on next session_init via replay_from_db)
                 try:
                     save_trade_swipes(
-                        user_id       = sig["user_id"],
-                        winner_ids    = sig["winner_ids"],
-                        loser_ids     = sig["loser_ids"],
-                        k_factor      = sig["k_factor"],
-                        decision_type = sig["decision_type"],
+                        user_id        = sig["user_id"],
+                        winner_ids     = sig["winner_ids"],
+                        loser_ids      = sig["loser_ids"],
+                        k_factor       = sig["k_factor"],
+                        decision_type  = sig["decision_type"],
+                        scoring_format = _active_format(sess),
                     )
                 except Exception as db_err:
                     log.warning("Failed to persist disposition swipe for %s: %s",
@@ -1667,12 +1796,13 @@ def submit_rankings():
 
     try:
         upsert_member_rankings(
-            user_id   = user_id,
-            league_id = league_id,
-            rankings  = payload,
+            user_id        = user_id,
+            league_id      = league_id,
+            rankings       = payload,
+            scoring_format = _active_format(sess),
         )
-        log.info("rankings/submit — user=%s league=%s players=%d",
-                 user_id, league_id, len(payload))
+        log.info("rankings/submit [%s] — user=%s league=%s players=%d",
+                 _active_format(sess), user_id, league_id, len(payload))
         return jsonify({"ok": True, "submitted": len(payload)})
     except Exception as e:
         log.error("rankings/submit error: %s", e)
@@ -1766,6 +1896,54 @@ def set_league_preferences():
         })
     except Exception as e:
         log.error("set_league_preferences error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/league/summary")
+def league_summary_route():
+    """GET /api/league/summary?league_id=XXX
+
+    Returns the roll-up shown on the League Summary page:
+      - matches_pending / matches_accepted (current user's)
+      - leaguemates_total / _joined / _unlocked_1qb / _unlocked_sf
+      - default_scoring, league_name
+    """
+    sess = _require_session()
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+    try:
+        summary = get_league_summary(league_id=league_id, user_id=g_user_id)
+        return jsonify(summary)
+    except Exception as e:
+        log.error("league/summary error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/league/scoring", methods=["POST"])
+def league_scoring_route():
+    """POST /api/league/scoring {league_id, format}
+
+    Sets the league's default scoring format (shown on League Summary).
+    This is informational — each user still has their own per-format
+    rank sets that they switch between independently.
+    """
+    sess = _require_session()
+    body       = request.get_json(force=True) or {}
+    league_id  = body.get("league_id")
+    fmt        = body.get("format", "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+    if fmt not in SCORING_FORMATS:
+        return jsonify({"error": f"Invalid format: {fmt!r}"}), 400
+    try:
+        set_league_scoring(league_id, fmt)
+        log.info("league/scoring %s → %s (by %s)", league_id, fmt, sess.get("user_id"))
+        return jsonify({"ok": True, "league_id": league_id, "default_scoring": fmt})
+    except Exception as e:
+        log.error("league/scoring error: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -2089,6 +2267,8 @@ def session_init():
     display_name      = body.get("display_name", "")
     username          = body.get("username", "")
     avatar            = body.get("avatar", None)
+    # Referrer attribution (set only on user INSERT)
+    invited_by        = body.get("invited_by") or None
 
     log.info("=== /api/session/init  user_id=%r  league=%r  "
              "user_players=%d  opponents=%d",
@@ -2107,17 +2287,19 @@ def session_init():
     if player_db is None:
         return jsonify({"error": "Player database not cached — call GET /api/sleeper/players first"}), 400
 
-    _ensure_universal_pool()
-    if not g_universal_players:
+    _ensure_universal_pools()
+    if not g_universal_by_format.get("1qb_ppr", {}).get("players"):
         return jsonify({"error": "Could not build universal player pool — Dynasty Process data may be unavailable"}), 400
 
-    # ── Ranking pool = universal players (includes generic picks) ────────
-    # No league-specific Sleeper draft picks in the ranker — only the
-    # generic Early/Mid/Late picks (rounds 1–4) from the universal pool.
-    ranking_pool = list(g_universal_players)
-    ranking_seed = dict(g_universal_seed)
+    # ── Ranking pools: one per scoring format ────────────────────────────
+    # Rankings in 1QB PPR and SF TEP are completely independent rank sets.
+    # Build ranking service state for both formats in parallel; the user's
+    # "active format" governs which one is visible on each request.
+    default_pool, default_seed = _get_universal_pool("1qb_ppr")
+    ranking_pool = list(default_pool)   # for legacy code paths below
+    ranking_seed = dict(default_seed)
 
-    # Build a combined players dict for trade service
+    # Build a combined players dict for trade service (default pool)
     players_dict = {p.id: p for p in ranking_pool}
 
     # ── Build opponent LeagueMembers (league-specific for trades) ────────
@@ -2185,55 +2367,64 @@ def session_init():
 
     new_user_roster = [pid for pid in user_player_ids if pid in players_dict]
 
-    # ── Ranking service: rebuild only if user changed or first init ──────
-    # Rankings are user-level — the universal pool stays constant, so we
-    # only need to rebuild when the user changes (different Sleeper account)
-    # or on first load.  This preserves rankings across league switches.
-    existing_service = existing_sess.get("service") if existing_sess else None
-    need_rebuild = (
-        existing_service is None
-        or not hasattr(existing_service, '_user_id')
-        or existing_service._user_id != user_id
-    )
+    # ── Ranking services: one per scoring format, rebuilt on user change ──
+    # Rankings are user-level — the universal pools stay constant, so we
+    # only rebuild when the user changes or on first load. Each format gets
+    # its own RankingService loaded with only that format's swipes/overrides.
+    existing_services = existing_sess.get("services") if existing_sess else None
+    existing_tagged_user = None
+    if existing_services:
+        any_svc = next(iter(existing_services.values()), None)
+        existing_tagged_user = getattr(any_svc, "_user_id", None) if any_svc else None
+    need_rebuild = existing_services is None or existing_tagged_user != user_id
 
     if need_rebuild:
-        new_service = RankingService(
-            players           = ranking_pool,
-            matchup_generator = matchup_gen,
-            seed_ratings      = ranking_seed,
-        )
-        new_service._user_id = user_id  # tag so we can detect user changes
+        new_services: dict = {}
+        from .database import SCORING_FORMATS as DB_SCORING_FORMATS
+        for fmt in DB_SCORING_FORMATS:
+            fmt_pool, fmt_seed = _get_universal_pool(fmt)
+            svc = RankingService(
+                players           = fmt_pool,
+                matchup_generator = matchup_gen,
+                seed_ratings      = fmt_seed,
+            )
+            svc._user_id = user_id
 
-        # Replay historical swipes — only needed on rebuild
-        try:
-            historical = load_swipe_decisions(user_id=user_id)
-            if historical:
-                replayed = new_service.replay_from_db(historical)
-                log.info("  ✅ replayed %d/%d swipe decisions from DB",
-                         replayed, len(historical))
-            else:
-                log.info("  (no stored swipe history for this user)")
-        except Exception as db_err:
-            log.warning("  DB replay failed — starting with fresh rankings: %s", db_err)
+            # Replay only the swipes tagged with this format
+            try:
+                historical = load_swipe_decisions(user_id=user_id, scoring_format=fmt)
+                if historical:
+                    replayed = svc.replay_from_db(historical)
+                    log.info("  ✅ [%s] replayed %d/%d swipes", fmt, replayed, len(historical))
+                else:
+                    log.info("  [%s] (no stored swipe history)", fmt)
+            except Exception as db_err:
+                log.warning("  [%s] DB replay failed: %s", fmt, db_err)
 
-        # Restore tier/reorder overrides from DB so tier saves survive rebuilds
-        try:
-            overrides = load_tier_overrides(user_id=user_id)
-            # Only keep overrides for players currently in the pool
-            valid_ids = {p.id for p in ranking_pool}
-            new_service._elo_overrides = {
-                pid: elo for pid, elo in overrides.items() if pid in valid_ids
-            }
-            if new_service._elo_overrides:
-                log.info("  ✅ restored %d tier overrides from DB",
-                         len(new_service._elo_overrides))
-        except Exception as db_err:
-            log.warning("  tier override restore failed: %s", db_err)
+            # Restore tier overrides for this format
+            try:
+                overrides = load_tier_overrides(user_id=user_id, scoring_format=fmt)
+                valid_ids = {p.id for p in fmt_pool}
+                svc._elo_overrides = {
+                    pid: elo for pid, elo in overrides.items() if pid in valid_ids
+                }
+                if svc._elo_overrides:
+                    log.info("  ✅ [%s] restored %d tier overrides", fmt, len(svc._elo_overrides))
+            except Exception as db_err:
+                log.warning("  [%s] tier override restore failed: %s", fmt, db_err)
+
+            new_services[fmt] = svc
     else:
-        new_service = existing_service
-        log.info("  ✅ ranking service preserved (same user, universal pool)")
+        new_services = existing_services
+        log.info("  ✅ ranking services preserved (same user, universal pools)")
 
-    # Trade service is always rebuilt per league (league-specific rosters).
+    # Backwards-compat: keep sess['service'] pointing at the currently-active
+    # format's service. Any legacy endpoint that still reads sess['service']
+    # gets the right one automatically.
+    # Active format is resolved below after we load the league's default.
+
+
+    # Trade services: one per scoring format, rebuilt per league.
     # Load past trade decisions (last 7 days) so already-swiped trades don't reappear.
     past_decision_keys: set = set()
     try:
@@ -2246,19 +2437,45 @@ def session_init():
     except Exception as db_err:
         log.warning("  could not load past trade decisions: %s", db_err)
 
-    new_trade_svc = TradeService(players=players_dict, past_decision_keys=past_decision_keys)
-    new_trade_svc.add_league(new_league)
+    new_trade_svcs: dict = {}
+    from .database import SCORING_FORMATS as DB_SCORING_FORMATS
+    for fmt in DB_SCORING_FORMATS:
+        fmt_pool, _ = _get_universal_pool(fmt)
+        fmt_players_dict = {p.id: p for p in fmt_pool}
+        tsvc = TradeService(players=fmt_players_dict, past_decision_keys=past_decision_keys)
+        tsvc.add_league(new_league)
+        new_trade_svcs[fmt] = tsvc
+
+    # ── Resolve active format ────────────────────────────────────────────
+    # Priority: body param > session carry-over > league default > DEFAULT
+    requested_format = body.get("active_format")
+    try:
+        from .database import get_league_scoring, DEFAULT_SCORING as DB_DEFAULT
+    except ImportError:
+        DB_DEFAULT = "1qb_ppr"
+    if requested_format in DB_SCORING_FORMATS:
+        active_format = requested_format
+    elif existing_sess and existing_sess.get("active_format") in DB_SCORING_FORMATS:
+        active_format = existing_sess["active_format"]
+    else:
+        try:
+            active_format = get_league_scoring(league_id)
+        except Exception:
+            active_format = DB_DEFAULT
 
     # ── Create or update session ─────────────────────────────────────────
     session_payload = {
-        "user_id":      user_id,
-        "league":       new_league,
-        "players":      ranking_pool,
-        "user_roster":  new_user_roster,
-        "service":      new_service,
-        "trade_svc":    new_trade_svc,
-        "display_name": display_name,
-        "last_active":  time.time(),
+        "user_id":       user_id,
+        "league":        new_league,
+        "players":       ranking_pool,
+        "user_roster":   new_user_roster,
+        "services":      new_services,                  # dict[format, RankingService]
+        "service":       new_services[active_format],   # alias to active format
+        "trade_svcs":    new_trade_svcs,                # dict[format, TradeService]
+        "trade_svc":     new_trade_svcs[active_format], # alias to active format
+        "active_format": active_format,
+        "display_name":  display_name,
+        "last_active":   time.time(),
     }
     with _sessions_lock:
         if existing_sess:
@@ -2275,6 +2492,7 @@ def session_init():
             username=username,
             display_name=display_name,
             avatar=avatar,
+            invited_by=invited_by,
         )
         upsert_league(
             league_id        = league_id,

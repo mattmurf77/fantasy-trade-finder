@@ -45,6 +45,17 @@ VALUE_MAX = 10_000.0
 # Positions we care about
 VALID_POSITIONS = {"QB", "RB", "WR", "TE"}
 
+# Supported scoring formats — each produces an independent rank set.
+# The values on the right are DynastyProcess's column suffix (without the
+# "value_" prefix), used by _fetch_dynasty_process(scoring=...).
+SCORING_FORMATS = ("1qb_ppr", "sf_tep")
+DEFAULT_SCORING = "1qb_ppr"
+# Map our internal keys → DP's scoring parameter
+DP_SCORING_PARAM = {
+    "1qb_ppr": "1qb",
+    "sf_tep":  "2qb",
+}
+
 # ---------------------------------------------------------------------------
 # Name-mismatch reference table: DynastyProcess → Sleeper
 # ---------------------------------------------------------------------------
@@ -167,7 +178,13 @@ def _fetch_dynasty_process(
     where:
         elo_map   = { normalised_name: initial_elo }
         value_map = { normalised_name: raw_value }  (only for value > 0)
+
+    Accepts either DP's raw column suffix ("1qb" / "2qb") OR our internal
+    format keys ("1qb_ppr" / "sf_tep").
     """
+    # Translate our internal format key into DP's column suffix if needed
+    if scoring in DP_SCORING_PARAM:
+        scoring = DP_SCORING_PARAM[scoring]
     value_col = f"value_{scoring}"
 
     try:

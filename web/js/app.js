@@ -464,6 +464,21 @@
 
         logDrawer.info(`Found ${leagues.length} league(s): ${leagues.map(l => l.name).join(', ')}`);
         _cachedLeagues = leagues;
+
+        // Auto-select the invited league if the user was referred and the
+        // league is in their list — saves a click for referred users.
+        const invitedLeagueId = localStorage.getItem('ftf_invited_league');
+        if (invitedLeagueId) {
+          const idx = leagues.findIndex(lg => lg.league_id === invitedLeagueId);
+          if (idx >= 0) {
+            logDrawer.info(`Auto-selecting invited league: ${leagues[idx].name}`);
+            localStorage.removeItem('ftf_invited_league');  // consume the intent
+            // Defer slightly so the screen transition is perceptible
+            setTimeout(() => selectLeague(idx, null), 200);
+            return;
+          }
+        }
+
         // Pass only the numeric index — avoids any quoting/escaping issues with league names
         list.innerHTML = leagues.map((lg, i) => `
           <div class="league-item" id="li-${lg.league_id}" onclick="selectLeague(${i}, this)">
@@ -507,6 +522,8 @@
       refreshCoverage();
       initFairnessSlider();
       _startNotifPolling();
+      // Render the scoring toggles now that the main views exist in the DOM
+      if (typeof renderScoringToggles === 'function') renderScoringToggles();
     }
 
     async function selectRankingMethod(method) {
@@ -549,8 +566,11 @@
       const leagueId   = lg.league_id;
       const leagueName = lg.name || 'Unnamed League';
       logDrawer.action(`League selected: "${leagueName}" (${leagueId})`);
-      el.classList.add('loading');
-      el.querySelector('.league-item-arrow').textContent = '⏳';
+      if (el) {
+        el.classList.add('loading');
+        const arrow = el.querySelector('.league-item-arrow');
+        if (arrow) arrow.textContent = '⏳';
+      }
 
       const user = getSavedUser();
       if (!user) { logout(); return; }
@@ -741,7 +761,13 @@
         league_name:      league.league_name,
         user_player_ids:  rosterData.userPlayerIds,
         opponent_rosters: rosterData.opponentRosters,
+        // Referral attribution — captured from the invite URL. Only set on
+        // first session_init for a given user (backend upsert_user ignores
+        // it on UPDATE).
+        invited_by:       localStorage.getItem('ftf_invited_by') || undefined,
       };
+      // Track current user globally so invite URLs can carry ?ref={username}
+      window._currentUser = user;
       logDrawer.info(`POSTing /api/session/init — ${rosterData.userPlayerIds.length} user_player_ids, ${rosterData.opponentRosters.length} opponents`);
 
       try {
@@ -1941,6 +1967,9 @@
       if (view === 'matches') {
         loadMatches();
       }
+      if (view === 'league') {
+        loadLeagueSummary();
+      }
     }
 
     // ── Trade finder ─────────────────────────────────────────────────
@@ -2940,6 +2969,319 @@
       if (_notifPollTimer) clearInterval(_notifPollTimer);
       fetchNotifications();  // immediate fetch on login
       _notifPollTimer = setInterval(fetchNotifications, 30000);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  Dual-scoring-format toggle + League Summary + Invite share sheet
+    // ══════════════════════════════════════════════════════════════════
+
+    const FORMAT_KEYS = ['1qb_ppr', 'sf_tep'];
+    const FORMAT_LABELS = {
+      '1qb_ppr': '🏈 1QB PPR',
+      'sf_tep':  '🏟 SF TEP',
+    };
+    const LS_ACTIVE_FORMAT = 'ftf_active_format';
+
+    function getActiveFormat() {
+      const stored = localStorage.getItem(LS_ACTIVE_FORMAT);
+      return FORMAT_KEYS.includes(stored) ? stored : '1qb_ppr';
+    }
+
+    /** Render the scoring-format toggle into every .scoring-toggle-wrap element.
+     *  Re-renders on demand (e.g. after format switch) so the active class syncs. */
+    function renderScoringToggles() {
+      const active = getActiveFormat();
+      document.querySelectorAll('.scoring-toggle-wrap').forEach(wrap => {
+        const isLeagueDefault = wrap.dataset.view === 'league-default';
+        wrap.innerHTML = `
+          <div class="scoring-toggle">
+            ${FORMAT_KEYS.map(fmt => `
+              <button class="scoring-toggle-btn ${fmt === active && !isLeagueDefault ? 'active' : ''}"
+                      data-format="${fmt}"
+                      data-scope="${isLeagueDefault ? 'league' : 'user'}"
+                      onclick="onScoringToggleClick(this)">
+                ${FORMAT_LABELS[fmt]}
+              </button>`).join('')}
+          </div>`;
+      });
+    }
+
+    async function onScoringToggleClick(btn) {
+      const fmt   = btn.dataset.format;
+      const scope = btn.dataset.scope;
+      if (!FORMAT_KEYS.includes(fmt)) return;
+
+      if (scope === 'league') {
+        // League default scoring — saves to /api/league/scoring for this league
+        if (!currentLeagueId) return;
+        btn.classList.add('switching');
+        try {
+          const res = await apiFetch('/api/league/scoring', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ league_id: currentLeagueId, format: fmt }),
+          });
+          if (res.ok) {
+            // Re-render league default toggle to reflect the saved state
+            await loadLeagueSummary();
+          }
+        } catch (e) {
+          showToast('Failed to save league scoring');
+        } finally {
+          btn.classList.remove('switching');
+        }
+        return;
+      }
+
+      // User-level active format switch
+      if (fmt === getActiveFormat()) return;  // already active
+      btn.classList.add('switching');
+      try {
+        const res = await apiFetch('/api/scoring/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ format: fmt }),
+        });
+        if (!res.ok) {
+          showToast('Failed to switch scoring format');
+          return;
+        }
+        localStorage.setItem(LS_ACTIVE_FORMAT, fmt);
+        renderScoringToggles();
+        refreshActiveView();
+      } catch (e) {
+        showToast('Switch failed: ' + e.message);
+      } finally {
+        btn.classList.remove('switching');
+      }
+    }
+
+    /** After a format switch, refresh whatever view is currently visible. */
+    function refreshActiveView() {
+      const active = document.querySelector('.view.active');
+      if (!active) return;
+      const id = active.id;
+      if (id === 'view-rank') {
+        loadTrio();
+        loadProgress();
+      } else if (id === 'view-rankings') {
+        if (typeof loadRankingsTable === 'function') loadRankingsTable();
+      } else if (id === 'view-trades') {
+        if (typeof refreshTrades === 'function') refreshTrades();
+      } else if (id === 'view-matches') {
+        if (typeof loadMatches === 'function') loadMatches();
+      } else if (id === 'view-league') {
+        loadLeagueSummary();
+      }
+    }
+
+    // ── League Summary ────────────────────────────────────────────────
+    async function loadLeagueSummary() {
+      if (!currentLeagueId) return;
+      try {
+        const res = await apiFetch('/api/league/summary?league_id=' + encodeURIComponent(currentLeagueId));
+        if (!res.ok) return;
+        const data = await res.json();
+        renderLeagueSummary(data);
+      } catch (e) {
+        logDrawer.warn('loadLeagueSummary failed: ' + e.message);
+      }
+    }
+
+    function renderLeagueSummary(data) {
+      const titleEl = document.getElementById('league-summary-title');
+      if (titleEl) titleEl.textContent = data.league_name || 'League';
+
+      const grid = document.getElementById('league-summary-grid');
+      if (grid) {
+        grid.innerHTML = `
+          <div class="summary-card">
+            <div class="summary-card-value pending">${data.matches_pending || 0}</div>
+            <div class="summary-card-label">Matches Pending</div>
+            <div class="summary-card-sub">Waiting on a decision</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-card-value accepted">${data.matches_accepted || 0}</div>
+            <div class="summary-card-label">Matches Accepted</div>
+            <div class="summary-card-sub">Both sides agreed</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-card-value">${data.leaguemates_joined || 0} / ${data.leaguemates_total || 0}</div>
+            <div class="summary-card-label">Leaguemates Joined</div>
+            <div class="summary-card-sub">Have a Trade Finder account</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-card-value">${data.leaguemates_unlocked_1qb || 0}&nbsp;<span style="font-size:14px;color:var(--muted)">1QB</span> · ${data.leaguemates_unlocked_sf || 0}&nbsp;<span style="font-size:14px;color:var(--muted)">SF</span></div>
+            <div class="summary-card-label">Unlocked Trade Finder</div>
+            <div class="summary-card-sub">Per scoring format</div>
+          </div>`;
+      }
+
+      // Update the league-default toggle to reflect the current setting
+      const leagueWrap = document.querySelector('.scoring-toggle-wrap[data-view="league-default"]');
+      if (leagueWrap) {
+        const defaultFmt = data.default_scoring || '1qb_ppr';
+        leagueWrap.innerHTML = `
+          <div class="scoring-toggle">
+            ${FORMAT_KEYS.map(fmt => `
+              <button class="scoring-toggle-btn ${fmt === defaultFmt ? 'active' : ''}"
+                      data-format="${fmt}"
+                      data-scope="league"
+                      onclick="onScoringToggleClick(this)">
+                ${FORMAT_LABELS[fmt]}
+              </button>`).join('')}
+          </div>`;
+      }
+    }
+
+    // ── Invite share sheet ────────────────────────────────────────────
+    function buildInviteUrl() {
+      const origin = window.location.origin;
+      const params = new URLSearchParams();
+      if (currentLeagueId) params.set('league', currentLeagueId);
+      const username = (window._currentUser && _currentUser.username) || '';
+      if (username) params.set('ref', username);
+      return `${origin}/?${params.toString()}`;
+    }
+
+    function buildInviteMessage() {
+      const url = buildInviteUrl();
+      const leagueName = document.getElementById('league-summary-title')?.textContent || 'our league';
+      return `Join me on Dynasty Trade Finder to find trades in ${leagueName} → ${url}`;
+    }
+
+    function openInviteModal() {
+      const modal = document.getElementById('invite-modal');
+      if (!modal) return;
+      const urlInput = document.getElementById('invite-url-input');
+      if (urlInput) urlInput.value = buildInviteUrl();
+      renderInviteGrid();
+      modal.classList.remove('hidden');
+    }
+
+    function closeInviteModal() {
+      document.getElementById('invite-modal')?.classList.add('hidden');
+    }
+
+    function closeInviteModalIfBackdrop(e) {
+      if (e.target && e.target.id === 'invite-modal') closeInviteModal();
+    }
+
+    function renderInviteGrid() {
+      const grid = document.getElementById('invite-grid');
+      if (!grid) return;
+      const channels = [
+        { key: 'email',    label: 'Email',      icon: '✉️' },
+        { key: 'sms',      label: 'SMS',        icon: '💬' },
+        { key: 'whatsapp', label: 'WhatsApp',   icon: '🟢' },
+        { key: 'telegram', label: 'Telegram',   icon: '✈️' },
+        { key: 'x',        label: 'X',          icon: '𝕏' },
+        { key: 'groupme',  label: 'GroupMe',    icon: '👥' },
+        { key: 'sleeper',  label: 'Sleeper',    icon: '😴' },
+        { key: 'copy',     label: 'Copy Link',  icon: '🔗' },
+      ];
+      grid.innerHTML = channels.map(ch => `
+        <button class="share-button" onclick="shareVia('${ch.key}')">
+          <span class="share-button-icon">${ch.icon}</span>
+          <span class="share-button-label">${ch.label}</span>
+        </button>`).join('');
+    }
+
+    async function shareVia(channel) {
+      const url = buildInviteUrl();
+      const msg = buildInviteMessage();
+      const subject = encodeURIComponent('Join me on Dynasty Trade Finder');
+      const body    = encodeURIComponent(msg);
+
+      switch (channel) {
+        case 'email':
+          window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+          break;
+        case 'sms':
+          // iOS and Android have slightly different sms: URI conventions; this works on both
+          window.open(`sms:?&body=${body}`, '_blank');
+          break;
+        case 'whatsapp':
+          window.open(`https://wa.me/?text=${body}`, '_blank');
+          break;
+        case 'telegram':
+          window.open(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent('Join me on Dynasty Trade Finder')}`, '_blank');
+          break;
+        case 'x':
+          window.open(`https://twitter.com/intent/tweet?text=${body}`, '_blank');
+          break;
+        case 'groupme':
+        case 'sleeper':
+          // No public deep-link scheme — fall back to Web Share API or copy
+          if (navigator.share) {
+            try {
+              await navigator.share({ title: 'Dynasty Trade Finder', text: msg, url });
+              return;
+            } catch (_) { /* user cancelled */ }
+          }
+          await copyInviteToClipboard(true);
+          showToast(`Link copied — paste it into ${channel === 'groupme' ? 'GroupMe' : 'Sleeper'}`);
+          break;
+        case 'copy':
+        default:
+          await copyInviteToClipboard(false);
+          showToast('Link copied to clipboard');
+          break;
+      }
+    }
+
+    async function copyInviteToClipboard(fullMessage) {
+      const text = fullMessage ? buildInviteMessage() : buildInviteUrl();
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_) {
+        // Fallback for browsers without clipboard API
+        const input = document.getElementById('invite-url-input');
+        if (input) { input.select(); document.execCommand('copy'); }
+      }
+    }
+
+    // ── Referral capture ──────────────────────────────────────────────
+    const LS_INVITED_BY     = 'ftf_invited_by';
+    const LS_INVITED_LEAGUE = 'ftf_invited_league';
+
+    function captureReferralFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const ref    = params.get('ref');
+      const lg     = params.get('league');
+      if (ref) localStorage.setItem(LS_INVITED_BY, ref);
+      if (lg)  localStorage.setItem(LS_INVITED_LEAGUE, lg);
+      if (ref || lg) {
+        // Clean the URL so the attribution params don't persist in the bar
+        const clean = window.location.pathname + window.location.hash;
+        window.history.replaceState({}, document.title, clean);
+        // Show the invited banner under the auth card (if still on login)
+        showInvitedBanner(ref);
+      }
+    }
+
+    function getInvitedBy() { return localStorage.getItem(LS_INVITED_BY) || ''; }
+    function getInvitedLeague() { return localStorage.getItem(LS_INVITED_LEAGUE) || ''; }
+
+    function showInvitedBanner(ref) {
+      if (!ref) return;
+      const card = document.querySelector('.auth-card');
+      if (!card) return;
+      if (card.querySelector('.invited-banner')) return;  // already shown
+      const banner = document.createElement('div');
+      banner.className = 'invited-banner';
+      banner.textContent = `🤝 Invited by @${ref}`;
+      card.appendChild(banner);
+    }
+
+    // Kick capture immediately (before boot runs)
+    captureReferralFromUrl();
+
+    // Render toggles once DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', renderScoringToggles);
+    } else {
+      renderScoringToggles();
     }
 
     // ── Kick everything off ─────────────────────────────────────────

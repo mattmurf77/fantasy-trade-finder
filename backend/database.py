@@ -52,11 +52,13 @@ users_table = Table("users", metadata,
     Column("avatar",          String),
     Column("created_at",      String),
     Column("ranking_method",  String),   # null | 'trio' | 'manual' | 'tiers'
-    Column("tiers_saved",     String),   # JSON list of positions saved, e.g. '["RB","WR"]'
-    Column("tier_overrides",  Text),     # JSON {player_id: elo_float} — user's
-                                          # tier/reorder assignments, replayed
-                                          # into RankingService._elo_overrides
-                                          # on session rebuild
+    Column("tiers_saved",     Text),     # JSON — dual-format shape:
+                                          #   {"1qb_ppr": ["RB","WR"], "sf_tep": []}
+    Column("tier_overrides",  Text),     # JSON — dual-format shape:
+                                          #   {"1qb_ppr": {pid: elo}, "sf_tep": {pid: elo}}
+    Column("invited_by",      String),   # sleeper username of referrer (null = direct)
+    Column("unlocked_formats", Text),    # JSON list — which formats the user has
+                                          # unlocked trade finder in, e.g. ["1qb_ppr"]
 )
 
 leagues_table = Table("leagues", metadata,
@@ -68,6 +70,7 @@ leagues_table = Table("leagues", metadata,
     Column("opponent_data",     Text),   # JSON: list of {user_id, username, player_ids}
     Column("created_at",        String),
     Column("updated_at",        String),
+    Column("default_scoring",   String), # '1qb_ppr' | 'sf_tep' (null → treated as '1qb_ppr')
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -81,6 +84,7 @@ swipe_decisions_table = Table("swipe_decisions", metadata,
     Column("decision_type",    String,  nullable=False),  # 'rank' | 'trade'
     Column("k_factor",         Float,   nullable=False, default=32.0),
     Column("created_at",       String),
+    Column("scoring_format",   String), # '1qb_ppr' | 'sf_tep' (null = legacy '1qb_ppr')
 )
 
 # High-level record of each trade card decision — human-readable audit trail.
@@ -112,12 +116,13 @@ league_members_table = Table("league_members", metadata,
 # Replaced atomically (delete + insert) every time a user submits their rankings.
 # This is what lets leaguemates see each other's actual valuations.
 member_rankings_table = Table("member_rankings", metadata,
-    Column("id",         Integer, primary_key=True, autoincrement=True),
-    Column("user_id",    String,  nullable=False),
-    Column("league_id",  String,  nullable=False),
-    Column("player_id",  String,  nullable=False),
-    Column("elo",        Float,   nullable=False),
-    Column("updated_at", String),
+    Column("id",             Integer, primary_key=True, autoincrement=True),
+    Column("user_id",        String,  nullable=False),
+    Column("league_id",      String,  nullable=False),
+    Column("player_id",      String,  nullable=False),
+    Column("elo",            Float,   nullable=False),
+    Column("updated_at",     String),
+    Column("scoring_format", String), # '1qb_ppr' | 'sf_tep' (null = legacy '1qb_ppr')
 )
 
 # Created when two users have BOTH swiped "like" on mirrored versions of the
@@ -341,6 +346,12 @@ def _migrate_db() -> None:
         ("users",              "ranking_method",        "VARCHAR"),
         ("users",              "tiers_saved",           "TEXT"),
         ("users",              "tier_overrides",        "TEXT"),
+        # Dual-format support (1QB PPR + SF TEP)
+        ("swipe_decisions",    "scoring_format",        "VARCHAR"),
+        ("member_rankings",    "scoring_format",        "VARCHAR"),
+        ("leagues",            "default_scoring",       "VARCHAR"),
+        ("users",              "invited_by",            "VARCHAR"),
+        ("users",              "unlocked_formats",      "TEXT"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -351,6 +362,9 @@ def _migrate_db() -> None:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
         except Exception:
             pass   # column already exists — safe to ignore
+
+    # Backfill: tag existing rows with '1qb_ppr' format since that was the only one
+    _backfill_dual_format()
 
     # Seed model_config defaults in a single clean transaction.
     with engine.begin() as conn:
@@ -366,6 +380,104 @@ def _migrate_db() -> None:
                     "VALUES (:key, :value, :description) "
                     "ON CONFLICT (key) DO NOTHING"
                 ), {"key": key, "value": value, "description": description})
+
+
+# Shared constants for dual-format support.
+# Must match backend.data_loader.SCORING_FORMATS and the frontend's
+# FORMAT_KEYS in web/js/app.js.
+SCORING_FORMATS = ("1qb_ppr", "sf_tep")
+DEFAULT_SCORING = "1qb_ppr"
+
+
+def _backfill_dual_format() -> None:
+    """
+    One-time backfill after dual-format migration:
+
+    1. Tag legacy rows in swipe_decisions / member_rankings with '1qb_ppr'
+       (that was the only format in use before).
+    2. Rewrite any legacy single-state JSON in users.tiers_saved and
+       users.tier_overrides into the new {format: state} shape.
+    3. Default users.unlocked_formats to '[]' where null.
+
+    All operations are idempotent and safe to run on every startup.
+    """
+    try:
+        with engine.begin() as conn:
+            # Tag legacy swipe rows
+            conn.execute(text(
+                "UPDATE swipe_decisions SET scoring_format = :fmt "
+                "WHERE scoring_format IS NULL"
+            ), {"fmt": DEFAULT_SCORING})
+            # Tag legacy member_rankings rows
+            conn.execute(text(
+                "UPDATE member_rankings SET scoring_format = :fmt "
+                "WHERE scoring_format IS NULL"
+            ), {"fmt": DEFAULT_SCORING})
+    except Exception as e:
+        # Logging via print since this module doesn't have `log`
+        print(f"[backfill] swipe/member scoring_format tag failed: {e}")
+
+    # Rewrite legacy JSON on users rows — one user at a time, skip rows
+    # already in the new shape.
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    users_table.c.sleeper_user_id,
+                    users_table.c.tiers_saved,
+                    users_table.c.tier_overrides,
+                    users_table.c.unlocked_formats,
+                )
+            ).fetchall()
+
+        for row in rows:
+            updates: dict = {}
+
+            # tiers_saved: legacy = ["RB","WR"]; new = {"1qb_ppr": [...], "sf_tep": []}
+            ts = row.tiers_saved
+            if ts:
+                try:
+                    parsed = json.loads(ts)
+                    if isinstance(parsed, list):
+                        updates["tiers_saved"] = json.dumps({
+                            "1qb_ppr": parsed,
+                            "sf_tep":  [],
+                        })
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # tier_overrides: legacy = {pid: elo}; new = {"1qb_ppr": {...}, "sf_tep": {}}
+            to = row.tier_overrides
+            if to:
+                try:
+                    parsed = json.loads(to)
+                    # Detect legacy: flat dict of {pid: float}, no format keys
+                    if isinstance(parsed, dict) and not any(
+                        k in parsed for k in SCORING_FORMATS
+                    ):
+                        updates["tier_overrides"] = json.dumps({
+                            "1qb_ppr": parsed,
+                            "sf_tep":  {},
+                        })
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # unlocked_formats: default to empty list if null
+            if row.unlocked_formats is None:
+                updates["unlocked_formats"] = "[]"
+
+            if updates:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            update(users_table)
+                            .where(users_table.c.sleeper_user_id == row.sleeper_user_id)
+                            .values(**updates)
+                        )
+                except Exception as e:
+                    print(f"[backfill] user {row.sleeper_user_id} update failed: {e}")
+    except Exception as e:
+        print(f"[backfill] users JSON rewrite failed: {e}")
 
 
 def init_db() -> None:
@@ -439,8 +551,13 @@ def upsert_user(
     username: str = "",
     display_name: str = "",
     avatar: str | None = None,
+    invited_by: str | None = None,
 ) -> None:
-    """Insert a new user or update their display fields if they already exist."""
+    """Insert a new user or update their display fields if they already exist.
+
+    `invited_by` is only set on INSERT — repeat logins never overwrite the
+    original referrer, so referral attribution is immutable once recorded.
+    """
     with engine.begin() as conn:
         existing = conn.execute(
             select(users_table).where(
@@ -455,13 +572,16 @@ def upsert_user(
                 .values(username=username, display_name=display_name, avatar=avatar)
             )
         else:
-            conn.execute(insert(users_table).values(
-                sleeper_user_id=sleeper_user_id,
-                username=username,
-                display_name=display_name,
-                avatar=avatar,
-                created_at=_now(),
-            ))
+            values: dict = {
+                "sleeper_user_id": sleeper_user_id,
+                "username":        username,
+                "display_name":    display_name,
+                "avatar":          avatar,
+                "created_at":      _now(),
+            }
+            if invited_by:
+                values["invited_by"] = invited_by
+            conn.execute(insert(users_table).values(**values))
 
 
 def set_ranking_method(user_id: str, method: str) -> None:
@@ -485,8 +605,36 @@ def get_ranking_method(user_id: str) -> str | None:
         return row.ranking_method if row else None
 
 
-def save_tiers_position(user_id: str, position: str) -> list[str]:
-    """Mark a position as tier-saved for this user. Returns updated list of saved positions.
+def _parse_per_format_json(raw: str | None, is_list: bool) -> dict:
+    """
+    Parse a per-format JSON column. Returns a dict keyed by SCORING_FORMATS
+    with the default empty value for any missing format.
+    """
+    empty = [] if is_list else {}
+    out: dict = {fmt: (list(empty) if is_list else dict(empty)) for fmt in SCORING_FORMATS}
+    if not raw:
+        return out
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return out
+    if isinstance(parsed, dict):
+        for fmt in SCORING_FORMATS:
+            val = parsed.get(fmt)
+            if is_list and isinstance(val, list):
+                out[fmt] = val
+            elif not is_list and isinstance(val, dict):
+                out[fmt] = val
+    return out
+
+
+def save_tiers_position(
+    user_id: str,
+    position: str,
+    scoring_format: str = DEFAULT_SCORING,
+) -> list[str]:
+    """Mark a position as tier-saved for this user in the given format.
+    Returns the updated list of saved positions for that format.
 
     Uses SELECT FOR UPDATE on Postgres (and a serialized transaction on SQLite)
     to prevent the read-modify-write race where two concurrent saves for
@@ -495,72 +643,144 @@ def save_tiers_position(user_id: str, position: str) -> list[str]:
     is_postgres = not DATABASE_URL.startswith("sqlite")
     with engine.begin() as conn:
         if is_postgres:
-            # Row-level lock held until transaction commits
             row = conn.execute(
                 text("SELECT tiers_saved FROM users WHERE sleeper_user_id = :uid FOR UPDATE"),
                 {"uid": user_id},
             ).fetchone()
         else:
-            # SQLite serializes writes at the DB level — a single BEGIN IMMEDIATE
-            # transaction prevents concurrent read-modify-write on the same row
             row = conn.execute(
                 select(users_table.c.tiers_saved).where(
                     users_table.c.sleeper_user_id == user_id
                 )
             ).fetchone()
 
-        saved = json.loads(row.tiers_saved) if row and row.tiers_saved else []
+        all_saved = _parse_per_format_json(row.tiers_saved if row else None, is_list=True)
+        saved = all_saved.get(scoring_format, [])
         if position not in saved:
             saved.append(position)
+            all_saved[scoring_format] = saved
             conn.execute(
                 update(users_table)
                 .where(users_table.c.sleeper_user_id == user_id)
-                .values(tiers_saved=json.dumps(saved))
+                .values(tiers_saved=json.dumps(all_saved))
             )
         return saved
 
 
-def get_tiers_saved(user_id: str) -> list[str]:
-    """Return list of positions that have saved tiers, e.g. ['RB', 'WR']."""
+def get_tiers_saved(
+    user_id: str,
+    scoring_format: str = DEFAULT_SCORING,
+) -> list[str]:
+    """Return list of positions with saved tiers for this user + format."""
     with engine.connect() as conn:
         row = conn.execute(
             select(users_table.c.tiers_saved).where(
                 users_table.c.sleeper_user_id == user_id
             )
         ).fetchone()
-        if row and row.tiers_saved:
-            return json.loads(row.tiers_saved)
-        return []
+    all_saved = _parse_per_format_json(row.tiers_saved if row else None, is_list=True)
+    return all_saved.get(scoring_format, [])
 
 
-def save_tier_overrides(user_id: str, overrides: dict[str, float]) -> None:
+def save_tier_overrides(
+    user_id: str,
+    overrides: dict[str, float],
+    scoring_format: str = DEFAULT_SCORING,
+) -> None:
     """
-    Persist the user's full tier/reorder override map as JSON.
-    Overrides is {player_id: elo_float}. Stored on the users row so it
-    survives session rebuilds and server restarts.
+    Persist the user's tier/reorder override map for one scoring format.
+    Other formats' overrides are left untouched.
     """
+    is_postgres = not DATABASE_URL.startswith("sqlite")
     with engine.begin() as conn:
+        if is_postgres:
+            row = conn.execute(
+                text("SELECT tier_overrides FROM users WHERE sleeper_user_id = :uid FOR UPDATE"),
+                {"uid": user_id},
+            ).fetchone()
+        else:
+            row = conn.execute(
+                select(users_table.c.tier_overrides).where(
+                    users_table.c.sleeper_user_id == user_id
+                )
+            ).fetchone()
+        all_overrides = _parse_per_format_json(row.tier_overrides if row else None, is_list=False)
+        # Cast ELO values to float so JSON stays clean
+        all_overrides[scoring_format] = {pid: float(elo) for pid, elo in overrides.items()}
         conn.execute(
             update(users_table)
             .where(users_table.c.sleeper_user_id == user_id)
-            .values(tier_overrides=json.dumps(overrides))
+            .values(tier_overrides=json.dumps(all_overrides))
         )
 
 
-def load_tier_overrides(user_id: str) -> dict[str, float]:
-    """Return {player_id: elo_float} for this user, or {} if none stored."""
+def load_tier_overrides(
+    user_id: str,
+    scoring_format: str = DEFAULT_SCORING,
+) -> dict[str, float]:
+    """Return {player_id: elo_float} overrides for this user + format."""
     with engine.connect() as conn:
         row = conn.execute(
             select(users_table.c.tier_overrides).where(
                 users_table.c.sleeper_user_id == user_id
             )
         ).fetchone()
-        if row and row.tier_overrides:
-            try:
-                return {k: float(v) for k, v in json.loads(row.tier_overrides).items()}
-            except (json.JSONDecodeError, TypeError, ValueError):
-                return {}
+    all_overrides = _parse_per_format_json(row.tier_overrides if row else None, is_list=False)
+    fmt_overrides = all_overrides.get(scoring_format, {})
+    try:
+        return {k: float(v) for k, v in fmt_overrides.items()}
+    except (TypeError, ValueError):
         return {}
+
+
+def mark_format_unlocked(user_id: str, scoring_format: str) -> None:
+    """Add `scoring_format` to the user's unlocked_formats list if not already present.
+    Monotonic — never removes a format once unlocked."""
+    is_postgres = not DATABASE_URL.startswith("sqlite")
+    with engine.begin() as conn:
+        if is_postgres:
+            row = conn.execute(
+                text("SELECT unlocked_formats FROM users WHERE sleeper_user_id = :uid FOR UPDATE"),
+                {"uid": user_id},
+            ).fetchone()
+        else:
+            row = conn.execute(
+                select(users_table.c.unlocked_formats).where(
+                    users_table.c.sleeper_user_id == user_id
+                )
+            ).fetchone()
+        unlocked: list = []
+        if row and row.unlocked_formats:
+            try:
+                parsed = json.loads(row.unlocked_formats)
+                if isinstance(parsed, list):
+                    unlocked = parsed
+            except (json.JSONDecodeError, TypeError):
+                unlocked = []
+        if scoring_format not in unlocked:
+            unlocked.append(scoring_format)
+            conn.execute(
+                update(users_table)
+                .where(users_table.c.sleeper_user_id == user_id)
+                .values(unlocked_formats=json.dumps(unlocked))
+            )
+
+
+def get_unlocked_formats(user_id: str) -> list[str]:
+    """Return the list of scoring formats the user has unlocked trade finder in."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.unlocked_formats).where(
+                users_table.c.sleeper_user_id == user_id
+            )
+        ).fetchone()
+    if row and row.unlocked_formats:
+        try:
+            parsed = json.loads(row.unlocked_formats)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -623,10 +843,11 @@ def save_ranking_swipes(
     user_id: str,
     ordered_ids: list[str],
     k_factor: float = 32.0,
+    scoring_format: str = DEFAULT_SCORING,
 ) -> None:
     """
     Decompose a 3-player (or N-player) ranking into pairwise comparisons
-    and persist each to the DB.
+    and persist each to the DB, tagged with the current scoring_format.
 
     Mirrors the decomposition in RankingService.record_ranking() so that
     replaying these rows recreates identical ELO state.
@@ -642,6 +863,7 @@ def save_ranking_swipes(
                 "decision_type":    "rank",
                 "k_factor":         k_factor,
                 "created_at":       now,
+                "scoring_format":   scoring_format,
             })
     if rows:
         with engine.begin() as conn:
@@ -654,6 +876,7 @@ def save_trade_swipes(
     loser_ids: list[str],
     k_factor: float,
     decision_type: str = "trade",
+    scoring_format: str = DEFAULT_SCORING,
 ) -> None:
     """
     Persist pairwise trade-signal swipes.
@@ -678,23 +901,40 @@ def save_trade_swipes(
                 "decision_type":    decision_type,
                 "k_factor":         k_factor,
                 "created_at":       now,
+                "scoring_format":   scoring_format,
             })
     if rows:
         with engine.begin() as conn:
             conn.execute(insert(swipe_decisions_table), rows)
 
 
-def load_swipe_decisions(user_id: str) -> list[dict]:
+def load_swipe_decisions(
+    user_id: str,
+    scoring_format: str | None = None,
+) -> list[dict]:
     """
     Return all stored swipe decisions for a user, in insertion order.
     Used to replay historical rankings into a freshly built RankingService.
+
+    If scoring_format is provided, only returns swipes tagged with that
+    format (or the legacy null format, which we treat as '1qb_ppr').
     """
     with engine.connect() as conn:
-        rows = conn.execute(
+        q = (
             select(swipe_decisions_table)
             .where(swipe_decisions_table.c.user_id == user_id)
             .order_by(swipe_decisions_table.c.id)
-        ).fetchall()
+        )
+        if scoring_format is not None:
+            if scoring_format == DEFAULT_SCORING:
+                # Include legacy NULL rows (backfill tags them but be defensive)
+                q = q.where(
+                    (swipe_decisions_table.c.scoring_format == scoring_format) |
+                    (swipe_decisions_table.c.scoring_format.is_(None))
+                )
+            else:
+                q = q.where(swipe_decisions_table.c.scoring_format == scoring_format)
+        rows = conn.execute(q).fetchall()
     return [dict(r._mapping) for r in rows]
 
 
@@ -827,6 +1067,144 @@ def load_league_members(league_id: str) -> list[dict]:
     return result
 
 
+def set_league_scoring(league_id: str, scoring_format: str) -> None:
+    """Save the league's default scoring format (shown on the league summary)."""
+    if scoring_format not in SCORING_FORMATS:
+        raise ValueError(f"Invalid scoring_format: {scoring_format!r}")
+    with engine.begin() as conn:
+        # Update ALL leagues rows for this league (there can be multiple user_id rows
+        # under the same sleeper_league_id since the leagues table keys on the pair).
+        conn.execute(
+            update(leagues_table)
+            .where(leagues_table.c.sleeper_league_id == league_id)
+            .values(default_scoring=scoring_format)
+        )
+
+
+def get_league_scoring(league_id: str) -> str:
+    """Return the league's default scoring format, defaulting to '1qb_ppr'."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(leagues_table.c.default_scoring)
+            .where(leagues_table.c.sleeper_league_id == league_id)
+            .limit(1)
+        ).fetchone()
+    if row and row.default_scoring in SCORING_FORMATS:
+        return row.default_scoring
+    return DEFAULT_SCORING
+
+
+def get_league_summary(league_id: str, user_id: str) -> dict:
+    """
+    Return a rollup for the League Summary page:
+
+    {
+        "league_name":              str,
+        "default_scoring":          '1qb_ppr' | 'sf_tep',
+        "matches_pending":          int,   # current user's pending matches in this league
+        "matches_accepted":         int,   # current user's accepted matches in this league
+        "leaguemates_total":        int,   # members other than current user
+        "leaguemates_joined":       int,   # how many have a users row
+        "leaguemates_unlocked_1qb": int,   # how many unlocked 1qb_ppr
+        "leaguemates_unlocked_sf":  int,   # how many unlocked sf_tep
+    }
+    """
+    from sqlalchemy import func
+
+    with engine.connect() as conn:
+        # League name and default scoring (first row wins)
+        league_row = conn.execute(
+            select(leagues_table.c.name, leagues_table.c.default_scoring)
+            .where(leagues_table.c.sleeper_league_id == league_id)
+            .limit(1)
+        ).fetchone()
+        league_name = league_row.name if league_row else ""
+        default_scoring = (
+            league_row.default_scoring
+            if league_row and league_row.default_scoring in SCORING_FORMATS
+            else DEFAULT_SCORING
+        )
+
+        # Match counts for the current user
+        matches_pending = conn.execute(
+            select(func.count()).select_from(trade_matches_table).where(
+                (trade_matches_table.c.league_id == league_id) &
+                (trade_matches_table.c.status == 'pending') &
+                (
+                    (trade_matches_table.c.user_a_id == user_id) |
+                    (trade_matches_table.c.user_b_id == user_id)
+                )
+            )
+        ).scalar() or 0
+
+        matches_accepted = conn.execute(
+            select(func.count()).select_from(trade_matches_table).where(
+                (trade_matches_table.c.league_id == league_id) &
+                (trade_matches_table.c.status == 'accepted') &
+                (
+                    (trade_matches_table.c.user_a_id == user_id) |
+                    (trade_matches_table.c.user_b_id == user_id)
+                )
+            )
+        ).scalar() or 0
+
+        # Leaguemate IDs excluding current user
+        leaguemate_rows = conn.execute(
+            select(league_members_table.c.user_id).where(
+                (league_members_table.c.league_id == league_id) &
+                (league_members_table.c.user_id != user_id)
+            )
+        ).fetchall()
+        leaguemate_ids = [r.user_id for r in leaguemate_rows]
+        leaguemates_total = len(leaguemate_ids)
+
+        if leaguemates_total == 0:
+            return {
+                "league_name":              league_name,
+                "default_scoring":          default_scoring,
+                "matches_pending":          matches_pending,
+                "matches_accepted":         matches_accepted,
+                "leaguemates_total":        0,
+                "leaguemates_joined":       0,
+                "leaguemates_unlocked_1qb": 0,
+                "leaguemates_unlocked_sf":  0,
+            }
+
+        # Joined = users rows exist for these sleeper_user_ids
+        joined_rows = conn.execute(
+            select(users_table.c.sleeper_user_id, users_table.c.unlocked_formats).where(
+                users_table.c.sleeper_user_id.in_(leaguemate_ids)
+            )
+        ).fetchall()
+        leaguemates_joined = len(joined_rows)
+
+        unlocked_1qb = 0
+        unlocked_sf = 0
+        for jr in joined_rows:
+            if not jr.unlocked_formats:
+                continue
+            try:
+                parsed = json.loads(jr.unlocked_formats)
+                if isinstance(parsed, list):
+                    if "1qb_ppr" in parsed:
+                        unlocked_1qb += 1
+                    if "sf_tep" in parsed:
+                        unlocked_sf += 1
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+    return {
+        "league_name":              league_name,
+        "default_scoring":          default_scoring,
+        "matches_pending":          matches_pending,
+        "matches_accepted":         matches_accepted,
+        "leaguemates_total":        leaguemates_total,
+        "leaguemates_joined":       leaguemates_joined,
+        "leaguemates_unlocked_1qb": unlocked_1qb,
+        "leaguemates_unlocked_sf":  unlocked_sf,
+    }
+
+
 def load_local_leagues_for_user(user_id: str) -> list[dict]:
     """
     Return all locally-stored (non-Sleeper) leagues where this user is a member,
@@ -910,44 +1288,67 @@ def upsert_member_rankings(
     user_id: str,
     league_id: str,
     rankings: list[dict],
+    scoring_format: str = DEFAULT_SCORING,
 ) -> None:
     """
-    Replace a user's full ranking snapshot for a league.
+    Replace a user's ranking snapshot for a league + scoring format.
 
     rankings: list of {player_id: str, elo: float}
 
-    Atomically deletes all existing rows for this (user_id, league_id) and
-    bulk-inserts the fresh snapshot.  This means stale players (dropped from
-    a roster) are automatically removed.
+    Atomically deletes all existing rows for this (user_id, league_id,
+    scoring_format) and bulk-inserts the fresh snapshot.  The OTHER
+    format's snapshot is left untouched, so toggling scoring doesn't
+    wipe the rank set you're not currently using.
     """
     now  = _now()
     rows = [
         {
-            "user_id":    user_id,
-            "league_id":  league_id,
-            "player_id":  r["player_id"],
-            "elo":        float(r["elo"]),
-            "updated_at": now,
+            "user_id":        user_id,
+            "league_id":      league_id,
+            "player_id":      r["player_id"],
+            "elo":            float(r["elo"]),
+            "updated_at":     now,
+            "scoring_format": scoring_format,
         }
         for r in rankings
         if r.get("player_id") and r.get("elo") is not None
     ]
 
     with engine.begin() as conn:
-        conn.execute(
-            delete(member_rankings_table).where(
-                (member_rankings_table.c.user_id   == user_id) &
-                (member_rankings_table.c.league_id == league_id)
+        # Delete only this format's rows. Legacy NULL-tagged rows (before
+        # dual-format migration) are cleaned up when the default format
+        # matches, but other-format rows stay put.
+        if scoring_format == DEFAULT_SCORING:
+            conn.execute(
+                delete(member_rankings_table).where(
+                    (member_rankings_table.c.user_id   == user_id) &
+                    (member_rankings_table.c.league_id == league_id) &
+                    (
+                        (member_rankings_table.c.scoring_format == scoring_format) |
+                        (member_rankings_table.c.scoring_format.is_(None))
+                    )
+                )
             )
-        )
+        else:
+            conn.execute(
+                delete(member_rankings_table).where(
+                    (member_rankings_table.c.user_id        == user_id) &
+                    (member_rankings_table.c.league_id      == league_id) &
+                    (member_rankings_table.c.scoring_format == scoring_format)
+                )
+            )
         if rows:
             conn.execute(insert(member_rankings_table), rows)
 
 
-def load_member_rankings(league_id: str, exclude_user_id: str) -> dict:
+def load_member_rankings(
+    league_id: str,
+    exclude_user_id: str,
+    scoring_format: str = DEFAULT_SCORING,
+) -> dict:
     """
-    Load all stored member rankings for a league, excluding one user (the
-    logged-in user, who already has their ELO in memory).
+    Load stored member rankings for a league + scoring format, excluding
+    one user (the logged-in user, who already has their ELO in memory).
 
     Returns:
     {
@@ -958,7 +1359,8 @@ def load_member_rankings(league_id: str, exclude_user_id: str) -> dict:
         ...
     }
 
-    Only users who have submitted at least one ranking are included.
+    Only users who have submitted at least one ranking in this format
+    are included.
     """
     with engine.connect() as conn:
         # Username lookup from league_members
@@ -972,13 +1374,23 @@ def load_member_rankings(league_id: str, exclude_user_id: str) -> dict:
             for r in member_rows
         }
 
-        # All stored rankings except the current user
-        ranking_rows = conn.execute(
+        # All stored rankings for this format except the current user.
+        # Legacy NULL rows are treated as '1qb_ppr' so pre-migration data
+        # keeps working for the default format.
+        q = (
             select(member_rankings_table).where(
                 (member_rankings_table.c.league_id == league_id) &
                 (member_rankings_table.c.user_id   != exclude_user_id)
             )
-        ).fetchall()
+        )
+        if scoring_format == DEFAULT_SCORING:
+            q = q.where(
+                (member_rankings_table.c.scoring_format == scoring_format) |
+                (member_rankings_table.c.scoring_format.is_(None))
+            )
+        else:
+            q = q.where(member_rankings_table.c.scoring_format == scoring_format)
+        ranking_rows = conn.execute(q).fetchall()
 
     result: dict = {}
     for r in ranking_rows:
