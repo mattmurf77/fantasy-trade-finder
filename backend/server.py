@@ -913,18 +913,18 @@ def save_tiers_route():
     if position not in ("QB", "RB", "WR", "TE"):
         return jsonify({"error": f"Invalid position: {position!r}"}), 400
 
-    # Build an ordered list from tiers: elite first, bench last
-    tier_order = ["elite", "starter", "solid", "depth", "bench"]
-    ordered_ids = []
-    for tier_name in tier_order:
-        ordered_ids.extend(tiers.get(tier_name, []))
-
-    if not ordered_ids:
+    # Must have at least one player in some tier
+    total_assigned = sum(len(ids) for ids in tiers.values() if isinstance(ids, list))
+    if total_assigned == 0:
         return jsonify({"error": "No players in any tier"}), 400
 
     try:
-        # Apply as a reorder (assigns linearly spaced ELO values)
-        service.apply_reorder(position=position, ordered_ids=ordered_ids)
+        # apply_tiers assigns ELOs inside each tier's threshold band so that
+        # when the frontend reloads and re-buckets by ELO, players land back
+        # in the tier the user chose (fixes the "bench → depth/elite" bug
+        # that apply_reorder caused because it spread linearly across the
+        # pool's min/max without regard for tier cutoffs).
+        service.apply_tiers(position=position, tiers=tiers)
 
         # Persist the full tier override dict so it survives session rebuilds
         try:

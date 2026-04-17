@@ -670,6 +670,56 @@ class RankingService:
             reasoning="Tightest uncompared trio by Elo.",
         )
 
+    # ELO bands for tier-based saves.  These MUST stay in sync with
+    # ELO_TIER_THRESHOLDS in web/positional-tiers.html so that tier
+    # assignments round-trip correctly: each tier's band sits safely
+    # above the frontend's threshold for that tier.
+    #
+    # Frontend thresholds:
+    #   elite   >= 1700
+    #   starter >= 1580
+    #   solid   >= 1460
+    #   depth   >= 1350
+    #   bench   <  1350
+    TIER_ELO_BANDS: dict[str, tuple[float, float]] = {
+        "elite":   (1720.0, 1790.0),
+        "starter": (1600.0, 1680.0),
+        "solid":   (1480.0, 1560.0),
+        "depth":   (1370.0, 1450.0),
+        "bench":   (1200.0, 1330.0),
+    }
+
+    def apply_tiers(self, position: Optional[str], tiers: dict[str, list[str]]) -> None:
+        """
+        Apply a positional-tier save by setting ELO overrides that fall
+        inside each tier's threshold band (see TIER_ELO_BANDS).
+
+        This guarantees the assignment round-trips: when the frontend
+        reloads /api/rankings and rebuilds its tier buckets via ELO
+        thresholds, each player lands back in the tier the user chose.
+
+        Within a tier, players are spread linearly across the band in the
+        order they were submitted, preserving the user's intra-tier order.
+        """
+        pool_ids = {p.id for p in self._pool(position)}
+
+        for tier_name, player_ids in tiers.items():
+            band = self.TIER_ELO_BANDS.get(tier_name)
+            if band is None:
+                continue
+            lo, hi = band
+            valid = [pid for pid in player_ids if pid in pool_ids]
+            n = len(valid)
+            if n == 0:
+                continue
+            if n == 1:
+                self._elo_overrides[valid[0]] = hi
+            else:
+                for i, pid in enumerate(valid):
+                    self._elo_overrides[pid] = hi - (hi - lo) * i / (n - 1)
+
+        self._version += 1
+
     def apply_reorder(self, position: Optional[str], ordered_ids: list[str]) -> None:
         """
         Apply a manual reorder by setting ELO overrides that match the
