@@ -288,10 +288,15 @@ Respond with JSON only — no markdown, no explanation outside the JSON:
         players: list[Player],
         swipe_history: list[SwipeDecision],
         position_filter: Optional[str] = None,
+        skipped_player_ids: Optional[set] = None,
     ) -> object:
         """
         Generate the most informative next 3-player ranking group.
         Returns a MatchupTrio-compatible object (duck-typed).
+
+        skipped_player_ids: optional set of player IDs to exclude (Agent 1 —
+        "I don't know this player" persistent skip). Filtered out before
+        candidate generation so they never appear in future trios.
         """
         from dataclasses import dataclass
 
@@ -302,9 +307,11 @@ Respond with JSON only — no markdown, no explanation outside the JSON:
             player_c: Player
             reasoning: str
 
+        _skipped: set = skipped_player_ids or set()
         filtered = [
             p for p in players
-            if position_filter is None or p.position == position_filter
+            if (position_filter is None or p.position == position_filter)
+            and p.id not in _skipped
         ]
 
         if len(filtered) < 3:

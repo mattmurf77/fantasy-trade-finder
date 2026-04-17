@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FAQ — Fantasy Trade Finder</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --border:   #2a2d3a;
+      --text:     #e8eaf0;
+      --muted:    #7a7f96;
+      --accent:   #4f7cff;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { max-width: 100vw; overflow-x: hidden; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                   "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      min-height: 100vh;
+      padding: 24px 16px 64px;
+    }
+    .faq-container {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .back-link {
+      display: inline-block;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+      padding: 4px 2px;
+    }
+    .back-link:hover { color: var(--accent); }
+    h1 {
+      font-size: 1.9rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    .faq-sub {
+      color: var(--muted);
+      margin-bottom: 24px;
+      font-size: 0.95rem;
+    }
+    .faq-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .faq-item summary {
+      cursor: pointer;
+      padding: 14px 16px;
+      font-weight: 600;
+      color: var(--text);
+      list-style: none;
+      position: relative;
+      user-select: none;
+    }
+    .faq-item summary::-webkit-details-marker { display: none; }
+    .faq-item summary::after {
+      content: "+";
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-size: 1.3rem;
+      line-height: 1;
+      transition: transform 0.2s;
+    }
+    .faq-item[open] summary::after { content: "–"; }
+    .faq-item[open] summary { border-bottom: 1px solid var(--border); }
+    .faq-body {
+      padding: 12px 16px 16px;
+      color: var(--text);
+      font-size: 0.94rem;
+    }
+    .faq-body p { margin-bottom: 8px; }
+    .faq-body p:last-child { margin-bottom: 0; }
+    .faq-body strong { color: var(--text); }
+    .faq-body code {
+      background: #2a2d3a;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 0.86em;
+    }
+    .faq-footer {
+      margin-top: 32px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.85rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="faq-container">
+    <a href="/" class="back-link">&larr; Back to app</a>
+
+    <h1>Frequently Asked Questions</h1>
+    <p class="faq-sub">Everything you wanted to know about Fantasy Trade Finder.</p>
+
+    <details class="faq-item" open>
+      <summary>What is Fantasy Trade Finder?</summary>
+      <div class="faq-body">
+        <p>Fantasy Trade Finder is a dynasty fantasy football tool that compares how you and your leaguemates value every player, then surfaces trades where both sides come out ahead. You build your rankings, we cross-reference with everyone else's, and mutually-attractive trades bubble up automatically.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>How does the ELO ranking system work?</summary>
+      <div class="faq-body">
+        <p>Every ranking decision you make — whether swiping trios, reordering manually, or assigning tiers — is decomposed into head-to-head "winner beats loser" comparisons. Those results feed an ELO rating so each player's value updates relative to the rest of the pool. The more comparisons, the more confident the rating.</p>
+        <p>Default K-factor for a trio swipe is 32. Trade-card swipes use smaller K-factors (8 for "interested", 4 for "pass") so a single trade view can't swing a rating as much as a direct ranking.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>What's the difference between 1QB PPR and SF TEP?</summary>
+      <div class="faq-body">
+        <p><strong>1QB PPR</strong> is the classic dynasty format — one starting quarterback, one point per reception.</p>
+        <p><strong>SF TEP</strong> is Superflex with Tight End Premium — you can start a second QB in a flex spot, and tight ends score extra points per catch. QBs and TEs are dramatically more valuable in this format.</p>
+        <p>Your two rank sets are completely independent, so you can hold different opinions about the same player in each format.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Why two rank sets?</summary>
+      <div class="faq-body">
+        <p>Because the same player is worth very different things in different scoring systems. Tier overrides, ELOs, and progress are all tracked per format. When you switch formats the UI shows your ratings for that format only.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>How do I sync my Sleeper league?</summary>
+      <div class="faq-body">
+        <p>Enter your Sleeper username on the login screen. We fetch your leagues via the public Sleeper API — no OAuth or password required. Pick a league from the list and we'll import your roster and every leaguemate's roster automatically.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>My league is private — what happens?</summary>
+      <div class="faq-body">
+        <p>Sleeper's public API exposes roster data for every league, public or private, as long as you know the league ID. Because you're logged in via your own username, we can only see leagues you're actually a member of. Private leagues show up exactly like public ones.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Do you share my data?</summary>
+      <div class="faq-body">
+        <p>No. Your rankings are visible to leaguemates inside the same league (that's the whole point — the tool works by comparing valuations), but we don't sell or share data with third parties. See the privacy summary at the bottom of this page.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Can I use values from Keep Trade Cut / Dynasty Daddy?</summary>
+      <div class="faq-body">
+        <p>Your personal rank set starts from a consensus seed derived from market sources, so on day one your values look roughly like KTC or Dynasty Daddy. As you swipe, reorder, and assign tiers, your rankings diverge based on your actual opinions. The tool trusts you over the crowd — that's what surfaces trades nobody else sees.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>What's a "tier"?</summary>
+      <div class="faq-body">
+        <p>A tier is a group of players you consider roughly interchangeable — elite, starter, bench, etc. Assigning tiers is faster than ranking each player individually and locks in a clean ELO band for every bucket. You can override any individual player's value after setting tiers.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>What's the I AM SPEED button?</summary>
+      <div class="faq-body">
+        <p>Turn it on and ranking goes turbo: tap your top two players in a trio and the third is auto-ranked last, then the ranking submits and a fresh trio loads immediately. No Confirm click. Great for blowing through the first hundred comparisons.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Is there a mobile app?</summary>
+      <div class="faq-body">
+        <p>The web app is mobile-first and works great in any phone browser. A native iOS app is on the roadmap — for now, add the site to your home screen for an app-like experience.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Privacy policy summary</summary>
+      <div class="faq-body">
+        <p>We store your Sleeper username, display name, avatar, league rosters, and ranking history so the tool can function across sessions. Rankings are shared with other members of leagues you're both in — that is the product. We do not sell, rent, or share your data with third parties outside of that use.</p>
+      </div>
+    </details>
+
+    <div class="faq-footer">
+      Still have questions? <a href="/" style="color: var(--accent);">Head back to the app</a>.
+    </div>
+  </div>
+</body>
+</html>

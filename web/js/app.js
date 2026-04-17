@@ -529,6 +529,8 @@
       refreshCoverage();
       initFairnessSlider();
       _startNotifPolling();
+      // Agent 6 — show Portfolio subtab only for users with ≥2 synced leagues
+      { const _ps = document.getElementById('portfolio-subtab'); if (_ps) _ps.classList.toggle('hidden', (_cachedLeagues || []).length < 2); }
       // Render the scoring toggles now that the main views exist in the DOM
       if (typeof renderScoringToggles === 'function') renderScoringToggles();
 
@@ -1613,6 +1615,8 @@
     function renderLeagueSwitcher() {
       const row    = document.getElementById('league-switcher-row');
       const select = document.getElementById('league-select');
+      // Agent 6 — mirror league count to Portfolio subtab visibility
+      { const _ps = document.getElementById('portfolio-subtab'); if (_ps) _ps.classList.toggle('hidden', (_cachedLeagues || []).length < 2); }
       if (!row || !select) return;
 
       // Only show the switcher when there are multiple leagues to choose from
@@ -1943,12 +1947,14 @@
     // Maps each view id to its tier-1 group + tier-2 data-view so the nav
     // can stay in sync regardless of how we got to the view.
     const VIEW_TO_NAV = {
-      rank:     { group: 'rank',   subView: 'rank' },
-      rankings: { group: 'rank',   subView: 'rankings' },
-      trades:   { group: 'trades', subView: 'trades' },
-      matches:  { group: 'trades', subView: 'matches' },
+      rank:      { group: 'rank',   subView: 'rank' },
+      rankings:  { group: 'rank',   subView: 'rankings' },
+      trends:    { group: 'rank',   subView: 'trends' },
+      trades:    { group: 'trades', subView: 'trades' },
+      matches:   { group: 'trades', subView: 'matches' },
+      portfolio: { group: 'trades', subView: 'portfolio' },
       // 'league' is reachable only via the 🏆 header chip; no tier-2 needed.
-      league:   { group: null,     subView: null },
+      league:    { group: null,     subView: null },
     };
 
     function _syncNavActive(view) {
@@ -2022,12 +2028,19 @@
       }
       if (view === 'rankings') {
         loadRankingsTable();
+        checkFormatEmptyState('rankings');
       }
       if (view === 'matches') {
         loadMatches();
       }
+      if (view === 'portfolio') {
+        loadPortfolio();
+      }
       if (view === 'league') {
         loadLeagueSummary();
+      }
+      if (view === 'rank') {
+        checkFormatEmptyState('rank');
       }
     }
 
@@ -2480,6 +2493,53 @@
         renderMatchesList(matches);
         updateMatchesBadge(matches);
       } catch {}
+    }
+
+    // ── Agent 6 — Cross-league portfolio ────────────────────────────────
+    async function loadPortfolio() {
+      const body = document.getElementById('portfolio-body');
+      if (!body) return;
+
+      // Fewer than 2 leagues → show empty/unlock state
+      if ((_cachedLeagues || []).length < 2) {
+        body.innerHTML = `<div class="portfolio-empty">
+          <strong>Connect another Sleeper league to unlock Portfolio</strong>
+          <div class="portfolio-empty-sub">Portfolio tracks your exposure across every team you run.</div>
+        </div>`;
+        return;
+      }
+
+      body.innerHTML = `<div class="portfolio-empty">Loading portfolio…</div>`;
+      try {
+        const res  = await apiFetch('/api/portfolio');
+        const data = await res.json();
+        const players = (data && data.players) || [];
+        if (!players.length) {
+          body.innerHTML = `<div class="portfolio-empty">
+            <strong>No players found</strong>
+            <div class="portfolio-empty-sub">Your rosters may still be syncing — try again in a moment.</div>
+          </div>`;
+          return;
+        }
+        const total = players[0].total_leagues || (_cachedLeagues || []).length;
+        const rows = players.map(p => `
+          <div class="portfolio-row">
+            <div class="portfolio-row-main">
+              <span class="portfolio-player">${escapeHtml(p.name || p.player_id)}</span>
+              <span class="portfolio-pos pos-${(p.pos || '').toLowerCase()}">${escapeHtml(p.pos || '')}</span>
+            </div>
+            <div class="portfolio-row-exposure">
+              <span class="portfolio-count">${p.exposure}/${p.total_leagues}</span>
+              <span class="portfolio-count-label">leagues</span>
+            </div>
+            <div class="portfolio-leagues">${(p.league_names || []).map(escapeHtml).join(' • ')}</div>
+          </div>`).join('');
+        body.innerHTML = `
+          <div class="portfolio-summary">You own <strong>${players.length}</strong> distinct players across <strong>${total}</strong> leagues.</div>
+          <div class="portfolio-list">${rows}</div>`;
+      } catch (e) {
+        body.innerHTML = `<div class="portfolio-empty">Couldn't load portfolio.</div>`;
+      }
     }
 
     function renderMatchesList(matches) {
@@ -3124,14 +3184,19 @@
       if (id === 'view-rank') {
         loadTrio();
         loadProgress();
+        if (typeof checkFormatEmptyState === 'function') checkFormatEmptyState('rank');
       } else if (id === 'view-rankings') {
         if (typeof loadRankingsTable === 'function') loadRankingsTable();
+        if (typeof checkFormatEmptyState === 'function') checkFormatEmptyState('rankings');
       } else if (id === 'view-trades') {
         if (typeof refreshTrades === 'function') refreshTrades();
       } else if (id === 'view-matches') {
         if (typeof loadMatches === 'function') loadMatches();
       } else if (id === 'view-league') {
         loadLeagueSummary();
+      }
+      if (view === 'trends') {
+        loadTrends();
       }
     }
 
@@ -3146,6 +3211,9 @@
       } catch (e) {
         logDrawer.warn('loadLeagueSummary failed: ' + e.message);
       }
+      // Fire the contrarian leaderboard fetch in parallel — independent of
+      // the summary response, rendered into its own section below the grid.
+      loadLeagueContrarianLeaderboard();
     }
 
     // Pick the unlocked-count that matches the league's scoring format.
@@ -3217,6 +3285,29 @@
       return `Join me on Dynasty Trade Finder to find trades in ${leagueName} → ${url}`;
     }
 
+    // ── OG share-card helpers (Agent 3) ──────────────────────────────
+    // Build a public share URL that resolves to an HTML page with OG meta
+    // tags pointing to the server-rendered PNG. Social apps (iMessage,
+    // Twitter, WhatsApp) will auto-render the image preview when these
+    // URLs are pasted into messages.
+    function buildTierShareUrl(pos, username) {
+      const origin = window.location.origin;
+      const posSeg = encodeURIComponent(String(pos || '').toLowerCase());
+      const u = encodeURIComponent(String(username || (window._currentUser && _currentUser.username) || '').trim());
+      if (!posSeg || !u) return origin + '/';
+      // Preserve active scoring format if available so the card subtitle matches
+      const fmt = (window._currentUser && _currentUser.scoring_format) || null;
+      const qs = (fmt && fmt !== '1qb_ppr') ? `?fmt=${encodeURIComponent(fmt)}` : '';
+      return `${origin}/s/tiers/${posSeg}/${u}${qs}`;
+    }
+
+    function buildTradeShareUrl(matchId) {
+      const origin = window.location.origin;
+      const mid = encodeURIComponent(String(matchId || '').trim());
+      if (!mid) return origin + '/';
+      return `${origin}/s/trade/${mid}`;
+    }
+
     function openInviteModal() {
       const modal = document.getElementById('invite-modal');
       if (!modal) return;
@@ -3275,17 +3366,92 @@
       }
     }
 
+    // Agent 4 addition — per-channel pre-filled share copy.
+    // Each channel has its own tone / length tuned to where it's pasted:
+    //   SMS:      terse
+    //   Twitter:  tweetable one-liner (within 280 chars)
+    //   WhatsApp: friendly
+    //   GroupMe:  casual group-chat
+    //   Telegram: WhatsApp-ish
+    //   Email:    subject + explainer body
+    //   Sleeper:  paste-ready DM
+    //   copy:     URL only
+    // Returns { title, subject, body, body_enc } — `body_enc` is pre-URI-encoded
+    // for deep-link URLs; `body` is the raw version used for clipboard/Web Share.
+    function buildChannelMessage(channel, ctx) {
+      ctx = ctx || {};
+      const url        = ctx.url        || buildInviteUrl();
+      const leagueName = ctx.leagueName
+        || (document.getElementById('league-summary-title')?.textContent || 'our league');
+      const title   = 'Fantasy Trade Finder';
+      let subject   = 'Join me on Fantasy Trade Finder';
+      let body;
+
+      switch (channel) {
+        case 'sms':
+          body = `${leagueName} fantasy trade finder — join me: ${url}`;
+          break;
+        case 'x':
+        case 'twitter':
+          body = `Joined @FantasyTradeFinder to find trades in ${leagueName}. Come ruin the league with me 🏈 ${url}`;
+          break;
+        case 'whatsapp':
+          body = `Hey! Been using Fantasy Trade Finder for ${leagueName} — it finds trades both sides actually like. Join me: ${url}`;
+          break;
+        case 'groupme':
+          body = `yo who's tired of "What you want for X?" — try this: ${url}`;
+          break;
+        case 'telegram':
+          body = `Hey! Using Fantasy Trade Finder for ${leagueName} — it finds trades both sides actually like. Join me: ${url}`;
+          break;
+        case 'email':
+          subject = `Join me on Fantasy Trade Finder — ${leagueName}`;
+          body = [
+            `Hey,`,
+            ``,
+            `I've been using Fantasy Trade Finder to work out trades in ${leagueName}.`,
+            `You rank players how you actually value them, it figures out which of your leaguemates value them differently, and it surfaces trades you'd both say yes to — no more "what you want for X?" back-and-forth.`,
+            ``,
+            `Takes about 5 minutes to set up. Give it a shot:`,
+            url,
+            ``,
+            `— sent from Fantasy Trade Finder`,
+          ].join('\n');
+          break;
+        case 'sleeper':
+          body = `Join me on Fantasy Trade Finder for ${leagueName}: ${url}`;
+          break;
+        case 'copy':
+          body = url;
+          break;
+        default:
+          body = `Join me on Fantasy Trade Finder for ${leagueName}: ${url}`;
+          break;
+      }
+
+      return {
+        title,
+        subject,
+        body,
+        body_enc: encodeURIComponent(body),
+      };
+    }
+
     async function shareVia(channel) {
       const url = buildInviteUrl();
-      const msg = buildInviteMessage();
-      const title = 'Dynasty Trade Finder';
-      const subject = encodeURIComponent('Join me on Dynasty Trade Finder');
-      const body    = encodeURIComponent(msg);
-      const sharePayload = { title, text: msg, url };
+      const ctx = { url };
+      const msg = buildChannelMessage(channel, ctx);
+      const title = msg.title;
+      const subjectEnc = encodeURIComponent(msg.subject);
+      const bodyEnc    = msg.body_enc;
+      const sharePayload = { title, text: msg.body, url };
 
       switch (channel) {
         case 'email':
-          window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+          // mailto: accepts subject + body as URI-encoded params on all major
+          // mail clients (Gmail web, Apple Mail, Outlook). The long-form
+          // explainer body lives in msg.body.
+          window.open(`mailto:?subject=${subjectEnc}&body=${bodyEnc}`, '_blank');
           break;
 
         case 'sms':
@@ -3293,24 +3459,30 @@
           // form works on both. Desktop browsers won't launch an app — fall
           // back to clipboard so the action isn't silently broken.
           if (_isMobileUA()) {
-            window.open(`sms:?&body=${body}`, '_blank');
+            window.open(`sms:?&body=${bodyEnc}`, '_blank');
           } else {
-            await copyInviteToClipboard(true);
+            await copyInviteToClipboard(true, channel);
             showToast('Copied — SMS only works on mobile. Paste it into any text.');
           }
           break;
 
         case 'whatsapp':
           // wa.me opens WhatsApp Web on desktop and the app on mobile.
-          window.open(`https://wa.me/?text=${body}`, '_blank');
+          window.open(`https://wa.me/?text=${bodyEnc}`, '_blank');
           break;
 
         case 'telegram':
-          window.open(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent('Join me on Dynasty Trade Finder')}`, '_blank');
+          // Telegram's share URL takes url + text as separate params; it
+          // renders the text as the message body and the url as the preview.
+          window.open(
+            `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${bodyEnc}`,
+            '_blank'
+          );
           break;
 
         case 'x':
-          window.open(`https://twitter.com/intent/tweet?text=${body}`, '_blank');
+          // Twitter/X intent URL — tweetable one-liner lives in msg.body.
+          window.open(`https://twitter.com/intent/tweet?text=${bodyEnc}`, '_blank');
           break;
 
         case 'groupme': {
@@ -3319,8 +3491,8 @@
           // integration available. Fall back to clipboard everywhere else.
           const opened = await _tryWebShare(sharePayload);
           if (opened) return;
-          await copyInviteToClipboard(true);
-          showToast('Copied — open GroupMe and paste into any group.');
+          await copyInviteToClipboard(true, channel);
+          showToast('Copied — open GroupMe and paste into any group chat.');
           break;
         }
 
@@ -3332,28 +3504,38 @@
           if (_isMobileUA()) {
             const opened = await _tryWebShare(sharePayload);
             if (opened) return;
-            await copyInviteToClipboard(true);
+            await copyInviteToClipboard(true, channel);
             // Nudge Sleeper's custom URL scheme. Silently fails if not
             // installed — the clipboard fallback above keeps us safe.
             try { window.location.href = 'sleeper://'; } catch (_) { /* noop */ }
             showToast('Copied — open Sleeper and paste into any DM.');
             return;
           }
-          await copyInviteToClipboard(true);
+          await copyInviteToClipboard(true, channel);
           showToast('Copied — open Sleeper and paste into any DM.');
           break;
         }
 
         case 'copy':
         default:
-          await copyInviteToClipboard(false);
+          await copyInviteToClipboard(false, channel);
           showToast('Link copied to clipboard');
           break;
       }
     }
 
-    async function copyInviteToClipboard(fullMessage) {
-      const text = fullMessage ? buildInviteMessage() : buildInviteUrl();
+    async function copyInviteToClipboard(fullMessage, channel) {
+      // Agent 4 update: copied text now matches the channel's template when
+      // fullMessage is true. Defaults to the generic invite message for
+      // callers that don't pass a channel (back-compat).
+      let text;
+      if (fullMessage) {
+        text = channel
+          ? buildChannelMessage(channel, {}).body
+          : buildInviteMessage();
+      } else {
+        text = buildInviteUrl();
+      }
       try {
         await navigator.clipboard.writeText(text);
       } catch (_) {
@@ -3362,6 +3544,158 @@
         if (input) { input.select(); document.execCommand('copy'); }
       }
     }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  League Contrarian Leaderboard  +  Format Empty-State Nudge
+    // ══════════════════════════════════════════════════════════════════
+
+    const _POS_META = [
+      { key: 'qb', label: 'QB', emoji: '🎯' },
+      { key: 'rb', label: 'RB', emoji: '🏃' },
+      { key: 'wr', label: 'WR', emoji: '🙌' },
+      { key: 'te', label: 'TE', emoji: '💪' },
+    ];
+
+    /**
+     * Fetch and render the per-position contrarian leaderboard for the
+     * active league + scoring format. Called after loadLeagueSummary().
+     */
+    async function loadLeagueContrarianLeaderboard() {
+      const body = document.getElementById('contrarian-leaderboard-body');
+      if (!body || !currentLeagueId) return;
+      try {
+        const fmt = getActiveFormat();
+        const url = `/api/league/contrarian?league_id=${encodeURIComponent(currentLeagueId)}&format=${encodeURIComponent(fmt)}`;
+        const res = await apiFetch(url);
+        if (!res.ok) {
+          body.innerHTML = '<div class="contrarian-leaderboard-error">Couldn\'t load leaderboard.</div>';
+          return;
+        }
+        const data = await res.json();
+        renderLeagueContrarianLeaderboard(data);
+      } catch (e) {
+        logDrawer.warn('loadLeagueContrarianLeaderboard failed: ' + e.message);
+        body.innerHTML = '<div class="contrarian-leaderboard-error">Couldn\'t load leaderboard.</div>';
+      }
+    }
+
+    /**
+     * Render the contrarian leaderboard data into #contrarian-leaderboard-body.
+     * Handles the insufficient-data case (fewer than 3 ranked users in the
+     * league) with a single-line nudge instead of per-position rows.
+     */
+    function renderLeagueContrarianLeaderboard(data) {
+      const body = document.getElementById('contrarian-leaderboard-body');
+      if (!body) return;
+
+      if (!data || data.insufficient_data) {
+        const ranked = (data && data.ranked_users) || 0;
+        const needed = (data && data.needed) || Math.max(3 - ranked, 1);
+        body.innerHTML = `
+          <div class="contrarian-leaderboard-empty">
+            <div class="contrarian-leaderboard-empty-icon">🤝</div>
+            <div class="contrarian-leaderboard-empty-title">Invite leaguemates to unlock.</div>
+            <div class="contrarian-leaderboard-empty-sub">
+              Need ${needed} more ranked leaguemate${needed === 1 ? '' : 's'} to compute the
+              contrarian leaderboard (currently ${ranked} / 3).
+            </div>
+            <button class="contrarian-leaderboard-invite-btn" onclick="openInviteModal()">📨 Invite</button>
+          </div>`;
+        return;
+      }
+
+      const rows = _POS_META.map(pos => {
+        const posData = data[pos.key];
+        if (!posData || (!posData.most_contrarian.length && !posData.most_consensus.length)) {
+          return `
+            <div class="contrarian-leaderboard-row">
+              <div class="contrarian-leaderboard-row-pos">
+                <span class="contrarian-leaderboard-pos-emoji">${pos.emoji}</span>
+                <span class="contrarian-leaderboard-pos-label">${pos.label}</span>
+              </div>
+              <div class="contrarian-leaderboard-row-body">
+                <div class="contrarian-leaderboard-nodata">Not enough ${pos.label} rankings yet.</div>
+              </div>
+            </div>`;
+        }
+        const contrarian = posData.most_contrarian[0];
+        const consensus  = posData.most_consensus[0];
+        const cHtml = contrarian
+          ? `<div class="contrarian-leaderboard-pick contrarian">
+               <div class="contrarian-leaderboard-pick-label">Most contrarian</div>
+               <div class="contrarian-leaderboard-pick-user">@${escapeHtml(contrarian.username)}</div>
+               <div class="contrarian-leaderboard-pick-score">${contrarian.deviation.toFixed(1)} avg ELO diff</div>
+             </div>`
+          : '';
+        const sHtml = consensus
+          ? `<div class="contrarian-leaderboard-pick consensus">
+               <div class="contrarian-leaderboard-pick-label">Most consensus</div>
+               <div class="contrarian-leaderboard-pick-user">@${escapeHtml(consensus.username)}</div>
+               <div class="contrarian-leaderboard-pick-score">${consensus.deviation.toFixed(1)} avg ELO diff</div>
+             </div>`
+          : '';
+        return `
+          <div class="contrarian-leaderboard-row">
+            <div class="contrarian-leaderboard-row-pos">
+              <span class="contrarian-leaderboard-pos-emoji">${pos.emoji}</span>
+              <span class="contrarian-leaderboard-pos-label">${pos.label}</span>
+            </div>
+            <div class="contrarian-leaderboard-row-body">
+              ${cHtml}
+              ${sHtml}
+            </div>
+          </div>`;
+      }).join('');
+
+      body.innerHTML = rows;
+    }
+
+    /**
+     * Show a nudge on ranking pages when the user has navigated to a format
+     * they haven't started ranking in yet. Checked on view enter (switchView)
+     * and on format toggle. Ignored silently if the league isn't ready or
+     * the endpoint fails — this is a helper nudge, not a blocker.
+     */
+    async function checkFormatEmptyState(viewName) {
+      const el = document.getElementById(`format-empty-state-${viewName}`);
+      if (!el) return;
+      if (!currentLeagueId) { el.classList.add('hidden'); return; }
+      try {
+        const res = await apiFetch('/api/league/format-stats?league_id=' + encodeURIComponent(currentLeagueId));
+        if (!res.ok) { el.classList.add('hidden'); return; }
+        const data = await res.json();
+        const fmt  = getActiveFormat();
+        const info = (data.formats || {})[fmt];
+        const count = (info && info.ranking_count) || 0;
+        if (count === 0) {
+          const activeLabel = FORMAT_LABELS[fmt] || fmt;
+          const otherFmt    = fmt === '1qb_ppr' ? 'sf_tep' : '1qb_ppr';
+          const otherLabel  = FORMAT_LABELS[otherFmt] || otherFmt;
+          const otherCount  = ((data.formats || {})[otherFmt] || {}).ranking_count || 0;
+          const titleEl = document.getElementById(`format-empty-state-${viewName}-title`);
+          const bodyEl  = document.getElementById(`format-empty-state-${viewName}-body`);
+          if (titleEl) titleEl.textContent = `You haven't started ranking for ${activeLabel}`;
+          if (bodyEl) {
+            if (otherCount > 0) {
+              bodyEl.textContent = `You have ${otherCount} rankings saved in ${otherLabel}. Switch formats above or keep scrolling to start ranking here.`;
+            } else {
+              bodyEl.textContent = `No rankings saved yet for this scoring format. Rank a few trios below to unlock trade matching.`;
+            }
+          }
+          el.classList.remove('hidden');
+        } else {
+          el.classList.add('hidden');
+        }
+      } catch (e) {
+        logDrawer.warn('checkFormatEmptyState failed: ' + e.message);
+        el.classList.add('hidden');
+      }
+    }
+
+    // Expose for inline handlers + format-toggle callers
+    window.loadLeagueContrarianLeaderboard = loadLeagueContrarianLeaderboard;
+    window.renderLeagueContrarianLeaderboard = renderLeagueContrarianLeaderboard;
+    window.checkFormatEmptyState = checkFormatEmptyState;
 
     // ── Referral capture ──────────────────────────────────────────────
     const LS_INVITED_BY     = 'ftf_invited_by';
@@ -3435,6 +3769,270 @@
       _bindCarouselSwipe();
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    //  Trends tab (Rank Players → Trends) — Agent 2
+    //  Risers/Fallers · Contrarian meter · Consensus Gap
+    // ══════════════════════════════════════════════════════════════════
+
+    let _trendsData = { rf: null, contrarian: null, gap: null };
+    let _trendsActivePos = 'ALL';
+
+    async function loadTrends() {
+      // Reset visual state
+      _trendsActivePos = 'ALL';
+      document.querySelectorAll('#trends-rf-pos-tabs .trends-pos-tab').forEach(b => {
+        b.classList.toggle('active', b.dataset.pos === 'ALL');
+      });
+
+      const riserEl  = document.getElementById('trends-risers-list');
+      const fallerEl = document.getElementById('trends-fallers-list');
+      const contrEl  = document.getElementById('trends-contrarian-body');
+      const gapEl    = document.getElementById('trends-gap-body');
+      if (riserEl)  riserEl.innerHTML  = '<div class="trends-empty">Loading…</div>';
+      if (fallerEl) fallerEl.innerHTML = '<div class="trends-empty">Loading…</div>';
+      if (contrEl)  contrEl.innerHTML  = '<div class="trends-empty">Loading…</div>';
+      if (gapEl)    gapEl.innerHTML    = '<div class="trends-empty">Loading…</div>';
+
+      const leagueId = currentLeagueId || '';
+      const q = leagueId ? `?league_id=${encodeURIComponent(leagueId)}` : '';
+      const results = await Promise.allSettled([
+        apiFetch('/api/trends/risers-fallers').then(r => r.json()),
+        apiFetch('/api/trends/contrarian' + q).then(r => r.json()),
+        apiFetch('/api/trends/consensus-gap' + q).then(r => r.json()),
+      ]);
+
+      _trendsData.rf         = results[0].status === 'fulfilled' ? results[0].value : null;
+      _trendsData.contrarian = results[1].status === 'fulfilled' ? results[1].value : null;
+      _trendsData.gap        = results[2].status === 'fulfilled' ? results[2].value : null;
+
+      renderTrendsRisersFallers();
+      renderTrendsContrarian();
+      renderTrendsConsensusGap();
+    }
+
+    function switchTrendsPos(pos, btn) {
+      _trendsActivePos = pos;
+      document.querySelectorAll('#trends-rf-pos-tabs .trends-pos-tab').forEach(b => {
+        b.classList.remove('active');
+      });
+      if (btn) btn.classList.add('active');
+      renderTrendsRisersFallers();
+    }
+
+    function _escapeHtml(s) {
+      // Re-use existing escapeHtml; defensive alias in case load order differs.
+      try { return escapeHtml(s); } catch { return String(s); }
+    }
+
+    function _deltaClass(d) {
+      if (d > 0) return 'trends-delta-up';
+      if (d < 0) return 'trends-delta-down';
+      return '';
+    }
+
+    function _renderMoveRow(row, kind) {
+      const delta  = row.delta || 0;
+      const sign   = delta > 0 ? '+' : '';
+      const pos    = row.position || '';
+      const name   = _escapeHtml(row.name || row.player_id);
+      const team   = row.team ? ` · ${_escapeHtml(row.team)}` : '';
+      return (
+        `<div class="trends-row">
+           <div class="trends-row-main">
+             <span class="trends-row-name">${name}</span>
+             <span class="trends-row-meta">${pos}${team}</span>
+           </div>
+           <div class="trends-row-delta ${_deltaClass(delta)}">
+             ${sign}${delta.toFixed(1)}
+             <span class="trends-row-sub">ELO</span>
+           </div>
+         </div>`
+      );
+    }
+
+    function renderTrendsRisersFallers() {
+      const data     = _trendsData.rf;
+      const riserEl  = document.getElementById('trends-risers-list');
+      const fallerEl = document.getElementById('trends-fallers-list');
+      const subEl    = document.getElementById('trends-rf-sub');
+      if (!riserEl || !fallerEl) return;
+
+      if (!data || !data.risers) {
+        riserEl.innerHTML  = '<div class="trends-empty">Couldn\'t load trend data.</div>';
+        fallerEl.innerHTML = '<div class="trends-empty">Couldn\'t load trend data.</div>';
+        return;
+      }
+
+      if (!data.has_history || (data.sample_size || 0) === 0) {
+        const msg = 'Not enough history yet — rank some players to start seeing movers.';
+        riserEl.innerHTML  = `<div class="trends-empty">${msg}</div>`;
+        fallerEl.innerHTML = '';
+        if (subEl) subEl.textContent = 'Your biggest movers will show up here as you rank more players.';
+        return;
+      }
+
+      if (subEl) {
+        subEl.textContent = `Based on ${data.sample_size} players with snapshots in the last ${data.window_days} days.`;
+      }
+
+      const pos     = _trendsActivePos || 'ALL';
+      const risers  = (data.risers  && data.risers[pos])  || [];
+      const fallers = (data.fallers && data.fallers[pos]) || [];
+
+      // Only show risers where delta > 0 / fallers where delta < 0
+      const upRows   = risers.filter(r => (r.delta || 0) > 0);
+      const downRows = fallers.filter(r => (r.delta || 0) < 0);
+
+      riserEl.innerHTML = upRows.length
+        ? upRows.map(r => _renderMoveRow(r, 'up')).join('')
+        : '<div class="trends-empty">No risers in this window.</div>';
+      fallerEl.innerHTML = downRows.length
+        ? downRows.map(r => _renderMoveRow(r, 'down')).join('')
+        : '<div class="trends-empty">No fallers in this window.</div>';
+    }
+
+    function renderTrendsContrarian() {
+      const el = document.getElementById('trends-contrarian-body');
+      if (!el) return;
+      const data = _trendsData.contrarian;
+      if (!data) {
+        el.innerHTML = '<div class="trends-empty">Couldn\'t load contrarian data.</div>';
+        return;
+      }
+      if (!data.has_baseline) {
+        const n = data.baseline_user_count || 0;
+        const need = Math.max(0, 3 - n);
+        const msg = need > 0
+          ? `Not enough community data yet — invite ${need} more leaguemate${need === 1 ? '' : 's'} so we can compare your rankings.`
+          : 'Not enough overlap between your rankings and the league yet.';
+        el.innerHTML = `<div class="trends-empty trends-empty-card">${msg}</div>`;
+        return;
+      }
+
+      const score = Number(data.score || 0);
+      const label = score >= 70 ? 'Very contrarian'
+                  : score >= 40 ? 'Somewhat contrarian'
+                  : score >= 20 ? 'Mostly consensus'
+                  : 'Consensus';
+
+      const rowsAbove = (data.above_consensus || []).map(r => (
+        `<div class="trends-row">
+           <div class="trends-row-main">
+             <span class="trends-row-name">${_escapeHtml(r.name || r.player_id)}</span>
+             <span class="trends-row-meta">${r.position || ''}</span>
+           </div>
+           <div class="trends-row-delta trends-delta-up">+${(r.delta||0).toFixed(1)}<span class="trends-row-sub">vs market</span></div>
+         </div>`
+      )).join('') || '<div class="trends-empty">No standout over-values.</div>';
+
+      const rowsBelow = (data.below_consensus || []).map(r => (
+        `<div class="trends-row">
+           <div class="trends-row-main">
+             <span class="trends-row-name">${_escapeHtml(r.name || r.player_id)}</span>
+             <span class="trends-row-meta">${r.position || ''}</span>
+           </div>
+           <div class="trends-row-delta trends-delta-down">${(r.delta||0).toFixed(1)}<span class="trends-row-sub">vs market</span></div>
+         </div>`
+      )).join('') || '<div class="trends-empty">No standout fades.</div>';
+
+      el.innerHTML = `
+        <div class="trends-contrarian-meter">
+          <div class="trends-score-wrap">
+            <div class="trends-score-value">${score.toFixed(0)}</div>
+            <div class="trends-score-label">${label}</div>
+          </div>
+          <div class="trends-score-bar">
+            <div class="trends-score-bar-fill" style="width:${Math.min(100, score).toFixed(1)}%;"></div>
+          </div>
+          <div class="trends-score-sub">
+            Compared against ${data.baseline_user_count} leaguemates ·
+            ${data.compared_players} players in common
+          </div>
+        </div>
+        <div class="trends-rf-grid">
+          <div class="trends-rf-col">
+            <div class="trends-rf-col-title">You love (above consensus)</div>
+            <div class="trends-rf-list">${rowsAbove}</div>
+          </div>
+          <div class="trends-rf-col">
+            <div class="trends-rf-col-title">You fade (below consensus)</div>
+            <div class="trends-rf-list">${rowsBelow}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTrendsConsensusGap() {
+      const el = document.getElementById('trends-gap-body');
+      if (!el) return;
+      const data = _trendsData.gap;
+      if (!data) {
+        el.innerHTML = '<div class="trends-empty">Couldn\'t load consensus-gap data.</div>';
+        return;
+      }
+      if (!data.has_baseline) {
+        const n = data.baseline_user_count || 0;
+        const need = Math.max(0, 3 - n);
+        const msg = need > 0
+          ? `Not enough community data yet — invite ${need} more leaguemate${need === 1 ? '' : 's'} and we can surface your biggest sell/buy gaps.`
+          : 'Not enough overlap with the league to compute consensus gaps.';
+        el.innerHTML = `<div class="trends-empty trends-empty-card">${msg}</div>`;
+        return;
+      }
+
+      const sells = data.easiest_sells || [];
+      const buys  = data.easiest_buys  || [];
+
+      const renderSell = (r) => (
+        `<div class="trends-row trends-gap-row">
+           <div class="trends-row-main">
+             <span class="trends-row-name">${_escapeHtml(r.name || r.player_id)}</span>
+             <span class="trends-row-meta">${r.position || ''}</span>
+           </div>
+           <div class="trends-gap-bar-wrap" title="Gap score ${r.score}/99">
+             <div class="trends-gap-bar"><div class="trends-gap-bar-fill" style="width:${Math.max(4, r.score || 0)}%;"></div></div>
+             <span class="trends-gap-score">+${(r.gap||0).toFixed(0)}</span>
+           </div>
+         </div>`
+      );
+
+      const renderBuy = (r) => (
+        `<div class="trends-row trends-gap-row">
+           <div class="trends-row-main">
+             <span class="trends-row-name">${_escapeHtml(r.name || r.player_id)}</span>
+             <span class="trends-row-meta">${r.position || ''} · owned by ${_escapeHtml(r.owner_username || '?')}</span>
+           </div>
+           <div class="trends-gap-bar-wrap" title="Gap score ${r.score}/99">
+             <div class="trends-gap-bar"><div class="trends-gap-bar-fill" style="width:${Math.max(4, r.score || 0)}%;"></div></div>
+             <span class="trends-gap-score">+${(r.gap||0).toFixed(0)}</span>
+           </div>
+         </div>`
+      );
+
+      el.innerHTML = `
+        <div class="trends-rf-grid">
+          <div class="trends-rf-col">
+            <div class="trends-rf-col-title">Easiest sells from your roster</div>
+            <div class="trends-rf-list">
+              ${sells.length ? sells.map(renderSell).join('') :
+                '<div class="trends-empty">No over-valued players on your roster right now.</div>'}
+            </div>
+          </div>
+          <div class="trends-rf-col">
+            <div class="trends-rf-col-title">Easiest buys around the league</div>
+            <div class="trends-rf-list">
+              ${buys.length ? buys.map(renderBuy).join('') :
+                '<div class="trends-empty">No clear buy targets where you out-value the owner.</div>'}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Expose so inline onclick= in index.html finds it
+    window.switchTrendsPos = switchTrendsPos;
+    window.loadTrends      = loadTrends;
+
     // Kick capture immediately (before boot runs)
     captureReferralFromUrl();
 
@@ -3445,5 +4043,67 @@
       renderScoringToggles();
     }
 
-    // ── Kick everything off ─────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════
+    //  Agent 1 — "I don't know this player" persistent skip (Trios page)
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // skipTrio() determines which card(s) to skip based on how the user has
+    // interacted with the trio so far:
+    //
+    //   • 0 cards ranked → primary UX: skip ALL three players in the trio.
+    //     The user truly doesn't recognize any of them.
+    //   • 1–2 cards ranked → skip only the un-ranked card(s); the ranked
+    //     ones the user already knew. No ELO is written for the partial
+    //     ranking — we just hide the unknown card(s) and move on.
+    //
+    // Skips are persisted server-side via POST /api/trio/skip so they stick
+    // across sessions for (user, scoring_format).
+    async function skipTrio() {
+      if (locked || !currentTrio) return;
+      locked = true;
+
+      const sides = ['a', 'b', 'c'];
+      const unranked = sides.filter(s => !selectionOrder.includes(s));
+      const targets = (selectionOrder.length === 0 ? sides : unranked);
+
+      const players = {
+        a: currentTrio.player_a,
+        b: currentTrio.player_b,
+        c: currentTrio.player_c,
+      };
+      const player_ids = targets
+        .map(s => players[s] && players[s].id)
+        .filter(Boolean);
+
+      if (player_ids.length === 0) {
+        locked = false;
+        return;
+      }
+
+      try {
+        const res = await apiFetch('/api/trio/skip', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ player_ids }),
+        });
+        if (!res.ok) {
+          showToast('⚠️ Could not save skip — try again');
+        } else {
+          const count = player_ids.length;
+          showToast(count === 1
+            ? '🙈 Hidden from future trios'
+            : `🙈 ${count} players hidden from future trios`);
+        }
+      } catch {
+        showToast('Skip failed — check server connection');
+      }
+
+      // Reset selection + load a fresh trio (the new trio won't include
+      // the just-skipped players thanks to the backend filter).
+      selectionOrder = [];
+      locked = false;
+      loadTrio();
+    }
+
+    // Kick everything off
     boot();

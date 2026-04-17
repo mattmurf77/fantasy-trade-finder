@@ -252,6 +252,45 @@ notifications_table = Table("notifications", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# Agent 1 additions — user_player_skips
+# ---------------------------------------------------------------------------
+# Persistent skip/dismiss decisions:
+#   - Trios page: "I don't know this player" button
+#   - Positional tiers page: × dismiss on unassigned cards
+# Scoped per (user, player, scoring_format). Skipped players are filtered out
+# of future trios and the unassigned pool for that format. No ELO update is
+# written, so the signal does not pollute the ranking engine.
+# ---------------------------------------------------------------------------
+
+user_player_skips_table = Table("user_player_skips", metadata,
+    Column("user_id",        String, primary_key=True, nullable=False),
+    Column("player_id",      String, primary_key=True, nullable=False),
+    Column("scoring_format", String, primary_key=True, nullable=False),
+    Column("skipped_at",     String),
+)
+
+# ---------------------------------------------------------------------------
+# elo_history — append-only log used by the Trends tab (Agent 2)
+# ---------------------------------------------------------------------------
+# One row per (user, league, player, format, snapshot_at).  Written on every
+# `save_ranking_swipes` call — only for players whose ELO actually changed in
+# this submission — so the Risers/Fallers chart has fresh data without a
+# daily cron.  Small enough (a few KB per submit) that we don't worry about
+# pruning in v1; a future maintenance job can compact snapshots older than
+# 90 days.
+# ---------------------------------------------------------------------------
+
+elo_history_table = Table("elo_history", metadata,
+    Column("id",             Integer, primary_key=True, autoincrement=True),
+    Column("user_id",        String,  nullable=False),
+    Column("league_id",      String),                       # nullable — global rankings too
+    Column("player_id",      String,  nullable=False),
+    Column("scoring_format", String,  nullable=False),      # '1qb_ppr' | 'sf_tep'
+    Column("elo",            Float,   nullable=False),
+    Column("snapshot_at",    String,  nullable=False),      # ISO UTC
+)
+
+# ---------------------------------------------------------------------------
 # model_config — runtime-tunable multiplier constants
 # ---------------------------------------------------------------------------
 # Stores every hardcoded constant used by the trade/ranking engine so they
@@ -266,6 +305,26 @@ model_config_table = Table("model_config", metadata,
     Column("key",         String, primary_key=True),
     Column("value",       Float,  nullable=False),
     Column("description", String),
+)
+
+# ---------------------------------------------------------------------------
+# Agent 6 additions — wrapped_events
+# ---------------------------------------------------------------------------
+# Silent event stream powering the "Fantasy Trade Wrapped" end-of-season recap.
+# Every row captures a single user action with an opaque JSON payload.
+# event_type is one of:
+#   swipe | trade_match | trade_accepted | trade_declined |
+#   tier_save | ranking_reorder | league_sync
+# ---------------------------------------------------------------------------
+
+wrapped_events_table = Table("wrapped_events", metadata,
+    Column("id",           Integer, primary_key=True, autoincrement=True),
+    Column("user_id",      String),
+    Column("league_id",    String),
+    Column("season",       Integer, default=2026),
+    Column("event_type",   String),
+    Column("payload_json", Text),
+    Column("created_at",   String),
 )
 
 # Default values seeded on first run.  Only inserted if the key doesn't
@@ -352,6 +411,9 @@ def _migrate_db() -> None:
         ("leagues",            "default_scoring",       "VARCHAR"),
         ("users",              "invited_by",            "VARCHAR"),
         ("users",              "unlocked_formats",      "TEXT"),
+        # Agent 4 additions — referral receipt feature reuses the existing
+        # `notifications` table (no new columns needed). The new notification
+        # `type` value is 'referral_joined'; see push_notification() below.
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -365,6 +427,19 @@ def _migrate_db() -> None:
 
     # Backfill: tag existing rows with '1qb_ppr' format since that was the only one
     _backfill_dual_format()
+
+    # ── Agent 1 additions — user_player_skips ─────────────────────────────
+    # The table is created by metadata.create_all(); this block is for any
+    # future additive ALTERs to that table. Kept idempotent like the rest.
+    _agent1_skip_migrations = [
+        # (table, column, type) — currently none; placeholder for future work
+    ]
+    for table, col, col_type in _agent1_skip_migrations:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+        except Exception:
+            pass
 
     # Seed model_config defaults in a single clean transaction.
     with engine.begin() as conn:
@@ -664,6 +739,13 @@ def save_tiers_position(
                 .where(users_table.c.sleeper_user_id == user_id)
                 .values(tiers_saved=json.dumps(all_saved))
             )
+        # Agent 6 — wrapped collector hook (non-throwing)
+        try:
+            from .wrapped_collector import record_event
+            record_event(user_id, None, "tier_save",
+                         {"position": position, "scoring_format": scoring_format})
+        except Exception:
+            pass
         return saved
 
 
@@ -833,6 +915,14 @@ def upsert_league(
                 created_at=now,
                 updated_at=now,
             ))
+    # Agent 6 — wrapped collector hook (non-throwing)
+    try:
+        from .wrapped_collector import record_event
+        record_event(user_id, league_id, "league_sync",
+                     {"name": name, "season": season,
+                      "roster_size": len(user_player_ids)})
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -868,6 +958,13 @@ def save_ranking_swipes(
     if rows:
         with engine.begin() as conn:
             conn.execute(insert(swipe_decisions_table), rows)
+        # Agent 6 — wrapped collector hook (non-throwing)
+        try:
+            from .wrapped_collector import record_event
+            record_event(user_id, None, "swipe",
+                         {"count": len(rows), "scoring_format": scoring_format})
+        except Exception:
+            pass
 
 
 def save_trade_swipes(
@@ -1576,6 +1673,15 @@ def create_trade_match(
             )
         )
         match_id = result.inserted_primary_key[0]
+
+    # Agent 6 — wrapped collector hook (non-throwing)
+    try:
+        from .wrapped_collector import record_event
+        record_event(user_a_id, league_id, "trade_match",
+                     {"match_id": match_id, "partner_id": user_b_id,
+                      "give": user_a_give, "receive": user_a_receive})
+    except Exception:
+        pass
 
     return {
         "id":          match_id,
@@ -2439,3 +2545,335 @@ def mark_notifications_read(
             q = q.where(notifications_table.c.id.in_(notification_ids))
         result = conn.execute(q.values(is_read=1))
         return result.rowcount
+
+
+# ---------------------------------------------------------------------------
+# Agent 6 — Cross-league portfolio
+# ---------------------------------------------------------------------------
+
+def load_user_cross_league_exposure(user_id: str) -> list[dict]:
+    """
+    Aggregate this user's player exposure across every league they own a
+    roster in.  Joins league_members (to get the user's own rosters) with
+    leagues (for human-readable league names) and players (for name/position).
+
+    Returns a list of dicts sorted by exposure count desc:
+        [{player_id, name, pos, exposure, total_leagues, league_names}, ...]
+
+    total_leagues is identical on every row — it's the number of leagues
+    this user has a roster in.  exposure is the subset where the player
+    is on this user's team.
+    """
+    with engine.connect() as conn:
+        # Pull every (league_id, roster_data) row where this user owns the team.
+        member_rows = conn.execute(
+            select(
+                league_members_table.c.league_id,
+                league_members_table.c.roster_data,
+            ).where(league_members_table.c.user_id == user_id)
+        ).fetchall()
+
+        if not member_rows:
+            return []
+
+        # Map league_id -> display name (prefer latest known leagues row)
+        league_ids = list({r.league_id for r in member_rows})
+        league_name_map: dict[str, str] = {}
+        if league_ids:
+            lrows = conn.execute(
+                select(
+                    leagues_table.c.sleeper_league_id,
+                    leagues_table.c.name,
+                ).where(leagues_table.c.sleeper_league_id.in_(league_ids))
+            ).fetchall()
+            for lr in lrows:
+                if lr.sleeper_league_id not in league_name_map and lr.name:
+                    league_name_map[lr.sleeper_league_id] = lr.name
+
+        # Build exposure: player_id -> set of league_ids it appears in
+        exposure: dict[str, set[str]] = {}
+        for r in member_rows:
+            try:
+                pids = json.loads(r.roster_data or "[]")
+            except (json.JSONDecodeError, TypeError):
+                pids = []
+            for pid in pids:
+                if not pid:
+                    continue
+                exposure.setdefault(str(pid), set()).add(r.league_id)
+
+        if not exposure:
+            return []
+
+        # Resolve player metadata in one query
+        prows = conn.execute(
+            select(
+                players_table.c.player_id,
+                players_table.c.full_name,
+                players_table.c.position,
+            ).where(players_table.c.player_id.in_(list(exposure.keys())))
+        ).fetchall()
+        player_meta = {
+            p.player_id: {"name": p.full_name, "pos": p.position}
+            for p in prows
+        }
+
+    total_leagues = len(league_ids)
+    result = []
+    for pid, lid_set in exposure.items():
+        meta = player_meta.get(pid, {})
+        result.append({
+            "player_id":     pid,
+            "name":          meta.get("name") or pid,
+            "pos":           meta.get("pos") or "",
+            "exposure":      len(lid_set),
+            "total_leagues": total_leagues,
+            "league_names":  sorted(
+                league_name_map.get(lid, lid) for lid in lid_set
+            ),
+        })
+
+    # Primary sort: exposure desc; secondary: name asc for stability
+    result.sort(key=lambda d: (-d["exposure"], d["name"].lower()))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Agent 1 additions — user_player_skips helpers
+# ---------------------------------------------------------------------------
+
+def add_skip(user_id: str, player_id: str, scoring_format: str = DEFAULT_SCORING) -> None:
+    """
+    Record a persistent skip/dismiss for (user, player, scoring_format).
+
+    Idempotent — already-skipped rows are silently ignored so the caller can
+    fire-and-forget without checking first.
+    """
+    if not user_id or not player_id:
+        return
+    if scoring_format not in SCORING_FORMATS:
+        scoring_format = DEFAULT_SCORING
+    payload = {
+        "user_id":        user_id,
+        "player_id":      player_id,
+        "scoring_format": scoring_format,
+        "skipped_at":     _now(),
+    }
+    try:
+        with engine.begin() as conn:
+            if DATABASE_URL.startswith("sqlite"):
+                conn.execute(text(
+                    "INSERT OR IGNORE INTO user_player_skips "
+                    "(user_id, player_id, scoring_format, skipped_at) "
+                    "VALUES (:user_id, :player_id, :scoring_format, :skipped_at)"
+                ), payload)
+            else:
+                conn.execute(text(
+                    "INSERT INTO user_player_skips "
+                    "(user_id, player_id, scoring_format, skipped_at) "
+                    "VALUES (:user_id, :player_id, :scoring_format, :skipped_at) "
+                    "ON CONFLICT (user_id, player_id, scoring_format) DO NOTHING"
+                ), payload)
+    except Exception as e:
+        # Non-fatal: log and continue. Callers swallow to keep UX snappy.
+        print(f"[add_skip] failed for user={user_id} pid={player_id} fmt={scoring_format}: {e}")
+
+
+def load_skips(user_id: str, scoring_format: str = DEFAULT_SCORING) -> set:
+    """Return the set of player_ids this user has persistently skipped in this format."""
+    if not user_id:
+        return set()
+    if scoring_format not in SCORING_FORMATS:
+        scoring_format = DEFAULT_SCORING
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(user_player_skips_table.c.player_id)
+                .where(user_player_skips_table.c.user_id == user_id)
+                .where(user_player_skips_table.c.scoring_format == scoring_format)
+            ).fetchall()
+        return {r.player_id for r in rows}
+    except Exception as e:
+        print(f"[load_skips] failed for user={user_id} fmt={scoring_format}: {e}")
+        return set()
+
+
+# Aliases — the tiers-page feature is conceptually a "dismiss", the trios-page
+# feature is a "skip" — same underlying table.
+dismiss_player = add_skip
+load_dismissed_players = load_skips
+
+
+# ---------------------------------------------------------------------------
+# Agent 4 additions — referral receipt helpers
+# ---------------------------------------------------------------------------
+#
+# Reuses the existing `notifications` table (no schema change needed). The new
+# `type` value 'referral_joined' is emitted from session_init when a user's
+# first INSERT carries an invited_by attribution.
+#
+# push_notification / load_notifications are thin aliases over the existing
+# create_notification / get_notifications helpers so Agent 4's documented
+# surface matches the spec, while keeping all data in one table.
+# ---------------------------------------------------------------------------
+
+def user_exists(sleeper_user_id: str) -> bool:
+    """Return True if a users row already exists for this sleeper_user_id.
+
+    Used by session_init to detect a "fresh INSERT" so the referral receipt
+    notification only fires once (on the referred user's first session).
+    """
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.sleeper_user_id).where(
+                users_table.c.sleeper_user_id == sleeper_user_id
+            )
+        ).fetchone()
+    return row is not None
+
+
+def get_user_by_username(username: str) -> dict | None:
+    """Look up a user row by their Sleeper username (case-insensitive).
+
+    Returns a dict with sleeper_user_id/username/display_name/avatar/etc.,
+    or None if no matching user was found. Used to resolve an `invited_by`
+    username back to the referrer's sleeper_user_id so we can post them a
+    notification.
+    """
+    if not username:
+        return None
+    from sqlalchemy import func
+    with engine.connect() as conn:
+        # Case-insensitive match — invited_by is stored as-typed by the
+        # inviter when they built the share URL, and Sleeper usernames are
+        # not case-sensitive.
+        row = conn.execute(
+            select(users_table).where(
+                func.lower(users_table.c.username) == username.lower()
+            )
+        ).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def push_notification(
+    user_id: str,
+    type: str,
+    body: str,
+    meta: dict | None = None,
+) -> dict:
+    """Agent 4 alias — push a notification into a user's inbox.
+
+    Delegates to create_notification(); the title defaults to the body for
+    types like 'referral_joined' where the single-line body is the whole
+    message. Extra context lives in `meta` (JSON-encoded on write).
+    """
+    return create_notification(
+        user_id=user_id,
+        type_=type,
+        title=body,
+        body=body,
+        metadata=meta or {},
+    )
+
+
+def load_notifications(user_id: str, unread_only: bool = False) -> list[dict]:
+    """Agent 4 alias — read a user's notifications.
+
+    Wraps get_notifications() so Agent 4's documented surface matches the
+    spec. When unread_only=True, returns just the unread subset.
+    """
+    rows = get_notifications(user_id=user_id)
+    if unread_only:
+        rows = [r for r in rows if not r.get("is_read")]
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# elo_history — snapshots for Trends tab
+# ---------------------------------------------------------------------------
+
+def record_elo_snapshot(
+    user_id: str,
+    league_id: str | None,
+    scoring_format: str,
+    changed_ratings: dict[str, float],
+) -> int:
+    """
+    Append ELO-history rows for every (player, new_elo) pair in
+    `changed_ratings`.  Caller decides which players actually changed —
+    this function is a pure insert.
+
+    Returns the number of rows inserted.
+    """
+    if not changed_ratings:
+        return 0
+    now = _now()
+    rows = [
+        {
+            "user_id":        user_id,
+            "league_id":      league_id,
+            "player_id":      str(pid),
+            "scoring_format": scoring_format or DEFAULT_SCORING,
+            "elo":            float(elo),
+            "snapshot_at":    now,
+        }
+        for pid, elo in changed_ratings.items()
+        if pid is not None and elo is not None
+    ]
+    if not rows:
+        return 0
+    with engine.begin() as conn:
+        conn.execute(insert(elo_history_table), rows)
+    return len(rows)
+
+
+def load_elo_history(
+    user_id: str,
+    scoring_format: str = DEFAULT_SCORING,
+    since_days: int = 30,
+    league_id: str | None = None,
+) -> list[dict]:
+    """
+    Return the user's ELO-history rows for `scoring_format` within the last
+    `since_days` days, ordered OLDEST first so the caller can pick the
+    earliest snapshot per player as the "previous" value.
+
+    If `league_id` is provided, filters to rows tagged with that league
+    (or globally tagged rows where league_id IS NULL).
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=since_days)).isoformat()
+    with engine.connect() as conn:
+        q = (
+            select(elo_history_table)
+            .where(elo_history_table.c.user_id        == user_id)
+            .where(elo_history_table.c.scoring_format == scoring_format)
+            .where(elo_history_table.c.snapshot_at    >= cutoff)
+            .order_by(elo_history_table.c.snapshot_at.asc(),
+                      elo_history_table.c.id.asc())
+        )
+        if league_id:
+            q = q.where(
+                (elo_history_table.c.league_id == league_id) |
+                (elo_history_table.c.league_id.is_(None))
+            )
+        rows = conn.execute(q).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+def load_community_elo_for_league(
+    league_id: str,
+    exclude_user_id: str,
+    scoring_format: str = DEFAULT_SCORING,
+) -> dict:
+    """
+    Thin alias around `load_member_rankings` — kept here so the Trends
+    service has a dedicated, clearly-named dependency separate from the
+    trade engine's usage of the same data.
+
+    Returns the same shape as load_member_rankings().
+    """
+    return load_member_rankings(
+        league_id       = league_id,
+        exclude_user_id = exclude_user_id,
+        scoring_format  = scoring_format,
+    )

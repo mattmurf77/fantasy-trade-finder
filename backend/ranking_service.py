@@ -271,13 +271,29 @@ class RankingService:
                 ))
         self._version += 1
 
-    def get_next_trio(self, position: Optional[str] = None) -> MatchupTrio:
-        """Return the most informative next 3 players to rank."""
+    def get_next_trio(
+        self,
+        position: Optional[str] = None,
+        skipped_player_ids: Optional[set] = None,
+    ) -> MatchupTrio:
+        """Return the most informative next 3 players to rank.
+
+        skipped_player_ids (Agent 1): persistent "I don't know this player"
+        exclusions. Players in this set are filtered out of the candidate pool
+        so they never appear in future trios for this user + format.
+        """
+        _skipped: set = skipped_player_ids or set()
+
         # Tier engine: filter the pool based on ranking progress phase
         if _c("tier_engine_enabled") == 1.0:
             pool = self._tiered_pool(position)
         else:
             pool = self._pool(position)
+
+        # Agent 1: remove any skipped players before size check so the error
+        # message reflects the *usable* pool size.
+        if _skipped:
+            pool = [p for p in pool if p.id not in _skipped]
 
         if len(pool) < 3:
             raise ValueError(f"Need at least 3 players for position={position!r}")
@@ -291,6 +307,7 @@ class RankingService:
                     players=pool,
                     swipe_history=history,
                     position_filter=position,
+                    skipped_player_ids=_skipped,
                 )
                 return trio
             except Exception:

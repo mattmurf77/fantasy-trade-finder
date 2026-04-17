@@ -1337,7 +1337,14 @@
         `;
       } else {
         // Pool card — larger with tier-assignment tiles
+        // Agent 1: × dismiss button hides this player from the unassigned pool
+        // for the current user + scoring_format. Persistent across sessions.
         chip.innerHTML = `
+          <button class="chip-dismiss-btn" ${stopDrag}
+            onclick="event.stopPropagation(); dismissPoolPlayer('${player.id}')"
+            title="I don't know this player — hide forever"
+            style="position:absolute; top:4px; right:6px; background:transparent; border:none; color:var(--muted); font-size:1.1rem; cursor:pointer; line-height:1; padding:2px 4px;"
+            aria-label="Dismiss ${player.name}">&times;</button>
           <div class="pool-chip-top">
             <span class="chip-pos ${posClass}">${player.pos}</span>
             <span class="chip-name">${player.name}</span>
@@ -1354,6 +1361,8 @@
             }).join('')}
           </div>
         `;
+        // Ensure the chip establishes a positioning context for the × button
+        chip.style.position = chip.style.position || 'relative';
       }
 
       // Drag events

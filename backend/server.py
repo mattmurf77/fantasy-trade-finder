@@ -75,6 +75,8 @@ from .database import (
     load_rookies,
     sync_draft_picks, load_draft_picks,
     create_notification, get_notifications, mark_notifications_read,
+    # Agent 4 additions — referral receipt helpers
+    user_exists, get_user_by_username, push_notification,
     get_config, set_config, list_config,
     load_local_leagues_for_user,
     load_local_league_rosters,
@@ -85,9 +87,16 @@ from .database import (
     mark_format_unlocked, get_unlocked_formats,
     set_league_scoring, get_league_scoring, get_league_summary,
     SCORING_FORMATS, DEFAULT_SCORING,
+    # Trends tab (Agent 2)
+    record_elo_snapshot, load_elo_history, load_community_elo_for_league,
+    load_user_cross_league_exposure,
+    # Agent 1 additions — user_player_skips helpers
+    add_skip as _skip_add,
+    load_skips as _skip_load,
 )
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
+from . import trends_service as _trends_service_mod
 from .trade_service import TradeService, League, LeagueMember
 
 # ---------------------------------------------------------------------------
@@ -825,8 +834,17 @@ def get_trio():
     sess["last_active"] = time.time()
     service = sess["service"]
     position = request.args.get("position") or None
+    # Agent 1: persistent "I don't know this player" skips for this user+format
     try:
-        trio = service.get_next_trio(position=position)
+        skipped_ids = _skip_load(
+            user_id=sess.get("user_id", ""),
+            scoring_format=_active_format(sess),
+        )
+    except Exception as _skip_err:
+        log.warning("load_skips failed (continuing without filter): %s", _skip_err)
+        skipped_ids = set()
+    try:
+        trio = service.get_next_trio(position=position, skipped_player_ids=skipped_ids)
         resp = {
             "player_a":  player_to_dict(trio.player_a),
             "player_b":  player_to_dict(trio.player_b),
@@ -905,6 +923,29 @@ def post_rank3():
                 )
         except Exception as db_err:
             log.warning("member_rankings auto-publish failed (continuing): %s", db_err)
+
+        # ── Trends: record ELO snapshot for any player involved in this
+        # ranking.  We only write the players that actually changed in this
+        # submission (the three IDs in `ranked_valid`) — the Risers/Fallers
+        # computation uses oldest-first ordering, so per-submit rows here
+        # feed cleanly into /api/trends/risers-fallers without a cron job.
+        try:
+            snapshot_league = g_league.league_id if g_league else None
+            current_rankings = service.get_rankings(position=None).rankings
+            changed = {
+                rp.player.id: rp.elo
+                for rp in current_rankings
+                if rp.player.id in set(ranked_valid)
+            }
+            if changed:
+                record_elo_snapshot(
+                    user_id         = g_user_id,
+                    league_id       = snapshot_league,
+                    scoring_format  = fmt,
+                    changed_ratings = changed,
+                )
+        except Exception as db_err:
+            log.warning("elo_history snapshot failed (continuing): %s", db_err)
 
         pct = min(100, round(rank_set.interaction_count / rank_set.threshold * 100))
         return jsonify({
@@ -1193,6 +1234,13 @@ def reorder_rankings():
 
     try:
         service.apply_reorder(position=position, ordered_ids=ordered_ids)
+        try:
+            from .wrapped_collector import record_event
+            record_event(g_user_id, getattr(g_league, "league_id", None),
+                         "ranking_reorder",
+                         {"position": position, "count": len(ordered_ids),
+                          "scoring_format": fmt})
+        except Exception: pass
 
         # Persist override dict for THIS format so it survives session rebuilds
         try:
@@ -1817,6 +1865,25 @@ def get_leagues():
     }])
 
 
+# ---------------------------------------------------------------------------
+# Agent 6 — Cross-league portfolio
+# ---------------------------------------------------------------------------
+
+@app.route("/api/portfolio")
+def get_portfolio():
+    """GET /api/portfolio → aggregate exposure across every league this user
+    has synced. Returns {players: [...]} sorted by exposure desc."""
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    try:
+        players = load_user_cross_league_exposure(g_user_id)
+        return jsonify({"players": players})
+    except Exception as e:
+        log.error("get_portfolio error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/rankings/submit", methods=["POST"])
 def submit_rankings():
     """
@@ -2031,6 +2098,236 @@ def league_coverage():
         return jsonify(coverage)
     except Exception as e:
         log.error("league/coverage error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# League Contrarian Leaderboard
+# ---------------------------------------------------------------------------
+# Surfaces per-position "most contrarian" and "most consensus" ranking-takers
+# in the league. Deviation is computed as the mean absolute difference between
+# each user's ELO and the community-mean ELO, restricted to players that at
+# least 2 users have ranked in the target position. Requires ≥3 users with
+# rankings for the league + format; otherwise returns an empty-state message
+# prompting the user to invite leaguemates.
+# ---------------------------------------------------------------------------
+
+_CONTRARIAN_POSITIONS = ("QB", "RB", "WR", "TE")
+
+
+def _compute_contrarian_per_position(
+    users_rankings: dict,
+    player_positions: dict,
+    position: str,
+) -> dict:
+    """Given {user_id: {username, elo_ratings: {player_id: elo}}} and a
+    player_id→position map, compute each user's mean absolute deviation from
+    the community mean for this position. Returns:
+
+        {
+            "most_contrarian": [{user_id, username, deviation}, ...],  # top 3
+            "most_consensus":  [{user_id, username, deviation}, ...],  # top 3
+            "ranked_users":    int,
+            "player_count":    int,
+        }
+
+    Players are only included if at least 2 users have an ELO for them (so
+    the community mean is non-trivial). Users are only included if they have
+    at least 3 qualifying players.
+    """
+    # Collect ELOs per player for the target position
+    pos_upper = position.upper()
+    player_elos: dict[str, list[tuple[str, float]]] = {}
+    for uid, udata in users_rankings.items():
+        for pid, elo in (udata.get("elo_ratings") or {}).items():
+            if player_positions.get(pid) == pos_upper:
+                player_elos.setdefault(pid, []).append((uid, float(elo)))
+
+    # Keep only players with >=2 raters so the mean is meaningful
+    community_means = {
+        pid: sum(e for _, e in entries) / len(entries)
+        for pid, entries in player_elos.items()
+        if len(entries) >= 2
+    }
+
+    # Per-user absolute deviations from community mean
+    user_deviations: dict[str, list[float]] = {}
+    for pid, mean_elo in community_means.items():
+        for uid, elo in player_elos[pid]:
+            user_deviations.setdefault(uid, []).append(abs(elo - mean_elo))
+
+    # Require each user to have ranked at least 3 qualifying players
+    leaderboard = []
+    for uid, devs in user_deviations.items():
+        if len(devs) < 3:
+            continue
+        username = users_rankings.get(uid, {}).get("username") or uid
+        deviation = sum(devs) / len(devs)
+        leaderboard.append({
+            "user_id":       uid,
+            "username":      username,
+            "deviation":     round(deviation, 2),
+            "player_count":  len(devs),
+        })
+
+    leaderboard.sort(key=lambda x: x["deviation"], reverse=True)
+    top_contrarian = leaderboard[:3]
+    top_consensus  = sorted(leaderboard, key=lambda x: x["deviation"])[:3]
+    return {
+        "most_contrarian": top_contrarian,
+        "most_consensus":  top_consensus,
+        "ranked_users":    len(leaderboard),
+        "player_count":    len(community_means),
+    }
+
+
+@app.route("/api/league/contrarian")
+def league_contrarian_route():
+    """GET /api/league/contrarian?league_id=...&format=1qb_ppr|sf_tep
+
+    Per-position contrarian leaderboard for the league. Requires at least 3
+    users in the league to have stored rankings for the requested format.
+    When the threshold isn't met, responds with an `insufficient_data` flag
+    and a human-readable message.
+
+    Response shape:
+    {
+        "league_id": "...",
+        "format":    "1qb_ppr",
+        "insufficient_data": false,
+        "message":   "Invite leaguemates to unlock.",  # only when insufficient
+        "qb": { "most_contrarian": [...], "most_consensus": [...],
+                "ranked_users": 4, "player_count": 23 },
+        "rb": { ... },
+        "wr": { ... },
+        "te": { ... }
+    }
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+
+    fmt = request.args.get("format") or _active_format(sess)
+    if fmt not in SCORING_FORMATS:
+        fmt = DEFAULT_SCORING
+
+    try:
+        # Fetch rankings for ALL users in the league (empty exclude matches
+        # no real user_id). This returns {user_id: {username, elo_ratings}}.
+        users_rankings = load_member_rankings(
+            league_id       = league_id,
+            exclude_user_id = "",
+            scoring_format  = fmt,
+        )
+
+        # Distinct users with stored rankings for this format
+        ranked_user_count = len(users_rankings)
+
+        # Need at least 3 users with data to compute a meaningful community
+        # baseline (contrarian score is relative to everyone else's mean).
+        if ranked_user_count < 3:
+            needed = 3 - ranked_user_count
+            return jsonify({
+                "league_id":          league_id,
+                "format":             fmt,
+                "insufficient_data":  True,
+                "ranked_users":       ranked_user_count,
+                "needed":             needed,
+                "message":            "Invite leaguemates to unlock.",
+                "qb": None, "rb": None, "wr": None, "te": None,
+            })
+
+        # Build player_id → position lookup once
+        all_players = load_players(position=None)
+        player_positions = {
+            str(p.get("player_id")): (p.get("position") or "").upper()
+            for p in all_players
+            if p.get("player_id")
+        }
+
+        out = {
+            "league_id":         league_id,
+            "format":            fmt,
+            "insufficient_data": False,
+            "ranked_users":      ranked_user_count,
+        }
+        for pos in _CONTRARIAN_POSITIONS:
+            out[pos.lower()] = _compute_contrarian_per_position(
+                users_rankings, player_positions, pos
+            )
+        return jsonify(out)
+    except Exception as e:
+        log.error("league/contrarian error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/league/format-stats")
+def league_format_stats_route():
+    """GET /api/league/format-stats?league_id=...
+
+    Lightweight check for the empty-state nudge on ranking views. Returns
+    how many rankings the CURRENT user has saved in each scoring format,
+    plus the league's detected default format. The frontend uses this to
+    decide whether to show a "You haven't started ranking for {format}
+    yet" CTA when a user navigates to a format they've never used.
+
+    Response:
+    {
+      "league_id":       "...",
+      "default_scoring": "1qb_ppr",
+      "formats": {
+        "1qb_ppr": { "ranking_count": 47 },
+        "sf_tep":  { "ranking_count": 0 }
+      }
+    }
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+
+    try:
+        # Per-format counts for THIS user only. load_member_rankings excludes
+        # a single user, so we call it with a dummy value to get every user,
+        # then filter to our own rows. Simple and avoids a new DB helper.
+        by_user = load_member_rankings(
+            league_id       = league_id,
+            exclude_user_id = "",
+            scoring_format  = DEFAULT_SCORING,
+        )
+        count_default = len((by_user.get(g_user_id) or {}).get("elo_ratings") or {})
+
+        other_fmt = "sf_tep" if DEFAULT_SCORING == "1qb_ppr" else "1qb_ppr"
+        by_user_other = load_member_rankings(
+            league_id       = league_id,
+            exclude_user_id = "",
+            scoring_format  = other_fmt,
+        )
+        count_other = len((by_user_other.get(g_user_id) or {}).get("elo_ratings") or {})
+
+        # Detected league scoring (for informational badge)
+        try:
+            detected = get_league_scoring(league_id)
+        except Exception:
+            detected = None
+
+        return jsonify({
+            "league_id":       league_id,
+            "default_scoring": detected or DEFAULT_SCORING,
+            "formats": {
+                DEFAULT_SCORING: {"ranking_count": count_default},
+                other_fmt:       {"ranking_count": count_other},
+            },
+        })
+    except Exception as e:
+        log.error("league/format-stats error: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -2540,6 +2837,15 @@ def session_init():
             _sessions[token] = session_payload
 
     # ── Persist user + league snapshot ──────────────────────────────────
+    # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE upsert_user runs
+    # so we can emit a one-time referral-receipt notification on the referred
+    # user's first session. upsert_user only applies `invited_by` on INSERT,
+    # so this is also our only window to attribute the join.
+    _is_new_user = False
+    try:
+        _is_new_user = not user_exists(user_id)
+    except Exception as _check_err:
+        log.warning("  referral receipt: user_exists check failed (%s)", _check_err)
     try:
         upsert_user(
             sleeper_user_id=user_id,
@@ -2558,9 +2864,46 @@ def session_init():
         )
         log.info("  ✅ user + league upserted in DB")
 
+        # ── Agent 4: referral receipt notification ─────────────────────────
+        # Fires exactly once: on the NEW user's very first session_init when
+        # they arrived with an invited_by attribution. Posts a bell
+        # notification to the referrer resolved-by-username.
+        if _is_new_user and invited_by:
+            try:
+                referrer = get_user_by_username(invited_by)
+                if referrer and referrer.get("sleeper_user_id"):
+                    referrer_uid  = referrer["sleeper_user_id"]
+                    new_username  = username or display_name or user_id
+                    push_notification(
+                        user_id=referrer_uid,
+                        type="referral_joined",
+                        body=f"🤝 @{new_username} joined Fantasy Trade Finder via your invite.",
+                        meta={
+                            "new_user_id":   user_id,
+                            "new_username":  new_username,
+                            "invited_by":    invited_by,
+                        },
+                    )
+                    log.info("  ✅ referral_joined notification → @%s (uid=%s)",
+                             invited_by, referrer_uid)
+                else:
+                    log.info("  referral_joined: referrer @%s not found in users table",
+                             invited_by)
+            except Exception as ref_err:
+                log.warning("  referral receipt emit failed (continuing): %s", ref_err)
+
         # ── Auto-detect league scoring format from Sleeper metadata ─────────
-        # Only fetch when we don't already have a format on file for this
-        # league — the Sleeper API call is ~100ms and runs once per league.
+        # Fires on every session/init for leagues without a format on file.
+        # Retrying on each init (when existing_fmt is falsy) self-heals
+        # leagues whose first sync hit a Sleeper API flake — subsequent
+        # logins keep attempting until detection succeeds. Once stored, the
+        # Sleeper call is skipped.
+        #
+        # AUDIT (2026-04-16): session/init is the only path that calls
+        # upsert_league — no other league-sync code path exists in server.py,
+        # so guarding auto-detect here covers every new + returning league
+        # connection. If additional sync paths are introduced, they must
+        # also invoke _detect_scoring_format_from_meta + set_league_scoring.
         try:
             existing_fmt = get_league_scoring(league_id)
             if not existing_fmt:
@@ -2569,6 +2912,8 @@ def session_init():
                     detected = _detect_scoring_format_from_meta(meta)
                     set_league_scoring(league_id, detected)
                     log.info("  ✅ league scoring auto-detected: %s", detected)
+                else:
+                    log.info("  ℹ️  league scoring auto-detect deferred — Sleeper meta unavailable")
         except Exception as e:
             log.warning("  league scoring auto-detect failed (continuing): %s", e)
     except Exception as db_err:
@@ -2705,6 +3050,479 @@ def read_all_notifications():
     except Exception as e:
         log.error("read_all_notifications error: %s", e)
         return jsonify({"error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Trends tab routes (Agent 2)
+# ---------------------------------------------------------------------------
+
+def _players_by_id_for(session_players) -> dict[str, dict]:
+    """Build a {player_id: {name, position, team}} lookup from a list of
+    RankingService Player dataclasses.  Used to enrich Trends responses."""
+    out: dict[str, dict] = {}
+    for p in (session_players or []):
+        try:
+            out[p.id] = {
+                "name":     p.name,
+                "position": p.position,
+                "team":     getattr(p, "team", None),
+            }
+        except Exception:
+            continue
+    return out
+
+
+@app.route("/api/trends/risers-fallers")
+def trends_risers_fallers_route():
+    """
+    GET /api/trends/risers-fallers?window_days=30&top_n=5
+    Returns the user's ELO risers + fallers over the requested window,
+    grouped by position.  Computed from the `elo_history` table written on
+    every ranking submit.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    service       = sess["service"]
+    g_user_id     = sess["user_id"]
+    g_league      = sess["league"]
+    g_players     = sess["players"]
+    fmt           = _active_format(sess)
+
+    try:
+        window_days = int(request.args.get("window_days", 30))
+    except ValueError:
+        window_days = 30
+    try:
+        top_n       = int(request.args.get("top_n", 5))
+    except ValueError:
+        top_n       = 5
+
+    current = {rp.player.id: rp.elo for rp in service.get_rankings(position=None).rankings}
+    try:
+        history = load_elo_history(
+            user_id        = g_user_id,
+            scoring_format = fmt,
+            since_days     = window_days,
+            league_id      = g_league.league_id if g_league else None,
+        )
+    except Exception as e:
+        log.warning("load_elo_history failed: %s", e)
+        history = []
+
+    players_by_id = _players_by_id_for(g_players)
+    result = _trends_service_mod.compute_risers_fallers(
+        current_elo   = current,
+        history_rows  = history,
+        players_by_id = players_by_id,
+        top_n         = top_n,
+        window_days   = window_days,
+    )
+    result["has_history"] = bool(history)
+    return jsonify(result)
+
+
+@app.route("/api/trends/contrarian")
+def trends_contrarian_route():
+    """
+    GET /api/trends/contrarian?league_id=...
+    Compares the user's ELO to the community consensus in the league for
+    the active scoring format.  Returns a single 0-100 contrarian score
+    plus Top-5-above / Top-5-below splits.  Falls back to
+    {has_baseline: false} when fewer than 3 other users have rankings.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    service       = sess["service"]
+    g_user_id     = sess["user_id"]
+    g_league      = sess["league"]
+    g_players     = sess["players"]
+    fmt           = _active_format(sess)
+    league_id     = request.args.get("league_id") or (g_league.league_id if g_league else None)
+
+    if not league_id or league_id == "league_demo":
+        return jsonify({
+            "has_baseline":        False,
+            "baseline_user_count": 0,
+            "score":               None,
+            "compared_players":    0,
+            "above_consensus":     [],
+            "below_consensus":     [],
+            "reason":              "no_league",
+        })
+
+    user_elo = {rp.player.id: rp.elo for rp in service.get_rankings(position=None).rankings}
+    try:
+        community = load_community_elo_for_league(
+            league_id       = league_id,
+            exclude_user_id = g_user_id,
+            scoring_format  = fmt,
+        )
+    except Exception as e:
+        log.warning("load_community_elo_for_league failed: %s", e)
+        community = {}
+
+    players_by_id = _players_by_id_for(g_players)
+    result = _trends_service_mod.compute_contrarian_score(
+        user_elo           = user_elo,
+        community_rankings = community,
+        players_by_id      = players_by_id,
+    )
+    return jsonify(result)
+
+
+@app.route("/api/trends/consensus-gap")
+def trends_consensus_gap_route():
+    """
+    GET /api/trends/consensus-gap?league_id=...&top_n=5
+    Per-player gap between the user's ELO and the community ELO (for
+    non-roster picks: vs the specific owner's ELO).  Returns
+    "easiest_sells" (own roster, over-valued vs market) and
+    "easiest_buys" (not on roster, over-valued vs owner).
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    service       = sess["service"]
+    g_user_id     = sess["user_id"]
+    g_league      = sess["league"]
+    g_user_roster = sess.get("user_roster") or []
+    g_players     = sess["players"]
+    fmt           = _active_format(sess)
+    league_id     = request.args.get("league_id") or (g_league.league_id if g_league else None)
+    try:
+        top_n = int(request.args.get("top_n", 5))
+    except ValueError:
+        top_n = 5
+
+    if not league_id or league_id == "league_demo":
+        return jsonify({
+            "has_baseline":        False,
+            "baseline_user_count": 0,
+            "easiest_sells":       [],
+            "easiest_buys":        [],
+            "reason":              "no_league",
+        })
+
+    user_elo = {rp.player.id: rp.elo for rp in service.get_rankings(position=None).rankings}
+    try:
+        community = load_community_elo_for_league(
+            league_id       = league_id,
+            exclude_user_id = g_user_id,
+            scoring_format  = fmt,
+        )
+    except Exception as e:
+        log.warning("load_community_elo_for_league failed: %s", e)
+        community = {}
+
+    # League-members shape expected by trends_service: list of dicts with
+    # user_id, username, roster.
+    members = []
+    if g_league:
+        for m in g_league.members:
+            members.append({
+                "user_id":  m.user_id,
+                "username": m.username,
+                "roster":   list(getattr(m, "roster", []) or []),
+            })
+
+    players_by_id = _players_by_id_for(g_players)
+    result = _trends_service_mod.compute_consensus_gap(
+        user_elo           = user_elo,
+        community_rankings = community,
+        user_roster        = g_user_roster,
+        league_members     = members,
+        players_by_id      = players_by_id,
+        top_n              = top_n,
+    )
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# Agent 1 additions — Skip / Dismiss persistent routes
+# ---------------------------------------------------------------------------
+# /api/trio/skip      — user says "I don't know this player" on the Trios page
+# /api/tiers/dismiss  — user taps × on an unassigned card on the Tiers page
+#
+# Both routes:
+#   • Scope the skip to (user_id, scoring_format) — not league.
+#   • Accept a single player_id OR a list via `player_ids` for bulk calls.
+#   • Do NOT write a swipe / do NOT update ELO.  Skipped players simply
+#     vanish from future trios and the unassigned pool.
+# ---------------------------------------------------------------------------
+
+@app.route("/api/trio/skip", methods=["POST"])
+def post_trio_skip():
+    """POST /api/trio/skip
+    Body: { player_id: str }  OR  { player_ids: [str, ...] }
+    Optional: { scoring_format: '1qb_ppr' | 'sf_tep' } — defaults to active.
+    Response: { ok: true, skipped: [ids], skipped_count: int }
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    user_id = sess.get("user_id", "")
+    if not user_id:
+        return jsonify({"error": "no_user_in_session"}), 400
+
+    body = request.get_json(force=True) or {}
+    fmt = body.get("scoring_format") or _active_format(sess)
+    if fmt not in SCORING_FORMATS:
+        fmt = _active_format(sess)
+
+    ids: list = []
+    if "player_ids" in body and isinstance(body["player_ids"], list):
+        ids = [str(x) for x in body["player_ids"] if x]
+    elif "player_id" in body and body["player_id"]:
+        ids = [str(body["player_id"])]
+
+    if not ids:
+        return jsonify({"error": "player_id or player_ids required"}), 400
+
+    for pid in ids:
+        try:
+            _skip_add(user_id=user_id, player_id=pid, scoring_format=fmt)
+        except Exception as e:
+            log.warning("skip add failed for pid=%s: %s", pid, e)
+
+    return jsonify({
+        "ok":             True,
+        "skipped":        ids,
+        "skipped_count":  len(ids),
+        "scoring_format": fmt,
+    })
+
+
+@app.route("/api/tiers/dismiss", methods=["POST"])
+def post_tiers_dismiss():
+    """POST /api/tiers/dismiss
+    Body: { player_id: str }  OR  { player_ids: [str, ...] }
+    Optional: { scoring_format: '1qb_ppr' | 'sf_tep' }
+    Response: { ok: true, dismissed: [ids], dismissed_count: int }
+
+    Shares the user_player_skips table with /api/trio/skip — a dismiss on the
+    tiers page also hides the player from the Trios flow, and vice versa.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    user_id = sess.get("user_id", "")
+    if not user_id:
+        return jsonify({"error": "no_user_in_session"}), 400
+
+    body = request.get_json(force=True) or {}
+    fmt = body.get("scoring_format") or _active_format(sess)
+    if fmt not in SCORING_FORMATS:
+        fmt = _active_format(sess)
+
+    ids: list = []
+    if "player_ids" in body and isinstance(body["player_ids"], list):
+        ids = [str(x) for x in body["player_ids"] if x]
+    elif "player_id" in body and body["player_id"]:
+        ids = [str(body["player_id"])]
+
+    if not ids:
+        return jsonify({"error": "player_id or player_ids required"}), 400
+
+    for pid in ids:
+        try:
+            _skip_add(user_id=user_id, player_id=pid, scoring_format=fmt)
+        except Exception as e:
+            log.warning("dismiss add failed for pid=%s: %s", pid, e)
+
+    return jsonify({
+        "ok":               True,
+        "dismissed":        ids,
+        "dismissed_count":  len(ids),
+        "scoring_format":   fmt,
+    })
+
+
+@app.route("/api/skips")
+def get_skips():
+    """GET /api/skips  →  { skipped_ids: [pid, ...], scoring_format: '...' }
+
+    Returns the user's current persistent skips for the active format — the
+    frontend uses this to hide already-dismissed unassigned cards on the
+    Tiers page without round-tripping each card through /api/players.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    user_id = sess.get("user_id", "")
+    fmt = _active_format(sess)
+    try:
+        ids = _skip_load(user_id=user_id, scoring_format=fmt)
+    except Exception as e:
+        log.warning("load_skips endpoint failed: %s", e)
+        ids = set()
+    return jsonify({
+        "skipped_ids":    sorted(ids),
+        "scoring_format": fmt,
+    })
+
+
+# ---------------------------------------------------------------------------
+# OG Share Cards (server-side rendered PNG + HTML wrappers)
+#
+# These routes are public (no session required) because social crawlers
+# like Twitter/Facebook/iMessage fetch them without cookies.
+# ---------------------------------------------------------------------------
+
+from flask import Response, make_response  # noqa: E402
+
+try:
+    from . import og_image as _og_image
+    _OG_IMPORT_ERROR: Exception | None = None
+except Exception as _og_err:  # pragma: no cover
+    _og_image = None  # type: ignore[assignment]
+    _OG_IMPORT_ERROR = _og_err
+    log.error("og_image import failed: %s — /og and /s routes will 503", _og_err)
+
+
+def _og_unavailable_response() -> "Response":
+    """503 fallback when Pillow isn't installed."""
+    body = (
+        "OG share cards require Pillow. Install with: pip install Pillow>=10.0\n"
+        f"Error: {_OG_IMPORT_ERROR}"
+    )
+    return Response(body, status=503, mimetype="text/plain")
+
+
+def _png_response(data: bytes, status: int = 200) -> "Response":
+    resp = make_response(data, status)
+    resp.headers["Content-Type"]  = "image/png"
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Content-Length"] = str(len(data))
+    return resp
+
+
+@app.route("/og/tiers/<pos>/<username>.png")
+def og_tier_card(pos, username):
+    """Render a user's tier snapshot for a position as a 1200x630 PNG."""
+    if _og_image is None:
+        return _og_unavailable_response()
+    # Attempt to detect the user's active format for nicer subtitle. Since
+    # share URLs are public, we can't consult the session — default to 1QB PPR
+    # unless a ?fmt= query overrides it.
+    fmt = request.args.get("fmt", "1qb_ppr")
+    if fmt not in SCORING_FORMATS:
+        fmt = DEFAULT_SCORING
+    try:
+        png, status = _og_image.render_tier_card(username, pos, fmt)
+    except Exception as e:
+        log.error("og_tier_card error (%s/%s): %s", pos, username, e)
+        png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
+        status = 500
+    return _png_response(png, status=status)
+
+
+@app.route("/og/trade/<match_id>.png")
+def og_trade_card(match_id):
+    """Render a trade match's give/get + fairness as a 1200x630 PNG."""
+    if _og_image is None:
+        return _og_unavailable_response()
+    try:
+        png, status = _og_image.render_trade_card(match_id)
+    except Exception as e:
+        log.error("og_trade_card error (%s): %s", match_id, e)
+        png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
+        status = 500
+    return _png_response(png, status=status)
+
+
+def _share_html(
+    *,
+    title: str,
+    description: str,
+    image_url: str,
+    cta_text: str,
+    cta_url: str,
+) -> "Response":
+    """Minimal HTML wrapper with OG tags + small human-readable body."""
+    # Escape minimal HTML special chars — we never render user-controlled
+    # HTML inside any attribute, so basic replacement is sufficient.
+    def esc(s: str) -> str:
+        return (s or "").replace("&", "&amp;").replace("<", "&lt;") \
+                         .replace(">", "&gt;").replace('"', "&quot;")
+
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{esc(title)} · Fantasy Trade Finder</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="{esc(description)}">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{esc(title)}">
+  <meta property="og:description" content="{esc(description)}">
+  <meta property="og:image" content="{esc(image_url)}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{esc(title)}">
+  <meta name="twitter:description" content="{esc(description)}">
+  <meta name="twitter:image" content="{esc(image_url)}">
+  <style>
+    body{{margin:0;background:#0f1322;color:#f5f7fc;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
+         min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}}
+    .card{{max-width:720px;width:100%;text-align:center;}}
+    .card img{{width:100%;max-width:720px;height:auto;border-radius:16px;
+               box-shadow:0 10px 40px rgba(0,0,0,.4);}}
+    h1{{font-size:28px;margin:24px 0 8px;}}
+    p{{color:#a0aec8;margin:0 0 24px;}}
+    .cta{{display:inline-block;background:#6eb4ff;color:#0f1322;padding:14px 28px;
+          border-radius:999px;font-weight:600;text-decoration:none;}}
+    .cta:hover{{background:#8cc6ff;}}
+    .brand{{margin-top:36px;color:#6b7a9a;font-size:13px;}}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img src="{esc(image_url)}" alt="{esc(title)}">
+    <h1>{esc(title)}</h1>
+    <p>{esc(description)}</p>
+    <a class="cta" href="{esc(cta_url)}">{esc(cta_text)}</a>
+    <div class="brand">Fantasy Trade Finder</div>
+  </div>
+</body>
+</html>"""
+    resp = make_response(html)
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
+@app.route("/s/tiers/<pos>/<username>")
+def share_tiers_page(pos, username):
+    """HTML wrapper with OG tags for a tier snapshot share link."""
+    fmt = request.args.get("fmt", "1qb_ppr")
+    if fmt not in SCORING_FORMATS:
+        fmt = DEFAULT_SCORING
+    pos_u = (pos or "").upper()
+    title = f"{username}'s {pos_u} Tiers"
+    fmt_label = "1QB PPR" if fmt == "1qb_ppr" else "SF TEP"
+    description = f"See how @{username} tiers their {pos_u}s in {fmt_label} dynasty."
+    image_url = f"/og/tiers/{pos}/{username}.png"
+    if fmt != "1qb_ppr":
+        image_url += f"?fmt={fmt}"
+    return _share_html(
+        title=title,
+        description=description,
+        image_url=image_url,
+        cta_text="Build your tiers",
+        cta_url="/",
+    )
+
+
+@app.route("/s/trade/<match_id>")
+def share_trade_page(match_id):
+    """HTML wrapper with OG tags for a trade verdict share link."""
+    title = "Trade Match"
+    description = "A dynasty fantasy trade — see the give/get breakdown and fairness verdict."
+    image_url = f"/og/trade/{match_id}.png"
+    return _share_html(
+        title=title,
+        description=description,
+        image_url=image_url,
+        cta_text="Find your next trade",
+        cta_url="/",
+    )
 
 
 if __name__ == "__main__":
