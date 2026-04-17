@@ -406,6 +406,59 @@ def _fetch_sleeper_adp() -> dict:
         return {}
 
 
+def _fetch_sleeper_league_meta(league_id: str) -> dict | None:
+    """
+    Fetch the full league metadata (roster_positions + scoring_settings + settings)
+    from Sleeper. Returns the raw dict or None on failure / non-Sleeper league IDs.
+
+    Endpoint: https://api.sleeper.app/v1/league/{league_id}
+    """
+    if not league_id or not str(league_id).isdigit():
+        return None
+    url = f"https://api.sleeper.app/v1/league/{league_id}"
+    try:
+        log.info("→ Fetching Sleeper league meta  league_id=%s", league_id)
+        raw = _sleeper_get(url, timeout=10)
+        return raw if isinstance(raw, dict) else None
+    except Exception as e:
+        log.info("  league meta fetch failed: %s", e)
+        return None
+
+
+def _detect_scoring_format_from_meta(meta: dict) -> str:
+    """
+    Derive our scoring_format key ('1qb_ppr' or 'sf_tep') from a Sleeper league
+    metadata dict.
+
+    Rules (matches how we split universal pools):
+      - Superflex  : roster_positions contains "SUPER_FLEX" (Sleeper's canonical
+                     marker). Falls back to counting QB slots ≥ 2.
+      - TE Premium : scoring_settings.bonus_rec_te > 0 (typically 0.5).
+      - If BOTH apply → 'sf_tep'. Otherwise → '1qb_ppr'.
+
+    Conservative default: when the league isn't a clear 'sf_tep', return
+    '1qb_ppr'. This matches DEFAULT_SCORING and preserves existing behavior
+    for any league whose metadata is missing or ambiguous.
+    """
+    if not isinstance(meta, dict):
+        return "1qb_ppr"
+
+    roster_positions = meta.get("roster_positions") or []
+    is_superflex = "SUPER_FLEX" in roster_positions
+    if not is_superflex:
+        qb_count = sum(1 for p in roster_positions if p == "QB")
+        is_superflex = qb_count >= 2
+
+    scoring = meta.get("scoring_settings") or {}
+    try:
+        bonus_rec_te = float(scoring.get("bonus_rec_te") or 0)
+    except (TypeError, ValueError):
+        bonus_rec_te = 0.0
+    is_tep = bonus_rec_te > 0
+
+    return "sf_tep" if (is_superflex and is_tep) else "1qb_ppr"
+
+
 def _maybe_sync_players() -> None:
     """
     Sync the Sleeper player cache to the players DB table if the table is
@@ -2503,6 +2556,20 @@ def session_init():
             opponent_rosters = opponent_rosters,
         )
         log.info("  ✅ user + league upserted in DB")
+
+        # ── Auto-detect league scoring format from Sleeper metadata ─────────
+        # Only fetch when we don't already have a format on file for this
+        # league — the Sleeper API call is ~100ms and runs once per league.
+        try:
+            existing_fmt = get_league_scoring(league_id)
+            if not existing_fmt:
+                meta = _fetch_sleeper_league_meta(league_id)
+                if meta:
+                    detected = _detect_scoring_format_from_meta(meta)
+                    set_league_scoring(league_id, detected)
+                    log.info("  ✅ league scoring auto-detected: %s", detected)
+        except Exception as e:
+            log.warning("  league scoring auto-detect failed (continuing): %s", e)
     except Exception as db_err:
         log.warning("  DB upsert failed (continuing): %s", db_err)
 

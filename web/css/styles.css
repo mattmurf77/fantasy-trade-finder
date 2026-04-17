@@ -2320,6 +2320,27 @@
       .scoring-toggle-btn { padding: 8px 12px; font-size: 12px; }
     }
 
+    /* Read-only badge that replaces the league-default toggle now that the
+       scoring format is auto-detected from Sleeper. */
+    .scoring-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 12px;
+      background: var(--bg-elev, rgba(255,255,255,0.04));
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 999px;
+      font-size: 13px;
+    }
+    .scoring-badge-label {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 11px;
+    }
+    .scoring-badge-value {
+      color: var(--text);
+      font-weight: 600;
+    }
+
     /* ── League Summary view ─────────────────────────────────────────── */
     .league-summary-wrap {
       width: 100%; max-width: 980px;

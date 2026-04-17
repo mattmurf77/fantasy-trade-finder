@@ -110,7 +110,7 @@
   <header>
     <div class="logo">Dynasty <span>Trade Finder</span></div>
     <div class="header-right">
-      <button class="view-btn" onclick="openRankings()">📋 Rankings</button>
+      <button class="view-btn" onclick="switchView('league')">🏆 League</button>
 
       <!-- Notification bell -->
       <div class="notif-bell-wrap" id="notif-bell-wrap">
@@ -249,8 +249,12 @@
   <div class="auto-confirm-row" style="text-align:center; margin-bottom:6px;">
     <button class="skip-btn" id="auto-confirm-toggle" onclick="toggleAutoConfirm()"
             style="font-size:0.82rem; padding:4px 14px; border-radius:8px; cursor:pointer;">
-      ⚡ Auto-advance OFF
+      ⚡ I AM SPEED — OFF
     </button>
+    <div class="speed-caption" id="speed-caption"
+         style="font-size:0.72rem; color:var(--muted); margin-top:4px; line-height:1.25;">
+      Pick your top 2 — we auto-rank the 3rd and save.
+    </div>
   </div>
   <div class="submit-row">
     <button class="submit-btn" id="submit-btn" onclick="submitRanking()">

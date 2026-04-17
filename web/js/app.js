@@ -513,7 +513,7 @@
         const acBtn = document.getElementById('auto-confirm-toggle');
         if (acBtn) {
           acBtn.classList.toggle('active', autoConfirmEnabled);
-          acBtn.textContent = autoConfirmEnabled ? '\u26A1 Auto-advance ON' : '\u26A1 Auto-advance OFF';
+          acBtn.textContent = autoConfirmEnabled ? '\u26A1 I AM SPEED \u2014 ON' : '\u26A1 I AM SPEED \u2014 OFF';
         }
         const submitRow = document.querySelector('.submit-row');
         if (submitRow) submitRow.style.display = autoConfirmEnabled ? 'none' : '';
@@ -881,7 +881,7 @@
       const btn = document.getElementById('auto-confirm-toggle');
       if (btn) {
         btn.classList.toggle('active', autoConfirmEnabled);
-        btn.textContent = autoConfirmEnabled ? '⚡ Auto-advance ON' : '⚡ Auto-advance OFF';
+        btn.textContent = autoConfirmEnabled ? '⚡ I AM SPEED — ON' : '⚡ I AM SPEED — OFF';
       }
       // When turning on auto-confirm, hide the submit button row
       const submitRow = document.querySelector('.submit-row');
@@ -926,7 +926,6 @@
       // ── Undo: clicking an already-ranked card removes it + later picks ──
       const existingIdx = selectionOrder.indexOf(side);
       if (existingIdx !== -1) {
-        // Remove this card and everything ranked after it
         const removed = selectionOrder.splice(existingIdx);
         removed.forEach(s => {
           const c = document.getElementById('card-' + s);
@@ -934,50 +933,45 @@
           document.getElementById('badge-' + s).textContent = '';
         });
         document.getElementById('submit-btn').classList.remove('ready');
-        // Update instruction text
-        const remaining = 3 - selectionOrder.length;
-        const instr = document.getElementById('instruction');
-        if (remaining === 3) {
-          instr.innerHTML = 'Tap players in order of preference — <strong>best first</strong>';
-        } else if (remaining === 2) {
-          instr.innerHTML = 'Good — now tap your <strong>2nd choice</strong>';
-        } else {
-          instr.innerHTML = 'Last one — tap your <strong>3rd choice</strong>';
-        }
+        _updateTrioInstruction();
         return;
       }
 
+      // ── Add: assign this card the next rank ──
       selectionOrder.push(side);
       const rank = selectionOrder.length;
       const card = document.getElementById('card-' + side);
-
       card.classList.remove('ranked-1', 'ranked-2', 'ranked-3');
       card.classList.add('ranked-' + rank);
-      document.getElementById('badge-' + side).textContent =
-        rank === 1 ? '1' : rank === 2 ? '2' : '3';
+      document.getElementById('badge-' + side).textContent = String(rank);
+      _updateTrioInstruction();
 
-      const remaining = 3 - selectionOrder.length;
-      const instr = document.getElementById('instruction');
-      if (remaining === 2) {
-        instr.innerHTML = 'Good — now tap your <strong>2nd choice</strong>';
-      } else if (remaining === 1) {
-        instr.innerHTML = 'Last one — tap your <strong>3rd choice</strong>';
-      } else {
-        instr.innerHTML = '✓ All ranked — confirm when ready';
-      }
-
-      if (selectionOrder.length === 2) {
+      // ── Speed mode (I AM SPEED): auto-rank the 3rd & auto-submit after the 2nd pick ──
+      if (autoConfirmEnabled && selectionOrder.length === 2) {
         const last = SIDES.find(s => !selectionOrder.includes(s));
         selectionOrder.push(last);
         const lastCard = document.getElementById('card-' + last);
         lastCard.classList.add('ranked-3');
         document.getElementById('badge-' + last).textContent = '3';
         document.getElementById('submit-btn').classList.add('ready');
-        // Auto-confirm: skip the confirm button if the user has enabled it
-        if (autoConfirmEnabled) {
-          submitRanking();
-        }
+        submitRanking();
+        return;
       }
+
+      // ── Manual mode: enable submit once all three have been explicitly ranked ──
+      if (selectionOrder.length === 3) {
+        document.getElementById('submit-btn').classList.add('ready');
+      }
+    }
+
+    function _updateTrioInstruction() {
+      const instr = document.getElementById('instruction');
+      if (!instr) return;
+      const remaining = 3 - selectionOrder.length;
+      if      (remaining === 3) instr.innerHTML = 'Tap players in order of preference — <strong>best first</strong>';
+      else if (remaining === 2) instr.innerHTML = 'Good — now tap your <strong>2nd choice</strong>';
+      else if (remaining === 1) instr.innerHTML = 'Last one — tap your <strong>3rd choice</strong>';
+      else                      instr.innerHTML = '✓ All ranked — confirm when ready';
     }
 
     // ── Submit ranking ──────────────────────────────────────────────
@@ -1940,7 +1934,13 @@
 
     function switchView(view, btn) {
       document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-      btn.classList.add('active');
+      // If called without an explicit button (e.g., from a header link), find
+      // the matching nav-tab so its active state stays in sync.
+      if (!btn) {
+        btn = Array.from(document.querySelectorAll('.nav-tab'))
+          .find(t => (t.getAttribute('onclick') || '').includes(`'${view}'`));
+      }
+      if (btn) btn.classList.add('active');
       document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
       document.getElementById('view-' + view).classList.add('active');
 
@@ -2988,21 +2988,23 @@
     }
 
     /** Render the scoring-format toggle into every .scoring-toggle-wrap element.
-     *  Re-renders on demand (e.g. after format switch) so the active class syncs. */
+     *  Re-renders on demand (e.g. after format switch) so the active class syncs.
+     *
+     *  As of the auto-detect rollout, the league's scoring format is sourced
+     *  from the Sleeper league metadata — each league plays exactly one format.
+     *  We no longer expose a user-level toggle on ranking pages; the League
+     *  summary page renders a read-only badge for the detected format. */
     function renderScoringToggles() {
-      const active = getActiveFormat();
       document.querySelectorAll('.scoring-toggle-wrap').forEach(wrap => {
         const isLeagueDefault = wrap.dataset.view === 'league-default';
-        wrap.innerHTML = `
-          <div class="scoring-toggle">
-            ${FORMAT_KEYS.map(fmt => `
-              <button class="scoring-toggle-btn ${fmt === active && !isLeagueDefault ? 'active' : ''}"
-                      data-format="${fmt}"
-                      data-scope="${isLeagueDefault ? 'league' : 'user'}"
-                      onclick="onScoringToggleClick(this)">
-                ${FORMAT_LABELS[fmt]}
-              </button>`).join('')}
-          </div>`;
+        if (!isLeagueDefault) {
+          // User-scope toggles are retired — the league dictates scoring.
+          wrap.innerHTML = '';
+          wrap.style.display = 'none';
+          return;
+        }
+        // Leave league-default wraps alone; renderLeagueSummary paints them
+        // with the current detected/overridden format as a read-only badge.
       });
     }
 
@@ -3088,6 +3090,15 @@
       }
     }
 
+    // Pick the unlocked-count that matches the league's scoring format.
+    // Each league plays exactly one format, so we only show one number —
+    // backend still returns both counts for back-compat.
+    function _leagueUnlockedCount(data) {
+      const fmt = data.default_scoring || '1qb_ppr';
+      if (fmt === 'sf_tep') return data.leaguemates_unlocked_sf || 0;
+      return data.leaguemates_unlocked_1qb || 0;
+    }
+
     function renderLeagueSummary(data) {
       const titleEl = document.getElementById('league-summary-title');
       if (titleEl) titleEl.textContent = data.league_name || 'League';
@@ -3111,25 +3122,23 @@
             <div class="summary-card-sub">Have a Trade Finder account</div>
           </div>
           <div class="summary-card">
-            <div class="summary-card-value">${data.leaguemates_unlocked_1qb || 0}&nbsp;<span style="font-size:14px;color:var(--muted)">1QB</span> · ${data.leaguemates_unlocked_sf || 0}&nbsp;<span style="font-size:14px;color:var(--muted)">SF</span></div>
+            <div class="summary-card-value">${_leagueUnlockedCount(data)}</div>
             <div class="summary-card-label">Unlocked Trade Finder</div>
-            <div class="summary-card-sub">Per scoring format</div>
+            <div class="summary-card-sub">Ready to match</div>
           </div>`;
       }
 
-      // Update the league-default toggle to reflect the current setting
+      // League scoring is auto-detected from Sleeper metadata — render as a
+      // read-only badge rather than a toggle, so users can't accidentally
+      // diverge from what the league actually plays.
       const leagueWrap = document.querySelector('.scoring-toggle-wrap[data-view="league-default"]');
       if (leagueWrap) {
         const defaultFmt = data.default_scoring || '1qb_ppr';
+        leagueWrap.style.display = '';
         leagueWrap.innerHTML = `
-          <div class="scoring-toggle">
-            ${FORMAT_KEYS.map(fmt => `
-              <button class="scoring-toggle-btn ${fmt === defaultFmt ? 'active' : ''}"
-                      data-format="${fmt}"
-                      data-scope="league"
-                      onclick="onScoringToggleClick(this)">
-                ${FORMAT_LABELS[fmt]}
-              </button>`).join('')}
+          <div class="scoring-badge" title="Detected from Sleeper league settings">
+            <span class="scoring-badge-label">Scoring</span>
+            <span class="scoring-badge-value">${FORMAT_LABELS[defaultFmt] || FORMAT_LABELS['1qb_ppr']}</span>
           </div>`;
       }
     }
@@ -3187,41 +3196,96 @@
         </button>`).join('');
     }
 
+    // True when running on a handheld where native share sheets + custom URL
+    // schemes work reliably. Desktop browsers usually can't launch apps, so we
+    // degrade to clipboard + clear copy there.
+    function _isMobileUA() {
+      return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+    }
+
+    // Try the Web Share API. Resolves true if the OS share sheet was opened
+    // (and the user either shared or dismissed). Resolves false if unsupported.
+    async function _tryWebShare(payload) {
+      if (!navigator.share) return false;
+      try {
+        await navigator.share(payload);
+        return true;
+      } catch (err) {
+        // AbortError = user cancelled the sheet. Still counts as "we tried."
+        if (err && err.name === 'AbortError') return true;
+        return false;
+      }
+    }
+
     async function shareVia(channel) {
       const url = buildInviteUrl();
       const msg = buildInviteMessage();
+      const title = 'Dynasty Trade Finder';
       const subject = encodeURIComponent('Join me on Dynasty Trade Finder');
       const body    = encodeURIComponent(msg);
+      const sharePayload = { title, text: msg, url };
 
       switch (channel) {
         case 'email':
           window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
           break;
+
         case 'sms':
-          // iOS and Android have slightly different sms: URI conventions; this works on both
-          window.open(`sms:?&body=${body}`, '_blank');
+          // iOS and Android have slightly different sms: URI conventions; this
+          // form works on both. Desktop browsers won't launch an app — fall
+          // back to clipboard so the action isn't silently broken.
+          if (_isMobileUA()) {
+            window.open(`sms:?&body=${body}`, '_blank');
+          } else {
+            await copyInviteToClipboard(true);
+            showToast('Copied — SMS only works on mobile. Paste it into any text.');
+          }
           break;
+
         case 'whatsapp':
+          // wa.me opens WhatsApp Web on desktop and the app on mobile.
           window.open(`https://wa.me/?text=${body}`, '_blank');
           break;
+
         case 'telegram':
           window.open(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent('Join me on Dynasty Trade Finder')}`, '_blank');
           break;
+
         case 'x':
           window.open(`https://twitter.com/intent/tweet?text=${body}`, '_blank');
           break;
-        case 'groupme':
-        case 'sleeper':
-          // No public deep-link scheme — fall back to Web Share API or copy
-          if (navigator.share) {
-            try {
-              await navigator.share({ title: 'Dynasty Trade Finder', text: msg, url });
-              return;
-            } catch (_) { /* user cancelled */ }
+
+        case 'groupme': {
+          // GroupMe has no public share-URL. On mobile the native share sheet
+          // will include GroupMe if the app is installed — that's the best
+          // integration available. Fall back to clipboard everywhere else.
+          const opened = await _tryWebShare(sharePayload);
+          if (opened) return;
+          await copyInviteToClipboard(true);
+          showToast('Copied — open GroupMe and paste into any group.');
+          break;
+        }
+
+        case 'sleeper': {
+          // Sleeper likewise has no public share-URL. Best-effort: on mobile we
+          // try to prime the native share sheet (which surfaces Sleeper if
+          // installed), then attempt the undocumented sleeper:// scheme, then
+          // copy. On desktop we go straight to clipboard with clear copy.
+          if (_isMobileUA()) {
+            const opened = await _tryWebShare(sharePayload);
+            if (opened) return;
+            await copyInviteToClipboard(true);
+            // Nudge Sleeper's custom URL scheme. Silently fails if not
+            // installed — the clipboard fallback above keeps us safe.
+            try { window.location.href = 'sleeper://'; } catch (_) { /* noop */ }
+            showToast('Copied — open Sleeper and paste into any DM.');
+            return;
           }
           await copyInviteToClipboard(true);
-          showToast(`Link copied — paste it into ${channel === 'groupme' ? 'GroupMe' : 'Sleeper'}`);
+          showToast('Copied — open Sleeper and paste into any DM.');
           break;
+        }
+
         case 'copy':
         default:
           await copyInviteToClipboard(false);
