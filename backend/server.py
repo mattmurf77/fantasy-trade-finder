@@ -1095,8 +1095,9 @@ def save_tiers_route():
     try:
         # apply_tiers assigns ELOs inside each tier's threshold band so that
         # when the frontend reloads and re-buckets by ELO, players land back
-        # in the tier the user chose.
-        service.apply_tiers(position=position, tiers=tiers)
+        # in the tier the user chose. Bands are position+format-aware:
+        # QB/TE in 1QB PPR use compressed bands (see ranking_service).
+        service.apply_tiers(position=position, tiers=tiers, scoring_format=fmt)
 
         # Persist the full tier override dict for THIS format so it survives
         # session rebuilds. The other format's overrides are untouched.

@@ -1112,28 +1112,59 @@
 
     // ── Elo thresholds for auto-tiering ──
     // Players are sorted by Elo descending, then bucketed using these cutoffs.
-    // Thresholds are applied per-position so each position gets its own curve.
-    const ELO_TIER_THRESHOLDS = {
+    // Thresholds are applied per-position per-format. Two sets exist:
+    //   UNIFORM        — RB/WR in any format, and ALL positions in SF TEP
+    //   QB_TE_1QB      — QB/TE only, in 1QB PPR. Each tier is shifted down
+    //                    one slot so "elite" for a 1QB-league QB caps where
+    //                    an RB/WR starter caps. Mirrors the server-side
+    //                    bands in ranking_service.tier_bands_for().
+    const UNIFORM_ELO_TIER_THRESHOLDS = {
       elite:   1700,   // top dynasty assets
       starter: 1580,   // reliable weekly starters
       solid:   1460,   // flex-worthy / matchup plays
       depth:   1350,   // bye-week fill-ins
       // everything below 1350 → bench
     };
+    const QB_TE_1QB_ELO_TIER_THRESHOLDS = {
+      elite:   1580,   // = uniform starter
+      starter: 1460,   // = uniform solid
+      solid:   1350,   // = uniform depth
+      depth:   1190,   // new floor above the compressed bench
+    };
+
+    function elTierThresholdsFor(pos) {
+      // Read localStorage directly — the LS_ACTIVE_FORMAT const and the
+      // tierGetActiveFormat() helper are declared later in this script,
+      // but autoAssignTiers (which calls us) runs during module init
+      // while those are still in the TDZ.
+      let fmt = '1qb_ppr';
+      try {
+        const stored = localStorage.getItem('ftf_active_format');
+        if (stored === '1qb_ppr' || stored === 'sf_tep') fmt = stored;
+      } catch (_) { /* ignore; keep default */ }
+      if (fmt === '1qb_ppr' && (pos === 'QB' || pos === 'TE')) {
+        return QB_TE_1QB_ELO_TIER_THRESHOLDS;
+      }
+      return UNIFORM_ELO_TIER_THRESHOLDS;
+    }
+
+    // Back-compat: a few older call sites still read this variable directly.
+    const ELO_TIER_THRESHOLDS = UNIFORM_ELO_TIER_THRESHOLDS;
 
     function autoAssignTiers(pos) {
       const players = (SAMPLE_PLAYERS[pos] || []).slice();
       // Sort by Elo descending so highest-rated appear first in each tier
       players.sort((a, b) => b.elo - a.elo);
 
+      const thresholds = elTierThresholdsFor(pos);
       const tiers = {};
       TIERS.forEach(t => tiers[t] = []);
 
       players.forEach(p => {
-        if      (p.elo >= ELO_TIER_THRESHOLDS.elite)   tiers.elite.push(p.id);
-        else if (p.elo >= ELO_TIER_THRESHOLDS.starter)  tiers.starter.push(p.id);
-        else if (p.elo >= ELO_TIER_THRESHOLDS.solid)    tiers.solid.push(p.id);
-        else if (p.elo >= ELO_TIER_THRESHOLDS.depth)    tiers.depth.push(p.id);
+        if      (p.elo >= thresholds.elite)   tiers.elite.push(p.id);
+        else if (p.elo >= thresholds.starter) tiers.starter.push(p.id);
+        else if (p.elo >= thresholds.solid)   tiers.solid.push(p.id);
+        else if (p.elo >= thresholds.depth)   tiers.depth.push(p.id);
         // Players below depth threshold stay unassigned (in the pool),
         // sorted by ELO so users can drag them into tiers as needed.
       });
@@ -1801,9 +1832,9 @@
         }
         localStorage.setItem(LS_ACTIVE_FORMAT, fmt);
         renderTierScoringToggle();
-        // Wipe in-memory state so the new format's data gets loaded fresh
+        // Wipe in-memory state so the new format's data gets loaded fresh.
+        // (There is no dirtyPositions state — that was a stale reference.)
         savedPositions = new Set();
-        dirtyPositions.clear();
         document.querySelectorAll('.pos-tab .check').forEach(el => el.remove());
         initFromAPI();
       } catch (e) {

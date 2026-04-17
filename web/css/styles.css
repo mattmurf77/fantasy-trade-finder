@@ -2766,6 +2766,22 @@
     }
     .nav-subtabs.hidden { display: none; }
 
+    /* Tier-1 has exactly two tabs now — force them to equal halves so
+       Find Trades lives in the right 50%. This makes the tier-2 sub-row
+       under it line up when we right-anchor it. */
+    .nav-tier-1 { justify-content: stretch; }
+    .nav-tier-1 .nav-tab {
+      flex: 1 1 0;
+      justify-content: center;
+    }
+
+    /* Match the subtab-row horizontal padding to .nav-tabs so the left
+       edge of subtabs-rank lines up with the left edge of Rank Players,
+       and the right edge of subtabs-trades lines up with Find Trades. */
+    .nav-subtabs { padding-left: 24px; padding-right: 24px; }
+    #subtabs-rank   { justify-content: flex-start; }
+    #subtabs-trades { justify-content: flex-end; }
+
     .nav-subtab {
       background: transparent;
       border: 1px solid var(--border);
