@@ -507,6 +507,13 @@
     }
 
     function _enterMainApp() {
+      // Honor ?view=<id> URL param (e.g., navigating back from the tiers page)
+      const qsView = new URLSearchParams(window.location.search).get('view');
+      const targetView = (qsView && VIEW_TO_NAV[qsView]) ? qsView : 'rank';
+      if (qsView) {
+        const clean = window.location.pathname + window.location.hash;
+        window.history.replaceState({}, document.title, clean);
+      }
       loadTrio();
       // Restore auto-confirm toggle state from localStorage
       {
@@ -524,6 +531,10 @@
       _startNotifPolling();
       // Render the scoring toggles now that the main views exist in the DOM
       if (typeof renderScoringToggles === 'function') renderScoringToggles();
+
+      // Route to the requested view (default: Trios under Rank Players)
+      if (targetView && targetView !== 'rank') switchView(targetView);
+      else _syncNavActive('rank');
     }
 
     async function selectRankingMethod(method) {
@@ -548,13 +559,12 @@
       hideMethodScreen();
 
       if (method === 'trio') {
-        // Go to Rank Players tab (default — trio flow)
+        // Go to Rank Players → Trios sub-view
         _enterMainApp();
       } else if (method === 'manual') {
-        // Go to Rankings tab — trade finder immediately available
+        // Go to Rank Players → Manual sub-view
         _enterMainApp();
-        const rankingsTab = document.querySelector('.nav-tab[onclick*="rankings"]');
-        if (rankingsTab) rankingsTab.click();
+        switchView('rankings');
       } else if (method === 'tiers') {
         // Navigate to the positional tiers page
         window.location.href = '/positional-tiers.html';
@@ -1061,8 +1071,7 @@
         actions.appendChild(makeBtn(`Continue ranking ${completedPosition}`, 'secondary', closeCelebration));
         actions.appendChild(makeBtn('Give me some offers \u2192', 'primary', () => {
           closeCelebration();
-          const tradesTab = document.querySelector('.nav-tab[onclick*="trades"]');
-          if (tradesTab) tradesTab.click();
+          switchView('trades');
         }));
       } else {
         const nextPos = POSITION_ORDER.find(p => !completedPositions.includes(p));
@@ -1926,21 +1935,71 @@
       });
     }
 
-    /** Navigate to the Rank Players tab. */
+    /** Navigate to the Rank Players → Trios sub-view. */
     function switchToRankView() {
-      const rankBtn = document.querySelector('.nav-tab[onclick*="rank"]');
-      if (rankBtn) switchView('rank', rankBtn);
+      switchView('rank');
+    }
+
+    // Maps each view id to its tier-1 group + tier-2 data-view so the nav
+    // can stay in sync regardless of how we got to the view.
+    const VIEW_TO_NAV = {
+      rank:     { group: 'rank',   subView: 'rank' },
+      rankings: { group: 'rank',   subView: 'rankings' },
+      trades:   { group: 'trades', subView: 'trades' },
+      matches:  { group: 'trades', subView: 'matches' },
+      // 'league' is reachable only via the 🏆 header chip; no tier-2 needed.
+      league:   { group: null,     subView: null },
+    };
+
+    function _syncNavActive(view) {
+      const map = VIEW_TO_NAV[view];
+      // Tier 1
+      document.querySelectorAll('.nav-tier-1 .nav-tab').forEach(t => t.classList.remove('active'));
+      if (map && map.group) {
+        document.querySelector(`.nav-tier-1 .nav-tab[data-group="${map.group}"]`)?.classList.add('active');
+      }
+      // Tier 2 visibility + active sub-tab
+      document.querySelectorAll('.nav-subtabs').forEach(s => s.classList.add('hidden'));
+      if (map && map.group) {
+        const subs = document.getElementById(`subtabs-${map.group}`);
+        if (subs) subs.classList.remove('hidden');
+      }
+      document.querySelectorAll('.nav-subtab').forEach(s => s.classList.remove('active'));
+      if (map && map.subView) {
+        document.querySelector(`.nav-subtabs:not(.hidden) .nav-subtab[data-view="${map.subView}"]`)?.classList.add('active');
+      }
+    }
+
+    /** Tier-1 click handler. Shows that group's tier-2 subtabs and, when the
+     *  user isn't already inside the group, routes to its default sub-view. */
+    function switchTabGroup(group, btn) {
+      // Is the user already inside this group's views?
+      const activeViewId = document.querySelector('.view.active')?.id || '';
+      const currentGroup = Object.entries(VIEW_TO_NAV).find(
+        ([vid, m]) => activeViewId === 'view-' + vid
+      )?.[1]?.group;
+
+      if (currentGroup === group) {
+        // Already in the group — just refresh nav state without navigating.
+        _syncNavActive(activeViewId.replace(/^view-/, ''));
+        return;
+      }
+
+      // Otherwise route to the group's default sub-view.
+      if (group === 'rank') {
+        goToTiers();  // Default under Rank Players → Tiers page
+      } else if (group === 'trades') {
+        switchView('trades');
+      }
+    }
+
+    /** Navigate to the standalone positional-tiers page. */
+    function goToTiers() {
+      window.location.href = '/positional-tiers.html';
     }
 
     function switchView(view, btn) {
-      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-      // If called without an explicit button (e.g., from a header link), find
-      // the matching nav-tab so its active state stays in sync.
-      if (!btn) {
-        btn = Array.from(document.querySelectorAll('.nav-tab'))
-          .find(t => (t.getAttribute('onclick') || '').includes(`'${view}'`));
-      }
-      if (btn) btn.classList.add('active');
+      _syncNavActive(view);
       document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
       document.getElementById('view-' + view).classList.add('active');
 
@@ -2939,10 +2998,9 @@
       const matchId = meta.match_id;
 
       if (type === 'trade_match' || type === 'trade_accepted' || type === 'trade_declined') {
-        // Switch to Find a Trade tab
-        const tradeTab = document.querySelector('.nav-tab:nth-child(2)');
-        if (tradeTab) {
-          switchView('trades', tradeTab);
+        // Switch to Find a Trade view (tier 1: Find Trades → Find a Trade)
+        {
+          switchView('trades');
           // Refresh matches to make sure the target is rendered, then scroll
           if (matchId) {
             loadMatches().then(() => {

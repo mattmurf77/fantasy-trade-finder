@@ -2388,28 +2388,35 @@
     }
 
     .cb-hero {
-      display: grid;
-      /* minmax(0,1fr) lets grid cells shrink below min-content — otherwise
-         the 380px-wide carousel + input row would force the cell wider than
-         a mobile viewport. */
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      /* Single-column centered layout (right preview was removed post-launch). */
+      display: flex;
+      align-items: center;
+      justify-content: center;
       min-height: 100vh;
-      overflow: hidden;
+      padding: 32px 20px;
     }
 
-    /* Left column */
+    /* Left column — now centered since right panel is gone */
     .cb-left.auth-card {
-      /* Reset inherited .auth-card styles so the split-hero lays out cleanly */
+      /* Reset inherited .auth-card styles so the hero lays out cleanly */
       background: transparent;
       border: none;
       border-radius: 0;
       box-shadow: none;
-      max-width: 600px;
-      margin: 0 0 0 auto;
-      padding: 32px 48px;
+      max-width: 540px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0;
       display: flex;
       flex-direction: column;
-      justify-content: center;
+      text-align: center;
+      align-items: center;
+    }
+
+    .cb-left.auth-card .cb-sub,
+    .cb-left.auth-card .cb-connect-wrap {
+      margin-left: auto;
+      margin-right: auto;
     }
 
     .cb-eyebrow {
@@ -2714,27 +2721,75 @@
     .ca-mock-pos.qb { background: rgba(249,115,22,0.15); color: var(--qb); }
     .ca-mock-pos.te { background: rgba(168,85,247,0.15); color: var(--te); }
 
-    /* Responsive: stack the split hero below tablet width */
-    @media (max-width: 768px) {
-      .cb-hero { grid-template-columns: minmax(0, 1fr); }
-      .cb-left.auth-card {
-        max-width: none;
-        margin: 0;
-        padding: 32px 20px 24px;
-      }
-      .cb-right {
-        min-height: auto;
-        border-left: none;
-        border-top: 1px solid var(--border);
-        padding: 40px 20px;
-      }
-      /* Cap child rails to available width so nothing overflows the viewport */
-      .cb-connect-wrap,
-      .cb-carousel-section,
-      .cb-sub {
-        max-width: 100%;
-      }
-      .cb-big-preview {
-        max-width: 100%;
-      }
+    /* Taglines below the connect row — Rank · Match · Trade on a single line */
+    .cb-taglines {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      margin-top: 12px;
+      font-size: 13px;
+      color: var(--text);
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    .cb-tagline {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .cb-tagline-icon {
+      font-size: 16px;
+    }
+    .cb-tagline-sep {
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+
+    @media (max-width: 420px) {
+      .cb-taglines { gap: 10px; font-size: 12px; }
+      .cb-tagline-icon { font-size: 14px; }
+    }
+
+    /* ── Tier-2 sub-navigation ───────────────────────────────────────── */
+    .nav-subtabs {
+      display: flex;
+      gap: 4px;
+      padding: 6px 12px 10px;
+      margin: 0 auto;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .nav-subtabs.hidden { display: none; }
+
+    .nav-subtab {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 14px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      transition: color 0.12s, border-color 0.12s, background 0.12s;
+    }
+    .nav-subtab:hover {
+      color: var(--text);
+      border-color: #3a3d4a;
+    }
+    .nav-subtab.active {
+      color: #fff;
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .nav-subtab.active:hover {
+      border-color: var(--accent);
     }
