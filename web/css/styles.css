@@ -2496,3 +2496,374 @@
       font-weight: 600;
       margin-top: 16px;
     }
+
+    /* ══════════════════════════════════════════════════════════════════
+       LOGIN SCREEN — Concept B: Split Hero
+       Ported from Fantasy Trade Finder Reference Files/landing-concepts.html
+    ══════════════════════════════════════════════════════════════════ */
+
+    /* Override default .auth-screen so the split hero can fill edge-to-edge */
+    .auth-screen.cb-page {
+      padding: 0;
+      display: block;
+      overflow: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .cb-page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .cb-hero {
+      display: grid;
+      /* minmax(0,1fr) lets grid cells shrink below min-content — otherwise
+         the 380px-wide carousel + input row would force the cell wider than
+         a mobile viewport. */
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Left column */
+    .cb-left.auth-card {
+      /* Reset inherited .auth-card styles so the split-hero lays out cleanly */
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      max-width: 600px;
+      margin: 0 0 0 auto;
+      padding: 32px 48px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .cb-eyebrow {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--green);
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .cb-eyebrow-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: cb-pulse 2s infinite;
+    }
+    @keyframes cb-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .cb-headline {
+      font-size: clamp(28px, 4vw, 44px);
+      font-weight: 800;
+      line-height: 1.12;
+      letter-spacing: -0.8px;
+      margin-bottom: 10px;
+    }
+    .cb-headline .hl { color: var(--accent); }
+
+    .cb-operator {
+      color: var(--accent);
+      font-weight: 900;
+      font-size: 0.85em;
+      margin: 0 4px;
+    }
+
+    .cb-sub {
+      font-size: 16px;
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 16px;
+      max-width: 420px;
+    }
+
+    .cb-connect-wrap { max-width: 380px; }
+
+    .cb-input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .cb-input {
+      flex: 1;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: 14px;
+      padding: 12px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .cb-input:focus { border-color: var(--accent); }
+    .cb-input::placeholder { color: #3e4258; }
+
+    .cb-go-btn {
+      background: var(--accent);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 12px 20px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+    .cb-go-btn:hover { opacity: 0.88; }
+    .cb-go-btn:disabled { opacity: 0.5; cursor: wait; }
+
+    .cb-trust {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+      flex-wrap: wrap;
+    }
+    .cb-trust-item { display: flex; align-items: center; gap: 5px; }
+    .cb-trust-icon { font-size: 14px; }
+
+    /* Carousel */
+    .cb-carousel-section {
+      margin-top: 12px;
+      max-width: 380px;
+    }
+    .cb-carousel-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .cb-carousel-viewport {
+      overflow: hidden;
+      border-radius: 14px;
+    }
+    .cb-carousel-track {
+      display: flex;
+      transition: transform 0.4s ease;
+    }
+    .cb-carousel-card {
+      min-width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .cb-card-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .cb-card-body { flex: 1; min-width: 0; }
+    .cb-card-step {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .cb-card-title { font-size: 14px; font-weight: 700; margin: 1px 0; }
+    .cb-card-desc { font-size: 12px; color: var(--muted); line-height: 1.45; }
+
+    .cb-carousel-dots {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .cb-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      border: none;
+      background: var(--border);
+      cursor: pointer;
+      padding: 0;
+      transition: background 0.2s, transform 0.2s;
+    }
+    .cb-dot.active {
+      background: var(--accent);
+      transform: scale(1.25);
+    }
+
+    /* Right column */
+    .cb-right {
+      background: linear-gradient(135deg, rgba(79,124,255,0.04), rgba(168,85,247,0.04));
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 40px;
+      gap: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .cb-right .glow-accent {
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      opacity: 0.5;
+    }
+    .glow-accent {
+      position: absolute;
+      width: 500px;
+      height: 500px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(79,124,255,0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    /* Big trade-card preview */
+    .cb-big-preview {
+      background: var(--surface);
+      border: 1px solid rgba(79,124,255,0.2);
+      border-radius: 18px;
+      padding: 28px 24px;
+      max-width: 380px;
+      width: 100%;
+      position: relative;
+      z-index: 1;
+      box-shadow: 0 12px 48px rgba(79,124,255,0.1);
+      animation: cb-floatCard 4s ease-in-out infinite;
+    }
+    @keyframes cb-floatCard {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-8px); }
+    }
+    .cb-big-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: var(--green);
+      margin-bottom: 16px;
+    }
+    .cb-big-trade-row { display: flex; align-items: center; gap: 16px; }
+    .cb-big-side { flex: 1; }
+    .cb-big-side-tag {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .cb-big-player-card { display: flex; align-items: center; gap: 10px; }
+    .cb-big-name { font-size: 15px; font-weight: 700; }
+    .cb-big-team { font-size: 12px; color: var(--muted); }
+    .cb-big-swap { font-size: 22px; color: var(--accent); flex-shrink: 0; }
+
+    .cb-big-score {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+    .cb-big-score-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .cb-big-score-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .cb-big-score-fill {
+      height: 100%;
+      width: 85%;
+      background: linear-gradient(90deg, var(--accent), var(--green));
+      border-radius: 3px;
+    }
+
+    .cb-big-actions { display: flex; gap: 10px; margin-top: 16px; }
+    .cb-big-pass {
+      flex: 1;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .cb-big-pass:hover { border-color: #3a3d4a; color: var(--text); }
+    .cb-big-like {
+      flex: 1;
+      background: var(--accent);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 10px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .cb-big-like:hover { opacity: 0.88; }
+
+    /* Player-position chips used by the preview */
+    .ca-mock-pos {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 6px;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+    }
+    .ca-mock-pos.rb { background: rgba(34,197,94,0.15); color: var(--rb); }
+    .ca-mock-pos.wr { background: rgba(59,130,246,0.15); color: var(--wr); }
+    .ca-mock-pos.qb { background: rgba(249,115,22,0.15); color: var(--qb); }
+    .ca-mock-pos.te { background: rgba(168,85,247,0.15); color: var(--te); }
+
+    /* Responsive: stack the split hero below tablet width */
+    @media (max-width: 768px) {
+      .cb-hero { grid-template-columns: minmax(0, 1fr); }
+      .cb-left.auth-card {
+        max-width: none;
+        margin: 0;
+        padding: 32px 20px 24px;
+      }
+      .cb-right {
+        min-height: auto;
+        border-left: none;
+        border-top: 1px solid var(--border);
+        padding: 40px 20px;
+      }
+      /* Cap child rails to available width so nothing overflows the viewport */
+      .cb-connect-wrap,
+      .cb-carousel-section,
+      .cb-sub {
+        max-width: 100%;
+      }
+      .cb-big-preview {
+        max-width: 100%;
+      }
+    }

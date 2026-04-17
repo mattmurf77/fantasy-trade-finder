@@ -9,38 +9,136 @@
 <body>
 
   <!-- ═══════════════════════════════════════════════════
-       LOGIN SCREEN
+       LOGIN SCREEN — Concept B: Split Hero
   ════════════════════════════════════════════════════ -->
-  <div class="auth-screen" id="auth-screen">
-    <div class="auth-card">
-      <div class="auth-logo">Dynasty <span>Trade Finder</span></div>
-      <div class="auth-subtitle">Enter your Sleeper username to import your roster and get personalised trade ideas.</div>
+  <div class="auth-screen cb-page" id="auth-screen">
+    <div class="cb-hero">
 
-      <div class="auth-field">
-        <div class="auth-label">SLEEPER USERNAME</div>
-        <input
-          class="auth-input"
-          id="username-input"
-          type="text"
-          inputmode="text"
-          enterkeyhint="go"
-          placeholder="e.g. dynastyking99"
-          autocomplete="off"
-          autocorrect="off"
-          autocapitalize="off"
-          spellcheck="false"
-        />
-        <div class="auth-error" id="auth-error"></div>
+      <!-- Left: Value prop + connect -->
+      <div class="cb-left auth-card">
+        <div class="cb-eyebrow">
+          <span class="cb-eyebrow-dot"></span>
+          Dynasty Fantasy Football
+        </div>
+
+        <h1 class="cb-headline">
+          Your Rankings <span class="cb-operator">+</span><br>
+          Their Rankings <span class="cb-operator">=</span><br>
+          <span class="hl">Trades That Actually Work</span>
+        </h1>
+
+        <p class="cb-sub">
+          Fantasy Trade Finder compares how you and your leaguemates value every player,
+          then finds trades where both sides come out ahead. No more "Hey! What do you want for X player?"
+        </p>
+
+        <!-- How It Works carousel -->
+        <div class="cb-carousel-section">
+          <div class="cb-carousel-label">How It Works</div>
+          <div class="cb-carousel-viewport">
+            <div class="cb-carousel-track" id="cb-carousel-track">
+
+              <div class="cb-carousel-card" data-index="0">
+                <div class="cb-card-icon" style="background:rgba(79,124,255,0.12);">&#128279;</div>
+                <div class="cb-card-body">
+                  <div class="cb-card-step">Step 1</div>
+                  <div class="cb-card-title">Connect Sleeper</div>
+                  <div class="cb-card-desc">Enter your username — we import leagues, rosters, and leaguemates automatically.</div>
+                </div>
+              </div>
+
+              <div class="cb-carousel-card" data-index="1">
+                <div class="cb-card-icon" style="background:rgba(34,197,94,0.12);">&#127942;</div>
+                <div class="cb-card-body">
+                  <div class="cb-card-step">Step 2</div>
+                  <div class="cb-card-title">Rank Your Players</div>
+                  <div class="cb-card-desc">Quick matchups, manual rankings, or positional tiers — pick your method.</div>
+                </div>
+              </div>
+
+              <div class="cb-carousel-card" data-index="2">
+                <div class="cb-card-icon" style="background:rgba(168,85,247,0.12);">&#9889;</div>
+                <div class="cb-card-body">
+                  <div class="cb-card-step">Step 3</div>
+                  <div class="cb-card-title">Get Trade Recommendations</div>
+                  <div class="cb-card-desc">Both sides perceive a win. Swipe to like, get matched when they agree.</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+          <div class="cb-carousel-dots" id="cb-carousel-dots">
+            <button class="cb-dot active" onclick="cbGoTo(0)"></button>
+            <button class="cb-dot" onclick="cbGoTo(1)"></button>
+            <button class="cb-dot" onclick="cbGoTo(2)"></button>
+          </div>
+        </div>
+
+        <!-- Sleeper connect -->
+        <div class="cb-connect-wrap" style="margin-top: 14px;">
+          <div class="cb-input-row">
+            <input
+              class="cb-input"
+              id="username-input"
+              type="text"
+              inputmode="text"
+              enterkeyhint="go"
+              placeholder="Sleeper username"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+            />
+            <button class="cb-go-btn" id="auth-btn" onclick="handleLogin()">Connect &#8594;</button>
+          </div>
+          <div class="auth-error" id="auth-error"></div>
+          <div class="cb-trust">
+            <span class="cb-trust-item"><span class="cb-trust-icon">&#128274;</span> No password needed</span>
+            <span class="cb-trust-item"><span class="cb-trust-icon">&#128241;</span> Data stays on device</span>
+            <span class="cb-trust-item"><span class="cb-trust-icon">&#9889;</span> Free to use</span>
+          </div>
+        </div>
       </div>
 
-      <button class="auth-btn" id="auth-btn" onclick="handleLogin()">
-        Connect with Sleeper →
-      </button>
-
-      <div class="auth-note">
-        No account required — Sleeper's API is public.<br>
-        Your data stays on your device.
+      <!-- Right: ambient preview -->
+      <div class="cb-right">
+        <div class="glow-accent"></div>
+        <div class="cb-big-preview">
+          <div class="cb-big-label">&#9889; Recommended Trade</div>
+          <div class="cb-big-trade-row">
+            <div class="cb-big-side">
+              <div class="cb-big-side-tag">YOU GIVE</div>
+              <div class="cb-big-player-card">
+                <span class="ca-mock-pos rb">RB</span>
+                <div>
+                  <div class="cb-big-name">Breece Hall</div>
+                  <div class="cb-big-team">NYJ</div>
+                </div>
+              </div>
+            </div>
+            <div class="cb-big-swap">&#8644;</div>
+            <div class="cb-big-side">
+              <div class="cb-big-side-tag">YOU GET</div>
+              <div class="cb-big-player-card">
+                <span class="ca-mock-pos wr">WR</span>
+                <div>
+                  <div class="cb-big-name">CeeDee Lamb</div>
+                  <div class="cb-big-team">DAL</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="cb-big-score">
+            <div class="cb-big-score-label">Match Score</div>
+            <div class="cb-big-score-track"><div class="cb-big-score-fill"></div></div>
+          </div>
+          <div class="cb-big-actions">
+            <button class="cb-big-pass">Pass</button>
+            <button class="cb-big-like">Interested &#10003;</button>
+          </div>
+        </div>
       </div>
+
     </div>
   </div>
 

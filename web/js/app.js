@@ -3338,6 +3338,45 @@
       card.appendChild(banner);
     }
 
+    // ── Login-page carousel (Concept B: "How It Works") ────────────────
+    // Dots + swipe-to-advance on the 3-step onboarding carousel.
+    let cbCurrent = 0;
+    function cbGoTo(idx) {
+      const track = document.getElementById('cb-carousel-track');
+      const dots  = document.querySelectorAll('#cb-carousel-dots .cb-dot');
+      if (!track || !dots.length) return;
+      cbCurrent = Math.max(0, Math.min(idx, dots.length - 1));
+      track.style.transform = 'translateX(-' + (cbCurrent * 100) + '%)';
+      dots.forEach((d, i) => d.classList.toggle('active', i === cbCurrent));
+    }
+    function _bindCarouselSwipe() {
+      const track = document.getElementById('cb-carousel-track');
+      if (!track || track.dataset.swipeBound === '1') return;
+      const vp = track.parentElement;
+      if (!vp) return;
+      track.dataset.swipeBound = '1';
+      let startX = 0, startY = 0, moving = false;
+      vp.addEventListener('touchstart', e => {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        moving = true;
+      }, { passive: true });
+      vp.addEventListener('touchend', e => {
+        if (!moving) return;
+        moving = false;
+        const dx = e.changedTouches[0].clientX - startX;
+        const dy = e.changedTouches[0].clientY - startY;
+        if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+          dx < 0 ? cbGoTo(cbCurrent + 1) : cbGoTo(cbCurrent - 1);
+        }
+      }, { passive: true });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', _bindCarouselSwipe);
+    } else {
+      _bindCarouselSwipe();
+    }
+
     // Kick capture immediately (before boot runs)
     captureReferralFromUrl();
 
