@@ -738,25 +738,6 @@
 
   <div class="toast" id="toast"></div>
 
-  <!-- ═══════════════════════════════════════════════════
-       DEBUG LOG DRAWER
-  ════════════════════════════════════════════════════ -->
-  <div id="log-drawer">
-    <div id="log-inner">
-      <div id="log-handle" onclick="logDrawer.toggle()">
-        <span id="log-toggle-icon">▲</span>
-        <span id="log-title">🔍 Debug Log</span>
-        <span id="log-count">0 entries</span>
-        <div id="log-actions" onclick="event.stopPropagation()">
-          <button class="log-action-btn" onclick="logDrawer.fetchBackend()">↓ Server logs</button>
-          <button class="log-action-btn" onclick="logDrawer.copy()">⎘ Copy</button>
-          <button class="log-action-btn" onclick="logDrawer.clear()">✕ Clear</button>
-        </div>
-      </div>
-      <div id="log-body"></div>
-    </div>
-  </div>
-
   <script src="/js/app.js"></script>
 </body>
 </html>
