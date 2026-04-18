@@ -1,0 +1,112 @@
+:root {
+  --bg:       #0f1117;
+  --surface:  #1a1d27;
+  --border:   #2a2d3a;
+  --text:     #e8eaf0;
+  --muted:    #7a7f96;
+  --accent:   #4f7cff;
+  --green:    #22c55e;
+  --red:      #ef4444;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; }
+body { width: 320px; padding: 0; }
+
+.hdr { padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
+.logo { font-size: 15px; font-weight: 800; letter-spacing: -0.2px; }
+.logo-accent { color: var(--accent); }
+.tagline { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+main { padding: 14px 16px; min-height: 180px; }
+.stage { display: flex; flex-direction: column; gap: 10px; }
+.stage.hidden { display: none; }
+
+/* Form */
+.fld { display: flex; flex-direction: column; gap: 4px; }
+.fld-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 700; }
+.fld input {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 10px 12px;
+  outline: none;
+}
+.fld input:focus { border-color: var(--accent); }
+
+.err { color: var(--red); font-size: 12px; min-height: 16px; }
+
+/* Buttons */
+.btn {
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.btn:disabled { opacity: 0.5; cursor: wait; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover:not(:disabled) { opacity: 0.9; }
+.btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { border-color: var(--accent); }
+.btn-link { background: transparent; color: var(--muted); padding: 10px 6px; }
+.btn-link:hover { color: var(--red); }
+.btn-row { display: flex; gap: 8px; justify-content: space-between; align-items: center; }
+
+.note { font-size: 11px; color: var(--muted); line-height: 1.45; }
+
+/* League picker */
+.pick-intro { font-size: 12px; color: var(--muted); }
+.leagues { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; }
+.lg-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.lg-row:hover { border-color: var(--accent); }
+.lg-ball { font-size: 16px; }
+.lg-body { flex: 1; min-width: 0; }
+.lg-name { font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-sub { font-size: 11px; color: var(--muted); }
+.lg-chev { color: var(--muted); }
+
+/* Connected card */
+.connected-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.kv-k { color: var(--muted); }
+.kv-v { color: var(--text); font-weight: 600; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Busy */
+.spinner {
+  width: 28px; height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  margin: 18px auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.busy-msg { text-align: center; color: var(--muted); font-size: 12px; }
+
+.ftr {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--muted);
+  text-align: center;
+}
+.ftr a { color: var(--muted); text-decoration: none; }
+.ftr a:hover { color: var(--accent); }

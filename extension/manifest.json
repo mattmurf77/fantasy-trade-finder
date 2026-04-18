@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Fantasy Trade Finder — Your Rankings on Sleeper",
+  "short_name": "FTF",
+  "version": "0.1.0",
+  "description": "See your personal tier and position-rank next to every player on sleeper.com.",
+  "icons": {
+    "16":  "icons/16.png",
+    "48":  "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16":  "icons/16.png",
+      "48":  "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://sleeper.com/*",
+    "https://sleeper.app/*",
+    "https://fantasy-trade-finder.onrender.com/*",
+    "http://localhost:5000/*",
+    "http://127.0.0.1:5000/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://sleeper.com/*",
+        "https://sleeper.app/*"
+      ],
+      "js":  ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+  <title>Fantasy Trade Finder</title>
+</head>
+<body>
+  <header class="hdr">
+    <div class="logo">Dynasty <span class="logo-accent">Trade Finder</span></div>
+    <div class="tagline">Your rankings on Sleeper</div>
+  </header>
+
+  <main id="stage-root">
+    <!-- Signed-out state -->
+    <section class="stage hidden" id="stage-signin">
+      <label class="fld">
+        <span class="fld-label">Sleeper username</span>
+        <input type="text" id="username-input" autocomplete="off" autocapitalize="off"
+               autocorrect="off" spellcheck="false" placeholder="e.g. mattmurf77" />
+      </label>
+      <div class="err" id="err-signin"></div>
+      <button class="btn btn-primary" id="btn-lookup">Look up my leagues →</button>
+      <p class="note">No password needed. We only ever read your public Sleeper data.</p>
+    </section>
+
+    <!-- League picker -->
+    <section class="stage hidden" id="stage-pick">
+      <p class="pick-intro">Pick the league the extension should use:</p>
+      <div class="leagues" id="leagues"></div>
+      <div class="err" id="err-pick"></div>
+      <button class="btn btn-secondary" id="btn-back">← Change username</button>
+    </section>
+
+    <!-- Connected state -->
+    <section class="stage hidden" id="stage-connected">
+      <div class="connected-card">
+        <div class="kv">
+          <span class="kv-k">Signed in as</span>
+          <span class="kv-v" id="conn-username">—</span>
+        </div>
+        <div class="kv">
+          <span class="kv-k">League</span>
+          <span class="kv-v" id="conn-league">—</span>
+        </div>
+        <div class="kv">
+          <span class="kv-k">Scoring</span>
+          <span class="kv-v" id="conn-format">—</span>
+        </div>
+        <div class="kv">
+          <span class="kv-k">Players ranked</span>
+          <span class="kv-v" id="conn-count">—</span>
+        </div>
+      </div>
+      <p class="note">Open any league on <strong>sleeper.com</strong> — you'll see your tier and position-rank next to every player.</p>
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="btn-refresh">Refresh rankings</button>
+        <button class="btn btn-link" id="btn-signout">Sign out</button>
+      </div>
+    </section>
+
+    <!-- Busy overlay -->
+    <section class="stage hidden" id="stage-busy">
+      <div class="spinner"></div>
+      <p class="busy-msg" id="busy-msg">Talking to Sleeper…</p>
+    </section>
+  </main>
+
+  <footer class="ftr">
+    <a href="https://fantasy-trade-finder.onrender.com/" target="_blank" rel="noopener">fantasy-trade-finder.onrender.com</a>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

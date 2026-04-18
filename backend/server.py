@@ -3525,6 +3525,235 @@ def share_trade_page(match_id):
     )
 
 
+# ---------------------------------------------------------------------------
+# Browser extension — /api/extension/auth + /api/extension/rankings
+# ---------------------------------------------------------------------------
+# The Chrome/Edge extension injects the user's personal tier + pos-rank next
+# to player names on sleeper.com. It needs a lean auth that takes a Sleeper
+# username (same UX as the main app) and a compact rankings payload. We do
+# NOT reuse /api/session/init because (a) the extension can't drive the
+# full frontend Sleeper-fetch flow, and (b) we don't need the trade service
+# or opponent-member hydration for read-only badge injection.
+
+def _extension_build_session(user_id: str, league_id: str, username: str,
+                             display_name: str, avatar: str | None) -> tuple[str, dict]:
+    """Build a lightweight session for the browser extension.
+
+    Does just enough to power GET /api/extension/rankings:
+    - One RankingService per scoring_format, with swipes + tier overrides
+      replayed from the DB.
+    - Resolves the active scoring_format from leagues.default_scoring
+      (auto-detected from Sleeper metadata on first sync).
+
+    Returns (token, session_payload).
+    """
+    # Ensure universal pools exist (same data the main app uses)
+    if _load_sleeper_cache() is None:
+        raise RuntimeError("Player DB not cached yet — try again in a moment.")
+    _ensure_universal_pools()
+
+    # Make sure we have the league's scoring format on file
+    try:
+        active_format = get_league_scoring(league_id)
+    except Exception:
+        active_format = None
+    if not active_format:
+        meta = _fetch_sleeper_league_meta(league_id)
+        if meta:
+            active_format = _detect_scoring_format_from_meta(meta)
+            try:
+                set_league_scoring(league_id, active_format)
+            except Exception:
+                pass
+    if active_format not in SCORING_FORMATS:
+        active_format = DEFAULT_SCORING
+
+    # Persist user (no invited_by — extension isn't a referral surface)
+    try:
+        upsert_user(
+            sleeper_user_id=user_id,
+            username=username,
+            display_name=display_name,
+            avatar=avatar,
+        )
+    except Exception as e:
+        log.warning("  extension auth: upsert_user failed: %s", e)
+
+    # Build RankingServices per format with replayed swipes + tier overrides
+    new_services: dict = {}
+    for fmt in SCORING_FORMATS:
+        fmt_pool, fmt_seed = _get_universal_pool(fmt)
+        svc = RankingService(
+            players           = fmt_pool,
+            matchup_generator = matchup_gen,
+            seed_ratings      = fmt_seed,
+        )
+        svc._user_id = user_id
+        try:
+            historical = load_swipe_decisions(user_id=user_id, scoring_format=fmt)
+            if historical:
+                svc.replay_from_db(historical)
+        except Exception as e:
+            log.warning("  [%s] extension replay failed: %s", fmt, e)
+        try:
+            overrides = load_tier_overrides(user_id=user_id, scoring_format=fmt)
+            valid_ids = {p.id for p in fmt_pool}
+            svc._elo_overrides = {pid: elo for pid, elo in overrides.items() if pid in valid_ids}
+        except Exception as e:
+            log.warning("  [%s] extension override restore failed: %s", fmt, e)
+        new_services[fmt] = svc
+
+    payload = {
+        "user_id":       user_id,
+        "username":      username,
+        "display_name":  display_name,
+        "league_id":     league_id,
+        "active_format": active_format,
+        "services":      new_services,
+        "service":       new_services[active_format],
+        "extension":     True,   # marker so later code can branch if needed
+        "last_active":   time.time(),
+    }
+    token = secrets.token_urlsafe(32)
+    with _sessions_lock:
+        _sessions[token] = payload
+    return token, payload
+
+
+@app.route("/api/extension/auth", methods=["POST"])
+def extension_auth():
+    """
+    Two-step username-only auth for the browser extension.
+
+    Step 1 — body {username}: returns the user's NFL 2026 league list,
+             WITHOUT minting a token.
+    Step 2 — body {username, league_id}: hydrates a lightweight session
+             and returns the token.
+
+    Error shape: {"error": "<code>", "message": "<human>"}
+    """
+    body     = request.get_json(force=True) or {}
+    username = (body.get("username") or "").strip().lower()
+    league_id = str(body.get("league_id") or "").strip() or None
+
+    if not username:
+        return jsonify({"error": "missing_username", "message": "Sleeper username required."}), 400
+
+    # Resolve Sleeper username → user_id
+    try:
+        user_data = _sleeper_get(
+            f"https://api.sleeper.app/v1/user/{urllib.parse.quote(username)}"
+        )
+    except Exception as e:
+        return jsonify({"error": "sleeper_error", "message": str(e)}), 502
+    if not isinstance(user_data, dict) or not user_data.get("user_id"):
+        return jsonify({"error": "user_not_found",
+                        "message": f"Sleeper user @{username} not found."}), 404
+
+    user_id      = user_data["user_id"]
+    display_name = user_data.get("display_name") or username
+    avatar       = user_data.get("avatar")
+
+    # Step 1 — no league_id yet, just return leagues
+    if not league_id:
+        try:
+            leagues = _sleeper_get(
+                f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/2026"
+            ) or []
+        except Exception as e:
+            return jsonify({"error": "sleeper_error", "message": str(e)}), 502
+        compact = [
+            {
+                "league_id": str(lg.get("league_id")),
+                "name":      lg.get("name") or "League",
+                "total_rosters": lg.get("total_rosters"),
+                "avatar":    lg.get("avatar"),
+            }
+            for lg in (leagues if isinstance(leagues, list) else [])
+            if lg.get("league_id")
+        ]
+        return jsonify({
+            "stage":         "pick_league",
+            "user_id":       user_id,
+            "username":      username,
+            "display_name":  display_name,
+            "avatar":        avatar,
+            "leagues":       compact,
+        })
+
+    # Step 2 — hydrate session for the chosen league
+    try:
+        token, payload = _extension_build_session(
+            user_id=user_id,
+            league_id=league_id,
+            username=username,
+            display_name=display_name,
+            avatar=avatar,
+        )
+    except Exception as e:
+        log.exception("extension_auth: session build failed")
+        return jsonify({"error": "session_build_failed", "message": str(e)}), 500
+
+    # 4 hours matches the main-app session TTL in _cleanup_loop
+    expires_at = int(payload["last_active"]) + 4 * 3600
+    return jsonify({
+        "stage":          "connected",
+        "session_token":  token,
+        "expires_at":     expires_at,
+        "username":       username,
+        "display_name":   display_name,
+        "user_id":        user_id,
+        "league_id":      league_id,
+        "scoring_format": payload["active_format"],
+    })
+
+
+@app.route("/api/extension/rankings")
+def extension_rankings():
+    """Return a compact tier + pos_rank map for the authenticated user.
+
+    Only players the user has actually ranked (non-default ELO) are included
+    — unranked players don't get a badge. Shape:
+      { format, league_id, username, updated_at, players: {pid: {name, pos, pos_rank, tier}} }
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    fmt     = _active_format(sess)
+    service = sess["services"][fmt] if sess.get("services") else sess["service"]
+
+    # Build per-position rankings; RankingService already exposes a sorted
+    # list via get_rankings(position=<pos>).
+    players_map: dict[str, dict] = {}
+    for pos in ("QB", "RB", "WR", "TE"):
+        try:
+            rankset = service.get_rankings(position=pos)
+        except Exception as e:
+            log.warning("extension_rankings: get_rankings(%s) failed: %s", pos, e)
+            continue
+        # rankset.rankings is a list of RankedPlayer sorted by elo desc.
+        # pos_rank is 1-indexed.
+        for i, rp in enumerate(rankset.rankings, start=1):
+            elo = getattr(rp, "elo", None)
+            tier = RankingService.tier_for_elo(elo, pos, fmt) if elo is not None else None
+            if tier is None:
+                continue  # skip unranked / sub-bench
+            pid = rp.player.id
+            players_map[pid] = {
+                "name":     rp.player.name,
+                "pos":      pos,
+                "pos_rank": i,
+                "tier":     tier,
+            }
+
+    return jsonify({
+        "format":      fmt,
+        "league_id":   sess.get("league_id") or (sess.get("league") and sess["league"].league_id) or "",
+        "username":    sess.get("username") or "",
+        "updated_at":  int(time.time()),
+        "players":     players_map,
+    })
+
+
 if __name__ == "__main__":
     # Pre-load Sleeper player cache from disk if available
     _load_sleeper_cache()

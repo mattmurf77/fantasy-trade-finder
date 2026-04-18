@@ -730,6 +730,36 @@ class RankingService:
             return cls.QB_TE_1QB_TIER_ELO_BANDS
         return cls.UNIFORM_TIER_ELO_BANDS
 
+    @classmethod
+    def tier_for_elo(
+        cls,
+        elo: float,
+        position: Optional[str],
+        scoring_format: str = "1qb_ppr",
+    ) -> Optional[str]:
+        """Inverse of `tier_bands_for` — bucket a raw ELO into a tier name.
+
+        Returns one of: 'elite', 'starter', 'solid', 'depth', 'bench', or
+        None when the ELO falls below the lowest band (unranked). Uses the
+        band's `hi` as the upper inclusive cutoff per tier so the mapping
+        matches what `apply_tiers` writes.
+
+        This is the source of truth for the browser extension's tier badge
+        and for anywhere the backend needs to label a player without going
+        through the frontend's threshold table.
+        """
+        if elo is None:
+            return None
+        bands = cls.tier_bands_for(position, scoring_format)
+        # Walk tiers top-down; return the first band whose hi >= elo >= lo.
+        # We allow elo above 'elite' hi to still register as elite.
+        ordered = ("elite", "starter", "solid", "depth", "bench")
+        for tier in ordered:
+            lo, hi = bands[tier]
+            if elo >= lo:
+                return tier
+        return None
+
     def apply_tiers(
         self,
         position: Optional[str],
