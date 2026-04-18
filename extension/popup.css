@@ -73,7 +73,7 @@ main { padding: 14px 16px; min-height: 180px; }
 .lg-row:hover { border-color: var(--accent); }
 .lg-ball { font-size: 16px; }
 .lg-body { flex: 1; min-width: 0; }
-.lg-name { font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-name { color: var(--text); font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lg-sub { font-size: 11px; color: var(--muted); }
 .lg-chev { color: var(--muted); }
 

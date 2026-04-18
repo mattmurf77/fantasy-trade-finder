@@ -233,6 +233,9 @@
         return;
       }
       logDrawer.info(`Saved user found: ${user.display_name} (${user.user_id})`);
+      // Hide the auth-screen immediately so restored sessions don't flash
+      // the login page underneath the init overlay or main app.
+      hideAuthScreen();
       renderAccountChip(user);
 
       if (!league) {

@@ -2522,63 +2522,74 @@ def admin_config_update(key: str):
 
 
 @app.route("/api/sleeper/players")
+def _ensure_sleeper_cache_populated() -> dict:
+    """Populate the Sleeper player cache if it's missing.
+
+    Returns the (in-memory) cache dict on success, or raises on network error.
+    Shared by /api/sleeper/players and the browser-extension auth flow so
+    the extension can work as the first hit on a cold server instance.
+    """
+    global _sleeper_cache
+    cached = _load_sleeper_cache()
+    if cached is not None:
+        return cached
+
+    log.info("  📡 cache miss — fetching from Sleeper (~5MB)…")
+    req = urllib.request.Request(
+        "https://api.sleeper.app/v1/players/nfl",
+        headers={"User-Agent": "FantasyTradeFinder/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=45) as r:
+        raw = json.loads(r.read())
+
+    log.info("  raw payload has %d players", len(raw))
+
+    # Filter to skill positions only (cuts ~80% of the payload)
+    relevant = {
+        pid: p for pid, p in raw.items()
+        if p.get("position") in ("QB", "RB", "WR", "TE")
+        and p.get("full_name")
+    }
+    log.info("  filtered to %d skill-position players", len(relevant))
+
+    # Persist to disk
+    try:
+        PLAYERS_CACHE_FILE.write_text(json.dumps(relevant))
+        log.info("  ✅ wrote cache to %s", PLAYERS_CACHE_FILE)
+    except Exception as e:
+        log.warning("  could not write Sleeper cache: %s", e)
+
+    _sleeper_cache = relevant
+
+    # Sync to players DB table so /api/players has data.
+    # Lock prevents two concurrent cold clients from running sync_players twice.
+    try:
+        with _player_sync_lock:
+            if needs_player_sync():
+                adp_map = _fetch_sleeper_adp()
+                count = sync_players(relevant, adp_map=adp_map or None)
+                log.info("  ✅ synced %d players to DB after cache fetch", count)
+            else:
+                log.info("  player DB already fresh — skipping sync")
+    except Exception as sync_err:
+        log.warning("  player DB sync after fetch failed: %s", sync_err)
+
+    return relevant
+
+
 def sleeper_players():
     """
     Return cached Sleeper bulk player data (QB/RB/WR/TE only).
     First call fetches ~5MB from Sleeper and caches to disk; subsequent
     calls are served instantly from memory.
     """
-    global _sleeper_cache
     log.info("=== /api/sleeper/players  (cache_loaded=%s)", _sleeper_cache is not None)
-
     cached = _load_sleeper_cache()
     if cached is not None:
         log.info("  serving from cache  size=%d", len(cached))
         return jsonify(cached)
-
-    # Fetch from Sleeper
     try:
-        log.info("  📡 cache miss — fetching from Sleeper (~5MB)…")
-        req = urllib.request.Request(
-            "https://api.sleeper.app/v1/players/nfl",
-            headers={"User-Agent": "FantasyTradeFinder/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=45) as r:
-            raw = json.loads(r.read())
-
-        log.info("  raw payload has %d players", len(raw))
-
-        # Filter to skill positions only (cuts ~80% of the payload)
-        relevant = {
-            pid: p for pid, p in raw.items()
-            if p.get("position") in ("QB", "RB", "WR", "TE")
-            and p.get("full_name")
-        }
-        log.info("  filtered to %d skill-position players", len(relevant))
-
-        # Persist to disk
-        try:
-            PLAYERS_CACHE_FILE.write_text(json.dumps(relevant))
-            log.info("  ✅ wrote cache to %s", PLAYERS_CACHE_FILE)
-        except Exception as e:
-            log.warning("  could not write Sleeper cache: %s", e)
-
-        _sleeper_cache = relevant
-
-        # Sync to players DB table so /api/players has data.
-        # Lock prevents two concurrent cold clients from running sync_players twice.
-        try:
-            with _player_sync_lock:
-                if needs_player_sync():
-                    adp_map = _fetch_sleeper_adp()
-                    count = sync_players(relevant, adp_map=adp_map or None)
-                    log.info("  ✅ synced %d players to DB after cache fetch", count)
-                else:
-                    log.info("  player DB already fresh — skipping sync")
-        except Exception as sync_err:
-            log.warning("  player DB sync after fetch failed: %s", sync_err)
-
-        return jsonify(relevant)
+        return jsonify(_ensure_sleeper_cache_populated())
     except Exception as e:
         log.error("  sleeper_players fetch error: %s\n%s", e, traceback.format_exc())
         return jsonify({"error": str(e)}), 500
@@ -3547,9 +3558,17 @@ def _extension_build_session(user_id: str, league_id: str, username: str,
 
     Returns (token, session_payload).
     """
-    # Ensure universal pools exist (same data the main app uses)
+    # Ensure the Sleeper player cache is populated — on a cold Render
+    # instance the extension could be the first caller, so fetch-on-demand
+    # rather than erroring out.
     if _load_sleeper_cache() is None:
-        raise RuntimeError("Player DB not cached yet — try again in a moment.")
+        try:
+            _ensure_sleeper_cache_populated()
+        except Exception as e:
+            raise RuntimeError(
+                f"Could not populate Sleeper player cache: {e}. "
+                "Try again in a moment."
+            )
     _ensure_universal_pools()
 
     # Make sure we have the league's scoring format on file

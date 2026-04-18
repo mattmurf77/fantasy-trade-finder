@@ -859,9 +859,96 @@
       background: var(--accent);
       border-color: var(--accent);
     }
+
+    /* App header — mirrors index.html so the chrome doesn't vanish when
+       the user navigates to /positional-tiers.html. Bell is omitted on
+       purpose (requires app.js polling); League + account chip cover the
+       primary visual affordances. */
+    .app-header {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 14px 16px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .app-header-logo {
+      font-size: 1.05rem;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+    }
+    .app-header-logo a { color: var(--text); text-decoration: none; }
+    .app-header-logo span { color: var(--accent); }
+    .app-header-right {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .app-header-league-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 12px;
+      text-decoration: none;
+      transition: border-color 0.12s;
+    }
+    .app-header-league-btn:hover { border-color: var(--accent); }
+    .app-header-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .app-header-chip-avatar {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), #7a7f96);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 11px; color: #fff; font-weight: 700;
+    }
   </style>
 </head>
 <body>
+
+  <!-- ── App header — logo + League button + account chip ── -->
+  <header class="app-header">
+    <div class="app-header-logo">
+      <a href="/">Dynasty <span>Trade Finder</span></a>
+    </div>
+    <div class="app-header-right">
+      <a class="app-header-league-btn" href="/?view=league">🏆 League</a>
+      <div class="app-header-chip" id="app-header-chip" style="display:none">
+        <span class="app-header-chip-avatar" id="app-header-chip-avatar">?</span>
+        <span id="app-header-chip-name">—</span>
+      </div>
+    </div>
+  </header>
+
+  <script>
+    // Populate the account chip from localStorage without needing app.js.
+    // Mirrors the chip the main app renders.
+    (function () {
+      try {
+        const raw = localStorage.getItem('sleeper_user');
+        if (!raw) return;
+        const u = JSON.parse(raw);
+        const name = u.display_name || u.username || 'User';
+        const chip = document.getElementById('app-header-chip');
+        const avatar = document.getElementById('app-header-chip-avatar');
+        const nameEl = document.getElementById('app-header-chip-name');
+        if (chip) chip.style.display = '';
+        if (nameEl) nameEl.textContent = name;
+        if (avatar) avatar.textContent = (name[0] || '?').toUpperCase();
+      } catch (_) { /* localStorage unavailable / bad JSON — silently skip */ }
+    })();
+  </script>
 
   <!-- ── Tier-1 + Tier-2 nav — mirrors index.html so users can cross over ── -->
   <div class="nav-tabs nav-tier-1" style="max-width:980px;width:100%;margin:0 auto;">
