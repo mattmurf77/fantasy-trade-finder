@@ -1,8 +1,7 @@
 // Fantasy Trade Finder — popup.js
-// Three-stage flow: sign-in → pick league → connected.
-// All backend calls go through the configured API origin; session token is
-// persisted in chrome.storage.local so the content script and background
-// service worker can share it.
+// Single-step auth: username → token. League picker is gone — the
+// content script auto-detects which league the user is viewing on
+// sleeper.com and fetches rankings for that league on demand.
 
 const API_BASE = 'https://fantasy-trade-finder.onrender.com';
 // For local development, uncomment the next line and comment the one above:
@@ -13,24 +12,18 @@ const STORAGE_KEY = 'ftf_session';
 const els = {
   stages: {
     signin:    document.getElementById('stage-signin'),
-    pick:      document.getElementById('stage-pick'),
     connected: document.getElementById('stage-connected'),
     busy:      document.getElementById('stage-busy'),
   },
-  username:   document.getElementById('username-input'),
-  errSignin:  document.getElementById('err-signin'),
-  errPick:    document.getElementById('err-pick'),
-  leagues:    document.getElementById('leagues'),
-  busyMsg:    document.getElementById('busy-msg'),
-  connUser:   document.getElementById('conn-username'),
-  connLeague: document.getElementById('conn-league'),
-  connFmt:    document.getElementById('conn-format'),
-  connCount:  document.getElementById('conn-count'),
+  username:      document.getElementById('username-input'),
+  errSignin:     document.getElementById('err-signin'),
+  busyMsg:       document.getElementById('busy-msg'),
+  connUser:      document.getElementById('conn-username'),
+  connLeagues:   document.getElementById('conn-leagues'),
+  connCurLeague: document.getElementById('conn-current-league'),
+  connFmt:       document.getElementById('conn-format'),
+  connCount:     document.getElementById('conn-count'),
 };
-
-// Ephemeral state — held only for the current popup lifecycle.
-let _pendingUsername = null;
-let _pendingUserData = null;
 
 function show(stageName, busyMsg) {
   for (const [k, el] of Object.entries(els.stages)) {
@@ -39,9 +32,8 @@ function show(stageName, busyMsg) {
   if (stageName === 'busy' && busyMsg) els.busyMsg.textContent = busyMsg;
 }
 
-function setError(which, msg) {
-  if (which === 'signin') els.errSignin.textContent = msg || '';
-  if (which === 'pick')   els.errPick.textContent   = msg || '';
+function setError(msg) {
+  els.errSignin.textContent = msg || '';
 }
 
 async function getSession() {
@@ -70,7 +62,7 @@ function fmtLabel(fmt) {
 //  API calls
 // ─────────────────────────────────────────────────────────────────
 
-async function apiLookup(username) {
+async function apiSignIn(username) {
   const res = await fetch(`${API_BASE}/api/extension/auth`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -78,22 +70,12 @@ async function apiLookup(username) {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message || body.error || `HTTP ${res.status}`);
-  return body;  // { stage: 'pick_league', user_id, username, display_name, avatar, leagues: [...] }
+  return body;  // { session_token, expires_at, user_id, username, display_name, avatar, leagues }
 }
 
-async function apiConnect(username, leagueId) {
-  const res = await fetch(`${API_BASE}/api/extension/auth`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, league_id: leagueId }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.message || body.error || `HTTP ${res.status}`);
-  return body;  // { session_token, expires_at, username, display_name, league_id, scoring_format }
-}
-
-async function apiRankings(token) {
-  const res = await fetch(`${API_BASE}/api/extension/rankings`, {
+async function apiRankings(token, leagueId) {
+  const qs = leagueId ? `?league_id=${encodeURIComponent(leagueId)}` : '';
+  const res = await fetch(`${API_BASE}/api/extension/rankings${qs}`, {
     headers: { 'X-Session-Token': token },
   });
   if (res.status === 401) throw new Error('session_expired');
@@ -103,45 +85,60 @@ async function apiRankings(token) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+//  Tab inspection — find the active sleeper.com tab + extract league_id
+// ─────────────────────────────────────────────────────────────────
+
+async function getActiveSleeperLeague() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tab = tabs && tabs[0];
+      if (!tab || !tab.url) return resolve(null);
+      const m = tab.url.match(/(?:sleeper\.com|sleeper\.app)\/leagues\/(\d+)/);
+      resolve(m ? m[1] : null);
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
 //  UI handlers
 // ─────────────────────────────────────────────────────────────────
 
-document.getElementById('btn-lookup').addEventListener('click', async () => {
-  setError('signin', '');
+document.getElementById('btn-signin').addEventListener('click', async () => {
+  setError('');
   const username = (els.username.value || '').trim().toLowerCase();
-  if (!username) { setError('signin', 'Enter your Sleeper username.'); return; }
-  show('busy', 'Looking up your leagues…');
+  if (!username) { setError('Enter your Sleeper username.'); return; }
+  show('busy', 'Signing in…');
   try {
-    const body = await apiLookup(username);
-    _pendingUsername = username;
-    _pendingUserData = body;
-    renderLeaguePicker(body.leagues || []);
-    show('pick');
+    const auth = await apiSignIn(username);
+    const sess = {
+      token:         auth.session_token,
+      username:      auth.username,
+      display_name:  auth.display_name,
+      user_id:       auth.user_id,
+      avatar:        auth.avatar,
+      expires_at:    auth.expires_at,
+      leagues:       auth.leagues || [],
+      // Cache rankings per league so we don't refetch on every popup open
+      rankings_cache: {},
+    };
+    await setSession(sess);
+    try { chrome.runtime.sendMessage({ type: 'ftf:signed_in', sess }); } catch (_) {}
+    await renderConnectedFromActiveTab(sess);
+    show('connected');
   } catch (e) {
-    setError('signin', e.message || 'Lookup failed.');
+    setError(e.message || 'Sign-in failed.');
     show('signin');
   }
 });
 
 els.username.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') document.getElementById('btn-lookup').click();
-});
-
-document.getElementById('btn-back').addEventListener('click', () => {
-  setError('pick', '');
-  _pendingUsername = null;
-  _pendingUserData = null;
-  els.username.focus();
-  show('signin');
+  if (e.key === 'Enter') document.getElementById('btn-signin').click();
 });
 
 document.getElementById('btn-signout').addEventListener('click', async () => {
   await clearSession();
-  // Tell content scripts to clear their cached badges
   try { chrome.runtime.sendMessage({ type: 'ftf:signed_out' }); } catch (_) {}
   els.username.value = '';
-  _pendingUsername = null;
-  _pendingUserData = null;
   show('signin');
 });
 
@@ -149,86 +146,72 @@ document.getElementById('btn-refresh').addEventListener('click', async () => {
   show('busy', 'Refreshing rankings…');
   const sess = await getSession();
   if (!sess) { show('signin'); return; }
+  const leagueId = await getActiveSleeperLeague();
   try {
-    const data = await apiRankings(sess.token);
-    sess.cached_rankings = data;
-    sess.cached_at = Date.now();
+    const data = await apiRankings(sess.token, leagueId);
+    sess.rankings_cache = sess.rankings_cache || {};
+    if (leagueId) {
+      sess.rankings_cache[leagueId] = { ...data, fetched_at: Date.now() };
+    }
     await setSession(sess);
-    try { chrome.runtime.sendMessage({ type: 'ftf:rankings_updated' }); } catch (_) {}
-    renderConnected(sess, data);
+    try { chrome.runtime.sendMessage({ type: 'ftf:rankings_updated', leagueId }); } catch (_) {}
+    await renderConnectedFromActiveTab(sess);
     show('connected');
   } catch (e) {
     if (String(e.message) === 'session_expired') {
       await clearSession();
       show('signin');
     } else {
-      renderConnected(sess, sess.cached_rankings);
+      await renderConnectedFromActiveTab(sess);
       show('connected');
     }
   }
 });
 
-function renderLeaguePicker(leagues) {
-  els.leagues.innerHTML = '';
-  if (!leagues.length) {
-    els.leagues.innerHTML = '<div class="note">No 2026 NFL leagues found on your Sleeper account.</div>';
+async function renderConnectedFromActiveTab(sess) {
+  els.connUser.textContent    = '@' + (sess.username || '—');
+  els.connLeagues.textContent = (sess.leagues && sess.leagues.length) ? `${sess.leagues.length}` : '—';
+
+  const leagueId = await getActiveSleeperLeague();
+  if (!leagueId) {
+    els.connCurLeague.textContent = 'Open a league on sleeper.com';
+    els.connFmt.textContent = '—';
+    els.connCount.textContent = '—';
     return;
   }
-  for (const lg of leagues) {
-    const row = document.createElement('button');
-    row.className = 'lg-row';
-    row.innerHTML = `
-      <div class="lg-ball">🏈</div>
-      <div class="lg-body">
-        <div class="lg-name"></div>
-        <div class="lg-sub">${(lg.total_rosters || 0)} teams</div>
-      </div>
-      <div class="lg-chev">›</div>
-    `;
-    row.querySelector('.lg-name').textContent = lg.name || 'League';
-    row.addEventListener('click', () => pickLeague(lg.league_id, lg.name));
-    els.leagues.appendChild(row);
-  }
-}
 
-async function pickLeague(leagueId, leagueName) {
-  if (!_pendingUsername) { show('signin'); return; }
-  setError('pick', '');
-  show('busy', 'Connecting to Fantasy Trade Finder…');
+  // Try to find a cached entry for this league
+  const cached = (sess.rankings_cache && sess.rankings_cache[leagueId]) || null;
+  if (cached) {
+    const leagueName = cached.league_name || findLeagueName(sess, leagueId) || leagueId;
+    els.connCurLeague.textContent = leagueName;
+    els.connFmt.textContent = fmtLabel(cached.format);
+    els.connCount.textContent = cached.players ? `${Object.keys(cached.players).length}` : '0';
+    return;
+  }
+
+  // Not cached yet — fetch fresh so the popup shows accurate numbers
   try {
-    const auth = await apiConnect(_pendingUsername, leagueId);
-    const sess = {
-      token:          auth.session_token,
-      username:       auth.username,
-      display_name:   auth.display_name,
-      user_id:        auth.user_id,
-      league_id:      auth.league_id,
-      league_name:    leagueName,
-      scoring_format: auth.scoring_format,
-      expires_at:     auth.expires_at,
-    };
-    // Prime the rankings cache immediately so the content script has data
-    try {
-      const data = await apiRankings(sess.token);
-      sess.cached_rankings = data;
-      sess.cached_at = Date.now();
-    } catch (_) { /* non-fatal — background alarm will retry */ }
+    const data = await apiRankings(sess.token, leagueId);
+    sess.rankings_cache = sess.rankings_cache || {};
+    sess.rankings_cache[leagueId] = { ...data, fetched_at: Date.now() };
     await setSession(sess);
-    try { chrome.runtime.sendMessage({ type: 'ftf:signed_in', sess }); } catch (_) {}
-    renderConnected(sess, sess.cached_rankings);
-    show('connected');
-  } catch (e) {
-    setError('pick', e.message || 'Connection failed.');
-    show('pick');
+    try { chrome.runtime.sendMessage({ type: 'ftf:rankings_updated', leagueId }); } catch (_) {}
+    const leagueName = data.league_name || findLeagueName(sess, leagueId) || leagueId;
+    els.connCurLeague.textContent = leagueName;
+    els.connFmt.textContent = fmtLabel(data.format);
+    els.connCount.textContent = data.players ? `${Object.keys(data.players).length}` : '0';
+  } catch (_) {
+    els.connCurLeague.textContent = findLeagueName(sess, leagueId) || leagueId;
+    els.connFmt.textContent = '—';
+    els.connCount.textContent = '—';
   }
 }
 
-function renderConnected(sess, rankings) {
-  els.connUser.textContent   = '@' + (sess.username || '—');
-  els.connLeague.textContent = sess.league_name || sess.league_id || '—';
-  els.connFmt.textContent    = fmtLabel(sess.scoring_format);
-  const count = rankings && rankings.players ? Object.keys(rankings.players).length : 0;
-  els.connCount.textContent = count ? `${count} players` : '—';
+function findLeagueName(sess, leagueId) {
+  if (!sess.leagues) return null;
+  const lg = sess.leagues.find((l) => String(l.league_id) === String(leagueId));
+  return lg ? lg.name : null;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -238,26 +221,9 @@ function renderConnected(sess, rankings) {
 (async function init() {
   const sess = await getSession();
   if (sess && sess.token) {
-    // Quietly refresh on popup open so "player count" is fresh
-    show('busy', 'Refreshing rankings…');
-    try {
-      const data = await apiRankings(sess.token);
-      sess.cached_rankings = data;
-      sess.cached_at = Date.now();
-      await setSession(sess);
-      try { chrome.runtime.sendMessage({ type: 'ftf:rankings_updated' }); } catch (_) {}
-      renderConnected(sess, data);
-      show('connected');
-    } catch (e) {
-      if (String(e.message) === 'session_expired') {
-        await clearSession();
-        show('signin');
-      } else {
-        // Show cached state even if refresh fails
-        renderConnected(sess, sess.cached_rankings);
-        show('connected');
-      }
-    }
+    show('busy', 'Loading your rankings…');
+    await renderConnectedFromActiveTab(sess);
+    show('connected');
   } else {
     show('signin');
     els.username.focus();

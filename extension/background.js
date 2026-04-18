@@ -1,12 +1,16 @@
 // Fantasy Trade Finder — background.js (MV3 service worker)
+//
 // Two jobs:
-//   1) Keep the rankings cache fresh (alarm every 15 min).
-//   2) Act as a message hub — content scripts ask for the latest cached
-//      rankings without hitting storage-get 1,000 times.
+//   1) Handle `ftf:fetch_rankings` requests from content scripts. Called
+//      whenever a content script sees a new league_id on sleeper.com; we
+//      fetch /api/extension/rankings?league_id=X with the stored token
+//      and cache the result into sess.rankings_cache[league_id].
+//   2) Periodic refresh (15 min alarm) of the ACTIVE sleeper.com tab's
+//      current league, so content scripts show fresh rankings without
+//      requiring a manual refresh.
 
 const API_BASE = 'https://fantasy-trade-finder.onrender.com';
-// For local dev:
-// const API_BASE = 'http://127.0.0.1:5000';
+// For local dev: const API_BASE = 'http://127.0.0.1:5000';
 
 const STORAGE_KEY = 'ftf_session';
 const REFRESH_ALARM = 'ftf:refresh';
@@ -32,42 +36,64 @@ async function clearSession() {
   });
 }
 
-async function fetchRankings(token) {
-  const res = await fetch(`${API_BASE}/api/extension/rankings`, {
+async function fetchRankings(token, leagueId) {
+  const qs = leagueId ? `?league_id=${encodeURIComponent(leagueId)}` : '';
+  const res = await fetch(`${API_BASE}/api/extension/rankings${qs}`, {
     headers: { 'X-Session-Token': token },
   });
-  if (res.status === 401) {
-    return { expired: true };
-  }
+  if (res.status === 401) return { expired: true };
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return { data: await res.json() };
 }
 
-async function refreshRankings() {
+// Fetch + cache rankings for a given league_id. Returns a message-response
+// shape so the content script's sendMessage resolves cleanly.
+async function fetchAndCache(leagueId) {
   const sess = await getSession();
-  if (!sess || !sess.token) return;
+  if (!sess || !sess.token) return { ok: false, error: 'no_session' };
   try {
-    const result = await fetchRankings(sess.token);
+    const result = await fetchRankings(sess.token, leagueId);
     if (result.expired) {
       await clearSession();
       broadcast({ type: 'ftf:session_expired' });
-      return;
+      return { ok: false, expired: true };
     }
-    sess.cached_rankings = result.data;
-    sess.cached_at = Date.now();
-    await setSession(sess);
-    broadcast({ type: 'ftf:rankings_updated' });
+    const data = result.data;
+    sess.rankings_cache = sess.rankings_cache || {};
+    if (leagueId) {
+      sess.rankings_cache[leagueId] = { ...data, fetched_at: Date.now() };
+      await setSession(sess);
+    }
+    return { ok: true, data };
   } catch (e) {
-    // Silent — transient network errors are common on service workers
+    return { ok: false, error: String(e && e.message) };
   }
 }
 
 function broadcast(message) {
-  // Send to every sleeper.com tab; content scripts listen for the type.
   chrome.tabs.query({ url: ['https://sleeper.com/*', 'https://sleeper.app/*'] }, (tabs) => {
     for (const tab of tabs) {
       if (tab.id != null) chrome.tabs.sendMessage(tab.id, message, () => void chrome.runtime.lastError);
     }
+  });
+}
+
+// Find the currently-active sleeper.com tab's league and refresh it.
+async function refreshActiveTab() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({
+      active: true,
+      url: ['https://sleeper.com/*', 'https://sleeper.app/*'],
+    }, async (tabs) => {
+      const tab = tabs && tabs[0];
+      if (!tab || !tab.url) return resolve();
+      const m = tab.url.match(/\/leagues\/(\d+)/);
+      if (!m) return resolve();
+      const leagueId = m[1];
+      await fetchAndCache(leagueId);
+      broadcast({ type: 'ftf:rankings_updated', leagueId });
+      resolve();
+    });
   });
 }
 
@@ -80,7 +106,7 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === REFRESH_ALARM) refreshRankings();
+  if (alarm.name === REFRESH_ALARM) refreshActiveTab();
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -92,11 +118,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'ftf:get_session') {
     getSession().then((sess) => sendResponse(sess));
-    return true;  // async response
+    return true;
+  }
+
+  if (msg.type === 'ftf:fetch_rankings') {
+    // Content script asking for rankings for a specific league_id
+    fetchAndCache(msg.league_id).then(sendResponse);
+    return true;  // async
   }
 
   if (msg.type === 'ftf:force_refresh') {
-    refreshRankings().then(() => sendResponse({ ok: true }));
+    refreshActiveTab().then(() => sendResponse({ ok: true }));
     return true;
   }
 

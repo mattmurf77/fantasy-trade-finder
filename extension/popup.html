@@ -20,16 +20,8 @@
                autocorrect="off" spellcheck="false" placeholder="e.g. mattmurf77" />
       </label>
       <div class="err" id="err-signin"></div>
-      <button class="btn btn-primary" id="btn-lookup">Look up my leagues →</button>
+      <button class="btn btn-primary" id="btn-signin">Sign in →</button>
       <p class="note">No password needed. We only ever read your public Sleeper data.</p>
-    </section>
-
-    <!-- League picker -->
-    <section class="stage hidden" id="stage-pick">
-      <p class="pick-intro">Pick the league the extension should use:</p>
-      <div class="leagues" id="leagues"></div>
-      <div class="err" id="err-pick"></div>
-      <button class="btn btn-secondary" id="btn-back">← Change username</button>
     </section>
 
     <!-- Connected state -->
@@ -40,21 +32,25 @@
           <span class="kv-v" id="conn-username">—</span>
         </div>
         <div class="kv">
-          <span class="kv-k">League</span>
-          <span class="kv-v" id="conn-league">—</span>
+          <span class="kv-k">Leagues found</span>
+          <span class="kv-v" id="conn-leagues">—</span>
+        </div>
+        <div class="kv">
+          <span class="kv-k">Current league</span>
+          <span class="kv-v" id="conn-current-league">—</span>
         </div>
         <div class="kv">
           <span class="kv-k">Scoring</span>
           <span class="kv-v" id="conn-format">—</span>
         </div>
         <div class="kv">
-          <span class="kv-k">Players ranked</span>
+          <span class="kv-k">Players ranked here</span>
           <span class="kv-v" id="conn-count">—</span>
         </div>
       </div>
-      <p class="note">Open any league on <strong>sleeper.com</strong> — you'll see your tier and position-rank next to every player.</p>
+      <p class="note">Navigate between leagues on <strong>sleeper.com</strong> — the extension auto-detects which league you're viewing and shows the right rankings.</p>
       <div class="btn-row">
-        <button class="btn btn-secondary" id="btn-refresh">Refresh rankings</button>
+        <button class="btn btn-secondary" id="btn-refresh">Refresh</button>
         <button class="btn btn-link" id="btn-signout">Sign out</button>
       </div>
     </section>
