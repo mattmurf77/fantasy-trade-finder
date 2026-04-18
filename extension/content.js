@@ -1,28 +1,36 @@
 // Fantasy Trade Finder — content.js
 // Runs on sleeper.com; scans the DOM for Sleeper player references and
-// injects a tier + pos-rank badge next to each matching name.
+// injects a tier + pos-rank badge next to each matching player name.
 //
-// Two detection strategies, layered:
-//   (1) Primary:   anchors matching /players/nfl/<id>  — stable DOM contract
-//                  that covers player popups, trade tabs, and roster rows.
-//   (2) Secondary: text-node name match — for draft boards and any surface
-//                  that renders plain player names without anchors.
+// Detection strategies, in order:
+//   (1) Anchor href scan   — a[href*="/players/nfl/<id>"]. Works on trade
+//                             summary, popups, some rosters.
+//   (2) aria-label scan    — [aria-label*=" - "]. Format is
+//                             "<prefix> - <Full Name>" per Sleeper's
+//                             accessibility convention. Covers team
+//                             rosters (where href="/"), trade picker,
+//                             and most draft surfaces.
+//   (3) Short-name fallback — elements matching [class*="player-name"]
+//                             whose text is "D Maye" style (first initial
+//                             + last name). Disambiguated via sibling
+//                             .pos span. Covers surfaces that lack both
+//                             a usable href and an aria-label.
 //
-// A MutationObserver on <body> re-runs the scan on every subtree addition
+// MutationObserver on <body> re-runs the scan on every subtree addition
 // so SPA navigations inside Sleeper keep getting badges.
+//
+// De-dupe uses a WeakSet of target elements so virtualized re-renders
+// don't leave stale markers blocking re-injection on remount.
 
 (() => {
   'use strict';
 
-  // Avoid double-init if the content script gets injected twice (some SPA
-  // quirks can cause this).
   if (window.__ftfBadgeInit) return;
   window.__ftfBadgeInit = true;
 
   const STORAGE_KEY = 'ftf_session';
   const BADGE_CLASS = 'ftf-badge';
   const BADGE_ATTR  = 'data-ftf-pid';
-  const SCANNED_ATTR = 'data-ftf-scanned';
 
   const TIER_LABELS = {
     elite:   'Elite',
@@ -32,13 +40,19 @@
     bench:   'Bench',
   };
 
-  // In-memory ranking map: { pidString: {name, pos, pos_rank, tier} }
-  let rankings = {};
-  // Name → id map for text-fallback matching, pre-lowercased
-  let nameToId = new Map();
+  // In-memory ranking state
+  let rankings = {};                     // { pid: {name, pos, pos_rank, tier} }
+  let nameToId = new Map();              // normalized full-name → pid
+  let shortNameToId = new Map();         // "qb:d:maye" → pid
   let sessionMeta = { format: null, league_name: null, updated_at: null };
   let observer = null;
   let scanScheduled = false;
+
+  // De-dupe using a WeakSet of target elements rather than a data-* attribute
+  // on the DOM. When Sleeper's virtualized lists remount rows, the detached
+  // nodes become unreachable and the set cleans up automatically — so freshly
+  // mounted rows get re-scanned without stale markers blocking them.
+  let injectedTargets = new WeakSet();
 
   // ─────────────────────────────────────────────────────────────
   //  Session + rankings bootstrap
@@ -60,13 +74,30 @@
     sessionMeta.format      = data.format || null;
     sessionMeta.league_name = data.league_name || null;
     sessionMeta.updated_at  = data.updated_at || null;
+
+    // Primary: full-name → pid
     nameToId = new Map();
+    // Secondary: "{pos}:{first_initial}:{last_name}" → pid  (for short names like "D Maye")
+    shortNameToId = new Map();
+
     for (const [pid, info] of Object.entries(rankings)) {
-      if (info && info.name) {
-        const key = normalizeName(info.name);
-        if (key) nameToId.set(key, pid);
+      if (!info || !info.name) continue;
+      const key = normalizeName(info.name);
+      if (key) nameToId.set(key, pid);
+
+      const parts = info.name.trim().split(/\s+/).filter(Boolean);
+      if (parts.length >= 2 && info.pos) {
+        const firstInitial = parts[0][0].toLowerCase();
+        const lastName = parts[parts.length - 1].toLowerCase()
+          .replace(/[^\w]/g, '')
+          .replace(/(jr|sr|ii|iii|iv|v)$/, '');
+        if (lastName) {
+          const sk = `${info.pos.toLowerCase()}:${firstInitial}:${lastName}`;
+          shortNameToId.set(sk, pid);
+        }
       }
     }
+
     clearAllBadges();
     scheduleScan();
   }
@@ -74,16 +105,18 @@
   function clearRankings() {
     rankings = {};
     nameToId = new Map();
+    shortNameToId = new Map();
+    injectedTargets = new WeakSet();
     clearAllBadges();
   }
 
   function clearAllBadges() {
     document.querySelectorAll('.' + BADGE_CLASS).forEach((el) => el.remove());
-    document.querySelectorAll(`[${SCANNED_ATTR}]`).forEach((el) => el.removeAttribute(SCANNED_ATTR));
+    injectedTargets = new WeakSet();
   }
 
   // ─────────────────────────────────────────────────────────────
-  //  Badge construction
+  //  Badge construction + insertion
   // ─────────────────────────────────────────────────────────────
 
   function makeBadge(info) {
@@ -98,23 +131,32 @@
     return b;
   }
 
-  // Insert a badge after the given element. Safe to call repeatedly —
-  // checks de-dupe marker to avoid stacking badges on every mutation.
-  function injectAfter(el, info) {
-    if (!el || !info) return;
-    if (el.hasAttribute(SCANNED_ATTR)) {
-      // Already has a badge for this pid? check the sibling
-      const next = el.nextElementSibling;
-      if (next && next.classList && next.classList.contains(BADGE_CLASS)
-          && next.getAttribute(BADGE_ATTR) === info.pid) {
-        return;  // still correct
+  // Insert a badge immediately after `anchor` (a DOM element). Idempotent.
+  function injectAfter(anchor, info) {
+    if (!anchor || !info || !info.pid) return;
+
+    // Already injected for this anchor? check the DOM side too — if the
+    // next-sibling badge has the same pid, nothing to do.
+    const next = anchor.nextElementSibling;
+    if (next && next.classList && next.classList.contains(BADGE_CLASS)) {
+      if (next.getAttribute(BADGE_ATTR) === String(info.pid)) {
+        injectedTargets.add(anchor);
+        return;
       }
-      // PID changed — remove and replace
-      if (next && next.classList && next.classList.contains(BADGE_CLASS)) next.remove();
+      // Pid changed (e.g., different player in the same slot) — replace
+      next.remove();
     }
-    el.setAttribute(SCANNED_ATTR, '1');
+
+    if (injectedTargets.has(anchor)) {
+      // Tracked but no sibling badge → Sleeper re-rendered; re-inject
+      injectedTargets.delete(anchor);
+    }
+
     const badge = makeBadge(info);
-    if (el.parentNode) el.parentNode.insertBefore(badge, el.nextSibling);
+    if (anchor.parentNode) {
+      anchor.parentNode.insertBefore(badge, anchor.nextSibling);
+      injectedTargets.add(anchor);
+    }
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -132,6 +174,40 @@
       .trim();
   }
 
+  // Extract "Full Name" from an aria-label like "Slot QB - Drake Maye".
+  // Returns null if no " - " delimiter present.
+  function nameFromAriaLabel(label) {
+    if (!label || typeof label !== 'string') return null;
+    // Use the LAST " - " so prefixes like "Click on - QB - X" work too
+    const idx = label.lastIndexOf(' - ');
+    if (idx < 0) return null;
+    const tail = label.slice(idx + 3).trim();
+    if (!tail || tail.length < 2 || tail.length > 60) return null;
+    return tail;
+  }
+
+  // Try to find the element where the player name is actually rendered so
+  // the badge lands next to the visible name, not next to a position-square
+  // or container. Falls back to the anchor itself.
+  function findNameElement(container) {
+    if (!container || !container.querySelector) return null;
+    // Common Sleeper patterns, most → least specific
+    return container.querySelector('[class*="player-name"]')
+        || container.querySelector('[class*="player_name"]')
+        || container.querySelector('[class*="player-title"]')
+        || null;
+  }
+
+  // Walk up to the nearest plausible player-row container.
+  function playerRowAncestor(el) {
+    if (!el || !el.closest) return null;
+    return el.closest('[class*="team-roster-item"]')
+        || el.closest('[class*="player-row"]')
+        || el.closest('[class*="player-card"]')
+        || el.closest('[class*="player-item"]')
+        || null;
+  }
+
   // ─────────────────────────────────────────────────────────────
   //  Scanning
   // ─────────────────────────────────────────────────────────────
@@ -139,7 +215,6 @@
   function scheduleScan() {
     if (scanScheduled) return;
     scanScheduled = true;
-    // Use requestAnimationFrame so we batch DOM work per paint cycle.
     requestAnimationFrame(() => {
       scanScheduled = false;
       try { scan(document); } catch (e) { /* swallow */ }
@@ -149,71 +224,94 @@
   function scan(root) {
     if (!rankings || Object.keys(rankings).length === 0) return;
 
-    // Strategy 1: anchor-href scan
-    const anchors = root.querySelectorAll
+    // Strategy 1 — anchor href scan (trade summary, popups)
+    const anchors = (root.querySelectorAll
       ? root.querySelectorAll('a[href*="/players/nfl/"]')
-      : [];
+      : []);
     anchors.forEach((a) => {
       const pid = extractPidFromHref(a.getAttribute('href') || '');
       if (!pid) return;
       const info = rankings[pid];
       if (!info) return;
-      injectAfter(a, { ...info, pid });
+      // Inject next to the name inside this anchor's row, not next to the
+      // anchor itself (which may wrap only a position square).
+      const row = playerRowAncestor(a);
+      const nameEl = findNameElement(row) || a;
+      injectAfter(nameEl, { ...info, pid });
     });
 
-    // Strategy 2: name-text match on elements that look like a player name.
-    // We're conservative — only match short text nodes (1–40 chars) whose
-    // parent is an inline element in a clearly list-like container.
-    if (nameToId.size > 0) scanTextNodes(root);
+    // Strategy 2 — aria-label scan (team rosters, trade picker, draft)
+    const labeled = (root.querySelectorAll
+      ? root.querySelectorAll('[aria-label*=" - "]')
+      : []);
+    labeled.forEach((el) => {
+      const fullName = nameFromAriaLabel(el.getAttribute('aria-label') || '');
+      if (!fullName) return;
+      const key = normalizeName(fullName);
+      const pid = nameToId.get(key);
+      if (!pid) return;
+      const info = rankings[pid];
+      if (!info) return;
+
+      const row = playerRowAncestor(el);
+      const nameEl = findNameElement(row) || el;
+      injectAfter(nameEl, { ...info, pid });
+    });
+
+    // Strategy 3 — short-name fallback via [class*="player-name"] text
+    // For surfaces where neither href nor aria-label resolves the player.
+    if (shortNameToId.size > 0) scanShortNames(root);
   }
 
   function extractPidFromHref(href) {
-    // matches /players/nfl/<id> or /players/nfl/<id>/...
     const m = href.match(/\/players\/nfl\/([A-Za-z0-9_\-]+)/);
     return m ? m[1] : null;
   }
 
-  function scanTextNodes(root) {
-    // Walk text nodes under root, but skip subtrees we've already scanned.
-    const walker = document.createTreeWalker(
-      root,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode(n) {
-          const t = n.nodeValue;
-          if (!t || t.length < 3 || t.length > 40) return NodeFilter.FILTER_REJECT;
-          const p = n.parentElement;
-          if (!p) return NodeFilter.FILTER_REJECT;
-          if (p.closest(`.${BADGE_CLASS}`)) return NodeFilter.FILTER_REJECT;
-          if (p.hasAttribute(SCANNED_ATTR)) return NodeFilter.FILTER_REJECT;
-          // Skip if this is inside a link — the anchor strategy already handled it
-          if (p.closest('a[href*="/players/nfl/"]')) return NodeFilter.FILTER_REJECT;
-          return NodeFilter.FILTER_ACCEPT;
-        },
-      }
-    );
+  function scanShortNames(root) {
+    const nameEls = root.querySelectorAll
+      ? root.querySelectorAll('[class*="player-name"], [class*="player_name"]')
+      : [];
+    nameEls.forEach((el) => {
+      const text = (el.textContent || '').trim();
+      if (!text || text.length > 40) return;
+      // Match "D Maye" / "D. Maye" / "D. Maye Jr." — first initial + last
+      const m = text.match(/^([A-Za-z])\.?\s+([A-Za-z'\-]+)(?:\s+(Jr|Sr|II|III|IV|V)\.?)?$/);
+      if (!m) return;
+      const firstInit = m[1].toLowerCase();
+      const lastName  = m[2].toLowerCase().replace(/[^\w]/g, '');
 
-    const hits = [];
-    let node;
-    while ((node = walker.nextNode())) {
-      const text = node.nodeValue.trim();
-      const key  = normalizeName(text);
-      if (!key) continue;
-      const pid = nameToId.get(key);
-      if (!pid) continue;
+      // Need the position to disambiguate — look for a sibling/ancestor
+      // element with position text.
+      const row = playerRowAncestor(el);
+      if (!row) return;
+      const pos = findPositionInRow(row);
+      if (!pos) return;
+
+      const sk = `${pos.toLowerCase()}:${firstInit}:${lastName}`;
+      const pid = shortNameToId.get(sk);
+      if (!pid) return;
       const info = rankings[pid];
-      if (!info) continue;
-      hits.push({ node, info, pid });
+      if (!info) return;
+
+      injectAfter(el, { ...info, pid });
+    });
+  }
+
+  function findPositionInRow(row) {
+    if (!row || !row.querySelector) return null;
+    // Sleeper commonly renders position in a small span with class .pos or
+    // .position or includes it inside the position-square anchor's text.
+    const cands = row.querySelectorAll('.pos, .position, [class*="pos-"], [class*="position"]');
+    for (const el of cands) {
+      const t = (el.textContent || '').trim().toUpperCase();
+      if (['QB', 'RB', 'WR', 'TE'].includes(t)) return t;
     }
-    // Process after walk to avoid mutating while iterating
-    for (const { node, info, pid } of hits) {
-      const target = node.parentElement;
-      if (target) injectAfter(target, { ...info, pid });
-    }
+    return null;
   }
 
   // ─────────────────────────────────────────────────────────────
-  //  Mutation observer (Sleeper is a SPA)
+  //  Mutation observer — Sleeper is a SPA
   // ─────────────────────────────────────────────────────────────
 
   function startObserver() {
@@ -221,11 +319,20 @@
     observer = new MutationObserver((mutations) => {
       let touched = false;
       for (const m of mutations) {
-        if (m.addedNodes && m.addedNodes.length) { touched = true; break; }
+        if ((m.addedNodes && m.addedNodes.length)
+            || m.type === 'attributes') {
+          touched = true;
+          break;
+        }
       }
       if (touched) scheduleScan();
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['aria-label', 'href'],
+    });
   }
 
   // ─────────────────────────────────────────────────────────────
