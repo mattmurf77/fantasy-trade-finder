@@ -18,6 +18,8 @@ Usage:
 """
 
 import json
+import math
+import random
 import anthropic
 from dataclasses import dataclass
 from typing import Optional
@@ -399,3 +401,131 @@ Respond with JSON only:
         idx    = max(0, min(int(result["selected_index"]) - 1, len(candidates) - 1))
         p1, p2, p3 = candidates[idx]
         return Trio(player_a=p1, player_b=p2, player_c=p3, reasoning=result["reasoning"])
+
+
+# ---------------------------------------------------------------------------
+# Agent A1 — helpers gated by swipe.community_compare / swipe.qc_compliments
+# (pure functions; no behavior change unless a caller invokes them)
+# ---------------------------------------------------------------------------
+
+def community_trio_signal(
+    seed_elo: dict,
+    trio_ids: list,
+) -> Optional[dict]:
+    """Compute community-consensus signal for a trio from seed ELOs.
+
+    Returns a dict describing the community's predicted #1 pick and the
+    approximate % of rankers expected to agree (softmax over seed ELOs).
+    Returns None when the signal is too weak to be meaningful (e.g. all
+    three players share the same seed or we don't have seed data for all
+    three).
+
+    Shape:
+        {
+            "consensus_order": [pid1, pid2, pid3],
+            "consensus_first": pid1,
+            "first_pick_pct": int (0-100),
+            "is_lopsided": bool,
+        }
+
+    The % is derived from a softmax over the three seed ELOs with a scale
+    similar to the ELO formula (s ≈ 173.7). This matches the intuition
+    that a 200-ELO gap ~≈ 76% expected win rate for the higher player.
+    """
+    elos = []
+    for pid in trio_ids:
+        e = seed_elo.get(pid)
+        if e is None:
+            return None
+        elos.append(float(e))
+
+    if len(elos) != 3:
+        return None
+
+    # If all three are within a tiny band, there's no meaningful signal.
+    spread = max(elos) - min(elos)
+    if spread < 25.0:
+        return None
+
+    # Softmax with ELO scale (400 / ln(10) ≈ 173.7) gives probabilities
+    # consistent with the Elo win-probability formula.
+    scale = 173.7
+    max_e = max(elos)
+    exps = [math.exp((e - max_e) / scale) for e in elos]
+    z = sum(exps)
+    probs = [ex / z for ex in exps]
+
+    # Build ordered consensus (highest elo first)
+    indexed = sorted(range(3), key=lambda i: elos[i], reverse=True)
+    ordered_ids = [trio_ids[i] for i in indexed]
+
+    first_idx = indexed[0]
+    first_pct = int(round(probs[first_idx] * 100))
+
+    # Lopsided = clear 1-2-3 with comfortable gaps at each step.
+    # Thresholds chosen to be rare (~1 in 10 random trios typically).
+    sorted_elos = sorted(elos, reverse=True)
+    gap_12 = sorted_elos[0] - sorted_elos[1]
+    gap_23 = sorted_elos[1] - sorted_elos[2]
+    is_lopsided = (gap_12 >= 80.0) and (gap_23 >= 80.0) and (first_pct >= 60)
+
+    return {
+        "consensus_order": ordered_ids,
+        "consensus_first": ordered_ids[0],
+        "first_pick_pct":  first_pct,
+        "is_lopsided":     is_lopsided,
+    }
+
+
+def find_qc_trio(
+    pool: list,
+    seed_elo: dict,
+    max_attempts: int = 40,
+    rng: Optional[random.Random] = None,
+) -> Optional[tuple]:
+    """Find a lopsided 1-2-3 trio (large ELO gaps) for QC compliments.
+
+    Picks a high-seed anchor, then searches for a partner a clear tier
+    below, and a third a clear tier below that. Returns the three players
+    in consensus order (best → worst) or None if no suitable trio exists.
+    """
+    r = rng or random
+
+    # Rank pool by seed ELO descending; we only look within the top 60
+    # so the QC trio always features recognisable names.
+    ranked = sorted(pool, key=lambda p: seed_elo.get(p.id, 1500.0), reverse=True)
+    if len(ranked) < 3:
+        return None
+
+    top_slice = ranked[: min(60, len(ranked))]
+
+    for _ in range(max_attempts):
+        # Sample an anchor from the top 20 if possible, else anywhere in slice.
+        anchor_pool = top_slice[: min(20, len(top_slice))]
+        a = r.choice(anchor_pool)
+        a_elo = seed_elo.get(a.id, 1500.0)
+
+        # Second player: ELO at least 90 below anchor, but not too far.
+        mid_candidates = [
+            p for p in top_slice
+            if p.id != a.id
+            and 90.0 <= (a_elo - seed_elo.get(p.id, 1500.0)) <= 250.0
+        ]
+        if not mid_candidates:
+            continue
+        b = r.choice(mid_candidates)
+        b_elo = seed_elo.get(b.id, 1500.0)
+
+        # Third player: ELO at least 90 below b, within the full pool.
+        low_candidates = [
+            p for p in pool
+            if p.id not in (a.id, b.id)
+            and 90.0 <= (b_elo - seed_elo.get(p.id, 1500.0)) <= 300.0
+        ]
+        if not low_candidates:
+            continue
+        c = r.choice(low_candidates)
+
+        return (a, b, c)
+
+    return None

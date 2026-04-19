@@ -24,6 +24,8 @@ from datetime import datetime, timezone, timedelta
 from itertools import combinations
 from typing import Optional
 
+from .feature_flags import FLAGS
+
 
 # ---------------------------------------------------------------------------
 # Runtime config — loaded from model_config DB table at startup and on
@@ -65,6 +67,13 @@ _DEFAULT_CFG: dict[str, float] = {
     "max_candidates":      500.0,
     # Trade ELO gap filter
     "trade_elo_gap_max":   250.0,
+    # Agent A8 — trade-math adjustments (all behind feature flags)
+    "qb_tax_rate":               0.075,  # 7.5% penalty when a side gets a premium QB
+    "star_tax_per_tier_gap":     0.10,   # 10% penalty per tier gap beyond 1
+    "star_tax_elite_multiplier": 1.5,    # extra multiplier when a Tier-1 star is traded away
+    "roster_spot_penalty":       0.05,   # 5% penalty per extra roster spot used
+    "roster_clogger_penalty":    0.10,   # 10% ADDITIONAL penalty per player beyond 2 in a 3+ one-way
+    "roster_clogger_threshold":  3.0,    # 3+ players one-way triggers "clogger"
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -296,6 +305,248 @@ def positional_preference_multiplier(
 
 
 # ---------------------------------------------------------------------------
+# Agent A8 — trade-math adjustments (behind feature flags)
+# ---------------------------------------------------------------------------
+# These functions compute multiplicative adjustments to the composite score
+# and, when the human_explanations flag is on, append a plain-English reason
+# to the supplied `reasons` list.  All adjustments are ADDITIVE — each flag
+# that is on contributes independently and stacks multiplicatively.
+#
+# Signatures follow a consistent pattern:
+#   (give_ids, recv_ids, *context, reasons: list[str]) -> float multiplier
+# where 1.0 means "no adjustment".
+#
+# The caller passes the same `reasons` list to each function.  If
+# human_explanations is off the caller simply drops the list at the end
+# rather than paying per-function branches.
+# ---------------------------------------------------------------------------
+
+# Elite-tier ELO lower bound — matches RankingService.UNIFORM_TIER_ELO_BANDS
+# elite band (1720-1790). We use the "starter" lower bound (1600) for
+# "premium QB" per the QB Tax spec; any QB at or above 1600 qualifies.
+_QB_PREMIUM_ELO = 1600.0
+
+
+def _position_of(pid: str, player_db: dict) -> Optional[str]:
+    p = player_db.get(pid)
+    if not p:
+        return None
+    return getattr(p, "position", None)
+
+
+def _seed_of(pid: str, seed_elo: dict[str, float]) -> float:
+    return seed_elo.get(pid, 1500.0)
+
+
+def qb_tax_adjustment(
+    give_ids: list[str],
+    recv_ids: list[str],
+    seed_elo: dict[str, float],
+    player_db: dict,
+    reasons: list[str],
+) -> float:
+    """
+    Feature: trade_math.qb_tax.
+
+    When one side of the trade RECEIVES a premium QB (seed ELO >=
+    _QB_PREMIUM_ELO) without GIVING one back, apply a penalty to that
+    side — i.e. the side that is handing over a premium QB is effectively
+    getting short-changed, so the composite score drops.
+
+    The penalty symmetrically models both directions:
+      * If user receives a premium QB and opponent does not → user's
+        side is advantaged; we actually want to discount the composite
+        because the opp would likely refuse. So the composite drops.
+      * If user gives a premium QB without getting one back → user is
+        disadvantaged; composite drops.
+    Either direction shaves the configured rate off the composite.
+
+    Returns a multiplier in (0, 1].
+    """
+    if not FLAGS.trade_math_qb_tax:
+        return 1.0
+
+    rate = _c("qb_tax_rate")
+
+    def _premium_qbs(ids: list[str]) -> list[str]:
+        out = []
+        for pid in ids:
+            if _position_of(pid, player_db) != "QB":
+                continue
+            if _seed_of(pid, seed_elo) >= _QB_PREMIUM_ELO:
+                out.append(pid)
+        return out
+
+    user_recv_qbs = _premium_qbs(recv_ids)   # user receives these
+    user_give_qbs = _premium_qbs(give_ids)   # user gives these
+
+    multiplier = 1.0
+    # Team 1 (user) receives a premium QB without giving one back.
+    if user_recv_qbs and not user_give_qbs:
+        multiplier *= (1.0 - rate)
+        if FLAGS.trade_math_human_explanations:
+            reasons.append(
+                f"⚠️ QB tax: Team 1 receives a premium QB without giving one back (−{rate*100:.1f}%)"
+            )
+    # Team 2 (opponent) receives a premium QB without giving one back
+    # (from user's perspective: user gives a QB without getting one).
+    if user_give_qbs and not user_recv_qbs:
+        multiplier *= (1.0 - rate)
+        if FLAGS.trade_math_human_explanations:
+            reasons.append(
+                f"⚠️ QB tax: Team 2 receives a premium QB without giving one back (−{rate*100:.1f}%)"
+            )
+    return multiplier
+
+
+def star_tax_adjustment(
+    give_ids: list[str],
+    recv_ids: list[str],
+    seed_elo: dict[str, float],
+    player_db: dict,
+    scoring_format: str,
+    reasons: list[str],
+) -> float:
+    """
+    Feature: trade_math.star_tax.
+
+    Compare the TOP asset on each side (highest seed ELO).  If they sit
+    more than one tier apart, apply `star_tax_per_tier_gap` per extra
+    tier step to the side RECEIVING the lower-tier package.  When the
+    higher-tier star is Tier 1 (elite), multiply the penalty by
+    `star_tax_elite_multiplier` — trading away an elite star is extra
+    costly.
+
+    Tiers from RankingService.tier_for_elo. Tier order (top→bottom):
+      elite (0) → starter (1) → solid (2) → depth (3) → bench (4) → unranked (5)
+    Gap = |give_tier_idx - recv_tier_idx|.
+    """
+    if not FLAGS.trade_math_star_tax:
+        return 1.0
+
+    try:
+        from .ranking_service import RankingService
+    except Exception:
+        return 1.0
+
+    tier_order = ("elite", "starter", "solid", "depth", "bench")
+
+    def _top_tier_idx(ids: list[str]) -> tuple[int, Optional[str], Optional[str]]:
+        """Return (tier_index, tier_name, pid) of the highest-ELO asset."""
+        best_idx = 99
+        best_name: Optional[str] = None
+        best_pid: Optional[str] = None
+        for pid in ids:
+            elo = _seed_of(pid, seed_elo)
+            pos = _position_of(pid, player_db)
+            tier = RankingService.tier_for_elo(elo, pos, scoring_format)
+            if tier is None:
+                idx = len(tier_order)  # unranked sinks below bench
+            else:
+                idx = tier_order.index(tier)
+            if idx < best_idx:
+                best_idx = idx
+                best_name = tier
+                best_pid = pid
+        return best_idx, best_name, best_pid
+
+    give_idx, give_tier, _give_pid = _top_tier_idx(give_ids)
+    recv_idx, recv_tier, _recv_pid = _top_tier_idx(recv_ids)
+
+    gap = abs(give_idx - recv_idx)
+    if gap <= 1:
+        return 1.0
+
+    per_gap  = _c("star_tax_per_tier_gap")
+    elite_m  = _c("star_tax_elite_multiplier")
+    extra    = gap - 1  # only count gaps BEYOND 1
+
+    # Side receiving the lower tier (higher idx) eats the penalty.
+    # Equivalently: the side trading away the higher tier is over-paying.
+    # We apply the penalty to the composite (which represents user utility
+    # regardless of side). Elite bump applies when the HIGHER-tier side
+    # is Tier 1.
+    higher_is_elite = (min(give_idx, recv_idx) == 0)
+    penalty = per_gap * extra
+    if higher_is_elite:
+        penalty *= elite_m
+
+    multiplier = max(0.0, 1.0 - penalty)
+
+    if FLAGS.trade_math_human_explanations:
+        if give_idx < recv_idx:
+            # User trades away the better star
+            side_label = "Team 1 trades away"
+            tier_label = give_tier or "unranked"
+        else:
+            side_label = "Team 2 trades away"
+            tier_label = recv_tier or "unranked"
+        tier_tag = "Tier 1" if higher_is_elite else tier_label.capitalize()
+        reasons.append(
+            f"⭐ Star tax: {side_label} a {tier_tag} star (−{penalty*100:.1f}%)"
+        )
+    return multiplier
+
+
+def roster_clogger_adjustment(
+    give_ids: list[str],
+    recv_ids: list[str],
+    reasons: list[str],
+) -> float:
+    """
+    Feature: trade_math.roster_clogger.
+
+    Penalise asymmetric-size trades.
+    * roster_spot_penalty per extra roster spot used
+    * Plus an ADDITIONAL roster_clogger_penalty per player beyond 2 for
+      a "clogger" trade (>= roster_clogger_threshold players one-way).
+    """
+    if not FLAGS.trade_math_roster_clogger:
+        return 1.0
+
+    n_give = len(give_ids)
+    n_recv = len(recv_ids)
+    diff   = abs(n_give - n_recv)
+    if diff <= 0:
+        return 1.0
+
+    spot_rate    = _c("roster_spot_penalty")
+    clogger_rate = _c("roster_clogger_penalty")
+    threshold    = int(_c("roster_clogger_threshold"))
+
+    multiplier = 1.0
+    penalty_total = spot_rate * diff
+
+    # Clogger: the bigger side has >= threshold players.
+    bigger = max(n_give, n_recv)
+    if bigger >= threshold:
+        # Each player beyond 2 in the bigger side adds clogger_rate
+        extra_players = bigger - 2
+        penalty_total += clogger_rate * extra_players
+
+    multiplier = max(0.0, 1.0 - penalty_total)
+
+    if FLAGS.trade_math_human_explanations:
+        # Label the side doing the "clogging" — the side giving up more
+        # players. From user POV: n_give > n_recv means user gives more.
+        if n_give > n_recv:
+            side_label = "Team 1 gives up"
+            count_label = f"{n_give} players for {n_recv}"
+        else:
+            side_label = "Team 2 gives up"
+            count_label = f"{n_recv} players for {n_give}"
+        if bigger >= threshold:
+            reasons.append(
+                f"📦 Roster clogger: {side_label} {count_label} (−{penalty_total*100:.1f}%)"
+            )
+        else:
+            reasons.append(
+                f"📦 Roster spots: {side_label} {count_label} (−{penalty_total*100:.1f}%)"
+            )
+    return multiplier
+
+
+# ---------------------------------------------------------------------------
 # Data Models
 # ---------------------------------------------------------------------------
 
@@ -323,6 +574,11 @@ class TradeCard:
     expires_at: str = field(default_factory=lambda: (
         datetime.now(timezone.utc) + timedelta(days=7)).isoformat())
     decision: Optional[str] = None      # None | "like" | "pass"
+    # Agent A8 — human-readable trade adjustment explanations.
+    # Populated only when trade-math flags are on. Empty list means no
+    # adjustment-level reasons for this trade. The server view converts
+    # an empty list to an omitted JSON key when human_explanations is off.
+    reasons: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -778,11 +1034,37 @@ class TradeService:
                 filtered.append((composite, mismatch, give_ids, recv_ids))
             candidates = filtered
 
+        # ------------------------------------------------------------------
+        # Agent A8 — apply trade-math adjustments (flag-gated).
+        # Each candidate's composite score is multiplied by the product
+        # of all enabled adjustments. Adjustments are ADDITIVE — each
+        # enabled flag contributes independently and compounds.
+        # When ALL flags are off this loop is a no-op (each function
+        # short-circuits to 1.0 and leaves reasons untouched), so the
+        # final candidate list is IDENTICAL to the legacy behaviour.
+        # ------------------------------------------------------------------
+        # Determine active scoring format once (for star-tax tier lookup).
+        # We don't have explicit access here, so fall back to "1qb_ppr".
+        _scoring_format = getattr(self, "_scoring_format", "1qb_ppr")
+        _adjusted: list[tuple[float, float, list[str], list[str], list[str]]] = []
+        for composite, mismatch, give_ids, recv_ids in candidates:
+            reasons: list[str] = []
+            adj = 1.0
+            adj *= qb_tax_adjustment(
+                give_ids, recv_ids, seed_elo, players, reasons,
+            )
+            adj *= star_tax_adjustment(
+                give_ids, recv_ids, seed_elo, players, _scoring_format, reasons,
+            )
+            adj *= roster_clogger_adjustment(give_ids, recv_ids, reasons)
+            new_composite = composite * adj
+            _adjusted.append((new_composite, mismatch, give_ids, recv_ids, reasons))
+
         # Sort and take top N
         # ------------------------------------------------------------------
-        candidates.sort(key=lambda x: x[0], reverse=True)
+        _adjusted.sort(key=lambda x: x[0], reverse=True)
         cards = []
-        for composite, mismatch, give_ids, recv_ids in candidates[:max_cards]:
+        for composite, mismatch, give_ids, recv_ids, reasons in _adjusted[:max_cards]:
             card = TradeCard(
                 trade_id          = str(uuid.uuid4())[:8],
                 league_id         = league_id,
@@ -794,6 +1076,7 @@ class TradeService:
                 mismatch_score    = round(mismatch, 1),
                 fairness_score    = round(composite, 3),
                 composite_score   = round(composite, 3),
+                reasons           = reasons if FLAGS.trade_math_human_explanations else [],
             )
             cards.append(card)
         return cards

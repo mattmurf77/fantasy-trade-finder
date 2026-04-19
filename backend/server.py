@@ -902,7 +902,40 @@ def get_trio():
         log.warning("load_skips failed (continuing without filter): %s", _skip_err)
         skipped_ids = set()
     try:
-        trio = service.get_next_trio(position=position, skipped_player_ids=skipped_ids)
+        # Agent A1 — swipe.qc_compliments: occasionally (~1/15) substitute
+        # a lopsided "QC" trio so we can reward the user when they match the
+        # community consensus. Flag-off behavior is unchanged.
+        qc_trio_obj = None
+        qc_expected_order: list = []
+        if is_enabled("swipe.qc_compliments"):
+            try:
+                import random as _rand
+                if _rand.random() < (1.0 / 15.0):
+                    from .smart_matchup_generator import find_qc_trio as _find_qc
+                    _pool = service._pool(position)
+                    if skipped_ids:
+                        _pool = [p for p in _pool if p.id not in skipped_ids]
+                    picked = _find_qc(_pool, service._seed)
+                    if picked is not None:
+                        a, b, c = picked
+                        qc_expected_order = [a.id, b.id, c.id]
+                        # Duck-type a trio object compatible with the
+                        # serialisation code below.
+                        class _QCTrio:  # local, tiny
+                            pass
+                        qc_trio_obj = _QCTrio()
+                        qc_trio_obj.player_a = a
+                        qc_trio_obj.player_b = b
+                        qc_trio_obj.player_c = c
+                        qc_trio_obj.reasoning = "Consensus check — clear tier gap."
+            except Exception as _qc_err:
+                log.warning("qc_compliments trio generation failed: %s", _qc_err)
+                qc_trio_obj = None
+
+        if qc_trio_obj is not None:
+            trio = qc_trio_obj
+        else:
+            trio = service.get_next_trio(position=position, skipped_player_ids=skipped_ids)
         resp = {
             "player_a":  player_to_dict(trio.player_a),
             "player_b":  player_to_dict(trio.player_b),
@@ -910,6 +943,29 @@ def get_trio():
             "reasoning": trio.reasoning,
             "tier_info": service._tier_info(position),
         }
+
+        # Agent A1 — swipe.community_compare: attach community-consensus
+        # signal so the frontend can show "X% agreed with your #1" toast.
+        # Flag-off: no new keys in the response.
+        if is_enabled("swipe.community_compare"):
+            try:
+                from .smart_matchup_generator import community_trio_signal
+                sig = community_trio_signal(
+                    seed_elo=service._seed,
+                    trio_ids=[trio.player_a.id, trio.player_b.id, trio.player_c.id],
+                )
+                if sig is not None:
+                    resp["community_signal"] = sig
+            except Exception as _cs_err:
+                log.warning("community_compare signal failed: %s", _cs_err)
+
+        # Agent A1 — swipe.qc_compliments: mark the response so the frontend
+        # can reward consensus-matching rankings. Flag-off or non-QC trio:
+        # no new keys in the response.
+        if is_enabled("swipe.qc_compliments") and qc_trio_obj is not None and qc_expected_order:
+            resp["is_qc_trio"] = True
+            resp["qc_expected_order"] = qc_expected_order
+
         return jsonify(resp)
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -1267,6 +1323,170 @@ def tiers_status_route():
         return jsonify({"error": str(e)}), 500
 
 
+# ---------------------------------------------------------------------------
+# Agent A2 — Tier UX helper endpoints (flag-gated; default-off)
+# ---------------------------------------------------------------------------
+# /api/tiers/community-diff — returns {player_id: {user_tier, community_tier}}
+#   community_tier is derived from the *universal seed ELO* (the consensus
+#   starting point before any swipes/overrides) using RankingService.tier_for_elo
+#   so it represents "where the market places this player" independent of the
+#   active user's own rank-set.
+#
+# /api/tiers/stability — returns {player_id: "stable" | "volatile"}
+#   Reads elo_history for the last 30 days, counts the number of distinct
+#   tier buckets the user's ELO has fallen into per player, and labels:
+#       1 distinct tier  → stable
+#       3+ distinct tiers → volatile
+#       2 distinct tiers  → (omitted — no badge)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/tiers/community-diff")
+def tiers_community_diff_route():
+    """GET /api/tiers/community-diff?position=RB
+    → { position, scoring_format, diffs: {player_id: {user_tier, community_tier}} }
+
+    Flag-gated by tiers.community_diff. When flag is off, returns an empty
+    diffs map so the frontend (which also gates) never shows the overlay.
+    """
+    if not is_enabled("tiers.community_diff"):
+        return jsonify({
+            "position":       request.args.get("position") or "",
+            "scoring_format": "",
+            "diffs":          {},
+            "disabled":       True,
+        })
+
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    service = sess["service"]
+    fmt = _active_format(sess)
+    position = request.args.get("position") or None
+    if position not in ("QB", "RB", "WR", "TE"):
+        return jsonify({"error": f"Invalid position: {position!r}"}), 400
+
+    try:
+        # User ELO comes from the active service's rankings (applies overrides
+        # + replayed swipes).
+        rank_set = service.get_rankings(position=position)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+    # Community ELO is the universal seed for this format — the consensus
+    # "starting point" before the user touched anything.
+    try:
+        _, community_seed = _get_universal_pool(fmt)
+    except Exception as e:
+        log.warning("community-diff seed fetch failed: %s", e)
+        community_seed = {}
+
+    diffs: dict[str, dict] = {}
+    for rp in rank_set.rankings:
+        pid = rp.player.id
+        user_elo = getattr(rp, "elo", None)
+        comm_elo = community_seed.get(pid)
+        user_tier = RankingService.tier_for_elo(user_elo, position, fmt) if user_elo is not None else None
+        comm_tier = RankingService.tier_for_elo(comm_elo, position, fmt) if comm_elo is not None else None
+        # Only include players where we have at least one tier assignment —
+        # otherwise the overlay has nothing useful to show.
+        if user_tier is None and comm_tier is None:
+            continue
+        diffs[pid] = {
+            "user_tier":      user_tier,
+            "community_tier": comm_tier,
+        }
+
+    return jsonify({
+        "position":       position,
+        "scoring_format": fmt,
+        "diffs":          diffs,
+    })
+
+
+@app.route("/api/tiers/stability")
+def tiers_stability_route():
+    """GET /api/tiers/stability?position=RB
+    → { position, scoring_format, stability: {player_id: "stable" | "volatile"} }
+
+    Flag-gated by tiers.stability_indicator. Reads elo_history for the last
+    30 days, buckets each snapshot via RankingService.tier_for_elo, and
+    classifies players:
+        1 distinct tier       → "stable"
+        3+ distinct tiers     → "volatile"
+        2 distinct tiers      → (omitted)
+        <2 total snapshots    → (omitted — insufficient data)
+    """
+    if not is_enabled("tiers.stability_indicator"):
+        return jsonify({
+            "position":       request.args.get("position") or "",
+            "scoring_format": "",
+            "stability":      {},
+            "disabled":       True,
+        })
+
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    fmt = _active_format(sess)
+    position = request.args.get("position") or None
+    if position not in ("QB", "RB", "WR", "TE"):
+        return jsonify({"error": f"Invalid position: {position!r}"}), 400
+
+    try:
+        history = load_elo_history(
+            user_id        = g_user_id,
+            scoring_format = fmt,
+            since_days     = 30,
+            league_id      = g_league.league_id if g_league else None,
+        )
+    except Exception as e:
+        log.warning("tiers/stability: load_elo_history failed: %s", e)
+        history = []
+
+    # Bucket each snapshot into a tier keyed by player_id. We only look at
+    # rows for players that belong to the requested position — cheap filter
+    # via the session's pool.
+    try:
+        pool_players = sess["service"]._pool(position)
+        valid_pids = {p.id for p in pool_players}
+    except Exception:
+        valid_pids = set()
+
+    # player_id → set(tier_name)
+    tiers_seen: dict[str, set] = {}
+    counts: dict[str, int] = {}
+    for row in history:
+        pid = row.get("player_id")
+        if not pid:
+            continue
+        if valid_pids and pid not in valid_pids:
+            continue
+        elo = row.get("elo")
+        tier = RankingService.tier_for_elo(elo, position, fmt)
+        if tier is None:
+            continue
+        tiers_seen.setdefault(pid, set()).add(tier)
+        counts[pid] = counts.get(pid, 0) + 1
+
+    stability: dict[str, str] = {}
+    for pid, tier_set in tiers_seen.items():
+        if counts.get(pid, 0) < 2:
+            # Need at least 2 snapshots before we label anything.
+            continue
+        distinct = len(tier_set)
+        if distinct == 1:
+            stability[pid] = "stable"
+        elif distinct >= 3:
+            stability[pid] = "volatile"
+        # distinct == 2 → no badge (neutral)
+
+    return jsonify({
+        "position":       position,
+        "scoring_format": fmt,
+        "stability":      stability,
+    })
+
+
 @app.route("/api/reset", methods=["POST"])
 def reset():
     """POST /api/reset  {position: "RB"}"""
@@ -1436,7 +1656,7 @@ def trade_card_to_dict(card, players: dict) -> dict:
         pl = players.get(pid)
         return player_to_dict(pl) if pl else {"id": pid, "name": "Unknown",
                                                "position": "?", "team": "?", "age": 0}
-    return {
+    out = {
         "trade_id":          card.trade_id,
         "league_id":         card.league_id,
         "target_username":   card.target_username,
@@ -1447,6 +1667,17 @@ def trade_card_to_dict(card, players: dict) -> dict:
         "decision":          card.decision,
         "expires_at":        card.expires_at,
     }
+    # Agent A8 — expose human-readable reasons only when the flag is on
+    # AND the card actually has some. Keeps legacy JSON identical when off.
+    reasons = getattr(card, "reasons", None)
+    if reasons:
+        try:
+            from .feature_flags import FLAGS as _FLAGS
+            if _FLAGS.trade_math_human_explanations:
+                out["reasons"] = list(reasons)
+        except Exception:
+            pass
+    return out
 
 
 @app.route("/api/trades/generate", methods=["POST"])

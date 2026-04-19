@@ -436,6 +436,13 @@
         </table>
       </div>
     </div>
+    <!-- Sticky mobile CTA bar (flag: mobile.sticky_cta) — hidden unless
+         flag on + mobile viewport. Keeps a primary action reachable. -->
+    <div class="mobile-sticky-cta-bar" id="mobile-rankings-sticky-cta" aria-hidden="true">
+      <button class="mobile-sticky-cta-btn"
+              onclick="switchView('rank')"
+              type="button">Rank More Players →</button>
+    </div>
   </div>
 
   <!-- ═══════════════════════════════════════════════════
@@ -527,6 +534,30 @@
         </button>
       </div>
 
+      <!-- ── New partners banner (flag trades.new_partners_alerts) ────────
+           Populated client-side by renderNewPartnersBanner(). Hidden by default. -->
+      <div class="new-partners-banner hidden" id="new-partners-banner" style="display:none">
+        <span class="new-partners-banner-icon">🎯</span>
+        <span class="new-partners-banner-text" id="new-partners-banner-text"></span>
+        <button class="new-partners-banner-dismiss"
+                onclick="dismissNewPartnersBanner()"
+                title="Dismiss">&times;</button>
+      </div>
+
+      <!-- ── Queue tabs (flag trades.queue_2k) ───────────────────────────
+           Flips between the normal trade results panel and the queued offers
+           panel. Both panels share the same trades-wrap. Hidden unless flag
+           on. -->
+      <div class="trade-queue-tabs hidden" id="trade-queue-tabs" style="display:none">
+        <button class="trade-queue-tab active" id="trade-queue-tab-results"
+                onclick="showTradePanel('results')">Results</button>
+        <button class="trade-queue-tab" id="trade-queue-tab-queue"
+                onclick="showTradePanel('queue')">
+          Queue
+          <span class="trade-queue-tab-count" id="trade-queue-tab-count" style="display:none">0</span>
+        </button>
+      </div>
+
       <!-- Fairness threshold slider -->
       <div class="fairness-row" id="fairness-row">
         <span class="fairness-label">Trade balance</span>
@@ -591,6 +622,30 @@
           <strong>No trades yet</strong>
           Hit "Find a Trade" to generate personalised trade suggestions<br>
           based on your rankings vs your leaguemates.
+        </div>
+      </div>
+
+      <!-- ── Queue panel (flag trades.queue_2k) ──────────────────────────
+           Hidden by default; toggled by showTradePanel(). Populated by
+           renderTradeQueue(). -->
+      <div class="trade-queue-panel hidden" id="trade-queue-panel" style="display:none">
+        <div class="trade-queue-panel-header">
+          <div class="trade-queue-panel-title">Your trade queue</div>
+          <div class="trade-queue-panel-actions">
+            <button class="trade-queue-clear-btn" id="trade-queue-clear-btn"
+                    onclick="clearTradeQueue()">Clear</button>
+            <button class="trade-queue-send-btn" id="trade-queue-send-btn"
+                    onclick="sendAllQueuedTrades()">Send all →</button>
+          </div>
+        </div>
+        <div class="trade-queue-panel-sub">
+          Queue up multiple offers, then batch-open them on Sleeper.
+        </div>
+        <div class="trade-queue-chips" id="trade-queue-chips">
+          <div class="trade-queue-empty">
+            <strong>Queue is empty</strong>
+            Tap <em>+ Queue</em> on any trade idea to stack it here.
+          </div>
         </div>
       </div>
 

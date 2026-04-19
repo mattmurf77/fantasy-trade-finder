@@ -379,6 +379,13 @@ _MODEL_CONFIG_DEFAULTS = [
     ("mix_in_pre_unlock_start", 5.0,   "Interaction count at which pre-unlock mix-in begins"),
     # ── Trade ELO gap filter ─────────────────────────────────────────────
     ("trade_elo_gap_max",    250.0,   "Max user-ELO gap between give/receive sides before rejecting a trade (0=disabled)"),
+    # ── Agent A8 — trade-math adjustments (flag-gated) ───────────────────
+    ("qb_tax_rate",              0.075, "QB tax: % penalty to side receiving a premium QB without giving one back"),
+    ("star_tax_per_tier_gap",    0.10,  "Star tax: % penalty per tier gap beyond 1 between top assets"),
+    ("star_tax_elite_multiplier", 1.5,  "Star tax: multiplier on penalty when the higher-tier star is Tier 1 (elite)"),
+    ("roster_spot_penalty",      0.05,  "Roster clogger: % penalty per extra roster spot used"),
+    ("roster_clogger_penalty",   0.10,  "Roster clogger: ADDITIONAL % penalty per player beyond 2 for 3+ one-way trades"),
+    ("roster_clogger_threshold", 3.0,   "Roster clogger: minimum one-side player count that triggers the clogger tag"),
 ]
 
 

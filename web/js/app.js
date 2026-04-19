@@ -19,9 +19,42 @@
       } catch (_) {
         // Silent — all flags default to false if the fetch fails.
       }
+      // Agent A1 — surface gesture_audit via a body class so the CSS
+      // thumb-zone rules only apply when the flag is enabled. Flag-off
+      // path: class never added, layout unchanged.
+      try {
+        if (document && document.body && window.FTF_FLAG && window.FTF_FLAG('swipe.gesture_audit')) {
+          document.body.classList.add('ftf-gesture-audit');
+        }
+      } catch (_) { /* ignore */ }
+      _applyMobilePolishFlags();
     }
     // Kick the fetch immediately; it resolves before most UI code runs.
     _loadFeatureFlags();
+
+    // ── Mobile polish flag → body data-attribute wiring (Agent A6) ────
+    // CSS rules scoped under body[data-ftf-flag-mobile-*="1"] become
+    // active only when the corresponding flag is enabled. Flag-off =
+    // no visual change on any viewport.
+    function _applyMobilePolishFlags() {
+      try {
+        const b = document.body;
+        if (!b || !b.dataset) return;
+        b.dataset.ftfFlagMobileStickyCta =
+          window.FTF_FLAG('mobile.sticky_cta') ? '1' : '0';
+        b.dataset.ftfFlagMobileThumbZoneTables =
+          window.FTF_FLAG('mobile.thumb_zone_tables') ? '1' : '0';
+        b.dataset.ftfFlagMobileRankingsCardView =
+          window.FTF_FLAG('mobile.rankings_card_view') ? '1' : '0';
+      } catch (_) { /* ignore */ }
+    }
+    // Apply immediately in case the fetch is slow — attrs start at "0"
+    // and get re-applied once flags resolve.
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', _applyMobilePolishFlags);
+    } else {
+      _applyMobilePolishFlags();
+    }
 
     // ═══════════════════════════════════════════════════════════════
     //  DEBUG LOG DRAWER
@@ -1338,6 +1371,57 @@
       else                      instr.innerHTML = '✓ All ranked — confirm when ready';
     }
 
+    // ── Swipe-compare toast (Agent A1 — swipe.community_compare / qc_compliments) ──
+    // Non-blocking: 600ms fade-in, hold, 600ms fade-out. Works alongside the
+    // existing showToast() without interfering with it.
+    let _swipeToastTimer = null;
+    function showSwipeCompareToast(message, holdMs) {
+      try {
+        let el = document.getElementById('swipe-compare-toast');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'swipe-compare-toast';
+          el.className = 'swipe-compare-toast';
+          el.setAttribute('role', 'status');
+          el.setAttribute('aria-live', 'polite');
+          document.body.appendChild(el);
+        }
+        el.textContent = message;
+        // Kick a reflow so repeat toasts restart the fade cleanly.
+        el.classList.remove('show');
+        // eslint-disable-next-line no-unused-expressions
+        void el.offsetWidth;
+        el.classList.add('show');
+        if (_swipeToastTimer) clearTimeout(_swipeToastTimer);
+        const hold = typeof holdMs === 'number' ? holdMs : 2000;
+        _swipeToastTimer = setTimeout(() => {
+          el.classList.remove('show');
+        }, 600 + hold);
+      } catch (_e) { /* never block the main flow */ }
+    }
+
+    // Agent A1 helpers — compute compare / QC outcomes from the current trio.
+    function _computeCommunityCompareMessage(trio, rankedIds) {
+      if (!trio || !trio.community_signal) return null;
+      const sig = trio.community_signal;
+      if (!sig || !sig.consensus_first || typeof sig.first_pick_pct !== 'number') return null;
+      if (!rankedIds || rankedIds.length < 1) return null;
+      if (rankedIds[0] !== sig.consensus_first) return null;  // only when user agrees
+      // Find the chosen player's name from the trio payload.
+      const players = [trio.player_a, trio.player_b, trio.player_c].filter(Boolean);
+      const pick = players.find(p => p && p.id === rankedIds[0]);
+      const name = (pick && pick.name) ? pick.name : 'your #1';
+      const pct = Math.max(0, Math.min(100, sig.first_pick_pct));
+      return `You picked ${name}. ${pct}% of rankers agreed.`;
+    }
+
+    function _isQcMatch(trio, rankedIds) {
+      if (!trio || !trio.is_qc_trio || !Array.isArray(trio.qc_expected_order)) return false;
+      if (!rankedIds || rankedIds.length !== 3) return false;
+      const exp = trio.qc_expected_order;
+      return exp.length === 3 && exp[0] === rankedIds[0] && exp[1] === rankedIds[1] && exp[2] === rankedIds[2];
+    }
+
     // ── Submit ranking ──────────────────────────────────────────────
     async function submitRanking() {
       if (locked || selectionOrder.length < 3 || !currentTrio) return;
@@ -1346,6 +1430,9 @@
 
       const players = { a: currentTrio.player_a, b: currentTrio.player_b, c: currentTrio.player_c };
       const ranked  = selectionOrder.map(s => players[s].id);
+      // Snapshot the trio so async toast logic sees the exact data the
+      // user just ranked (even after loadTrio overwrites currentTrio).
+      const submittedTrio = currentTrio;
 
       try {
         const res  = await apiFetch('/api/rank3', {
@@ -1367,6 +1454,24 @@
         if (data.error) { showToast('⚠️ ' + data.error); locked = false; return; }
 
         updateProgress(data);
+
+        // Agent A1 — QC compliment (takes precedence over compare toast).
+        // Non-blocking: renders while the next trio is loading.
+        let _swipeToastShown = false;
+        if (window.FTF_FLAG && window.FTF_FLAG('swipe.qc_compliments')) {
+          try {
+            if (_isQcMatch(submittedTrio, ranked)) {
+              showSwipeCompareToast('\u2713 Nice call \u2014 you helped verify the rankings!', 1500);
+              _swipeToastShown = true;
+            }
+          } catch (_e) { /* ignore */ }
+        }
+        if (!_swipeToastShown && window.FTF_FLAG && window.FTF_FLAG('swipe.community_compare')) {
+          try {
+            const msg = _computeCommunityCompareMessage(submittedTrio, ranked);
+            if (msg) showSwipeCompareToast(msg, 2000);
+          } catch (_e) { /* ignore */ }
+        }
 
         if (data.threshold_met && data.interaction_count === data.threshold) {
           _celebrationActive = true;
@@ -1507,6 +1612,136 @@
         if (p.college) parts.push(`<span style="color:var(--muted)">${escapeHtml(p.college)}</span>`);
         extraEl.innerHTML = parts.filter(Boolean).join('');
       }
+
+      // Agent A1 — swipe.gesture_audit: attach the small ⓘ button + touch
+      // gesture handlers. Flag-off: no DOM or event changes.
+      if (window.FTF_FLAG && window.FTF_FLAG('swipe.gesture_audit')) {
+        try { _attachGestureAuditControls(card, side, p); } catch (_e) { /* ignore */ }
+      }
+    }
+
+    // ── Gesture-audit helpers (Agent A1 — swipe.gesture_audit) ─────────
+    // Adds: info button per card, swipe-left = skip, swipe-right = rank 1.
+    // Everything is idempotent — safe to call on every renderCard.
+    function _attachGestureAuditControls(card, side, p) {
+      if (!card) return;
+
+      // 1) Inject a small ⓘ info button if not already there.
+      if (!card.querySelector('.gesture-info-btn')) {
+        const info = document.createElement('button');
+        info.type = 'button';
+        info.className = 'gesture-info-btn';
+        info.setAttribute('aria-label', 'Player info');
+        info.textContent = '\u24D8';  // circled i
+        info.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          _openPlayerInfoSheet(p);
+        });
+        // Stop touch propagation too so tapping ⓘ doesn't start a swipe.
+        info.addEventListener('touchstart', function (ev) { ev.stopPropagation(); }, { passive: true });
+        card.appendChild(info);
+      }
+
+      // 2) Attach swipe handlers once per card element.
+      if (card.dataset.gestureBound === '1') return;
+      card.dataset.gestureBound = '1';
+
+      let startX = 0, startY = 0, startT = 0, tracking = false;
+      const SWIPE_MIN_X = 55;   // px
+      const SWIPE_MAX_Y = 40;   // px (vertical tolerance)
+      const SWIPE_MAX_MS = 600; // time budget
+
+      card.addEventListener('touchstart', function (ev) {
+        if (!ev.touches || ev.touches.length !== 1) return;
+        tracking = true;
+        startX = ev.touches[0].clientX;
+        startY = ev.touches[0].clientY;
+        startT = Date.now();
+      }, { passive: true });
+
+      card.addEventListener('touchmove', function (ev) {
+        if (!tracking || !ev.touches || ev.touches.length !== 1) return;
+        const dx = ev.touches[0].clientX - startX;
+        const dy = ev.touches[0].clientY - startY;
+        if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
+          // Visual cue — translate card slightly.
+          card.style.transform = 'translateX(' + Math.max(-100, Math.min(100, dx)) + 'px)';
+        }
+      }, { passive: true });
+
+      const endHandler = function (ev) {
+        if (!tracking) return;
+        tracking = false;
+        card.style.transform = '';
+        const t = Date.now() - startT;
+        let endX = startX, endY = startY;
+        if (ev.changedTouches && ev.changedTouches.length) {
+          endX = ev.changedTouches[0].clientX;
+          endY = ev.changedTouches[0].clientY;
+        }
+        const dx = endX - startX;
+        const dy = endY - startY;
+        if (t > SWIPE_MAX_MS) return;
+        if (Math.abs(dy) > SWIPE_MAX_Y) return;
+        if (dx <= -SWIPE_MIN_X) {
+          // Swipe left: skip (same as Skip button).
+          try { loadTrio(); } catch (_e) {}
+        } else if (dx >= SWIPE_MIN_X) {
+          // Swipe right: treat as tapping this card for rank 1.
+          // Only acts if the card isn't already ranked.
+          try {
+            if (!(selectionOrder || []).includes(side)) selectCard(side);
+          } catch (_e) {}
+        }
+      };
+      card.addEventListener('touchend', endHandler, { passive: true });
+      card.addEventListener('touchcancel', function () {
+        tracking = false;
+        card.style.transform = '';
+      }, { passive: true });
+    }
+
+    function _openPlayerInfoSheet(p) {
+      if (!p) return;
+      let sheet = document.getElementById('gesture-info-sheet');
+      if (!sheet) {
+        sheet = document.createElement('div');
+        sheet.id = 'gesture-info-sheet';
+        sheet.className = 'gesture-info-sheet';
+        sheet.addEventListener('click', function (ev) {
+          if (ev.target === sheet) _closePlayerInfoSheet();
+        });
+        document.body.appendChild(sheet);
+      }
+      const exp = (p.years_experience != null)
+        ? `${p.years_experience} yr${p.years_experience === 1 ? '' : 's'} exp`
+        : '';
+      const dc = (p.depth_chart_order != null)
+        ? `Depth chart: ${p.depth_chart_order}`
+        : '';
+      const injury = p.injury_status ? `Injury: ${escapeHtml(p.injury_status)}` : '';
+      const college = p.college ? `College: ${escapeHtml(p.college)}` : '';
+      const adp = (p.adp != null) ? `ADP: ${p.adp}` : '';
+      const rows = [
+        `<div class="gesture-info-name">${escapeHtml(p.name || '')}</div>`,
+        `<div class="gesture-info-meta">${escapeHtml(p.position || '')} · ${escapeHtml(p.team || 'FA')}${p.age != null ? ' · Age ' + p.age : ''}${exp ? ' · ' + exp : ''}</div>`,
+        dc ? `<div class="gesture-info-row">${dc}</div>` : '',
+        injury ? `<div class="gesture-info-row">${injury}</div>` : '',
+        college ? `<div class="gesture-info-row">${college}</div>` : '',
+        adp ? `<div class="gesture-info-row">${adp}</div>` : '',
+      ].filter(Boolean).join('');
+      sheet.innerHTML =
+        `<div class="gesture-info-panel" role="dialog" aria-modal="true" aria-label="Player info">
+           <button type="button" class="gesture-info-close" aria-label="Close">&times;</button>
+           ${rows}
+         </div>`;
+      sheet.querySelector('.gesture-info-close').addEventListener('click', _closePlayerInfoSheet);
+      sheet.classList.add('open');
+    }
+
+    function _closePlayerInfoSheet() {
+      const sheet = document.getElementById('gesture-info-sheet');
+      if (sheet) sheet.classList.remove('open');
     }
 
     function setCardsLoading() {
@@ -2608,6 +2843,21 @@
     }
 
     function renderTrades(cards) {
+      // Feature flags: run diff against previous snapshot + surface queue controls.
+      // Both are additive and inert unless their flag is on.
+      try {
+        if (window.FTF_FLAG && window.FTF_FLAG('trades.new_partners_alerts')) {
+          _updateNewPartnersBanner(cards);
+        }
+        if (window.FTF_FLAG && window.FTF_FLAG('trades.queue_2k')) {
+          _ensureQueueUIVisible();
+          _renderTradeQueue();            // refresh queue panel (count badge)
+        }
+      } catch (_) { /* non-fatal */ }
+
+      // Cache latest cards so queue-add can look up player metadata.
+      _lastRenderedTrades = Array.isArray(cards) ? cards : [];
+
       const list = document.getElementById('trades-list');
       if (!cards.length) {
         list.innerHTML = `<div class="trades-empty">
@@ -2624,17 +2874,30 @@
           <button class="rank-more-nudge-btn" onclick="switchToRankView()">Rank more →</button>
         </div>`;
 
+      const _queueFlagOn = !!(window.FTF_FLAG && window.FTF_FLAG('trades.queue_2k'));
+      const _queueIds    = _queueFlagOn ? new Set(_loadTradeQueue().map(e => e.trade_id)) : null;
+
       list.innerHTML = cards.map(card => {
         const givePlayers  = card.give.map(p => tradePlayerHTML(p)).join('');
         const recvPlayers  = card.receive.map(p => tradePlayerHTML(p)).join('');
         const decided      = card.decision !== null;
         const cls          = card.decision === 'like' ? 'liked' : card.decision === 'pass' ? 'passed' : '';
         const score        = Math.round(card.mismatch_score);
+        const queueBtn     = (_queueFlagOn && !decided)
+          ? (() => {
+              const isQueued = _queueIds.has(card.trade_id);
+              const label    = isQueued ? '✓ Queued' : '+ Queue';
+              const klass    = isQueued ? 'trade-queue-add-btn queued' : 'trade-queue-add-btn';
+              return `<button class="${klass}" data-queue-btn="${card.trade_id}"
+                              onclick="toggleTradeQueue('${card.trade_id}')">${label}</button>`;
+            })()
+          : '';
         const actionBtns   = decided
           ? `<div style="font-size:13px;color:var(--muted);text-align:center;padding:4px 0;">
                ${card.decision === 'like' ? '✅ Interested' : '✗ Passed'}
              </div>`
           : `<div class="trade-actions">
+               ${queueBtn}
                <button class="trade-pass-btn" onclick="swipeTrade('${card.trade_id}','pass')">✕ Pass</button>
                <button class="trade-like-btn" onclick="swipeTrade('${card.trade_id}','like')">✓ Interested</button>
              </div>`;
@@ -2642,6 +2905,17 @@
         const dataTag = card.real_opponent
           ? `<span title="Based on this leaguemate's actual rankings" style="font-size:10px;color:var(--green);margin-left:4px;font-weight:700;">● real</span>`
           : `<span title="Opponent rankings estimated" style="font-size:10px;color:var(--muted);margin-left:4px;">○ est.</span>`;
+
+        // Agent A8 — human-readable trade explanations (flag-gated).
+        // Render only when the flag is on AND the backend supplied reasons.
+        let reasonsHTML = '';
+        if (window.FTF_FLAG && window.FTF_FLAG('trade_math.human_explanations')
+            && Array.isArray(card.reasons) && card.reasons.length) {
+          const items = card.reasons.map(r =>
+            `<li class="trade-reasons-item">${escapeHtml(r)}</li>`
+          ).join('');
+          reasonsHTML = `<ul class="trade-reasons">${items}</ul>`;
+        }
 
         return `<div class="trade-card ${cls}" id="tc-${card.trade_id}">
           <div class="trade-meta">
@@ -2659,9 +2933,339 @@
               ${recvPlayers}
             </div>
           </div>
+          ${reasonsHTML}
           ${actionBtns}
         </div>`;
       }).join('') + _rankNudgeHTML;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  2K-STYLE TRADE QUEUE — flag `trades.queue_2k`
+    //  -----------------------------------------------------------------
+    //  Users can stack trade ideas and "Send all" opens each one on
+    //  Sleeper's trade-propose page in a new tab (500ms stagger). Sleeper
+    //  doesn't publish a programmatic trade-propose endpoint for 3rd
+    //  parties, so deep-link + new-tab is the pragmatic v1. Queue
+    //  persists across reloads via localStorage, keyed per league.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Per-load cache of the last cards renderTrades received — lets us resolve
+    // trade_id → card metadata when building the queue chips + deep links.
+    let _lastRenderedTrades = [];
+
+    function _tradeQueueStorageKey() {
+      const lid = currentLeagueId || 'default';
+      return `ftf_trade_queue_${lid}`;
+    }
+
+    function _loadTradeQueue() {
+      try {
+        const raw = localStorage.getItem(_tradeQueueStorageKey());
+        if (!raw) return [];
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+      } catch (_) { return []; }
+    }
+
+    function _saveTradeQueue(arr) {
+      try {
+        localStorage.setItem(_tradeQueueStorageKey(), JSON.stringify(arr || []));
+      } catch (_) { /* quota full / disabled — non-fatal */ }
+    }
+
+    function _ensureQueueUIVisible() {
+      const tabs = document.getElementById('trade-queue-tabs');
+      if (tabs) {
+        tabs.classList.remove('hidden');
+        tabs.style.display = '';
+      }
+    }
+
+    function showTradePanel(which) {
+      // which = 'results' | 'queue'
+      const list   = document.getElementById('trades-list');
+      const panel  = document.getElementById('trade-queue-panel');
+      const tabR   = document.getElementById('trade-queue-tab-results');
+      const tabQ   = document.getElementById('trade-queue-tab-queue');
+      if (!list || !panel) return;
+      if (which === 'queue') {
+        list.style.display  = 'none';
+        panel.style.display = '';
+        panel.classList.remove('hidden');
+        if (tabR) tabR.classList.remove('active');
+        if (tabQ) tabQ.classList.add('active');
+        _renderTradeQueue();
+      } else {
+        list.style.display  = '';
+        panel.style.display = 'none';
+        panel.classList.add('hidden');
+        if (tabR) tabR.classList.add('active');
+        if (tabQ) tabQ.classList.remove('active');
+      }
+    }
+
+    function toggleTradeQueue(tradeId) {
+      if (!(window.FTF_FLAG && window.FTF_FLAG('trades.queue_2k'))) return;
+      const queue = _loadTradeQueue();
+      const idx   = queue.findIndex(e => e.trade_id === tradeId);
+
+      if (idx >= 0) {
+        queue.splice(idx, 1);
+        _saveTradeQueue(queue);
+        _refreshQueueButton(tradeId, false);
+        _renderTradeQueue();
+        showToast('Removed from queue');
+        return;
+      }
+
+      // Add — capture a light snapshot of card metadata for later rendering.
+      const card = (_lastRenderedTrades || []).find(c => c.trade_id === tradeId);
+      if (!card) { showToast('Could not queue — regenerate and try again'); return; }
+      queue.push({
+        trade_id:        card.trade_id,
+        target_username: card.target_username,
+        target_user_id:  card.target_user_id || null,
+        give:            (card.give    || []).map(p => ({
+                            player_id: p.player_id || p.id || null,
+                            name: p.name, position: p.position
+                         })),
+        receive:         (card.receive || []).map(p => ({
+                            player_id: p.player_id || p.id || null,
+                            name: p.name, position: p.position
+                         })),
+        mismatch_score:  card.mismatch_score,
+        league_id:       card.league_id || currentLeagueId,
+        queued_at:       Date.now(),
+      });
+      _saveTradeQueue(queue);
+      _refreshQueueButton(tradeId, true);
+      _renderTradeQueue();
+      showToast(`Added to queue (${queue.length})`);
+    }
+
+    function _refreshQueueButton(tradeId, isQueued) {
+      const btn = document.querySelector(`[data-queue-btn="${tradeId}"]`);
+      if (!btn) return;
+      btn.textContent = isQueued ? '✓ Queued' : '+ Queue';
+      btn.classList.toggle('queued', !!isQueued);
+    }
+
+    function removeFromTradeQueue(tradeId) {
+      const queue = _loadTradeQueue().filter(e => e.trade_id !== tradeId);
+      _saveTradeQueue(queue);
+      _refreshQueueButton(tradeId, false);
+      _renderTradeQueue();
+    }
+
+    function clearTradeQueue() {
+      const queue = _loadTradeQueue();
+      if (!queue.length) return;
+      if (!confirm(`Clear ${queue.length} queued trade${queue.length === 1 ? '' : 's'}?`)) return;
+      // Reset each visible button.
+      queue.forEach(e => _refreshQueueButton(e.trade_id, false));
+      _saveTradeQueue([]);
+      _renderTradeQueue();
+      showToast('Queue cleared');
+    }
+
+    function _renderTradeQueue() {
+      const container = document.getElementById('trade-queue-chips');
+      const countBdg  = document.getElementById('trade-queue-tab-count');
+      const sendBtn   = document.getElementById('trade-queue-send-btn');
+      const clearBtn  = document.getElementById('trade-queue-clear-btn');
+      const queue     = _loadTradeQueue();
+
+      if (countBdg) {
+        countBdg.textContent = queue.length;
+        countBdg.style.display = queue.length > 0 ? '' : 'none';
+      }
+      if (sendBtn)  sendBtn.disabled  = queue.length === 0;
+      if (clearBtn) clearBtn.disabled = queue.length === 0;
+
+      if (!container) return;
+      if (!queue.length) {
+        container.innerHTML = `<div class="trade-queue-empty">
+          <strong>Queue is empty</strong>
+          Tap <em>+ Queue</em> on any trade idea to stack it here.
+        </div>`;
+        return;
+      }
+
+      container.innerHTML = queue.map(entry => {
+        const giveLbl = (entry.give    || []).map(p => escapeHtml(p.name || '?')).join(' + ');
+        const recvLbl = (entry.receive || []).map(p => escapeHtml(p.name || '?')).join(' + ');
+        const score   = Math.round(entry.mismatch_score || 0);
+        const vs      = escapeHtml(entry.target_username || 'leaguemate');
+        return `<div class="trade-queue-chip" data-queue-chip="${entry.trade_id}">
+          <div class="trade-queue-chip-main">
+            <div class="trade-queue-chip-line">
+              <strong>${giveLbl || '?'}</strong>
+              <span class="trade-queue-chip-arrow">⇄</span>
+              <strong>${recvLbl || '?'}</strong>
+            </div>
+            <div class="trade-queue-chip-sub">vs ${vs} · match ${score}</div>
+          </div>
+          <button class="trade-queue-chip-remove"
+                  title="Remove from queue"
+                  onclick="removeFromTradeQueue('${entry.trade_id}')">&times;</button>
+        </div>`;
+      }).join('');
+    }
+
+    function _buildSleeperTradeUrl(entry) {
+      // Sleeper's public web app accepts a trade-propose deep link of the form:
+      //   https://sleeper.com/leagues/<league_id>/trade?...
+      // The trade-propose route doesn't have a fully documented query schema
+      // but historically accepts receiver + adds/gives by player_id. We pass
+      // what we know; if the schema changes, the user still lands on the
+      // league's trade surface with the right counter-party.
+      const leagueId = entry.league_id || currentLeagueId;
+      if (!leagueId) return null;
+      const params = new URLSearchParams();
+      if (entry.target_user_id) params.append('add_receiver_id', entry.target_user_id);
+      (entry.give    || []).forEach(p => { if (p.player_id) params.append('give_player_id', p.player_id); });
+      (entry.receive || []).forEach(p => { if (p.player_id) params.append('add_player_id',  p.player_id); });
+      const qs = params.toString();
+      return `https://sleeper.com/leagues/${leagueId}/trade${qs ? '?' + qs : ''}`;
+    }
+
+    async function sendAllQueuedTrades() {
+      const queue = _loadTradeQueue();
+      if (!queue.length) return;
+      const btn = document.getElementById('trade-queue-send-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
+
+      let opened = 0;
+      for (let i = 0; i < queue.length; i++) {
+        const url = _buildSleeperTradeUrl(queue[i]);
+        if (url) {
+          // noopener keeps cross-origin Sleeper tabs from touching our window.
+          window.open(url, '_blank', 'noopener');
+          opened++;
+        }
+        // 500ms stagger — avoids popup-blocker "multiple popups" heuristic
+        // firing on most browsers when the initial click was the trigger.
+        if (i < queue.length - 1) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+
+      if (btn) { btn.disabled = false; btn.textContent = 'Send all →'; }
+      showToast(`Opened ${opened} trade${opened === 1 ? '' : 's'} on Sleeper`);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  NEW-PARTNERS ALERT — flag `trades.new_partners_alerts`
+    //  -----------------------------------------------------------------
+    //  Client-side diff: on each successful generate, compare the current
+    //  top-10 trade_ids to a snapshot kept in localStorage. Banner shows
+    //  any new matches. Snapshot rotates weekly so week-over-week changes
+    //  surface even if the user didn't visit for a bit.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    const _NEW_PARTNERS_SNAPSHOT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+    const _NEW_PARTNERS_TOP_N           = 10;
+
+    function _newPartnersStorageKey() {
+      const lid = currentLeagueId || 'default';
+      return `ftf_new_partners_snapshot_${lid}`;
+    }
+
+    function _newPartnersDismissKey() {
+      const lid = currentLeagueId || 'default';
+      return `ftf_new_partners_dismissed_${lid}`;
+    }
+
+    function _loadNewPartnersSnapshot() {
+      try {
+        const raw = localStorage.getItem(_newPartnersStorageKey());
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !Array.isArray(parsed.trade_ids)) return null;
+        return parsed;
+      } catch (_) { return null; }
+    }
+
+    function _saveNewPartnersSnapshot(tradeIds) {
+      try {
+        localStorage.setItem(_newPartnersStorageKey(), JSON.stringify({
+          trade_ids: tradeIds,
+          saved_at:  Date.now(),
+        }));
+      } catch (_) { /* non-fatal */ }
+    }
+
+    function _updateNewPartnersBanner(cards) {
+      if (!Array.isArray(cards) || cards.length === 0) {
+        _hideNewPartnersBanner();
+        return;
+      }
+
+      // Dismissed this cycle? Skip.
+      const dismissed = localStorage.getItem(_newPartnersDismissKey());
+      if (dismissed) {
+        const prev  = _loadNewPartnersSnapshot();
+        const since = prev ? prev.saved_at : 0;
+        if (parseInt(dismissed, 10) > since) {
+          _hideNewPartnersBanner();
+          return;
+        }
+      }
+
+      const topIds  = cards.slice(0, _NEW_PARTNERS_TOP_N).map(c => c.trade_id);
+      const snap    = _loadNewPartnersSnapshot();
+      const stale   = !snap || (Date.now() - (snap.saved_at || 0)) > _NEW_PARTNERS_SNAPSHOT_TTL_MS;
+
+      if (!snap || stale) {
+        // First visit or snapshot too old — seed and stay quiet.
+        _saveNewPartnersSnapshot(topIds);
+        _hideNewPartnersBanner();
+        return;
+      }
+
+      const prior       = new Set(snap.trade_ids);
+      const newCards    = cards.slice(0, _NEW_PARTNERS_TOP_N).filter(c => !prior.has(c.trade_id));
+      if (newCards.length === 0) {
+        _hideNewPartnersBanner();
+        return;
+      }
+
+      // Pick out the leaguemate(s) driving the new opportunities for a
+      // human flourish.
+      const usernames = [...new Set(newCards.map(c => c.target_username).filter(Boolean))];
+      const whoChunk  = usernames.length === 1
+        ? `@${usernames[0]} moved players up in their rankings.`
+        : usernames.length > 1
+          ? `@${usernames[0]} and ${usernames.length - 1} other${usernames.length - 1 === 1 ? '' : 's'} moved players around.`
+          : '';
+
+      const banner = document.getElementById('new-partners-banner');
+      const text   = document.getElementById('new-partners-banner-text');
+      if (!banner || !text) return;
+
+      const n = newCards.length;
+      text.innerHTML =
+        `<strong>${n} new fair trade${n === 1 ? '' : 's'}</strong> became available since your last visit`
+        + (whoChunk ? ` — ${escapeHtml(whoChunk)}` : '.');
+      banner.classList.remove('hidden');
+      banner.style.display = '';
+
+      // Update the stored snapshot to the new state so next visit starts fresh.
+      _saveNewPartnersSnapshot(topIds);
+    }
+
+    function _hideNewPartnersBanner() {
+      const banner = document.getElementById('new-partners-banner');
+      if (!banner) return;
+      banner.classList.add('hidden');
+      banner.style.display = 'none';
+    }
+
+    function dismissNewPartnersBanner() {
+      try {
+        localStorage.setItem(_newPartnersDismissKey(), String(Date.now()));
+      } catch (_) {}
+      _hideNewPartnersBanner();
     }
 
     function buildInjuryBadge(injuryStatus) {

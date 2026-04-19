@@ -779,6 +779,109 @@
       .player-chip { min-height: 40px; }
     }
 
+    /* ── Agent A2 — Community diff overlay (flag: tiers.community_diff) ── */
+    .community-diff-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      user-select: none;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      min-height: 32px;
+    }
+    .community-diff-toggle:hover { color: var(--text); border-color: #3a3d4a; }
+    .community-diff-toggle.active {
+      background: rgba(79,124,255,0.12);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .community-diff-toggle input { display: none; }
+
+    .community-diff-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      margin-left: 4px;
+    }
+    .community-diff-badge.agree {
+      color: var(--green);
+      border-color: rgba(34,197,94,0.35);
+      background: rgba(34,197,94,0.08);
+    }
+    .community-diff-badge.divergent-1 {
+      color: #fbbf24;
+      border-color: rgba(251,191,36,0.35);
+      background: rgba(251,191,36,0.08);
+    }
+    .community-diff-badge.divergent-2 {
+      color: #fb923c;
+      border-color: rgba(251,146,60,0.4);
+      background: rgba(251,146,60,0.1);
+    }
+    .community-diff-badge.divergent-3 {
+      color: var(--red);
+      border-color: rgba(239,68,68,0.45);
+      background: rgba(239,68,68,0.12);
+    }
+
+    /* Stability indicator (flag: tiers.stability_indicator) */
+    .stability-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      margin-left: 4px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .stability-badge.stable   { color: #7dd3fc; border-color: rgba(56,189,248,0.35); background: rgba(56,189,248,0.08); }
+    .stability-badge.volatile { color: #fbbf24; border-color: rgba(251,191,36,0.4);  background: rgba(251,191,36,0.1); }
+
+    /* Swipe hint (flag: tiers.swipe_secondary_actions) */
+    .swipe-hint {
+      display: none;
+      position: fixed;
+      left: 50%;
+      top: 72px;
+      transform: translateX(-50%);
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(79,124,255,0.14);
+      border: 1px solid rgba(79,124,255,0.4);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      z-index: 900;
+      pointer-events: none;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    }
+    .swipe-hint.visible { display: inline-flex; animation: swipeHintFade 0.3s ease-out; }
+    @keyframes swipeHintFade { from { opacity: 0; transform: translate(-50%, -4px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+    .player-chip.swiping {
+      transition: none;
+    }
+
     /* Scoring format toggle (shared pattern with main app) */
     .scoring-toggle {
       display: inline-flex;
@@ -974,8 +1077,13 @@
       </div>
       <!-- Scoring format toggle — rendered by inline JS below -->
       <div id="scoring-toggle-wrap" style="margin-top:8px;"></div>
+      <!-- Agent A2: community diff toggle (flag: tiers.community_diff) -->
+      <div id="community-diff-toggle-wrap" style="margin-top:8px;"></div>
     </div>
   </div>
+
+  <!-- Agent A2: one-shot swipe hint (flag: tiers.swipe_secondary_actions) -->
+  <div class="swipe-hint" id="swipe-hint">Swipe cards to move them</div>
 
   <!-- ── Position tabs ── -->
   <div class="pos-tabs" id="pos-tabs">
@@ -1941,6 +2049,358 @@
     }
 
     renderTierScoringToggle();
+
+    // ══════════════════════════════════════════════════════
+    //  Agent A2 — Feature-flag loading + tier UX overlays
+    // ══════════════════════════════════════════════════════
+    // positional-tiers.html doesn't load app.js, so window.FTF_FLAGS may be
+    // empty. Fetch /api/feature-flags once and expose window.FTF_FLAG(key).
+    window.FTF_FLAGS = window.FTF_FLAGS || {};
+    window.FTF_FLAG = window.FTF_FLAG || function (key) {
+      try { return !!(window.FTF_FLAGS && window.FTF_FLAGS[key]); }
+      catch (_) { return false; }
+    };
+
+    async function _ftfLoadFlags() {
+      if (Object.keys(window.FTF_FLAGS).length > 0) return window.FTF_FLAGS;
+      try {
+        const res = await fetch('/api/feature-flags');
+        if (!res.ok) return window.FTF_FLAGS;
+        const data = await res.json();
+        if (data && data.flags && typeof data.flags === 'object') {
+          window.FTF_FLAGS = data.flags;
+        }
+      } catch (_) { /* offline or server down — leave defaults */ }
+      return window.FTF_FLAGS;
+    }
+
+    // ── Community diff state ──────────────────────────────────────────
+    // When toggled on, call /api/tiers/community-diff?position=X and store
+    // the response at _communityDiffCache[pos]; re-render decorates chips.
+    const LS_COMMUNITY_DIFF_ON = 'ftf_tiers_community_diff_on';
+    const _communityDiffCache = {};   // pos → { player_id: {user_tier, community_tier} }
+    const _communityDiffLoading = {}; // pos → bool
+    const TIER_ORDER = ['elite', 'starter', 'solid', 'depth', 'bench'];
+    const TIER_LABELS_SHORT = {
+      elite: 'Elite', starter: 'Start', solid: 'Solid',
+      depth: 'Depth', bench: 'Bench',
+    };
+
+    function communityDiffEnabled() {
+      return window.FTF_FLAG('tiers.community_diff');
+    }
+    function communityDiffOn() {
+      if (!communityDiffEnabled()) return false;
+      try { return localStorage.getItem(LS_COMMUNITY_DIFF_ON) === '1'; }
+      catch (_) { return false; }
+    }
+
+    function renderCommunityDiffToggle() {
+      const wrap = document.getElementById('community-diff-toggle-wrap');
+      if (!wrap) return;
+      if (!communityDiffEnabled()) { wrap.innerHTML = ''; return; }
+      const on = communityDiffOn();
+      wrap.innerHTML = `
+        <label class="community-diff-toggle ${on ? 'active' : ''}"
+               id="community-diff-label"
+               onclick="onToggleCommunityDiff()">
+          <input type="checkbox" ${on ? 'checked' : ''} />
+          <span>${on ? '✓ ' : ''}Show community diff</span>
+        </label>`;
+    }
+
+    async function onToggleCommunityDiff() {
+      if (!communityDiffEnabled()) return;
+      const nowOn = !communityDiffOn();
+      try { localStorage.setItem(LS_COMMUNITY_DIFF_ON, nowOn ? '1' : '0'); }
+      catch (_) { /* ignore */ }
+      renderCommunityDiffToggle();
+      if (nowOn) {
+        await ensureCommunityDiffLoaded(currentPos);
+      }
+      render();
+    }
+
+    async function ensureCommunityDiffLoaded(pos) {
+      if (!communityDiffEnabled()) return;
+      if (_communityDiffCache[pos] || _communityDiffLoading[pos]) return;
+      _communityDiffLoading[pos] = true;
+      try {
+        const res = await fetch(`/api/tiers/community-diff?position=${pos}`, {
+          headers: { 'X-Session-Token': _getSessionToken() },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        _communityDiffCache[pos] = (data && data.diffs) || {};
+      } catch (e) {
+        console.warn('community-diff fetch failed:', e);
+      } finally {
+        _communityDiffLoading[pos] = false;
+      }
+    }
+
+    function buildCommunityDiffBadge(playerId) {
+      if (!communityDiffEnabled() || !communityDiffOn()) return '';
+      const cache = _communityDiffCache[currentPos] || {};
+      const entry = cache[playerId];
+      if (!entry) return '';
+      const u = entry.user_tier;
+      const c = entry.community_tier;
+      // If we have no meaningful data, skip.
+      if (!u && !c) return '';
+      const uLabel = u ? (TIER_LABELS_SHORT[u] || u) : '—';
+      const cLabel = c ? (TIER_LABELS_SHORT[c] || c) : '—';
+      if (u && c && u === c) {
+        return `<span class="community-diff-badge agree" title="You and community agree: ${cLabel}">✓ ${cLabel}</span>`;
+      }
+      // Compute gap size when both tiers are known
+      let gapClass = 'divergent-1';
+      if (u && c) {
+        const ui = TIER_ORDER.indexOf(u);
+        const ci = TIER_ORDER.indexOf(c);
+        if (ui >= 0 && ci >= 0) {
+          const gap = Math.abs(ui - ci);
+          if (gap >= 3) gapClass = 'divergent-3';
+          else if (gap === 2) gapClass = 'divergent-2';
+        }
+      }
+      return `<span class="community-diff-badge ${gapClass}" title="Community: ${cLabel} vs You: ${uLabel}">● C:${cLabel}</span>`;
+    }
+
+    // ── Stability indicator state ─────────────────────────────────────
+    const _stabilityCache = {};        // pos → { player_id: "stable" | "volatile" }
+    const _stabilityLoading = {};      // pos → bool
+
+    function stabilityEnabled() {
+      return window.FTF_FLAG('tiers.stability_indicator');
+    }
+
+    async function ensureStabilityLoaded(pos) {
+      if (!stabilityEnabled()) return;
+      if (_stabilityCache[pos] || _stabilityLoading[pos]) return;
+      _stabilityLoading[pos] = true;
+      try {
+        const res = await fetch(`/api/tiers/stability?position=${pos}`, {
+          headers: { 'X-Session-Token': _getSessionToken() },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        _stabilityCache[pos] = (data && data.stability) || {};
+      } catch (e) {
+        console.warn('stability fetch failed:', e);
+      } finally {
+        _stabilityLoading[pos] = false;
+      }
+    }
+
+    function buildStabilityBadge(playerId) {
+      if (!stabilityEnabled()) return '';
+      const cache = _stabilityCache[currentPos] || {};
+      const s = cache[playerId];
+      if (s === 'stable') {
+        return `<span class="stability-badge stable" title="Stable — you've kept this player in one tier">🔒</span>`;
+      }
+      if (s === 'volatile') {
+        return `<span class="stability-badge volatile" title="Volatile — this player has moved between 3+ tiers">🔄</span>`;
+      }
+      return '';
+    }
+
+    // ── Post-render hook: decorate existing chips with flag-driven badges ──
+    // We avoid patching createChip (and doubling the template complexity)
+    // by inserting overlay badges after render() paints the DOM.
+    const _originalRender = render;
+    render = function renderWithOverlays() {
+      _originalRender();
+      try { applyTierOverlays(); } catch (e) { console.warn('overlay apply failed:', e); }
+      try { applySwipeBehavior(); } catch (e) { console.warn('swipe apply failed:', e); }
+    };
+
+    function applyTierOverlays() {
+      const showDiff = communityDiffOn();
+      const showStab = stabilityEnabled();
+      if (!showDiff && !showStab) return;
+
+      // Every chip in the DOM corresponds to a player.id stored on dataset.id
+      document.querySelectorAll('.player-chip').forEach(chip => {
+        const pid = chip.dataset.id;
+        if (!pid) return;
+        // Remove any previously-added badges (re-render cleans them up)
+        chip.querySelectorAll('.community-diff-badge, .stability-badge').forEach(el => el.remove());
+
+        const inTier = !!chip.closest('.tier-drop-zone');
+        const anchor = inTier
+          ? chip.querySelector('.chip-team')
+          : chip.querySelector('.pool-chip-meta');
+        if (!anchor) return;
+
+        if (showDiff) {
+          const diffHtml = buildCommunityDiffBadge(pid);
+          if (diffHtml) anchor.insertAdjacentHTML('afterend', diffHtml);
+        }
+        if (showStab) {
+          const stabHtml = buildStabilityBadge(pid);
+          if (stabHtml) anchor.insertAdjacentHTML('afterend', stabHtml);
+        }
+      });
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  Agent A2 — Swipe-based secondary actions
+    //  (flag: tiers.swipe_secondary_actions)
+    // ══════════════════════════════════════════════════════
+    const LS_SWIPE_HINT_SHOWN = 'ftf_tiers_swipe_hint_shown';
+    const SWIPE_THRESHOLD_X = 40;
+    const SWIPE_ABORT_Y = 30;
+    let _lastUsedTier = 'starter';  // tracks MRU tier for pool→tier swipe
+
+    // Track the last tier the user explicitly assigned to so swipe-right on
+    // a pool chip lands there.  Hook into assignToTier without overriding it
+    // (avoid recursion) by wrapping.
+    const _originalAssignToTier = assignToTier;
+    assignToTier = function assignWithMRU(playerId, targetTier) {
+      if (TIERS.includes(targetTier)) _lastUsedTier = targetTier;
+      return _originalAssignToTier(playerId, targetTier);
+    };
+
+    function swipeEnabled() {
+      return window.FTF_FLAG('tiers.swipe_secondary_actions');
+    }
+
+    function showSwipeHintOnce() {
+      if (!swipeEnabled()) return;
+      try {
+        if (localStorage.getItem(LS_SWIPE_HINT_SHOWN) === '1') return;
+        localStorage.setItem(LS_SWIPE_HINT_SHOWN, '1');
+      } catch (_) { /* ignore */ }
+      const hint = document.getElementById('swipe-hint');
+      if (!hint) return;
+      hint.classList.add('visible');
+      setTimeout(() => hint.classList.remove('visible'), 3200);
+    }
+
+    function applySwipeBehavior() {
+      if (!swipeEnabled()) return;
+      document.querySelectorAll('.player-chip').forEach(chip => {
+        if (chip._swipeBound) return;
+        chip._swipeBound = true;
+        attachSwipeHandlers(chip);
+      });
+    }
+
+    function attachSwipeHandlers(chip) {
+      let startX = 0, startY = 0, lastX = 0;
+      let tracking = false;
+      let aborted = false;
+
+      function reset(animateBack) {
+        if (animateBack) {
+          chip.style.transition = 'transform 0.18s ease-out';
+          chip.style.transform = '';
+          setTimeout(() => { chip.style.transition = ''; }, 200);
+        } else {
+          chip.style.transform = '';
+        }
+        chip.classList.remove('swiping');
+        tracking = false;
+        aborted = false;
+      }
+
+      chip.addEventListener('touchstart', (e) => {
+        if (!swipeEnabled()) return;
+        // Don't interfere with button taps inside the chip
+        const tgt = e.target;
+        if (tgt && (tgt.tagName === 'BUTTON' || tgt.closest('button'))) return;
+        if (e.touches.length !== 1) return;
+        startX = lastX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        tracking = true;
+        aborted = false;
+        chip.classList.add('swiping');
+      }, { passive: true });
+
+      chip.addEventListener('touchmove', (e) => {
+        if (!tracking || aborted) return;
+        const x = e.touches[0].clientX;
+        const y = e.touches[0].clientY;
+        const dx = x - startX;
+        const dy = y - startY;
+        if (Math.abs(dy) > SWIPE_ABORT_Y) {
+          aborted = true;
+          reset(true);
+          return;
+        }
+        lastX = x;
+        chip.style.transform = `translateX(${dx}px)`;
+      }, { passive: true });
+
+      chip.addEventListener('touchend', () => {
+        if (!tracking || aborted) { reset(true); return; }
+        const dx = lastX - startX;
+        const pid = chip.dataset.id;
+        tracking = false;
+
+        const inTier = !!chip.closest('.tier-drop-zone');
+        if (Math.abs(dx) < SWIPE_THRESHOLD_X || !pid) {
+          reset(true);
+          return;
+        }
+        if (inTier && dx < 0) {
+          // Swipe left on tier-bin card → return to pool
+          reset(false);
+          removeFromTier(pid);
+          return;
+        }
+        if (!inTier && dx > 0) {
+          // Swipe right on pool card → assign to MRU tier
+          reset(false);
+          assignToTier(pid, TIERS.includes(_lastUsedTier) ? _lastUsedTier : 'starter');
+          return;
+        }
+        // Direction didn't match the chip's context — snap back
+        reset(true);
+      });
+
+      chip.addEventListener('touchcancel', () => { reset(true); });
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  Agent A2 — Bootstrap
+    // ══════════════════════════════════════════════════════
+    (async function bootstrapA2() {
+      await _ftfLoadFlags();
+      renderCommunityDiffToggle();
+
+      // Preload caches for current pos when flags are on
+      if (communityDiffEnabled() && communityDiffOn()) {
+        await ensureCommunityDiffLoaded(currentPos);
+      }
+      if (stabilityEnabled()) {
+        await ensureStabilityLoaded(currentPos);
+      }
+      // Re-render so any cached overlays appear even without a state change
+      render();
+
+      if (swipeEnabled()) {
+        // Show the one-shot hint after a tiny delay so users see the page first
+        setTimeout(showSwipeHintOnce, 600);
+      }
+    })();
+
+    // Reload per-position caches when the user switches positions. Wrap
+    // switchPos rather than redefining so we keep the original behaviour.
+    const _originalSwitchPos = switchPos;
+    switchPos = async function switchPosWithOverlays(pos, btn) {
+      _originalSwitchPos(pos, btn);
+      if (communityDiffEnabled() && communityDiffOn()) {
+        await ensureCommunityDiffLoaded(pos);
+      }
+      if (stabilityEnabled()) {
+        await ensureStabilityLoaded(pos);
+      }
+      render();
+    };
+
     initFromAPI();
   </script>
 
