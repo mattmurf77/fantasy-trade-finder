@@ -75,6 +75,8 @@ from .database import (
     load_rookies,
     sync_draft_picks, load_draft_picks,
     create_notification, get_notifications, mark_notifications_read,
+    # M5 Push additions — device tokens
+    save_device_token, load_device_tokens_for_users,
     # Agent 4 additions — referral receipt helpers
     user_exists, get_user_by_username, push_notification,
     # Agent 5 additions — invite K-factor dashboard
@@ -1919,6 +1921,44 @@ def swipe_trade():
                         except Exception as notif_err:
                             log.warning("create_notification failed (non-fatal): %s", notif_err)
 
+                        # ── M5 Push — fire Expo push to each user's registered devices ──
+                        # Non-throwing; push failures must not break match creation.
+                        try:
+                            _push_targets = load_device_tokens_for_users(
+                                [g_user_id, card.target_user_id]
+                            )
+                            if _push_targets:
+                                _messages = []
+                                for tgt in _push_targets:
+                                    # Title/body from each user's POV
+                                    if tgt["user_id"] == g_user_id:
+                                        _partner_for = _partner_a
+                                        _give  = _give_names
+                                        _recv  = _receive_names
+                                    else:
+                                        _partner_for = _my_username
+                                        _give  = _receive_names   # flipped
+                                        _recv  = _give_names
+                                    _body_detail = (
+                                        f"{', '.join(_give)} for {', '.join(_recv)}"
+                                        if _give and _recv else
+                                        "Tap to view the matched trade."
+                                    )
+                                    _messages.append({
+                                        "to":    tgt["device_token"],
+                                        "title": f"🎯 Match with @{_partner_for}",
+                                        "body":  _body_detail,
+                                        "data":  {
+                                            "match_id":  match_data["id"],
+                                            "league_id": card.league_id,
+                                            "type":      "trade_match",
+                                        },
+                                        "sound": "default",
+                                    })
+                                _send_expo_push(_messages)
+                        except Exception as push_err:
+                            log.warning("push dispatch failed (non-fatal): %s", push_err)
+
         except Exception as db_err:
             log.warning("DB write failed for trade swipe (continuing): %s", db_err)
 
@@ -3465,6 +3505,90 @@ def read_all_notifications():
     except Exception as e:
         log.error("read_all_notifications error: %s", e)
         return jsonify({"error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# M5 Push — Expo push dispatch + register-device route
+# ---------------------------------------------------------------------------
+# We use Expo's push service (https://exp.host/--/api/v2/push/send) which
+# abstracts APNs + FCM. Clients register Expo push tokens (shape
+# "ExponentPushToken[xxx]") via the route below. The match-create hook in
+# /api/trades/swipe calls _send_expo_push() to fan out pushes to every
+# registered device for both match participants.
+
+_EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+_EXPO_TOKEN_PREFIX = "ExponentPushToken["
+
+def _send_expo_push(messages: list) -> None:
+    """POST a batch of Expo push messages. Non-throwing — swallows all
+    errors and logs a warning. Chunks at 100 per request (Expo limit).
+
+    Each message is a dict:
+      { to: str, title: str, body: str, data: dict, sound?: "default" }
+    """
+    if not messages:
+        return
+    try:
+        # Filter to only valid-looking Expo tokens
+        clean = [m for m in messages if isinstance(m.get("to"), str)
+                 and m["to"].startswith(_EXPO_TOKEN_PREFIX)]
+        if not clean:
+            return
+        # Chunk at 100
+        for i in range(0, len(clean), 100):
+            chunk = clean[i:i + 100]
+            body = json.dumps(chunk).encode("utf-8")
+            req = urllib.request.Request(
+                _EXPO_PUSH_URL,
+                data=body,
+                headers={
+                    "Content-Type":  "application/json",
+                    "Accept":        "application/json",
+                    "Accept-encoding": "gzip, deflate",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                status = r.status
+                if status >= 300:
+                    log.warning("Expo push non-2xx: status=%s", status)
+                else:
+                    log.info("Expo push delivered: %d message(s)", len(chunk))
+    except Exception as e:
+        log.warning("_send_expo_push failed (non-fatal): %s", e)
+
+
+@app.route("/api/notifications/register-device", methods=["POST"])
+def register_device_for_push():
+    """Register an Expo push token for the authenticated user.
+
+    Body: { "device_token": "ExponentPushToken[...]", "platform": "ios"|"android" }
+    Returns: { ok: true }
+
+    Idempotent — the underlying save_device_token() upserts on (device_token)
+    so re-calling with the same token from the same user is a no-op beyond
+    refreshing last_seen_at.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    body = request.get_json(force=True) or {}
+    token    = (body.get("device_token") or "").strip()
+    platform = (body.get("platform") or "").strip().lower()
+
+    if not token or not token.startswith(_EXPO_TOKEN_PREFIX) or not token.endswith("]"):
+        return jsonify({"error": "invalid_token",
+                        "message": "device_token must be a valid Expo push token"}), 400
+    if platform not in ("ios", "android"):
+        return jsonify({"error": "invalid_platform",
+                        "message": "platform must be 'ios' or 'android'"}), 400
+
+    try:
+        save_device_token(user_id=g_user_id, device_token=token, platform=platform)
+        return jsonify({"ok": True})
+    except Exception as e:
+        log.error("register-device failed: %s", e)
+        return jsonify({"error": "save_failed", "message": str(e)}), 500
 
 
 # ---------------------------------------------------------------------------

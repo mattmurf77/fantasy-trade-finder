@@ -327,6 +327,19 @@ wrapped_events_table = Table("wrapped_events", metadata,
     Column("created_at",   String),
 )
 
+# ── M5 Push additions — device_tokens ─────────────────────────────────
+# Stores Expo push tokens so the match-create hook in server.py can send
+# a push to both participants when a mutual trade match is persisted.
+# Upsert on (user_id, device_token) — the same pair is idempotent; a
+# user re-signing in on the same device refreshes last_seen_at only.
+device_tokens_table = Table("device_tokens", metadata,
+    Column("user_id",      String, nullable=False, index=True),
+    Column("device_token", String, nullable=False, primary_key=True),
+    Column("platform",     String, nullable=False),   # 'ios' | 'android'
+    Column("created_at",   String),
+    Column("last_seen_at", String),
+)
+
 # Default values seeded on first run.  Only inserted if the key doesn't
 # already exist (INSERT OR IGNORE) so manual overrides survive re-deploys.
 _MODEL_CONFIG_DEFAULTS = [
@@ -3248,3 +3261,81 @@ def list_referral_activity(username_or_user_id: str) -> list[dict]:
                 "swipe_count":     swipe_count,
             })
         return out
+
+
+# ---------------------------------------------------------------------------
+# M5 Push additions — device_tokens helpers
+# ---------------------------------------------------------------------------
+
+def save_device_token(user_id: str, device_token: str, platform: str) -> None:
+    """Register an Expo push token for a user+device.
+
+    Idempotent — re-calling with the same (user_id, device_token) refreshes
+    last_seen_at without creating a new row. Tokens can migrate between
+    users (e.g., phone re-signed in as a different account) by upserting
+    user_id.
+    """
+    if not user_id or not device_token or platform not in ("ios", "android"):
+        return
+    now = _now()
+    payload = {
+        "user_id":      user_id,
+        "device_token": device_token,
+        "platform":     platform,
+        "created_at":   now,
+        "last_seen_at": now,
+    }
+    try:
+        with engine.begin() as conn:
+            if DATABASE_URL.startswith("sqlite"):
+                # SQLite: upsert via INSERT OR REPLACE. Keep created_at stable
+                # by checking existing first.
+                existing = conn.execute(
+                    select(device_tokens_table.c.created_at)
+                    .where(device_tokens_table.c.device_token == device_token)
+                ).fetchone()
+                if existing and existing[0]:
+                    payload["created_at"] = existing[0]
+                conn.execute(text(
+                    "INSERT OR REPLACE INTO device_tokens "
+                    "(user_id, device_token, platform, created_at, last_seen_at) "
+                    "VALUES (:user_id, :device_token, :platform, :created_at, :last_seen_at)"
+                ), payload)
+            else:
+                conn.execute(text(
+                    "INSERT INTO device_tokens "
+                    "(user_id, device_token, platform, created_at, last_seen_at) "
+                    "VALUES (:user_id, :device_token, :platform, :created_at, :last_seen_at) "
+                    "ON CONFLICT (device_token) DO UPDATE SET "
+                    "user_id = EXCLUDED.user_id, "
+                    "platform = EXCLUDED.platform, "
+                    "last_seen_at = EXCLUDED.last_seen_at"
+                ), payload)
+    except Exception as e:
+        print(f"[save_device_token] failed for user={user_id}: {e}")
+
+
+def load_device_tokens_for_users(user_ids: list) -> list:
+    """Return [{user_id, device_token, platform}] for all given users.
+
+    Used by the match-create hook in server.py so one DB round-trip finds
+    every device to push to.
+    """
+    if not user_ids:
+        return []
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    device_tokens_table.c.user_id,
+                    device_tokens_table.c.device_token,
+                    device_tokens_table.c.platform,
+                ).where(device_tokens_table.c.user_id.in_(list(user_ids)))
+            ).fetchall()
+        return [
+            {"user_id": r.user_id, "device_token": r.device_token, "platform": r.platform}
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[load_device_tokens_for_users] failed: {e}")
+        return []

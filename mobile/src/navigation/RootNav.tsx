@@ -1,5 +1,9 @@
-import React from 'react';
-import { NavigationContainer, DarkTheme } from '@react-navigation/native';
+import React, { useCallback, useRef } from 'react';
+import {
+  NavigationContainer,
+  DarkTheme,
+  createNavigationContainerRef,
+} from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
@@ -7,6 +11,7 @@ import { useSession } from '../state/useSession';
 import SignInScreen from '../screens/SignInScreen';
 import LeaguePickerScreen from '../screens/LeaguePickerScreen';
 import TabNav from './TabNav';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 
 type AuthStack = {
   SignIn: undefined;
@@ -15,11 +20,28 @@ type AuthStack = {
 };
 
 const Stack = createNativeStackNavigator<AuthStack>();
+const navigationRef = createNavigationContainerRef<AuthStack>();
 
 export default function RootNav({ booted }: { booted: boolean }) {
   const user = useSession((s) => s.user);
   const league = useSession((s) => s.league);
   const hasToken = useSession((s) => s.hasToken);
+
+  // Deep-link tapped trade-match pushes into the Matches tab. The
+  // callback is stable so the hook's cleanup stays clean.
+  const onTapMatchNotification = useCallback((_matchId?: string | number) => {
+    if (!navigationRef.isReady()) return;
+    try {
+      // @ts-expect-error — nested tab nav route; types don't cover cross-stack
+      navigationRef.navigate('Main', { screen: 'Matches' });
+    } catch {
+      // swallow — navigation state may be mid-transition
+    }
+  }, []);
+
+  // Registers the device's Expo push token with the backend once the
+  // user has signed in. No-op while `user` is null.
+  usePushNotifications(user?.user_id ?? null, onTapMatchNotification);
 
   if (!booted) {
     return (
@@ -41,6 +63,7 @@ export default function RootNav({ booted }: { booted: boolean }) {
 
   return (
     <NavigationContainer
+      ref={navigationRef}
       theme={{
         ...DarkTheme,
         colors: {
