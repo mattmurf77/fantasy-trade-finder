@@ -77,6 +77,8 @@ from .database import (
     create_notification, get_notifications, mark_notifications_read,
     # Agent 4 additions — referral receipt helpers
     user_exists, get_user_by_username, push_notification,
+    # Agent 5 additions — invite K-factor dashboard
+    count_referrals, list_referral_activity,
     get_config, set_config, list_config,
     load_local_leagues_for_user,
     load_local_league_rosters,
@@ -86,6 +88,8 @@ from .database import (
     save_tier_overrides, load_tier_overrides,
     mark_format_unlocked, get_unlocked_formats,
     set_league_scoring, get_league_scoring, get_league_summary,
+    # Agent A4 additions — league social features
+    load_league_member_unlock_states, load_league_activity,
     SCORING_FORMATS, DEFAULT_SCORING,
     # Trends tab (Agent 2)
     record_elo_snapshot, load_elo_history, load_community_elo_for_league,
@@ -1108,6 +1112,13 @@ def get_rankings_progress():
         except Exception as db_err:
             log.warning("mark_format_unlocked failed: %s", db_err)
 
+    # Agent A4 — surface the user's full list of unlocked formats so the
+    # frontend nav-pill can show 0/2, 1/2, 2/2 in one shot. Additive-only.
+    try:
+        unlocked_formats_list = get_unlocked_formats(g_user_id) or []
+    except Exception:
+        unlocked_formats_list = []
+
     return jsonify({
         **counts,
         "threshold":        threshold,
@@ -1116,6 +1127,7 @@ def get_rankings_progress():
         "scoring_format":   fmt,
         "total_required":   total_required,
         "total_completed":  total_completed,
+        "unlocked_formats": unlocked_formats_list,
     })
 
 
@@ -2152,6 +2164,103 @@ def league_coverage():
         return jsonify(coverage)
     except Exception as e:
         log.error("league/coverage error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Agent A4 — per-member unlock states + league activity feed
+# ---------------------------------------------------------------------------
+# Both endpoints are no-ops (return an empty payload) when their feature
+# flag is off so the frontend can call them unconditionally without
+# leaking data. Still gate in the UI for defence-in-depth.
+# ---------------------------------------------------------------------------
+
+@app.route("/api/league/member-unlock-states")
+def league_member_unlock_states_route():
+    """
+    GET /api/league/member-unlock-states?league_id=...
+    Returns each leaguemate's unlock state for the league summary card.
+
+    Response:
+        {
+          "members": [
+            {
+              "user_id":            str,
+              "username":           str,
+              "display_name":       str,
+              "avatar":             str | None,
+              "joined":             bool,
+              "unlocked_formats":   [..],
+              "unlocked_count":     int,
+              "has_ranking_method": bool
+            }, ...
+          ]
+        }
+
+    When the `league.unlock_badges_per_member` flag is off, returns
+    `{"members": [], "flag_off": true}`.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    # Extension-auth sessions don't carry a 'league' key; guard with .get()
+    g_league  = sess.get("league")
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+
+    if not is_enabled("league.unlock_badges_per_member"):
+        return jsonify({"members": [], "flag_off": True})
+
+    try:
+        members = load_league_member_unlock_states(
+            league_id       = league_id,
+            exclude_user_id = g_user_id,
+        )
+        return jsonify({"members": members})
+    except Exception as e:
+        log.error("league/member-unlock-states error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/league/activity")
+def league_activity_route():
+    """
+    GET /api/league/activity?league_id=...&limit=20
+    Returns a formatted activity feed of recent league events.
+
+    Response:
+        {
+          "events": [
+            {"ts": ISO, "emoji": str, "message": str,
+             "actor_user_id": str, "event_type": str}, ...
+          ]
+        }
+
+    When the `league.activity_feed` flag is off, returns
+    `{"events": [], "flag_off": true}`.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    # Extension-auth sessions don't carry a 'league' key; guard with .get()
+    g_league  = sess.get("league")
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+
+    if not is_enabled("league.activity_feed"):
+        return jsonify({"events": [], "flag_off": True})
+
+    try:
+        raw_limit = request.args.get("limit", "20")
+        try:
+            limit = max(1, min(100, int(raw_limit)))
+        except (TypeError, ValueError):
+            limit = 20
+        events = load_league_activity(league_id=league_id, limit=limit)
+        return jsonify({"events": events})
+    except Exception as e:
+        log.error("league/activity error: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -3846,6 +3955,98 @@ def extension_rankings():
 
 
 # ---------------------------------------------------------------------------
+# Invite K-factor dashboard (Agent 5) — feature-flagged
+# ---------------------------------------------------------------------------
+
+# Milestone thresholds for the "Your invite impact" section of the invite
+# modal. Kept here (not in a config file) because the frontend also needs
+# to know the exact list to render a progress bar; single source of truth
+# lives in the /api/invite/impact response.
+_INVITE_MILESTONES: tuple[tuple[int, str], ...] = (
+    (1,  "🌱 First Recruit"),
+    (3,  "🤝 League Builder"),
+    (5,  "🔥 Five-Spot"),
+    (10, "👑 Ambassador"),
+)
+
+
+def _compute_invite_impact(username: str, user_id: str) -> dict:
+    """Build the K-factor dashboard payload for the given user.
+
+    Returns the shape consumed by GET /api/invite/impact — see that route's
+    docstring for the contract.
+    """
+    # count_referrals accepts either a username or user_id; prefer username
+    # because invited_by is stored by-username on the referred users' rows.
+    key = username or user_id or ""
+    total_joined = count_referrals(key)
+
+    # Richer activity — "actively ranking" = has ≥1 swipe. We keep the
+    # query cheap by only running it when the dashboard flag is on (i.e.
+    # inside this helper, which only fires from the flagged route).
+    activity = list_referral_activity(key) if key else []
+    active_rankers = sum(1 for r in activity if r.get("has_swiped"))
+
+    # v1 definition: invited == joined because every referred row exists
+    # only after that user's session_init. We still return both fields so
+    # the frontend copy can evolve without a backend change.
+    invited = total_joined
+    joined = total_joined
+
+    # Next milestone = smallest threshold strictly greater than joined.
+    # Once past the last threshold there is no "next" — return null so the
+    # UI can hide the progress bar.
+    next_milestone: dict | None = None
+    for threshold, label in _INVITE_MILESTONES:
+        if joined < threshold:
+            next_milestone = {"badge": label, "at": threshold}
+            break
+
+    badges_earned = [label for threshold, label in _INVITE_MILESTONES
+                     if joined >= threshold]
+
+    return {
+        "invited":        invited,
+        "joined":         joined,
+        "active_rankers": active_rankers,
+        "k_factor":       float(joined),   # v1 fan-out per user
+        "next_milestone": next_milestone,
+        "badges_earned":  badges_earned,
+        "milestones":     [{"at": t, "badge": b} for t, b in _INVITE_MILESTONES],
+    }
+
+
+@app.route("/api/invite/impact")
+def invite_impact_route():
+    """GET /api/invite/impact — returns the inviter's K-factor snapshot.
+
+    Gated by the `invite.k_factor_dashboard` flag. When the flag is off we
+    still respond 200 with a zeroed payload so the frontend can fail quiet
+    without a console error, matching the other flagged endpoints.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+
+    if not is_enabled("invite.k_factor_dashboard"):
+        return jsonify({
+            "enabled":        False,
+            "invited":        0,
+            "joined":         0,
+            "active_rankers": 0,
+            "k_factor":       0.0,
+            "next_milestone": None,
+            "badges_earned":  [],
+            "milestones":     [{"at": t, "badge": b} for t, b in _INVITE_MILESTONES],
+        })
+
+    username = sess.get("username") or ""
+    user_id  = sess.get("user_id")  or ""
+    payload = _compute_invite_impact(username, user_id)
+    payload["enabled"] = True
+    return jsonify(payload)
+
+
+# ---------------------------------------------------------------------------
 # Feature flags — powers the sprint's on/off toggling via config/features.json
 # ---------------------------------------------------------------------------
 
@@ -3925,6 +4126,305 @@ def parse_league_url():
         "name":      name,
         "supported": platform == "sleeper",
     })
+
+
+# ---------------------------------------------------------------------------
+# Agent A7 — new surfaces
+# ---------------------------------------------------------------------------
+# Three features, each flag-gated. When the flag is off, routes return 404
+# (profile) or the feature simply isn't wired on the frontend.
+#   • profiles.public_pages   — /u/<username> + /api/profile/<username>
+#   • landing.smart_start_cta — frontend only (flag-gated)
+#   • landing.try_before_sync — /api/session/demo builds a seeded demo session
+# ---------------------------------------------------------------------------
+
+_PROFILE_POSITIONS = ("QB", "RB", "WR", "TE")
+
+
+def _build_profile_tiers_snapshot(
+    user_id: str,
+    scoring_format: str,
+    player_positions: dict,
+    player_name_map: dict,
+) -> dict:
+    """Bucket a user's saved tier overrides into {position: {tier: [names]}}.
+
+    Reads from load_tier_overrides (what the user saved via the tiers UI)
+    and buckets each player by their stored ELO using the canonical
+    RankingService.tier_for_elo.
+    """
+    from .ranking_service import RankingService as _RS
+    try:
+        overrides = load_tier_overrides(user_id=user_id, scoring_format=scoring_format)
+    except Exception as e:
+        log.warning("profile tiers load failed: %s", e)
+        overrides = {}
+
+    snapshot: dict = {}
+    for pid, elo in overrides.items():
+        pos = (player_positions.get(str(pid)) or "").upper()
+        if pos not in _PROFILE_POSITIONS:
+            continue
+        try:
+            elo_f = float(elo)
+        except (TypeError, ValueError):
+            continue
+        tier = _RS.tier_for_elo(elo_f, pos, scoring_format)
+        if not tier:
+            continue
+        name = player_name_map.get(str(pid), str(pid))
+        snapshot.setdefault(pos.lower(), {}).setdefault(tier, []).append({
+            "player_id": str(pid),
+            "name":      name,
+            "elo":       round(elo_f, 1),
+        })
+
+    for pos_buckets in snapshot.values():
+        for entries in pos_buckets.values():
+            entries.sort(key=lambda e: -e["elo"])
+
+    return snapshot
+
+
+def _build_profile_contrarian(
+    user_id: str,
+    scoring_format: str,
+    player_positions: dict,
+    player_name_map: dict,
+    top_n: int = 3,
+) -> dict:
+    """Compute the user's top-N above/below community picks per position.
+
+    Aggregates community ELO across every league the user belongs to and
+    diffs against the user's own stored ELOs. A player needs at least 2
+    non-user raters to count. Returns {pos: {above: [...], below: [...]}}.
+    """
+    # Get all league IDs this user is a member of
+    league_ids: list = []
+    try:
+        from .database import league_members_table, engine as _engine  # type: ignore
+        from sqlalchemy import select as _select
+        with _engine.connect() as _conn:
+            rows = _conn.execute(
+                _select(league_members_table.c.league_id).where(
+                    league_members_table.c.user_id == user_id
+                )
+            ).fetchall()
+            league_ids = sorted({r.league_id for r in rows})
+    except Exception as e:
+        log.warning("profile league_ids load failed: %s", e)
+
+    user_by_pid: dict = {}
+    community_by_pid: dict = {}
+    try:
+        for lid in league_ids:
+            everyone = load_member_rankings(
+                league_id=lid,
+                exclude_user_id="",
+                scoring_format=scoring_format,
+            )
+            for uid, urow in everyone.items():
+                for pid, elo in (urow.get("elo_ratings") or {}).items():
+                    try:
+                        fe = float(elo)
+                    except (TypeError, ValueError):
+                        continue
+                    if uid == user_id:
+                        user_by_pid[str(pid)] = fe
+                    else:
+                        community_by_pid.setdefault(str(pid), []).append(fe)
+    except Exception as e:
+        log.warning("profile rankings aggregation failed: %s", e)
+
+    out: dict = {pos.lower(): {"above": [], "below": []} for pos in _PROFILE_POSITIONS}
+    if not user_by_pid:
+        return out
+
+    for pos in _PROFILE_POSITIONS:
+        deltas: list = []
+        pos_u = pos.upper()
+        for pid, u_elo in user_by_pid.items():
+            if (player_positions.get(pid) or "").upper() != pos_u:
+                continue
+            c_list = community_by_pid.get(pid) or []
+            if len(c_list) < 2:
+                continue
+            c_mean = sum(c_list) / len(c_list)
+            delta = u_elo - c_mean
+            deltas.append({
+                "player_id":      pid,
+                "name":           player_name_map.get(pid, pid),
+                "user_elo":       round(u_elo, 1),
+                "community_elo":  round(c_mean, 1),
+                "delta":          round(delta, 1),
+                "raters":         len(c_list),
+            })
+        above = sorted(deltas, key=lambda d: -d["delta"])[:top_n]
+        below = sorted(deltas, key=lambda d: d["delta"])[:top_n]
+        out[pos.lower()] = {"above": above, "below": below}
+    return out
+
+
+@app.route("/u/<path:username>")
+def public_profile_page(username):
+    """Serve the public profile page when flag is on; 404 otherwise."""
+    if not is_enabled("profiles.public_pages"):
+        return jsonify({"error": "not_found"}), 404
+    return send_from_directory(app.static_folder, "profile.html")
+
+
+@app.route("/api/profile/<path:username>")
+def public_profile_data(username):
+    """Public profile JSON. Read-only; only data the user has created.
+
+    404 when flag off or user not found. No private league info exposed.
+    """
+    if not is_enabled("profiles.public_pages"):
+        return jsonify({"error": "not_found"}), 404
+
+    uname = (username or "").strip().lower()
+    if not uname:
+        return jsonify({"error": "missing_username"}), 400
+
+    try:
+        user = get_user_by_username(uname)
+    except Exception as e:
+        log.warning("profile: user lookup failed: %s", e)
+        user = None
+    if not user:
+        return jsonify({"error": "not_found"}), 404
+
+    user_id = user.get("sleeper_user_id") or user.get("user_id")
+    if not user_id:
+        return jsonify({"error": "not_found"}), 404
+
+    # Count distinct leagues
+    leagues_count = 0
+    try:
+        from .database import league_members_table, engine as _engine  # type: ignore
+        from sqlalchemy import select as _select, func as _func
+        with _engine.connect() as _conn:
+            row = _conn.execute(
+                _select(_func.count(_func.distinct(league_members_table.c.league_id))).where(
+                    league_members_table.c.user_id == user_id
+                )
+            ).fetchone()
+            if row:
+                leagues_count = int(row[0] or 0)
+    except Exception as e:
+        log.warning("profile leagues_count failed: %s", e)
+
+    # Players lookup
+    try:
+        all_players = load_players(position=None)
+    except Exception as e:
+        log.warning("profile load_players failed: %s", e)
+        all_players = []
+    player_positions = {
+        str(p.get("player_id")): (p.get("position") or "").upper()
+        for p in all_players if p.get("player_id")
+    }
+    player_name_map = {
+        str(p.get("player_id")): (p.get("full_name") or "—")
+        for p in all_players if p.get("player_id")
+    }
+
+    # Pick the format with the larger tiers snapshot
+    best_fmt = DEFAULT_SCORING
+    best_tiers: dict = {}
+    for fmt in SCORING_FORMATS:
+        tiers_snap = _build_profile_tiers_snapshot(
+            user_id, fmt, player_positions, player_name_map
+        )
+        cur = sum(len(v) for v in tiers_snap.values())
+        best = sum(len(v) for v in best_tiers.values())
+        if cur > best:
+            best_tiers = tiers_snap
+            best_fmt = fmt
+
+    contrarian = _build_profile_contrarian(
+        user_id, best_fmt, player_positions, player_name_map, top_n=3
+    )
+
+    avatar_url = None
+    avatar = user.get("avatar")
+    if avatar:
+        avatar_url = f"https://sleepercdn.com/avatars/thumbs/{avatar}"
+
+    return jsonify({
+        "username":         user.get("username") or uname,
+        "display_name":     user.get("display_name") or user.get("username") or uname,
+        "avatar_url":       avatar_url,
+        "leagues_count":    leagues_count,
+        "scoring_format":   best_fmt,
+        "contrarian_takes": contrarian,
+        "tiers_snapshot":   best_tiers,
+    })
+
+
+@app.route("/api/session/demo", methods=["POST", "GET"])
+def session_demo():
+    """Bootstrap a seeded demo session — no Sleeper auth, nothing persists."""
+    if not is_enabled("landing.try_before_sync"):
+        return jsonify({"error": "not_found"}), 404
+
+    try:
+        demo_user_id = "demo_user_" + secrets.token_hex(4)
+
+        from .database import SCORING_FORMATS as DB_SCORING_FORMATS
+        new_services: dict = {}
+        new_trade_svcs: dict = {}
+        final_league = None
+        for fmt in DB_SCORING_FORMATS:
+            svc = RankingService(
+                players=list(DEMO_PLAYERS),
+                matchup_generator=matchup_gen,
+                seed_ratings=seed,
+            )
+            svc._user_id = demo_user_id
+            new_services[fmt] = svc
+
+            tsvc = TradeService(players={p.id: p for p in DEMO_PLAYERS})
+            dl, _dr = _build_demo_league(DEMO_PLAYERS, seed)
+            tsvc.add_league(dl)
+            new_trade_svcs[fmt] = tsvc
+            final_league = dl
+
+        active_format = DEFAULT_SCORING
+        token = secrets.token_urlsafe(32)
+        payload = {
+            "user_id":       demo_user_id,
+            "league":        final_league,
+            "players":       list(DEMO_PLAYERS),
+            "user_roster":   list(DEMO_USER_ROSTER),
+            "services":      new_services,
+            "service":       new_services[active_format],
+            "trade_svcs":    new_trade_svcs,
+            "trade_svc":     new_trade_svcs[active_format],
+            "active_format": active_format,
+            "display_name":  "Demo User",
+            "last_active":   time.time(),
+            "is_demo":       True,
+        }
+        with _sessions_lock:
+            _sessions[token] = payload
+
+        players_dict = {p.id: p for p in DEMO_PLAYERS}
+        return jsonify({
+            "ok":           True,
+            "demo":         True,
+            "token":        token,
+            "user_id":      demo_user_id,
+            "display_name": "Demo User",
+            "league_id":    final_league.league_id,
+            "league_name":  final_league.name,
+            "player_count": len(DEMO_PLAYERS),
+            "user_roster":  [player_to_dict(players_dict[pid]) for pid in DEMO_USER_ROSTER if pid in players_dict],
+            "opponents":    len(final_league.members),
+        })
+    except Exception as e:
+        log.error("session/demo failed: %s\n%s", e, traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

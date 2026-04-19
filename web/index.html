@@ -34,6 +34,34 @@
 
         <!-- Sleeper connect -->
         <div class="cb-connect-wrap" style="margin-top: 18px;">
+
+          <!-- Agent A7 · Smart-start CTA (flag: landing.smart_start_cta) -->
+          <div class="smart-start hidden" id="smart-start-wrap">
+            <button class="smart-start-toggle" id="smart-start-toggle" type="button" onclick="toggleSmartStart()">
+              <span class="smart-start-icon">🔗</span>
+              <span class="smart-start-text">Got a league URL? Paste it</span>
+              <span class="smart-start-arrow">→</span>
+            </button>
+            <div class="smart-start-panel hidden" id="smart-start-panel">
+              <div class="smart-start-input-row">
+                <input
+                  class="cb-input"
+                  id="smart-start-url"
+                  type="url"
+                  inputmode="url"
+                  placeholder="Paste a Sleeper league URL"
+                  autocomplete="off"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                />
+                <button class="cb-go-btn" id="smart-start-btn" type="button" onclick="smartStartSubmit()">Go →</button>
+              </div>
+              <div class="smart-start-err" id="smart-start-err"></div>
+              <div class="smart-start-result hidden" id="smart-start-result"></div>
+            </div>
+          </div>
+
           <div class="cb-input-row">
             <input
               class="cb-input"
@@ -50,6 +78,14 @@
             <button class="cb-go-btn" id="auth-btn" onclick="handleLogin()">Connect &#8594;</button>
           </div>
           <div class="auth-error" id="auth-error"></div>
+
+          <!-- Agent A7 · Try-before-sync link (flag: landing.try_before_sync) -->
+          <div class="try-demo-wrap hidden" id="try-demo-wrap">
+            <a href="#" class="try-demo-link" onclick="startDemoMode(event)">
+              Just browsing? Try with a sample league →
+            </a>
+          </div>
+
           <div class="cb-taglines">
             <span class="cb-tagline"><span class="cb-tagline-icon">&#128200;</span> Rank</span>
             <span class="cb-tagline-sep"></span>
@@ -127,10 +163,22 @@
        MAIN APP
   ════════════════════════════════════════════════════ -->
 
+  <!-- Agent A7 · Demo-mode banner (flag: landing.try_before_sync) -->
+  <div class="demo-banner hidden" id="demo-banner">
+    <span class="demo-banner-text">
+      Enjoying this? <strong>Connect your Sleeper account</strong> to save your rankings →
+    </span>
+    <button class="demo-banner-cta" onclick="exitDemoMode()" type="button">Connect Sleeper</button>
+    <button class="demo-banner-close" onclick="dismissDemoBanner()" type="button" title="Dismiss">×</button>
+  </div>
+
   <header>
-    <div class="logo">Dynasty <span>Trade Finder</span></div>
+    <div class="logo">
+      Dynasty <span>Trade Finder</span>
+      <span class="demo-chip hidden" id="demo-chip">DEMO MODE</span>
+    </div>
     <div class="header-right">
-      <button class="view-btn" onclick="switchView('league')">🏆 League</button>
+      <button class="view-btn" onclick="switchView('league')">🏆 League<span class="nav-pill-unlock hidden" id="nav-pill-unlock-header" title=""></span></button>
 
       <!-- Notification bell -->
       <div class="notif-bell-wrap" id="notif-bell-wrap">
@@ -596,6 +644,37 @@
         <!-- Stat cards rendered by loadLeagueSummary() -->
       </div>
 
+      <!-- ── Leaguemates unlock badges (Agent A4) ────────────────────────
+           Flag: league.unlock_badges_per_member. One row per leaguemate
+           showing their join + unlock state. Populated by
+           renderLeaguematesUnlockList(). Hidden unless the flag is on. -->
+      <div class="leaguemates-section hidden" id="leaguemates-section">
+        <div class="leaguemates-header">
+          <div class="leaguemates-title">👥 Leaguemates</div>
+          <div class="leaguemates-sub">
+            Who's joined Trade Finder and how far along they are.
+          </div>
+        </div>
+        <div class="leaguemates-list" id="leaguemates-list">
+          <div class="leaguemates-loading">Loading…</div>
+        </div>
+      </div>
+
+      <!-- ── Activity feed (Agent A4) ─────────────────────────────────
+           Flag: league.activity_feed. Last 20 narrative events across
+           the league. Populated by renderLeagueActivityFeed(). -->
+      <div class="activity-feed-section hidden" id="activity-feed-section">
+        <div class="activity-feed-header">
+          <div class="activity-feed-title">🕒 League Activity</div>
+          <div class="activity-feed-sub">
+            Recent trades, tier saves, and sync-ups from your league.
+          </div>
+        </div>
+        <div class="activity-feed-list" id="activity-feed-list">
+          <div class="activity-feed-loading">Loading…</div>
+        </div>
+      </div>
+
       <div class="league-scoring-section">
         <div class="league-scoring-label">League's default scoring</div>
         <div class="league-scoring-badges">
@@ -660,6 +739,9 @@
         <div class="invite-title">Invite your league</div>
         <button class="invite-close" onclick="closeInviteModal()">&times;</button>
       </div>
+      <!-- K-factor dashboard (Agent 5) — populated by loadInviteImpact() when
+           the invite.k_factor_dashboard flag is on. Empty + hidden when off. -->
+      <div id="invite-impact-section" class="invite-impact-section hidden"></div>
       <div class="invite-url-row">
         <input type="text" class="invite-url-input" id="invite-url-input" readonly />
       </div>

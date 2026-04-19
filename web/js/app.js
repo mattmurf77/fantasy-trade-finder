@@ -995,6 +995,237 @@
         .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  Agent A7 — NEW SURFACES
+    //  Three features, each flag-gated:
+    //    • landing.smart_start_cta  — paste-a-league-url CTA above username
+    //    • landing.try_before_sync  — "sample league" demo mode link
+    //    • profiles.public_pages    — public /u/<username> page (profile.html)
+    // ═══════════════════════════════════════════════════════════════
+
+    // Reveal flag-gated landing surfaces once the flag fetch completes.
+    // _loadFeatureFlags() is fired at module top; we poll once on DOMContentLoaded
+    // so the initial paint doesn't flash the CTA if the flag is off.
+    function _applyLandingFlags() {
+      try {
+        if (window.FTF_FLAG && window.FTF_FLAG('landing.smart_start_cta')) {
+          const el = document.getElementById('smart-start-wrap');
+          if (el) el.classList.remove('hidden');
+        }
+        if (window.FTF_FLAG && window.FTF_FLAG('landing.try_before_sync')) {
+          const el = document.getElementById('try-demo-wrap');
+          if (el) el.classList.remove('hidden');
+        }
+      } catch (_) { /* flags may not have loaded yet */ }
+    }
+    // Run now (in case flags already populated) and again after a beat
+    // (covers the async boot race).
+    _applyLandingFlags();
+    setTimeout(_applyLandingFlags, 250);
+    setTimeout(_applyLandingFlags, 1000);
+
+    // ── Smart-start CTA ─────────────────────────────────────────────
+    function toggleSmartStart() {
+      const wrap  = document.getElementById('smart-start-wrap');
+      const panel = document.getElementById('smart-start-panel');
+      if (!wrap || !panel) return;
+      const isOpen = !panel.classList.contains('hidden');
+      if (isOpen) {
+        panel.classList.add('hidden');
+        wrap.classList.remove('open');
+      } else {
+        panel.classList.remove('hidden');
+        wrap.classList.add('open');
+        const input = document.getElementById('smart-start-url');
+        if (input) setTimeout(() => input.focus(), 50);
+      }
+    }
+
+    async function smartStartSubmit() {
+      const input = document.getElementById('smart-start-url');
+      const errEl = document.getElementById('smart-start-err');
+      const resEl = document.getElementById('smart-start-result');
+      const btn   = document.getElementById('smart-start-btn');
+      if (!input || !errEl || !resEl || !btn) return;
+
+      errEl.textContent = '';
+      resEl.classList.add('hidden');
+      resEl.innerHTML = '';
+
+      const url = (input.value || '').trim();
+      if (!url) {
+        errEl.textContent = 'Paste a Sleeper league URL.';
+        return;
+      }
+
+      btn.disabled = true;
+      const prevLabel = btn.textContent;
+      btn.textContent = '…';
+
+      try {
+        const res = await fetch('/api/league/parse-url', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ url }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          errEl.textContent = body.message || body.error || `Request failed (${res.status}).`;
+          btn.disabled = false;
+          btn.textContent = prevLabel;
+          return;
+        }
+
+        const platformLabel = {
+          sleeper: 'Sleeper',
+          espn:    'ESPN Fantasy',
+          mfl:     'MyFantasyLeague',
+        }[body.platform] || body.platform;
+
+        if (!body.supported || body.platform !== 'sleeper') {
+          // ESPN / MFL — show the same "coming soon" message we use elsewhere
+          resEl.className = 'smart-start-result pending';
+          resEl.innerHTML = `<strong>${escapeHtml(platformLabel)}</strong> sync is coming soon.
+            We detected league <strong>${escapeHtml(body.league_id)}</strong> — Sleeper
+            leagues work today. We'll tie the other platforms into full sync soon.`;
+          resEl.classList.remove('hidden');
+          btn.disabled = false;
+          btn.textContent = prevLabel;
+          return;
+        }
+
+        // Sleeper — resolve an owner and auto-run the username flow so
+        // the user skips typing their handle.
+        resEl.className = 'smart-start-result success';
+        resEl.innerHTML = `<span>Found <strong>${escapeHtml(body.name || 'League ' + body.league_id)}</strong> — connecting…</span>`;
+        resEl.classList.remove('hidden');
+
+        try {
+          const rostersRes = await fetch(`/api/sleeper/rosters/${encodeURIComponent(body.league_id)}`);
+          const rosters    = await rostersRes.json();
+          if (!rostersRes.ok || !Array.isArray(rosters) || !rosters.length) {
+            throw new Error('No rosters on that league.');
+          }
+          // Pick the first owner we find — the user will verify/switch on
+          // the league-select screen if they have multiple accounts.
+          const firstOwnerId = rosters
+            .map(r => r && r.owner_id)
+            .find(v => !!v);
+          if (!firstOwnerId) throw new Error('No roster owners found.');
+
+          // Look up that user's Sleeper username
+          const usersRes = await fetch(`/api/sleeper/league_users/${encodeURIComponent(body.league_id)}`);
+          const users    = await usersRes.json();
+          const ownerRow = Array.isArray(users) ? users.find(u => u && u.user_id === firstOwnerId) : null;
+          const ownerUsername = ownerRow && (ownerRow.username || ownerRow.display_name);
+          if (!ownerUsername) throw new Error('Could not resolve a league owner username.');
+
+          // Remember which league they came from so auto-select kicks in
+          try { localStorage.setItem('ftf_invited_league', body.league_id); } catch (_) {}
+
+          // Drop into the normal username flow — handleLogin() takes over
+          const uInput = document.getElementById('username-input');
+          if (uInput) {
+            uInput.value = (ownerUsername || '').toLowerCase();
+          }
+          if (typeof handleLogin === 'function') {
+            handleLogin();
+          }
+        } catch (e) {
+          resEl.className = 'smart-start-result pending';
+          resEl.innerHTML = `We found the league but couldn't resolve a username.
+            Type your Sleeper username below to continue. (${escapeHtml(e.message || 'error')})`;
+          btn.disabled = false;
+          btn.textContent = prevLabel;
+        }
+      } catch (e) {
+        errEl.textContent = e.message || 'Parse failed.';
+        btn.disabled = false;
+        btn.textContent = prevLabel;
+      }
+    }
+
+    // Enter key in the URL input triggers submit
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && e.target && e.target.id === 'smart-start-url') {
+        e.preventDefault();
+        smartStartSubmit();
+      }
+    });
+
+    // ── Demo mode (try-before-sync) ─────────────────────────────────
+    function _isDemoUrl() {
+      const p = new URLSearchParams(window.location.search);
+      return p.get('demo') === '1';
+    }
+
+    async function startDemoMode(e) {
+      if (e) e.preventDefault();
+      const auth  = document.getElementById('auth-screen');
+      const btn   = document.querySelector('.try-demo-link');
+      if (btn) btn.textContent = 'Loading sample league…';
+      try {
+        const res = await fetch('/api/session/demo', { method: 'POST' });
+        if (!res.ok) {
+          if (btn) btn.textContent = 'Demo unavailable — try again';
+          return;
+        }
+        const body = await res.json();
+        if (body && body.token) {
+          try { sessionStorage.setItem('ftf_session_token', body.token); } catch (_) {}
+          try { sessionStorage.setItem('ftf_demo_mode', '1'); } catch (_) {}
+        }
+        // Save a "demo" user so the account chip / league state render
+        const demoUser = {
+          user_id:      body.user_id || 'demo_user',
+          display_name: body.display_name || 'Demo User',
+          avatar_id:    null,
+        };
+        try {
+          if (typeof saveUser === 'function') saveUser(demoUser);
+          if (typeof saveLeague === 'function') saveLeague({
+            league_id:   body.league_id || 'league_demo',
+            league_name: body.league_name || 'The Demo League',
+          });
+        } catch (_) {}
+
+        // Reload with the demo flag so the banner/chip render on the next boot.
+        const u = new URL(window.location.href);
+        u.searchParams.set('demo', '1');
+        window.location.href = u.toString();
+      } catch (err) {
+        if (btn) btn.textContent = 'Demo unavailable — try again';
+      }
+    }
+
+    function exitDemoMode() {
+      try {
+        sessionStorage.removeItem('ftf_demo_mode');
+        sessionStorage.removeItem('ftf_session_token');
+        localStorage.removeItem('sleeper_user');
+      } catch (_) {}
+      // Strip ?demo=1 and reload to the clean landing
+      window.location.href = '/';
+    }
+
+    function dismissDemoBanner() {
+      const el = document.getElementById('demo-banner');
+      if (el) el.classList.add('hidden');
+    }
+
+    function _applyDemoModeUi() {
+      const isDemo = _isDemoUrl() ||
+                     (typeof sessionStorage !== 'undefined' &&
+                      sessionStorage.getItem('ftf_demo_mode') === '1');
+      if (!isDemo) return;
+      const chip   = document.getElementById('demo-chip');
+      const banner = document.getElementById('demo-banner');
+      if (chip)   chip.classList.remove('hidden');
+      if (banner) banner.classList.remove('hidden');
+    }
+    _applyDemoModeUi();
+    setTimeout(_applyDemoModeUi, 250);
+
 
     // ═══════════════════════════════════════════════════════════════
     //  RANKING APP
@@ -1943,6 +2174,9 @@
           _rankingProgressLeague = currentLeagueId;
         }
       } catch { /* network error — keep old cache */ }
+      // Agent A4 — refresh the nav-pill unlock badge whenever progress
+      // changes. Safe no-op when the flag is off.
+      try { if (typeof updateLeagueNavPillUnlock === 'function') updateLeagueNavPillUnlock(); } catch {}
       return _rankingProgress;
     }
 
@@ -3390,6 +3624,163 @@
             <span class="scoring-badge-value">${FORMAT_LABELS[defaultFmt] || FORMAT_LABELS['1qb_ppr']}</span>
           </div>`;
       }
+
+      // Agent A4 — fire the two new async sections (each is flag-gated
+      // server-side; renderers no-op when the flag is off).
+      if (window.FTF_FLAG && window.FTF_FLAG('league.unlock_badges_per_member')) {
+        loadLeaguematesUnlockList();
+      }
+      if (window.FTF_FLAG && window.FTF_FLAG('league.activity_feed')) {
+        loadLeagueActivityFeed();
+      }
+    }
+
+    // ── Agent A4 — Leaguemates unlock badges ──────────────────────────
+    async function loadLeaguematesUnlockList() {
+      const section = document.getElementById('leaguemates-section');
+      const list    = document.getElementById('leaguemates-list');
+      if (!section || !list || !currentLeagueId) return;
+      section.classList.remove('hidden');
+      list.innerHTML = '<div class="leaguemates-loading">Loading…</div>';
+      try {
+        const res = await apiFetch('/api/league/member-unlock-states?league_id=' +
+                                   encodeURIComponent(currentLeagueId));
+        if (!res.ok) {
+          list.innerHTML = '<div class="leaguemates-empty">Could not load leaguemates.</div>';
+          return;
+        }
+        const body = await res.json();
+        if (body.flag_off) {
+          section.classList.add('hidden');
+          return;
+        }
+        renderLeaguematesUnlockList(body.members || []);
+      } catch (e) {
+        if (typeof logDrawer !== 'undefined') logDrawer.warn('loadLeaguematesUnlockList failed: ' + e.message);
+        list.innerHTML = '<div class="leaguemates-empty">Could not load leaguemates.</div>';
+      }
+    }
+
+    // Note: Agent A4 originally declared a second `_escapeHtml` here.
+    // Removed — a pre-existing `_escapeHtml` further down (from the
+    // earlier trends sprint) covers all call sites. Two declarations
+    // in the same scope lets the second silently win via hoisting.
+
+    function renderLeaguematesUnlockList(members) {
+      const list = document.getElementById('leaguemates-list');
+      if (!list) return;
+      if (!members.length) {
+        list.innerHTML = '<div class="leaguemates-empty">No other leaguemates yet. Invite someone!</div>';
+        return;
+      }
+      const rows = members.map(m => {
+        const display = _escapeHtml(m.display_name || m.username || 'Leaguemate');
+        const username = m.username ? '@' + _escapeHtml(m.username) : '';
+        // Avatar: Sleeper avatar hashes work via their CDN. Fall back to initial.
+        let avatarHtml;
+        if (m.avatar) {
+          const url = 'https://sleepercdn.com/avatars/thumbs/' + encodeURIComponent(m.avatar);
+          avatarHtml = `<img src="${url}" alt="" onerror="this.replaceWith(document.createTextNode('${(display[0]||'?').toUpperCase()}'))" />`;
+        } else {
+          avatarHtml = (display[0] || '?').toUpperCase();
+        }
+
+        let stateHtml;
+        if (!m.joined) {
+          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-none">— Not joined</span>`;
+        } else if (m.unlocked_count >= 2) {
+          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-full">🔓 Unlocked · 2/2 formats</span>`;
+        } else if (m.unlocked_count === 1) {
+          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-partial">🔓 Unlocked · 1/2</span>`;
+        } else if (m.has_ranking_method) {
+          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-ranking">⏳ Signed up · ranking</span>`;
+        } else {
+          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-joined">⏳ Signed up</span>`;
+        }
+
+        return `<div class="leaguemate-row">
+          <div class="leaguemate-row-avatar">${avatarHtml}</div>
+          <div class="leaguemate-row-name">
+            <div class="leaguemate-row-display">${display}</div>
+            ${username ? `<div class="leaguemate-row-username">${username}</div>` : ''}
+          </div>
+          ${stateHtml}
+        </div>`;
+      }).join('');
+      list.innerHTML = rows;
+    }
+
+    // ── Agent A4 — League activity feed ───────────────────────────────
+    async function loadLeagueActivityFeed() {
+      const section = document.getElementById('activity-feed-section');
+      const list    = document.getElementById('activity-feed-list');
+      if (!section || !list || !currentLeagueId) return;
+      section.classList.remove('hidden');
+      list.innerHTML = '<div class="activity-feed-loading">Loading…</div>';
+      try {
+        const res = await apiFetch('/api/league/activity?league_id=' +
+                                   encodeURIComponent(currentLeagueId) + '&limit=20');
+        if (!res.ok) {
+          list.innerHTML = '<div class="activity-feed-empty">Could not load activity.</div>';
+          return;
+        }
+        const body = await res.json();
+        if (body.flag_off) {
+          section.classList.add('hidden');
+          return;
+        }
+        const events = body.events || [];
+        if (!events.length) {
+          list.innerHTML = '<div class="activity-feed-empty">No recent activity yet.</div>';
+          return;
+        }
+        list.innerHTML = events.map(ev =>
+          `<div class="activity-feed-item">${_escapeHtml(ev.message || '')}</div>`
+        ).join('');
+      } catch (e) {
+        if (typeof logDrawer !== 'undefined') logDrawer.warn('loadLeagueActivityFeed failed: ' + e.message);
+        list.innerHTML = '<div class="activity-feed-empty">Could not load activity.</div>';
+      }
+    }
+
+    // ── Agent A4 — Nav-pill unlock badge on the header League button ──
+    // The pill shows how many scoring formats the *current user* has unlocked
+    // (0/2, 1/2, 2/2). Data source is the existing /api/rankings/progress
+    // endpoint plus window._currentUser.unlocked_formats when available.
+    function updateLeagueNavPillUnlock() {
+      const pill = document.getElementById('nav-pill-unlock-header');
+      if (!pill) return;
+      if (!window.FTF_FLAG || !window.FTF_FLAG('league.unlock_badges_nav_pill')) {
+        pill.classList.add('hidden');
+        return;
+      }
+      // Derive a per-user unlocked_formats list from whatever we have:
+      //   1) _rankingProgress.unlocked_formats (server-truth, set each fetch)
+      //   2) window._currentUser.unlocked_formats (older session snapshot)
+      //   3) Fallback: current progress response indicating THIS format is unlocked.
+      let unlockedSet = new Set();
+      if (_rankingProgress && Array.isArray(_rankingProgress.unlocked_formats)) {
+        _rankingProgress.unlocked_formats.forEach(f => { if (f) unlockedSet.add(f); });
+      }
+      const u = window._currentUser;
+      if (u && Array.isArray(u.unlocked_formats)) {
+        u.unlocked_formats.forEach(f => { if (f) unlockedSet.add(f); });
+      }
+      if (_rankingProgress && _rankingProgress.unlocked && _rankingProgress.scoring_format) {
+        unlockedSet.add(_rankingProgress.scoring_format);
+      }
+      const count = unlockedSet.size;
+      pill.textContent = '🔓 ' + count + '/2';
+      pill.classList.remove('hidden', 'nav-pill-unlock-partial', 'nav-pill-unlock-none');
+      if (count === 0) {
+        pill.classList.add('nav-pill-unlock-none');
+        pill.title = "You haven't unlocked any scoring formats in this league yet — finish ranking to unlock.";
+      } else if (count === 1) {
+        pill.classList.add('nav-pill-unlock-partial');
+        pill.title = 'You have unlocked 1 of 2 scoring formats for this league.';
+      } else {
+        pill.title = 'You have unlocked both scoring formats for this league.';
+      }
     }
 
     // ── Invite share sheet ────────────────────────────────────────────
@@ -3437,7 +3828,148 @@
       const urlInput = document.getElementById('invite-url-input');
       if (urlInput) urlInput.value = buildInviteUrl();
       renderInviteGrid();
+      // K-factor dashboard (Agent 5) — only render when the flag is on.
+      // When off we leave the section hidden so the modal renders exactly
+      // as it did before this feature shipped.
+      try {
+        const section = document.getElementById('invite-impact-section');
+        if (section) {
+          if (window.FTF_FLAG && window.FTF_FLAG('invite.k_factor_dashboard')) {
+            section.classList.remove('hidden');
+            loadInviteImpact();
+          } else {
+            section.classList.add('hidden');
+            section.innerHTML = '';
+          }
+        }
+      } catch (e) { /* non-fatal */ }
       modal.classList.remove('hidden');
+    }
+
+    // ── K-factor dashboard (Agent 5) ──────────────────────────────────
+    // Key used to dedupe celebration animations across sessions — we only
+    // want to show the confetti once per badge earned per user.
+    const INVITE_BADGE_SEEN_KEY = 'ftf.invite.badgesSeen';
+
+    function _getSeenInviteBadges() {
+      try {
+        const raw = localStorage.getItem(INVITE_BADGE_SEEN_KEY) || '[]';
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+      } catch (e) { return []; }
+    }
+    function _markInviteBadgeSeen(badge) {
+      if (!badge) return;
+      const seen = _getSeenInviteBadges();
+      if (seen.indexOf(badge) === -1) {
+        seen.push(badge);
+        try { localStorage.setItem(INVITE_BADGE_SEEN_KEY, JSON.stringify(seen)); } catch (e) {}
+      }
+    }
+
+    async function loadInviteImpact() {
+      const section = document.getElementById('invite-impact-section');
+      if (!section) return;
+      // Optimistic skeleton so the modal doesn't flash a blank block while
+      // the round-trip completes.
+      section.innerHTML = `
+        <div class="invite-impact-skeleton">
+          <div class="invite-impact-headline">Your invite impact</div>
+          <div class="invite-impact-sub">Loading…</div>
+        </div>`;
+      try {
+        const resp = await apiFetch('/api/invite/impact');
+        if (!resp.ok) throw new Error('impact ' + resp.status);
+        const data = await resp.json();
+        renderInviteImpact(data);
+      } catch (err) {
+        // Fail quiet — hide the section entirely so the modal still works.
+        section.classList.add('hidden');
+        section.innerHTML = '';
+      }
+    }
+
+    function renderInviteImpact(data) {
+      const section = document.getElementById('invite-impact-section');
+      if (!section || !data) return;
+
+      const invited       = Number(data.invited || 0);
+      const joined        = Number(data.joined || 0);
+      const activeRankers = Number(data.active_rankers || 0);
+      const kFactor       = Number(data.k_factor || 0);
+      const next          = data.next_milestone || null;
+      const badges        = Array.isArray(data.badges_earned) ? data.badges_earned : [];
+
+      // Progress toward next milestone. If we're past the last one, show
+      // a solid 100% bar with a "max level" label instead.
+      let barPct = 100;
+      let nextLabel = '';
+      if (next && next.at > 0) {
+        const cap = Number(next.at);
+        barPct = Math.max(0, Math.min(100, Math.round((joined / cap) * 100)));
+        nextLabel = `${joined}/${cap} → ${next.badge}`;
+      } else {
+        nextLabel = '👑 Max level reached';
+      }
+
+      // Primary headline — keeps the short sentence structure from the spec.
+      const headline = `You've invited ${invited} leaguemate${invited === 1 ? '' : 's'}` +
+                       ` · ${joined} joined · ${kFactor.toFixed(1)} K-factor`;
+      const subline = activeRankers > 0
+        ? `${activeRankers} actively ranking`
+        : (joined > 0 ? 'Nudge them to start ranking!' : 'Share your link to get started');
+
+      const badgeChips = badges.length
+        ? `<div class="milestone-badge-row">` +
+            badges.map(b => `<span class="milestone-badge-chip">${b}</span>`).join('') +
+          `</div>`
+        : '';
+
+      section.innerHTML = `
+        <div class="invite-impact-card">
+          <div class="invite-impact-headline">Your invite impact</div>
+          <div class="invite-impact-stats">${headline}</div>
+          <div class="invite-impact-sub">${subline}</div>
+          <div class="kfactor-bar-wrap">
+            <div class="kfactor-bar-track">
+              <div class="kfactor-bar-fill" style="width:${barPct}%"></div>
+            </div>
+            <div class="kfactor-bar-label">${nextLabel}</div>
+          </div>
+          ${badgeChips}
+        </div>`;
+
+      // Celebration — fire once for any badge the user earned but hasn't
+      // seen yet. Single-shot via localStorage; survives reloads.
+      const seen = _getSeenInviteBadges();
+      const fresh = badges.filter(b => seen.indexOf(b) === -1);
+      if (fresh.length) {
+        // Celebrate only the latest (highest) tier in this burst — avoids
+        // stacked toasts if a user hits two milestones between visits.
+        const celebrate = fresh[fresh.length - 1];
+        _celebrateInviteBadge(celebrate);
+        fresh.forEach(_markInviteBadgeSeen);
+      }
+    }
+
+    function _celebrateInviteBadge(badge) {
+      if (!badge) return;
+      const host = document.getElementById('invite-impact-section');
+      if (!host) return;
+      // Lightweight DOM-only confetti — avoids a new dep. Slides in a
+      // toast, pulses once, then removes itself. The CSS defines the
+      // motion so we can add/remove a class here.
+      const toast = document.createElement('div');
+      toast.className = 'milestone-badge-toast';
+      toast.innerHTML = `
+        <div class="milestone-badge-toast-emoji">🎉</div>
+        <div class="milestone-badge-toast-text">
+          <div class="milestone-badge-toast-title">New badge unlocked!</div>
+          <div class="milestone-badge-toast-badge">${badge}</div>
+        </div>`;
+      host.appendChild(toast);
+      // Auto-dismiss after the animation ends (4 s is plenty).
+      setTimeout(() => { try { toast.remove(); } catch (e) {} }, 4000);
     }
 
     function closeInviteModal() {

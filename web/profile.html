@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fantasy Trade Finder — Profile</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --border:   #2a2d3a;
+      --text:     #e8eaf0;
+      --muted:    #7a7f96;
+      --accent:   #4f7cff;
+      --green:    #22c55e;
+      --red:      #ef4444;
+      --qb: #f97316;
+      --rb: #22c55e;
+      --wr: #3b82f6;
+      --te: #a855f7;
+      --gold:   #f59e0b;
+      --elite:   #fbbf24;
+      --starter: #22c55e;
+      --solid:   #4f7cff;
+      --depth:   #fb923c;
+      --bench:   #7a7f96;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 100vw;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .pp-wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 32px 20px 80px;
+    }
+
+    .pp-brand {
+      font-size: 13px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+    }
+    .pp-brand a { color: var(--muted); }
+    .pp-brand strong { color: var(--accent); }
+
+    .pp-header {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      margin-bottom: 20px;
+    }
+    .pp-avatar {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--muted);
+      overflow: hidden;
+      flex-shrink: 0;
+      border: 1px solid var(--border);
+    }
+    .pp-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .pp-who {
+      flex: 1;
+      min-width: 0;
+    }
+    .pp-display {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pp-handle {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .pp-leagues-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(79, 124, 255, 0.12);
+      color: var(--accent);
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-top: 10px;
+    }
+
+    .pp-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px 20px 24px;
+      margin-bottom: 16px;
+    }
+    .pp-section-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+
+    .pp-takes-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+    }
+    .pp-takes-pos {
+      background: rgba(255,255,255,0.015);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .pp-takes-pos-title {
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: 0.06em;
+    }
+    .pp-takes-pos-title[data-pos="qb"] { color: var(--qb); }
+    .pp-takes-pos-title[data-pos="rb"] { color: var(--rb); }
+    .pp-takes-pos-title[data-pos="wr"] { color: var(--wr); }
+    .pp-takes-pos-title[data-pos="te"] { color: var(--te); }
+
+    .pp-take-group {
+      margin-top: 8px;
+    }
+    .pp-take-group-label {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .pp-take-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 4px 0;
+      font-size: 13px;
+    }
+    .pp-take-delta {
+      font-weight: 600;
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+    .pp-take-delta.above { color: var(--green); }
+    .pp-take-delta.below { color: var(--red); }
+
+    .pp-tiers-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+    }
+    .pp-tier-pos {
+      background: rgba(255,255,255,0.015);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .pp-tier-pos-title {
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: 0.06em;
+    }
+    .pp-tier-pos-title[data-pos="qb"] { color: var(--qb); }
+    .pp-tier-pos-title[data-pos="rb"] { color: var(--rb); }
+    .pp-tier-pos-title[data-pos="wr"] { color: var(--wr); }
+    .pp-tier-pos-title[data-pos="te"] { color: var(--te); }
+
+    .pp-tier-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      padding: 4px 0;
+      border-top: 1px dashed var(--border);
+      font-size: 12px;
+    }
+    .pp-tier-row:first-of-type { border-top: none; }
+    .pp-tier-label {
+      flex: 0 0 58px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding-top: 3px;
+    }
+    .pp-tier-label[data-tier="elite"]   { color: var(--elite); }
+    .pp-tier-label[data-tier="starter"] { color: var(--starter); }
+    .pp-tier-label[data-tier="solid"]   { color: var(--solid); }
+    .pp-tier-label[data-tier="depth"]   { color: var(--depth); }
+    .pp-tier-label[data-tier="bench"]   { color: var(--bench); }
+
+    .pp-tier-names {
+      flex: 1;
+      color: var(--text);
+      line-height: 1.4;
+    }
+
+    .pp-empty {
+      color: var(--muted);
+      font-size: 13px;
+      padding: 10px 0;
+      font-style: italic;
+    }
+
+    .pp-cta {
+      display: block;
+      background: var(--accent);
+      color: white;
+      padding: 16px 24px;
+      border-radius: 12px;
+      text-align: center;
+      font-weight: 600;
+      margin-top: 24px;
+      font-size: 15px;
+    }
+    .pp-cta:hover {
+      background: #3d65d9;
+      text-decoration: none;
+    }
+
+    .pp-error {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .pp-error-title {
+      font-size: 18px;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="pp-wrap">
+    <div class="pp-brand">
+      <a href="/">← <strong>Fantasy Trade Finder</strong></a>
+    </div>
+
+    <div id="pp-content">
+      <div class="pp-section">
+        <div class="pp-empty">Loading profile…</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const POS_LABELS = { qb: 'QB', rb: 'RB', wr: 'WR', te: 'TE' };
+      const TIER_ORDER = ['elite', 'starter', 'solid', 'depth', 'bench'];
+      const TIER_LABELS = {
+        elite: 'Elite', starter: 'Starter', solid: 'Solid',
+        depth: 'Depth', bench: 'Bench',
+      };
+
+      function esc(s) {
+        return String(s == null ? '' : s)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      function extractUsername() {
+        // Path is /u/<username> — strip leading /u/ and any trailing slash.
+        const p = window.location.pathname.replace(/^\/u\//, '').replace(/\/$/, '');
+        return decodeURIComponent(p || '');
+      }
+
+      function avatarInitials(name) {
+        if (!name) return '?';
+        const parts = name.trim().split(/\s+/);
+        return (parts[0][0] || '?').toUpperCase() + (parts[1] ? parts[1][0].toUpperCase() : '');
+      }
+
+      function renderTakesPos(pos, data) {
+        const above = (data && data.above) || [];
+        const below = (data && data.below) || [];
+        if (!above.length && !below.length) return '';
+
+        const row = (p, kind) => `
+          <div class="pp-take-row">
+            <span>${esc(p.name)}</span>
+            <span class="pp-take-delta ${kind}">${p.delta > 0 ? '+' : ''}${p.delta}</span>
+          </div>`;
+
+        return `
+          <div class="pp-takes-pos">
+            <div class="pp-takes-pos-title" data-pos="${pos}">${POS_LABELS[pos]}</div>
+            ${above.length ? `
+              <div class="pp-take-group">
+                <div class="pp-take-group-label">Higher than community</div>
+                ${above.map(p => row(p, 'above')).join('')}
+              </div>` : ''}
+            ${below.length ? `
+              <div class="pp-take-group">
+                <div class="pp-take-group-label">Lower than community</div>
+                ${below.map(p => row(p, 'below')).join('')}
+              </div>` : ''}
+          </div>`;
+      }
+
+      function renderTiersPos(pos, buckets) {
+        if (!buckets || !Object.keys(buckets).length) return '';
+        const rows = TIER_ORDER
+          .filter(t => buckets[t] && buckets[t].length)
+          .map(t => `
+            <div class="pp-tier-row">
+              <div class="pp-tier-label" data-tier="${t}">${TIER_LABELS[t]}</div>
+              <div class="pp-tier-names">
+                ${buckets[t].map(p => esc(p.name)).join(', ')}
+              </div>
+            </div>`).join('');
+        if (!rows) return '';
+        return `
+          <div class="pp-tier-pos">
+            <div class="pp-tier-pos-title" data-pos="${pos}">${POS_LABELS[pos]}</div>
+            ${rows}
+          </div>`;
+      }
+
+      function render(data) {
+        const displayName = data.display_name || data.username;
+        const avatarHtml = data.avatar_url
+          ? `<img src="${esc(data.avatar_url)}" alt="" onerror="this.style.display='none'; this.parentNode.textContent='${esc(avatarInitials(displayName))}';">`
+          : esc(avatarInitials(displayName));
+
+        const takesGrid = ['qb','rb','wr','te']
+          .map(pos => renderTakesPos(pos, (data.contrarian_takes || {})[pos]))
+          .filter(Boolean)
+          .join('');
+        const tiersGrid = ['qb','rb','wr','te']
+          .map(pos => renderTiersPos(pos, (data.tiers_snapshot || {})[pos]))
+          .filter(Boolean)
+          .join('');
+
+        const html = `
+          <div class="pp-header">
+            <div class="pp-avatar">${avatarHtml}</div>
+            <div class="pp-who">
+              <div class="pp-display">${esc(displayName)}</div>
+              <div class="pp-handle">@${esc(data.username)}</div>
+              ${data.leagues_count ? `<div class="pp-leagues-chip">🏈 ${data.leagues_count} league${data.leagues_count === 1 ? '' : 's'}</div>` : ''}
+            </div>
+          </div>
+
+          <div class="pp-section">
+            <div class="pp-section-title">Top Contrarian Takes</div>
+            ${takesGrid ? `<div class="pp-takes-grid">${takesGrid}</div>` : `<div class="pp-empty">Not enough community data yet — invite leaguemates to unlock.</div>`}
+          </div>
+
+          <div class="pp-section">
+            <div class="pp-section-title">Current Tiers Snapshot</div>
+            ${tiersGrid ? `<div class="pp-tiers-grid">${tiersGrid}</div>` : `<div class="pp-empty">No tiers saved yet.</div>`}
+          </div>
+
+          <a class="pp-cta" href="/">See their rankings in Fantasy Trade Finder →</a>`;
+
+        document.getElementById('pp-content').innerHTML = html;
+      }
+
+      function renderError(message) {
+        document.getElementById('pp-content').innerHTML = `
+          <div class="pp-error">
+            <div class="pp-error-title">Profile not found</div>
+            <div>${esc(message || 'This user hasn\u2019t set up a Fantasy Trade Finder profile yet.')}</div>
+          </div>`;
+      }
+
+      async function load() {
+        const uname = extractUsername();
+        if (!uname) {
+          renderError('No username in URL.');
+          return;
+        }
+        document.title = `@${uname} — Fantasy Trade Finder`;
+        try {
+          const res = await fetch('/api/profile/' + encodeURIComponent(uname), { cache: 'no-store' });
+          if (res.status === 404) {
+            renderError();
+            return;
+          }
+          if (!res.ok) {
+            renderError('Server error (' + res.status + ').');
+            return;
+          }
+          const data = await res.json();
+          render(data);
+        } catch (e) {
+          renderError('Could not load profile.');
+        }
+      }
+
+      load();
+    })();
+  </script>
+</body>
+</html>

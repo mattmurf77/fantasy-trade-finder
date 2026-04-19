@@ -3426,3 +3426,430 @@
       padding: 10px 18px;
       font-size: 13px;
     }
+
+    /* ── Invite K-factor dashboard (Agent 5) ──────────────────────────── */
+    .invite-impact-section { position: relative; }
+    .invite-impact-section.hidden { display: none; }
+    .invite-impact-card {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(236, 72, 153, 0.10));
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      border-radius: 12px;
+      padding: 14px 16px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .invite-impact-skeleton {
+      padding: 12px 14px;
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      color: var(--muted);
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .invite-impact-headline {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .invite-impact-stats {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.35;
+    }
+    .invite-impact-sub {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .kfactor-bar-wrap {
+      display: flex; flex-direction: column; gap: 4px;
+      margin-top: 2px;
+    }
+    .kfactor-bar-track {
+      width: 100%;
+      height: 8px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .kfactor-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #6366f1, #ec4899);
+      border-radius: 999px;
+      transition: width 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
+    }
+    .kfactor-bar-label {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .milestone-badge-row {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      margin-top: 4px;
+    }
+    .milestone-badge-chip {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: var(--text);
+    }
+    .milestone-badge-toast {
+      position: absolute;
+      top: -6px; right: -6px;
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px;
+      background: linear-gradient(135deg, #6366f1, #ec4899);
+      color: white;
+      border-radius: 12px;
+      box-shadow: 0 12px 32px rgba(99,102,241,0.45);
+      animation: milestoneToastPop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+                 milestoneToastFade 0.6s ease 3.4s forwards;
+      z-index: 2;
+      max-width: 280px;
+    }
+    .milestone-badge-toast-emoji { font-size: 22px; }
+    .milestone-badge-toast-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      opacity: 0.85;
+    }
+    .milestone-badge-toast-badge {
+      font-size: 14px;
+      font-weight: 800;
+    }
+    @keyframes milestoneToastPop {
+      from { transform: scale(0.7) translateY(-6px); opacity: 0; }
+      to   { transform: scale(1)   translateY(0);    opacity: 1; }
+    }
+    @keyframes milestoneToastFade {
+      from { opacity: 1; transform: translateY(0); }
+      to   { opacity: 0; transform: translateY(-6px); }
+    }
+
+    /* ── Agent A4 — Leaguemate unlock badges ─────────────────────────── */
+    .leaguemates-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 16px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .leaguemates-section.hidden { display: none; }
+    .leaguemates-header {
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .leaguemates-title {
+      font-size: 15px; font-weight: 800; color: var(--text);
+    }
+    .leaguemates-sub {
+      font-size: 12px; color: var(--muted); line-height: 1.4;
+    }
+    .leaguemates-list {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .leaguemates-loading,
+    .leaguemates-empty {
+      padding: 14px 0;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+    .leaguemate-row {
+      display: grid;
+      grid-template-columns: 36px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 10px;
+    }
+    .leaguemate-row-avatar {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: var(--border);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text);
+      font-weight: 700;
+      font-size: 14px;
+      overflow: hidden;
+    }
+    .leaguemate-row-avatar img {
+      width: 100%; height: 100%; object-fit: cover;
+    }
+    .leaguemate-row-name {
+      display: flex; flex-direction: column; gap: 2px;
+      min-width: 0;
+    }
+    .leaguemate-row-display {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .leaguemate-row-username {
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .leaguemate-row-state {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .leaguemate-row-state-full {
+      background: rgba(34,197,94,0.12);
+      color: #4ade80;
+      border: 1px solid rgba(74,222,128,0.35);
+    }
+    .leaguemate-row-state-partial {
+      background: rgba(251,146,60,0.12);
+      color: #fb923c;
+      border: 1px solid rgba(251,146,60,0.35);
+    }
+    .leaguemate-row-state-ranking {
+      background: rgba(99,102,241,0.12);
+      color: #a5b4fc;
+      border: 1px solid rgba(129,140,248,0.35);
+    }
+    .leaguemate-row-state-joined {
+      background: rgba(255,255,255,0.04);
+      color: var(--muted);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .leaguemate-row-state-none {
+      background: transparent;
+      color: var(--muted);
+      border: 1px dashed rgba(255,255,255,0.15);
+      font-weight: 600;
+    }
+
+    /* ── Agent A4 — Activity feed ────────────────────────────────────── */
+    .activity-feed-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 16px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .activity-feed-section.hidden { display: none; }
+    .activity-feed-header {
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .activity-feed-title {
+      font-size: 15px; font-weight: 800; color: var(--text);
+    }
+    .activity-feed-sub {
+      font-size: 12px; color: var(--muted); line-height: 1.4;
+    }
+    .activity-feed-list {
+      display: flex; flex-direction: column;
+      max-height: 420px;
+      overflow-y: auto;
+    }
+    .activity-feed-loading,
+    .activity-feed-empty {
+      padding: 18px 0;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+    .activity-feed-item {
+      padding: 10px 4px;
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.4;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .activity-feed-item:last-child {
+      border-bottom: none;
+    }
+
+    /* ── Agent A4 — Nav pill unlock badge ────────────────────────────── */
+    .nav-pill-unlock {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.2;
+      background: rgba(34,197,94,0.15);
+      color: #4ade80;
+      border: 1px solid rgba(74,222,128,0.35);
+      vertical-align: middle;
+    }
+    .nav-pill-unlock.hidden { display: none; }
+    .nav-pill-unlock.nav-pill-unlock-partial {
+      background: rgba(251,146,60,0.15);
+      color: #fb923c;
+      border-color: rgba(251,146,60,0.35);
+    }
+    .nav-pill-unlock.nav-pill-unlock-none {
+      background: rgba(255,255,255,0.04);
+      color: var(--muted);
+      border-color: rgba(255,255,255,0.10);
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Agent A7 — smart-start CTA (flag: landing.smart_start_cta)
+       ───────────────────────────────────────────────────────────── */
+    .smart-start {
+      margin-bottom: 12px;
+    }
+    .smart-start.hidden { display: none; }
+    .smart-start-toggle {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(79, 124, 255, 0.06);
+      border: 1px dashed rgba(79, 124, 255, 0.35);
+      color: var(--text);
+      padding: 12px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .smart-start-toggle:hover {
+      background: rgba(79, 124, 255, 0.12);
+      border-color: rgba(79, 124, 255, 0.6);
+    }
+    .smart-start-icon { font-size: 16px; }
+    .smart-start-text { flex: 1; text-align: left; }
+    .smart-start-arrow {
+      color: var(--accent);
+      font-weight: 700;
+      transition: transform 0.2s;
+    }
+    .smart-start.open .smart-start-arrow {
+      transform: rotate(90deg);
+    }
+    .smart-start-panel {
+      margin-top: 10px;
+      padding: 14px;
+      background: rgba(79, 124, 255, 0.04);
+      border: 1px solid rgba(79, 124, 255, 0.2);
+      border-radius: 10px;
+    }
+    .smart-start-panel.hidden { display: none; }
+    .smart-start-input-row {
+      display: flex;
+      gap: 8px;
+    }
+    .smart-start-input-row .cb-input { flex: 1; }
+    .smart-start-err {
+      color: var(--red);
+      font-size: 12px;
+      margin-top: 6px;
+      min-height: 1em;
+    }
+    .smart-start-result {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .smart-start-result.hidden { display: none; }
+    .smart-start-result.success {
+      background: rgba(34, 197, 94, 0.10);
+      border: 1px solid rgba(34, 197, 94, 0.35);
+      color: #a7f3d0;
+    }
+    .smart-start-result.pending {
+      background: rgba(251, 146, 60, 0.10);
+      border: 1px solid rgba(251, 146, 60, 0.35);
+      color: #fed7aa;
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Agent A7 — try-before-sync demo link (flag: landing.try_before_sync)
+       ───────────────────────────────────────────────────────────── */
+    .try-demo-wrap {
+      text-align: center;
+      margin: 10px 0 4px;
+    }
+    .try-demo-wrap.hidden { display: none; }
+    .try-demo-link {
+      color: var(--muted);
+      font-size: 13px;
+      text-decoration: none;
+      border-bottom: 1px dashed rgba(122, 127, 150, 0.5);
+      padding-bottom: 1px;
+    }
+    .try-demo-link:hover {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    /* Demo-mode chip + banner */
+    .demo-chip {
+      display: inline-block;
+      background: var(--gold);
+      color: #0f1117;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      padding: 3px 8px;
+      border-radius: 999px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .demo-chip.hidden { display: none; }
+
+    .demo-banner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.12), rgba(79, 124, 255, 0.08));
+      border-bottom: 1px solid rgba(245, 158, 11, 0.3);
+      color: var(--text);
+      font-size: 13px;
+      position: sticky;
+      top: 0;
+      z-index: 120;
+    }
+    .demo-banner.hidden { display: none; }
+    .demo-banner-text { flex: 1; }
+    .demo-banner-text strong { color: var(--gold); }
+    .demo-banner-cta {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .demo-banner-cta:hover { background: #3d65d9; }
+    .demo-banner-close {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 4px 6px;
+    }
+    .demo-banner-close:hover { color: var(--text); }
+
+    @media (max-width: 640px) {
+      .demo-banner { flex-wrap: wrap; }
+      .demo-banner-text { flex: 1 1 100%; }
+    }

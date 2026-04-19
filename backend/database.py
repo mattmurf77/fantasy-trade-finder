@@ -1302,6 +1302,270 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Agent A4 additions — per-member unlock states & league activity feed.
+# Used by the new /api/league/member-unlock-states and /api/league/activity
+# endpoints behind the league.unlock_badges_per_member and
+# league.activity_feed flags.
+# ---------------------------------------------------------------------------
+
+def load_league_member_unlock_states(league_id: str, exclude_user_id: str | None = None) -> list[dict]:
+    """
+    Return a per-leaguemate unlock-state list for the League view.
+
+    Each row: {
+        "user_id":          str,
+        "username":         str,
+        "display_name":     str,
+        "avatar":           str | None,
+        "joined":           bool,          # has a users row
+        "unlocked_formats": list[str],     # subset of ('1qb_ppr','sf_tep')
+        "unlocked_count":   int,           # 0..2
+        "has_ranking_method": bool,        # users.ranking_method is not null
+    }
+
+    Rows are sorted: unlocked_count DESC, joined first, display_name ASC.
+    """
+    with engine.connect() as conn:
+        member_rows = conn.execute(
+            select(
+                league_members_table.c.user_id,
+                league_members_table.c.username,
+                league_members_table.c.display_name,
+            ).where(league_members_table.c.league_id == league_id)
+        ).fetchall()
+
+        if exclude_user_id:
+            member_rows = [r for r in member_rows if r.user_id != exclude_user_id]
+
+        if not member_rows:
+            return []
+
+        member_ids = [r.user_id for r in member_rows]
+
+        user_rows = conn.execute(
+            select(
+                users_table.c.sleeper_user_id,
+                users_table.c.username,
+                users_table.c.display_name,
+                users_table.c.avatar,
+                users_table.c.unlocked_formats,
+                users_table.c.ranking_method,
+            ).where(users_table.c.sleeper_user_id.in_(member_ids))
+        ).fetchall()
+
+    by_id = {r.sleeper_user_id: r for r in user_rows}
+
+    out: list[dict] = []
+    for m in member_rows:
+        u = by_id.get(m.user_id)
+        unlocked: list[str] = []
+        joined = False
+        avatar = None
+        display_name = m.display_name or m.username or ""
+        username = m.username or ""
+        has_method = False
+        if u is not None:
+            joined = True
+            avatar = u.avatar
+            if u.display_name:
+                display_name = u.display_name
+            if u.username:
+                username = u.username
+            has_method = bool(u.ranking_method)
+            if u.unlocked_formats:
+                try:
+                    parsed = json.loads(u.unlocked_formats)
+                    if isinstance(parsed, list):
+                        for fmt in parsed:
+                            if fmt in ("1qb_ppr", "sf_tep") and fmt not in unlocked:
+                                unlocked.append(fmt)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        out.append({
+            "user_id":            m.user_id,
+            "username":           username,
+            "display_name":       display_name,
+            "avatar":             avatar,
+            "joined":             joined,
+            "unlocked_formats":   unlocked,
+            "unlocked_count":     len(unlocked),
+            "has_ranking_method": has_method,
+        })
+
+    out.sort(key=lambda r: (
+        -r["unlocked_count"],
+        0 if r["joined"] else 1,
+        (r["display_name"] or "").lower(),
+    ))
+    return out
+
+
+def load_league_activity(league_id: str, limit: int = 20) -> list[dict]:
+    """
+    Pull the most recent wrapped_events for a league and format them as
+    human-readable activity-feed entries.
+
+    Returns a list (newest first) of:
+        {
+            "ts":            ISO timestamp string,
+            "emoji":         str,
+            "message":       str,
+            "actor_user_id": str | None,
+            "event_type":    str,
+        }
+    """
+    from datetime import datetime, timezone
+    NARRATIVE_TYPES = {
+        "trade_match",
+        "trade_accepted",
+        "trade_declined",
+        "tier_save",
+        "league_sync",
+    }
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                wrapped_events_table.c.user_id,
+                wrapped_events_table.c.event_type,
+                wrapped_events_table.c.payload_json,
+                wrapped_events_table.c.created_at,
+            )
+            .where(wrapped_events_table.c.league_id == league_id)
+            .order_by(wrapped_events_table.c.id.desc())
+            .limit(max(limit * 4, 40))
+        ).fetchall()
+
+        filtered = [r for r in rows if r.event_type in NARRATIVE_TYPES][:limit]
+        if not filtered:
+            return []
+
+        user_ids = list({r.user_id for r in filtered if r.user_id})
+        user_map: dict[str, dict] = {}
+        if user_ids:
+            user_rows = conn.execute(
+                select(
+                    users_table.c.sleeper_user_id,
+                    users_table.c.username,
+                    users_table.c.display_name,
+                    users_table.c.invited_by,
+                ).where(users_table.c.sleeper_user_id.in_(user_ids))
+            ).fetchall()
+            user_map = {
+                r.sleeper_user_id: {
+                    "username":     r.username or "",
+                    "display_name": r.display_name or r.username or "",
+                    "invited_by":   r.invited_by or "",
+                }
+                for r in user_rows
+            }
+
+    def _handle_name(uid):
+        if not uid:
+            return "someone"
+        u = user_map.get(uid)
+        if not u:
+            return "someone"
+        return u["username"] or u["display_name"] or "someone"
+
+    def _ago(iso_ts):
+        if not iso_ts:
+            return "recently"
+        try:
+            ts = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+        except Exception:
+            return "recently"
+        now = datetime.now(timezone.utc)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        delta = now - ts
+        secs = int(delta.total_seconds())
+        if secs < 60:
+            return "just now"
+        if secs < 3600:
+            return f"{secs // 60}m ago"
+        if secs < 86400:
+            return f"{secs // 3600}h ago"
+        return f"{secs // 86400}d ago"
+
+    FMT_LABELS = {"1qb_ppr": "1QB PPR", "sf_tep": "SF TEP"}
+
+    out: list[dict] = []
+    for r in filtered:
+        try:
+            payload = json.loads(r.payload_json) if r.payload_json else {}
+            if not isinstance(payload, dict):
+                payload = {}
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+
+        actor = _handle_name(r.user_id)
+        ago = _ago(r.created_at)
+        et = r.event_type
+        emoji = "•"
+        message = ""
+
+        if et == "trade_accepted":
+            emoji = "✅"
+            other = _handle_name(payload.get("other_user_id"))
+            message = f"✅ @{actor} accepted a trade with @{other} ({ago})"
+        elif et == "trade_declined":
+            emoji = "✖️"
+            other = _handle_name(payload.get("other_user_id"))
+            message = f"✖️ @{actor} declined a trade with @{other} ({ago})"
+        elif et == "trade_match":
+            emoji = "🤝"
+            other = _handle_name(payload.get("other_user_id"))
+            message = f"🤝 @{actor} matched a trade with @{other} ({ago})"
+        elif et == "tier_save":
+            emoji = "📋"
+            pos = (payload.get("position") or "").upper()
+            fmt_key = payload.get("scoring_format") or payload.get("format") or ""
+            fmt_lbl = FMT_LABELS.get(fmt_key, "")
+            if pos and fmt_lbl:
+                message = f"📋 @{actor} saved their {pos} tiers ({fmt_lbl}) ({ago})"
+            elif pos:
+                message = f"📋 @{actor} saved their {pos} tiers ({ago})"
+            else:
+                message = f"📋 @{actor} saved their tiers ({ago})"
+        elif et == "league_sync":
+            u = user_map.get(r.user_id or "", {})
+            inviter = u.get("invited_by") if u else ""
+            if inviter:
+                emoji = "🤝"
+                message = f"🤝 @{actor} joined via @{inviter}'s invite ({ago})"
+            else:
+                emoji = "🔄"
+                message = f"🔄 @{actor} synced the league ({ago})"
+        else:
+            message = f"• @{actor} — {et} ({ago})"
+
+        # If a tier_save also flipped the format to unlocked, surface a
+        # separate unlock milestone entry.
+        if et == "tier_save" and payload.get("unlocked_format"):
+            fmt_key = payload.get("unlocked_format")
+            fmt_lbl = FMT_LABELS.get(fmt_key, fmt_key)
+            out.append({
+                "ts":            r.created_at,
+                "emoji":         "🎯",
+                "message":       f"🎯 @{actor} unlocked trades in {fmt_lbl} ({ago})",
+                "actor_user_id": r.user_id,
+                "event_type":    "unlock",
+            })
+
+        out.append({
+            "ts":            r.created_at,
+            "emoji":         emoji,
+            "message":       message,
+            "actor_user_id": r.user_id,
+            "event_type":    et,
+        })
+
+    return out[:limit]
+
+
 def load_local_leagues_for_user(user_id: str) -> list[dict]:
     """
     Return all locally-stored (non-Sleeper) leagues where this user is a member,
@@ -2877,3 +3141,103 @@ def load_community_elo_for_league(
         exclude_user_id = exclude_user_id,
         scoring_format  = scoring_format,
     )
+
+
+# ---------------------------------------------------------------------------
+# Agent 5 additions — invite K-factor / referral dashboard helpers
+# ---------------------------------------------------------------------------
+#
+# The users.invited_by column stores the referrer's Sleeper username as typed
+# by the inviter (preserved case-insensitively, see get_user_by_username).
+# To compute a user's "invited leaguemates" count we count rows whose
+# invited_by matches either the caller's sleeper_user_id OR their username.
+# The frontend only knows one of these at a time so we accept either.
+# ---------------------------------------------------------------------------
+
+def count_referrals(username_or_user_id: str) -> int:
+    """Return the number of users referred by this user.
+
+    Accepts either a Sleeper username (matched case-insensitively against
+    invited_by) OR a sleeper_user_id (resolved to a username first, then
+    matched). Returns 0 for unknown / empty input.
+    """
+    if not username_or_user_id:
+        return 0
+    from sqlalchemy import func
+    target = str(username_or_user_id).strip()
+    if not target:
+        return 0
+
+    with engine.connect() as conn:
+        # If they passed a sleeper_user_id, resolve it to their username so
+        # we can match against invited_by. If they passed a username, this
+        # lookup returns None and we fall through to the direct match.
+        row = conn.execute(
+            select(users_table.c.username).where(
+                users_table.c.sleeper_user_id == target
+            )
+        ).fetchone()
+        username = (row.username if row and row.username else target).strip()
+        if not username:
+            return 0
+
+        count_row = conn.execute(
+            select(func.count()).select_from(users_table).where(
+                func.lower(users_table.c.invited_by) == username.lower()
+            )
+        ).fetchone()
+    return int(count_row[0]) if count_row else 0
+
+
+def list_referral_activity(username_or_user_id: str) -> list[dict]:
+    """Return a list of {sleeper_user_id, username, has_swiped} for each
+    user referred by this caller.
+
+    `has_swiped` is True when the referred user has at least one row in
+    swipe_decisions — a cheap proxy for "actively ranking". Used by the
+    K-factor dashboard to show "N invited · M actively ranking".
+    """
+    if not username_or_user_id:
+        return []
+    from sqlalchemy import func
+    target = str(username_or_user_id).strip()
+    if not target:
+        return []
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.username).where(
+                users_table.c.sleeper_user_id == target
+            )
+        ).fetchone()
+        username = (row.username if row and row.username else target).strip()
+        if not username:
+            return []
+
+        referred = conn.execute(
+            select(
+                users_table.c.sleeper_user_id,
+                users_table.c.username,
+                users_table.c.display_name,
+            ).where(
+                func.lower(users_table.c.invited_by) == username.lower()
+            )
+        ).fetchall()
+
+        out: list[dict] = []
+        for r in referred:
+            uid = r.sleeper_user_id
+            swipe_row = conn.execute(
+                select(func.count()).select_from(swipe_decisions_table).where(
+                    swipe_decisions_table.c.user_id == uid
+                )
+            ).fetchone()
+            swipe_count = int(swipe_row[0]) if swipe_row else 0
+            out.append({
+                "sleeper_user_id": uid,
+                "username":        r.username or "",
+                "display_name":    r.display_name or "",
+                "has_swiped":      swipe_count > 0,
+                "swipe_count":     swipe_count,
+            })
+        return out
