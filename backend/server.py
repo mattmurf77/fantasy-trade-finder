@@ -415,6 +415,54 @@ def _fetch_sleeper_adp() -> dict:
         return {}
 
 
+def _parse_league_url(url: str) -> tuple[str | None, str | None]:
+    """
+    Parse a pasted league URL into (platform, league_id).
+
+    Supported formats:
+      - Sleeper: https://sleeper.com/leagues/<18-digit-id>/...
+                 https://sleeper.app/leagues/<id>/...
+                 Bare 18-digit ID
+      - ESPN:    https://fantasy.espn.com/football/league?leagueId=<id>
+                 https://fantasy.espn.com/football/team?leagueId=<id>
+                 https://fantasy.espn.com/football/league/settings?leagueId=<id>
+      - MFL:     https://www47.myfantasyleague.com/2024/home/<5-digit-id>
+                 https://www47.myfantasyleague.com/2024/options?L=<id>
+                 https://*.myfantasyleague.com/... with ?L=<id>
+
+    Returns (None, None) when the URL can't be recognized.
+    """
+    import re
+    if not url or not isinstance(url, str):
+        return None, None
+    url = url.strip()
+
+    # Sleeper canonical URL
+    m = re.search(r'sleeper\.(?:com|app)/leagues?/(\d{10,})', url)
+    if m:
+        return "sleeper", m.group(1)
+
+    # Bare Sleeper ID pasted without the URL (currently 15-20 digits)
+    if re.match(r'^\d{15,20}$', url):
+        return "sleeper", url
+
+    # ESPN Fantasy — leagueId in the query string
+    m = re.search(r'fantasy\.espn\.com/.*[?&]leagueId=(\d+)', url, re.IGNORECASE)
+    if m:
+        return "espn", m.group(1)
+
+    # MFL — /YEAR/home/<id> or /YEAR/options/<id> or similar path-style
+    m = re.search(r'myfantasyleague\.com/\d{4}/(?:home|options|standings)/(\d{4,6})', url, re.IGNORECASE)
+    if m:
+        return "mfl", m.group(1)
+    # MFL — ?L=<id> query-style
+    m = re.search(r'myfantasyleague\.com/.*[?&]L=(\d{4,6})', url, re.IGNORECASE)
+    if m:
+        return "mfl", m.group(1)
+
+    return None, None
+
+
 def _fetch_sleeper_league_meta(league_id: str) -> dict | None:
     """
     Fetch the full league metadata (roster_positions + scoring_settings + settings)
@@ -439,15 +487,20 @@ def _detect_scoring_format_from_meta(meta: dict) -> str:
     Derive our scoring_format key ('1qb_ppr' or 'sf_tep') from a Sleeper league
     metadata dict.
 
-    Rules (matches how we split universal pools):
-      - Superflex  : roster_positions contains "SUPER_FLEX" (Sleeper's canonical
-                     marker). Falls back to counting QB slots ≥ 2.
-      - TE Premium : scoring_settings.bonus_rec_te > 0 (typically 0.5).
-      - If BOTH apply → 'sf_tep'. Otherwise → '1qb_ppr'.
+    We only have two format buckets, so the rule is:
+      - Superflex present → 'sf_tep' (Superflex is the dominant value-driver;
+                                      QB scarcity reshapes the whole ranking)
+      - TE Premium present → 'sf_tep' (TE-value distortion makes the TEP
+                                       rankings a closer fit than 1QB PPR)
+      - Otherwise → '1qb_ppr'
 
-    Conservative default: when the league isn't a clear 'sf_tep', return
-    '1qb_ppr'. This matches DEFAULT_SCORING and preserves existing behavior
-    for any league whose metadata is missing or ambiguous.
+    Superflex detection: roster_positions contains "SUPER_FLEX" (Sleeper's
+    canonical marker), or QB slot count ≥ 2 as a fallback.
+
+    TE Premium detection: scoring_settings.bonus_rec_te > 0 (typically 0.5).
+
+    Previously required BOTH conditions, which mis-bucketed SF-without-TEP
+    and 1QB-with-TEP leagues into '1qb_ppr'.
     """
     if not isinstance(meta, dict):
         return "1qb_ppr"
@@ -465,7 +518,7 @@ def _detect_scoring_format_from_meta(meta: dict) -> str:
         bonus_rec_te = 0.0
     is_tep = bonus_rec_te > 0
 
-    return "sf_tep" if (is_superflex and is_tep) else "1qb_ppr"
+    return "sf_tep" if (is_superflex or is_tep) else "1qb_ppr"
 
 
 def _maybe_sync_players() -> None:
@@ -2915,16 +2968,26 @@ def session_init():
         # so guarding auto-detect here covers every new + returning league
         # connection. If additional sync paths are introduced, they must
         # also invoke _detect_scoring_format_from_meta + set_league_scoring.
+        # Re-detect scoring format on EVERY session_init (not just when
+        # unset) so any previously-miscategorized league self-heals. Cost
+        # is one cached Sleeper API call per init; writes only happen when
+        # the detected value differs from what's on file.
         try:
-            existing_fmt = get_league_scoring(league_id)
-            if not existing_fmt:
-                meta = _fetch_sleeper_league_meta(league_id)
-                if meta:
-                    detected = _detect_scoring_format_from_meta(meta)
+            existing_fmt = None
+            try:
+                existing_fmt = get_league_scoring(league_id)
+            except Exception:
+                pass
+            meta = _fetch_sleeper_league_meta(league_id)
+            if meta:
+                detected = _detect_scoring_format_from_meta(meta)
+                if detected != existing_fmt:
                     set_league_scoring(league_id, detected)
-                    log.info("  ✅ league scoring auto-detected: %s", detected)
+                    log.info("  ✅ league scoring (re-)detected: %s (was: %r)", detected, existing_fmt)
                 else:
-                    log.info("  ℹ️  league scoring auto-detect deferred — Sleeper meta unavailable")
+                    log.info("  ✅ league scoring confirmed: %s", detected)
+            else:
+                log.info("  ℹ️  league scoring auto-detect deferred — Sleeper meta unavailable")
         except Exception as e:
             log.warning("  league scoring auto-detect failed (continuing): %s", e)
     except Exception as db_err:
@@ -3778,6 +3841,59 @@ def extension_rankings():
         "username":     sess.get("username") or "",
         "updated_at":   int(time.time()),
         "players":      players_map,
+    })
+
+
+# ---------------------------------------------------------------------------
+# League URL parsing — powers the "Connect another league" dropdown action
+# ---------------------------------------------------------------------------
+
+@app.route("/api/league/parse-url", methods=["POST"])
+def parse_league_url():
+    """Parse a pasted league URL into {platform, league_id, name, supported}.
+
+    Body: {"url": "<league-url>"}
+    Response shape:
+      {
+        "platform":   "sleeper" | "espn" | "mfl",
+        "league_id":  "<id>",
+        "name":       "<League name, if resolvable>" (optional),
+        "supported":  true  if we can complete the sync flow today,
+                      false for ESPN / MFL where full sync is still on the
+                            roadmap (the frontend shows a "coming soon" state)
+      }
+    Errors: {"error": "<code>", "message": "<human-readable>"}
+    """
+    body = request.get_json(force=True) or {}
+    url = (body.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "missing_url",
+                        "message": "Paste a league URL to continue."}), 400
+
+    platform, league_id = _parse_league_url(url)
+    if not platform or not league_id:
+        return jsonify({
+            "error":   "unrecognized_url",
+            "message": "Couldn't recognize that URL. Paste a link from "
+                       "Sleeper, ESPN Fantasy, or MyFantasyLeague.",
+        }), 400
+
+    # For Sleeper, we can resolve the league name immediately so the
+    # confirmation UI shows "Lakeview League" rather than a bare ID.
+    name = None
+    if platform == "sleeper":
+        try:
+            meta = _fetch_sleeper_league_meta(league_id)
+            if meta:
+                name = meta.get("name")
+        except Exception as e:
+            log.info("parse_league_url: Sleeper meta lookup failed (non-fatal): %s", e)
+
+    return jsonify({
+        "platform":  platform,
+        "league_id": league_id,
+        "name":      name,
+        "supported": platform == "sleeper",
     })
 
 

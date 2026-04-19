@@ -625,6 +625,34 @@
     </div>
   </div>
 
+  <!-- Connect another league modal — URL paste for Sleeper / ESPN / MFL -->
+  <div class="invite-modal hidden" id="connect-league-modal" onclick="closeConnectLeagueModalIfBackdrop(event)">
+    <div class="invite-card connect-league-card">
+      <div class="invite-header">
+        <div class="invite-title">Connect another league</div>
+        <button class="invite-close" onclick="closeConnectLeagueModal()">&times;</button>
+      </div>
+      <div class="connect-league-body">
+        <label class="connect-league-field">
+          <span class="connect-league-label">Paste your league URL</span>
+          <input type="url" class="connect-league-input" id="connect-league-url"
+                 placeholder="https://sleeper.com/leagues/… or fantasy.espn.com/… or myfantasyleague.com/…"
+                 autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+        </label>
+        <div class="connect-league-hint">
+          Supports <strong>Sleeper</strong>, <strong>ESPN Fantasy</strong>, and <strong>MyFantasyLeague</strong>.
+          Bare Sleeper league IDs (just the number) also work.
+        </div>
+        <div class="connect-league-err" id="connect-league-err"></div>
+        <div class="connect-league-result hidden" id="connect-league-result"></div>
+      </div>
+      <div class="connect-league-actions">
+        <button class="skip-btn" onclick="closeConnectLeagueModal()">Cancel</button>
+        <button class="submit-btn" id="connect-league-btn" onclick="connectPastedLeague()">Connect →</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Invite share sheet modal -->
   <div class="invite-modal hidden" id="invite-modal" onclick="closeInviteModalIfBackdrop(event)">
     <div class="invite-card">

@@ -3342,3 +3342,87 @@
       min-width: 32px;
       text-align: right;
     }
+
+    /* ── "Connect another league" modal (reuses .invite-modal shell) ── */
+    .connect-league-card {
+      max-width: 520px;
+      width: 100%;
+    }
+    .connect-league-body {
+      padding: 0 18px 14px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .connect-league-field {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .connect-league-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .connect-league-input {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 13px;
+      padding: 10px 12px;
+      outline: none;
+      transition: border-color 0.12s;
+      width: 100%;
+    }
+    .connect-league-input:focus { border-color: var(--accent); }
+    .connect-league-hint {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .connect-league-hint strong { color: var(--text); font-weight: 600; }
+    .connect-league-err {
+      color: var(--red);
+      font-size: 12px;
+      min-height: 16px;
+    }
+    .connect-league-result {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .connect-league-result.success {
+      border-color: rgba(74, 222, 128, 0.35);
+      background: rgba(74, 222, 128, 0.06);
+      color: var(--text);
+    }
+    .connect-league-result.pending {
+      border-color: rgba(245, 158, 11, 0.35);
+      background: rgba(245, 158, 11, 0.06);
+      color: var(--text);
+    }
+    .connect-league-result.hidden { display: none; }
+    .connect-league-result strong { color: var(--text); font-weight: 700; }
+    .connect-league-result .platform-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(79,124,255,0.15);
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-right: 6px;
+    }
+    .connect-league-actions {
+      display: flex; gap: 10px; justify-content: flex-end;
+      padding: 12px 18px 18px;
+    }
+    .connect-league-actions .skip-btn,
+    .connect-league-actions .submit-btn {
+      padding: 10px 18px;
+      font-size: 13px;
+    }

@@ -848,8 +848,10 @@
              🏈 ${escapeHtml(league.league_name || 'My League')}
            </div>
            <div class="account-menu-item" onclick="switchLeague()">↔ Switch league</div>
+           <div class="account-menu-item" onclick="openConnectLeagueModal()">➕ Connect another league</div>
            <div class="account-menu-divider"></div>`
-        : '';
+        : `<div class="account-menu-item" onclick="openConnectLeagueModal()">➕ Connect another league</div>
+           <div class="account-menu-divider"></div>`;
 
       document.getElementById('account-chip-container').innerHTML = `
         <div class="account-chip">
@@ -868,6 +870,97 @@
       currentLeagueId = null;
       const user = getSavedUser();
       if (user) showLeagueScreen(user);
+    }
+
+    // ── Connect-another-league modal (smart-paste URL) ──────────────
+    function openConnectLeagueModal() {
+      const modal = document.getElementById('connect-league-modal');
+      if (!modal) return;
+      modal.classList.remove('hidden');
+      const input  = document.getElementById('connect-league-url');
+      const errEl  = document.getElementById('connect-league-err');
+      const resEl  = document.getElementById('connect-league-result');
+      if (input)  { input.value = ''; setTimeout(() => input.focus(), 80); }
+      if (errEl)  errEl.textContent = '';
+      if (resEl)  { resEl.classList.add('hidden'); resEl.className = 'connect-league-result hidden'; resEl.innerHTML = ''; }
+      // Enter-to-submit
+      if (input && !input.dataset.ftfBound) {
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') connectPastedLeague();
+        });
+        input.dataset.ftfBound = '1';
+      }
+    }
+    function closeConnectLeagueModal() {
+      document.getElementById('connect-league-modal')?.classList.add('hidden');
+    }
+    function closeConnectLeagueModalIfBackdrop(e) {
+      if (e.target && e.target.id === 'connect-league-modal') closeConnectLeagueModal();
+    }
+
+    async function connectPastedLeague() {
+      const input = document.getElementById('connect-league-url');
+      const errEl = document.getElementById('connect-league-err');
+      const resEl = document.getElementById('connect-league-result');
+      const btn   = document.getElementById('connect-league-btn');
+      if (!input || !errEl || !resEl || !btn) return;
+
+      errEl.textContent = '';
+      resEl.classList.add('hidden');
+      resEl.innerHTML = '';
+
+      const url = (input.value || '').trim();
+      if (!url) { errEl.textContent = 'Paste a league URL (or a bare Sleeper league ID).'; return; }
+
+      btn.disabled = true;
+      const prevLabel = btn.textContent;
+      btn.textContent = 'Checking…';
+
+      try {
+        const res = await apiFetch('/api/league/parse-url', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ url }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          errEl.textContent = body.message || body.error || `Request failed (${res.status}).`;
+          btn.disabled = false;
+          btn.textContent = prevLabel;
+          return;
+        }
+
+        const platformLabel = {
+          sleeper: 'Sleeper',
+          espn:    'ESPN Fantasy',
+          mfl:     'MyFantasyLeague',
+        }[body.platform] || body.platform;
+
+        if (body.supported && body.platform === 'sleeper') {
+          // Save + reload — boot() will re-init the session against the new league
+          resEl.className = 'connect-league-result success';
+          resEl.innerHTML = `<span class="platform-chip">${platformLabel}</span>
+            <strong>${escapeHtml(body.name || 'League ' + body.league_id)}</strong><br>
+            Switching you over…`;
+          resEl.classList.remove('hidden');
+          saveLeague({ league_id: body.league_id, league_name: body.name || 'League' });
+          setTimeout(() => { location.reload(); }, 500);
+          return;
+        }
+
+        // ESPN / MFL — parsed the ID, but full sync isn't wired up yet
+        resEl.className = 'connect-league-result pending';
+        resEl.innerHTML = `<span class="platform-chip">${platformLabel}</span>
+          Detected league <strong>${escapeHtml(body.league_id)}</strong>.<br>
+          ${platformLabel} sync is on the roadmap — Sleeper leagues work today. We'll tie this into full sync in an upcoming update.`;
+        resEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = prevLabel;
+      } catch (e) {
+        errEl.textContent = e.message || 'Parse failed.';
+        btn.disabled = false;
+        btn.textContent = prevLabel;
+      }
     }
 
     // ── Utilities ───────────────────────────────────────────────────
@@ -1735,16 +1828,18 @@
         return;
       }
 
-      // Commit the switch — clear pinned players since roster changed
-      currentLeagueId = lg.league_id;
-      _pinnedGivePlayers.clear();
-      renderPlayerPicker();
+      // Commit the switch — persist to localStorage, then HARD RELOAD
+      // the page. Incrementally patching every visible view after a switch
+      // was bug-prone (stale rankings, stale trade cards, stale contrarian
+      // leaderboards, etc.). A full reload re-runs boot() which reads the
+      // saved league from localStorage and rebuilds every view cleanly.
       saveLeague({ league_id: lg.league_id, league_name: lg.name });
-      renderAccountChip(user);
-      status.textContent = '✓ Switched';
-      setTimeout(() => { status.textContent = ''; }, 2000);
-      logDrawer.info(`✅ League switched to "${lg.name}"`);
-      showToast(`✅ Switched to ${lg.name}`);
+      status.textContent = '✓ Switched — reloading…';
+      logDrawer.info(`✅ League switched to "${lg.name}" — reloading`);
+      // Small delay so the status text is visible before the reload yanks
+      // the page out from under the user.
+      setTimeout(() => { location.reload(); }, 400);
+      return;
 
       // Clear stale trade cards and reset ranking gate for new league
       document.getElementById('trades-list').innerHTML =
