@@ -1,0 +1,33 @@
+{
+  "_comment": "Feature flags for the 2026-04-19 sprint. Every key defaults to false in backend/feature_flags.py. Flip a value to true here to enable the feature in the running deployment. Unknown keys are ignored with a console warning.",
+
+  "swipe.community_compare":         false,
+  "swipe.qc_compliments":            false,
+  "swipe.gesture_audit":             false,
+
+  "tiers.community_diff":            false,
+  "tiers.stability_indicator":       false,
+  "tiers.swipe_secondary_actions":   false,
+
+  "trades.queue_2k":                 false,
+  "trades.new_partners_alerts":      false,
+
+  "league.unlock_badges_per_member": false,
+  "league.activity_feed":            false,
+  "league.unlock_badges_nav_pill":   false,
+
+  "invite.k_factor_dashboard":       false,
+
+  "mobile.sticky_cta":               false,
+  "mobile.thumb_zone_tables":        false,
+  "mobile.rankings_card_view":       false,
+
+  "profiles.public_pages":           false,
+  "landing.smart_start_cta":         false,
+  "landing.try_before_sync":         false,
+
+  "trade_math.qb_tax":               false,
+  "trade_math.star_tax":             false,
+  "trade_math.roster_clogger":       false,
+  "trade_math.human_explanations":   false
+}

@@ -1,4 +1,29 @@
     // ═══════════════════════════════════════════════════════════════
+    //  FEATURE FLAGS
+    //  window.FTF_FLAGS — read { "group.feature": bool } map of flags
+    //  Populated at boot by fetching /api/feature-flags. Defaults to
+    //  an empty object so accesses before boot complete are safely false.
+    //  Use: if (window.FTF_FLAGS && window.FTF_FLAGS["swipe.community_compare"]) { ... }
+    // ═══════════════════════════════════════════════════════════════
+    window.FTF_FLAGS = window.FTF_FLAGS || {};
+    window.FTF_FLAG  = function (key) { return !!(window.FTF_FLAGS && window.FTF_FLAGS[key]); };
+
+    async function _loadFeatureFlags() {
+      try {
+        const res = await fetch('/api/feature-flags', { cache: 'no-store' });
+        if (!res.ok) return;
+        const body = await res.json().catch(() => ({}));
+        if (body && body.flags && typeof body.flags === 'object') {
+          window.FTF_FLAGS = body.flags;
+        }
+      } catch (_) {
+        // Silent — all flags default to false if the fetch fails.
+      }
+    }
+    // Kick the fetch immediately; it resolves before most UI code runs.
+    _loadFeatureFlags();
+
+    // ═══════════════════════════════════════════════════════════════
     //  DEBUG LOG DRAWER
     //  logDrawer.action / .req / .res / .err / .info — call anywhere
     // ═══════════════════════════════════════════════════════════════

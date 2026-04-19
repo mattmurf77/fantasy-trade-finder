@@ -97,6 +97,7 @@ from .database import (
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
 from . import trends_service as _trends_service_mod
+from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
 from .trade_service import TradeService, League, LeagueMember
 
 # ---------------------------------------------------------------------------
@@ -3842,6 +3843,35 @@ def extension_rankings():
         "updated_at":   int(time.time()),
         "players":      players_map,
     })
+
+
+# ---------------------------------------------------------------------------
+# Feature flags — powers the sprint's on/off toggling via config/features.json
+# ---------------------------------------------------------------------------
+
+@app.route("/api/feature-flags")
+def feature_flags_route():
+    """Return the current effective feature-flag map.
+
+    Shape: {"flags": {"swipe.community_compare": false, ...}}
+
+    Frontend fetches this at boot and stashes it in window.FTF_FLAGS so
+    UI code can do `if (window.FTF_FLAGS["swipe.community_compare"]) ...`.
+    Backend code uses FLAGS.swipe_community_compare or is_enabled(key).
+    """
+    return jsonify({"flags": flags_dict()})
+
+
+@app.route("/api/feature-flags/reload", methods=["POST"])
+def feature_flags_reload_route():
+    """Force-reload flags from config/features.json + FTF_FLAGS env.
+
+    Useful when flipping a flag in prod without a full server restart.
+    No auth check for v1 — this just re-reads files/env the server
+    already has access to, so there's no privileged data exposed.
+    """
+    flags = reload_flags()
+    return jsonify({"ok": True, "flags": flags})
 
 
 # ---------------------------------------------------------------------------
