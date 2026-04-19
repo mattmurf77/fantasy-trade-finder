@@ -3,17 +3,13 @@ import { Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { colors } from '../theme/colors';
 import PlaceholderScreen from '../screens/PlaceholderScreen';
+import RankScreen from '../screens/RankScreen';
 
 // Tab definitions kept thin; real screens swap in as Phase 2-4 land.
 const Tab = createBottomTabNavigator();
 
 function RankTab() {
-  return (
-    <PlaceholderScreen
-      title="Rank Players"
-      note="Trios + Tiers ranking loops come in Phase 2-3."
-    />
-  );
+  return <RankScreen />;
 }
 function TradesTab() {
   return <PlaceholderScreen title="Find a Trade" note="Phase 4." />;
