@@ -417,6 +417,57 @@ device_tokens_table = Table("device_tokens", metadata,
     Column("last_seen_at", String),
 )
 
+# ---------------------------------------------------------------------------
+# Notification preferences + send log + queued (deferred) pushes
+# ---------------------------------------------------------------------------
+# Three tables that together power typed push delivery:
+#
+# notification_prefs        — per-user opt-in for each bucket + tz + quiet hrs.
+#                             Defaults assumed when no row exists (see
+#                             get_notification_prefs()), so we don't need to
+#                             write a row at signup.
+# notification_events_log   — append-only record of every push actually sent
+#                             (or coalesced into a bundle), keyed by user_id +
+#                             kind. Powers frequency caps (e.g. winback_dormant
+#                             1/30d) without scanning user_events.
+# notification_queue        — pushes generated during a user's quiet hours that
+#                             will be drained + bundled into a single summary
+#                             push at the user's local 8am.
+#
+# Buckets ('trade_matches' | 'weekly_digest' | 'reengagement') map kinds →
+# user-facing toggle in get_pref_bucket() in server.py's push dispatcher.
+notification_prefs_table = Table("notification_prefs", metadata,
+    Column("user_id",            String,  primary_key=True),
+    Column("trade_matches",      Integer),  # 0|1, default 1
+    Column("weekly_digest",      Integer),  # 0|1, default 1
+    Column("reengagement",       Integer),  # 0|1, default 1
+    Column("quiet_hours_enabled",Integer),  # 0|1, default 1
+    Column("tz",                 String),   # IANA, e.g. 'America/New_York'
+    Column("updated_at",         String),
+)
+
+notification_events_log_table = Table("notification_events_log", metadata,
+    Column("id",         Integer, primary_key=True, autoincrement=True),
+    Column("user_id",    String,  nullable=False),
+    Column("kind",       String,  nullable=False),  # 'new_match' | 'winback_dormant' | etc.
+    Column("dedup_key",  String),                   # e.g. match_id, week-stamp
+    Column("sent_at",    String,  nullable=False),
+    Index("ix_notif_events_user_kind_sent", "user_id", "kind", "sent_at"),
+)
+
+# Pushes deferred by quiet hours land here; the 8am tick collapses them per
+# user into one summary push and clears the rows.
+notification_queue_table = Table("notification_queue", metadata,
+    Column("id",           Integer, primary_key=True, autoincrement=True),
+    Column("user_id",      String,  nullable=False, index=True),
+    Column("kind",         String,  nullable=False),
+    Column("title",        String),
+    Column("body",         String),
+    Column("data_json",    Text),                # original push data payload
+    Column("queued_at",    String,  nullable=False),
+    Column("deliver_after",String,  nullable=False),  # ISO UTC timestamp when eligible
+)
+
 # Default values seeded on first run.  Only inserted if the key doesn't
 # already exist (INSERT OR IGNORE) so manual overrides survive re-deploys.
 _MODEL_CONFIG_DEFAULTS = [
@@ -4057,3 +4108,227 @@ def load_device_tokens_for_users(user_ids: list) -> list:
     except Exception as e:
         print(f"[load_device_tokens_for_users] failed: {e}")
         return []
+
+
+# ---------------------------------------------------------------------------
+# Notification prefs / send-log / quiet-hours queue helpers
+# ---------------------------------------------------------------------------
+
+# Default values used when no notification_prefs row exists for the user.
+# Matches the plan: all 3 buckets ON, quiet hours ON.
+NOTIF_PREF_DEFAULTS: dict = {
+    "trade_matches":       1,
+    "weekly_digest":       1,
+    "reengagement":        1,
+    "quiet_hours_enabled": 1,
+    "tz":                  "America/New_York",
+}
+
+# Map every push `kind` to one of three pref-bucket column names. Anything
+# absent is treated as transactional and ignored by the bucket gate (i.e.
+# always sent if the user has push enabled at the OS level).
+NOTIF_KIND_TO_BUCKET: dict[str, str] = {
+    # Trade matches bucket
+    "new_match":                       "trade_matches",
+    "counter_offer":                   "trade_matches",
+    "match_accepted":                  "trade_matches",
+    "match_expiring":                  "trade_matches",
+    "first_match":                     "trade_matches",
+    "league_member_joined":            "trade_matches",
+    "league_member_unlocked_trades":   "trade_matches",
+    # Weekly digest bucket
+    "weekly_digest":                   "weekly_digest",
+    "pending_review":                  "weekly_digest",
+    # Re-engagement bucket
+    "winback_matches":                 "reengagement",
+    "winback_dormant":                 "reengagement",
+    "finish_ranking":                  "reengagement",
+    "season_start":                    "reengagement",
+}
+
+def get_notification_prefs(user_id: str) -> dict:
+    """Return the user's prefs row merged onto NOTIF_PREF_DEFAULTS. Always
+    returns a complete dict — callers don't need to handle missing rows.
+    """
+    out = dict(NOTIF_PREF_DEFAULTS)
+    if not user_id:
+        return out
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                select(notification_prefs_table)
+                .where(notification_prefs_table.c.user_id == user_id)
+            ).fetchone()
+        if row:
+            d = dict(row._mapping)
+            for k in ("trade_matches", "weekly_digest", "reengagement", "quiet_hours_enabled"):
+                if d.get(k) is not None:
+                    out[k] = int(d[k])
+            if d.get("tz"):
+                out["tz"] = d["tz"]
+    except Exception as e:
+        print(f"[get_notification_prefs] {user_id} failed: {e}")
+    return out
+
+
+def upsert_notification_prefs(user_id: str, **fields) -> dict:
+    """Partial update — only the keys passed are written. Returns the
+    post-update merged prefs dict. Booleans accepted as 0/1/True/False.
+    """
+    if not user_id:
+        return dict(NOTIF_PREF_DEFAULTS)
+    allowed = {"trade_matches", "weekly_digest", "reengagement",
+               "quiet_hours_enabled", "tz"}
+    updates: dict = {}
+    for k, v in fields.items():
+        if k not in allowed or v is None:
+            continue
+        if k == "tz":
+            updates[k] = str(v)
+        else:
+            updates[k] = 1 if bool(v) else 0
+    if not updates:
+        return get_notification_prefs(user_id)
+    updates["user_id"]    = user_id
+    updates["updated_at"] = _now()
+    try:
+        with engine.begin() as conn:
+            existing = conn.execute(
+                select(notification_prefs_table.c.user_id)
+                .where(notification_prefs_table.c.user_id == user_id)
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    update(notification_prefs_table)
+                    .where(notification_prefs_table.c.user_id == user_id)
+                    .values(**{k: v for k, v in updates.items() if k != "user_id"})
+                )
+            else:
+                # Fill missing columns with defaults so the row is complete.
+                row = dict(NOTIF_PREF_DEFAULTS)
+                row.update(updates)
+                conn.execute(insert(notification_prefs_table).values(**row))
+    except Exception as e:
+        print(f"[upsert_notification_prefs] {user_id} failed: {e}")
+    return get_notification_prefs(user_id)
+
+
+def log_notification_send(user_id: str, kind: str, dedup_key: str | None = None) -> None:
+    """Append one row to notification_events_log. Called by the push
+    dispatcher right after a push leaves _send_expo_push().
+    """
+    if not user_id or not kind:
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(insert(notification_events_log_table).values(
+                user_id   = user_id,
+                kind      = kind,
+                dedup_key = dedup_key,
+                sent_at   = _now(),
+            ))
+    except Exception as e:
+        print(f"[log_notification_send] {user_id}/{kind} failed: {e}")
+
+
+def notification_dedup_sent(user_id: str, kind: str, dedup_key: str) -> bool:
+    """True if a (user_id, kind, dedup_key) row already exists in
+    notification_events_log. Powers per-event lifetime caps like
+    `match_expiring` (1 per match) and `first_match` (1 lifetime).
+    """
+    if not user_id or not kind or not dedup_key:
+        return False
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                select(notification_events_log_table.c.id)
+                .where(notification_events_log_table.c.user_id == user_id)
+                .where(notification_events_log_table.c.kind == kind)
+                .where(notification_events_log_table.c.dedup_key == dedup_key)
+                .limit(1)
+            ).fetchone()
+            return row is not None
+    except Exception as e:
+        print(f"[notification_dedup_sent] {user_id}/{kind} failed: {e}")
+        return False
+
+
+def count_notification_sends_since(user_id: str, kind: str, since_iso: str) -> int:
+    """Count rows in notification_events_log for (user_id, kind) with
+    sent_at >= since_iso. Powers frequency-cap checks.
+    """
+    if not user_id or not kind or not since_iso:
+        return 0
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text(
+                "SELECT COUNT(*) AS n FROM notification_events_log "
+                "WHERE user_id = :u AND kind = :k AND sent_at >= :s"
+            ), {"u": user_id, "k": kind, "s": since_iso}).fetchone()
+            return int(row.n) if row else 0
+    except Exception as e:
+        print(f"[count_notification_sends_since] {user_id}/{kind} failed: {e}")
+        return 0
+
+
+def queue_notification(
+    user_id: str,
+    kind: str,
+    *,
+    title: str,
+    body: str,
+    data: dict | None = None,
+    deliver_after: str,
+) -> None:
+    """Defer a push by writing it to notification_queue. The 8am cron
+    drains rows where deliver_after <= now() per user and bundles them.
+    """
+    if not user_id or not kind or not deliver_after:
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(insert(notification_queue_table).values(
+                user_id        = user_id,
+                kind           = kind,
+                title          = title,
+                body           = body,
+                data_json      = json.dumps(data) if data else None,
+                queued_at      = _now(),
+                deliver_after  = deliver_after,
+            ))
+    except Exception as e:
+        print(f"[queue_notification] {user_id}/{kind} failed: {e}")
+
+
+def drain_due_queued_notifications(now_iso: str) -> dict[str, list[dict]]:
+    """Return + delete all queue rows where deliver_after <= now_iso, grouped
+    by user_id. Caller is responsible for collapsing into bundled push(es).
+
+    Atomic: rows are SELECTed and DELETEd in the same transaction so the
+    same row never drains twice.
+    """
+    out: dict[str, list[dict]] = {}
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(
+                select(notification_queue_table)
+                .where(notification_queue_table.c.deliver_after <= now_iso)
+            ).fetchall()
+            if not rows:
+                return out
+            ids = [r.id for r in rows]
+            for r in rows:
+                d = dict(r._mapping)
+                if d.get("data_json"):
+                    try: d["data"] = json.loads(d["data_json"])
+                    except Exception: d["data"] = None
+                else:
+                    d["data"] = None
+                out.setdefault(d["user_id"], []).append(d)
+            conn.execute(
+                delete(notification_queue_table)
+                .where(notification_queue_table.c.id.in_(ids))
+            )
+    except Exception as e:
+        print(f"[drain_due_queued_notifications] failed: {e}")
+    return out

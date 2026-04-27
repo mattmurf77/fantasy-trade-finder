@@ -23,3 +23,7 @@ Thumbs.db
 project-reorganizer-workspace/
 scripts/
 *.skill
+
+# Plan-review artifacts (interactive feedback HTML + saved JSON)
+notification-plan-review.html
+notification-plan-feedback*.json

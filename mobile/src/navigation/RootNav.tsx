@@ -12,6 +12,8 @@ import { useSession } from '../state/useSession';
 import SignInScreen from '../screens/SignInScreen';
 import LeaguePickerScreen from '../screens/LeaguePickerScreen';
 import TabNav from './TabNav';
+import SettingsScreen from '../screens/SettingsScreen';
+import PushPrimingModal from '../components/PushPrimingModal';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { getProgress } from '../api/rankings';
 
@@ -19,10 +21,11 @@ type AuthStack = {
   SignIn: undefined;
   LeaguePicker: undefined;
   Main: undefined;
+  Settings: undefined;
 };
 
 const Stack = createNativeStackNavigator<AuthStack>();
-const navigationRef = createNavigationContainerRef<AuthStack>();
+export const navigationRef = createNavigationContainerRef<AuthStack>();
 
 export default function RootNav({ booted }: { booted: boolean }) {
   const user = useSession((s) => s.user);
@@ -122,7 +125,25 @@ export default function RootNav({ booted }: { booted: boolean }) {
             />
           )}
         </Stack.Screen>
-        <Stack.Screen name="Main" component={TabNav} />
+        <Stack.Screen name="Main">
+          {() => (
+            <>
+              <TabNav />
+              <PushPrimingModal />
+            </>
+          )}
+        </Stack.Screen>
+        <Stack.Screen
+          name="Settings"
+          component={SettingsScreen}
+          options={{
+            presentation: 'modal',
+            headerShown: true,
+            title: 'Settings',
+            headerStyle: { backgroundColor: colors.bg },
+            headerTintColor: colors.text,
+          }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );
