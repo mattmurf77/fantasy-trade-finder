@@ -15,7 +15,7 @@ import os
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Column, Float, Integer, MetaData, String, Table, Text, UniqueConstraint,
+    Column, Float, Index, Integer, MetaData, String, Table, Text, UniqueConstraint,
     create_engine, delete, insert, or_, select, update, and_, text,
 )
 from datetime import timedelta
@@ -147,6 +147,22 @@ trade_matches_table = Table("trade_matches", metadata,
     Column("user_b_decision",  String),   # accept | decline | NULL
     Column("user_a_decided_at", String),
     Column("user_b_decided_at", String),
+)
+
+# Composite indexes on (user, league) — both single-league and the new
+# cross-league /api/trades/matches/all queries hit one of these. Without
+# them, a cross-league scan over a populated table would table-scan.
+# `metadata.create_all()` picks these up on fresh DBs; `_migrate_db()`
+# below adds them to existing DBs (idempotent CREATE INDEX IF NOT EXISTS).
+Index(
+    "ix_trade_matches_user_a_league",
+    trade_matches_table.c.user_a_id,
+    trade_matches_table.c.league_id,
+)
+Index(
+    "ix_trade_matches_user_b_league",
+    trade_matches_table.c.user_b_id,
+    trade_matches_table.c.league_id,
 )
 
 
@@ -458,6 +474,25 @@ def _migrate_db() -> None:
         try:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+        except Exception:
+            pass
+
+    # ── Multi-league refactor: composite indexes on trade_matches ─────────
+    # Existing tables won't have the indexes declared on trade_matches_table
+    # above, so create them here idempotently. Postgres ≥9.5 + SQLite ≥3.3
+    # both support `CREATE INDEX IF NOT EXISTS`. Each is wrapped in its own
+    # try/except so a partial failure (e.g. concurrent migration) doesn't
+    # cascade.
+    _trade_match_indexes = [
+        ("ix_trade_matches_user_a_league", "trade_matches", "user_a_id, league_id"),
+        ("ix_trade_matches_user_b_league", "trade_matches", "user_b_id, league_id"),
+    ]
+    for idx_name, tbl, cols in _trade_match_indexes:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})"
+                ))
         except Exception:
             pass
 
@@ -1979,9 +2014,16 @@ def create_trade_match(
     }
 
 
-def load_matches(user_id: str, league_id: str) -> list[dict]:
+def load_matches(user_id: str, league_id: str | None = None) -> list[dict]:
     """
-    Return ALL trade matches for a user in a league, across all statuses.
+    Return ALL trade matches for a user, optionally scoped to one league.
+
+    `league_id`:
+      - When provided, returns only matches in that league (existing
+        single-league behavior, used by the legacy /api/trades/matches route).
+      - When None, returns matches across EVERY league the user is in (used
+        by /api/trades/matches/all). Each match still carries its `league_id`
+        so the caller can group / filter client-side.
 
     Returns each match from the caller's perspective:
       - my_give / my_receive are normalised so "give" always means what THIS
@@ -1992,29 +2034,51 @@ def load_matches(user_id: str, league_id: str) -> list[dict]:
       - status is normalised: legacy 'active' rows are treated as 'pending'.
 
     Sorted by matched_at descending (most recent first) so the frontend
-    can render sections in order without additional sorting.
+    can render in order without additional sorting.
     """
+    # User membership is filtered in SQL — Python-side filtering was fine for
+    # one league but would over-fetch every other user's match across leagues.
+    user_filter = or_(
+        trade_matches_table.c.user_a_id == user_id,
+        trade_matches_table.c.user_b_id == user_id,
+    )
+    where_clauses = [user_filter]
+    if league_id is not None:
+        where_clauses.append(trade_matches_table.c.league_id == league_id)
+
     with engine.connect() as conn:
         rows = conn.execute(
-            select(trade_matches_table).where(
-                trade_matches_table.c.league_id == league_id,
-            ).order_by(trade_matches_table.c.matched_at.desc())
+            select(trade_matches_table)
+            .where(and_(*where_clauses))
+            .order_by(trade_matches_table.c.matched_at.desc())
         ).fetchall()
 
-        member_rows = conn.execute(
-            select(league_members_table).where(
-                league_members_table.c.league_id == league_id
-            )
-        ).fetchall()
-        username_map = {
-            r.user_id: r.username or r.display_name or r.user_id
-            for r in member_rows
-        }
+        # Build a (league_id, user_id) → display name map. For the
+        # single-league case this is one query; for cross-league we fan out
+        # to every league we found in the result set.
+        if league_id is not None:
+            league_ids_for_members = {league_id}
+        else:
+            league_ids_for_members = {r.league_id for r in rows}
+
+        username_map: dict[tuple[str, str], str] = {}
+        if league_ids_for_members:
+            member_rows = conn.execute(
+                select(league_members_table).where(
+                    league_members_table.c.league_id.in_(league_ids_for_members)
+                )
+            ).fetchall()
+            for mr in member_rows:
+                username_map[(mr.league_id, mr.user_id)] = (
+                    mr.username or mr.display_name or mr.user_id
+                )
 
     result = []
     for r in rows:
         is_a = r.user_a_id == user_id
         is_b = r.user_b_id == user_id
+        # Should not fire — SQL filter restricts to user's matches — but
+        # keep as a defense against join surprises.
         if not (is_a or is_b):
             continue
 
@@ -2054,7 +2118,7 @@ def load_matches(user_id: str, league_id: str) -> list[dict]:
             "match_id":        r.id,
             "league_id":       r.league_id,
             "partner_id":      partner_id,
-            "partner_name":    username_map.get(partner_id, partner_id),
+            "partner_name":    username_map.get((r.league_id, partner_id), partner_id),
             "my_give":         my_give,
             "my_receive":      my_receive,
             "matched_at":      r.matched_at,

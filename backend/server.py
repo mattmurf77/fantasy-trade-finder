@@ -2030,6 +2030,82 @@ def get_trade_matches():
         return jsonify([])
 
 
+@app.route("/api/trades/matches/all")
+def get_trade_matches_all():
+    """
+    GET /api/trades/matches/all
+    Returns trade matches across EVERY league the user is in (all statuses),
+    enriched with `league_name` plus `my_give_names` / `my_receive_names`
+    for display. Used by the mobile Matches tab so users can see pending /
+    accepted / declined matches without flipping through their league list.
+
+    Player-name enrichment uses the global players_table (not session state)
+    because cross-league matches reference players outside the active
+    league's roster pool. League names come from the leagues table.
+
+    Response is a bare array — same contract as /api/trades/matches.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    if not g_user_id:
+        return jsonify([])
+
+    try:
+        matches = load_matches(user_id=g_user_id, league_id=None)
+        if not matches:
+            return jsonify([])
+
+        # Batch enrichment — two IN-clause queries instead of one per match.
+        from sqlalchemy import select as _sa_select
+        from .database import leagues_table, players_table, engine as _engine
+
+        league_ids = {m["league_id"] for m in matches}
+        all_pids: set[str] = set()
+        for m in matches:
+            all_pids.update(m.get("my_give") or [])
+            all_pids.update(m.get("my_receive") or [])
+
+        league_name_by_id: dict[str, str] = {}
+        player_name_by_id: dict[str, str] = {}
+        with _engine.connect() as _conn:
+            if league_ids:
+                lrows = _conn.execute(
+                    _sa_select(
+                        leagues_table.c.sleeper_league_id,
+                        leagues_table.c.name,
+                    ).where(leagues_table.c.sleeper_league_id.in_(league_ids))
+                ).fetchall()
+                for lr in lrows:
+                    # Multiple users may have a row per league — first wins;
+                    # the names are the same regardless of which user owns it.
+                    league_name_by_id.setdefault(lr.sleeper_league_id, lr.name or "")
+            if all_pids:
+                prows = _conn.execute(
+                    _sa_select(
+                        players_table.c.player_id,
+                        players_table.c.full_name,
+                    ).where(players_table.c.player_id.in_(all_pids))
+                ).fetchall()
+                for pr in prows:
+                    player_name_by_id[pr.player_id] = pr.full_name or pr.player_id
+
+        enriched = []
+        for m in matches:
+            give_ids    = m.get("my_give")    or []
+            receive_ids = m.get("my_receive") or []
+            enriched.append({
+                **m,
+                "league_name":      league_name_by_id.get(m["league_id"], ""),
+                "my_give_names":    [player_name_by_id.get(pid, pid) for pid in give_ids],
+                "my_receive_names": [player_name_by_id.get(pid, pid) for pid in receive_ids],
+            })
+        return jsonify(enriched)
+    except Exception as e:
+        log.warning("get_trade_matches_all error: %s", e)
+        return jsonify([])
+
+
 @app.route("/api/trades/matches/<int:match_id>/disposition", methods=["POST"])
 def disposition_trade_match(match_id):
     """
