@@ -1431,8 +1431,11 @@ def post_rank3():
         except Exception as db_err:
             log.warning("elo_history snapshot failed (continuing): %s", db_err)
 
+        # record_event returns the post-event streak so we don't need a
+        # separate get_user_streak() round-trip below.
+        post_streak: dict | None = None
         try:
-            record_event(
+            post_streak = record_event(
                 g_user_id,
                 "trio_swipe",
                 league_id = g_league.league_id if g_league else None,
@@ -1455,9 +1458,10 @@ def post_rank3():
             log.warning("rank3: trade-cache invalidation failed: %s", inv_err)
 
         pct = min(100, round(rank_set.interaction_count / rank_set.threshold * 100))
-        # Inline the post-rank streak so the chip can animate the increment
-        # without a second round-trip on every submit.
-        streak = get_user_streak(g_user_id)
+        # Inline the post-rank streak from record_event's return value (same
+        # transaction). Fall back to a fresh read only if the dual-write
+        # itself failed — rare and already logged.
+        streak = post_streak if post_streak is not None else get_user_streak(g_user_id)
         return jsonify({
             "interaction_count": rank_set.interaction_count,
             "threshold":         rank_set.threshold,

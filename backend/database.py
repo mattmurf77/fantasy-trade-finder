@@ -725,10 +725,15 @@ _EVENT_TO_USER_COL: dict[str, str] = {
 }
 
 # Event types that count toward the daily ranking streak. Adding a new rank
-# surface? Add it here too.
+# surface? Add it here too — and make sure the corresponding call site is
+# wired through user-events `record_event()` (NOT the legacy
+# wrapped_collector.record_event, which is a different function).
+#
+# Note: tier_save is intentionally excluded today. Tier saves only flow
+# through wrapped_collector.record_event, so they never reach this map.
+# Add "tier_save" here once that call site is migrated.
 _RANK_STREAK_EVENTS: frozenset[str] = frozenset({
     "trio_swipe",
-    "tier_save",
     "ranking_complete_first_time",
 })
 
@@ -778,7 +783,7 @@ def record_event(
     source:      str | None = None,
     props:       dict | None = None,
     tz:          str | None = None,
-) -> None:
+) -> dict | None:
     """Append one row to user_events AND bump the matching users.last_*_at
     column (and device snapshot columns) in a single transaction.
 
@@ -786,12 +791,17 @@ def record_event(
     columns on `users` are pointers to the most recent event of each type
     so notification gating queries don't have to scan the full log.
 
+    Returns the post-event streak snapshot when `event_type` is a
+    rank-class event (so callers don't need a follow-up SELECT). Returns
+    None for non-rank events or when logging fails.
+
     Failures are logged and swallowed — event logging must never break the
     surrounding business logic.
     """
     if not user_id or not event_type:
-        return
+        return None
     now = _now()
+    streak_result: dict | None = None
     try:
         with engine.begin() as conn:
             conn.execute(
@@ -834,13 +844,17 @@ def record_event(
             )
             # Streak transition runs inside the same transaction so a crash
             # mid-write can't desync user_events from the streak counter.
+            # Return the post-state so the caller doesn't need a follow-up
+            # SELECT (eliminates a separate read transaction + race window).
             if event_type in _RANK_STREAK_EVENTS:
-                _recompute_streak_on_rank_event(conn, user_id, tz)
+                streak_result = _recompute_streak_on_rank_event(conn, user_id, tz)
     except Exception as e:
         print(f"[record_event] {user_id}/{event_type} failed: {e}")
+        return None
+    return streak_result
 
 
-def _recompute_streak_on_rank_event(conn, user_id: str, tz: str | None) -> None:
+def _recompute_streak_on_rank_event(conn, user_id: str, tz: str | None) -> dict | None:
     """Advance the user's daily ranking streak using the local day implied
     by `tz` (IANA name, e.g. 'America/New_York'). Falls back to UTC when tz
     is missing/invalid. Idempotent — multiple ranks on the same local day
@@ -850,6 +864,9 @@ def _recompute_streak_on_rank_event(conn, user_id: str, tz: str | None) -> None:
     +1 local day  → current_streak += 1, longest = max(longest, current)
     Gap > 1       → reset current_streak to 1
     First ever    → set current_streak = longest_streak = 1
+
+    Returns the post-state (current/longest/last_rank_local_date) for the
+    caller to inline in its response — None only if the user row is missing.
     """
     zone = None
     if tz and ZoneInfo is not None:
@@ -867,7 +884,7 @@ def _recompute_streak_on_rank_event(conn, user_id: str, tz: str | None) -> None:
         ).where(users_table.c.sleeper_user_id == user_id)
     ).first()
     if row is None:
-        return  # user row not found — nothing to update
+        return None  # user row not found — nothing to update
 
     current  = row.current_streak  or 0
     longest  = row.longest_streak  or 0
@@ -881,23 +898,36 @@ def _recompute_streak_on_rank_event(conn, user_id: str, tz: str | None) -> None:
             last_date = None
 
     if last_date == today_local:
-        return  # already counted today
+        # Same-day re-rank: no write, but return the current state so the
+        # caller can still inline it in its response.
+        return {
+            "current":              current,
+            "longest":              longest,
+            "last_rank_local_date": last_str,
+        }
+
     if last_date is None or (today_local - last_date).days > 1:
         new_current = 1
     else:  # exactly +1 day
         new_current = current + 1
 
     new_longest = max(longest, new_current)
+    today_iso   = today_local.isoformat()
     conn.execute(
         update(users_table)
         .where(users_table.c.sleeper_user_id == user_id)
         .values(
             current_streak       = new_current,
             longest_streak       = new_longest,
-            last_rank_local_date = today_local.isoformat(),
+            last_rank_local_date = today_iso,
             last_rank_tz         = tz,
         )
     )
+    return {
+        "current":              new_current,
+        "longest":              new_longest,
+        "last_rank_local_date": today_iso,
+    }
 
 
 def get_user_streak(user_id: str) -> dict:
