@@ -102,6 +102,8 @@ from .database import (
     load_skips as _skip_load,
     # User-event logging
     record_event, touch_user_activity, load_user_events,
+    # Streak — driven by record_event, read for the chip + leaderboard
+    get_user_streak,
 )
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
@@ -945,6 +947,10 @@ def _device_info_from_request() -> dict:
 def _stash_device_and_touch_activity() -> None:
     info = _device_info_from_request()
     g.device_info = info
+    # IANA tz from the client (e.g. 'America/New_York'). Powers local-day
+    # streak math in record_event(). Not part of device_info because it's
+    # neither device-shaped nor written to users.last_device_*.
+    g.user_tz = request.headers.get("X-User-TZ") or None
     # Only bump activity if a valid session is attached. We resolve user_id
     # without raising — _require_session would 401 here, which is wrong for
     # endpoints that don't require auth (login, static, demo, etc.).
@@ -1324,6 +1330,18 @@ def get_trio():
         return jsonify({"error": str(e)}), 400
 
 
+@app.route("/api/me/streak", methods=["GET"])
+def get_me_streak():
+    """GET /api/me/streak → {current, longest, last_rank_local_date}.
+
+    The streak counter advances inside record_event() whenever a rank-class
+    event fires (see _RANK_STREAK_EVENTS). This endpoint just reads the
+    denormalized columns on `users`.
+    """
+    sess = _require_session()
+    return jsonify(get_user_streak(sess["user_id"]))
+
+
 @app.route("/api/rank3", methods=["POST"])
 def post_rank3():
     """POST /api/rank3  {ranked: [id1, id2, id3]}  →  updated progress"""
@@ -1414,13 +1432,17 @@ def post_rank3():
         except Exception as db_err:
             log.warning("elo_history snapshot failed (continuing): %s", db_err)
 
+        # record_event returns the post-event streak so we don't need a
+        # separate get_user_streak() round-trip below.
+        post_streak: dict | None = None
         try:
-            record_event(
+            post_streak = record_event(
                 g_user_id,
                 "trio_swipe",
                 league_id = g_league.league_id if g_league else None,
                 source    = "api",
                 props     = {"ordered_ids": ranked_valid, "scoring_format": fmt},
+                tz        = getattr(g, "user_tz", None),
                 **(getattr(g, "device_info", {}) or {}),
             )
         except Exception as ev_err:
@@ -1437,11 +1459,16 @@ def post_rank3():
             log.warning("rank3: trade-cache invalidation failed: %s", inv_err)
 
         pct = min(100, round(rank_set.interaction_count / rank_set.threshold * 100))
+        # Inline the post-rank streak from record_event's return value (same
+        # transaction). Fall back to a fresh read only if the dual-write
+        # itself failed — rare and already logged.
+        streak = post_streak if post_streak is not None else get_user_streak(g_user_id)
         return jsonify({
             "interaction_count": rank_set.interaction_count,
             "threshold":         rank_set.threshold,
             "threshold_met":     rank_set.threshold_met,
             "percent":           pct,
+            "streak":            streak,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 400

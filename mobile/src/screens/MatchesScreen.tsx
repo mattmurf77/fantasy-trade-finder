@@ -12,7 +12,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
+import { haptics } from '../utils/haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { colors } from '../theme/colors';
@@ -71,7 +71,7 @@ export default function MatchesScreen() {
     },
     onSuccess: (_res, vars) => {
       if (vars.d === 'accepted') {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        haptics.success();
       }
     },
   });

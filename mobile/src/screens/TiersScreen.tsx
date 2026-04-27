@@ -16,7 +16,7 @@ import Animated, {
   withTiming,
   runOnJS,
 } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import { haptics } from '../utils/haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { colors } from '../theme/colors';
@@ -156,7 +156,7 @@ export default function TiersScreen() {
         if (moved) next[toZone].push(moved);
         return next;
       });
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      haptics.success();
     },
     [],
   );
@@ -175,7 +175,7 @@ export default function TiersScreen() {
         onLongPress={() => {
           // Secondary dismiss via long-press confirm. Kept opt-in so
           // normal users don't accidentally banish players.
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          haptics.warning();
           dismissMutation.mutate(p.id);
         }}
       />
@@ -206,7 +206,7 @@ export default function TiersScreen() {
               (tiersStatusQuery.data?.scoring_format as ScoringFormat) || '1qb_ppr';
             const bucketed = autoBucket(players, position, fmt);
             setBuckets({ ...bucketed, unassigned: [] });
-            void Haptics.selectionAsync();
+            haptics.selection();
           }}
           style={({ pressed }) => [styles.resetBtn, pressed && { opacity: 0.6 }]}
         >
@@ -335,7 +335,7 @@ function DraggableRow({ player, zoneAt, onDrop, onLongPress }: DraggableRowProps
         .onStart(() => {
           scale.value = withTiming(1.04, { duration: 120 });
           zIndex.value = 10;
-          runOnJS(Haptics.selectionAsync)();
+          runOnJS(haptics.pickup)();
         })
         .onUpdate((e) => {
           translateX.value = e.translationX;

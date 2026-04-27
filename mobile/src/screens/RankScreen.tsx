@@ -19,7 +19,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import * as Haptics from 'expo-haptics';
+import { haptics } from '../utils/haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { colors } from '../theme/colors';
@@ -29,6 +29,7 @@ import Toast from '../components/Toast';
 import {
   getNextTrio,
   getProgress,
+  getStreak,
   submitTrioRanking,
   skipPlayer,
 } from '../api/rankings';
@@ -58,7 +59,7 @@ export default function RankScreen() {
     setSpeedMode((prev) => {
       const next = !prev;
       void AsyncStorage.setItem(SPEED_MODE_KEY, next ? '1' : '0');
-      void Haptics.selectionAsync();
+      haptics.selection();
       return next;
     });
   }, []);
@@ -80,13 +81,32 @@ export default function RankScreen() {
     staleTime: 15_000,
   });
 
+  const streakQuery = useQuery({
+    queryKey: ['streak'],
+    queryFn: getStreak,
+    staleTime: 60_000,
+  });
+
   const submitMutation = useMutation({
     mutationFn: (rankedIds: [string, string, string]) =>
       submitTrioRanking(rankedIds),
-    onSuccess: () => {
+    onSuccess: (resp) => {
       queryClient.invalidateQueries({ queryKey: ['progress'] });
       queryClient.invalidateQueries({ queryKey: ['trio', position] });
       setSelectionOrder([]);
+      // Detect streak increment from inline response — compare to the
+      // currently-cached value before writing through. If the new value
+      // jumped, celebrate. (Same-day re-ranks are a no-op server-side, so
+      // current stays equal — no false positive.)
+      const prev = streakQuery.data?.current ?? 0;
+      const next = resp.streak?.current ?? 0;
+      if (next > prev && next >= 2) {
+        setToast({ msg: `🔥 ${next}-day streak!`, tone: 'success' });
+        haptics.success();
+      }
+      if (resp.streak) {
+        queryClient.setQueryData(['streak'], resp.streak);
+      }
     },
   });
 
@@ -130,7 +150,7 @@ export default function RankScreen() {
         rankedIds.every((id, i) => id === trio.qc_expected_order![i])
       ) {
         setToast({ msg: '✓ Nice call — you helped verify the rankings!', tone: 'success' });
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        haptics.success();
       }
       submitMutation.mutate(rankedIds);
     },
@@ -166,7 +186,7 @@ export default function RankScreen() {
         }
         return next;
       });
-      void Haptics.selectionAsync();
+      haptics.selection();
     },
     [speedMode, trio, submitCurrent],
   );
@@ -222,6 +242,18 @@ export default function RankScreen() {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Streak chip — only shown once the user has an active streak.
+            Hidden at 0 so a brand-new user doesn't see "🔥 0". */}
+        {(streakQuery.data?.current ?? 0) > 0 ? (
+          <View style={styles.streakRow}>
+            <View style={styles.streakChip}>
+              <Text style={styles.streakFlame}>🔥</Text>
+              <Text style={styles.streakNum}>{streakQuery.data!.current}</Text>
+              <Text style={styles.streakLabel}>day streak</Text>
+            </View>
+          </View>
+        ) : null}
+
         {/* Position switcher */}
         <View style={styles.switcher}>
           {POSITIONS.map((p) => {
@@ -328,7 +360,7 @@ export default function RankScreen() {
                 onSwipeSkip={handleSkipEntireTrio}
                 onSwipeRankFirst={() => {
                   setSelectionOrder(() => [side]);
-                  void Haptics.selectionAsync();
+                  haptics.selection();
                 }}
                 disabled={submitMutation.isPending || skipMutation.isPending}
               />
@@ -525,6 +557,21 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
     gap: spacing.md,
   },
+  streakRow: { alignItems: 'center' },
+  streakChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,140,40,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,140,40,0.35)',
+  },
+  streakFlame: { fontSize: fontSize.base },
+  streakNum: { color: '#ffb27a', fontSize: fontSize.base, fontWeight: '800' },
+  streakLabel: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '600' },
   switcher: {
     flexDirection: 'row',
     gap: spacing.xs,

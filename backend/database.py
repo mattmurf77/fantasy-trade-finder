@@ -14,6 +14,11 @@ import json
 import os
 from datetime import datetime, timezone
 
+try:
+    from zoneinfo import ZoneInfo  # py3.9+
+except ImportError:                # pragma: no cover
+    ZoneInfo = None  # type: ignore
+
 from sqlalchemy import (
     Column, Float, Index, Integer, MetaData, String, Table, Text, UniqueConstraint,
     create_engine, delete, insert, or_, select, update, and_, text,
@@ -71,6 +76,15 @@ users_table = Table("users", metadata,
     Column("last_device_type",      String),
     Column("last_os_version",       String),
     Column("last_app_version",      String),
+    # ── Ranking streak ────────────────────────────────────────────────────
+    # Updated by record_event() when a rank-class event fires (trio_swipe,
+    # tier_save, ranking_complete_first_time). Streak math runs in the
+    # user's local-day frame — last_rank_local_date stores a date string
+    # (YYYY-MM-DD) in last_rank_tz so DST shifts and travel don't reset.
+    Column("current_streak",        Integer),
+    Column("longest_streak",        Integer),
+    Column("last_rank_local_date",  String),
+    Column("last_rank_tz",          String),
 )
 
 leagues_table = Table("leagues", metadata,
@@ -512,6 +526,11 @@ def _migrate_db() -> None:
         ("users",              "last_device_type",      "VARCHAR"),
         ("users",              "last_os_version",       "VARCHAR"),
         ("users",              "last_app_version",      "VARCHAR"),
+        # Ranking streak — see _recompute_streak_on_rank_event()
+        ("users",              "current_streak",        "INTEGER"),
+        ("users",              "longest_streak",        "INTEGER"),
+        ("users",              "last_rank_local_date",  "VARCHAR"),
+        ("users",              "last_rank_tz",          "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -705,6 +724,19 @@ _EVENT_TO_USER_COL: dict[str, str] = {
     "push_sent":                    "last_push_sent_at",
 }
 
+# Event types that count toward the daily ranking streak. Adding a new rank
+# surface? Add it here too — and make sure the corresponding call site is
+# wired through user-events `record_event()` (NOT the legacy
+# wrapped_collector.record_event, which is a different function).
+#
+# Note: tier_save is intentionally excluded today. Tier saves only flow
+# through wrapped_collector.record_event, so they never reach this map.
+# Add "tier_save" here once that call site is migrated.
+_RANK_STREAK_EVENTS: frozenset[str] = frozenset({
+    "trio_swipe",
+    "ranking_complete_first_time",
+})
+
 
 def touch_user_activity(
     user_id: str,
@@ -750,7 +782,8 @@ def record_event(
     app_version: str | None = None,
     source:      str | None = None,
     props:       dict | None = None,
-) -> None:
+    tz:          str | None = None,
+) -> dict | None:
     """Append one row to user_events AND bump the matching users.last_*_at
     column (and device snapshot columns) in a single transaction.
 
@@ -758,12 +791,17 @@ def record_event(
     columns on `users` are pointers to the most recent event of each type
     so notification gating queries don't have to scan the full log.
 
+    Returns the post-event streak snapshot when `event_type` is a
+    rank-class event (so callers don't need a follow-up SELECT). Returns
+    None for non-rank events or when logging fails.
+
     Failures are logged and swallowed — event logging must never break the
     surrounding business logic.
     """
     if not user_id or not event_type:
-        return
+        return None
     now = _now()
+    streak_result: dict | None = None
     try:
         with engine.begin() as conn:
             conn.execute(
@@ -804,8 +842,115 @@ def record_event(
                 .where(users_table.c.sleeper_user_id == user_id)
                 .values(**user_updates)
             )
+            # Streak transition runs inside the same transaction so a crash
+            # mid-write can't desync user_events from the streak counter.
+            # Return the post-state so the caller doesn't need a follow-up
+            # SELECT (eliminates a separate read transaction + race window).
+            if event_type in _RANK_STREAK_EVENTS:
+                streak_result = _recompute_streak_on_rank_event(conn, user_id, tz)
     except Exception as e:
         print(f"[record_event] {user_id}/{event_type} failed: {e}")
+        return None
+    return streak_result
+
+
+def _recompute_streak_on_rank_event(conn, user_id: str, tz: str | None) -> dict | None:
+    """Advance the user's daily ranking streak using the local day implied
+    by `tz` (IANA name, e.g. 'America/New_York'). Falls back to UTC when tz
+    is missing/invalid. Idempotent — multiple ranks on the same local day
+    are a no-op for streak math.
+
+    Same day      → no-op
+    +1 local day  → current_streak += 1, longest = max(longest, current)
+    Gap > 1       → reset current_streak to 1
+    First ever    → set current_streak = longest_streak = 1
+
+    Returns the post-state (current/longest/last_rank_local_date) for the
+    caller to inline in its response — None only if the user row is missing.
+    """
+    zone = None
+    if tz and ZoneInfo is not None:
+        try:
+            zone = ZoneInfo(tz)
+        except Exception:
+            zone = None
+    today_local = datetime.now(zone or timezone.utc).date()
+
+    row = conn.execute(
+        select(
+            users_table.c.current_streak,
+            users_table.c.longest_streak,
+            users_table.c.last_rank_local_date,
+        ).where(users_table.c.sleeper_user_id == user_id)
+    ).first()
+    if row is None:
+        return None  # user row not found — nothing to update
+
+    current  = row.current_streak  or 0
+    longest  = row.longest_streak  or 0
+    last_str = row.last_rank_local_date
+
+    last_date = None
+    if last_str:
+        try:
+            last_date = datetime.strptime(last_str, "%Y-%m-%d").date()
+        except Exception:
+            last_date = None
+
+    if last_date == today_local:
+        # Same-day re-rank: no write, but return the current state so the
+        # caller can still inline it in its response.
+        return {
+            "current":              current,
+            "longest":              longest,
+            "last_rank_local_date": last_str,
+        }
+
+    if last_date is None or (today_local - last_date).days > 1:
+        new_current = 1
+    else:  # exactly +1 day
+        new_current = current + 1
+
+    new_longest = max(longest, new_current)
+    today_iso   = today_local.isoformat()
+    conn.execute(
+        update(users_table)
+        .where(users_table.c.sleeper_user_id == user_id)
+        .values(
+            current_streak       = new_current,
+            longest_streak       = new_longest,
+            last_rank_local_date = today_iso,
+            last_rank_tz         = tz,
+        )
+    )
+    return {
+        "current":              new_current,
+        "longest":              new_longest,
+        "last_rank_local_date": today_iso,
+    }
+
+
+def get_user_streak(user_id: str) -> dict:
+    """Read-only streak snapshot for the streak chip + leaderboard."""
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(
+                select(
+                    users_table.c.current_streak,
+                    users_table.c.longest_streak,
+                    users_table.c.last_rank_local_date,
+                ).where(users_table.c.sleeper_user_id == user_id)
+            ).first()
+        if row is None:
+            return {"current": 0, "longest": 0, "last_rank_local_date": None}
+        return {
+            "current":              row.current_streak or 0,
+            "longest":              row.longest_streak or 0,
+            "last_rank_local_date": row.last_rank_local_date,
+        }
+    except Exception as e:
+        print(f"[get_user_streak] {user_id} failed: {e}")
+        return {"current": 0, "longest": 0, "last_rank_local_date": None}
 
 
 def load_user_events(

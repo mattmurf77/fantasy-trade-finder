@@ -7,9 +7,55 @@
 // never has to touch fetch directly.
 
 import Constants from 'expo-constants';
+import * as Device from 'expo-device';
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 const SECURE_TOKEN_KEY = 'ftf.sessionToken';
+// Survives app deletion (Keychain default). Used to prefill SignInScreen
+// for returning users, even after sign-out or token expiry.
+const SECURE_LAST_USERNAME_KEY = 'ftf.lastUsername';
+
+// ── Client-info headers ─────────────────────────────────────────────────
+// The backend's before_request middleware reads these on every authed call
+// to maintain users.last_device_type/os/app_version + the snapshot fields
+// on every user_events row. X-User-TZ powers local-day-aware streak math.
+//
+// Computed once per app launch — Device + Constants values don't change
+// without a re-launch, and re-reading the IANA TZ on every request is
+// wasted work.
+//
+//   X-Device      'iphone' | 'ipad' | 'macos' | 'web' (per backend taxonomy)
+//   X-OS-Version  e.g. '17.4'
+//   X-App-Version e.g. '1.2.3'
+//   X-User-TZ     IANA name e.g. 'America/New_York'
+function _resolveDeviceLabel(): string {
+  if (Platform.OS === 'ios') {
+    // expo-device DeviceType: UNKNOWN=0, PHONE=1, TABLET=2, DESKTOP=3, TV=4
+    if (Device.deviceType === Device.DeviceType.TABLET) return 'ipad';
+    if (Device.deviceType === Device.DeviceType.DESKTOP) return 'macos';
+    return 'iphone';
+  }
+  if (Platform.OS === 'android') return 'android';
+  if (Platform.OS === 'web') return 'web';
+  return Platform.OS;
+}
+
+const _CLIENT_HEADERS: Record<string, string> = (() => {
+  const h: Record<string, string> = {
+    'X-Device': _resolveDeviceLabel(),
+  };
+  if (Device.osVersion) h['X-OS-Version'] = Device.osVersion;
+  const appVersion = Constants.expoConfig?.version;
+  if (appVersion) h['X-App-Version'] = appVersion;
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz) h['X-User-TZ'] = tz;
+  } catch {
+    /* Hermes without full ICU — skip; backend treats missing TZ as UTC */
+  }
+  return h;
+})();
 
 function getBaseUrl(): string {
   // Expo puts values from app.json's `extra` here at build time; fall back
@@ -38,6 +84,22 @@ export async function clearSessionToken(): Promise<void> {
     await SecureStore.deleteItemAsync(SECURE_TOKEN_KEY);
   } catch {
     /* already gone */
+  }
+}
+
+export async function getLastUsername(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(SECURE_LAST_USERNAME_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setLastUsername(username: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(SECURE_LAST_USERNAME_KEY, username);
+  } catch {
+    /* non-fatal */
   }
 }
 
@@ -73,6 +135,7 @@ export async function apiRequest<T = unknown>(
   const url = path.startsWith('http') ? path : `${base}${path}`;
   const headers: Record<string, string> = {
     Accept: 'application/json',
+    ..._CLIENT_HEADERS,
     ...(opts.headers || {}),
   };
   if (opts.body !== undefined) {
