@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { Platform } from 'react-native';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { registerDeviceForPush } from '../api/notifications';
-import { useNotifications } from '../state/useNotifications';
+import { useNotifications, type PushPermissionStatus } from '../state/useNotifications';
 
 // Display pushes while app is foregrounded. Setting this once per module
 // rather than per-hook-invocation avoids any ordering surprises.
@@ -142,4 +142,31 @@ export function usePushNotifications(
       responseSubRef.current = null;
     };
   }, [userId, onTapMatchNotification]);
+
+  // ── Refresh permission status when the app foregrounds ───────────────
+  // The "denied" banner on LeagueScreen tells the user "enable in Settings
+  // to fix." If we don't re-read permission on return-to-foreground, the
+  // banner will persist even after they fix it — until the next cold
+  // launch. AppState's 'active' transition is the right hook: cheap, fires
+  // exactly when we need it, and doesn't churn while the app is in the
+  // background. iOS-only check would be tighter but expo-notifications
+  // works on Android too, so we keep it cross-platform.
+  useEffect(() => {
+    if (!userId || !Device.isDevice) return;
+    const handleAppStateChange = async (next: AppStateStatus) => {
+      if (next !== 'active') return;
+      try {
+        const perm = await Notifications.getPermissionsAsync();
+        const status: PushPermissionStatus =
+          perm.status === 'granted' ? 'granted'
+          : perm.status === 'denied' ? 'denied'
+          : 'undetermined';
+        useNotifications.getState().setPermissionStatus(status);
+      } catch {
+        // best-effort — leave the cached status alone on read failure
+      }
+    };
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    return () => sub.remove();
+  }, [userId]);
 }
