@@ -184,7 +184,7 @@ export default function TiersScreen() {
 
   // ── Render ──────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={['bottom']}>
       <Toast
         visible={!!toast}
         message={toast?.msg || ''}

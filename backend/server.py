@@ -1118,6 +1118,7 @@ def _run_trade_job(
             acquire_positions    = acquire_positions,
             trade_away_positions = trade_away_positions,
             pinned_give_players  = pinned_give or None,
+            scoring_format       = fmt,
             on_opponent_done     = progress_cb,
         )
 
@@ -2078,6 +2079,13 @@ def trade_card_to_dict(card, players: dict) -> dict:
                 out["reasons"] = list(reasons)
         except Exception:
             pass
+    # Feature 1 + 2 — templated narrative + structured roster-aware match context.
+    narrative = getattr(card, "narrative", None)
+    if narrative:
+        out["narrative"] = narrative
+    match_context = getattr(card, "match_context", None)
+    if match_context:
+        out["match_context"] = match_context
     return out
 
 

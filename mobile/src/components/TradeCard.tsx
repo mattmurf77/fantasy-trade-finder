@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import PlayerCard from './PlayerCard';
+import StrengthBar from './StrengthBar';
 import type { TradeCard as TradeCardData } from '../shared/types';
 
 interface Props {
@@ -25,8 +26,16 @@ export default function TradeCardComp({
   onDecline,
   acting,
 }: Props) {
-  const matchPct = Math.round((data.match_score || 0) * 1);
-  const fairPct = Math.round((data.fairness || 0) * 100);
+  const matchPct = Math.round(data.match_score || 0);
+  // `fairness` may be missing — backend doesn't always expose fairness_score.
+  // Hide the row entirely in that case rather than rendering a bogus 0%.
+  const hasFairness = typeof data.fairness === 'number';
+  const fairPct = hasFairness ? Math.round((data.fairness as number) * 100) : 0;
+  // Defensive: backend or normalizer should always populate these, but
+  // never let a missing array crash the card. Empty arrays just render
+  // an empty side, which is recoverable visually.
+  const receivePlayers = Array.isArray(data.receive_players) ? data.receive_players : [];
+  const givePlayers    = Array.isArray(data.give_players)    ? data.give_players    : [];
 
   return (
     <View style={styles.card}>
@@ -35,17 +44,16 @@ export default function TradeCardComp({
           <Text style={styles.headerLabel}>Trade with</Text>
           <Text style={styles.headerName}>@{data.opponent_username}</Text>
         </View>
-        <View style={styles.scorePill}>
-          <Text style={styles.scoreText}>{matchPct}</Text>
-          <Text style={styles.scoreLabel}>match</Text>
-        </View>
       </View>
+
+      {/* Match strength — gradient bar replacing the prior accent pill. */}
+      <StrengthBar value={matchPct} label="Match strength" />
 
       <View style={styles.split}>
         <View style={styles.side}>
           <Text style={styles.sideLabel}>YOU GET</Text>
           <View style={styles.sideStack}>
-            {data.receive_players.map((p) => (
+            {receivePlayers.map((p) => (
               <PlayerCard key={p.id} player={p} compact />
             ))}
           </View>
@@ -54,20 +62,22 @@ export default function TradeCardComp({
         <View style={styles.side}>
           <Text style={styles.sideLabel}>YOU GIVE</Text>
           <View style={styles.sideStack}>
-            {data.give_players.map((p) => (
+            {givePlayers.map((p) => (
               <PlayerCard key={p.id} player={p} compact />
             ))}
           </View>
         </View>
       </View>
 
-      <View style={styles.fairnessRow}>
-        <Text style={styles.fairnessLabel}>Fairness</Text>
-        <View style={styles.fairnessTrack}>
-          <View style={[styles.fairnessFill, { width: `${fairPct}%` }]} />
+      {hasFairness && (
+        <View style={styles.fairnessRow}>
+          <Text style={styles.fairnessLabel}>Fairness</Text>
+          <View style={styles.fairnessTrack}>
+            <View style={[styles.fairnessFill, { width: `${fairPct}%` }]} />
+          </View>
+          <Text style={styles.fairnessValue}>{fairPct}%</Text>
         </View>
-        <Text style={styles.fairnessValue}>{fairPct}%</Text>
-      </View>
+      )}
 
       {/* Human-readable reasons (flag trade_math.human_explanations is ON).
           Rendered only when the backend returns a non-empty list. */}
@@ -133,23 +143,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   headerName: { color: colors.text, fontSize: fontSize.base, fontWeight: '800' },
-  scorePill: {
-    backgroundColor: 'rgba(79,124,255,0.14)',
-    borderColor: 'rgba(79,124,255,0.45)',
-    borderWidth: 1,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 4,
-    alignItems: 'center',
-  },
-  scoreText: { color: colors.accent, fontSize: fontSize.lg, fontWeight: '800' },
-  scoreLabel: {
-    color: colors.accent,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
   split: {
     flexDirection: 'row',
     gap: spacing.md,

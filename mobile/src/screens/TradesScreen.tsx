@@ -102,16 +102,34 @@ export default function TradesScreen() {
   // per-opponent budget (one opponent done every ~3s → ~2 polls per
   // increment). Cleared when status flips to complete/error or the
   // component unmounts.
+  //
+  // Failure handling: a single network blip is fine, but a backend that
+  // 500s for an extended period would otherwise leave the user staring
+  // at "Searching…" forever. After MAX_POLL_FAILURES consecutive errors
+  // we surface a toast and clear the local job so the UI returns to its
+  // pre-tap state. The server-side worker keeps running so the next tap
+  // can hit the warm cache.
   useEffect(() => {
     if (!job || job.status !== 'running' || !job.job_id) return;
     let cancelled = false;
+    let failures = 0;
+    const MAX_POLL_FAILURES = 4;
     const tick = async () => {
       try {
         const next = await getTradeStatus(job.job_id);
-        if (!cancelled) setJob(next);
+        if (cancelled) return;
+        failures = 0;
+        setJob(next);
       } catch {
-        // Network blip — keep polling. The interval handles backoff
-        // implicitly (we don't accelerate on failure).
+        if (cancelled) return;
+        failures += 1;
+        if (failures >= MAX_POLL_FAILURES) {
+          setToast({
+            msg: 'Network hiccup — try Find a Trade again in a moment',
+            tone: 'warn',
+          });
+          setJob(null);
+        }
       }
     };
     const id = setInterval(tick, 1500);
@@ -289,12 +307,15 @@ export default function TradesScreen() {
                   {job.cards.length > 0 ? `  ·  ${job.cards.length} trade${job.cards.length === 1 ? '' : 's'}` : ''}
                 </Text>
               </View>
+              {/* "Hide", not "Stop": the server-side worker keeps running
+                  so its results land in the warm cache for the next tap.
+                  We just dismiss the in-progress UI on the client. */}
               <Pressable
                 onPress={() => setJob(null)}
                 style={({ pressed }) => [styles.stopBtn, pressed && { opacity: 0.6 }]}
                 hitSlop={8}
               >
-                <Text style={styles.stopBtnText}>Stop</Text>
+                <Text style={styles.stopBtnText}>Hide</Text>
               </Pressable>
             </View>
           )}

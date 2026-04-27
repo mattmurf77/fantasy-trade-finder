@@ -9,6 +9,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -37,6 +38,7 @@ import { useFlag } from '../state/useFeatureFlags';
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
 const THRESHOLD_FALLBACK = 10;
+const SPEED_MODE_KEY = 'ftf.trios.speedMode';
 
 export default function RankScreen() {
   const queryClient = useQueryClient();
@@ -44,6 +46,23 @@ export default function RankScreen() {
   const [selectionOrder, setSelectionOrder] = useState<('a' | 'b' | 'c')[]>([]);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' } | null>(null);
   const [infoSheet, setInfoSheet] = useState<{ name: string; info: string } | null>(null);
+  // I AM SPEED — when ON we auto-rank the 3rd choice + auto-submit after the
+  // user picks 2. Default OFF (manual confirm). Persisted to AsyncStorage so
+  // the toggle survives app restarts. Mirrors web/js/app.js's autoConfirmEnabled.
+  const [speedMode, setSpeedMode] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem(SPEED_MODE_KEY).then((v) => {
+      if (v === '1') setSpeedMode(true);
+    });
+  }, []);
+  const toggleSpeedMode = useCallback(() => {
+    setSpeedMode((prev) => {
+      const next = !prev;
+      void AsyncStorage.setItem(SPEED_MODE_KEY, next ? '1' : '0');
+      haptics.selection();
+      return next;
+    });
+  }, []);
 
   const qcEnabled      = useFlag('swipe.qc_compliments');
   const gestureEnabled = useFlag('swipe.gesture_audit');
@@ -114,6 +133,30 @@ export default function RankScreen() {
   const playerForSide = (t: Trio, side: 'a' | 'b' | 'c') =>
     side === 'a' ? t.player_a : side === 'b' ? t.player_b : t.player_c;
 
+  // Submit the current selection — runs the QC celebration check then mutates.
+  // Pulled out of the effect so it can be called from the Confirm button too.
+  const submitCurrent = useCallback(
+    (orderToSubmit: ('a' | 'b' | 'c')[]) => {
+      if (orderToSubmit.length !== 3 || !trio || submitMutation.isPending) return;
+      const rankedIds = orderToSubmit.map(
+        (s) => playerForSide(trio, s).id,
+      ) as [string, string, string];
+
+      if (
+        qcEnabled &&
+        trio.is_qc_trio &&
+        Array.isArray(trio.qc_expected_order) &&
+        trio.qc_expected_order.length === 3 &&
+        rankedIds.every((id, i) => id === trio.qc_expected_order![i])
+      ) {
+        setToast({ msg: '✓ Nice call — you helped verify the rankings!', tone: 'success' });
+        haptics.success();
+      }
+      submitMutation.mutate(rankedIds);
+    },
+    [trio, submitMutation, qcEnabled],
+  );
+
   // Rank a card. Tapping an already-ranked card removes it (and anything
   // ranked after it), matching the web app's behavior in selectCard().
   const rankSide = useCallback(
@@ -125,38 +168,28 @@ export default function RankScreen() {
           return prev.slice(0, existing);
         }
         if (prev.length >= 3) return prev;
-        return [...prev, side];
+        const next = [...prev, side];
+
+        // I AM SPEED: after the user picks 2, auto-rank the 3rd (the only
+        // remaining card) and submit immediately. Mirrors the web's
+        // autoConfirmEnabled branch in selectCard().
+        if (speedMode && next.length === 2 && trio) {
+          const sides: ('a' | 'b' | 'c')[] = ['a', 'b', 'c'];
+          const last = sides.find((s) => !next.includes(s));
+          if (last) {
+            const final = [...next, last] as ('a' | 'b' | 'c')[];
+            // Defer the submit so React commits the visible rank-3 badge
+            // before the trio rotates to the next one.
+            setTimeout(() => submitCurrent(final), 0);
+            return final;
+          }
+        }
+        return next;
       });
       haptics.selection();
     },
-    [],
+    [speedMode, trio, submitCurrent],
   );
-
-  // When all three are picked, submit.
-  useEffect(() => {
-    if (selectionOrder.length === 3 && trio && !submitMutation.isPending) {
-      const rankedIds = selectionOrder.map(
-        (s) => playerForSide(trio, s).id,
-      ) as [string, string, string];
-
-      // QC compliment check — flag-gated. When the backend marks this as
-      // a quality-control trio and the user's ranking matches the
-      // consensus order, celebrate.
-      if (
-        qcEnabled &&
-        trio.is_qc_trio &&
-        Array.isArray(trio.qc_expected_order) &&
-        trio.qc_expected_order.length === 3 &&
-        rankedIds.every((id, i) => id === trio.qc_expected_order![i])
-      ) {
-        setToast({ msg: '✓ Nice call — you helped verify the rankings!', tone: 'success' });
-        haptics.success();
-      }
-
-      submitMutation.mutate(rankedIds);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectionOrder, trio?.player_a?.id]);
 
   const handleSkipEntireTrio = () => {
     // Web app hits /api/trio/skip with a single player_id — we pick the
@@ -197,7 +230,7 @@ export default function RankScreen() {
 
   // ── Render ──────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={['bottom']}>
       <Toast
         visible={!!toast}
         message={toast?.msg || ''}
@@ -283,13 +316,19 @@ export default function RankScreen() {
 
         {/* Instruction */}
         <Text style={styles.instruction}>
-          {selectionOrder.length === 0
+          {submitMutation.isPending
+            ? '✓ Submitting…'
+            : selectionOrder.length === 0
             ? 'Tap in order of preference — best first'
             : selectionOrder.length === 1
             ? 'Good — now tap your 2nd choice'
             : selectionOrder.length === 2
-            ? 'Last one — tap your 3rd choice'
-            : '✓ Submitting…'}
+            ? speedMode
+              ? '⚡ Speed mode — releasing now'
+              : 'Last one — tap your 3rd choice'
+            : speedMode
+            ? '✓ Submitting…'
+            : '✓ All ranked — confirm when ready'}
         </Text>
 
         {/* Cards */}
@@ -327,6 +366,47 @@ export default function RankScreen() {
               />
             ))}
           </View>
+        )}
+
+        {/* I AM SPEED toggle — sits ABOVE the secondary action row per spec */}
+        <Pressable
+          onPress={toggleSpeedMode}
+          style={({ pressed }) => [
+            styles.speedTile,
+            speedMode && styles.speedTileOn,
+            pressed && { opacity: 0.85 },
+          ]}
+        >
+          <Text style={[styles.speedTileText, speedMode && styles.speedTileTextOn]}>
+            {speedMode ? '⚡ I AM SPEED — ON' : '⚡ I AM SPEED — OFF'}
+          </Text>
+          <Text style={styles.speedTileCaption}>
+            {speedMode
+              ? 'Pick your top 2 — we auto-rank the 3rd and save.'
+              : 'Tap all 3, then tap Confirm to save.'}
+          </Text>
+        </Pressable>
+
+        {/* Confirm button — appears only after the user has ranked all 3
+            cards (in manual mode). Pre-3 we say nothing here; the
+            instruction line above the cards already coaches the user. */}
+        {!speedMode && selectionOrder.length === 3 && (
+          <Pressable
+            onPress={() => submitCurrent(selectionOrder)}
+            disabled={!trio || submitMutation.isPending}
+            style={({ pressed }) => [
+              styles.confirmBtn,
+              styles.confirmBtnReady,
+              pressed && { opacity: 0.85 },
+              submitMutation.isPending && { opacity: 0.45 },
+            ]}
+          >
+            {submitMutation.isPending ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.confirmBtnText}>Confirm ranking →</Text>
+            )}
+          </Pressable>
         )}
 
         {/* Bottom actions */}
@@ -542,6 +622,49 @@ const styles = StyleSheet.create({
   },
   errorText: { color: colors.red, fontSize: fontSize.sm, textAlign: 'center' },
   retryText: { color: colors.accent, fontSize: fontSize.sm, fontWeight: '700' },
+
+  speedTile: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.lg,
+    alignItems: 'center',
+    gap: 4,
+  },
+  speedTileOn: {
+    borderColor: colors.accent,
+    backgroundColor: 'rgba(79,124,255,0.10)',
+  },
+  speedTileText: {
+    color: colors.text,
+    fontSize: fontSize.sm,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  speedTileTextOn: { color: colors.accent },
+  speedTileCaption: {
+    color: colors.muted,
+    fontSize: fontSize.xs,
+    textAlign: 'center',
+  },
+  confirmBtn: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingVertical: 14,
+    alignItems: 'center',
+    minHeight: 48,
+    marginTop: spacing.sm,
+  },
+  confirmBtnReady: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  confirmBtnText: { color: '#fff', fontSize: fontSize.base, fontWeight: '800' },
 
   actions: {
     flexDirection: 'row',
