@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { NotificationItem } from '../shared/types';
+import type { NotificationItem, NotificationPrefs } from '../shared/types';
 
 // GET /api/notifications?user_id=X  — returns the bell inbox
 export async function getNotifications(userId: string) {
@@ -36,4 +36,14 @@ export async function registerDeviceForPush(
     // Swallow — the endpoint may not exist yet during the Phase-5 rollout.
     return { ok: false };
   }
+}
+
+// GET /api/notifications/prefs
+export async function getNotifPrefs() {
+  return api.get<NotificationPrefs>('/api/notifications/prefs');
+}
+
+// PUT /api/notifications/prefs — partial update
+export async function updateNotifPrefs(patch: Partial<NotificationPrefs>) {
+  return api.put<NotificationPrefs>('/api/notifications/prefs', patch);
 }

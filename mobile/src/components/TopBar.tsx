@@ -12,6 +12,11 @@ import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import { useNotifications } from '../state/useNotifications';
 import { relativeTime } from '../utils/relativeTime';
+// Circular at module-load (TopBar ← TabNav ← RootNav), but `navigationRef`
+// is a top-level const created at RootNav import time and only *read*
+// lazily inside onPress below. If you refactor navigationRef into the
+// component body, this circular import will break silently.
+import { navigationRef } from '../navigation/RootNav';
 
 // Global top bar that sits above the tab navigator. The only widget today
 // is the floating notifications bell on the right — it shows an unread
@@ -46,6 +51,24 @@ export default function TopBar() {
         ]}
       >
         <View style={styles.row}>
+          <Pressable
+            onPress={() => {
+              if (navigationRef.isReady()) {
+                // @ts-expect-error — top-level Settings route on AuthStack
+                navigationRef.navigate('Settings');
+              }
+            }}
+            hitSlop={12}
+            style={({ pressed }) => [
+              styles.bellBtn,
+              { marginRight: spacing.sm },
+              pressed && { opacity: 0.7 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+          >
+            <Text style={styles.bellEmoji}>⚙️</Text>
+          </Pressable>
           <Pressable
             onPress={openSheet}
             hitSlop={12}

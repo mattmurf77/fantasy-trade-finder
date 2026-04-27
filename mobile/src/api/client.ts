@@ -186,4 +186,6 @@ export const api = {
     apiRequest<T>(path, { ...opts, method: 'GET' }),
   post: <T = unknown>(path: string, body?: unknown, opts?: RequestOptions) =>
     apiRequest<T>(path, { ...opts, method: 'POST', body }),
+  put: <T = unknown>(path: string, body?: unknown, opts?: RequestOptions) =>
+    apiRequest<T>(path, { ...opts, method: 'PUT', body }),
 };

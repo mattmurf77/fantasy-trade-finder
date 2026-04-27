@@ -30,6 +30,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from datetime import datetime, timedelta, timezone
+
 from flask import Flask, g, jsonify, request, send_from_directory
 
 # ---------------------------------------------------------------------------
@@ -104,6 +106,12 @@ from .database import (
     record_event, touch_user_activity, load_user_events,
     # Streak — driven by record_event, read for the chip + leaderboard
     get_user_streak,
+    # Notification prefs / send log / quiet-hours queue
+    get_notification_prefs, upsert_notification_prefs,
+    log_notification_send, count_notification_sends_since,
+    notification_dedup_sent,
+    queue_notification, drain_due_queued_notifications,
+    NOTIF_KIND_TO_BUCKET, NOTIF_PREF_DEFAULTS,
 )
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
@@ -2371,59 +2379,29 @@ def swipe_trade():
                         except Exception as notif_err:
                             log.warning("create_notification failed (non-fatal): %s", notif_err)
 
-                        # ── M5 Push — fire Expo push to each user's registered devices ──
-                        # Non-throwing; push failures must not break match creation.
-                        try:
-                            _push_targets = load_device_tokens_for_users(
-                                [g_user_id, card.target_user_id]
+                        # ── Push — typed dispatch to both match participants ──
+                        # _send_typed_push handles prefs, freq caps, and
+                        # quiet-hours bundling. Non-throwing.
+                        for _recipient_id, _partner_name, _give, _recv in [
+                            (g_user_id,           _partner_a,    _give_names,    _receive_names),
+                            (card.target_user_id, _my_username,  _receive_names, _give_names),
+                        ]:
+                            _body_detail = (
+                                f"{', '.join(_give)} for {', '.join(_recv)}"
+                                if _give and _recv else
+                                "Tap to view the matched trade."
                             )
-                            if _push_targets:
-                                _messages = []
-                                for tgt in _push_targets:
-                                    # Title/body from each user's POV
-                                    if tgt["user_id"] == g_user_id:
-                                        _partner_for = _partner_a
-                                        _give  = _give_names
-                                        _recv  = _receive_names
-                                    else:
-                                        _partner_for = _my_username
-                                        _give  = _receive_names   # flipped
-                                        _recv  = _give_names
-                                    _body_detail = (
-                                        f"{', '.join(_give)} for {', '.join(_recv)}"
-                                        if _give and _recv else
-                                        "Tap to view the matched trade."
-                                    )
-                                    _messages.append({
-                                        "to":    tgt["device_token"],
-                                        "title": f"🎯 Match with @{_partner_for}",
-                                        "body":  _body_detail,
-                                        "data":  {
-                                            "match_id":  match_data["id"],
-                                            "league_id": card.league_id,
-                                            "type":      "trade_match",
-                                        },
-                                        "sound": "default",
-                                    })
-                                _send_expo_push(_messages)
-                                # Log a push_sent event per recipient so we can
-                                # gate re-engagement pushes on last_push_sent_at.
-                                for tgt in _push_targets:
-                                    try:
-                                        record_event(
-                                            tgt["user_id"],
-                                            "push_sent",
-                                            league_id = card.league_id,
-                                            source    = "api",
-                                            props     = {
-                                                "type":     "trade_match",
-                                                "match_id": match_data["id"],
-                                            },
-                                        )
-                                    except Exception:
-                                        pass
-                        except Exception as push_err:
-                            log.warning("push dispatch failed (non-fatal): %s", push_err)
+                            _send_typed_push(
+                                _recipient_id,
+                                "new_match",
+                                title = f"🎯 Match with @{_partner_name}",
+                                body  = _body_detail,
+                                data  = {
+                                    "match_id":  match_data["id"],
+                                    "league_id": card.league_id,
+                                },
+                                dedup_key = str(match_data["id"]),
+                            )
 
         except Exception as db_err:
             log.warning("DB write failed for trade swipe (continuing): %s", db_err)
@@ -4157,33 +4135,64 @@ def read_all_notifications():
 
 
 # ---------------------------------------------------------------------------
-# M5 Push — Expo push dispatch + register-device route
+# Push dispatch — typed wrapper + raw Expo POST
 # ---------------------------------------------------------------------------
-# We use Expo's push service (https://exp.host/--/api/v2/push/send) which
-# abstracts APNs + FCM. Clients register Expo push tokens (shape
-# "ExponentPushToken[xxx]") via the route below. The match-create hook in
-# /api/trades/swipe calls _send_expo_push() to fan out pushes to every
-# registered device for both match participants.
+# Two-layer design:
+#
+#   _send_expo_push(messages)         — raw Expo POST. Knows nothing about
+#                                       prefs/quiet hours/caps. Direct callers
+#                                       should be rare; the bundled-summary
+#                                       cron uses it because it's already
+#                                       made the gating decisions.
+#
+#   _send_typed_push(user_id, kind,   — high-level entry point. Looks up the
+#                    title, body,     user's prefs, applies bucket gate,
+#                    data, dedup_key) frequency cap, quiet-hours bundling,
+#                                     fans out to all registered devices,
+#                                     records event + log row. This is what
+#                                     match-create / cron jobs / hooks call.
+#
+# Quiet-hours rule (per the plan):
+#   If quiet_hours_enabled AND now-local is in 22:00–08:00 user-local, the
+#   push is queued in notification_queue with deliver_after = next 08:00
+#   user-local converted to UTC. The 8am hourly tick collapses every queued
+#   row for a user into ONE bundled summary push.
+#
+# Frequency cap rules:
+#   _NOTIF_FREQ_CAPS maps kind → (window_days, max_count). Re-engagement
+#   kinds are the main consumers; transactional kinds are unbounded.
 
 _EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _EXPO_TOKEN_PREFIX = "ExponentPushToken["
+
+# kind → (window_days, max_within_window). Pushes exceeding the cap are
+# silently dropped (still logged in user_events as `push_skipped` with the
+# reason). Kinds not in this map have no cap.
+_NOTIF_FREQ_CAPS: dict[str, tuple[int, int]] = {
+    "winback_matches": (7,   1),
+    "winback_dormant": (30,  1),
+    "finish_ranking":  (30,  1),
+    "season_start":    (365, 1),
+}
+
+# Per-dedup_key caps (e.g. "fire match_expiring at most 1× per match_id").
+_NOTIF_DEDUP_CAPS: set[str] = {"match_expiring", "first_match"}
+
 
 def _send_expo_push(messages: list) -> None:
     """POST a batch of Expo push messages. Non-throwing — swallows all
     errors and logs a warning. Chunks at 100 per request (Expo limit).
 
-    Each message is a dict:
-      { to: str, title: str, body: str, data: dict, sound?: "default" }
+    Each message: { to: str, title: str, body: str, data: dict, sound?: "default" }
+    Use _send_typed_push() for normal pushes; this is the raw transport.
     """
     if not messages:
         return
     try:
-        # Filter to only valid-looking Expo tokens
         clean = [m for m in messages if isinstance(m.get("to"), str)
                  and m["to"].startswith(_EXPO_TOKEN_PREFIX)]
         if not clean:
             return
-        # Chunk at 100
         for i in range(0, len(clean), 100):
             chunk = clean[i:i + 100]
             body = json.dumps(chunk).encode("utf-8")
@@ -4205,6 +4214,126 @@ def _send_expo_push(messages: list) -> None:
                     log.info("Expo push delivered: %d message(s)", len(chunk))
     except Exception as e:
         log.warning("_send_expo_push failed (non-fatal): %s", e)
+
+
+def _local_hour_in_quiet_window(tz_name: str | None) -> bool:
+    """True if the current time in `tz_name` is between 22:00 and 08:00."""
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(tz_name or "America/New_York")
+    except Exception:
+        return False
+    h = datetime.now(tz).hour
+    return h >= 22 or h < 8
+
+
+def _next_8am_utc(tz_name: str | None) -> str:
+    """Return the next 08:00 in `tz_name` as an ISO UTC string. On any tz
+    resolution failure, fall back to 13:00 UTC tomorrow (~08:00 ET) so the
+    queued push still drains in roughly the right morning window.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(tz_name or "America/New_York")
+        now_local = datetime.now(tz)
+        target = now_local.replace(hour=8, minute=0, second=0, microsecond=0)
+        if now_local >= target:
+            target = target + timedelta(days=1)
+        return target.astimezone(timezone.utc).isoformat()
+    except Exception:
+        now_utc = datetime.now(timezone.utc)
+        target = now_utc.replace(hour=13, minute=0, second=0, microsecond=0)
+        if now_utc >= target:
+            target = target + timedelta(days=1)
+        return target.isoformat()
+
+
+def _freq_cap_blocks(user_id: str, kind: str, dedup_key: str | None) -> bool:
+    """Return True if the cap for (user_id, kind) is reached and the push
+    must be skipped.
+    """
+    if kind in _NOTIF_DEDUP_CAPS and dedup_key:
+        # Per-dedup_key lifetime cap (e.g. "fire match_expiring at most 1×
+        # per match_id"). Skip if any prior row exists.
+        return notification_dedup_sent(user_id, kind, dedup_key)
+
+    cap = _NOTIF_FREQ_CAPS.get(kind)
+    if not cap:
+        return False
+    window_days, max_count = cap
+    since = (datetime.now(timezone.utc) - timedelta(days=window_days)).isoformat()
+    sent = count_notification_sends_since(user_id, kind, since)
+    return sent >= max_count
+
+
+def _send_typed_push(
+    user_id: str,
+    kind: str,
+    *,
+    title: str,
+    body: str,
+    data: dict | None = None,
+    dedup_key: str | None = None,
+) -> None:
+    """High-level push entry point. Applies pref / cap / quiet-hours rules.
+    Non-throwing — failures are logged.
+
+    Flow:
+      1. Look up user's prefs (defaults if missing row).
+      2. Bucket gate — skip if the user has the relevant toggle off.
+      3. Frequency cap — skip if (kind, user, window) is at or over the cap.
+      4. Quiet hours — if active for the user, write to notification_queue
+         and exit. The 8am cron drains and bundles.
+      5. Otherwise: load device tokens, send via Expo, log + record_event.
+    """
+    if not user_id or not kind:
+        return
+    try:
+        prefs = get_notification_prefs(user_id)
+        bucket = NOTIF_KIND_TO_BUCKET.get(kind)
+        if bucket and not int(prefs.get(bucket, 1)):
+            log.info("push skipped (bucket=%s off): user=%s kind=%s", bucket, user_id, kind)
+            return
+
+        if _freq_cap_blocks(user_id, kind, dedup_key):
+            log.info("push skipped (cap): user=%s kind=%s dedup=%s", user_id, kind, dedup_key)
+            return
+
+        # Quiet-hours check uses the user's saved tz, falling back to ET.
+        if int(prefs.get("quiet_hours_enabled", 1)) and \
+                _local_hour_in_quiet_window(prefs.get("tz")):
+            queue_notification(
+                user_id, kind,
+                title=title, body=body, data=data or {},
+                deliver_after=_next_8am_utc(prefs.get("tz")),
+            )
+            log.info("push queued (quiet hrs): user=%s kind=%s", user_id, kind)
+            return
+
+        # Active hours — fan out to every registered device for this user.
+        targets = load_device_tokens_for_users([user_id])
+        if not targets:
+            return
+        msgs = [{
+            "to":    t["device_token"],
+            "title": title,
+            "body":  body,
+            "data":  {**(data or {}), "type": kind},
+            "sound": "default",
+        } for t in targets]
+        _send_expo_push(msgs)
+        log_notification_send(user_id, kind, dedup_key=dedup_key)
+        try:
+            record_event(
+                user_id, "push_sent",
+                source="api",
+                props={"kind": kind, "dedup_key": dedup_key},
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        log.warning("_send_typed_push failed (non-fatal): user=%s kind=%s err=%s",
+                    user_id, kind, e)
 
 
 @app.route("/api/notifications/register-device", methods=["POST"])
@@ -4237,6 +4366,53 @@ def register_device_for_push():
         return jsonify({"ok": True})
     except Exception as e:
         log.error("register-device failed: %s", e)
+        return jsonify({"error": "save_failed", "message": str(e)}), 500
+
+
+@app.route("/api/notifications/prefs", methods=["GET"])
+def get_notification_prefs_route():
+    """GET /api/notifications/prefs → user's per-bucket toggles + quiet-hours
+    setting + tz. Defaults are returned when no row exists; the response
+    shape is stable regardless.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    return jsonify(get_notification_prefs(sess["user_id"]))
+
+
+@app.route("/api/notifications/prefs", methods=["PUT"])
+def update_notification_prefs_route():
+    """PUT /api/notifications/prefs — partial update. Body keys (all optional):
+      trade_matches, weekly_digest, reengagement, quiet_hours_enabled (bool/0/1),
+      tz (IANA string)
+    Returns the full merged prefs dict.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    body = request.get_json(force=True) or {}
+    allowed = {"trade_matches", "weekly_digest", "reengagement",
+               "quiet_hours_enabled", "tz"}
+    fields = {k: v for k, v in body.items() if k in allowed}
+    if not fields:
+        return jsonify({"error": "no_valid_fields"}), 400
+    if "tz" in fields:
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(str(fields["tz"]))
+        except Exception:
+            return jsonify({"error": "invalid_tz"}), 400
+    try:
+        out = upsert_notification_prefs(sess["user_id"], **fields)
+        try:
+            record_event(
+                sess["user_id"], "notif_pref_changed",
+                source="api", props={"changed": list(fields.keys())},
+            )
+        except Exception:
+            pass
+        return jsonify(out)
+    except Exception as e:
+        log.error("update_notification_prefs failed: %s", e)
         return jsonify({"error": "save_failed", "message": str(e)}), 500
 
 

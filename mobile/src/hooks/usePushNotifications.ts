@@ -5,6 +5,7 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { registerDeviceForPush } from '../api/notifications';
 import { useNotifications } from '../state/useNotifications';
+import { usePushPriming } from '../state/usePushPriming';
 
 // Display pushes while app is foregrounded. Setting this once per module
 // rather than per-hook-invocation avoids any ordering surprises.
@@ -54,32 +55,48 @@ export function usePushNotifications(
 
     let cancelled = false;
 
-    (async () => {
+    // Inner: actually call OS permission prompt + fetch token + register.
+    // Used both directly (already-granted path) and as the `accept` callback
+    // that the priming modal invokes.
+    const requestAndRegister = async () => {
       try {
-        const existing = await Notifications.getPermissionsAsync();
-        let status = existing.status;
-        if (status !== 'granted') {
-          const req = await Notifications.requestPermissionsAsync();
-          status = req.status;
-        }
-        if (status !== 'granted') return;
-        if (cancelled) return;
-
+        const req = await Notifications.requestPermissionsAsync();
+        if (req.status !== 'granted' || cancelled) return;
         const projectId: string | undefined =
           (Constants.expoConfig as any)?.extra?.eas?.projectId ??
           (Constants.easConfig as any)?.projectId;
-
         const tokenResp = await Notifications.getExpoPushTokenAsync(
           projectId ? { projectId } : undefined,
         );
         const token = tokenResp?.data;
         if (!token || cancelled) return;
-
         const platform = Platform.OS === 'ios' ? 'ios' : 'android';
         await registerDeviceForPush(token, platform);
         if (!cancelled) registeredRef.current = true;
       } catch {
         // Silent — push is non-critical.
+      } finally {
+        usePushPriming.getState().clear();
+      }
+    };
+
+    (async () => {
+      try {
+        const existing = await Notifications.getPermissionsAsync();
+        if (existing.status === 'granted') {
+          // Already granted on a prior session — skip priming, refresh token.
+          await requestAndRegister();
+          return;
+        }
+        // Permission is `undetermined` (first-run) or `denied`. We don't
+        // re-prompt after explicit denials. For undetermined, hand off to
+        // the priming modal — it will call back into requestAndRegister
+        // only after the user opts in via the in-app sheet.
+        if (existing.status === 'undetermined') {
+          usePushPriming.getState().request(requestAndRegister);
+        }
+      } catch {
+        // ignore — push registration is best-effort
       }
     })();
 

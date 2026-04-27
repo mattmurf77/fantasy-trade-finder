@@ -130,3 +130,11 @@ export interface NotificationItem {
 }
 
 export type FlagMap = Record<string, boolean>;
+
+export interface NotificationPrefs {
+  trade_matches: 0 | 1;
+  weekly_digest: 0 | 1;
+  reengagement: 0 | 1;
+  quiet_hours_enabled: 0 | 1;
+  tz: string;
+}
