@@ -1,6 +1,17 @@
 import { api } from './client';
 import type { Trio, RankingProgress, Position } from '../shared/types';
 
+export interface Streak {
+  current: number;
+  longest: number;
+  last_rank_local_date: string | null;
+}
+
+// GET /api/me/streak — returns the user's current ranking streak.
+export async function getStreak() {
+  return api.get<Streak>('/api/me/streak');
+}
+
 // GET /api/trio?position=QB — next trio for the user's active format.
 export async function getNextTrio(position?: Position | null) {
   const qs = position ? `?position=${position}` : '';
@@ -8,8 +19,16 @@ export async function getNextTrio(position?: Position | null) {
 }
 
 // POST /api/rank3  body: { ranked: [pid_first, pid_second, pid_third] }
+// Response includes the post-rank streak snapshot so the UI can detect
+// an increment without a follow-up GET /api/me/streak.
 export async function submitTrioRanking(rankedIds: [string, string, string]) {
-  return api.post<any>('/api/rank3', { ranked: rankedIds });
+  return api.post<{
+    interaction_count: number;
+    threshold: number;
+    threshold_met: boolean;
+    percent: number;
+    streak: Streak;
+  }>('/api/rank3', { ranked: rankedIds });
 }
 
 // POST /api/trio/skip  body: { player_id }
