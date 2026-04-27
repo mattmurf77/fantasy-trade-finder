@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { spacing, radius, fontSize } from '../theme/spacing';
 import { signIn } from '../api/auth';
 import { useSession } from '../state/useSession';
 import { getLeagues } from '../api/sleeper';
+import { getLastUsername, setLastUsername } from '../api/client';
 
 interface Props {
   onSignedIn: () => void;
@@ -28,12 +29,22 @@ export default function SignInScreen({ onSignedIn }: Props) {
   const [username, setUsername] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
   const setUser = useSession((s) => s.setUser);
   const setLeagues = useSession((s) => s.setLeagues);
 
-  async function handleSubmit() {
+  useEffect(() => {
+    getLastUsername().then((u) => {
+      if (u) {
+        setUsername(u);
+        setHint(u);
+      }
+    });
+  }, []);
+
+  async function handleSubmit(override?: string) {
     if (busy) return;
-    const trimmed = username.trim().toLowerCase();
+    const trimmed = (override ?? username).trim().toLowerCase();
     if (!trimmed) {
       setError('Enter your Sleeper username');
       return;
@@ -49,6 +60,8 @@ export default function SignInScreen({ onSignedIn }: Props) {
         display_name: auth.display_name,
         avatar_id: auth.avatar ?? null,
       });
+      // Remember username in Keychain so it survives reinstall + sign-out.
+      void setLastUsername(auth.username);
       // Prefetch leagues so the league picker is instant
       try {
         const lgs = await getLeagues(auth.user_id);
@@ -91,6 +104,22 @@ export default function SignInScreen({ onSignedIn }: Props) {
           </View>
 
           <View style={styles.form}>
+            {hint ? (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.hintPill,
+                  pressed && { opacity: 0.7 },
+                ]}
+                onPress={() => {
+                  setUsername(hint);
+                  void handleSubmit(hint);
+                }}
+                disabled={busy}
+              >
+                <Text style={styles.hintLabel}>Continue as</Text>
+                <Text style={styles.hintName}>@{hint}</Text>
+              </Pressable>
+            ) : null}
             <TextInput
               style={styles.input}
               placeholder="Sleeper username"
@@ -101,7 +130,7 @@ export default function SignInScreen({ onSignedIn }: Props) {
               autoCorrect={false}
               autoComplete="off"
               returnKeyType="go"
-              onSubmitEditing={handleSubmit}
+              onSubmitEditing={() => handleSubmit()}
               editable={!busy}
               inputMode="text"
             />
@@ -112,7 +141,7 @@ export default function SignInScreen({ onSignedIn }: Props) {
                 (busy || !username.trim()) && styles.buttonDisabled,
                 pressed && styles.buttonPressed,
               ]}
-              onPress={handleSubmit}
+              onPress={() => handleSubmit()}
               disabled={busy || !username.trim()}
             >
               {busy ? (
@@ -211,4 +240,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   taglineSep: { color: colors.border },
+  hintPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.md,
+  },
+  hintLabel: { color: colors.muted, fontSize: fontSize.sm },
+  hintName: { color: colors.accent, fontSize: fontSize.base, fontWeight: '700' },
 });

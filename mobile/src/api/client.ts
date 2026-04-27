@@ -10,6 +10,9 @@ import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 
 const SECURE_TOKEN_KEY = 'ftf.sessionToken';
+// Survives app deletion (Keychain default). Used to prefill SignInScreen
+// for returning users, even after sign-out or token expiry.
+const SECURE_LAST_USERNAME_KEY = 'ftf.lastUsername';
 
 function getBaseUrl(): string {
   // Expo puts values from app.json's `extra` here at build time; fall back
@@ -38,6 +41,22 @@ export async function clearSessionToken(): Promise<void> {
     await SecureStore.deleteItemAsync(SECURE_TOKEN_KEY);
   } catch {
     /* already gone */
+  }
+}
+
+export async function getLastUsername(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(SECURE_LAST_USERNAME_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setLastUsername(username: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(SECURE_LAST_USERNAME_KEY, username);
+  } catch {
+    /* non-fatal */
   }
 }
 
