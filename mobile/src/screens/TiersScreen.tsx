@@ -17,6 +17,7 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { haptics } from '../utils/haptics';
+import { startSpan } from '../observability/sentry';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { colors } from '../theme/colors';
@@ -69,12 +70,16 @@ export default function TiersScreen() {
   });
 
   const saveMutation = useMutation({
-    mutationFn: () => {
-      // Only send the 5 real tiers — `unassigned` isn't a real tier on the server.
-      const payload: Record<string, string[]> = {};
-      for (const t of TIERS) payload[t] = buckets[t].map((p) => p.id);
-      return saveTiers(position, payload);
-    },
+    // Wrap the tier save in a Sentry span — measures end-to-end latency
+    // including the per-position payload build + the network round-trip.
+    // No-op when Sentry isn't initialized.
+    mutationFn: () =>
+      startSpan({ name: 'tiers.save', op: 'mutation' }, () => {
+        // Only send the 5 real tiers — `unassigned` isn't a real tier on the server.
+        const payload: Record<string, string[]> = {};
+        for (const t of TIERS) payload[t] = buckets[t].map((p) => p.id);
+        return saveTiers(position, payload);
+      }),
     onSuccess: () => {
       setToast({ msg: '✓ Tiers saved', tone: 'success' });
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });

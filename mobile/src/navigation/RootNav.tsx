@@ -14,6 +14,7 @@ import LeaguePickerScreen from '../screens/LeaguePickerScreen';
 import TabNav from './TabNav';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { getProgress } from '../api/rankings';
+import { navigationIntegration } from '../observability/sentry';
 
 type AuthStack = {
   SignIn: undefined;
@@ -90,6 +91,11 @@ export default function RootNav({ booted }: { booted: boolean }) {
   return (
     <NavigationContainer
       ref={navigationRef}
+      onReady={() => {
+        // Hand the container ref to Sentry so it can tag spans by screen.
+        // No-op when Sentry isn't initialized.
+        navigationIntegration.registerNavigationContainer(navigationRef);
+      }}
       theme={{
         ...DarkTheme,
         colors: {

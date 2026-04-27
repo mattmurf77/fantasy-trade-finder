@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { clearSessionToken, getSessionToken } from '../api/client';
 import { initLeagueSession } from '../api/auth';
+import { setUser as sentrySetUser } from '../observability/sentry';
 import type { LeagueSummary } from '../shared/types';
 
 // Storage keys kept identical to the web app where practical, so the server
@@ -65,6 +66,9 @@ export const useSession = create<SessionState>((set, get) => ({
     if (u) await AsyncStorage.setItem(SU_KEY, JSON.stringify(u));
     else   await AsyncStorage.removeItem(SU_KEY);
     set({ user: u });
+    // Tag Sentry events with the Sleeper user_id + username for triage.
+    // No-op when Sentry isn't initialized. Cleared on sign-out.
+    sentrySetUser(u ? { id: u.user_id, username: u.username } : null);
   },
 
   setLeague: async (lg) => {

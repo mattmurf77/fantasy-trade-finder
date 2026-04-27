@@ -6,6 +6,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import RootNav from './src/navigation/RootNav';
 import { useSession } from './src/state/useSession';
 import { useFeatureFlags } from './src/state/useFeatureFlags';
+import { initSentry, wrap as sentryWrap } from './src/observability/sentry';
+
+// Initialize observability as early as possible so even crashes during
+// bootstrap are captured. No-ops cleanly when no DSN is configured.
+initSentry();
 
 // One QueryClient for the app lifetime. Defaults tuned for a consumer
 // mobile app: retry once, keep data fresh for 30s, background-refresh
@@ -24,7 +29,7 @@ const queryClient = new QueryClient({
   },
 });
 
-export default function App() {
+function App() {
   const [booted, setBooted] = useState(false);
   const bootstrap = useSession((s) => s.bootstrap);
   const loadFlags = useFeatureFlags((s) => s.load);
@@ -48,3 +53,8 @@ export default function App() {
     </GestureHandlerRootView>
   );
 }
+
+// sentryWrap installs the Sentry ErrorBoundary + touch event tracker
+// around the root. When Sentry isn't initialized it returns the same
+// component unchanged — safe to call unconditionally.
+export default sentryWrap(App);
