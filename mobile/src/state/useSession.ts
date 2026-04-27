@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { clearSessionToken, getSessionToken } from '../api/client';
+import { initLeagueSession } from '../api/auth';
 import type { LeagueSummary } from '../shared/types';
 
 // Storage keys kept identical to the web app where practical, so the server
@@ -24,19 +25,28 @@ interface SessionState {
   league: SavedLeague | null;
   leagues: LeagueSummary[];         // cached list for the switcher
   hasToken: boolean;
+  /** True while a switchLeague() call is in flight. UI uses this to
+   *  disable the switcher rows / show a spinner. */
+  switching: boolean;
 
   bootstrap: () => Promise<void>;
   setUser: (u: SavedUser | null) => Promise<void>;
   setLeague: (lg: SavedLeague | null) => Promise<void>;
   setLeagues: (lgs: LeagueSummary[]) => void;
+  /** Atomically swap the active league: re-runs initLeagueSession on the
+   *  backend, then updates the persisted active league locally. Throws on
+   *  failure; UI should wrap in try/catch. No-ops if `lg` matches the
+   *  current league or another switch is in progress. */
+  switchLeague: (lg: SavedLeague) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
-export const useSession = create<SessionState>((set) => ({
+export const useSession = create<SessionState>((set, get) => ({
   user: null,
   league: null,
   leagues: [],
   hasToken: false,
+  switching: false,
 
   bootstrap: async () => {
     const [userRaw, leagueRaw, tok] = await Promise.all([
@@ -64,6 +74,26 @@ export const useSession = create<SessionState>((set) => ({
   },
 
   setLeagues: (lgs) => set({ leagues: lgs }),
+
+  switchLeague: async (lg) => {
+    const s = get();
+    if (s.switching) return;                          // re-entry guard
+    if (!s.user) throw new Error('Not signed in');
+    if (s.league?.league_id === lg.league_id) return; // no-op
+
+    set({ switching: true });
+    try {
+      // initLeagueSession owns the backend handshake (rosters → users →
+      // /api/session/init). On success, persist the new active league.
+      await initLeagueSession(s.user, {
+        league_id: lg.league_id,
+        name:      lg.league_name,
+      });
+      await get().setLeague(lg);
+    } finally {
+      set({ switching: false });
+    }
+  },
 
   signOut: async () => {
     await Promise.all([
