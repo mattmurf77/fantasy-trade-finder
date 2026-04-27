@@ -17,7 +17,7 @@ import Animated, {
   runOnJS,
   Easing,
 } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import { haptics } from '../utils/haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { colors } from '../theme/colors';
@@ -112,10 +112,10 @@ export default function TradesScreen() {
     swipeMutation.mutate({ tradeId: topCard.trade_id, decision });
     setDeckIdx((i) => i + 1);
     if (decision === 'like') {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      haptics.success();
       setToast({ msg: 'Liked ✓', tone: 'success' });
     } else {
-      void Haptics.selectionAsync();
+      haptics.swipe();
     }
   }
 

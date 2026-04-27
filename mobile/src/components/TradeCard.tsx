@@ -74,7 +74,7 @@ export default function TradeCardComp({
       {Array.isArray(data.reasons) && data.reasons.length > 0 && (
         <View style={styles.reasons}>
           {data.reasons.map((r, i) => (
-            <Text key={i} style={styles.reasonLine}>• {r}</Text>
+            <Text key={`${i}:${r}`} style={styles.reasonLine}>• {r}</Text>
           ))}
         </View>
       )}

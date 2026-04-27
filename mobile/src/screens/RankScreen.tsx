@@ -18,7 +18,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import * as Haptics from 'expo-haptics';
+import { haptics } from '../utils/haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { colors } from '../theme/colors';
@@ -107,7 +107,7 @@ export default function RankScreen() {
         if (prev.length >= 3) return prev;
         return [...prev, side];
       });
-      void Haptics.selectionAsync();
+      haptics.selection();
     },
     [],
   );
@@ -130,7 +130,7 @@ export default function RankScreen() {
         rankedIds.every((id, i) => id === trio.qc_expected_order![i])
       ) {
         setToast({ msg: '✓ Nice call — you helped verify the rankings!', tone: 'success' });
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        haptics.success();
       }
 
       submitMutation.mutate(rankedIds);
@@ -289,7 +289,7 @@ export default function RankScreen() {
                 onSwipeSkip={handleSkipEntireTrio}
                 onSwipeRankFirst={() => {
                   setSelectionOrder(() => [side]);
-                  void Haptics.selectionAsync();
+                  haptics.selection();
                 }}
                 disabled={submitMutation.isPending || skipMutation.isPending}
               />
