@@ -757,6 +757,7 @@ class TradeService:
         pinned_give_players: list[str] | None = None,  # specific players user wants to trade away
         scoring_format: str = "1qb_ppr",
         is_dynasty: bool = False,
+        on_opponent_done = None,             # callback(idx_done, total, sorted_cards_so_far)
     ) -> list[TradeCard]:
         """
         Generate trade cards for the user against all league members
@@ -782,15 +783,18 @@ class TradeService:
 
         new_cards: list[TradeCard] = []
 
-        # Pre-compute the user's roster profile once; opponent profiles cached per-loop.
+        # Pre-compute the user's roster profile once.
         user_profile = analyze_roster_strengths(user_roster, self._players, scoring_format)
 
-        for member in league.members:
-            if member.user_id == user_id:
-                continue
-            if not member.elo_ratings:
-                continue
+        # Build the list of eligible opponents up-front so the callback can
+        # report a stable "X of N" without surprises when members get filtered.
+        eligible = [
+            m for m in league.members
+            if m.user_id != user_id and m.elo_ratings
+        ]
+        total = len(eligible)
 
+        for idx, member in enumerate(eligible):
             opp_profile = analyze_roster_strengths(member.roster, self._players, scoring_format)
             match_ctx = build_match_context(user_profile, opp_profile, scoring_format, is_dynasty)
 
@@ -812,19 +816,41 @@ class TradeService:
                 c.narrative = build_narrative(c, match_ctx, self._players)
             new_cards.extend(cards)
 
-        # Filter out trades the user has already swiped on (within memory window)
-        if self._past_decision_keys:
-            new_cards = [
-                c for c in new_cards
-                if (frozenset(c.give_player_ids), frozenset(c.receive_player_ids))
-                   not in self._past_decision_keys
-            ]
+            # Streaming hook — let callers (e.g. /api/trades/generate's
+            # background worker) snapshot a sorted, dedup-aware view as
+            # cards land. The list is sorted descending by composite_score
+            # so the snapshot already represents "best so far". Errors from
+            # the callback are isolated; we never let a UI bug crash the
+            # generator.
+            if on_opponent_done is not None:
+                try:
+                    snapshot = self._dedup_and_sort(new_cards)
+                    on_opponent_done(idx + 1, total, snapshot)
+                except Exception:
+                    pass  # callback issues must not derail the loop
 
-        # Store and return sorted by composite score
+        # Filter out trades the user has already swiped on (within memory window)
+        # and dedup, then sort by composite score
+        new_cards = self._dedup_and_sort(new_cards)
+
+        # Store
         for card in new_cards:
             self._trade_cards[card.trade_id] = card
 
-        return sorted(new_cards, key=lambda c: c.composite_score, reverse=True)
+        return new_cards
+
+    def _dedup_and_sort(self, cards: list[TradeCard]) -> list[TradeCard]:
+        """Apply past-decision filter (skip trades the user already swiped on)
+        and return cards sorted by composite_score descending. Pulled out of
+        the main loop so it can be called both incrementally (snapshot for
+        progress callback) and at the end of generation."""
+        if self._past_decision_keys:
+            cards = [
+                c for c in cards
+                if (frozenset(c.give_player_ids), frozenset(c.receive_player_ids))
+                   not in self._past_decision_keys
+            ]
+        return sorted(cards, key=lambda c: c.composite_score, reverse=True)
 
     def get_pending_trades(self, user_id: str, league_id: Optional[str] = None) -> list[TradeCard]:
         """Return undecided trade cards for a user, newest first."""
@@ -887,12 +913,22 @@ class TradeService:
         # Helpers
         # ------------------------------------------------------------------
 
+        # Memoize per-pair _dv lookups. Without this, dynasty_value(p) is
+        # recomputed for every (give, recv) combination — same player IDs
+        # appear in tens of thousands of combinations per opponent. The
+        # cache is local to each opponent so it doesn't outlive the call.
+        _dv_cache: dict[str, float] = {}
+        _ktc_fallback_dv = dynasty_value(None, rank_override=int(_c("ktc_fallback_rank")))
+
         def _dv(pid: str) -> float:
             """Dynasty value for a player by ID (KTC-style)."""
+            v = _dv_cache.get(pid)
+            if v is not None:
+                return v
             p = players.get(pid)
-            if p is None:
-                return dynasty_value(None, rank_override=int(_c("ktc_fallback_rank")))
-            return dynasty_value(p)
+            v = _ktc_fallback_dv if p is None else dynasty_value(p)
+            _dv_cache[pid] = v
+            return v
 
         def _ktc_ok(give_ids: list[str], recv_ids: list[str]) -> bool:
             """

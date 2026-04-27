@@ -89,13 +89,34 @@ export interface TradeCard {
 export interface TradeMatch {
   match_id: string;
   league_id: string;
+  /** Display name for the league this match belongs to. Populated by the
+   *  backend's /api/trades/matches/all endpoint; absent on legacy single-
+   *  league responses. */
+  league_name?: string;
   my_side_player_ids: string[];
   their_side_player_ids: string[];
+  /** Pre-resolved player display names, parallel arrays to *_player_ids.
+   *  Populated by /all enrichment so we don't have to look players up in
+   *  session state (which is league-scoped). */
+  my_side_player_names?: string[];
+  their_side_player_names?: string[];
   counterparty_user_id: string;
   counterparty_username: string;
   created_at: string;
   my_disposition?: 'pending' | 'accepted' | 'declined';
   their_disposition?: 'pending' | 'accepted' | 'declined';
+}
+
+// Returned by /api/trades/generate and /api/trades/status. The actual
+// generation runs in a background thread on the server; the client polls
+// with the `job_id` to stream cards into the deck as they're produced.
+export interface TradeJobSnapshot {
+  job_id: string;
+  status: 'running' | 'complete' | 'error';
+  cards: TradeCard[];
+  opponents_done: number;
+  opponents_total: number;
+  error?: string | null;
 }
 
 export interface NotificationItem {
