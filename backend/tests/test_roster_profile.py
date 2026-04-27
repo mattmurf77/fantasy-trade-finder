@@ -59,6 +59,19 @@ def test_match_context_overlap_message():
     assert ctx["league_settings"]["scoring"] == "ppr"
 
 
+def test_match_context_sf_tep_is_ppr():
+    # sf_tep is a PPR format — must not be reported as "standard"
+    ctx = build_match_context({}, {}, "sf_tep")
+    assert ctx["league_settings"]["scoring"] == "ppr"
+    assert ctx["league_settings"]["superflex"] is True
+    assert ctx["league_settings"]["te_premium"] is True
+
+
+def test_match_context_explicit_standard_format():
+    ctx = build_match_context({}, {}, "1qb_standard")
+    assert ctx["league_settings"]["scoring"] == "standard"
+
+
 def test_match_context_no_overlap_falls_back():
     user_profile = {"position_needs": [], "position_surplus": []}
     opp_profile  = {"position_needs": [], "position_surplus": []}

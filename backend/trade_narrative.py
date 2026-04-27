@@ -18,12 +18,21 @@ def _player_name(pid: str, players: dict) -> Optional[str]:
 
 
 def _top_received_name(card, players: dict) -> Optional[str]:
-    """Highest-value received player by name (best heuristic = first ID)."""
+    """Name of the highest-value received player (by dynasty value)."""
+    # Lazy import to avoid circular import at module load.
+    from .trade_service import dynasty_value
+
+    best_name: Optional[str] = None
+    best_value = -1.0
     for pid in card.receive_player_ids:
-        name = _player_name(pid, players)
-        if name:
-            return name
-    return None
+        player = players.get(pid)
+        if player is None:
+            continue
+        value = dynasty_value(player)
+        if value > best_value:
+            best_value = value
+            best_name = getattr(player, "name", None)
+    return best_name
 
 
 def _fairness_label(score: float) -> str:

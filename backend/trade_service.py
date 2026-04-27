@@ -331,13 +331,17 @@ def build_match_context(
     else:
         rationale = "Roster profiles align without a single standout gap."
 
+    # Both supported formats (1qb_ppr, sf_tep) are PPR. Treat anything not
+    # explicitly marked standard/std as PPR by default.
+    fmt_lower = scoring_format.lower()
+    is_standard = "standard" in fmt_lower or "_std" in fmt_lower or fmt_lower == "std"
     return {
         "user_needs":       user_needs,
         "opponent_surplus": opp_surplus,
         "league_settings":  {
-            "scoring":     "ppr" if "ppr" in scoring_format else "standard",
-            "superflex":   scoring_format.startswith("sf"),
-            "te_premium":  "tep" in scoring_format,
+            "scoring":     "standard" if is_standard else "ppr",
+            "superflex":   fmt_lower.startswith("sf"),
+            "te_premium":  "tep" in fmt_lower,
             "dynasty":     is_dynasty,
         },
         "positional_rationale": rationale,
