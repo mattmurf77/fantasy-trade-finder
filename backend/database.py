@@ -2839,20 +2839,23 @@ _PICK_DEFAULT_VALUE = 5.0    # 4th round and beyond
 _PICK_YEAR_DISCOUNT = 0.85   # 15 % off per year out
 
 
-def compute_pick_value(round_: int, season: int, current_season: int) -> float:
+def compute_pick_value(
+    round_: int,
+    season: int,
+    current_season: int,
+    league_size: int = 12,
+) -> float:
     """
     Return the dynasty fantasy value for a draft pick.
 
-    Uses the mid-tier base value for the round and applies a 15 % discount
+    Uses the mid-tier base value for the round, scales by league size
+    (12-team baseline, clamped to [0.5, 1.5]), and applies a 15 % discount
     for each year the pick is in the future.
-
-    round_         : pick round (1, 2, 3, …)
-    season         : year the draft will be held (e.g. 2026)
-    current_season : current NFL season (e.g. 2026)
     """
     base       = _PICK_BASE.get(round_, _PICK_DEFAULT_VALUE)
+    scale      = max(0.5, min(1.5, league_size / 12.0))
     years_out  = max(0, season - current_season)
-    discounted = base * (_PICK_YEAR_DISCOUNT ** years_out)
+    discounted = base * scale * (_PICK_YEAR_DISCOUNT ** years_out)
     return round(discounted, 2)
 
 
@@ -2865,6 +2868,7 @@ def sync_draft_picks(
     current_season: int = 2026,
     rounds: int = 3,
     seasons_ahead: int = 3,
+    league_size: int = 12,
 ) -> list[dict]:
     """
     Build the full pick grid for a dynasty league and persist it to the DB.
@@ -2910,7 +2914,7 @@ def sync_draft_picks(
                     "original_user_id":   user_id,
                     "original_username":  username,
                     "is_traded":          0,
-                    "pick_value":         compute_pick_value(rnd, season, current_season),
+                    "pick_value":         compute_pick_value(rnd, season, current_season, league_size),
                 }
 
     # Step 2: overlay traded picks
@@ -2947,7 +2951,7 @@ def sync_draft_picks(
                 "original_user_id":   orig_user,
                 "original_username":  orig_username,
                 "is_traded":          0,
-                "pick_value":         compute_pick_value(rnd, season, current_season),
+                "pick_value":         compute_pick_value(rnd, season, current_season, league_size),
             }
 
         is_traded = int(new_rid != orig_rid)
