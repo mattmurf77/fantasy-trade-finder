@@ -1652,10 +1652,57 @@ def get_rankings_progress():
     # Mark the format as unlocked once (monotonic) so the League Summary
     # adoption counts can query users.unlocked_formats efficiently.
     if unlocked:
+        # Detect first-time unlock by reading the prior list before write.
+        # An empty/missing list at this point means this is the user's first
+        # format ever unlocked → fire ranking_complete_first_time + push
+        # leaguemates that this user is now generating trades.
+        try:
+            _prior_unlocked = get_unlocked_formats(g_user_id) or []
+        except Exception:
+            _prior_unlocked = []
         try:
             mark_format_unlocked(g_user_id, fmt)
         except Exception as db_err:
             log.warning("mark_format_unlocked failed: %s", db_err)
+
+        if not _prior_unlocked:
+            try:
+                record_event(
+                    g_user_id,
+                    "ranking_complete_first_time",
+                    source="api",
+                    props={"scoring_format": fmt},
+                    **(getattr(g, "device_info", {}) or {}),
+                )
+            except Exception as ev_err:
+                log.warning("record_event(ranking_complete_first_time) failed: %s", ev_err)
+            # Fire league_member_unlocked_trades to leaguemates already on
+            # the app. League is resolved via the active session.
+            try:
+                _league_obj  = sess.get("league")
+                _league_id   = getattr(_league_obj, "league_id", None)
+                _league_name = getattr(_league_obj, "name", "") or ""
+                if _league_id:
+                    _members  = load_league_member_unlock_states(
+                        _league_id, exclude_user_id=g_user_id,
+                    )
+                    _my_username = (sess.get("display_name")
+                                    or sess.get("username") or g_user_id)
+                    for _p in _members:
+                        if not _p.get("joined") or not _p.get("user_id"):
+                            continue
+                        _send_typed_push(
+                            _p["user_id"],
+                            "league_member_unlocked_trades",
+                            title = "🔓 New trade options in your league",
+                            body  = f"@{_my_username} just unlocked Trade Finder. Tap to look for matches.",
+                            data  = {"unlocker_user_id": g_user_id,
+                                     "league_id": _league_id,
+                                     "league_name": _league_name},
+                            dedup_key = f"unlock:{g_user_id}:{_p['user_id']}",
+                        )
+            except Exception as _lm_err:
+                log.warning("league_member_unlocked_trades push failed: %s", _lm_err)
 
     # Agent A4 — surface the user's full list of unlocked formats so the
     # frontend nav-pill can show 0/2, 1/2, 2/2 in one shot. Additive-only.
@@ -2461,6 +2508,10 @@ def swipe_trade():
                         # ── Push — typed dispatch to both match participants ──
                         # _send_typed_push handles prefs, freq caps, and
                         # quiet-hours bundling. Non-throwing.
+                        # Each recipient also gets a one-time `first_match`
+                        # push if this is their first-ever match (gated by
+                        # the dedup-cap on the `first_match` kind — fires
+                        # once per user, ever).
                         for _recipient_id, _partner_name, _give, _recv in [
                             (g_user_id,           _partner_a,    _give_names,    _receive_names),
                             (card.target_user_id, _my_username,  _receive_names, _give_names),
@@ -2480,6 +2531,17 @@ def swipe_trade():
                                     "league_id": card.league_id,
                                 },
                                 dedup_key = str(match_data["id"]),
+                            )
+                            _send_typed_push(
+                                _recipient_id,
+                                "first_match",
+                                title = "🎉 You got your first trade match!",
+                                body  = f"@{_partner_name} matched a trade with you. Tap to review.",
+                                data  = {
+                                    "match_id":  match_data["id"],
+                                    "league_id": card.league_id,
+                                },
+                                dedup_key = "lifetime",
                             )
 
         except Exception as db_err:
@@ -2707,6 +2769,30 @@ def disposition_trade_match(match_id):
                 props     = {"match_id": match_id},
                 **(getattr(g, "device_info", {}) or {}),
             )
+            # ── Push: match_accepted → notify the OTHER party as soon as
+            # this user taps Accept, regardless of whether both have decided.
+            # Skipped on Decline (no need to ping the proposer that they
+            # were rejected via push; in-app inbox + the existing
+            # create_notification path covers it).
+            if decision == "accept":
+                _other_uid = next(
+                    (s["user_id"] for s in (result.get("elo_signals") or [])
+                     if s["user_id"] != g_user_id),
+                    None,
+                )
+                if _other_uid:
+                    _members_map = {m.user_id: (m.username or m.user_id)
+                                    for m in (g_league.members if g_league else [])}
+                    _my_name = _members_map.get(g_user_id, g_user_id)
+                    _send_typed_push(
+                        _other_uid,
+                        "match_accepted",
+                        title = f"✅ @{_my_name} accepted your trade",
+                        body  = "Tap to ratify on Sleeper.",
+                        data  = {"match_id": match_id,
+                                 "league_id": g_league.league_id if g_league else None},
+                        dedup_key = f"accept:{match_id}:{g_user_id}",
+                    )
             if result.get("both_decided") and result.get("outcome") == "accepted":
                 # Mutual accept = ratified. Log for both users.
                 _partner = next(
@@ -4007,6 +4093,34 @@ def session_init():
                              invited_by)
             except Exception as ref_err:
                 log.warning("  referral receipt emit failed (continuing): %s", ref_err)
+
+        # ── league_member_joined: ping existing leaguemates on the app ──
+        # Fires once per (existing leaguemate, joining user) pair on the
+        # joining user's first session. Doesn't ping the joiner. Capped
+        # implicitly by the dedup_key — a returning user re-init won't
+        # re-fire because _is_new_user is False.
+        if _is_new_user:
+            try:
+                _new_username = username or display_name or user_id
+                _peers = load_league_member_unlock_states(
+                    league_id, exclude_user_id=user_id,
+                )
+                for _p in _peers:
+                    if not _p.get("joined") or not _p.get("user_id"):
+                        continue
+                    _send_typed_push(
+                        _p["user_id"],
+                        "league_member_joined",
+                        title = "🤝 New leaguemate on Fantasy Trade Finder",
+                        body  = f"@{_new_username} joined {league_name}. More trades may unlock.",
+                        data  = {"new_user_id":  user_id,
+                                 "new_username": _new_username,
+                                 "league_id":    league_id,
+                                 "league_name":  league_name},
+                        dedup_key = f"joined:{user_id}:{_p['user_id']}",
+                    )
+            except Exception as lm_err:
+                log.warning("  league_member_joined push failed: %s", lm_err)
 
         # ── Auto-detect league scoring format from Sleeper metadata ─────────
         # Fires on every session/init for leagues without a format on file.
