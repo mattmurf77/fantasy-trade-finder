@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
+import { haptics } from '../utils/haptics';
 import {
   getLeaderboard,
   type LeaderboardScope,
@@ -82,7 +83,10 @@ function Board({
           return (
             <Pressable
               key={t.key}
-              onPress={() => setTabKey(t.key)}
+              onPress={() => {
+                if (t.key !== tabKey) haptics.selection();
+                setTabKey(t.key);
+              }}
               style={({ pressed }) => [
                 styles.tab,
                 isActive && styles.tabActive,

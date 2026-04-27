@@ -251,10 +251,11 @@ export default function RankScreen() {
             <Pressable
               onPress={() => {
                 haptics.selection();
-                // RankScreen is nested in RankStack → Tab navigator. The
-                // tab navigator is the grandparent (RankStack is parent).
-                const tabNav: any = navigation.getParent()?.getParent?.() ?? navigation.getParent();
-                tabNav?.navigate?.('League');
+                // RankScreen is the inner screen of RankStack which is
+                // hosted by the Tab navigator — getParent() returns the
+                // tab nav directly. Cast because @react-navigation's
+                // generic `navigate` doesn't know our route names here.
+                (navigation.getParent() as any)?.navigate('League');
               }}
               style={({ pressed }) => [styles.streakChip, pressed && { opacity: 0.7 }]}
             >

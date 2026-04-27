@@ -105,7 +105,7 @@ from .database import (
     # Streak — driven by record_event, read for the chip + leaderboard
     get_user_streak,
     # Leaderboards — read-only aggregations across users / leagues
-    load_leaderboard,
+    load_leaderboard, get_self_leaderboard_row,
 )
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
@@ -1348,7 +1348,7 @@ def _leaderboard_cached(metric: str, window: str | None, league_id: str | None) 
     hit = _LEADERBOARD_CACHE.get(key)
     if hit and (now - hit[0]) < _LEADERBOARD_TTL_SECONDS:
         return hit[1]
-    data = load_leaderboard(metric=metric, window=window, league_id=league_id, self_user_id=None)
+    data = load_leaderboard(metric=metric, window=window, league_id=league_id)
     _LEADERBOARD_CACHE[key] = (now, data)
     return data
 
@@ -1392,19 +1392,12 @@ def get_leaderboard():
     in_top = any(r["is_self"] for r in rows)
     self_row = None
     if not in_top:
-        # Out-of-top: do a fresh full read just for this user's rank. Cheap
-        # since it's the same query with limit removed; bypasses the cache
-        # so we don't have to invalidate when a user crosses ranks.
-        full = load_leaderboard(
-            metric=metric, window=window, league_id=league_id,
-            self_user_id=self_user_id, limit=10**9,
+        # Out-of-top: a single SQL count-of-better-positions gives the
+        # viewer's rank without re-ranking everyone or invalidating the
+        # cache when ranks shift.
+        self_row = get_self_leaderboard_row(
+            metric=metric, window=window, league_id=league_id, user_id=self_user_id,
         )
-        self_row = full.get("self_row")
-        if self_row is None:
-            for r in full["rows"]:
-                if r["user_id"] == self_user_id:
-                    self_row = r
-                    break
 
     return jsonify({
         "metric":    metric,
