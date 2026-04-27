@@ -16,6 +16,7 @@ import { spacing, radius, fontSize } from '../theme/spacing';
 import { getLeagueSummary, getLeagueCoverage } from '../api/league';
 import { useSession } from '../state/useSession';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
+import LeaderboardsSection from '../components/LeaderboardsSection';
 
 // League tab v1 — replaces the prior PlaceholderScreen. Pulls
 // /api/league/summary + /api/league/coverage and renders:
@@ -156,6 +157,10 @@ export default function LeagueScreen() {
               : `Rank more players to widen the trade pool — ${100 - coveragePct}% to go.`}
           </Text>
         </View>
+
+        {/* Leaderboards — League-specific + Universal sections inline. */}
+        <SectionTitle>Leaderboards</SectionTitle>
+        <LeaderboardsSection leagueId={leagueId} />
 
         {/* Switch league — opens an in-app sheet rather than nuking the
             session and bouncing back to the LeaguePicker stack. */}

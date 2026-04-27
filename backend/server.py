@@ -112,6 +112,8 @@ from .database import (
     notification_dedup_sent,
     queue_notification, drain_due_queued_notifications,
     NOTIF_KIND_TO_BUCKET, NOTIF_PREF_DEFAULTS,
+    # Leaderboards — read-only aggregations across users / leagues
+    load_leaderboard, get_self_leaderboard_row,
 )
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
@@ -1336,6 +1338,83 @@ def get_trio():
         return jsonify(resp)
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+
+# ── Leaderboard cache ─────────────────────────────────────────────────────
+# Universal-scope queries scan the full users / user_events tables. Cache
+# the result for 5 min so a hot leaderboards screen doesn't hammer the DB.
+# Keyed on (scope, league_id, metric, window) — self-row + is_self flags
+# are computed outside the cache so two users in the same league still see
+# their own rank highlighted correctly.
+_LEADERBOARD_CACHE: dict[tuple, tuple[float, dict]] = {}
+_LEADERBOARD_TTL_SECONDS = 300
+
+
+def _leaderboard_cached(metric: str, window: str | None, league_id: str | None) -> dict:
+    key = ("league" if league_id else "universal", league_id, metric, window)
+    now = time.time()
+    hit = _LEADERBOARD_CACHE.get(key)
+    if hit and (now - hit[0]) < _LEADERBOARD_TTL_SECONDS:
+        return hit[1]
+    data = load_leaderboard(metric=metric, window=window, league_id=league_id)
+    _LEADERBOARD_CACHE[key] = (now, data)
+    return data
+
+
+@app.route("/api/leaderboard", methods=["GET"])
+def get_leaderboard():
+    """GET /api/leaderboard?scope=league|universal&metric=streak|ranks&window=week|month|season|all&league_id=...
+
+    `window` is required when `metric=ranks`, ignored when `metric=streak`.
+    `league_id` is required when `scope=league`. Universal scope ignores any
+    league_id passed in.
+
+    The cached top slice carries no per-user is_self info — we tag it on
+    the way out so the same cached payload personalizes for every viewer.
+    Out-of-top users get a `self_row` populated via a one-off uncached
+    scan so they can see their own rank pinned at the bottom on mobile.
+    """
+    sess = _require_session()
+    self_user_id = sess["user_id"]
+
+    scope     = (request.args.get("scope") or "universal").lower()
+    metric    = (request.args.get("metric") or "streak").lower()
+    window    = (request.args.get("window") or None)
+    league_id = request.args.get("league_id") or None
+
+    if scope == "league" and not league_id:
+        return jsonify({"error": "league_id is required when scope=league"}), 400
+    if scope == "universal":
+        league_id = None  # ignore stray league_id on universal queries
+
+    if metric not in ("streak", "ranks"):
+        return jsonify({"error": "metric must be 'streak' or 'ranks'"}), 400
+    if metric == "streak":
+        window = None
+    elif window not in ("week", "month", "season", "all"):
+        return jsonify({"error": "window must be week/month/season/all when metric=ranks"}), 400
+
+    base = _leaderboard_cached(metric, window, league_id)
+
+    rows = [{**r, "is_self": (r["user_id"] == self_user_id)} for r in base["rows"]]
+    in_top = any(r["is_self"] for r in rows)
+    self_row = None
+    if not in_top:
+        # Out-of-top: a single SQL count-of-better-positions gives the
+        # viewer's rank without re-ranking everyone or invalidating the
+        # cache when ranks shift.
+        self_row = get_self_leaderboard_row(
+            metric=metric, window=window, league_id=league_id, user_id=self_user_id,
+        )
+
+    return jsonify({
+        "metric":    metric,
+        "window":    window,
+        "scope":     scope,
+        "league_id": league_id,
+        "rows":      rows,
+        "self_row":  self_row,
+    })
 
 
 @app.route("/api/me/streak", methods=["GET"])
