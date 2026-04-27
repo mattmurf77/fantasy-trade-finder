@@ -19,6 +19,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useNavigation } from '@react-navigation/native';
 import { haptics } from '../utils/haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -42,6 +43,7 @@ const SPEED_MODE_KEY = 'ftf.trios.speedMode';
 
 export default function RankScreen() {
   const queryClient = useQueryClient();
+  const navigation  = useNavigation();
   const [position, setPosition] = useState<Position>('QB');
   const [selectionOrder, setSelectionOrder] = useState<('a' | 'b' | 'c')[]>([]);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' } | null>(null);
@@ -243,14 +245,24 @@ export default function RankScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {/* Streak chip — only shown once the user has an active streak.
-            Hidden at 0 so a brand-new user doesn't see "🔥 0". */}
+            Tap → jump to the League tab where leaderboards live. */}
         {(streakQuery.data?.current ?? 0) > 0 ? (
           <View style={styles.streakRow}>
-            <View style={styles.streakChip}>
+            <Pressable
+              onPress={() => {
+                haptics.selection();
+                // RankScreen is nested in RankStack → Tab navigator. The
+                // tab navigator is the grandparent (RankStack is parent).
+                const tabNav: any = navigation.getParent()?.getParent?.() ?? navigation.getParent();
+                tabNav?.navigate?.('League');
+              }}
+              style={({ pressed }) => [styles.streakChip, pressed && { opacity: 0.7 }]}
+            >
               <Text style={styles.streakFlame}>🔥</Text>
               <Text style={styles.streakNum}>{streakQuery.data!.current}</Text>
               <Text style={styles.streakLabel}>day streak</Text>
-            </View>
+              <Text style={styles.streakArrow}>›</Text>
+            </Pressable>
           </View>
         ) : null}
 
@@ -572,6 +584,7 @@ const styles = StyleSheet.create({
   streakFlame: { fontSize: fontSize.base },
   streakNum: { color: '#ffb27a', fontSize: fontSize.base, fontWeight: '800' },
   streakLabel: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '600' },
+  streakArrow: { color: colors.muted, fontSize: fontSize.base, marginLeft: 2 },
   switcher: {
     flexDirection: 'row',
     gap: spacing.xs,

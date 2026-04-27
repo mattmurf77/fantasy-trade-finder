@@ -953,6 +953,191 @@ def get_user_streak(user_id: str) -> dict:
         return {"current": 0, "longest": 0, "last_rank_local_date": None}
 
 
+# ---------------------------------------------------------------------------
+# Leaderboards
+# ---------------------------------------------------------------------------
+# Powers GET /api/leaderboard. Two scopes (league / universal) × two metrics
+# (streak / ranks-in-window). Universal queries are 5-min cached server-side
+# in server.py — this function is the uncached read.
+
+def load_leaderboard(
+    *,
+    metric:    str,                 # 'streak' | 'ranks'
+    window:    str | None = None,   # 'week' | 'month' | 'season' | 'all' — only used by metric=ranks
+    league_id: str | None = None,   # required when scope='league', omitted for universal
+    self_user_id: str | None = None,  # if set, every row carries is_self plus we append a self row out-of-band
+    limit:     int = 50,
+) -> dict:
+    """Return a leaderboard slice. Shape:
+        {
+          "metric": str, "window": str | None, "league_id": str | None,
+          "rows":     [{rank, user_id, username, display_name, avatar, value, is_self}, ...],
+          "self_row": {rank, user_id, username, display_name, avatar, value, is_self} | None,
+        }
+
+    `self_row` is populated when `self_user_id` is supplied and the user
+    isn't in the top `limit` — the mobile screen pins it as a sticky row.
+    Returns None for self_row if the user is in the top slice or has no
+    qualifying value.
+    """
+    if metric not in ("streak", "ranks"):
+        raise ValueError(f"unsupported metric: {metric}")
+    if metric == "ranks" and window not in ("week", "month", "season", "all"):
+        raise ValueError(f"unsupported window: {window}")
+
+    league_user_ids: list[str] | None = None
+    if league_id:
+        try:
+            with engine.begin() as conn:
+                league_user_ids = [
+                    r.user_id for r in conn.execute(
+                        select(league_members_table.c.user_id)
+                        .where(league_members_table.c.league_id == league_id)
+                    ).fetchall()
+                ]
+        except Exception as e:
+            print(f"[load_leaderboard] league members lookup failed: {e}")
+            league_user_ids = []
+        if not league_user_ids:
+            return {"metric": metric, "window": window, "league_id": league_id,
+                    "rows": [], "self_row": None}
+
+    # Build the (user_id → value) map per metric, then JOIN with users for display.
+    if metric == "streak":
+        value_map = _streak_values(league_user_ids)
+    else:
+        value_map = _rank_count_values(_window_since(window), league_user_ids)
+
+    if not value_map:
+        return {"metric": metric, "window": window, "league_id": league_id,
+                "rows": [], "self_row": None}
+
+    # Rank by value DESC (ties broken by user_id ASC for stability).
+    ordered = sorted(value_map.items(), key=lambda kv: (-kv[1], kv[0]))
+    top_ids   = [uid for uid, _ in ordered[:limit]]
+    self_rank = None
+    if self_user_id and self_user_id in value_map:
+        for i, (uid, _) in enumerate(ordered):
+            if uid == self_user_id:
+                self_rank = i + 1
+                break
+
+    # Pull display fields for everyone we'll render — top_ids plus self if needed.
+    needed_ids = set(top_ids)
+    if self_rank and self_rank > limit:
+        needed_ids.add(self_user_id)  # type: ignore[arg-type]
+    user_meta = _user_meta(needed_ids)
+
+    def _row(rank: int, uid: str) -> dict:
+        m = user_meta.get(uid, {})
+        return {
+            "rank":         rank,
+            "user_id":      uid,
+            "username":     m.get("username"),
+            "display_name": m.get("display_name") or m.get("username") or uid,
+            "avatar":       m.get("avatar"),
+            "value":        value_map[uid],
+            "is_self":      (uid == self_user_id),
+        }
+
+    rows = [_row(i + 1, uid) for i, uid in enumerate(top_ids)]
+    self_row = None
+    if self_rank and self_rank > limit:
+        self_row = _row(self_rank, self_user_id)  # type: ignore[arg-type]
+
+    return {"metric": metric, "window": window, "league_id": league_id,
+            "rows": rows, "self_row": self_row}
+
+
+def _streak_values(league_user_ids: list[str] | None) -> dict[str, int]:
+    """Return {user_id: current_streak} for users with current_streak > 0."""
+    try:
+        with engine.begin() as conn:
+            stmt = select(
+                users_table.c.sleeper_user_id,
+                users_table.c.current_streak,
+            ).where(users_table.c.current_streak.is_not(None)) \
+             .where(users_table.c.current_streak > 0)
+            if league_user_ids is not None:
+                stmt = stmt.where(users_table.c.sleeper_user_id.in_(league_user_ids))
+            rows = conn.execute(stmt).fetchall()
+        return {r.sleeper_user_id: r.current_streak for r in rows}
+    except Exception as e:
+        print(f"[_streak_values] failed: {e}")
+        return {}
+
+
+def _rank_count_values(
+    since_iso: str | None,
+    league_user_ids: list[str] | None,
+) -> dict[str, int]:
+    """Return {user_id: count} of rank-class events since `since_iso`. None
+    means all-time. Indexed by ix_user_events_type_occurred."""
+    try:
+        from sqlalchemy import func
+        with engine.begin() as conn:
+            stmt = select(
+                user_events_table.c.user_id,
+                func.count().label("cnt"),
+            ).where(user_events_table.c.event_type.in_(list(_RANK_STREAK_EVENTS)))
+            if since_iso:
+                stmt = stmt.where(user_events_table.c.occurred_at >= since_iso)
+            if league_user_ids is not None:
+                stmt = stmt.where(user_events_table.c.user_id.in_(league_user_ids))
+            stmt = stmt.group_by(user_events_table.c.user_id)
+            rows = conn.execute(stmt).fetchall()
+        return {r.user_id: r.cnt for r in rows}
+    except Exception as e:
+        print(f"[_rank_count_values] failed: {e}")
+        return {}
+
+
+def _user_meta(user_ids: set[str]) -> dict[str, dict]:
+    """Bulk-fetch username/display_name/avatar for the IDs we'll render."""
+    if not user_ids:
+        return {}
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(
+                select(
+                    users_table.c.sleeper_user_id,
+                    users_table.c.username,
+                    users_table.c.display_name,
+                    users_table.c.avatar,
+                ).where(users_table.c.sleeper_user_id.in_(list(user_ids)))
+            ).fetchall()
+        return {
+            r.sleeper_user_id: {
+                "username":     r.username,
+                "display_name": r.display_name,
+                "avatar":       r.avatar,
+            }
+            for r in rows
+        }
+    except Exception as e:
+        print(f"[_user_meta] failed: {e}")
+        return {}
+
+
+def _window_since(window: str | None) -> str | None:
+    """Convert a leaderboard window label to an ISO-UTC cutoff. None = all-time."""
+    if not window or window == "all":
+        return None
+    now = datetime.now(timezone.utc)
+    if window == "week":
+        return (now - timedelta(days=7)).isoformat()
+    if window == "month":
+        return (now - timedelta(days=30)).isoformat()
+    if window == "season":
+        # NFL season starts ~Sept 1. If today is before Sept 1, use the
+        # prior year's Sept 1 — keeps the leaderboard meaningful in the
+        # April–August offseason instead of returning an empty list.
+        today = now.date()
+        cutoff_year = today.year if today.month >= 9 else today.year - 1
+        return datetime(cutoff_year, 9, 1, tzinfo=timezone.utc).isoformat()
+    return None
+
+
 def load_user_events(
     user_id: str,
     *,
