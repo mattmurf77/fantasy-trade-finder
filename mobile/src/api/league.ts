@@ -48,7 +48,12 @@ export async function getLeagueCoverage(leagueId: string) {
 
 // ── League summary ────────────────────────────────────────────────
 // Roll-up shown on the League tab. Backend: GET /api/league/summary
-export interface LeagueSummary {
+//
+// NB: deliberately named LeagueSummaryRollup, not LeagueSummary, to
+// avoid colliding with the LeagueSummary in shared/types.ts (which
+// describes a Sleeper league as the picker sees it — totally different
+// shape). IDE auto-import + grep both stay unambiguous this way.
+export interface LeagueSummaryRollup {
   league_id: string;
   league_name?: string;
   default_scoring?: string | null;
@@ -70,7 +75,7 @@ export interface LeagueSummary {
   }>;
 }
 export async function getLeagueSummary(leagueId: string) {
-  return api.get<LeagueSummary>(
+  return api.get<LeagueSummaryRollup>(
     `/api/league/summary?league_id=${encodeURIComponent(leagueId)}`,
   );
 }
