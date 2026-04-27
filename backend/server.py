@@ -29,7 +29,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_from_directory
 
 # ---------------------------------------------------------------------------
 # Logging setup — writes to stdout AND keeps a ring-buffer for /api/debug/log
@@ -99,6 +99,8 @@ from .database import (
     # Agent 1 additions — user_player_skips helpers
     add_skip as _skip_add,
     load_skips as _skip_load,
+    # User-event logging
+    record_event, touch_user_activity, load_user_events,
 )
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
@@ -855,6 +857,53 @@ def _cleanup_loop() -> None:
 threading.Thread(target=_cleanup_loop, daemon=True).start()
 
 
+# ---------------------------------------------------------------------------
+# Device-info + activity middleware
+# ---------------------------------------------------------------------------
+# Reads the client's device snapshot from request headers (set by mobile/web
+# clients on every API call) and stashes it on flask.g so request handlers
+# and record_event() callers can read it cheaply. Also bumps the user's
+# last_active_at + device snapshot columns when a session token is present.
+#
+# Headers (all optional — old clients that don't send them just no-op):
+#   X-Device       — 'iphone' | 'ipad' | 'macos' | 'web' | 'extension'
+#   X-OS-Version   — '17.4' | '18.1' | etc.
+#   X-App-Version  — semver string '1.2.3'
+#
+# We deliberately do NOT write a user_events row per request — that would
+# be O(requests) writes. App-open events are fired explicitly from the
+# session-create flow; per-request we only bump the cheap denorm column.
+def _device_info_from_request() -> dict:
+    return {
+        "device_type": request.headers.get("X-Device") or None,
+        "os_version":  request.headers.get("X-OS-Version") or None,
+        "app_version": request.headers.get("X-App-Version") or None,
+    }
+
+
+@app.before_request
+def _stash_device_and_touch_activity() -> None:
+    info = _device_info_from_request()
+    g.device_info = info
+    # Only bump activity if a valid session is attached. We resolve user_id
+    # without raising — _require_session would 401 here, which is wrong for
+    # endpoints that don't require auth (login, static, demo, etc.).
+    token = request.headers.get("X-Session-Token", "")
+    if not token:
+        return
+    with _sessions_lock:
+        sess = _sessions.get(token)
+    if not sess:
+        return
+    user_id = sess.get("user_id")
+    if not user_id:
+        return
+    try:
+        touch_user_activity(user_id, **info)
+    except Exception:
+        pass  # never break the request on activity logging
+
+
 def player_to_dict(p) -> dict:
     d = {
         "id":               p.id,
@@ -1062,6 +1111,18 @@ def post_rank3():
                 )
         except Exception as db_err:
             log.warning("elo_history snapshot failed (continuing): %s", db_err)
+
+        try:
+            record_event(
+                g_user_id,
+                "trio_swipe",
+                league_id = g_league.league_id if g_league else None,
+                source    = "api",
+                props     = {"ordered_ids": ranked_valid, "scoring_format": fmt},
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as ev_err:
+            log.warning("record_event(trio_swipe) failed: %s", ev_err)
 
         pct = min(100, round(rank_set.interaction_count / rank_set.threshold * 100))
         return jsonify({
@@ -1843,6 +1904,24 @@ def swipe_trade():
                 scoring_format = _active_format(sess),
             )
 
+            try:
+                record_event(
+                    g_user_id,
+                    "trade_proposed" if decision == "like" else "match_swiped",
+                    league_id = card.league_id,
+                    source    = "api",
+                    props     = {
+                        "decision":   decision,
+                        "trade_id":   trade_id,
+                        "give":       card.give_player_ids,
+                        "receive":    card.receive_player_ids,
+                        "target":     card.target_user_id,
+                    },
+                    **(getattr(g, "device_info", {}) or {}),
+                )
+            except Exception as ev_err:
+                log.warning("record_event(trade swipe) failed: %s", ev_err)
+
             # Mutual match detection — only on "like" decisions
             if decision == "like" and card.target_user_id and card.league_id != "league_demo":
                 is_mirror = check_for_match(
@@ -1956,6 +2035,22 @@ def swipe_trade():
                                         "sound": "default",
                                     })
                                 _send_expo_push(_messages)
+                                # Log a push_sent event per recipient so we can
+                                # gate re-engagement pushes on last_push_sent_at.
+                                for tgt in _push_targets:
+                                    try:
+                                        record_event(
+                                            tgt["user_id"],
+                                            "push_sent",
+                                            league_id = card.league_id,
+                                            source    = "api",
+                                            props     = {
+                                                "type":     "trade_match",
+                                                "match_id": match_data["id"],
+                                            },
+                                        )
+                                    except Exception:
+                                        pass
                         except Exception as push_err:
                             log.warning("push dispatch failed (non-fatal): %s", push_err)
 
@@ -2024,6 +2119,18 @@ def get_trade_matches():
                 "my_receive_names": [players_dict[pid].name for pid in m["my_receive"]
                                      if pid in players_dict],
             })
+        if matches:
+            try:
+                record_event(
+                    g_user_id,
+                    "match_viewed",
+                    league_id = league_id,
+                    source    = "api",
+                    props     = {"count": len(matches)},
+                    **(getattr(g, "device_info", {}) or {}),
+                )
+            except Exception:
+                pass
         return jsonify(enriched)
     except Exception as e:
         log.warning("get_trade_matches error: %s", e)
@@ -2055,6 +2162,16 @@ def get_trade_matches_all():
         matches = load_matches(user_id=g_user_id, league_id=None)
         if not matches:
             return jsonify([])
+        try:
+            record_event(
+                g_user_id,
+                "match_viewed",
+                source = "api",
+                props  = {"count": len(matches), "scope": "cross_league"},
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception:
+            pass
 
         # Batch enrichment — two IN-clause queries instead of one per match.
         from sqlalchemy import select as _sa_select
@@ -2152,6 +2269,33 @@ def disposition_trade_match(match_id):
             return jsonify({"error": "match not found"}), 404
         if result["status"] == "already_decided":
             return jsonify({"error": "you have already recorded a decision for this match"}), 409
+
+        try:
+            record_event(
+                g_user_id,
+                "trade_accepted" if decision == "accept" else "trade_declined",
+                league_id = g_league.league_id if g_league else None,
+                source    = "api",
+                props     = {"match_id": match_id},
+                **(getattr(g, "device_info", {}) or {}),
+            )
+            if result.get("both_decided") and result.get("outcome") == "accepted":
+                # Mutual accept = ratified. Log for both users.
+                _partner = next(
+                    (s["user_id"] for s in (result.get("elo_signals") or [])
+                     if s["user_id"] != g_user_id),
+                    None,
+                )
+                for uid in filter(None, [g_user_id, _partner]):
+                    record_event(
+                        uid,
+                        "trade_ratified",
+                        league_id = g_league.league_id if g_league else None,
+                        source    = "api",
+                        props     = {"match_id": match_id},
+                    )
+        except Exception as ev_err:
+            log.warning("record_event(trade disposition) failed: %s", ev_err)
 
         # ── Apply ELO signals when both parties have decided ─────────────
         if result["both_decided"] and result["elo_signals"]:
@@ -3384,6 +3528,22 @@ def session_init():
             opponent_rosters = opponent_rosters,
         )
         log.info("  ✅ user + league upserted in DB")
+
+        # User-event log: signup on first session, app_open thereafter.
+        # Fires after upsert_user so the row is guaranteed to exist for the
+        # FK-style update inside record_event().
+        _ev_info = getattr(g, "device_info", {}) or {}
+        try:
+            record_event(
+                user_id,
+                "signup" if _is_new_user else "app_open",
+                league_id  = league_id,
+                session_id = token,
+                source     = "api",
+                **_ev_info,
+            )
+        except Exception as _ev_err:
+            log.warning("  record_event failed: %s", _ev_err)
 
         # ── Agent 4: referral receipt notification ─────────────────────────
         # Fires exactly once: on the NEW user's very first session_init when

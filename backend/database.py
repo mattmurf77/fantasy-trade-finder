@@ -59,6 +59,18 @@ users_table = Table("users", metadata,
     Column("invited_by",      String),   # sleeper username of referrer (null = direct)
     Column("unlocked_formats", Text),    # JSON list — which formats the user has
                                           # unlocked trade finder in, e.g. ["1qb_ppr"]
+    # ── User-event denormalized hot-read columns (see user_events_table) ──
+    Column("last_active_at",        String),
+    Column("last_login_at",         String),
+    Column("last_rank_at",          String),
+    Column("last_match_seen_at",    String),
+    Column("last_trade_proposed_at", String),
+    Column("last_push_sent_at",     String),
+    Column("signup_at",             String),
+    Column("events_count",          Integer),
+    Column("last_device_type",      String),
+    Column("last_os_version",       String),
+    Column("last_app_version",      String),
 )
 
 leagues_table = Table("leagues", metadata,
@@ -343,6 +355,41 @@ wrapped_events_table = Table("wrapped_events", metadata,
     Column("created_at",   String),
 )
 
+# ---------------------------------------------------------------------------
+# user_events — append-only log of user activity
+# ---------------------------------------------------------------------------
+# Every meaningful user action gets one row here (immutable). Hot reads
+# (e.g. "when did this user last log in?", "who's been inactive 14 days?")
+# read the denormalized `last_*_at` columns on `users` instead — see
+# record_event() below for the dual-write.
+#
+# event_type taxonomy (extend as needed):
+#   Session:    signup | login | logout | app_open
+#   Ranking:    trio_swipe | tier_save | ranking_complete_first_time |
+#               ranking_method_changed
+#   Trade:      match_viewed | match_swiped | trade_proposed | counter_sent |
+#               trade_accepted | trade_declined | trade_ratified
+#   Engagement: push_sent | push_opened | notif_pref_changed | league_synced |
+#               wrapped_viewed
+#
+# Device fields are snapshots at the time of the event — sourced from
+# X-Device / X-OS-Version / X-App-Version request headers.
+user_events_table = Table("user_events", metadata,
+    Column("id",           Integer, primary_key=True, autoincrement=True),
+    Column("user_id",      String,  nullable=False, index=True),
+    Column("event_type",   String,  nullable=False),
+    Column("occurred_at",  String,  nullable=False),    # ISO UTC
+    Column("league_id",    String),
+    Column("session_id",   String),
+    Column("device_type",  String),                     # 'iphone' | 'ipad' | 'macos' | 'web' | 'extension'
+    Column("os_version",   String),                     # '17.4' | '18.1' | etc.
+    Column("app_version",  String),                     # '1.2.3'
+    Column("source",       String),                     # 'mobile' | 'web' | 'api' | 'cron'
+    Column("props",        Text),                       # JSON — event-specific extras
+    Index("ix_user_events_user_occurred", "user_id", "occurred_at"),
+    Index("ix_user_events_type_occurred", "event_type", "occurred_at"),
+)
+
 # ── M5 Push additions — device_tokens ─────────────────────────────────
 # Stores Expo push tokens so the match-create hook in server.py can send
 # a push to both participants when a mutual trade match is persisted.
@@ -450,6 +497,21 @@ def _migrate_db() -> None:
         # Agent 4 additions — referral receipt feature reuses the existing
         # `notifications` table (no new columns needed). The new notification
         # `type` value is 'referral_joined'; see push_notification() below.
+        # ── User-event denormalized hot-read columns (see user_events_table) ──
+        # These mirror MAX(occurred_at) for specific event_types so notification
+        # gating + re-engagement queries don't scan the full event log.
+        ("users",              "last_active_at",        "VARCHAR"),
+        ("users",              "last_login_at",         "VARCHAR"),
+        ("users",              "last_rank_at",          "VARCHAR"),
+        ("users",              "last_match_seen_at",    "VARCHAR"),
+        ("users",              "last_trade_proposed_at", "VARCHAR"),
+        ("users",              "last_push_sent_at",     "VARCHAR"),
+        ("users",              "signup_at",             "VARCHAR"),
+        ("users",              "events_count",          "INTEGER"),
+        # Most-recent device snapshot — overwritten on every event
+        ("users",              "last_device_type",      "VARCHAR"),
+        ("users",              "last_os_version",       "VARCHAR"),
+        ("users",              "last_app_version",      "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -622,6 +684,163 @@ def init_db() -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# User-event logging
+# ---------------------------------------------------------------------------
+# Maps event_type → the column on `users` that should be bumped when this
+# event fires. Events not in this map only get a row in user_events (no
+# denorm pointer is updated).
+_EVENT_TO_USER_COL: dict[str, str] = {
+    "signup":                       "signup_at",
+    "login":                        "last_login_at",
+    "app_open":                     "last_active_at",
+    "trio_swipe":                   "last_rank_at",
+    "tier_save":                    "last_rank_at",
+    "ranking_complete_first_time":  "last_rank_at",
+    "match_viewed":                 "last_match_seen_at",
+    "trade_proposed":               "last_trade_proposed_at",
+    "counter_sent":                 "last_trade_proposed_at",
+    "push_sent":                    "last_push_sent_at",
+}
+
+
+def touch_user_activity(
+    user_id: str,
+    *,
+    device_type: str | None = None,
+    os_version:  str | None = None,
+    app_version: str | None = None,
+) -> None:
+    """Cheap denormalized update — bumps users.last_active_at + device snapshot
+    columns. Called by the request middleware on every authed API call so we
+    don't have to write a `user_events` row per request.
+
+    Use record_event() instead when logging a discrete user action.
+    """
+    if not user_id:
+        return
+    updates: dict = {"last_active_at": _now()}
+    if device_type:
+        updates["last_device_type"] = device_type
+    if os_version:
+        updates["last_os_version"] = os_version
+    if app_version:
+        updates["last_app_version"] = app_version
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                update(users_table)
+                .where(users_table.c.sleeper_user_id == user_id)
+                .values(**updates)
+            )
+    except Exception as e:
+        print(f"[touch_user_activity] {user_id} failed: {e}")
+
+
+def record_event(
+    user_id: str,
+    event_type: str,
+    *,
+    league_id:   str | None = None,
+    session_id:  str | None = None,
+    device_type: str | None = None,
+    os_version:  str | None = None,
+    app_version: str | None = None,
+    source:      str | None = None,
+    props:       dict | None = None,
+) -> None:
+    """Append one row to user_events AND bump the matching users.last_*_at
+    column (and device snapshot columns) in a single transaction.
+
+    Always inserts a new row — never overwrites prior events. The denorm
+    columns on `users` are pointers to the most recent event of each type
+    so notification gating queries don't have to scan the full log.
+
+    Failures are logged and swallowed — event logging must never break the
+    surrounding business logic.
+    """
+    if not user_id or not event_type:
+        return
+    now = _now()
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                insert(user_events_table).values(
+                    user_id     = user_id,
+                    event_type  = event_type,
+                    occurred_at = now,
+                    league_id   = league_id,
+                    session_id  = session_id,
+                    device_type = device_type,
+                    os_version  = os_version,
+                    app_version = app_version,
+                    source      = source,
+                    props       = json.dumps(props) if props else None,
+                )
+            )
+            # Build the denorm UPDATE: always bumps last_active_at + events_count,
+            # plus the event-specific pointer column when one is mapped, plus the
+            # device snapshot columns when those headers were sent.
+            user_updates: dict = {"last_active_at": now}
+            ptr_col = _EVENT_TO_USER_COL.get(event_type)
+            if ptr_col and ptr_col != "last_active_at":
+                user_updates[ptr_col] = now
+            if device_type:
+                user_updates["last_device_type"] = device_type
+            if os_version:
+                user_updates["last_os_version"] = os_version
+            if app_version:
+                user_updates["last_app_version"] = app_version
+            # events_count: portable increment via a subquery-free expression.
+            # Using SQL expression here so we don't need to SELECT first.
+            user_updates["events_count"] = (
+                # COALESCE so the first event ever sets it to 1 instead of NULL+1.
+                text("COALESCE(events_count, 0) + 1")
+            )
+            conn.execute(
+                update(users_table)
+                .where(users_table.c.sleeper_user_id == user_id)
+                .values(**user_updates)
+            )
+    except Exception as e:
+        print(f"[record_event] {user_id}/{event_type} failed: {e}")
+
+
+def load_user_events(
+    user_id: str,
+    *,
+    event_type: str | None = None,
+    limit:      int = 100,
+) -> list[dict]:
+    """Return the user's most-recent events (newest first), optionally
+    filtered to one event_type. Returns deserialized props.
+    """
+    try:
+        with engine.begin() as conn:
+            stmt = (
+                select(user_events_table)
+                .where(user_events_table.c.user_id == user_id)
+                .order_by(user_events_table.c.occurred_at.desc())
+                .limit(limit)
+            )
+            if event_type:
+                stmt = stmt.where(user_events_table.c.event_type == event_type)
+            rows = conn.execute(stmt).fetchall()
+        out: list[dict] = []
+        for r in rows:
+            d = dict(r._mapping)
+            if d.get("props"):
+                try:
+                    d["props"] = json.loads(d["props"])
+                except Exception:
+                    pass
+            out.append(d)
+        return out
+    except Exception as e:
+        print(f"[load_user_events] {user_id} failed: {e}")
+        return []
 
 
 # ---------------------------------------------------------------------------
