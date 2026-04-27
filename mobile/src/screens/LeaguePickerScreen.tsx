@@ -12,8 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import { useSession } from '../state/useSession';
-import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
-import { sessionInit } from '../api/auth';
+import { getLeagues } from '../api/sleeper';
+import { initLeagueSession } from '../api/auth';
 import type { LeagueSummary } from '../shared/types';
 
 interface Props {
@@ -62,38 +62,7 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
     setSelectingId(lg.league_id);
     setError(null);
     try {
-      // Fetch rosters + users to build the session_init payload, same shape
-      // as the web app sends from selectLeague().
-      const [rosters, leagueUsers] = await Promise.all([
-        getLeagueRosters(lg.league_id),
-        getLeagueUsers(lg.league_id),
-      ]);
-      const usernameMap: Record<string, string> = {};
-      for (const u of leagueUsers || []) {
-        usernameMap[u.user_id] = u.display_name || u.username || u.user_id;
-      }
-      const myRoster = (rosters || []).find((r) => r.owner_id === user.user_id);
-      const myPlayerIds = (myRoster?.players || []).filter(Boolean);
-      const opponentRosters = (rosters || [])
-        .filter((r) => r.owner_id && r.owner_id !== user.user_id)
-        .map((r) => ({
-          user_id: r.owner_id,
-          username: usernameMap[r.owner_id] || `Team ${r.roster_id}`,
-          player_ids: (r.players || []).filter(Boolean),
-        }))
-        .filter((r) => r.player_ids.length > 0);
-
-      await sessionInit({
-        user_id: user.user_id,
-        username: user.username,
-        display_name: user.display_name,
-        avatar: user.avatar_id,
-        league_id: lg.league_id,
-        league_name: lg.name,
-        user_player_ids: myPlayerIds,
-        opponent_rosters: opponentRosters,
-      });
-
+      await initLeagueSession(user, { league_id: lg.league_id, name: lg.name });
       await setLeague({ league_id: lg.league_id, league_name: lg.name });
       onLeaguePicked();
     } catch (e: any) {

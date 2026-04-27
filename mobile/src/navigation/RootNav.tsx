@@ -6,12 +6,14 @@ import {
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { useQuery } from '@tanstack/react-query';
 import { colors } from '../theme/colors';
 import { useSession } from '../state/useSession';
 import SignInScreen from '../screens/SignInScreen';
 import LeaguePickerScreen from '../screens/LeaguePickerScreen';
 import TabNav from './TabNav';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { getProgress } from '../api/rankings';
 
 type AuthStack = {
   SignIn: undefined;
@@ -39,9 +41,33 @@ export default function RootNav({ booted }: { booted: boolean }) {
     }
   }, []);
 
+  // Drive the iOS push-permission deferral. We only want to ask after the
+  // user has earned the Find-a-Trade unlock (progress.unlocked === true),
+  // so we tail /api/rankings/progress at the root of the authed tree and
+  // gate the push hook on that flag.
+  //
+  // Query is enabled only after sign-in. Cached short so unlock flips
+  // propagate within ~30s of the user finishing rankings on the Trios screen
+  // (which itself invalidates this query — see RankScreen submitMutation).
+  const progressQuery = useQuery({
+    queryKey: ['progress'],
+    queryFn: getProgress,
+    enabled: !!user && hasToken,
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+  });
+  const pushEnabled = progressQuery.data?.unlocked === true;
+
   // Registers the device's Expo push token with the backend once the
-  // user has signed in. No-op while `user` is null.
-  usePushNotifications(user?.user_id ?? null, onTapMatchNotification);
+  // user has signed in AND unlocked Find-a-Trade. The hook always wires
+  // up listeners post-signin so a notification that arrives despite no
+  // permission prompt (e.g. permission was previously granted on this
+  // device) still feeds the in-app bell.
+  usePushNotifications(
+    user?.user_id ?? null,
+    onTapMatchNotification,
+    pushEnabled,
+  );
 
   if (!booted) {
     return (
