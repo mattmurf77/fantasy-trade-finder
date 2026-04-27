@@ -25,6 +25,7 @@ import ssl
 import threading
 import time
 import traceback
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -784,6 +785,35 @@ _sessions: dict[str, dict] = {}  # token → per-session dict
 _sessions_lock = threading.Lock()  # guards all _sessions reads/writes
 _player_sync_lock = threading.Lock()  # serialises concurrent player DB syncs
 
+# ─── Trade-generation jobs (streaming + pre-gen cache) ────────────────────
+# Each job represents one /api/trades/generate run. The actual work is done
+# by a background daemon thread; the request thread returns immediately with
+# a job_id so the mobile app can poll /api/trades/status. The same dict
+# doubles as a cache: a complete job younger than _PREGEN_TTL_SECONDS is
+# returned instantly to the next caller for the same (user, league, format).
+#
+# Job state shape:
+#   {
+#     "job_id":               str,
+#     "key":                  (user_id, league_id, scoring_format),
+#     "status":               "running" | "complete" | "error",
+#     "started_at":           float (time.monotonic),
+#     "finished_at":          float | None,
+#     "opponents_done":       int,
+#     "opponents_total":      int,
+#     "cards":                list[dict],     # public trade_card_to_dict shape
+#     "error":                str | None,
+#     "fairness_threshold":   float,
+#     "outlook_value":        str | None,
+#     "is_pinned":            bool,           # pinned-give jobs are never cached
+#   }
+_trade_jobs: dict[str, dict] = {}                     # job_id → state
+_trade_jobs_by_key: dict[tuple, str] = {}             # (uid,lid,fmt) → job_id
+_trade_jobs_lock = threading.Lock()
+_PREGEN_TTL_SECONDS  = 1800   # 30 min — fresh cache window
+_JOB_HARD_TIMEOUT    = 60     # seconds — past this a stuck job is marked error
+_JOB_RETENTION       = 4 * 3600  # keep finished jobs around for ~4hr cleanup
+
 
 class _SessionExpired(Exception):
     pass
@@ -841,9 +871,11 @@ def _active_format(sess: dict) -> str:
 
 
 def _cleanup_loop() -> None:
-    """Background thread: evict sessions inactive for > 4 hours."""
+    """Background thread: evict stale sessions + stuck/old trade jobs."""
     while True:
         time.sleep(300)  # check every 5 min
+
+        # Sessions — 4hr inactivity
         cutoff = time.time() - 4 * 3600
         with _sessions_lock:
             stale = [t for t, s in _sessions.items()
@@ -852,6 +884,34 @@ def _cleanup_loop() -> None:
                 _sessions.pop(t, None)
         if stale:
             log.info("Cleaned up %d stale session(s)", len(stale))
+
+        # Trade jobs — three reasons to evict:
+        #   (a) running jobs older than _JOB_HARD_TIMEOUT → mark as error so
+        #       the frontend stops polling
+        #   (b) finished jobs older than _JOB_RETENTION → drop entirely
+        #   (c) keep _trade_jobs_by_key in sync with _trade_jobs
+        now = time.monotonic()
+        evicted = 0
+        timed_out = 0
+        with _trade_jobs_lock:
+            to_drop = []
+            for jid, job in _trade_jobs.items():
+                age = now - (job.get("finished_at") or job.get("started_at") or now)
+                if job.get("status") == "running" and (now - job.get("started_at", now)) > _JOB_HARD_TIMEOUT:
+                    job["status"] = "error"
+                    job["error"]  = "timeout"
+                    job["finished_at"] = now
+                    timed_out += 1
+                if age > _JOB_RETENTION:
+                    to_drop.append(jid)
+            for jid in to_drop:
+                key = _trade_jobs[jid].get("key")
+                _trade_jobs.pop(jid, None)
+                if key and _trade_jobs_by_key.get(key) == jid:
+                    _trade_jobs_by_key.pop(key, None)
+                evicted += 1
+        if evicted or timed_out:
+            log.info("Trade jobs swept: %d evicted, %d timed out", evicted, timed_out)
 
 
 threading.Thread(target=_cleanup_loop, daemon=True).start()
@@ -904,6 +964,247 @@ def _stash_device_and_touch_activity() -> None:
         pass  # never break the request on activity logging
 
 
+
+# ─── Trade-job helpers (streaming + pre-gen) ─────────────────────────────
+
+def _trade_job_key(user_id: str, league_id: str, scoring_format: str) -> tuple:
+    return (user_id, league_id, scoring_format)
+
+
+def _trade_job_public_view(job: dict) -> dict:
+    """Shape returned to the mobile app by /api/trades/generate + /status.
+    Hides internal-only fields like the cache key."""
+    return {
+        "job_id":          job["job_id"],
+        "status":          job["status"],
+        "opponents_done":  job["opponents_done"],
+        "opponents_total": job["opponents_total"],
+        "cards":           job.get("cards") or [],
+        "error":           job.get("error"),
+    }
+
+
+def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value) -> bool:
+    """True iff this job's result can be returned as-is to a new caller —
+    i.e. it's complete, recent, and was generated for the same parameters."""
+    if job.get("status") != "complete":
+        return False
+    if job.get("is_pinned"):
+        return False
+    if (time.monotonic() - (job.get("finished_at") or 0)) > _PREGEN_TTL_SECONDS:
+        return False
+    # Allow ±0.01 wiggle on threshold — frontend may round
+    if abs((job.get("fairness_threshold") or 0) - fairness_threshold) > 0.01:
+        return False
+    if (job.get("outlook_value") or None) != (outlook_value or None):
+        return False
+    return True
+
+
+def _make_progress_cb(job_id: str, players_dict: dict, real_user_ids: set, outlook_value):
+    """Build a callback that snapshots cards into _trade_jobs[job_id] as
+    each opponent finishes. Pre-binds the players_dict + outlook so the
+    closure can run inside the worker thread without re-reading session state."""
+    def _cb(opponents_done: int, opponents_total: int, sorted_cards):
+        # Convert internal TradeCard objects → public dicts (same shape as
+        # /api/trades/matches enrichment uses).
+        snapshot = []
+        for c in sorted_cards:
+            d = trade_card_to_dict(c, players_dict)
+            d["real_opponent"] = c.target_user_id in real_user_ids
+            d["outlook"]       = outlook_value
+            snapshot.append(d)
+        with _trade_jobs_lock:
+            j = _trade_jobs.get(job_id)
+            if j and j["status"] == "running":
+                j["opponents_done"]  = opponents_done
+                j["opponents_total"] = opponents_total
+                j["cards"]           = snapshot
+    return _cb
+
+
+def _run_trade_job(
+    job_id: str,
+    sess_token: str,
+    league_id: str,
+    fairness_threshold: float,
+    pinned_give: list,
+):
+    """Daemon-thread entry point. Resolves the session itself (rather than
+    capturing closures over per-request state) so the request that kicked
+    us off can return immediately. All exceptions caught — a thread death
+    here would leave the job 'running' forever, which is a worse failure
+    than surfacing the error to the polling frontend."""
+    try:
+        with _sessions_lock:
+            sess = _sessions.get(sess_token)
+        if not sess:
+            raise RuntimeError("session expired before trade job started")
+
+        # Resolve format-scoped service. Mirrors the resolution path used by
+        # /api/trades/generate's request handler — see _require_session.
+        active_format  = sess.get("_effective_format") or sess.get("active_format") or "1qb_ppr"
+        services       = sess.get("services") or {}
+        trade_svcs     = sess.get("trade_svcs") or {}
+        service        = services.get(active_format) or sess.get("service")
+        trade_service  = trade_svcs.get(active_format) or sess.get("trade_svc")
+        g_user_id      = sess["user_id"]
+        g_league       = sess["league"]
+        g_user_roster  = sess["user_roster"]
+        g_players      = sess["players"]
+        if not (service and trade_service and g_league):
+            raise RuntimeError("session missing required state for trade gen")
+
+        user_elo   = service.get_rankings(position=None)
+        elo_map_rt = {rp.player.id: rp.elo for rp in user_elo.rankings}
+        seed_map   = service._seed or {}
+
+        # Inject real leaguemate ELOs (same logic as /api/trades/generate)
+        real_count = 0
+        real_user_ids: set = set()
+        try:
+            real_rankings = load_member_rankings(
+                league_id=league_id, exclude_user_id=g_user_id,
+                scoring_format=active_format,
+            )
+            if real_rankings:
+                for member in g_league.members:
+                    if member.user_id in real_rankings:
+                        rd = real_rankings[member.user_id]
+                        ue = dict(rd["elo_ratings"])
+                        if ue:
+                            member.elo_ratings = ue
+                            member.username    = rd["username"] or member.username
+                            real_count += 1
+                real_user_ids = set(real_rankings.keys()) if real_count else set()
+        except Exception as db_err:
+            log.warning("trade-job: could not load real rankings: %s", db_err)
+
+        # Outlook + positional preferences
+        outlook_value        = None
+        acquire_positions    = []
+        trade_away_positions = []
+        try:
+            prefs = load_league_preference(user_id=g_user_id, league_id=league_id)
+            if prefs:
+                outlook_value        = prefs.get("team_outlook")
+                acquire_positions    = prefs.get("acquire_positions",    []) or []
+                trade_away_positions = prefs.get("trade_away_positions", []) or []
+        except Exception as pref_err:
+            log.warning("trade-job: could not load league preference: %s", pref_err)
+
+        # Update outlook on the job for cache freshness checks
+        with _trade_jobs_lock:
+            j = _trade_jobs.get(job_id)
+            if j is not None:
+                j["outlook_value"] = outlook_value
+
+        players_dict = {p.id: p for p in g_players}
+        progress_cb  = _make_progress_cb(job_id, players_dict, real_user_ids, outlook_value)
+
+        trade_service.generate_trades(
+            user_id              = g_user_id,
+            user_elo             = elo_map_rt,
+            user_roster          = g_user_roster,
+            league_id            = league_id,
+            seed_elo             = seed_map,
+            fairness_threshold   = fairness_threshold,
+            acquire_positions    = acquire_positions,
+            trade_away_positions = trade_away_positions,
+            pinned_give_players  = pinned_give or None,
+            on_opponent_done     = progress_cb,
+        )
+
+        # Mark complete. Final card snapshot was already published by the
+        # last on_opponent_done invocation.
+        with _trade_jobs_lock:
+            j = _trade_jobs.get(job_id)
+            if j is not None:
+                j["status"]      = "complete"
+                j["finished_at"] = time.monotonic()
+
+    except Exception as e:
+        log.exception("trade-job %s failed", job_id)
+        with _trade_jobs_lock:
+            j = _trade_jobs.get(job_id)
+            if j is not None:
+                j["status"]      = "error"
+                j["error"]       = str(e)
+                j["finished_at"] = time.monotonic()
+
+
+def _invalidate_trade_jobs(*, user_id: str, league_id: str | None = None) -> int:
+    """Drop cached trade jobs so the next /api/trades/generate kicks off
+    a fresh run. Two scopes:
+      - league_id=None: drop all of this user's jobs (used after /api/rank3
+        — user ELOs just changed, so trades for any league are stale).
+      - league_id=...: drop only that league's job (used after a league
+        preferences POST — only this league's outlook changed).
+
+    Doesn't touch in-flight 'running' jobs — those will publish their
+    final result and be flushed by the next call. We only remove the
+    `_trade_jobs_by_key` index entry so the next request creates a new
+    job instead of reusing the stale one.
+    """
+    dropped = 0
+    with _trade_jobs_lock:
+        for key in list(_trade_jobs_by_key.keys()):
+            uid, lid, _fmt = key
+            if uid != user_id:
+                continue
+            if league_id is not None and lid != league_id:
+                continue
+            jid = _trade_jobs_by_key.get(key)
+            job = _trade_jobs.get(jid) if jid else None
+            # Only drop the index pointer for completed/errored jobs;
+            # leave running jobs alone so concurrent /generate calls don't
+            # wastefully spawn duplicates while the worker is still going.
+            if job and job.get("status") != "running":
+                _trade_jobs_by_key.pop(key, None)
+                dropped += 1
+    return dropped
+
+
+def _kickoff_trade_job(
+    sess_token: str,
+    user_id: str,
+    league_id: str,
+    scoring_format: str,
+    fairness_threshold: float = 0.75,
+    pinned_give: list | None = None,
+    opponents_total: int | None = None,
+) -> str:
+    """Register a new job in _trade_jobs and start its worker thread.
+    Returns the job_id. Caller is responsible for any pre-existing-job
+    deduplication; this always creates a fresh one."""
+    job_id = uuid.uuid4().hex
+    is_pinned = bool(pinned_give)
+    job = {
+        "job_id":             job_id,
+        "key":                _trade_job_key(user_id, league_id, scoring_format),
+        "status":             "running",
+        "started_at":         time.monotonic(),
+        "finished_at":        None,
+        "opponents_done":     0,
+        "opponents_total":    opponents_total or 0,
+        "cards":              [],
+        "error":              None,
+        "fairness_threshold": fairness_threshold,
+        "outlook_value":      None,    # populated when the worker reads prefs
+        "is_pinned":          is_pinned,
+    }
+    with _trade_jobs_lock:
+        _trade_jobs[job_id] = job
+        if not is_pinned:
+            # Pin into the per-key index so future generate calls dedupe.
+            _trade_jobs_by_key[job["key"]] = job_id
+
+    threading.Thread(
+        target=_run_trade_job,
+        args=(job_id, sess_token, league_id, fairness_threshold, pinned_give or []),
+        daemon=True,
+    ).start()
+    return job_id
 def player_to_dict(p) -> dict:
     d = {
         "id":               p.id,
@@ -1123,6 +1424,16 @@ def post_rank3():
             )
         except Exception as ev_err:
             log.warning("record_event(trio_swipe) failed: %s", ev_err)
+
+        # Invalidate cached trade-generation jobs — the user's ELO map just
+        # changed, so any cached deck is stale. Drop across all leagues
+        # since rankings are user-level. Don't synchronously regenerate;
+        # the next user-tap on Find a Trade (or the next session_init for
+        # a league) will pick up the fresh state.
+        try:
+            _invalidate_trade_jobs(user_id=g_user_id)
+        except Exception as inv_err:
+            log.warning("rank3: trade-cache invalidation failed: %s", inv_err)
 
         pct = min(100, round(rank_set.interaction_count / rank_set.threshold * 100))
         return jsonify({
@@ -1745,88 +2056,113 @@ def trade_card_to_dict(card, players: dict) -> dict:
 
 @app.route("/api/trades/generate", methods=["POST"])
 def generate_trades():
-    """POST /api/trades/generate  →  generate fresh trade cards for the user"""
+    """POST /api/trades/generate
+    Spawns (or reuses) a background trade-generation job and returns a
+    snapshot. The actual matching algorithm runs asynchronously; the
+    mobile client polls /api/trades/status?job_id=X to stream cards as
+    they're generated.
+
+    Response shape (TradeJobSnapshot):
+      {
+        job_id, status: 'running'|'complete'|'error',
+        opponents_done, opponents_total,
+        cards: [...],          # public trade card dicts (may be partial)
+        error: str | null,
+      }
+
+    Caching:
+      - A complete job for the same (user, league, format) within 30 min
+        is returned instantly with status='complete'.
+      - In-flight jobs are shared across concurrent callers — second tap
+        gets the same job_id and the current snapshot.
+      - Pinned-give jobs always create a fresh, uncached job.
+    """
     sess = _require_session()
     sess["last_active"] = time.time()
-    service       = sess["service"]
-    trade_service = sess["trade_svc"]
-    g_user_id     = sess["user_id"]
-    g_league      = sess["league"]
-    g_user_roster = sess["user_roster"]
-    g_players     = sess["players"]
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    if not (g_user_id and g_league):
+        return jsonify({"error": "session missing user/league"}), 400
+
     body               = request.get_json(force=True) or {}
     league_id          = body.get("league_id") or g_league.league_id
-    pinned_give        = body.get("pinned_give_players") or []  # list of player IDs to trade away
+    pinned_give        = body.get("pinned_give_players") or []
     # Default to 50% when pinned players are selected (wide net), 75% otherwise
     default_fairness   = 0.50 if pinned_give else 0.75
     fairness_threshold = float(body.get("fairness_threshold", default_fairness))
-    user_elo   = service.get_rankings(position=None)
-    elo_map_rt = {rp.player.id: rp.elo for rp in user_elo.rankings}
-    seed_map   = service._seed or {}
+    fmt                = _active_format(sess)
 
-    # ── Inject real leaguemate ELO from DB (for active scoring format) ───
-    # For every member in the current league, replace their simulated ELO
-    # with their actual stored rankings for THIS format if they have any.
-    # Members with no stored rankings in this format keep their random-biased
-    # values as a fallback.
-    real_count = 0
-    fmt = _active_format(sess)
-    try:
-        real_rankings = load_member_rankings(
-            league_id=league_id, exclude_user_id=g_user_id, scoring_format=fmt
-        )
-        if real_rankings:
-            for member in g_league.members:
-                if member.user_id in real_rankings:
-                    real_data = real_rankings[member.user_id]
-                    # Use ALL real rankings — the trade engine needs the
-                    # opponent's opinion of the *user's* roster players too,
-                    # not just the opponent's own roster players.
-                    updated_elo = dict(real_data["elo_ratings"])
-                    if updated_elo:
-                        member.elo_ratings = updated_elo
-                        member.username    = real_data["username"] or member.username
-                        real_count += 1
-            log.info("  trade gen: %d/%d members using real rankings",
-                     real_count, len(g_league.members))
-    except Exception as db_err:
-        log.warning("  could not load real rankings (using simulated): %s", db_err)
-
-    # ── Load team outlook + positional preferences ──────────────────────
-    outlook              = None
-    acquire_positions    = []
-    trade_away_positions = []
+    # Read current outlook for cache-freshness comparison. The actual job
+    # worker reads it again; this is just for the cache hit decision.
     try:
         prefs = load_league_preference(user_id=g_user_id, league_id=league_id)
-        if prefs:
-            outlook              = prefs.get("team_outlook")
-            acquire_positions    = prefs.get("acquire_positions",    []) or []
-            trade_away_positions = prefs.get("trade_away_positions", []) or []
-    except Exception as pref_err:
-        log.warning("Could not load league preference: %s", pref_err)
+        outlook_value = (prefs or {}).get("team_outlook")
+    except Exception:
+        outlook_value = None
 
+    sess_token = request.headers.get("X-Session-Token", "")
+    key        = _trade_job_key(g_user_id, league_id, fmt)
+
+    # Opponent count for early progress reporting (best-effort).
+    opponents_total = 0
     try:
-        cards = trade_service.generate_trades(
-            user_id              = g_user_id,
-            user_elo             = elo_map_rt,
-            user_roster          = g_user_roster,
-            league_id            = league_id,
-            seed_elo             = seed_map,
-            fairness_threshold   = fairness_threshold,
-            acquire_positions    = acquire_positions,
-            trade_away_positions = trade_away_positions,
-            pinned_give_players  = pinned_give or None,
+        opponents_total = sum(
+            1 for m in g_league.members
+            if m.user_id != g_user_id and m.elo_ratings
         )
+    except Exception:
+        pass
 
-        players_dict  = {p.id: p for p in g_players}
-        result        = [trade_card_to_dict(c, players_dict) for c in cards]
-        real_user_ids = set(real_rankings.keys()) if real_count else set()
-        for card_dict, card in zip(result, cards):
-            card_dict["real_opponent"] = card.target_user_id in real_user_ids
-            card_dict["outlook"]       = outlook   # echoed back so frontend can reflect it
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+    with _trade_jobs_lock:
+        existing_id = _trade_jobs_by_key.get(key) if not pinned_give else None
+        existing    = _trade_jobs.get(existing_id) if existing_id else None
+
+        if existing and not pinned_give:
+            # Cache hit: complete + fresh + same params → return instantly.
+            if _trade_job_is_fresh(existing, fairness_threshold, outlook_value):
+                return jsonify(_trade_job_public_view(existing))
+            # In-flight: share the current job. Note: if the request used
+            # different fairness/outlook, the snapshot will reflect the
+            # original params — the frontend can re-tap once status flips.
+            if existing.get("status") == "running":
+                return jsonify(_trade_job_public_view(existing))
+            # Otherwise: stale or errored → drop the index entry and fall
+            # through to spawn a new job.
+            _trade_jobs_by_key.pop(key, None)
+
+    # Kick off a fresh job. No locks held during the worker spawn so we
+    # don't accidentally serialize parallel users.
+    job_id = _kickoff_trade_job(
+        sess_token         = sess_token,
+        user_id            = g_user_id,
+        league_id          = league_id,
+        scoring_format     = fmt,
+        fairness_threshold = fairness_threshold,
+        pinned_give        = pinned_give or None,
+        opponents_total    = opponents_total,
+    )
+    with _trade_jobs_lock:
+        snapshot = _trade_job_public_view(_trade_jobs[job_id])
+    return jsonify(snapshot)
+
+
+@app.route("/api/trades/status")
+def trade_job_status():
+    """GET /api/trades/status?job_id=X
+    Cheap dict lookup. Used by the mobile app to poll an in-flight
+    /api/trades/generate job. 404 if the job has been evicted."""
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    job_id = request.args.get("job_id") or ""
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "job not found"}), 404
+        # Defense: don't leak another user's job. The lookup key includes
+        # user_id, but we double-check here in case of a stale id.
+        if job["key"][0] != sess["user_id"]:
+            return jsonify({"error": "job not found"}), 404
+        return jsonify(_trade_job_public_view(job))
 
 
 @app.route("/api/trades")
@@ -2566,6 +2902,13 @@ def set_league_preferences():
         )
         log.info("league_preferences/set — user=%s league=%s outlook=%s acquire=%s away=%s",
                  user_id, league_id, outlook, acquire_positions, trade_away_positions)
+        # Outlook drives the trade-engine's preference multiplier — any
+        # cached deck for THIS league is now stale. Drop the league-scoped
+        # cache entry so the next /api/trades/generate spawns a fresh job.
+        try:
+            _invalidate_trade_jobs(user_id=user_id, league_id=league_id)
+        except Exception as inv_err:
+            log.warning("league/preferences: trade-cache invalidation failed: %s", inv_err)
         return jsonify({
             "ok":                    True,
             "team_outlook":          outlook,
@@ -3639,6 +3982,41 @@ def session_init():
              len(g_universal_players), generic_pick_count, len(new_user_roster), len(members))
 
     real_player_count = sum(1 for p in ranking_pool if p.pick_value is None)
+
+    # ── Pre-generate trade cards in the background ───────────────────────
+    # The user just imported a league; they're a few taps away from the
+    # Trades tab. Kick off a generate job now so the deck is ready by the
+    # time they get there. We only kick off if there's no fresh cached job
+    # for (user, league, format) already. The thread.start() returns
+    # immediately — session_init's response is unaffected.
+    try:
+        # `active_format`, `token`, and `members` are all in local scope at
+        # this point (set above). Don't re-read from the session dict —
+        # we already have the right values.
+        pregen_key = _trade_job_key(user_id, league_id, active_format)
+        with _trade_jobs_lock:
+            existing_id = _trade_jobs_by_key.get(pregen_key)
+            existing    = _trade_jobs.get(existing_id) if existing_id else None
+            should_kickoff = (existing is None) or (
+                existing.get("status") == "complete"
+                and (time.monotonic() - (existing.get("finished_at") or 0)) > _PREGEN_TTL_SECONDS
+            )
+        if should_kickoff:
+            opp_total = sum(1 for m in members if m.user_id != user_id and m.elo_ratings)
+            _kickoff_trade_job(
+                sess_token         = token,
+                user_id            = user_id,
+                league_id          = league_id,
+                scoring_format     = active_format,
+                fairness_threshold = 0.75,
+                pinned_give        = None,
+                opponents_total    = opp_total,
+            )
+            log.info("session/init: kicked off pre-gen trade job for league=%s", league_id)
+    except Exception as pregen_err:
+        # Pre-gen is best-effort. Never let it break session_init.
+        log.warning("session/init: pre-gen kickoff failed: %s", pregen_err)
+
     return jsonify({
         "ok":           True,
         "token":        token,
