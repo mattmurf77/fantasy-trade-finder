@@ -25,6 +25,7 @@ from itertools import combinations
 from typing import Optional
 
 from .feature_flags import FLAGS
+from .trade_narrative import build_narrative
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +232,120 @@ def package_value(individual_values: list[float]) -> float:
     sorted_vals = sorted(individual_values, reverse=True)
     total = sum(v * w for v, w in zip(sorted_vals, weights))
     return round(total, 1)
+
+
+# ---------------------------------------------------------------------------
+# Roster strength analysis (Feature 2: roster-aware match context)
+# ---------------------------------------------------------------------------
+
+# Dynasty-value tier thresholds (KTC-scale, ktc_max=10000).
+# Tuned so a typical 12-team starter hits ~1500+, an elite player ~4000+.
+_TIER_ELITE   = 4000.0
+_TIER_STARTER = 1500.0
+_TIER_BENCH   = 500.0
+
+# Per-position starter-depth thresholds. Superflex bumps QB to require 2.
+_STARTER_NEED = {"QB": 1, "RB": 2, "WR": 2, "TE": 1}
+_SURPLUS_AT   = {"QB": 2, "RB": 4, "WR": 4, "TE": 2}
+
+
+def _bin_player(value: float) -> str | None:
+    if value >= _TIER_ELITE:
+        return "elite"
+    if value >= _TIER_STARTER:
+        return "starter"
+    if value >= _TIER_BENCH:
+        return "bench"
+    return None
+
+
+def analyze_roster_strengths(
+    roster_player_ids: list[str],
+    players: dict,
+    scoring_format: str = "1qb_ppr",
+) -> dict:
+    """
+    Profile a roster's positional depth using dynasty values.
+
+    Returns:
+        {
+          "tier_depth":      {pos: {"elite": n, "starter": n, "bench": n}},
+          "position_needs":  [pos, ...],     # below starter threshold
+          "position_surplus":[pos, ...],     # at-or-above surplus threshold
+        }
+    """
+    tier_depth: dict[str, dict[str, int]] = {
+        pos: {"elite": 0, "starter": 0, "bench": 0}
+        for pos in ("QB", "RB", "WR", "TE")
+    }
+    starter_count: dict[str, int] = {pos: 0 for pos in tier_depth}
+
+    for pid in roster_player_ids:
+        player = players.get(pid)
+        if player is None or getattr(player, "position", None) not in tier_depth:
+            continue
+        bin_ = _bin_player(dynasty_value(player))
+        if bin_ is None:
+            continue
+        tier_depth[player.position][bin_] += 1
+        if bin_ in ("elite", "starter"):
+            starter_count[player.position] += 1
+
+    is_superflex = scoring_format.startswith("sf")
+    needs: list[str] = []
+    surplus: list[str] = []
+    for pos in tier_depth:
+        threshold = _STARTER_NEED[pos]
+        if pos == "QB" and is_superflex:
+            threshold = 2
+        if starter_count[pos] < threshold:
+            needs.append(pos)
+        if starter_count[pos] >= _SURPLUS_AT[pos]:
+            surplus.append(pos)
+
+    return {
+        "tier_depth":       tier_depth,
+        "position_needs":   needs,
+        "position_surplus": surplus,
+    }
+
+
+def build_match_context(
+    user_profile: dict,
+    opponent_profile: dict,
+    scoring_format: str,
+    is_dynasty: bool = False,
+) -> dict:
+    """
+    Produce the structured 'why this match' object that ships on each
+    TradeCard. Pure function; deterministic.
+    """
+    user_needs       = user_profile.get("position_needs", [])
+    opp_surplus      = opponent_profile.get("position_surplus", [])
+    overlap          = [p for p in user_needs if p in opp_surplus]
+
+    if overlap:
+        rationale = f"You're thin at {overlap[0]}; opponent is {overlap[0]}-heavy."
+    elif user_needs:
+        rationale = f"You're thin at {user_needs[0]} — see if any reach across."
+    else:
+        rationale = "Roster profiles align without a single standout gap."
+
+    # Both supported formats (1qb_ppr, sf_tep) are PPR. Treat anything not
+    # explicitly marked standard/std as PPR by default.
+    fmt_lower = scoring_format.lower()
+    is_standard = "standard" in fmt_lower or "_std" in fmt_lower or fmt_lower == "std"
+    return {
+        "user_needs":       user_needs,
+        "opponent_surplus": opp_surplus,
+        "league_settings":  {
+            "scoring":     "standard" if is_standard else "ppr",
+            "superflex":   fmt_lower.startswith("sf"),
+            "te_premium":  "tep" in fmt_lower,
+            "dynasty":     is_dynasty,
+        },
+        "positional_rationale": rationale,
+    }
 
 
 def positional_preference_multiplier(
@@ -579,6 +694,11 @@ class TradeCard:
     # adjustment-level reasons for this trade. The server view converts
     # an empty list to an omitted JSON key when human_explanations is off.
     reasons: list[str] = field(default_factory=list)
+    # Feature 2 — structured roster-aware match context, computed from
+    # analyze_roster_strengths() / build_match_context(). None when not yet wired.
+    match_context: Optional[dict] = None
+    # Feature 1 — templated, deterministic plain-English narrative (≤2 sentences).
+    narrative: Optional[str] = None
 
 
 @dataclass
@@ -635,6 +755,8 @@ class TradeService:
         acquire_positions: list[str] | None = None,    # positions user wants to receive
         trade_away_positions: list[str] | None = None, # positions user wants to give
         pinned_give_players: list[str] | None = None,  # specific players user wants to trade away
+        scoring_format: str = "1qb_ppr",
+        is_dynasty: bool = False,
         on_opponent_done = None,             # callback(idx_done, total, sorted_cards_so_far)
     ) -> list[TradeCard]:
         """
@@ -661,6 +783,9 @@ class TradeService:
 
         new_cards: list[TradeCard] = []
 
+        # Pre-compute the user's roster profile once.
+        user_profile = analyze_roster_strengths(user_roster, self._players, scoring_format)
+
         # Build the list of eligible opponents up-front so the callback can
         # report a stable "X of N" without surprises when members get filtered.
         eligible = [
@@ -670,6 +795,9 @@ class TradeService:
         total = len(eligible)
 
         for idx, member in enumerate(eligible):
+            opp_profile = analyze_roster_strengths(member.roster, self._players, scoring_format)
+            match_ctx = build_match_context(user_profile, opp_profile, scoring_format, is_dynasty)
+
             cards = self._generate_for_pair(
                 user_id              = user_id,
                 user_elo             = user_elo,
@@ -683,6 +811,9 @@ class TradeService:
                 trade_away_positions = trade_away_positions or [],
                 pinned_give_players  = pinned_give_players,
             )
+            for c in cards:
+                c.match_context = match_ctx
+                c.narrative = build_narrative(c, match_ctx, self._players)
             new_cards.extend(cards)
 
             # Streaming hook — let callers (e.g. /api/trades/generate's
