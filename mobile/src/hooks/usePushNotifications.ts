@@ -46,6 +46,9 @@ export function usePushNotifications(
   const registeredRef = useRef(false);
 
   // ── Permission ask + token registration (deferred until `enabled`) ──
+  // Publishes the OS permission status into useNotifications so screens
+  // can render a "denied" banner — once the user denies we cannot
+  // re-prompt; only Settings can flip it back.
   useEffect(() => {
     if (!userId) return;
     if (!enabled) return;
@@ -58,9 +61,19 @@ export function usePushNotifications(
       try {
         const existing = await Notifications.getPermissionsAsync();
         let status = existing.status;
+        // Publish the pre-prompt state so the banner can show "ask"
+        // copy if undetermined or "denied" if already declined.
+        useNotifications.getState().setPermissionStatus(
+          status === 'granted' ? 'granted'
+          : status === 'denied' ? 'denied'
+          : 'undetermined',
+        );
         if (status !== 'granted') {
           const req = await Notifications.requestPermissionsAsync();
           status = req.status;
+          useNotifications.getState().setPermissionStatus(
+            status === 'granted' ? 'granted' : 'denied',
+          );
         }
         if (status !== 'granted') return;
         if (cancelled) return;

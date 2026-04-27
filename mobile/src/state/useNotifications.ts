@@ -19,17 +19,33 @@ export interface AppNotification {
   data?: Record<string, unknown>;
 }
 
+const ITEMS_CAP = 50;
+
+/** Tri-state mirroring expo-notifications' permission status, plus a
+ *  bootstrap value for "we haven't asked the OS yet." LeagueScreen reads
+ *  this to surface a banner when the user denied — they need to flip the
+ *  toggle in iOS Settings; we can't re-prompt. */
+export type PushPermissionStatus =
+  | 'unknown'        // pre-prompt, or simulator (push doesn't work)
+  | 'undetermined'   // OS hasn't been asked yet
+  | 'granted'
+  | 'denied';
+
 interface NotificationsState {
   items: AppNotification[];
   unreadCount: number;
+  permissionStatus: PushPermissionStatus;
+
   add: (n: Omit<AppNotification, 'receivedAt' | 'read'>) => void;
   markAllRead: () => void;
   clear: () => void;
+  setPermissionStatus: (s: PushPermissionStatus) => void;
 }
 
 export const useNotifications = create<NotificationsState>((set, get) => ({
   items: [],
   unreadCount: 0,
+  permissionStatus: 'unknown',
 
   add: (n) => {
     const item: AppNotification = {
@@ -38,8 +54,11 @@ export const useNotifications = create<NotificationsState>((set, get) => ({
       read: false,
     };
     set((s) => ({
-      items: [item, ...s.items].slice(0, 50), // cap so we don't grow forever
-      unreadCount: s.unreadCount + 1,
+      items: [item, ...s.items].slice(0, ITEMS_CAP),
+      // Cap unreadCount at the same cap as items. Without this, after 50+
+      // distinct pushes the badge would say "9+" forever even after the
+      // older items were dropped from the list.
+      unreadCount: Math.min(s.unreadCount + 1, ITEMS_CAP),
     }));
   },
 
@@ -52,4 +71,9 @@ export const useNotifications = create<NotificationsState>((set, get) => ({
   },
 
   clear: () => set({ items: [], unreadCount: 0 }),
+
+  setPermissionStatus: (s) => {
+    if (get().permissionStatus === s) return;   // skip no-op renders
+    set({ permissionStatus: s });
+  },
 }));

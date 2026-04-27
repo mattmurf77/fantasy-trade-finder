@@ -46,17 +46,20 @@ export default function RootNav({ booted }: { booted: boolean }) {
   // so we tail /api/rankings/progress at the root of the authed tree and
   // gate the push hook on that flag.
   //
-  // Query is enabled only after sign-in. Cached short so unlock flips
-  // propagate within ~30s of the user finishing rankings on the Trios screen
-  // (which itself invalidates this query — see RankScreen submitMutation).
+  // Cache the unlocked flag in a ref. Once it flips true, we stop polling
+  // entirely — the gate is one-way (a user who unlocked stays unlocked
+  // for this session) and there's no reason to keep hitting the endpoint
+  // every focus. Saves a per-resume fetch on the user's most-used flow.
+  const everUnlockedRef = useRef(false);
   const progressQuery = useQuery({
     queryKey: ['progress'],
     queryFn: getProgress,
-    enabled: !!user && hasToken,
+    enabled: !!user && hasToken && !everUnlockedRef.current,
     staleTime: 15_000,
     refetchOnWindowFocus: true,
   });
-  const pushEnabled = progressQuery.data?.unlocked === true;
+  if (progressQuery.data?.unlocked === true) everUnlockedRef.current = true;
+  const pushEnabled = everUnlockedRef.current || progressQuery.data?.unlocked === true;
 
   // Registers the device's Expo push token with the backend once the
   // user has signed in AND unlocked Find-a-Trade. The hook always wires

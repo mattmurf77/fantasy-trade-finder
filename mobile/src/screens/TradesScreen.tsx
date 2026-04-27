@@ -142,6 +142,14 @@ export default function TradesScreen() {
   // Deck maintenance: append new cards as the snapshot grows, dedup by
   // trade_id so re-rendering doesn't duplicate. Don't reset the index —
   // the user may already be swiping on early cards.
+  //
+  // Deps: depend on cards.length, not the cards array reference. Each
+  // poll returns a fresh array even when content didn't change; using
+  // the array ref triggers a no-op re-render every 1.5s. The length is
+  // monotonically increasing during a job so any actual growth fires
+  // the effect; we still re-evaluate setDeck inside which dedups by
+  // trade_id, so the rare "same length, different content" case (e.g.
+  // backend resorts after the last opponent) gets the latest snapshot.
   useEffect(() => {
     if (!job) return;
     setDeck((prev) => {
@@ -149,7 +157,8 @@ export default function TradesScreen() {
       const fresh = job.cards.filter((c) => !seen.has(c.trade_id));
       return fresh.length === 0 ? prev : [...prev, ...fresh];
     });
-  }, [job?.cards]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.cards.length, job?.status]);
 
   // When the user picks a different fairness slider position or switches
   // leagues, drop the local deck/job so the next "Find a Trade" tap kicks

@@ -7,6 +7,7 @@ import {
   ScrollView,
   ActivityIndicator,
   RefreshControl,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -15,6 +16,7 @@ import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import { getLeagueSummary, getLeagueCoverage } from '../api/league';
 import { useSession } from '../state/useSession';
+import { useNotifications } from '../state/useNotifications';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 
 // League tab v1 — replaces the prior PlaceholderScreen. Pulls
@@ -28,6 +30,10 @@ export default function LeagueScreen() {
   const league   = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  // OS-level push permission status. We can't re-prompt once denied, so
+  // we surface a banner here pointing the user to Settings.
+  const pushPermission = useNotifications((s) => s.permissionStatus);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   const summaryQuery = useQuery({
     queryKey: ['league-summary', leagueId],
@@ -95,6 +101,35 @@ export default function LeagueScreen() {
           />
         }
       >
+        {/* Push-permission banner — only when iOS denied AND user hasn't
+            dismissed it. Renders above the hero so it doesn't get lost. */}
+        {pushPermission === 'denied' && !bannerDismissed && (
+          <View style={styles.permBanner}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.permBannerTitle}>🔕 Push notifications off</Text>
+              <Text style={styles.permBannerBody}>
+                You won't get a ping when a leaguemate matches one of your trades.
+                Enable in Settings to fix.
+              </Text>
+            </View>
+            <View style={styles.permBannerBtns}>
+              <Pressable
+                onPress={() => Linking.openSettings().catch(() => {})}
+                style={({ pressed }) => [styles.permBannerCta, pressed && { opacity: 0.85 }]}
+              >
+                <Text style={styles.permBannerCtaText}>Settings</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setBannerDismissed(true)}
+                hitSlop={8}
+                style={({ pressed }) => [styles.permBannerDismiss, pressed && { opacity: 0.6 }]}
+              >
+                <Text style={styles.permBannerDismissText}>Not now</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
         {/* League name + scoring */}
         <View style={styles.heroCard}>
           <Text style={styles.heroLabel}>League</Text>
@@ -231,6 +266,34 @@ function ProgressBar({ pct }: { pct: number }) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
+
+  permBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: 'rgba(250,204,21,0.10)',
+    borderColor: 'rgba(250,204,21,0.45)',
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+  },
+  permBannerTitle: { color: colors.text, fontSize: fontSize.sm, fontWeight: '800' },
+  permBannerBody: {
+    color: colors.muted,
+    fontSize: fontSize.xs,
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  permBannerBtns: { gap: 6, alignItems: 'flex-end' },
+  permBannerCta: {
+    backgroundColor: colors.accent,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+  },
+  permBannerCtaText: { color: '#fff', fontSize: fontSize.xs, fontWeight: '800' },
+  permBannerDismiss: { paddingHorizontal: spacing.sm, paddingVertical: 2 },
+  permBannerDismissText: { color: colors.muted, fontSize: 11, fontWeight: '700' },
 
   heroCard: {
     backgroundColor: colors.surface,

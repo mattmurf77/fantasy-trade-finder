@@ -76,16 +76,27 @@ export const useSession = create<SessionState>((set, get) => ({
   setLeagues: (lgs) => set({ leagues: lgs }),
 
   switchLeague: async (lg) => {
-    const s = get();
-    if (s.switching) return;                          // re-entry guard
-    if (!s.user) throw new Error('Not signed in');
-    if (s.league?.league_id === lg.league_id) return; // no-op
+    // Atomic check-and-acquire. Doing the guards inside the set() callback
+    // means zustand serializes them — two near-simultaneous switchLeague
+    // callers can't both see `switching=false` and race past the guard.
+    // The previous "read-then-set" pattern had a tiny but real window
+    // between get() and set() where two callers could both proceed.
+    let acquired = false;
+    let userSnapshot: SavedUser | null = null;
+    set((state) => {
+      if (state.switching) return state;                              // already swapping
+      if (!state.user) return state;                                  // not signed in
+      if (state.league?.league_id === lg.league_id) return state;     // same league, no-op
+      acquired = true;
+      userSnapshot = state.user;
+      return { ...state, switching: true };
+    });
+    if (!acquired || !userSnapshot) return;
 
-    set({ switching: true });
     try {
       // initLeagueSession owns the backend handshake (rosters → users →
       // /api/session/init). On success, persist the new active league.
-      await initLeagueSession(s.user, {
+      await initLeagueSession(userSnapshot, {
         league_id: lg.league_id,
         name:      lg.league_name,
       });
