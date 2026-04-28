@@ -1651,21 +1651,17 @@ def get_rankings_progress():
 
     # Mark the format as unlocked once (monotonic) so the League Summary
     # adoption counts can query users.unlocked_formats efficiently.
+    # mark_format_unlocked returns {'inserted', 'was_first'} computed in
+    # the same transaction as the write — gating on `was_first` is race-free
+    # (concurrent /progress calls won't both see was_first=True).
     if unlocked:
-        # Detect first-time unlock by reading the prior list before write.
-        # An empty/missing list at this point means this is the user's first
-        # format ever unlocked → fire ranking_complete_first_time + push
-        # leaguemates that this user is now generating trades.
+        _unlock_res = {"inserted": False, "was_first": False}
         try:
-            _prior_unlocked = get_unlocked_formats(g_user_id) or []
-        except Exception:
-            _prior_unlocked = []
-        try:
-            mark_format_unlocked(g_user_id, fmt)
+            _unlock_res = mark_format_unlocked(g_user_id, fmt) or _unlock_res
         except Exception as db_err:
             log.warning("mark_format_unlocked failed: %s", db_err)
 
-        if not _prior_unlocked:
+        if _unlock_res.get("was_first"):
             try:
                 record_event(
                     g_user_id,
@@ -2774,12 +2770,13 @@ def disposition_trade_match(match_id):
             # Skipped on Decline (no need to ping the proposer that they
             # were rejected via push; in-app inbox + the existing
             # create_notification path covers it).
+            #
+            # We read partner_user_id (always set on status=='ok') instead of
+            # walking elo_signals — elo_signals is only populated when both
+            # parties have decided, which would defeat the purpose of an
+            # accept-immediate ping.
             if decision == "accept":
-                _other_uid = next(
-                    (s["user_id"] for s in (result.get("elo_signals") or [])
-                     if s["user_id"] != g_user_id),
-                    None,
-                )
+                _other_uid = result.get("partner_user_id")
                 if _other_uid:
                     _members_map = {m.user_id: (m.username or m.user_id)
                                     for m in (g_league.members if g_league else [])}
@@ -4369,7 +4366,20 @@ _NOTIF_FREQ_CAPS: dict[str, tuple[int, int]] = {
 }
 
 # Per-dedup_key caps (e.g. "fire match_expiring at most 1× per match_id").
-_NOTIF_DEDUP_CAPS: set[str] = {"match_expiring", "first_match"}
+# Each kind here pairs with a dedup_key passed by the call site so the same
+# logical event never re-pushes:
+#   match_expiring                  → dedup_key = match_id
+#   first_match                     → dedup_key = "lifetime" (per-user)
+#   match_accepted                  → dedup_key = "accept:{match_id}:{actor_uid}"
+#   league_member_joined            → dedup_key = "joined:{joiner_uid}:{leaguemate_uid}"
+#   league_member_unlocked_trades   → dedup_key = "unlock:{user_uid}:{leaguemate_uid}"
+_NOTIF_DEDUP_CAPS: set[str] = {
+    "match_expiring",
+    "first_match",
+    "match_accepted",
+    "league_member_joined",
+    "league_member_unlocked_trades",
+}
 
 
 def _send_expo_push(messages: list) -> None:
