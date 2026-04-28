@@ -77,7 +77,22 @@ export default function MatchesScreen() {
   });
 
   async function handleAccept(m: TradeMatch) {
-    dispMutation.mutate({ id: m.match_id, d: 'accepted' });
+    // Wait for the disposition POST to settle BEFORE deep-linking. The
+    // previous fire-and-forget pattern would optimistically remove the
+    // match from the list and then leave the user on Sleeper.com if the
+    // backend later 500'd — the rollback toast would only render after
+    // they switched back to the app, which is confusing.
+    //
+    // mutateAsync re-throws on failure (onError still fires for the
+    // optimistic rollback), so the catch keeps the user inside the app
+    // and the existing onError toast surfaces a real failure. On
+    // success: deep-link.
+    try {
+      await dispMutation.mutateAsync({ id: m.match_id, d: 'accepted' });
+    } catch {
+      // onError already toasts + rolls back the optimistic removal.
+      return;
+    }
     // Deep-link to Sleeper. Sleeper's trade-propose deep link format:
     //   https://sleeper.com/leagues/<league_id>/trade
     const url = `https://sleeper.com/leagues/${m.league_id}/trade`;

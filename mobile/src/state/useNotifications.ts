@@ -39,7 +39,12 @@ export const useNotifications = create<NotificationsState>((set, get) => ({
     };
     set((s) => ({
       items: [item, ...s.items].slice(0, 50), // cap so we don't grow forever
-      unreadCount: s.unreadCount + 1,
+      // Cap the badge counter at the same number as items. Without this,
+      // after 50+ pushes without markAllRead firing, `unreadCount` would
+      // climb forever even though `items` stays at 50 — the badge would
+      // read "9+" indefinitely with nothing to clear it short of opening
+      // the bell sheet.
+      unreadCount: Math.min(s.unreadCount + 1, 50),
     }));
   },
 
