@@ -35,9 +35,14 @@ Notifications.setNotificationHandler({
  *   until the user grants permission in Settings.
  * - Tolerant of missing projectId (pre-EAS-init) — logs and moves on.
  */
+// (tab, matchId) — tab is one of the bottom-tab route names. Pass undefined
+// matchId for non-trade kinds; the receiving screen ignores it.
+type TapRouter = (tab: 'Matches' | 'League' | 'Rank' | 'Trades',
+                  matchId?: string | number) => void;
+
 export function usePushNotifications(
   userId: string | null,
-  onTapMatchNotification?: (matchId?: string | number) => void,
+  onTapMatchNotification?: TapRouter,
   enabled: boolean = true,
 ) {
   const receivedSubRef = useRef<Notifications.EventSubscription | null>(null);
@@ -131,8 +136,27 @@ export function usePushNotifications(
     responseSubRef.current = Notifications.addNotificationResponseReceivedListener((resp) => {
       try {
         const data = resp?.notification?.request?.content?.data as any;
-        if (data?.type === 'trade_match' && onTapMatchNotification) {
-          onTapMatchNotification(data.match_id);
+        if (!data?.type || !onTapMatchNotification) return;
+        // Route by `data.type` (set by backend = the push `kind`). Legacy
+        // 'trade_match' value still routes to Matches for older payloads
+        // already sitting in iOS Notification Center.
+        const kind = String(data.type);
+        const matchKinds = new Set([
+          'trade_match', 'new_match', 'first_match', 'match_accepted',
+          'match_expiring', 'counter_offer',
+          'weekly_digest', 'pending_review',
+          'winback_matches', 'winback_dormant', 'season_start',
+        ]);
+        const leagueKinds = new Set([
+          'league_member_joined', 'league_member_unlocked_trades',
+        ]);
+        const rankKinds = new Set(['finish_ranking']);
+        if (matchKinds.has(kind)) {
+          onTapMatchNotification('Matches', data.match_id);
+        } else if (leagueKinds.has(kind)) {
+          onTapMatchNotification('League', undefined);
+        } else if (rankKinds.has(kind)) {
+          onTapMatchNotification('Rank', undefined);
         }
       } catch {
         // ignore

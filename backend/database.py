@@ -1571,9 +1571,15 @@ def load_tier_overrides(
         return {}
 
 
-def mark_format_unlocked(user_id: str, scoring_format: str) -> None:
+def mark_format_unlocked(user_id: str, scoring_format: str) -> dict:
     """Add `scoring_format` to the user's unlocked_formats list if not already present.
-    Monotonic — never removes a format once unlocked."""
+    Monotonic — never removes a format once unlocked.
+
+    Returns {'inserted': bool, 'was_first': bool} so callers can detect
+    first-time-ever unlock without racing — both flags are computed inside
+    the same transaction as the write (postgres uses SELECT FOR UPDATE; on
+    SQLite the global write lock serializes us).
+    """
     is_postgres = not DATABASE_URL.startswith("sqlite")
     with engine.begin() as conn:
         if is_postgres:
@@ -1595,13 +1601,16 @@ def mark_format_unlocked(user_id: str, scoring_format: str) -> None:
                     unlocked = parsed
             except (json.JSONDecodeError, TypeError):
                 unlocked = []
-        if scoring_format not in unlocked:
+        was_first = (len(unlocked) == 0)
+        inserted = scoring_format not in unlocked
+        if inserted:
             unlocked.append(scoring_format)
             conn.execute(
                 update(users_table)
                 .where(users_table.c.sleeper_user_id == user_id)
                 .values(unlocked_formats=json.dumps(unlocked))
             )
+        return {"inserted": inserted, "was_first": was_first and inserted}
 
 
 def get_unlocked_formats(user_id: str) -> list[str]:
@@ -2850,11 +2859,12 @@ def record_match_disposition(
 
     Returns a result dict:
     {
-        'status':        'ok' | 'not_found' | 'already_decided',
-        'match_id':      int,
-        'both_decided':  bool,
-        'outcome':       'accepted' | 'declined' | None,
-        'elo_signals':   [    # only present when both_decided=True
+        'status':           'ok' | 'not_found' | 'already_decided',
+        'match_id':         int,
+        'both_decided':     bool,
+        'outcome':          'accepted' | 'declined' | None,
+        'partner_user_id':  str | None,   # the OTHER party (always set on 'ok')
+        'elo_signals':      [    # only present when both_decided=True
             {
                 'user_id':       str,
                 'winner_ids':    list[str],
@@ -2974,11 +2984,12 @@ def record_match_disposition(
                 })
 
     return {
-        "status":       "ok",
-        "match_id":     match_id,
-        "both_decided": both_decided,
-        "outcome":      outcome,
-        "elo_signals":  elo_signals,
+        "status":          "ok",
+        "match_id":        match_id,
+        "both_decided":    both_decided,
+        "outcome":         outcome,
+        "partner_user_id": (row.user_b_id if is_a else row.user_a_id),
+        "elo_signals":     elo_signals,
     }
 
 

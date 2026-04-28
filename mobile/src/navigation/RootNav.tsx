@@ -32,17 +32,22 @@ export default function RootNav({ booted }: { booted: boolean }) {
   const league = useSession((s) => s.league);
   const hasToken = useSession((s) => s.hasToken);
 
-  // Deep-link tapped trade-match pushes into the Matches tab. The
-  // callback is stable so the hook's cleanup stays clean.
-  const onTapMatchNotification = useCallback((_matchId?: string | number) => {
-    if (!navigationRef.isReady()) return;
-    try {
-      // @ts-expect-error — nested tab nav route; types don't cover cross-stack
-      navigationRef.navigate('Main', { screen: 'Matches' });
-    } catch {
-      // swallow — navigation state may be mid-transition
-    }
-  }, []);
+  // Tap-router: the push hook decodes `data.type` and tells us which tab
+  // to focus. We intentionally don't pass match_id deeper — the Matches
+  // tab loads the latest list on focus and any specific match the user
+  // tapped is already at the top.
+  const onTapMatchNotification = useCallback(
+    (tab: 'Matches' | 'League' | 'Rank' | 'Trades', _matchId?: string | number) => {
+      if (!navigationRef.isReady()) return;
+      try {
+        // @ts-expect-error — nested tab nav route; types don't cover cross-stack
+        navigationRef.navigate('Main', { screen: tab });
+      } catch {
+        // swallow — navigation state may be mid-transition
+      }
+    },
+    [],
+  );
 
   // Drive the iOS push-permission deferral. We only want to ask after the
   // user has earned the Find-a-Trade unlock (progress.unlocked === true),
