@@ -1939,11 +1939,22 @@
       }
       if (empty) empty.classList.add('hidden');
 
+      const lastIdx = _rankingsData.length - 1;
       tbody.innerHTML = _rankingsData.map((r, i) => {
         const pos = (r.position || '?').toLowerCase();
+        const upDisabled   = i === 0        ? ' disabled aria-disabled="true"' : '';
+        const downDisabled = i === lastIdx  ? ' disabled aria-disabled="true"' : '';
         return `<tr draggable="true" data-player-id="${r.id}" data-index="${i}">
           <td class="rt-rank-col"><span class="rt-editable-cell" contenteditable="true"
                 data-player-id="${r.id}">${i + 1}</span></td>
+          <td class="rt-move-col">
+            <button type="button" class="rt-move-btn rt-move-up"
+                    data-player-id="${r.id}" data-dir="up"
+                    title="Move up" aria-label="Move up"${upDisabled}>&#9650;</button>
+            <button type="button" class="rt-move-btn rt-move-down"
+                    data-player-id="${r.id}" data-dir="down"
+                    title="Move down" aria-label="Move down"${downDisabled}>&#9660;</button>
+          </td>
           <td class="rt-player-name">${escapeHtml(r.name || 'Unknown')}</td>
           <td><span class="pos-badge ${pos}">${(r.position || '?').toUpperCase()}</span></td>
           <td>${r.age || ''}</td>
@@ -1967,6 +1978,43 @@
           if (e.key === 'Enter') { e.preventDefault(); cell.blur(); }
         });
       });
+
+      // Attach up/down move handlers
+      tbody.querySelectorAll('.rt-move-btn').forEach(btn => {
+        btn.addEventListener('click', _rtOnMoveClick);
+      });
+    }
+
+    // ── Move up / down ──────────────────────────────────────────────
+    // Click ↑ swaps with the row above; ↓ swaps with the row below. Uses the
+    // same _rtRenumberAndSubmit() flow as drag-and-drop so the reorder is
+    // persisted via /api/rankings/reorder.
+    function _rtOnMoveClick(e) {
+      const btn = e.currentTarget;
+      if (btn.disabled) return;
+      const dir   = btn.dataset.dir;
+      const tbody = document.getElementById('rankings-tbody');
+      if (!tbody) return;
+      const row = btn.closest('tr');
+      if (!row) return;
+
+      if (dir === 'up') {
+        const prev = row.previousElementSibling;
+        if (!prev) return;
+        tbody.insertBefore(row, prev);
+      } else {
+        const next = row.nextElementSibling;
+        if (!next) return;
+        tbody.insertBefore(next, row);
+      }
+      _rtRenumberAndSubmit();
+      // Re-render to refresh first/last disabled states.
+      // _rankingsData order needs to match the DOM first.
+      const newOrder = Array.from(tbody.querySelectorAll('tr'))
+        .map(tr => tr.dataset.playerId);
+      _rankingsData.sort((a, b) =>
+        newOrder.indexOf(String(a.id)) - newOrder.indexOf(String(b.id)));
+      renderRankingsTable();
     }
 
     // ── Drag and drop ───────────────────────────────────────────────
