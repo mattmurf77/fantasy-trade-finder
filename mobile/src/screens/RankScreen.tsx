@@ -21,6 +21,7 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useNavigation } from '@react-navigation/native';
 import { haptics } from '../utils/haptics';
+import { startSpan } from '../observability/sentry';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { colors } from '../theme/colors';
@@ -90,8 +91,13 @@ export default function RankScreen() {
   });
 
   const submitMutation = useMutation({
+    // Wrap the network call in a Sentry span so we can see p50/p95
+    // latency of trio submits in production. Span is a no-op when
+    // Sentry isn't initialized.
     mutationFn: (rankedIds: [string, string, string]) =>
-      submitTrioRanking(rankedIds),
+      startSpan({ name: 'trio.submit', op: 'mutation' }, () =>
+        submitTrioRanking(rankedIds),
+      ),
     onSuccess: (resp) => {
       queryClient.invalidateQueries({ queryKey: ['progress'] });
       queryClient.invalidateQueries({ queryKey: ['trio', position] });

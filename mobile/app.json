@@ -46,7 +46,8 @@
       "expo-secure-store"
     ],
     "extra": {
-      "apiBaseUrl": "https://fantasy-trade-finder.onrender.com"
+      "apiBaseUrl": "https://fantasy-trade-finder.onrender.com",
+      "sentryDsn": ""
     }
   }
 }
