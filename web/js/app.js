@@ -3947,7 +3947,12 @@
       listEl.innerHTML = _notifState.map(n => {
         const unreadCls = n.is_read ? '' : ' unread';
         const icon      = notifTypeIcon(n.type);
-        const body      = escapeHtml(n.body || n.title || '');
+        // Strip a leading type-icon emoji from the body so it isn't shown
+        // twice alongside the visual icon badge (legacy notifications stored
+        // an emoji prefix in the body; new notifications no longer do).
+        const rawBody   = (n.body || n.title || '');
+        const cleanBody = rawBody.replace(/^\s*(?:🤝|✅|❌|🎯|🔔)\s*/u, '');
+        const body      = escapeHtml(cleanBody);
         const rel  = relativeTime(n.created_at);
         const abs  = absoluteTime(n.created_at);
         const time = abs ? `${rel} · ${abs}` : rel;

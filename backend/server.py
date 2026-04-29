@@ -2475,7 +2475,7 @@ def swipe_trade():
                                 type_    = "trade_match",
                                 title    = f"🤝 New trade match with {_partner_a}{_in_league}!",
                                 body     = (
-                                    f"🤝 New trade match with {_partner_a}{_in_league}! "
+                                    f"New trade match with {_partner_a}{_in_league}! "
                                     + (f"{', '.join(_give_names)} for {', '.join(_receive_names)}"
                                        if _give_names and _receive_names else "")
                                 ).strip(),
@@ -2488,7 +2488,7 @@ def swipe_trade():
                                 type_    = "trade_match",
                                 title    = f"🤝 New trade match with {_my_username}{_in_league}!",
                                 body     = (
-                                    f"🤝 New trade match with {_my_username}{_in_league}! "
+                                    f"New trade match with {_my_username}{_in_league}! "
                                     + (f"{', '.join(_receive_names)} for {', '.join(_give_names)}"
                                        if _give_names and _receive_names else "")
                                 ).strip(),
