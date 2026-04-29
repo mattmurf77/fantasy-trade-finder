@@ -336,8 +336,11 @@
         showLeagueScreen(user);
       } else {
         logDrawer.info('Session restored ✓');
-        initFairnessSlider();   // load per-league fairness preference on restore
-        _startNotifPolling();
+        // Mount the main app — this calls loadTrio() so the Trios screen
+        // renders with players on auto-auth instead of an empty state.
+        // Also handles initFairnessSlider, _startNotifPolling, scoring
+        // toggles, auto-confirm restore, and ?view= routing.
+        _enterMainApp();
         // Populate the league switcher — _cachedLeagues is empty on a fresh page load
         // so we fetch leagues in the background without blocking the UI
         apiFetch(`/api/sleeper/leagues/${user.user_id}`)
