@@ -464,6 +464,7 @@ notification_queue_table = Table("notification_queue", metadata,
     Column("title",        String),
     Column("body",         String),
     Column("data_json",    Text),                # original push data payload
+    Column("dedup_key",    String),              # original dedup_key from _send_typed_push
     Column("queued_at",    String,  nullable=False),
     Column("deliver_after",String,  nullable=False),  # ISO UTC timestamp when eligible
 )
@@ -582,6 +583,8 @@ def _migrate_db() -> None:
         ("users",              "longest_streak",        "INTEGER"),
         ("users",              "last_rank_local_date",  "VARCHAR"),
         ("users",              "last_rank_tz",          "VARCHAR"),
+        # PR3 — dedup_key threading on quiet-hours queue
+        ("notification_queue", "dedup_key",             "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -4290,9 +4293,12 @@ def queue_notification(
     body: str,
     data: dict | None = None,
     deliver_after: str,
+    dedup_key: str | None = None,
 ) -> None:
     """Defer a push by writing it to notification_queue. The 8am cron
     drains rows where deliver_after <= now() per user and bundles them.
+    `dedup_key` is the original key from _send_typed_push; it gets
+    threaded through the bundle drain so frequency caps remain accurate.
     """
     if not user_id or not kind or not deliver_after:
         return
@@ -4304,6 +4310,7 @@ def queue_notification(
                 title          = title,
                 body           = body,
                 data_json      = json.dumps(data) if data else None,
+                dedup_key      = dedup_key,
                 queued_at      = _now(),
                 deliver_after  = deliver_after,
             ))

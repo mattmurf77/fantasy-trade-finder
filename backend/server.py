@@ -4511,6 +4511,7 @@ def _send_typed_push(
                 user_id, kind,
                 title=title, body=body, data=data or {},
                 deliver_after=_next_8am_utc(prefs.get("tz")),
+                dedup_key=dedup_key,
             )
             log.info("push queued (quiet hrs): user=%s kind=%s", user_id, kind)
             return
@@ -4637,17 +4638,38 @@ def update_notification_prefs_route():
 # environment scaffolding.
 
 _CRON_SECRET = os.environ.get("CRON_SECRET", "")
+# "Production" = anything that isn't pointed at the bundled SQLite DB.
+# Render sets DATABASE_URL=postgresql://… so this evaluates True there.
+# Local dev (sqlite:///…) is the only path where missing CRON_SECRET
+# is treated as an explicit "auth disabled" rather than a misconfig.
+_IS_PROD_ENV = not (os.environ.get("DATABASE_URL", "")
+                    .startswith("sqlite") or
+                    os.environ.get("DATABASE_URL", "") == "")
+
+if _IS_PROD_ENV and not _CRON_SECRET:
+    log.warning("⚠️  CRON_SECRET is unset in a non-SQLite environment — "
+                "/api/cron/* endpoints will reject ALL requests until set")
 
 
 def _require_cron_auth() -> None:
     """Raises a flask abort if the X-Cron-Secret header doesn't match
-    CRON_SECRET. No-op when CRON_SECRET is unset (local dev).
+    CRON_SECRET.
+
+    Local dev (sqlite or no DATABASE_URL): missing CRON_SECRET disables
+    the check so smoke tests don't need scaffolding.
+
+    Production (any non-sqlite DATABASE_URL): missing CRON_SECRET fails
+    closed — every request is rejected with 503. This prevents an
+    accidentally-unset secret from leaving the cron endpoints world-
+    callable on Render.
     """
+    from flask import abort
+    if _IS_PROD_ENV and not _CRON_SECRET:
+        abort(503)
     if not _CRON_SECRET:
         return
     sent = request.headers.get("X-Cron-Secret", "")
     if sent != _CRON_SECRET:
-        from flask import abort
         abort(401)
 
 
@@ -4736,9 +4758,15 @@ def cron_hourly_tick():
             "sound": "default",
         } for t in targets]
         _send_expo_push(msgs)
-        # Log every kind covered by the bundle so frequency caps fire correctly
+        # Log every kind covered by the bundle so frequency caps stay
+        # accurate. We pass the original dedup_key (threaded through the
+        # queue row) so per-dedup_key caps for kinds in _NOTIF_DEDUP_CAPS
+        # — match_expiring, first_match, match_accepted, league_member_*
+        # — keep working when their pushes were deferred to this morning.
         for it in items:
-            log_notification_send(uid, it["kind"], dedup_key="bundled")
+            log_notification_send(
+                uid, it["kind"], dedup_key=it.get("dedup_key"),
+            )
         bundled_users += 1
 
     # ── 2. Tuesday 9am weekly_digest, Wednesday 9am pending_review ──
