@@ -43,11 +43,18 @@
           "color": "#4f7cff"
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "dynasty-trade-finder",
+          "project": "react-native"
+        }
+      ]
     ],
     "extra": {
       "apiBaseUrl": "https://fantasy-trade-finder.onrender.com",
-      "sentryDsn": ""
+      "sentryDsn": "https://cd5ebfea837c8bd07ef3b749dc2daa73@o4511305516187648.ingest.us.sentry.io/4511305531326464"
     }
   }
 }
