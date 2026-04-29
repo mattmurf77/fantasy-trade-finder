@@ -352,6 +352,12 @@
 
     .account-menu {
       position: absolute;
+      /* Visually offset 8px below the chip (preserves the prior look). The
+         8px gap between the chip's bottom edge and the menu's top edge used
+         to drop the :hover state as the cursor crossed it, hiding the menu
+         before the cursor could reach an item. The .account-chip::after
+         bridge below extends the chip's hover hit area down across the gap
+         so :hover stays active during the traverse. */
       top: calc(100% + 8px);
       right: 0;
       background: var(--surface);
@@ -363,6 +369,20 @@
       pointer-events: none;
       transition: opacity 0.15s;
       z-index: 50;
+    }
+    /* Invisible hover bridge: a 10px transparent strip directly below the
+       chip that fills the 8px gap to the menu. Because it is positioned
+       inside .account-chip (which is position:relative), hovering the strip
+       keeps .account-chip:hover true, which keeps .account-menu visible.
+       No JS, no opacity hacks — just a continuous hit area from chip to menu. */
+    .account-chip::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 100%;
+      height: 10px;
+      background: transparent;
     }
 
     .account-menu-item {
