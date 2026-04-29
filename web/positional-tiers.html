@@ -242,12 +242,17 @@
     .tier-drop-zone {
       flex: 1;
       display: flex;
-      flex-wrap: wrap;
-      align-items: flex-start;
-      align-content: flex-start;
-      gap: 8px;
+      /* Vertical list: chips stack top→bottom in rank order. Within-tier
+         rank is now meaningful; flex-direction:column makes that order
+         visually obvious without ambiguous wrap behavior. */
+      flex-direction: column;
+      flex-wrap: nowrap;
+      align-items: stretch;
+      gap: 6px;
       padding: 10px;
       min-height: 52px;
+      max-height: 50vh;            /* keep a 30-player bench from running off page */
+      overflow-y: auto;
       position: relative;
     }
 
@@ -262,6 +267,27 @@
       color: #3a3d50;
       pointer-events: none;
     }
+
+    /* Drop-indicator: a 2px accent line above the targeted chip while
+       another chip is being dragged over the zone. Used for both
+       within-tier reorder and cross-tier insertion. */
+    .tier-drop-zone .player-chip.drop-indicator-above {
+      box-shadow: 0 -3px 0 0 var(--accent);
+      transition: box-shadow 0.08s linear;
+    }
+    .tier-drop-zone.drop-at-end::after {
+      /* Show a thin accent strip at the bottom of the zone when the drop
+         target is past the last chip. Hidden by default; revealed only
+         while .drop-at-end is set. */
+      content: "";
+      display: block;
+      height: 2px;
+      background: var(--accent);
+      margin-top: 2px;
+      pointer-events: none;
+    }
+    /* When .drop-at-end is on a non-empty zone, hide the placeholder text */
+    .tier-drop-zone.drop-at-end.empty::after { content: ""; height: 2px; background: var(--accent); position: static; display: block; inset: auto; }
 
     /* ── Top: Unassigned player pool (full width, grid) ── */
     .player-pool {
@@ -422,6 +448,36 @@
     }
     .chip-remove:hover { background: rgba(239,68,68,0.25); }
     .tier-drop-zone .player-chip .chip-remove { display: flex; }
+
+    /* Tier chips fill the column width so the within-tier vertical order
+       reads cleanly. Rank number (.chip-rank) sits at the left, then the
+       existing position-chip + name + meta + arrows + remove pattern. */
+    .tier-drop-zone .player-chip {
+      width: 100%;
+      justify-content: flex-start;
+      box-sizing: border-box;
+    }
+    /* Name grows to fill remaining width so arrows + remove pin to the
+       right edge of the chip. Mirrors the mobile-breakpoint rule that
+       used to live inside @media (max-width: 600px) — promoted to base. */
+    .tier-drop-zone .chip-name {
+      flex: 1 1 0;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chip-rank {
+      flex-shrink: 0;
+      width: 24px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--muted);
+      text-align: right;
+      line-height: 1;
+    }
 
     .chip-age {
       font-size: 11px;
@@ -1436,14 +1492,15 @@
       const assigned = new Set();
       TIERS.forEach(t => tierState[currentPos][t].forEach(id => assigned.add(id)));
 
-      // Render tier zones
+      // Render tier zones. Pass the array index as `rankInTier` so the
+      // chip can render its 1-based rank label (within-tier order).
       TIERS.forEach(tier => {
         const zone = document.getElementById(`zone-${tier}`);
         const ids = tierState[currentPos][tier];
         zone.innerHTML = '';
-        ids.forEach(id => {
+        ids.forEach((id, rankIdx) => {
           const p = players.find(x => x.id === id);
-          if (p) zone.appendChild(createChip(p, tier));
+          if (p) zone.appendChild(createChip(p, tier, rankIdx));
         });
         zone.classList.toggle('empty', ids.length === 0);
         document.getElementById(`count-${tier}`).textContent = ids.length;
@@ -1486,13 +1543,16 @@
       filtered.forEach(p => pool.appendChild(createChip(p, null)));
     }
 
-    function createChip(player, tierName) {
+    function createChip(player, tierName, rankInTier) {
       // tierName: null = in pool (unassigned), or 'elite'/'starter'/'solid'/'depth'/'bench'
+      // rankInTier: 0-based array index of this chip within its tier (in-tier only;
+      //             ignored for pool chips). Rendered as 1-based "1." "2." etc.
       const inTier = !!tierName;
       const chip = document.createElement('div');
       chip.className = 'player-chip';
       chip.setAttribute('draggable', 'true');
       chip.dataset.id = player.id;
+      if (inTier) chip.dataset.rank = String(rankInTier ?? 0);
 
       const posClass = player.pos.toLowerCase();
       const tierIdx  = inTier ? TIERS.indexOf(tierName) : -1;
@@ -1522,7 +1582,12 @@
       const ageStr = player.age ? `${player.age}` : '';
 
       if (inTier) {
+        // Rank label is tier-local and 1-indexed. The tier name itself
+        // (in the .tier-label-area on the left of the row) supplies the
+        // tier context, so just plain "1." here keeps the chip uncluttered.
+        const rankLabel = `${(rankInTier ?? 0) + 1}.`;
         chip.innerHTML = `
+          <span class="chip-rank">${rankLabel}</span>
           <span class="chip-pos ${posClass}">${player.pos}</span>
           <span class="chip-name">${player.name}</span>
           ${ageStr ? `<span class="chip-age">${ageStr}</span>` : ''}
@@ -1571,6 +1636,9 @@
         chip.classList.remove('dragging');
         draggedId = null;
         document.querySelectorAll('.tier-row.drag-over').forEach(r => r.classList.remove('drag-over'));
+        // Clear any insertion-line indicators in case the drag ended
+        // outside a drop zone (Esc, snap-back, etc.).
+        _clearDropIndicators();
       });
 
       // Pool chips use the tier-assign buttons instead of click-to-quick-assign
@@ -1581,60 +1649,133 @@
     // ══════════════════════════════════════════════════════
     //  DRAG & DROP HANDLERS
     // ══════════════════════════════════════════════════════
+    // ── computeDropIndex(zoneEl, clientY) ─────────────────────────────────
+    // Given a tier-drop-zone DOM element and the cursor's clientY (viewport
+    // coordinate), return the 0-based array index where a drop should
+    // insert the dragged chip. Iterates direct .player-chip children and
+    // returns the index of the first child whose vertical midpoint is
+    // BELOW the cursor (i.e. cursor is above that child's middle → insert
+    // before it). If the cursor is below every child's midpoint, returns
+    // children.length (append to end). Excludes the dragged chip itself
+    // so the insertion math is consistent with the post-removal array.
+    function computeDropIndex(zoneEl, clientY) {
+      const chips = Array.from(zoneEl.querySelectorAll(':scope > .player-chip'))
+        .filter((c) => c.dataset.id !== draggedId);
+      for (let i = 0; i < chips.length; i++) {
+        const r = chips[i].getBoundingClientRect();
+        if (clientY < r.top + r.height / 2) return i;
+      }
+      return chips.length;
+    }
+
+    function _clearDropIndicators() {
+      document.querySelectorAll('.player-chip.drop-indicator-above')
+        .forEach((c) => c.classList.remove('drop-indicator-above'));
+      document.querySelectorAll('.tier-drop-zone.drop-at-end')
+        .forEach((z) => z.classList.remove('drop-at-end'));
+    }
+
     function onDragOver(e) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
-      e.currentTarget.closest('.tier-row').classList.add('drag-over');
+      const zone = e.currentTarget;
+      zone.closest('.tier-row').classList.add('drag-over');
+
+      // Compute the insertion index and paint a 2px accent strip either
+      // above the chip we'd insert before, or at the very bottom of the
+      // zone if dropping past the last chip.
+      const idx = computeDropIndex(zone, e.clientY);
+      _clearDropIndicators();
+      const chips = Array.from(zone.querySelectorAll(':scope > .player-chip'))
+        .filter((c) => c.dataset.id !== draggedId);
+      if (idx < chips.length) {
+        chips[idx].classList.add('drop-indicator-above');
+      } else {
+        zone.classList.add('drop-at-end');
+      }
     }
 
     function onDragLeave(e) {
       // Only remove if we actually left the zone
       if (!e.currentTarget.contains(e.relatedTarget)) {
         e.currentTarget.closest('.tier-row').classList.remove('drag-over');
+        _clearDropIndicators();
       }
     }
 
     function onDrop(e, targetTier) {
       e.preventDefault();
-      const row = e.currentTarget.closest('.tier-row');
+      const zone = e.currentTarget;
+      const row = zone.closest('.tier-row');
       row.classList.remove('drag-over');
 
       const playerId = e.dataTransfer.getData('text/plain') || draggedId;
+      // Compute drop index BEFORE clearing indicators (the indicator
+      // helper only paints; the math is independent and runs on the
+      // current chip layout — same as what was visualized).
+      const idx = computeDropIndex(zone, e.clientY);
+      _clearDropIndicators();
       if (!playerId) return;
 
-      assignToTier(playerId, targetTier);
+      assignToTierAt(playerId, targetTier, idx);
     }
 
     // ══════════════════════════════════════════════════════
     //  TIER ASSIGNMENT LOGIC
     // ══════════════════════════════════════════════════════
-    function assignToTier(playerId, targetTier) {
+    // ── assignToTierAt(playerId, targetTier, insertIdx) ───────────────────
+    // Insert the player into `targetTier` at the given 0-based index. Used
+    // for both within-tier reorder (drag to a new position in the same
+    // tier) and cross-tier moves (drag onto a different tier row, optionally
+    // at a specific position). The thin `assignToTier(pid, t)` wrapper
+    // below preserves the legacy "append to end" call sites.
+    //
+    // `insertIdx` is interpreted in POST-REMOVAL coordinates: the drag
+    // path computes it from a list that already excludes the dragged chip,
+    // so we splice the source out FIRST and then splice into the target
+    // at exactly `insertIdx` with no further adjustment. This makes
+    // same-tier and cross-tier paths use the same arithmetic.
+    function assignToTierAt(playerId, targetTier, insertIdx) {
       const state = tierState[currentPos];
 
-      // Find current tier (if any)
+      // Find current location (tier + index)
       let fromTier = null;
-      TIERS.forEach(t => {
-        const idx = state[t].indexOf(playerId);
-        if (idx !== -1) {
-          fromTier = t;
-          state[t].splice(idx, 1);
-        }
-      });
+      let fromIdx  = -1;
+      for (const t of TIERS) {
+        const i = state[t].indexOf(playerId);
+        if (i !== -1) { fromTier = t; fromIdx = i; break; }
+      }
 
-      // Skip if already in the same tier
-      if (fromTier === targetTier) {
+      // No-op: already at the requested slot in the same tier. We use
+      // fromIdx === toIdx (in post-removal coordinates) — this catches
+      // "drop in own slot" without doing a destructive splice round-trip.
+      let toIdx = (typeof insertIdx === 'number') ? insertIdx : state[targetTier].length;
+      // Clamp: post-removal target length is len-1 if same-tier, else len.
+      const targetLen = state[targetTier].length - (fromTier === targetTier ? 1 : 0);
+      if (toIdx < 0) toIdx = 0;
+      if (toIdx > targetLen) toIdx = targetLen;
+      if (fromTier === targetTier && fromIdx === toIdx) {
         render();
         return;
       }
 
-      state[targetTier].push(playerId);
+      // Remove from old location, then insert at new.
+      if (fromTier !== null) state[fromTier].splice(fromIdx, 1);
+      state[targetTier].splice(toIdx, 0, playerId);
 
-      // Push undo
-      undoStack.push({ playerId, fromTier, toTier: targetTier });
+      // Push undo with full positional context so undo is precise
+      undoStack.push({ playerId, fromTier, fromIdx, toTier: targetTier, toIdx });
       showUndo(playerId);
 
       markDirty();
       render();
+    }
+
+    // Backwards-compat wrapper. Existing call sites that don't care about
+    // insertion index (tier-assign buttons on pool chips, quickAssign,
+    // moveUp/moveDown's old behavior) keep working unchanged.
+    function assignToTier(playerId, targetTier) {
+      return assignToTierAt(playerId, targetTier, tierState[currentPos][targetTier].length);
     }
 
     function removeFromTier(playerId) {
@@ -1643,7 +1784,8 @@
       TIERS.forEach(t => {
         const idx = state[t].indexOf(playerId);
         if (idx !== -1) {
-          undoStack.push({ playerId, fromTier: t, toTier: null });
+          // Capture fromIdx so undo restores at the exact previous position.
+          undoStack.push({ playerId, fromTier: t, fromIdx: idx, toTier: null, toIdx: -1 });
           state[t].splice(idx, 1);
           showUndo(playerId);
           changed = true;
@@ -1672,37 +1814,71 @@
       assignToTier(playerId, target);
     }
 
-    // ── Arrow-based tier movement (mobile fallback) ──
+    // ── Rank-by-1 with edge spillover ─────────────────────────────────────
+    // Up: move up one position within the current tier. If already at the
+    //     top of a tier, hop to the END of the tier above (so the visual
+    //     "kept moving up" intuition stays consistent across the boundary).
+    //     At the top of `elite`, no-op.
+    // Down: symmetric. At the bottom of a tier, move to the START of the
+    //      tier below. At the bottom of `bench`, send back to the pool.
+    //
+    // Trade-off vs. legacy "1 click = 1 tier promote": full tier promotes
+    // now take N+1 clicks. Drag-drop is the fast path for tier-level moves;
+    // typical tiers hold 3–7 players so this is acceptable.
     function moveUp(playerId) {
       const state = tierState[currentPos];
       let currentTier = null;
-      TIERS.forEach(t => { if (state[t].includes(playerId)) currentTier = t; });
+      let currentIdx  = -1;
+      for (const t of TIERS) {
+        const i = state[t].indexOf(playerId);
+        if (i !== -1) { currentTier = t; currentIdx = i; break; }
+      }
 
       if (!currentTier) {
-        // In pool — assign to bottom tier
+        // In pool — append to bottom tier (preserves legacy intent)
         assignToTier(playerId, TIERS[TIERS.length - 1]);
         return;
       }
 
-      const idx = TIERS.indexOf(currentTier);
-      if (idx <= 0) return; // already at top
-      assignToTier(playerId, TIERS[idx - 1]);
+      // Within tier: swap with the chip above
+      if (currentIdx > 0) {
+        assignToTierAt(playerId, currentTier, currentIdx - 1);
+        return;
+      }
+
+      // At top of current tier: spill to end of tier above
+      const tierIdx = TIERS.indexOf(currentTier);
+      if (tierIdx <= 0) return;                     // already at top of `elite`
+      const above = TIERS[tierIdx - 1];
+      assignToTierAt(playerId, above, state[above].length);
     }
 
     function moveDown(playerId) {
       const state = tierState[currentPos];
       let currentTier = null;
-      TIERS.forEach(t => { if (state[t].includes(playerId)) currentTier = t; });
+      let currentIdx  = -1;
+      for (const t of TIERS) {
+        const i = state[t].indexOf(playerId);
+        if (i !== -1) { currentTier = t; currentIdx = i; break; }
+      }
 
-      if (!currentTier) return;
+      if (!currentTier) return;                     // not in any tier; arrows hidden anyway
 
-      const idx = TIERS.indexOf(currentTier);
-      if (idx >= TIERS.length - 1) {
-        // At bottom tier — remove back to pool
+      // Within tier: swap with the chip below
+      if (currentIdx < state[currentTier].length - 1) {
+        assignToTierAt(playerId, currentTier, currentIdx + 1);
+        return;
+      }
+
+      // At bottom of current tier: spill to start of tier below
+      const tierIdx = TIERS.indexOf(currentTier);
+      if (tierIdx >= TIERS.length - 1) {
+        // At bottom of bench — back to pool (preserves legacy intent)
         removeFromTier(playerId);
         return;
       }
-      assignToTier(playerId, TIERS[idx + 1]);
+      const below = TIERS[tierIdx + 1];
+      assignToTierAt(playerId, below, 0);
     }
 
     // ══════════════════════════════════════════════════════
@@ -1722,21 +1898,28 @@
 
     function undoLastMove() {
       if (undoStack.length === 0) return;
-      const { playerId, fromTier, toTier } = undoStack.pop();
+      const entry = undoStack.pop();
+      const { playerId, fromTier, fromIdx, toTier } = entry;
       const state = tierState[currentPos];
 
-      // Remove from where it went
+      // Remove from where it went (toTier may be null if the move was a
+      // removeFromTier, in which case there's nothing to remove from a tier).
       if (toTier) {
         const idx = state[toTier].indexOf(playerId);
         if (idx !== -1) state[toTier].splice(idx, 1);
       }
 
-      // Put back where it was
+      // Put back where it was, at the exact index. fromIdx may be missing
+      // on legacy entries (defensive); fall back to push-to-end so undo
+      // still does something useful.
       if (fromTier) {
-        state[fromTier].push(playerId);
+        const restoreIdx = (typeof fromIdx === 'number') ? fromIdx : state[fromTier].length;
+        const clamped = Math.max(0, Math.min(restoreIdx, state[fromTier].length));
+        state[fromTier].splice(clamped, 0, playerId);
       }
 
       document.getElementById('undo-toast').classList.remove('show');
+      markDirty();           // undo is itself a state change worth saving
       render();
     }
 
@@ -2255,12 +2438,21 @@
     let _lastUsedTier = 'starter';  // tracks MRU tier for pool→tier swipe
 
     // Track the last tier the user explicitly assigned to so swipe-right on
-    // a pool chip lands there.  Hook into assignToTier without overriding it
-    // (avoid recursion) by wrapping.
+    // a pool chip lands there.  Hook into BOTH assignToTier and the newer
+    // assignToTierAt without overriding either (avoid recursion) by wrapping.
+    // assignToTier delegates to assignToTierAt internally, but we wrap both
+    // so that direct assignToTier(...) call sites and direct
+    // assignToTierAt(...) call sites (drag-drop) both update _lastUsedTier
+    // in one consistent place.
     const _originalAssignToTier = assignToTier;
     assignToTier = function assignWithMRU(playerId, targetTier) {
       if (TIERS.includes(targetTier)) _lastUsedTier = targetTier;
       return _originalAssignToTier(playerId, targetTier);
+    };
+    const _originalAssignToTierAt = assignToTierAt;
+    assignToTierAt = function assignAtWithMRU(playerId, targetTier, insertIdx) {
+      if (TIERS.includes(targetTier)) _lastUsedTier = targetTier;
+      return _originalAssignToTierAt(playerId, targetTier, insertIdx);
     };
 
     function swipeEnabled() {
