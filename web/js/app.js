@@ -2986,8 +2986,38 @@
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify(payload),
         });
-        const cards = await res.json();
-        if (cards.error) { showToast('⚠️ ' + cards.error); return; }
+        const body = await res.json();
+
+        // The backend was refactored to return a streaming TradeJobSnapshot
+        // (`{job_id, status, cards, opponents_done, opponents_total}`) for
+        // the mobile app's progressive deck. The web client wasn't updated
+        // at the time, so it was reading `.length` off the snapshot object
+        // and rendering "Found undefined trade ideas." Handle both shapes:
+        // a bare array (legacy fallback) and a snapshot we may need to poll.
+        let cards;
+        if (Array.isArray(body)) {
+          cards = body;
+        } else if (body && typeof body === 'object' && body.job_id) {
+          if (body.status === 'error') {
+            showToast('⚠️ ' + (body.error || 'Trade generation failed'));
+            return;
+          }
+          if (body.status === 'complete') {
+            cards = Array.isArray(body.cards) ? body.cards : [];
+          } else {
+            // Status === 'running' — poll until done. The button text
+            // doubles as the progress strip so the user sees movement.
+            cards = await _pollTradesJob(body, btn);
+            if (cards == null) return;          // user-visible error already toasted
+          }
+        } else if (body && body.error) {
+          showToast('⚠️ ' + body.error);
+          return;
+        } else {
+          showToast('⚠️ Unexpected response from trade engine');
+          return;
+        }
+
         const pinnedLabel = pinnedGive.length > 0 ? ` for ${pinnedGive.length} pinned player(s)` : '';
         showToast(`✅ Found ${cards.length} trade ideas${pinnedLabel}`);
         renderTrades(cards);
@@ -2998,6 +3028,68 @@
         btn.disabled = false;
         btn.textContent = '⚡ Find a Trade';
       }
+    }
+
+    // Polls /api/trades/status until the snapshot's status flips off
+    // 'running'. Returns the final cards array on success, or null on
+    // user-visible error (already toasted). Updates the gen-btn label
+    // with progress so the user sees opponents-checked counter while we
+    // wait. Caps at MAX_POLLS * INTERVAL ≈ 60 seconds wall clock — which
+    // covers the worst-case generation time on Render's free tier.
+    async function _pollTradesJob(initialSnapshot, btn) {
+      const INTERVAL_MS = 1500;
+      const MAX_POLLS   = 40;
+      const MAX_FAILS   = 4;
+      let snap = initialSnapshot;
+      let fails = 0;
+
+      const updateBtnText = () => {
+        const done = snap.opponents_done || 0;
+        const tot  = snap.opponents_total || '?';
+        const n    = Array.isArray(snap.cards) ? snap.cards.length : 0;
+        btn.textContent = n > 0
+          ? `⏳ Searching… ${done}/${tot} · ${n} found`
+          : `⏳ Searching… ${done}/${tot}`;
+      };
+      updateBtnText();
+
+      for (let i = 0; i < MAX_POLLS; i++) {
+        await new Promise(r => setTimeout(r, INTERVAL_MS));
+        try {
+          const r = await apiFetch(
+            `/api/trades/status?job_id=${encodeURIComponent(snap.job_id)}`,
+          );
+          if (!r.ok) {
+            // 404 = job evicted. Treat as terminal failure.
+            if (r.status === 404) {
+              showToast('⚠️ Trade job expired — try again');
+              return null;
+            }
+            throw new Error(`status ${r.status}`);
+          }
+          snap = await r.json();
+          fails = 0;
+        } catch {
+          fails++;
+          if (fails >= MAX_FAILS) {
+            showToast('⚠️ Network hiccup — try Find a Trade again');
+            return null;
+          }
+          continue;       // try one more poll
+        }
+        updateBtnText();
+        if (snap.status === 'complete') {
+          return Array.isArray(snap.cards) ? snap.cards : [];
+        }
+        if (snap.status === 'error') {
+          showToast('⚠️ ' + (snap.error || 'Trade generation failed'));
+          return null;
+        }
+      }
+      // Timed out waiting. Return whatever cards have arrived so far —
+      // user can re-tap to keep waiting.
+      showToast('⌛ Still searching — tap again in a moment');
+      return Array.isArray(snap.cards) ? snap.cards : [];
     }
 
     async function refreshTrades() {
