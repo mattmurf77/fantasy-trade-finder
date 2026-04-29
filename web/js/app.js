@@ -4041,8 +4041,34 @@
     }
 
     // ── Notifications ──────────────────────────────────────────────
-    let _notifState    = [];   // current cached notifications
+    let _notifState    = [];   // current cached notifications (server-side, unfiltered)
     let _notifPollTimer = null;
+
+    // Locally-dismissed notification IDs (per browser). Persisted in
+    // localStorage so notifications cleared via the "Clear" button stay
+    // hidden across refreshes and poll cycles. The server still has the
+    // notifications — we just filter them out on render and in the badge
+    // count. Stored as a JSON array of IDs.
+    const LS_DISMISSED_NOTIFS = 'ftf_dismissed_notifs';
+    function _getDismissedNotifIds() {
+      try {
+        const raw = localStorage.getItem(LS_DISMISSED_NOTIFS);
+        if (!raw) return new Set();
+        const arr = JSON.parse(raw);
+        return new Set(Array.isArray(arr) ? arr : []);
+      } catch { return new Set(); }
+    }
+    function _saveDismissedNotifIds(set) {
+      try {
+        // Cap to last 500 IDs to prevent unbounded localStorage growth.
+        const arr = Array.from(set).slice(-500);
+        localStorage.setItem(LS_DISMISSED_NOTIFS, JSON.stringify(arr));
+      } catch {}
+    }
+    function _visibleNotifs() {
+      const dismissed = _getDismissedNotifIds();
+      return (_notifState || []).filter(n => !dismissed.has(n.id));
+    }
 
     function relativeTime(isoStr) {
       if (!isoStr) return '';
@@ -4082,7 +4108,10 @@
         const res  = await apiFetch(`/api/notifications?user_id=${encodeURIComponent(currentUserId)}`);
         const data = await res.json();
         _notifState = data.notifications || [];
-        _updateNotifBadge(data.unread_count || 0);
+        // Badge must reflect what the user actually sees, so exclude
+        // locally-dismissed notifications from the unread count.
+        const visibleUnread = _visibleNotifs().filter(n => !n.is_read).length;
+        _updateNotifBadge(visibleUnread);
         // If panel is open, refresh it
         const panel = document.getElementById('notif-panel');
         if (panel && panel.classList.contains('open')) {
@@ -4108,11 +4137,12 @@
     function _renderNotifList() {
       const listEl = document.getElementById('notif-list');
       if (!listEl) return;
-      if (!_notifState || _notifState.length === 0) {
+      const visible = _visibleNotifs();
+      if (!visible || visible.length === 0) {
         listEl.innerHTML = '<div class="notif-empty">No notifications yet</div>';
         return;
       }
-      listEl.innerHTML = _notifState.map(n => {
+      listEl.innerHTML = visible.map(n => {
         const unreadCls = n.is_read ? '' : ' unread';
         const icon      = notifTypeIcon(n.type);
         // Strip a leading type-icon emoji from the body so it isn't shown
@@ -4166,6 +4196,26 @@
         _updateNotifBadge(0);
         _renderNotifList();
       } catch { /* silent fail */ }
+    }
+
+    /**
+     * Locally hide every notification currently visible in the dropdown.
+     * Adds their IDs to a localStorage-backed dismissed set so they don't
+     * reappear on refresh or the next poll. This is a client-only operation
+     * — the server still has the notifications, we just filter them out
+     * everywhere we render or count.
+     */
+    function clearVisibleNotifs() {
+      const visible = _visibleNotifs();
+      if (visible.length === 0) return;
+      const dismissed = _getDismissedNotifIds();
+      visible.forEach(n => { if (n && n.id != null) dismissed.add(n.id); });
+      _saveDismissedNotifIds(dismissed);
+      // Recompute badge from what's still visible (any newer notifications
+      // that arrived between fetch and clear would still be unread).
+      const remainingUnread = _visibleNotifs().filter(n => !n.is_read).length;
+      _updateNotifBadge(remainingUnread);
+      _renderNotifList();
     }
 
     async function clickNotif(id, type, metadata) {

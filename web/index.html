@@ -191,7 +191,10 @@
         <div class="notif-panel" id="notif-panel">
           <div class="notif-panel-header">
             <span class="notif-panel-title">Notifications</span>
-            <button class="notif-mark-all-btn" onclick="markAllNotifsRead()">Mark all read</button>
+            <div class="notif-panel-actions">
+              <button class="notif-mark-all-btn" onclick="markAllNotifsRead()">Mark all read</button>
+              <button class="notif-clear-btn" onclick="clearVisibleNotifs()" title="Hide these notifications">Clear</button>
+            </div>
           </div>
           <div class="notif-list" id="notif-list">
             <div class="notif-empty">No notifications yet</div>
