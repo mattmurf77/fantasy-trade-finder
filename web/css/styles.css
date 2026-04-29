@@ -1957,8 +1957,6 @@
       padding: 8px 12px; white-space: nowrap; color: var(--text);
     }
     .rt-rank-col { width: 36px; text-align: center; color: var(--muted); font-weight: 600; }
-    .rt-drag-col { width: 24px; text-align: center; cursor: grab; color: var(--muted); opacity: 0.5; }
-    .rt-drag-col:hover { opacity: 1; }
     .rt-editable-col { width: 60px; }
     .rt-editable-cell {
       cursor: text; padding: 4px 8px; border-radius: 4px;

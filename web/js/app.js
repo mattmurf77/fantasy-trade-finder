@@ -1944,7 +1944,6 @@
         return `<tr draggable="true" data-player-id="${r.id}" data-index="${i}">
           <td class="rt-rank-col"><span class="rt-editable-cell" contenteditable="true"
                 data-player-id="${r.id}">${i + 1}</span></td>
-          <td class="rt-drag-col" title="Drag to reorder">\u2807</td>
           <td class="rt-player-name">${escapeHtml(r.name || 'Unknown')}</td>
           <td><span class="pos-badge ${pos}">${(r.position || '?').toUpperCase()}</span></td>
           <td>${r.age || ''}</td>
