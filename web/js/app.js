@@ -1613,7 +1613,6 @@
         const stage = buildCareerBadge(p);
         if (tier)  parts.push(tier);
         if (stage) parts.push(stage);
-        if (p.college) parts.push(`<span style="color:var(--muted)">${escapeHtml(p.college)}</span>`);
         extraEl.innerHTML = parts.filter(Boolean).join('');
       }
 
