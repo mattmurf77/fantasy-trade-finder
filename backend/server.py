@@ -1651,11 +1651,28 @@ def get_rankings_progress():
         # 'trio' or null — original threshold logic
         unlocked = all(counts[p] >= threshold for p in POSITIONS)
 
+    # Pull the user's prior unlocked formats now so we can apply a
+    # monotonic floor to the per-method decision above. Users who already
+    # qualified via one method (e.g. trio swipes) and later switched their
+    # method (e.g. to "tiers") were getting re-locked here because the
+    # method-specific check failed — even though they had already passed.
+    # mark_format_unlocked is monotonic by contract, so OR'ing here is safe.
+    try:
+        unlocked_formats_list = get_unlocked_formats(g_user_id) or []
+    except Exception:
+        unlocked_formats_list = []
+
+    if not unlocked and fmt in unlocked_formats_list:
+        unlocked = True
+
     # Mark the format as unlocked once (monotonic) so the League Summary
     # adoption counts can query users.unlocked_formats efficiently.
     # mark_format_unlocked returns {'inserted', 'was_first'} computed in
     # the same transaction as the write — gating on `was_first` is race-free
-    # (concurrent /progress calls won't both see was_first=True).
+    # (concurrent /progress calls won't both see was_first=True). When the
+    # user is reaching this from the monotonic OR above (already in the
+    # list), `was_first` will be False and the event/push fan-out won't
+    # spuriously fire.
     if unlocked:
         _unlock_res = {"inserted": False, "was_first": False}
         try:
@@ -1702,12 +1719,12 @@ def get_rankings_progress():
             except Exception as _lm_err:
                 log.warning("league_member_unlocked_trades push failed: %s", _lm_err)
 
-    # Agent A4 — surface the user's full list of unlocked formats so the
-    # frontend nav-pill can show 0/2, 1/2, 2/2 in one shot. Additive-only.
-    try:
-        unlocked_formats_list = get_unlocked_formats(g_user_id) or []
-    except Exception:
-        unlocked_formats_list = []
+        # If the per-method branch decided unlocked=True for a format
+        # we hadn't seen before, fold it into the response list now —
+        # mark_format_unlocked above already persisted, but our local
+        # cache was read before that write.
+        if fmt not in unlocked_formats_list:
+            unlocked_formats_list = list(unlocked_formats_list) + [fmt]
 
     return jsonify({
         **counts,
