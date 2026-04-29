@@ -1557,8 +1557,16 @@
 
       const posClass = player.pos.toLowerCase();
       const tierIdx  = inTier ? TIERS.indexOf(tierName) : -1;
-      const isTop    = tierIdx === 0;
-      const isBottom = tierIdx === TIERS.length - 1;
+      // The arrows now drive both within-tier reorder and tier promotion/
+      // demotion (see moveUp/moveDown), so the visibility gate has to look
+      // at the player's position WITHIN the tier too — not just whether
+      // they're in the top/bottom tier. Without this, every player in tier 1
+      // had its up arrow stripped (only the rank-0 player should), and every
+      // player in the bottom tier had its down arrow stripped.
+      const tierLen     = inTier ? (tierState[currentPos][tierName] || []).length : 0;
+      const isAbsTop    = tierIdx === 0 && (rankInTier ?? 0) === 0;
+      const isAbsBottom = tierIdx === TIERS.length - 1
+                          && (rankInTier ?? 0) === Math.max(0, tierLen - 1);
 
       // Helper: stop pointer/mouse/touch events from bubbling so the parent
       // chip's dragstart doesn't fire when a user taps these controls —
@@ -1567,14 +1575,17 @@
       const stopDrag = `draggable="false" onpointerdown="event.stopPropagation()" ontouchstart="event.stopPropagation()" onmousedown="event.stopPropagation()"`;
 
       // Build arrow buttons: only show relevant arrows when in a tier.
+      // The up arrow is hidden only for the absolute top spot (rank 0 in the
+      // top tier) — every other in-tier player can move up (within their
+      // tier or spill to the tier above). Symmetric for the down arrow.
       let arrowsHtml = '';
       if (inTier) {
-        const upBtn = isTop
+        const upBtn = isAbsTop
           ? ''
-          : `<button class="chip-arrow-btn" ${stopDrag} onclick="event.stopPropagation(); moveUp('${player.id}')" title="Move up tier">&#9650;</button>`;
-        const downBtn = isBottom
+          : `<button class="chip-arrow-btn" ${stopDrag} onclick="event.stopPropagation(); moveUp('${player.id}')" title="Move up">&#9650;</button>`;
+        const downBtn = isAbsBottom
           ? ''
-          : `<button class="chip-arrow-btn" ${stopDrag} onclick="event.stopPropagation(); moveDown('${player.id}')" title="Move down tier">&#9660;</button>`;
+          : `<button class="chip-arrow-btn" ${stopDrag} onclick="event.stopPropagation(); moveDown('${player.id}')" title="Move down">&#9660;</button>`;
         if (upBtn || downBtn) {
           arrowsHtml = `<span class="chip-arrows tier-arrows">${upBtn}${downBtn}</span>`;
         }
