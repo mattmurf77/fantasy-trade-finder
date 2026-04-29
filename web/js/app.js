@@ -2764,6 +2764,9 @@
       if (view === 'rank') {
         checkFormatEmptyState('rank');
       }
+      if (view === 'trends') {
+        loadTrends();
+      }
     }
 
     // ── Trade finder ─────────────────────────────────────────────────
@@ -4291,7 +4294,7 @@
       } else if (id === 'view-league') {
         loadLeagueSummary();
       }
-      if (view === 'trends') {
+      if (id === 'view-trends') {
         loadTrends();
       }
     }
