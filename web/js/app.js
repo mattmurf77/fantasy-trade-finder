@@ -1807,12 +1807,16 @@
         overallTab.classList.toggle('hidden', !progress.unlocked);
       }
 
-      // Hide once fully unlocked
-      if (progress.unlocked) {
+      // Hide once fully unlocked — remove the promo section entirely
+      // so it stops occupying space on the Trios page after the user
+      // has unlocked Find a Trade.
+      if (progress.unlocked === true) {
         wrap.classList.add('unlocked');
+        wrap.hidden = true;
         return;
       }
       wrap.classList.remove('unlocked');
+      wrap.hidden = false;
 
       let totalDone = 0;
       const totalRequired = threshold * positions.length;
