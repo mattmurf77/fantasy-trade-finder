@@ -3234,6 +3234,70 @@ def league_member_unlock_states_route():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/league/members")
+def league_members_route():
+    """
+    GET /api/league/members?league_id=...
+    Returns the roster of leaguemates with their join status. Powers
+    the "Leaguemates" roster section on the League Summary page (with
+    its Invite button in the top-right).
+
+    Unlike /api/league/member-unlock-states this endpoint is NOT
+    flag-gated — join status is base info, always shown.
+
+    Response:
+        {
+          "members": [
+            {
+              "user_id":      str,
+              "username":     str,
+              "display_name": str,
+              "avatar":       str | None,
+              "joined":       bool,    # has a users row (i.e. has signed in to FTF)
+            }, ...
+          ]
+        }
+
+    Sort order: joined first (alphabetically by display_name), then
+    not-joined (alphabetically by display_name).
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess.get("league")
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+
+    try:
+        # Reuse existing per-member loader, then trim to the join-status
+        # fields this section needs. Keeps a single source of truth for
+        # the join determination.
+        rows = load_league_member_unlock_states(
+            league_id       = league_id,
+            exclude_user_id = g_user_id,
+        )
+        members = [
+            {
+                "user_id":      r["user_id"],
+                "username":     r["username"],
+                "display_name": r["display_name"],
+                "avatar":       r["avatar"],
+                "joined":       r["joined"],
+            }
+            for r in rows
+        ]
+        # Sort: joined first, then not-joined; alphabetical within each group.
+        members.sort(key=lambda r: (
+            0 if r["joined"] else 1,
+            (r["display_name"] or "").lower(),
+        ))
+        return jsonify({"members": members})
+    except Exception as e:
+        log.error("league/members error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/league/activity")
 def league_activity_route():
     """

@@ -2233,9 +2233,9 @@
       if (!user) { logout(); return; }
 
       logDrawer.action(`League switcher → "${lg.name}" (${lg.league_id})`);
-      select.disabled = true;
+      _setSwitcherDisabled(true);
       if (genBtn) genBtn.disabled = true;
-      status.textContent = '⏳ Switching…';
+      _setSwitcherStatus('⏳ Switching…');
 
       // Warm player cache (no-op if already loaded), then fetch new rosters
       try {
@@ -2243,12 +2243,12 @@
         if (!pr.ok) throw new Error(`Player cache HTTP ${pr.status}`);
       } catch (e) {
         logDrawer.error(`League switch — player cache failed: ${e.message}`);
-        status.textContent = '⚠️ Failed';
-        select.disabled = false;
+        _setSwitcherStatus('⚠️ Failed');
+        _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
         // Revert visual selection to current league
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
-        if (revertIdx >= 0) select.selectedIndex = revertIdx;
+        if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
         showToast('⚠️ Could not load player database');
         return;
       }
@@ -2264,11 +2264,11 @@
         logDrawer.info(`Switch roster fetch: ${rosters?.length} rosters, ${leagueUsers?.length} users`);
       } catch (e) {
         logDrawer.error(`League switch — roster fetch failed: ${e.message}`);
-        status.textContent = '⚠️ Failed';
-        select.disabled = false;
+        _setSwitcherStatus('⚠️ Failed');
+        _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
-        if (revertIdx >= 0) select.selectedIndex = revertIdx;
+        if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
         showToast('⚠️ Failed to fetch roster data');
         return;
       }
@@ -2281,11 +2281,11 @@
       const userRoster = (rosters || []).find(r => r.owner_id === user.user_id);
       if (!userRoster) {
         logDrawer.error(`League switch — no roster found for owner_id=${user.user_id}`);
-        status.textContent = '⚠️ No roster';
-        select.disabled = false;
+        _setSwitcherStatus('⚠️ No roster');
+        _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
-        if (revertIdx >= 0) select.selectedIndex = revertIdx;
+        if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
         showToast('⚠️ Could not find your roster in this league');
         return;
       }
@@ -2300,21 +2300,21 @@
         }))
         .filter(r => r.player_ids.length > 0);
 
-      status.textContent = '⏳ Loading…';
+      _setSwitcherStatus('⏳ Loading…');
       const ok = await initSession(
         user,
         { league_id: lg.league_id, league_name: lg.name },
         { userPlayerIds, opponentRosters }
       );
 
-      select.disabled = false;
+      _setSwitcherDisabled(false);
       if (genBtn) genBtn.disabled = false;
 
       if (!ok) {
         logDrawer.error(`League switch — initSession failed for ${lg.league_id}`);
-        status.textContent = '⚠️ Failed';
+        _setSwitcherStatus('⚠️ Failed');
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
-        if (revertIdx >= 0) select.selectedIndex = revertIdx;
+        if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
         showToast('⚠️ Failed to switch league');
         return;
       }
@@ -2325,7 +2325,7 @@
       // leaderboards, etc.). A full reload re-runs boot() which reads the
       // saved league from localStorage and rebuilds every view cleanly.
       saveLeague({ league_id: lg.league_id, league_name: lg.name });
-      status.textContent = '✓ Switched — reloading…';
+      _setSwitcherStatus('✓ Switched — reloading…');
       logDrawer.info(`✅ League switched to "${lg.name}" — reloading`);
       // Small delay so the status text is visible before the reload yanks
       // the page out from under the user.
@@ -4164,6 +4164,10 @@
     // ── League Summary ────────────────────────────────────────────────
     async function loadLeagueSummary() {
       if (!currentLeagueId) return;
+      // Make sure the in-place league switcher at the top of the page is
+      // populated and reflects the active league every time the user lands
+      // on the League Summary view. Cheap + idempotent.
+      renderLeagueSummarySwitcher();
       try {
         const res = await apiFetch('/api/league/summary?league_id=' + encodeURIComponent(currentLeagueId));
         if (!res.ok) return;
@@ -4229,6 +4233,11 @@
           </div>`;
       }
 
+      // League roster (join status) — always shown. Fires its own fetch
+      // against /api/league/members. The Invite button lives inside the
+      // section header (top-right).
+      loadLeagueRoster();
+
       // Agent A4 — fire the two new async sections (each is flag-gated
       // server-side; renderers no-op when the flag is off).
       if (window.FTF_FLAG && window.FTF_FLAG('league.unlock_badges_per_member')) {
@@ -4237,6 +4246,62 @@
       if (window.FTF_FLAG && window.FTF_FLAG('league.activity_feed')) {
         loadLeagueActivityFeed();
       }
+    }
+
+    // ── League roster (join status) ───────────────────────────────────
+    // Lists each leaguemate with a joined / not-joined badge. Always on
+    // (not flag-gated). The section's header has an Invite button in
+    // its top-right corner that opens the existing invite modal.
+    async function loadLeagueRoster() {
+      const section = document.getElementById('league-roster-section');
+      const list    = document.getElementById('league-roster-list');
+      if (!section || !list || !currentLeagueId) return;
+      list.innerHTML = '<div class="league-roster-loading">Loading…</div>';
+      try {
+        const res = await apiFetch('/api/league/members?league_id=' +
+                                   encodeURIComponent(currentLeagueId));
+        if (!res.ok) {
+          list.innerHTML = '<div class="league-roster-empty">Could not load leaguemates.</div>';
+          return;
+        }
+        const body = await res.json();
+        renderLeagueRoster(body.members || []);
+      } catch (e) {
+        if (typeof logDrawer !== 'undefined') logDrawer.warn('loadLeagueRoster failed: ' + e.message);
+        list.innerHTML = '<div class="league-roster-empty">Could not load leaguemates.</div>';
+      }
+    }
+
+    function renderLeagueRoster(members) {
+      const list = document.getElementById('league-roster-list');
+      if (!list) return;
+      if (!members.length) {
+        list.innerHTML = '<div class="league-roster-empty">No other leaguemates yet. Invite someone!</div>';
+        return;
+      }
+      const rows = members.map(m => {
+        const display  = _escapeHtml(m.display_name || m.username || 'Leaguemate');
+        const username = m.username ? '@' + _escapeHtml(m.username) : '';
+        let avatarHtml;
+        if (m.avatar) {
+          const url = 'https://sleepercdn.com/avatars/thumbs/' + encodeURIComponent(m.avatar);
+          avatarHtml = `<img src="${url}" alt="" onerror="this.replaceWith(document.createTextNode('${(display[0]||'?').toUpperCase()}'))" />`;
+        } else {
+          avatarHtml = (display[0] || '?').toUpperCase();
+        }
+        const stateHtml = m.joined
+          ? `<span class="league-roster-row-state league-roster-row-state-joined">✓ Joined</span>`
+          : `<span class="league-roster-row-state league-roster-row-state-pending">✗ Not joined</span>`;
+        return `<div class="league-roster-row">
+          <div class="league-roster-row-avatar">${avatarHtml}</div>
+          <div class="league-roster-row-name">
+            <div class="league-roster-row-display">${display}</div>
+            ${username ? `<div class="league-roster-row-username">${username}</div>` : ''}
+          </div>
+          ${stateHtml}
+        </div>`;
+      }).join('');
+      list.innerHTML = rows;
     }
 
     // ── Agent A4 — Leaguemates unlock badges ──────────────────────────

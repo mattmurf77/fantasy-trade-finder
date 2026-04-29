@@ -699,6 +699,29 @@
         <!-- Stat cards rendered by loadLeagueSummary() -->
       </div>
 
+      <!-- ── League roster (join status) ─────────────────────────────────
+           Lists each leaguemate with a joined / not-joined badge.
+           The Invite button sits in the top-right of this section's
+           header — same flow as the page-header Invite button (opens
+           the existing invite modal). Populated by loadLeagueRoster() /
+           renderLeagueRoster(). -->
+      <div class="league-roster-section" id="league-roster-section">
+        <div class="league-roster-header">
+          <div class="league-roster-titleblock">
+            <div class="league-roster-title">👥 Leaguemates</div>
+            <div class="league-roster-sub">
+              Who has and hasn't joined Trade Finder yet.
+            </div>
+          </div>
+          <button class="invite-btn league-roster-invite-btn"
+                  id="league-roster-invite-btn"
+                  onclick="openInviteModal()">&#128233; Invite</button>
+        </div>
+        <div class="league-roster-list" id="league-roster-list">
+          <div class="league-roster-loading">Loading…</div>
+        </div>
+      </div>
+
       <!-- ── Leaguemates unlock badges (Agent A4) ────────────────────────
            Flag: league.unlock_badges_per_member. One row per leaguemate
            showing their join + unlock state. Populated by
