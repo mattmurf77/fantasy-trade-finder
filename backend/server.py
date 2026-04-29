@@ -111,6 +111,8 @@ from .database import (
     log_notification_send, count_notification_sends_since,
     notification_dedup_sent,
     queue_notification, drain_due_queued_notifications,
+    load_pending_matches_older_than, load_unread_match_count,
+    load_all_signed_up_users,
     NOTIF_KIND_TO_BUCKET, NOTIF_PREF_DEFAULTS,
     # Leaderboards — read-only aggregations across users / leagues
     load_leaderboard, get_self_leaderboard_row,
@@ -4617,6 +4619,256 @@ def update_notification_prefs_route():
     except Exception as e:
         log.error("update_notification_prefs failed: %s", e)
         return jsonify({"error": "save_failed", "message": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Cron-tick endpoints — called by Render Cron jobs over HTTP
+# ---------------------------------------------------------------------------
+# Three endpoints:
+#   /api/cron/realtime-tick (15-min) — match_expiring scan
+#   /api/cron/hourly-tick           — drain quiet-hours bundle, weekly_digest
+#                                      (Tue 9am local), pending_review (Wed)
+#   /api/cron/daily-tick            — winback_matches, winback_dormant,
+#                                      finish_ranking, season_start
+#
+# Auth: each call must include `X-Cron-Secret: <CRON_SECRET env value>`.
+# Setting CRON_SECRET on Render disables anonymous calls. If unset (local
+# dev), any X-Cron-Secret value is accepted so smoke tests don't need
+# environment scaffolding.
+
+_CRON_SECRET = os.environ.get("CRON_SECRET", "")
+
+
+def _require_cron_auth() -> None:
+    """Raises a flask abort if the X-Cron-Secret header doesn't match
+    CRON_SECRET. No-op when CRON_SECRET is unset (local dev).
+    """
+    if not _CRON_SECRET:
+        return
+    sent = request.headers.get("X-Cron-Secret", "")
+    if sent != _CRON_SECRET:
+        from flask import abort
+        abort(401)
+
+
+def _summary_push(items: list[dict]) -> tuple[str, str]:
+    """Build (title, body) for the bundled morning summary push.
+    Adapts based on the count + mix of queued items:
+      1 item → preserve original title/body
+      multi-of-one-kind → "You have N new trade matches"
+      mixed → "N new matches and M updates while you slept"
+    """
+    if len(items) == 1:
+        it = items[0]
+        return (it.get("title") or "Notification",
+                it.get("body")  or "Tap to view.")
+    by_kind: dict[str, int] = {}
+    for it in items:
+        by_kind[it["kind"]] = by_kind.get(it["kind"], 0) + 1
+    matches = by_kind.get("new_match", 0)
+    if len(by_kind) == 1 and matches:
+        return ("🌅 Good morning",
+                f"You have {matches} new trade matches waiting.")
+    other = sum(c for k, c in by_kind.items() if k != "new_match")
+    if matches and other:
+        return ("🌅 Good morning",
+                f"{matches} new matches and {other} updates while you slept.")
+    return ("🌅 Good morning",
+            f"{sum(by_kind.values())} updates while you slept.")
+
+
+@app.route("/api/cron/realtime-tick", methods=["POST"])
+def cron_realtime_tick():
+    """Every 15 minutes. Pushes match_expiring for pending matches >48h
+    old that the recipient hasn't decided. Dedup gate (`match_expiring`
+    in _NOTIF_DEDUP_CAPS) ensures one push per match per user.
+    """
+    _require_cron_auth()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    rows = load_pending_matches_older_than(cutoff)
+    sent = 0
+    for r in rows:
+        for uid, dec in [
+            (r["user_a_id"], r.get("user_a_decision")),
+            (r["user_b_id"], r.get("user_b_decision")),
+        ]:
+            if dec is not None:
+                continue   # already decided their side
+            _send_typed_push(
+                uid,
+                "match_expiring",
+                title = "⏳ A trade match is expiring soon",
+                body  = "Tap to review before it disappears.",
+                data  = {"match_id":  r["id"], "league_id": r.get("league_id")},
+                dedup_key = str(r["id"]),
+            )
+            sent += 1
+    log.info("realtime-tick: scanned %d pending; pushed %d", len(rows), sent)
+    return jsonify({"ok": True, "scanned": len(rows), "pushed": sent})
+
+
+@app.route("/api/cron/hourly-tick", methods=["POST"])
+def cron_hourly_tick():
+    """Every hour. Drains the quiet-hours queue (8am bundle delivery) +
+    fires Tue/Wed 9am-local digest pushes for any user whose local time
+    falls in this window.
+    """
+    _require_cron_auth()
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # ── 1. Drain the quiet-hours queue and bundle per-user ──
+    drained = drain_due_queued_notifications(now_iso)
+    bundled_users = 0
+    for uid, items in drained.items():
+        if not items:
+            continue
+        targets = load_device_tokens_for_users([uid])
+        if not targets:
+            continue
+        title, body = _summary_push(items)
+        msgs = [{
+            "to":    t["device_token"],
+            "title": title,
+            "body":  body,
+            "data":  {"type": "bundle_summary",
+                      "kinds": [it["kind"] for it in items],
+                      "count": len(items)},
+            "sound": "default",
+        } for t in targets]
+        _send_expo_push(msgs)
+        # Log every kind covered by the bundle so frequency caps fire correctly
+        for it in items:
+            log_notification_send(uid, it["kind"], dedup_key="bundled")
+        bundled_users += 1
+
+    # ── 2. Tuesday 9am weekly_digest, Wednesday 9am pending_review ──
+    digest_sent = 0
+    review_sent = 0
+    try:
+        from zoneinfo import ZoneInfo
+    except Exception:
+        ZoneInfo = None  # type: ignore
+    if ZoneInfo is None:
+        log.warning("hourly-tick: zoneinfo unavailable, skipping digest scan")
+        return jsonify({"ok": True, "bundled_users": bundled_users,
+                        "digest_sent": 0, "review_sent": 0})
+
+    week_window = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
+    for u in load_all_signed_up_users():
+        prefs = get_notification_prefs(u["sleeper_user_id"])
+        if not int(prefs.get("weekly_digest", 1)):
+            continue
+        try:
+            tz = ZoneInfo(prefs.get("tz") or "America/New_York")
+        except Exception:
+            continue
+        local = datetime.now(tz)
+        # Tuesday=1, Wednesday=2 (Python weekday())
+        if local.weekday() == 1 and local.hour == 9:
+            if count_notification_sends_since(
+                u["sleeper_user_id"], "weekly_digest", week_window) == 0:
+                _send_typed_push(
+                    u["sleeper_user_id"],
+                    "weekly_digest",
+                    title = "📰 Your weekly trade roundup",
+                    body  = "Tap to see what's new in your leagues.",
+                    data  = {"week": local.strftime("%Y-W%U")},
+                )
+                digest_sent += 1
+        elif local.weekday() == 2 and local.hour == 9:
+            unread = load_unread_match_count(u["sleeper_user_id"])
+            if unread <= 0:
+                continue
+            if count_notification_sends_since(
+                u["sleeper_user_id"], "pending_review", week_window) == 0:
+                _send_typed_push(
+                    u["sleeper_user_id"],
+                    "pending_review",
+                    title = "👀 You have unreviewed matches",
+                    body  = f"You have {unread} match{'es' if unread != 1 else ''} waiting.",
+                    data  = {"unread_count": unread},
+                )
+                review_sent += 1
+
+    log.info("hourly-tick: bundled=%d digest=%d review=%d",
+             bundled_users, digest_sent, review_sent)
+    return jsonify({"ok": True, "bundled_users": bundled_users,
+                    "digest_sent": digest_sent, "review_sent": review_sent})
+
+
+@app.route("/api/cron/daily-tick", methods=["POST"])
+def cron_daily_tick():
+    """Once per day. Re-engagement pushes — winback variants, finish_ranking,
+    and season_start. Frequency caps in `_NOTIF_FREQ_CAPS` enforce per-window
+    limits (winback_matches: 1/7d, winback_dormant: 1/30d, finish_ranking:
+    1/30d, season_start: 1/365d). The cap check happens inside
+    _send_typed_push, so the loop here is the broad scan.
+    """
+    _require_cron_auth()
+    now = datetime.now(timezone.utc)
+    cutoff_7d  = (now - timedelta(days=7)).isoformat()
+    cutoff_30d = (now - timedelta(days=30)).isoformat()
+    cutoff_3d  = (now - timedelta(days=3)).isoformat()
+
+    counters: dict[str, int] = {
+        "winback_matches": 0, "winback_dormant": 0,
+        "finish_ranking":  0, "season_start":    0,
+    }
+    is_aug25 = (now.month == 8 and now.day == 25)
+
+    for u in load_all_signed_up_users():
+        uid = u["sleeper_user_id"]
+        last_active = u.get("last_active_at")
+        signup_at   = u.get("signup_at")
+        unlocked    = u.get("unlocked_formats") or []
+
+        # ── season_start: Aug 25 fan-out, all signed-up users ──
+        if is_aug25:
+            _send_typed_push(
+                uid, "season_start",
+                title = "🏈 Football is back",
+                body  = "Re-rank your players to find this year's trades.",
+                data  = {"season": now.year},
+            )
+            counters["season_start"] += 1
+            continue   # don't double-stack a winback on top of season kickoff
+
+        # ── finish_ranking: signed up >3d ago, no format unlocked ──
+        if signup_at and signup_at < cutoff_3d and not unlocked:
+            _send_typed_push(
+                uid, "finish_ranking",
+                title = "🎯 You're 5 minutes away from your first trade",
+                body  = "Finish ranking your players to unlock matches.",
+                data  = {},
+            )
+            counters["finish_ranking"] += 1
+            continue
+
+        # ── winback_dormant: 30d inactive ──
+        if last_active and last_active < cutoff_30d:
+            _send_typed_push(
+                uid, "winback_dormant",
+                title = "👋 Your league misses you",
+                body  = "New trade matches are waiting when you're ready.",
+                data  = {},
+            )
+            counters["winback_dormant"] += 1
+            continue
+
+        # ── winback_matches: 7d inactive AND ≥1 unread match ──
+        if last_active and last_active < cutoff_7d:
+            unread = load_unread_match_count(uid)
+            if unread > 0:
+                _send_typed_push(
+                    uid, "winback_matches",
+                    title = "🔥 Trade matches are waiting",
+                    body  = f"You have {unread} unreviewed match{'es' if unread != 1 else ''}.",
+                    data  = {"unread_count": unread},
+                )
+                counters["winback_matches"] += 1
+
+    log.info("daily-tick: %s", counters)
+    return jsonify({"ok": True, **counters})
 
 
 # ---------------------------------------------------------------------------

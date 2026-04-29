@@ -4343,3 +4343,93 @@ def drain_due_queued_notifications(now_iso: str) -> dict[str, list[dict]]:
     except Exception as e:
         print(f"[drain_due_queued_notifications] failed: {e}")
     return out
+
+
+# ---------------------------------------------------------------------------
+# Cron-tick helpers — iterate users / match state for re-engagement + reminders
+# ---------------------------------------------------------------------------
+
+def load_pending_matches_older_than(cutoff_iso: str) -> list[dict]:
+    """Pending trade_matches whose `matched_at` < cutoff_iso. Used by the
+    15-min realtime tick to find matches eligible for an `match_expiring`
+    push. Each row returns enough to address both participants individually.
+    """
+    out: list[dict] = []
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    trade_matches_table.c.id,
+                    trade_matches_table.c.league_id,
+                    trade_matches_table.c.user_a_id,
+                    trade_matches_table.c.user_b_id,
+                    trade_matches_table.c.user_a_decision,
+                    trade_matches_table.c.user_b_decision,
+                    trade_matches_table.c.matched_at,
+                )
+                .where(trade_matches_table.c.status == "pending")
+                .where(trade_matches_table.c.matched_at < cutoff_iso)
+            ).fetchall()
+        for r in rows:
+            out.append(dict(r._mapping))
+    except Exception as e:
+        print(f"[load_pending_matches_older_than] failed: {e}")
+    return out
+
+
+def load_unread_match_count(user_id: str) -> int:
+    """Count of pending matches where this user has not yet decided AND the
+    match has been created since the user last viewed Matches. Used for
+    pending_review (Wed 9am) and winback_matches (7d inactive + unread).
+    """
+    if not user_id:
+        return 0
+    try:
+        with engine.connect() as conn:
+            seen_row = conn.execute(
+                select(users_table.c.last_match_seen_at)
+                .where(users_table.c.sleeper_user_id == user_id)
+            ).fetchone()
+            seen_at = (seen_row.last_match_seen_at if seen_row else None) or "1970-01-01T00:00:00+00:00"
+            row = conn.execute(text(
+                "SELECT COUNT(*) AS n FROM trade_matches "
+                "WHERE status = 'pending' AND matched_at > :seen "
+                "AND ((user_a_id = :uid AND user_a_decision IS NULL) "
+                "  OR (user_b_id = :uid AND user_b_decision IS NULL))"
+            ), {"uid": user_id, "seen": seen_at}).fetchone()
+            return int(row.n) if row else 0
+    except Exception as e:
+        print(f"[load_unread_match_count] {user_id} failed: {e}")
+        return 0
+
+
+def load_all_signed_up_users() -> list[dict]:
+    """Return a minimal dict per user with the fields cron ticks need to
+    reason about engagement state. One row per user — no JOINs because
+    notification_prefs is read separately via get_notification_prefs() to
+    keep the default-merge logic in one place.
+    """
+    out: list[dict] = []
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    users_table.c.sleeper_user_id,
+                    users_table.c.username,
+                    users_table.c.display_name,
+                    users_table.c.signup_at,
+                    users_table.c.last_active_at,
+                    users_table.c.last_rank_at,
+                    users_table.c.unlocked_formats,
+                ).where(users_table.c.signup_at.is_not(None))
+            ).fetchall()
+        for r in rows:
+            d = dict(r._mapping)
+            try:
+                d["unlocked_formats"] = json.loads(d["unlocked_formats"]) if d.get("unlocked_formats") else []
+            except Exception:
+                d["unlocked_formats"] = []
+            out.append(d)
+    except Exception as e:
+        print(f"[load_all_signed_up_users] failed: {e}")
+    return out
