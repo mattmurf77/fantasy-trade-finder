@@ -79,3 +79,20 @@ export async function getLeagueSummary(leagueId: string) {
     `/api/league/summary?league_id=${encodeURIComponent(leagueId)}`,
   );
 }
+
+// ── Leaguemate roster ──────────────────────────────────────────────
+// Backend: GET /api/league/members. Powers the "Leaguemates" roster
+// list on the League tab (joined ✓ / not-joined). Sorted joined first
+// alpha, then not-joined alpha.
+export interface LeagueMember {
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar: string | null;
+  joined: boolean;
+}
+export async function getLeagueMembers(leagueId: string) {
+  return api.get<{ members: LeagueMember[] }>(
+    `/api/league/members?league_id=${encodeURIComponent(leagueId)}`,
+  );
+}

@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
-import { getLeagueSummary, getLeagueCoverage } from '../api/league';
+import { getLeagueSummary, getLeagueCoverage, getLeagueMembers } from '../api/league';
 import { useSession } from '../state/useSession';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import LeaderboardsSection from '../components/LeaderboardsSection';
@@ -44,9 +44,20 @@ export default function LeagueScreen() {
     staleTime: 60_000,
   });
 
+  // Leaguemate roster (joined ✓ / not-joined ✗). Mirrors the web
+  // client's section in the League Summary page (PR #13, agent #15).
+  // The summary stat card shows the count; this list shows the names.
+  const membersQuery = useQuery({
+    queryKey: ['league-members', leagueId],
+    queryFn:  () => getLeagueMembers(leagueId!),
+    enabled:  !!leagueId,
+    staleTime: 60_000,
+  });
+
   const refetchAll = () => {
     summaryQuery.refetch();
     coverageQuery.refetch();
+    membersQuery.refetch();
   };
 
   // No league yet — funnel back to the picker. Should be rare since the
@@ -140,6 +151,32 @@ export default function LeagueScreen() {
             <Text style={styles.cardSubValue}>{unlockedSf}</Text>
           </View>
         </View>
+
+        {/* Leaguemate roster — names + join status. Backend sorts joined
+            first then not-joined. Empty state stays silent (rare in
+            practice; the join-count card above already conveys 0). */}
+        {membersQuery.data?.members && membersQuery.data.members.length > 0 ? (
+          <View style={styles.card}>
+            {membersQuery.data.members.map((m) => (
+              <View key={m.user_id} style={styles.memberRow}>
+                <Text style={styles.memberName} numberOfLines={1}>
+                  {m.display_name || m.username || m.user_id}
+                </Text>
+                <View style={[
+                  styles.memberBadge,
+                  m.joined ? styles.memberBadgeJoined : styles.memberBadgeNotJoined,
+                ]}>
+                  <Text style={[
+                    styles.memberBadgeText,
+                    m.joined ? styles.memberBadgeTextJoined : styles.memberBadgeTextNotJoined,
+                  ]}>
+                    {m.joined ? '✓ Joined' : 'Not joined'}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {/* Ranking coverage */}
         <SectionTitle>Coverage</SectionTitle>
@@ -313,6 +350,40 @@ const styles = StyleSheet.create({
   cardSubLabel: { color: colors.muted, fontSize: fontSize.xs },
   cardSubValue: { color: colors.text,  fontSize: fontSize.sm,  fontWeight: '700' },
   cardHint:     { color: colors.muted, fontSize: fontSize.xs,  marginTop: spacing.xs, lineHeight: 18 },
+
+  memberRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  memberName: {
+    flex: 1,
+    color: colors.text,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+    marginRight: spacing.sm,
+  },
+  memberBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+  },
+  memberBadgeJoined: {
+    backgroundColor: 'rgba(34,197,94,0.12)',
+    borderColor: 'rgba(34,197,94,0.45)',
+  },
+  memberBadgeNotJoined: {
+    backgroundColor: 'transparent',
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+  },
+  memberBadgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
+  memberBadgeTextJoined: { color: colors.green },
+  memberBadgeTextNotJoined: { color: colors.muted },
 
   progressTrack: {
     height: 6,
