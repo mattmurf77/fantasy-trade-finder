@@ -2310,6 +2310,7 @@
        on the League Summary page since it's the page's primary interactive
        control. */
     #league-summary-select { max-width: 420px; }
+
     .invite-btn {
       padding: 10px 18px;
       min-height: 44px;

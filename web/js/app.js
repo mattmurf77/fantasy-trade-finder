@@ -2267,6 +2267,11 @@
       const select = document.getElementById('league-select');
       // Agent 6 — mirror league count to Portfolio subtab visibility
       { const _ps = document.getElementById('portfolio-subtab'); if (_ps) _ps.classList.toggle('hidden', (_cachedLeagues || []).length < 2); }
+
+      // Keep the in-place League Summary switcher in sync regardless of
+      // whether the Trades-view switcher is present in the DOM.
+      renderLeagueSummarySwitcher();
+
       if (!row || !select) return;
 
       // Only show the switcher when there are multiple leagues to choose from
@@ -2285,12 +2290,74 @@
       document.getElementById('league-switch-status').textContent = '';
     }
 
+    /**
+     * Populate the in-place league switcher at the top of the League Summary
+     * page. Mirrors renderLeagueSwitcher() but writes into #league-summary-select
+     * so users can switch leagues without leaving the League Summary view.
+     *
+     * Reuses _cachedLeagues (populated by the picker / boot flow) and the
+     * existing switchToLeague() pipeline — the onchange handler on the
+     * select element calls switchToLeague(this.selectedIndex), which runs
+     * /api/session/init and reloads the page.
+     */
+    function renderLeagueSummarySwitcher() {
+      const row    = document.getElementById('league-summary-switcher-row');
+      const select = document.getElementById('league-summary-select');
+      const status = document.getElementById('league-summary-switch-status');
+      if (!row || !select) return;
+
+      // Hide entirely when there's only one league — no point in a 1-option dropdown.
+      if (!_cachedLeagues || _cachedLeagues.length < 2) {
+        row.style.display = 'none';
+        return;
+      }
+
+      // Mark the active league with a checkmark so the current selection is
+      // visually obvious even when the <select> is collapsed.
+      select.innerHTML = _cachedLeagues.map((lg, i) => {
+        const isActive = lg.league_id === currentLeagueId;
+        const label    = (isActive ? '✓ ' : '') + (lg.name || 'Unnamed League');
+        return `<option value="${i}"${isActive ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+      }).join('');
+
+      const activeIdx = _cachedLeagues.findIndex(lg => lg.league_id === currentLeagueId);
+      if (activeIdx >= 0) select.selectedIndex = activeIdx;
+
+      row.style.display = 'flex';
+      if (status) status.textContent = '';
+    }
+
+    // Helpers that keep BOTH switcher dropdowns (Trades-view + League Summary)
+    // in sync during a switch. The user can pick from either one — we want
+    // status text + disabled state mirrored on whichever they're looking at.
+    function _allSwitcherSelects() {
+      return [
+        document.getElementById('league-select'),
+        document.getElementById('league-summary-select'),
+      ].filter(Boolean);
+    }
+    function _allSwitcherStatuses() {
+      return [
+        document.getElementById('league-switch-status'),
+        document.getElementById('league-summary-switch-status'),
+      ].filter(Boolean);
+    }
+    function _setSwitcherDisabled(disabled) {
+      for (const s of _allSwitcherSelects()) s.disabled = disabled;
+    }
+    function _setSwitcherStatus(text) {
+      for (const s of _allSwitcherStatuses()) s.textContent = text;
+    }
+    function _setSwitcherSelectedIndex(idx) {
+      for (const s of _allSwitcherSelects()) {
+        if (idx >= 0 && idx < s.options.length) s.selectedIndex = idx;
+      }
+    }
+
     async function switchToLeague(idx) {
       const lg = _cachedLeagues[idx];
       if (!lg || lg.league_id === currentLeagueId) return;
 
-      const select   = document.getElementById('league-select');
-      const status   = document.getElementById('league-switch-status');
       const genBtn   = document.getElementById('gen-btn');
       const user     = getSavedUser();
       if (!user) { logout(); return; }

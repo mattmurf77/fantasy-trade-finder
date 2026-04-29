@@ -689,6 +689,18 @@
         <button class="invite-btn" id="invite-btn" onclick="openInviteModal()">&#128233; Invite</button>
       </div>
 
+      <!-- In-place league switcher — visible when the user has 2+ leagues.
+           Populated by renderLeagueSummarySwitcher() in web/js/app.js.
+           onchange routes through the existing switchToLeague() pipeline,
+           which calls /api/session/init and reloads the page. -->
+      <div class="league-summary-switcher-row" id="league-summary-switcher-row" style="display:none">
+        <label for="league-summary-select" class="league-summary-switcher-label">Switch league</label>
+        <select class="league-select" id="league-summary-select"
+                onchange="switchToLeague(this.selectedIndex)"
+                aria-label="Switch active league"></select>
+        <span class="league-switch-status" id="league-summary-switch-status"></span>
+      </div>
+
       <div class="summary-grid" id="league-summary-grid">
         <!-- Stat cards rendered by loadLeagueSummary() -->
       </div>
