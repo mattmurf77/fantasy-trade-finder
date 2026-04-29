@@ -580,13 +580,17 @@
           <button class="player-picker-clear" id="picker-clear-btn" onclick="event.stopPropagation(); clearPinnedPlayers()" style="display:none">Clear all</button>
         </div>
         <div class="player-picker-body" id="player-picker-body" style="display:none">
-          <div class="player-picker-pos-filters" id="picker-pos-filters">
-            <button class="picker-pos-tab active" onclick="filterPickerPos('ALL', this)">All</button>
-            <button class="picker-pos-tab" onclick="filterPickerPos('QB', this)">QB</button>
-            <button class="picker-pos-tab" onclick="filterPickerPos('RB', this)">RB</button>
-            <button class="picker-pos-tab" onclick="filterPickerPos('WR', this)">WR</button>
-            <button class="picker-pos-tab" onclick="filterPickerPos('TE', this)">TE</button>
-            <button class="picker-pos-tab" onclick="filterPickerPos('PICK', this)">Picks</button>
+          <div class="player-picker-controls">
+            <div class="player-picker-pos-filters" id="picker-pos-filters">
+              <button class="picker-pos-tab active" onclick="filterPickerPos('ALL', this)">All</button>
+              <button class="picker-pos-tab" onclick="filterPickerPos('QB', this)">QB</button>
+              <button class="picker-pos-tab" onclick="filterPickerPos('RB', this)">RB</button>
+              <button class="picker-pos-tab" onclick="filterPickerPos('WR', this)">WR</button>
+              <button class="picker-pos-tab" onclick="filterPickerPos('TE', this)">TE</button>
+              <button class="picker-pos-tab" onclick="filterPickerPos('PICK', this)">Picks</button>
+            </div>
+            <button class="picker-select-all-btn" id="picker-select-all-btn"
+                    onclick="toggleSelectAllPinnedPlayers()">Select all</button>
           </div>
           <div class="player-picker-chips" id="picker-chips"></div>
         </div>

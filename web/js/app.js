@@ -2908,6 +2908,31 @@
       renderPlayerPicker();
     }
 
+    // Returns the roster slice currently visible in the picker, respecting
+    // the active position filter. Used by the Select all / Clear all toggle
+    // so the action mirrors what the user sees, not the whole roster when
+    // a position is filtered.
+    function _pickerVisiblePlayers() {
+      if (!_myRoster || !_myRoster.length) return [];
+      if (_pickerPosFilter === 'ALL') return _myRoster;
+      return _myRoster.filter(p => (p.position || '').toUpperCase() === _pickerPosFilter);
+    }
+
+    // Toggle Select all / Clear all behavior:
+    //   - if every visible player is already pinned -> clear them
+    //   - otherwise -> pin every visible player
+    function toggleSelectAllPinnedPlayers() {
+      const visible = _pickerVisiblePlayers();
+      if (!visible.length) return;
+      const allSelected = visible.every(p => _pinnedGivePlayers.has(p.id));
+      if (allSelected) {
+        visible.forEach(p => _pinnedGivePlayers.delete(p.id));
+      } else {
+        visible.forEach(p => _pinnedGivePlayers.add(p.id));
+      }
+      renderPlayerPicker();
+    }
+
     function filterPickerPos(pos, btn) {
       _pickerPosFilter = pos;
       // Update active tab
@@ -2919,6 +2944,7 @@
     function _updatePickerBadge() {
       const badge = document.getElementById('picker-count-badge');
       const clearBtn = document.getElementById('picker-clear-btn');
+      const selectAllBtn = document.getElementById('picker-select-all-btn');
       const count = _pinnedGivePlayers.size;
       if (badge) {
         badge.textContent = count;
@@ -2926,6 +2952,15 @@
       }
       if (clearBtn) {
         clearBtn.style.display = count > 0 ? '' : 'none';
+      }
+      if (selectAllBtn) {
+        // Label flips between Select all / Clear all based on whether every
+        // currently visible (filter-respecting) player is already pinned.
+        const visible = _pickerVisiblePlayers();
+        const allSelected = visible.length > 0 && visible.every(p => _pinnedGivePlayers.has(p.id));
+        selectAllBtn.textContent = allSelected ? 'Clear all' : 'Select all';
+        selectAllBtn.classList.toggle('all-selected', allSelected);
+        selectAllBtn.disabled = visible.length === 0;
       }
     }
 

@@ -2211,6 +2211,39 @@
     }
     .picker-pos-tab:hover { color: var(--text); border-color: var(--text); }
     .picker-pos-tab.active { color: var(--text); border-color: var(--accent); background: rgba(79,124,255,0.1); }
+    /* Row that holds the position filter tabs on the left and the
+       Select all / Clear all toggle button on the right. */
+    .player-picker-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .picker-select-all-btn {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .picker-select-all-btn:hover {
+      border-color: var(--accent);
+      background: rgba(79,124,255,0.1);
+    }
+    .picker-select-all-btn.all-selected {
+      color: var(--muted);
+    }
+    .picker-select-all-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
     .selected-count-badge {
       font-size: 11px;
       font-weight: 700;
