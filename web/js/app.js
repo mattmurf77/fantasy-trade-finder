@@ -1617,36 +1617,21 @@
         extraEl.innerHTML = parts.filter(Boolean).join('');
       }
 
-      // Agent A1 — swipe.gesture_audit: attach the small ⓘ button + touch
-      // gesture handlers. Flag-off: no DOM or event changes.
+      // Agent A1 — swipe.gesture_audit: attach touch gesture handlers
+      // (swipe-left = skip, swipe-right = rank 1). Flag-off: no event changes.
       if (window.FTF_FLAG && window.FTF_FLAG('swipe.gesture_audit')) {
         try { _attachGestureAuditControls(card, side, p); } catch (_e) { /* ignore */ }
       }
     }
 
     // ── Gesture-audit helpers (Agent A1 — swipe.gesture_audit) ─────────
-    // Adds: info button per card, swipe-left = skip, swipe-right = rank 1.
+    // Adds: swipe-left = skip, swipe-right = rank 1.
     // Everything is idempotent — safe to call on every renderCard.
+    // (The per-card ⓘ info button was removed — users found it unnecessary.)
     function _attachGestureAuditControls(card, side, p) {
       if (!card) return;
 
-      // 1) Inject a small ⓘ info button if not already there.
-      if (!card.querySelector('.gesture-info-btn')) {
-        const info = document.createElement('button');
-        info.type = 'button';
-        info.className = 'gesture-info-btn';
-        info.setAttribute('aria-label', 'Player info');
-        info.textContent = '\u24D8';  // circled i
-        info.addEventListener('click', function (ev) {
-          ev.stopPropagation();
-          _openPlayerInfoSheet(p);
-        });
-        // Stop touch propagation too so tapping ⓘ doesn't start a swipe.
-        info.addEventListener('touchstart', function (ev) { ev.stopPropagation(); }, { passive: true });
-        card.appendChild(info);
-      }
-
-      // 2) Attach swipe handlers once per card element.
+      // Attach swipe handlers once per card element.
       if (card.dataset.gestureBound === '1') return;
       card.dataset.gestureBound = '1';
 
