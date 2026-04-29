@@ -4343,9 +4343,9 @@
             <div class="summary-card-sub">Both sides agreed</div>
           </div>
           <div class="summary-card">
-            <div class="summary-card-value">${data.leaguemates_joined || 0} / ${data.leaguemates_total || 0}</div>
+            <div class="summary-card-value">${(data.leaguemates_joined || 0) + 1} / ${(data.leaguemates_total || 0) + 1}</div>
             <div class="summary-card-label">Leaguemates Joined</div>
-            <div class="summary-card-sub">Have a Trade Finder account</div>
+            <div class="summary-card-sub">Have a Trade Finder account (including you)</div>
           </div>
           <div class="summary-card">
             <div class="summary-card-value">${_leagueUnlockedCount(data)}</div>
