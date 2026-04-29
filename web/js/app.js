@@ -1927,6 +1927,29 @@
       } catch (_) { /* ignore */ }
     }
 
+    // ELO → tier label, mirroring the thresholds in positional-tiers.html
+    // (UNIFORM_ELO_TIER_THRESHOLDS / QB_TE_1QB_ELO_TIER_THRESHOLDS) and the
+    // server-side bands in ranking_service.tier_bands_for(). Returns one of
+    // 'Elite' / 'Starter' / 'Solid' / 'Depth' / 'Bench', or '' when ELO is
+    // missing.
+    function _eloToTierLabel(elo, position) {
+      if (elo == null || isNaN(elo)) return '';
+      const pos = (position || '').toUpperCase();
+      let fmt = '1qb_ppr';
+      try {
+        const stored = localStorage.getItem('ftf_active_format');
+        if (stored === '1qb_ppr' || stored === 'sf_tep') fmt = stored;
+      } catch (_) { /* ignore */ }
+      const thresholds = (fmt === '1qb_ppr' && (pos === 'QB' || pos === 'TE'))
+        ? { elite: 1580, starter: 1460, solid: 1350, depth: 1190 }
+        : { elite: 1700, starter: 1580, solid: 1460, depth: 1350 };
+      if (elo >= thresholds.elite)   return 'Elite';
+      if (elo >= thresholds.starter) return 'Starter';
+      if (elo >= thresholds.solid)   return 'Solid';
+      if (elo >= thresholds.depth)   return 'Depth';
+      return 'Bench';
+    }
+
     function renderRankingsTable() {
       const tbody  = document.getElementById('rankings-tbody');
       const empty  = document.getElementById('rankings-table-empty');
@@ -1944,6 +1967,7 @@
         const pos = (r.position || '?').toLowerCase();
         const upDisabled   = i === 0        ? ' disabled aria-disabled="true"' : '';
         const downDisabled = i === lastIdx  ? ' disabled aria-disabled="true"' : '';
+        const tierLabel    = _eloToTierLabel(r.elo, r.position);
         return `<tr draggable="true" data-player-id="${r.id}" data-index="${i}">
           <td class="rt-rank-col"><span class="rt-editable-cell" contenteditable="true"
                 data-player-id="${r.id}">${i + 1}</span></td>
@@ -1959,7 +1983,7 @@
           <td><span class="pos-badge ${pos}">${(r.position || '?').toUpperCase()}</span></td>
           <td>${r.age || ''}</td>
           <td>${escapeHtml(r.team || 'FA')}</td>
-          <td style="color:var(--muted)">${r.elo ? r.elo.toFixed(0) : ''}</td>
+          <td style="color:var(--muted)">${tierLabel}</td>
         </tr>`;
       }).join('');
 
