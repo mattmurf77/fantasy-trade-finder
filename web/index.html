@@ -191,7 +191,10 @@
         <div class="notif-panel" id="notif-panel">
           <div class="notif-panel-header">
             <span class="notif-panel-title">Notifications</span>
-            <button class="notif-mark-all-btn" onclick="markAllNotifsRead()">Mark all read</button>
+            <div class="notif-panel-actions">
+              <button class="notif-mark-all-btn" onclick="markAllNotifsRead()">Mark all read</button>
+              <button class="notif-clear-btn" onclick="clearVisibleNotifs()" title="Hide these notifications">Clear</button>
+            </div>
           </div>
           <div class="notif-list" id="notif-list">
             <div class="notif-empty">No notifications yet</div>
@@ -212,8 +215,8 @@
 
   <!-- Tier 2 — contextual sub-nav. Only one is visible at a time. -->
   <div class="nav-subtabs" id="subtabs-rank" style="max-width:980px;width:100%;">
-    <button class="nav-subtab active" data-view="tiers"    onclick="goToTiers()">Tiers</button>
-    <button class="nav-subtab"        data-view="rank"     onclick="switchView('rank', this)">Trios</button>
+    <button class="nav-subtab"        data-view="tiers"    onclick="goToTiers()">Tiers</button>
+    <button class="nav-subtab active" data-view="rank"     onclick="switchView('rank', this)">Trios</button>
     <button class="nav-subtab"        data-view="rankings" onclick="switchView('rankings', this)">Manual</button>
     <button class="nav-subtab"        data-view="trends"   onclick="switchView('trends', this)">Trends</button>
   </div>
@@ -352,12 +355,6 @@
       Confirm ranking →
     </button>
     <button class="skip-btn" onclick="loadTrio()">Skip ↩</button>
-    <!-- Agent 1: persistent "I don't know" skip. Excludes the player(s) in
-         question from future trios for this user + active scoring format. -->
-    <button class="skip-btn" id="dont-know-btn" onclick="skipTrio()"
-            title="Remove these players from future trios">
-      I don't know 🙈
-    </button>
   </div>
 
   </div> <!-- end view-rank -->
@@ -424,12 +421,12 @@
           <thead id="rankings-thead">
             <tr>
               <th class="rt-rank-col">Rank</th>
-              <th class="rt-drag-col"></th>
+              <th class="rt-move-col" aria-label="Move"></th>
               <th>Player</th>
               <th>Pos</th>
               <th>Age</th>
               <th>Team</th>
-              <th>ELO</th>
+              <th>Tier</th>
             </tr>
           </thead>
           <tbody id="rankings-tbody"></tbody>
@@ -586,13 +583,17 @@
           <button class="player-picker-clear" id="picker-clear-btn" onclick="event.stopPropagation(); clearPinnedPlayers()" style="display:none">Clear all</button>
         </div>
         <div class="player-picker-body" id="player-picker-body" style="display:none">
-          <div class="player-picker-pos-filters" id="picker-pos-filters">
-            <button class="picker-pos-tab active" onclick="filterPickerPos('ALL', this)">All</button>
-            <button class="picker-pos-tab" onclick="filterPickerPos('QB', this)">QB</button>
-            <button class="picker-pos-tab" onclick="filterPickerPos('RB', this)">RB</button>
-            <button class="picker-pos-tab" onclick="filterPickerPos('WR', this)">WR</button>
-            <button class="picker-pos-tab" onclick="filterPickerPos('TE', this)">TE</button>
-            <button class="picker-pos-tab" onclick="filterPickerPos('PICK', this)">Picks</button>
+          <div class="player-picker-controls">
+            <div class="player-picker-pos-filters" id="picker-pos-filters">
+              <button class="picker-pos-tab active" onclick="filterPickerPos('ALL', this)">All</button>
+              <button class="picker-pos-tab" onclick="filterPickerPos('QB', this)">QB</button>
+              <button class="picker-pos-tab" onclick="filterPickerPos('RB', this)">RB</button>
+              <button class="picker-pos-tab" onclick="filterPickerPos('WR', this)">WR</button>
+              <button class="picker-pos-tab" onclick="filterPickerPos('TE', this)">TE</button>
+              <button class="picker-pos-tab" onclick="filterPickerPos('PICK', this)">Picks</button>
+            </div>
+            <button class="picker-select-all-btn" id="picker-select-all-btn"
+                    onclick="toggleSelectAllPinnedPlayers()">Select all</button>
           </div>
           <div class="player-picker-chips" id="picker-chips"></div>
         </div>
@@ -695,8 +696,43 @@
         <button class="invite-btn" id="invite-btn" onclick="openInviteModal()">&#128233; Invite</button>
       </div>
 
+      <!-- In-place league switcher — visible when the user has 2+ leagues.
+           Populated by renderLeagueSummarySwitcher() in web/js/app.js.
+           onchange routes through the existing switchToLeague() pipeline,
+           which calls /api/session/init and reloads the page. -->
+      <div class="league-summary-switcher-row" id="league-summary-switcher-row" style="display:none">
+        <label for="league-summary-select" class="league-summary-switcher-label">Switch league</label>
+        <select class="league-select" id="league-summary-select"
+                onchange="switchToLeague(this.selectedIndex)"
+                aria-label="Switch active league"></select>
+        <span class="league-switch-status" id="league-summary-switch-status"></span>
+      </div>
+
       <div class="summary-grid" id="league-summary-grid">
         <!-- Stat cards rendered by loadLeagueSummary() -->
+      </div>
+
+      <!-- ── League roster (join status) ─────────────────────────────────
+           Lists each leaguemate with a joined / not-joined badge.
+           The Invite button sits in the top-right of this section's
+           header — same flow as the page-header Invite button (opens
+           the existing invite modal). Populated by loadLeagueRoster() /
+           renderLeagueRoster(). -->
+      <div class="league-roster-section" id="league-roster-section">
+        <div class="league-roster-header">
+          <div class="league-roster-titleblock">
+            <div class="league-roster-title">👥 Leaguemates</div>
+            <div class="league-roster-sub">
+              Who has and hasn't joined Trade Finder yet.
+            </div>
+          </div>
+          <button class="invite-btn league-roster-invite-btn"
+                  id="league-roster-invite-btn"
+                  onclick="openInviteModal()">&#128233; Invite</button>
+        </div>
+        <div class="league-roster-list" id="league-roster-list">
+          <div class="league-roster-loading">Loading…</div>
+        </div>
       </div>
 
       <!-- ── Leaguemates unlock badges (Agent A4) ────────────────────────

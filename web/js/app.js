@@ -336,8 +336,12 @@
         showLeagueScreen(user);
       } else {
         logDrawer.info('Session restored ✓');
-        initFairnessSlider();   // load per-league fairness preference on restore
-        _startNotifPolling();
+        // Mount the main app — this calls loadTrio() so the Trios screen
+        // renders with players on auto-auth instead of an empty state.
+        // Also handles initFairnessSlider, _startNotifPolling, scoring
+        // toggles, auto-confirm restore, and ?view= routing — so the
+        // Tiers→Manual cross-page link lands on the correct sub-view.
+        _enterMainApp();
         // Populate the league switcher — _cachedLeagues is empty on a fresh page load
         // so we fetch leagues in the background without blocking the UI
         apiFetch(`/api/sleeper/leagues/${user.user_id}`)
@@ -1609,40 +1613,24 @@
         const stage = buildCareerBadge(p);
         if (tier)  parts.push(tier);
         if (stage) parts.push(stage);
-        if (p.college) parts.push(`<span style="color:var(--muted)">${escapeHtml(p.college)}</span>`);
         extraEl.innerHTML = parts.filter(Boolean).join('');
       }
 
-      // Agent A1 — swipe.gesture_audit: attach the small ⓘ button + touch
-      // gesture handlers. Flag-off: no DOM or event changes.
+      // Agent A1 — swipe.gesture_audit: attach touch gesture handlers
+      // (swipe-left = skip, swipe-right = rank 1). Flag-off: no event changes.
       if (window.FTF_FLAG && window.FTF_FLAG('swipe.gesture_audit')) {
         try { _attachGestureAuditControls(card, side, p); } catch (_e) { /* ignore */ }
       }
     }
 
     // ── Gesture-audit helpers (Agent A1 — swipe.gesture_audit) ─────────
-    // Adds: info button per card, swipe-left = skip, swipe-right = rank 1.
+    // Adds: swipe-left = skip, swipe-right = rank 1.
     // Everything is idempotent — safe to call on every renderCard.
+    // (The per-card ⓘ info button was removed — users found it unnecessary.)
     function _attachGestureAuditControls(card, side, p) {
       if (!card) return;
 
-      // 1) Inject a small ⓘ info button if not already there.
-      if (!card.querySelector('.gesture-info-btn')) {
-        const info = document.createElement('button');
-        info.type = 'button';
-        info.className = 'gesture-info-btn';
-        info.setAttribute('aria-label', 'Player info');
-        info.textContent = '\u24D8';  // circled i
-        info.addEventListener('click', function (ev) {
-          ev.stopPropagation();
-          _openPlayerInfoSheet(p);
-        });
-        // Stop touch propagation too so tapping ⓘ doesn't start a swipe.
-        info.addEventListener('touchstart', function (ev) { ev.stopPropagation(); }, { passive: true });
-        card.appendChild(info);
-      }
-
-      // 2) Attach swipe handlers once per card element.
+      // Attach swipe handlers once per card element.
       if (card.dataset.gestureBound === '1') return;
       card.dataset.gestureBound = '1';
 
@@ -1819,12 +1807,16 @@
         overallTab.classList.toggle('hidden', !progress.unlocked);
       }
 
-      // Hide once fully unlocked
-      if (progress.unlocked) {
+      // Hide once fully unlocked — remove the promo section entirely
+      // so it stops occupying space on the Trios page after the user
+      // has unlocked Find a Trade.
+      if (progress.unlocked === true) {
         wrap.classList.add('unlocked');
+        wrap.hidden = true;
         return;
       }
       wrap.classList.remove('unlocked');
+      wrap.hidden = false;
 
       let totalDone = 0;
       const totalRequired = threshold * positions.length;
@@ -1935,6 +1927,29 @@
       } catch (_) { /* ignore */ }
     }
 
+    // ELO → tier label, mirroring the thresholds in positional-tiers.html
+    // (UNIFORM_ELO_TIER_THRESHOLDS / QB_TE_1QB_ELO_TIER_THRESHOLDS) and the
+    // server-side bands in ranking_service.tier_bands_for(). Returns one of
+    // 'Elite' / 'Starter' / 'Solid' / 'Depth' / 'Bench', or '' when ELO is
+    // missing.
+    function _eloToTierLabel(elo, position) {
+      if (elo == null || isNaN(elo)) return '';
+      const pos = (position || '').toUpperCase();
+      let fmt = '1qb_ppr';
+      try {
+        const stored = localStorage.getItem('ftf_active_format');
+        if (stored === '1qb_ppr' || stored === 'sf_tep') fmt = stored;
+      } catch (_) { /* ignore */ }
+      const thresholds = (fmt === '1qb_ppr' && (pos === 'QB' || pos === 'TE'))
+        ? { elite: 1580, starter: 1460, solid: 1350, depth: 1190 }
+        : { elite: 1700, starter: 1580, solid: 1460, depth: 1350 };
+      if (elo >= thresholds.elite)   return 'Elite';
+      if (elo >= thresholds.starter) return 'Starter';
+      if (elo >= thresholds.solid)   return 'Solid';
+      if (elo >= thresholds.depth)   return 'Depth';
+      return 'Bench';
+    }
+
     function renderRankingsTable() {
       const tbody  = document.getElementById('rankings-tbody');
       const empty  = document.getElementById('rankings-table-empty');
@@ -1947,17 +1962,28 @@
       }
       if (empty) empty.classList.add('hidden');
 
+      const lastIdx = _rankingsData.length - 1;
       tbody.innerHTML = _rankingsData.map((r, i) => {
         const pos = (r.position || '?').toLowerCase();
+        const upDisabled   = i === 0        ? ' disabled aria-disabled="true"' : '';
+        const downDisabled = i === lastIdx  ? ' disabled aria-disabled="true"' : '';
+        const tierLabel    = _eloToTierLabel(r.elo, r.position);
         return `<tr draggable="true" data-player-id="${r.id}" data-index="${i}">
           <td class="rt-rank-col"><span class="rt-editable-cell" contenteditable="true"
                 data-player-id="${r.id}">${i + 1}</span></td>
-          <td class="rt-drag-col" title="Drag to reorder">\u2807</td>
+          <td class="rt-move-col">
+            <button type="button" class="rt-move-btn rt-move-up"
+                    data-player-id="${r.id}" data-dir="up"
+                    title="Move up" aria-label="Move up"${upDisabled}>&#9650;</button>
+            <button type="button" class="rt-move-btn rt-move-down"
+                    data-player-id="${r.id}" data-dir="down"
+                    title="Move down" aria-label="Move down"${downDisabled}>&#9660;</button>
+          </td>
           <td class="rt-player-name">${escapeHtml(r.name || 'Unknown')}</td>
           <td><span class="pos-badge ${pos}">${(r.position || '?').toUpperCase()}</span></td>
           <td>${r.age || ''}</td>
           <td>${escapeHtml(r.team || 'FA')}</td>
-          <td style="color:var(--muted)">${r.elo ? r.elo.toFixed(0) : ''}</td>
+          <td style="color:var(--muted)">${tierLabel}</td>
         </tr>`;
       }).join('');
 
@@ -1976,6 +2002,43 @@
           if (e.key === 'Enter') { e.preventDefault(); cell.blur(); }
         });
       });
+
+      // Attach up/down move handlers
+      tbody.querySelectorAll('.rt-move-btn').forEach(btn => {
+        btn.addEventListener('click', _rtOnMoveClick);
+      });
+    }
+
+    // ── Move up / down ──────────────────────────────────────────────
+    // Click ↑ swaps with the row above; ↓ swaps with the row below. Uses the
+    // same _rtRenumberAndSubmit() flow as drag-and-drop so the reorder is
+    // persisted via /api/rankings/reorder.
+    function _rtOnMoveClick(e) {
+      const btn = e.currentTarget;
+      if (btn.disabled) return;
+      const dir   = btn.dataset.dir;
+      const tbody = document.getElementById('rankings-tbody');
+      if (!tbody) return;
+      const row = btn.closest('tr');
+      if (!row) return;
+
+      if (dir === 'up') {
+        const prev = row.previousElementSibling;
+        if (!prev) return;
+        tbody.insertBefore(row, prev);
+      } else {
+        const next = row.nextElementSibling;
+        if (!next) return;
+        tbody.insertBefore(next, row);
+      }
+      _rtRenumberAndSubmit();
+      // Re-render to refresh first/last disabled states.
+      // _rankingsData order needs to match the DOM first.
+      const newOrder = Array.from(tbody.querySelectorAll('tr'))
+        .map(tr => tr.dataset.playerId);
+      _rankingsData.sort((a, b) =>
+        newOrder.indexOf(String(a.id)) - newOrder.indexOf(String(b.id)));
+      renderRankingsTable();
     }
 
     // ── Drag and drop ───────────────────────────────────────────────
@@ -2204,6 +2267,11 @@
       const select = document.getElementById('league-select');
       // Agent 6 — mirror league count to Portfolio subtab visibility
       { const _ps = document.getElementById('portfolio-subtab'); if (_ps) _ps.classList.toggle('hidden', (_cachedLeagues || []).length < 2); }
+
+      // Keep the in-place League Summary switcher in sync regardless of
+      // whether the Trades-view switcher is present in the DOM.
+      renderLeagueSummarySwitcher();
+
       if (!row || !select) return;
 
       // Only show the switcher when there are multiple leagues to choose from
@@ -2222,20 +2290,82 @@
       document.getElementById('league-switch-status').textContent = '';
     }
 
+    /**
+     * Populate the in-place league switcher at the top of the League Summary
+     * page. Mirrors renderLeagueSwitcher() but writes into #league-summary-select
+     * so users can switch leagues without leaving the League Summary view.
+     *
+     * Reuses _cachedLeagues (populated by the picker / boot flow) and the
+     * existing switchToLeague() pipeline — the onchange handler on the
+     * select element calls switchToLeague(this.selectedIndex), which runs
+     * /api/session/init and reloads the page.
+     */
+    function renderLeagueSummarySwitcher() {
+      const row    = document.getElementById('league-summary-switcher-row');
+      const select = document.getElementById('league-summary-select');
+      const status = document.getElementById('league-summary-switch-status');
+      if (!row || !select) return;
+
+      // Hide entirely when there's only one league — no point in a 1-option dropdown.
+      if (!_cachedLeagues || _cachedLeagues.length < 2) {
+        row.style.display = 'none';
+        return;
+      }
+
+      // Mark the active league with a checkmark so the current selection is
+      // visually obvious even when the <select> is collapsed.
+      select.innerHTML = _cachedLeagues.map((lg, i) => {
+        const isActive = lg.league_id === currentLeagueId;
+        const label    = (isActive ? '✓ ' : '') + (lg.name || 'Unnamed League');
+        return `<option value="${i}"${isActive ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+      }).join('');
+
+      const activeIdx = _cachedLeagues.findIndex(lg => lg.league_id === currentLeagueId);
+      if (activeIdx >= 0) select.selectedIndex = activeIdx;
+
+      row.style.display = 'flex';
+      if (status) status.textContent = '';
+    }
+
+    // Helpers that keep BOTH switcher dropdowns (Trades-view + League Summary)
+    // in sync during a switch. The user can pick from either one — we want
+    // status text + disabled state mirrored on whichever they're looking at.
+    function _allSwitcherSelects() {
+      return [
+        document.getElementById('league-select'),
+        document.getElementById('league-summary-select'),
+      ].filter(Boolean);
+    }
+    function _allSwitcherStatuses() {
+      return [
+        document.getElementById('league-switch-status'),
+        document.getElementById('league-summary-switch-status'),
+      ].filter(Boolean);
+    }
+    function _setSwitcherDisabled(disabled) {
+      for (const s of _allSwitcherSelects()) s.disabled = disabled;
+    }
+    function _setSwitcherStatus(text) {
+      for (const s of _allSwitcherStatuses()) s.textContent = text;
+    }
+    function _setSwitcherSelectedIndex(idx) {
+      for (const s of _allSwitcherSelects()) {
+        if (idx >= 0 && idx < s.options.length) s.selectedIndex = idx;
+      }
+    }
+
     async function switchToLeague(idx) {
       const lg = _cachedLeagues[idx];
       if (!lg || lg.league_id === currentLeagueId) return;
 
-      const select   = document.getElementById('league-select');
-      const status   = document.getElementById('league-switch-status');
       const genBtn   = document.getElementById('gen-btn');
       const user     = getSavedUser();
       if (!user) { logout(); return; }
 
       logDrawer.action(`League switcher → "${lg.name}" (${lg.league_id})`);
-      select.disabled = true;
+      _setSwitcherDisabled(true);
       if (genBtn) genBtn.disabled = true;
-      status.textContent = '⏳ Switching…';
+      _setSwitcherStatus('⏳ Switching…');
 
       // Warm player cache (no-op if already loaded), then fetch new rosters
       try {
@@ -2243,12 +2373,12 @@
         if (!pr.ok) throw new Error(`Player cache HTTP ${pr.status}`);
       } catch (e) {
         logDrawer.error(`League switch — player cache failed: ${e.message}`);
-        status.textContent = '⚠️ Failed';
-        select.disabled = false;
+        _setSwitcherStatus('⚠️ Failed');
+        _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
         // Revert visual selection to current league
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
-        if (revertIdx >= 0) select.selectedIndex = revertIdx;
+        if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
         showToast('⚠️ Could not load player database');
         return;
       }
@@ -2264,11 +2394,11 @@
         logDrawer.info(`Switch roster fetch: ${rosters?.length} rosters, ${leagueUsers?.length} users`);
       } catch (e) {
         logDrawer.error(`League switch — roster fetch failed: ${e.message}`);
-        status.textContent = '⚠️ Failed';
-        select.disabled = false;
+        _setSwitcherStatus('⚠️ Failed');
+        _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
-        if (revertIdx >= 0) select.selectedIndex = revertIdx;
+        if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
         showToast('⚠️ Failed to fetch roster data');
         return;
       }
@@ -2281,11 +2411,11 @@
       const userRoster = (rosters || []).find(r => r.owner_id === user.user_id);
       if (!userRoster) {
         logDrawer.error(`League switch — no roster found for owner_id=${user.user_id}`);
-        status.textContent = '⚠️ No roster';
-        select.disabled = false;
+        _setSwitcherStatus('⚠️ No roster');
+        _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
-        if (revertIdx >= 0) select.selectedIndex = revertIdx;
+        if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
         showToast('⚠️ Could not find your roster in this league');
         return;
       }
@@ -2300,21 +2430,21 @@
         }))
         .filter(r => r.player_ids.length > 0);
 
-      status.textContent = '⏳ Loading…';
+      _setSwitcherStatus('⏳ Loading…');
       const ok = await initSession(
         user,
         { league_id: lg.league_id, league_name: lg.name },
         { userPlayerIds, opponentRosters }
       );
 
-      select.disabled = false;
+      _setSwitcherDisabled(false);
       if (genBtn) genBtn.disabled = false;
 
       if (!ok) {
         logDrawer.error(`League switch — initSession failed for ${lg.league_id}`);
-        status.textContent = '⚠️ Failed';
+        _setSwitcherStatus('⚠️ Failed');
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
-        if (revertIdx >= 0) select.selectedIndex = revertIdx;
+        if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
         showToast('⚠️ Failed to switch league');
         return;
       }
@@ -2325,7 +2455,7 @@
       // leaderboards, etc.). A full reload re-runs boot() which reads the
       // saved league from localStorage and rebuilds every view cleanly.
       saveLeague({ league_id: lg.league_id, league_name: lg.name });
-      status.textContent = '✓ Switched — reloading…';
+      _setSwitcherStatus('✓ Switched — reloading…');
       logDrawer.info(`✅ League switched to "${lg.name}" — reloading`);
       // Small delay so the status text is visible before the reload yanks
       // the page out from under the user.
@@ -2634,6 +2764,9 @@
       if (view === 'rank') {
         checkFormatEmptyState('rank');
       }
+      if (view === 'trends') {
+        loadTrends();
+      }
     }
 
     // ── Trade finder ─────────────────────────────────────────────────
@@ -2775,6 +2908,31 @@
       renderPlayerPicker();
     }
 
+    // Returns the roster slice currently visible in the picker, respecting
+    // the active position filter. Used by the Select all / Clear all toggle
+    // so the action mirrors what the user sees, not the whole roster when
+    // a position is filtered.
+    function _pickerVisiblePlayers() {
+      if (!_myRoster || !_myRoster.length) return [];
+      if (_pickerPosFilter === 'ALL') return _myRoster;
+      return _myRoster.filter(p => (p.position || '').toUpperCase() === _pickerPosFilter);
+    }
+
+    // Toggle Select all / Clear all behavior:
+    //   - if every visible player is already pinned -> clear them
+    //   - otherwise -> pin every visible player
+    function toggleSelectAllPinnedPlayers() {
+      const visible = _pickerVisiblePlayers();
+      if (!visible.length) return;
+      const allSelected = visible.every(p => _pinnedGivePlayers.has(p.id));
+      if (allSelected) {
+        visible.forEach(p => _pinnedGivePlayers.delete(p.id));
+      } else {
+        visible.forEach(p => _pinnedGivePlayers.add(p.id));
+      }
+      renderPlayerPicker();
+    }
+
     function filterPickerPos(pos, btn) {
       _pickerPosFilter = pos;
       // Update active tab
@@ -2786,6 +2944,7 @@
     function _updatePickerBadge() {
       const badge = document.getElementById('picker-count-badge');
       const clearBtn = document.getElementById('picker-clear-btn');
+      const selectAllBtn = document.getElementById('picker-select-all-btn');
       const count = _pinnedGivePlayers.size;
       if (badge) {
         badge.textContent = count;
@@ -2793,6 +2952,15 @@
       }
       if (clearBtn) {
         clearBtn.style.display = count > 0 ? '' : 'none';
+      }
+      if (selectAllBtn) {
+        // Label flips between Select all / Clear all based on whether every
+        // currently visible (filter-respecting) player is already pinned.
+        const visible = _pickerVisiblePlayers();
+        const allSelected = visible.length > 0 && visible.every(p => _pinnedGivePlayers.has(p.id));
+        selectAllBtn.textContent = allSelected ? 'Clear all' : 'Select all';
+        selectAllBtn.classList.toggle('all-selected', allSelected);
+        selectAllBtn.disabled = visible.length === 0;
       }
     }
 
@@ -3873,8 +4041,34 @@
     }
 
     // ── Notifications ──────────────────────────────────────────────
-    let _notifState    = [];   // current cached notifications
+    let _notifState    = [];   // current cached notifications (server-side, unfiltered)
     let _notifPollTimer = null;
+
+    // Locally-dismissed notification IDs (per browser). Persisted in
+    // localStorage so notifications cleared via the "Clear" button stay
+    // hidden across refreshes and poll cycles. The server still has the
+    // notifications — we just filter them out on render and in the badge
+    // count. Stored as a JSON array of IDs.
+    const LS_DISMISSED_NOTIFS = 'ftf_dismissed_notifs';
+    function _getDismissedNotifIds() {
+      try {
+        const raw = localStorage.getItem(LS_DISMISSED_NOTIFS);
+        if (!raw) return new Set();
+        const arr = JSON.parse(raw);
+        return new Set(Array.isArray(arr) ? arr : []);
+      } catch { return new Set(); }
+    }
+    function _saveDismissedNotifIds(set) {
+      try {
+        // Cap to last 500 IDs to prevent unbounded localStorage growth.
+        const arr = Array.from(set).slice(-500);
+        localStorage.setItem(LS_DISMISSED_NOTIFS, JSON.stringify(arr));
+      } catch {}
+    }
+    function _visibleNotifs() {
+      const dismissed = _getDismissedNotifIds();
+      return (_notifState || []).filter(n => !dismissed.has(n.id));
+    }
 
     function relativeTime(isoStr) {
       if (!isoStr) return '';
@@ -3914,7 +4108,10 @@
         const res  = await apiFetch(`/api/notifications?user_id=${encodeURIComponent(currentUserId)}`);
         const data = await res.json();
         _notifState = data.notifications || [];
-        _updateNotifBadge(data.unread_count || 0);
+        // Badge must reflect what the user actually sees, so exclude
+        // locally-dismissed notifications from the unread count.
+        const visibleUnread = _visibleNotifs().filter(n => !n.is_read).length;
+        _updateNotifBadge(visibleUnread);
         // If panel is open, refresh it
         const panel = document.getElementById('notif-panel');
         if (panel && panel.classList.contains('open')) {
@@ -3940,14 +4137,20 @@
     function _renderNotifList() {
       const listEl = document.getElementById('notif-list');
       if (!listEl) return;
-      if (!_notifState || _notifState.length === 0) {
+      const visible = _visibleNotifs();
+      if (!visible || visible.length === 0) {
         listEl.innerHTML = '<div class="notif-empty">No notifications yet</div>';
         return;
       }
-      listEl.innerHTML = _notifState.map(n => {
+      listEl.innerHTML = visible.map(n => {
         const unreadCls = n.is_read ? '' : ' unread';
         const icon      = notifTypeIcon(n.type);
-        const body      = escapeHtml(n.body || n.title || '');
+        // Strip a leading type-icon emoji from the body so it isn't shown
+        // twice alongside the visual icon badge (legacy notifications stored
+        // an emoji prefix in the body; new notifications no longer do).
+        const rawBody   = (n.body || n.title || '');
+        const cleanBody = rawBody.replace(/^\s*(?:🤝|✅|❌|🎯|🔔)\s*/u, '');
+        const body      = escapeHtml(cleanBody);
         const rel  = relativeTime(n.created_at);
         const abs  = absoluteTime(n.created_at);
         const time = abs ? `${rel} · ${abs}` : rel;
@@ -3993,6 +4196,26 @@
         _updateNotifBadge(0);
         _renderNotifList();
       } catch { /* silent fail */ }
+    }
+
+    /**
+     * Locally hide every notification currently visible in the dropdown.
+     * Adds their IDs to a localStorage-backed dismissed set so they don't
+     * reappear on refresh or the next poll. This is a client-only operation
+     * — the server still has the notifications, we just filter them out
+     * everywhere we render or count.
+     */
+    function clearVisibleNotifs() {
+      const visible = _visibleNotifs();
+      if (visible.length === 0) return;
+      const dismissed = _getDismissedNotifIds();
+      visible.forEach(n => { if (n && n.id != null) dismissed.add(n.id); });
+      _saveDismissedNotifIds(dismissed);
+      // Recompute badge from what's still visible (any newer notifications
+      // that arrived between fetch and clear would still be unread).
+      const remainingUnread = _visibleNotifs().filter(n => !n.is_read).length;
+      _updateNotifBadge(remainingUnread);
+      _renderNotifList();
     }
 
     async function clickNotif(id, type, metadata) {
@@ -4156,7 +4379,7 @@
       } else if (id === 'view-league') {
         loadLeagueSummary();
       }
-      if (view === 'trends') {
+      if (id === 'view-trends') {
         loadTrends();
       }
     }
@@ -4164,6 +4387,10 @@
     // ── League Summary ────────────────────────────────────────────────
     async function loadLeagueSummary() {
       if (!currentLeagueId) return;
+      // Make sure the in-place league switcher at the top of the page is
+      // populated and reflects the active league every time the user lands
+      // on the League Summary view. Cheap + idempotent.
+      renderLeagueSummarySwitcher();
       try {
         const res = await apiFetch('/api/league/summary?league_id=' + encodeURIComponent(currentLeagueId));
         if (!res.ok) return;
@@ -4204,9 +4431,9 @@
             <div class="summary-card-sub">Both sides agreed</div>
           </div>
           <div class="summary-card">
-            <div class="summary-card-value">${data.leaguemates_joined || 0} / ${data.leaguemates_total || 0}</div>
+            <div class="summary-card-value">${(data.leaguemates_joined || 0) + 1} / ${(data.leaguemates_total || 0) + 1}</div>
             <div class="summary-card-label">Leaguemates Joined</div>
-            <div class="summary-card-sub">Have a Trade Finder account</div>
+            <div class="summary-card-sub">Have a Trade Finder account (including you)</div>
           </div>
           <div class="summary-card">
             <div class="summary-card-value">${_leagueUnlockedCount(data)}</div>
@@ -4229,6 +4456,11 @@
           </div>`;
       }
 
+      // League roster (join status) — always shown. Fires its own fetch
+      // against /api/league/members. The Invite button lives inside the
+      // section header (top-right).
+      loadLeagueRoster();
+
       // Agent A4 — fire the two new async sections (each is flag-gated
       // server-side; renderers no-op when the flag is off).
       if (window.FTF_FLAG && window.FTF_FLAG('league.unlock_badges_per_member')) {
@@ -4237,6 +4469,62 @@
       if (window.FTF_FLAG && window.FTF_FLAG('league.activity_feed')) {
         loadLeagueActivityFeed();
       }
+    }
+
+    // ── League roster (join status) ───────────────────────────────────
+    // Lists each leaguemate with a joined / not-joined badge. Always on
+    // (not flag-gated). The section's header has an Invite button in
+    // its top-right corner that opens the existing invite modal.
+    async function loadLeagueRoster() {
+      const section = document.getElementById('league-roster-section');
+      const list    = document.getElementById('league-roster-list');
+      if (!section || !list || !currentLeagueId) return;
+      list.innerHTML = '<div class="league-roster-loading">Loading…</div>';
+      try {
+        const res = await apiFetch('/api/league/members?league_id=' +
+                                   encodeURIComponent(currentLeagueId));
+        if (!res.ok) {
+          list.innerHTML = '<div class="league-roster-empty">Could not load leaguemates.</div>';
+          return;
+        }
+        const body = await res.json();
+        renderLeagueRoster(body.members || []);
+      } catch (e) {
+        if (typeof logDrawer !== 'undefined') logDrawer.warn('loadLeagueRoster failed: ' + e.message);
+        list.innerHTML = '<div class="league-roster-empty">Could not load leaguemates.</div>';
+      }
+    }
+
+    function renderLeagueRoster(members) {
+      const list = document.getElementById('league-roster-list');
+      if (!list) return;
+      if (!members.length) {
+        list.innerHTML = '<div class="league-roster-empty">No other leaguemates yet. Invite someone!</div>';
+        return;
+      }
+      const rows = members.map(m => {
+        const display  = _escapeHtml(m.display_name || m.username || 'Leaguemate');
+        const username = m.username ? '@' + _escapeHtml(m.username) : '';
+        let avatarHtml;
+        if (m.avatar) {
+          const url = 'https://sleepercdn.com/avatars/thumbs/' + encodeURIComponent(m.avatar);
+          avatarHtml = `<img src="${url}" alt="" onerror="this.replaceWith(document.createTextNode('${(display[0]||'?').toUpperCase()}'))" />`;
+        } else {
+          avatarHtml = (display[0] || '?').toUpperCase();
+        }
+        const stateHtml = m.joined
+          ? `<span class="league-roster-row-state league-roster-row-state-joined">✓ Joined</span>`
+          : `<span class="league-roster-row-state league-roster-row-state-pending">✗ Not joined</span>`;
+        return `<div class="league-roster-row">
+          <div class="league-roster-row-avatar">${avatarHtml}</div>
+          <div class="league-roster-row-name">
+            <div class="league-roster-row-display">${display}</div>
+            ${username ? `<div class="league-roster-row-username">${username}</div>` : ''}
+          </div>
+          ${stateHtml}
+        </div>`;
+      }).join('');
+      list.innerHTML = rows;
     }
 
     // ── Agent A4 — Leaguemates unlock badges ──────────────────────────
@@ -5300,68 +5588,6 @@
       document.addEventListener('DOMContentLoaded', renderScoringToggles);
     } else {
       renderScoringToggles();
-    }
-
-    // ══════════════════════════════════════════════════════════════════
-    //  Agent 1 — "I don't know this player" persistent skip (Trios page)
-    // ══════════════════════════════════════════════════════════════════
-    //
-    // skipTrio() determines which card(s) to skip based on how the user has
-    // interacted with the trio so far:
-    //
-    //   • 0 cards ranked → primary UX: skip ALL three players in the trio.
-    //     The user truly doesn't recognize any of them.
-    //   • 1–2 cards ranked → skip only the un-ranked card(s); the ranked
-    //     ones the user already knew. No ELO is written for the partial
-    //     ranking — we just hide the unknown card(s) and move on.
-    //
-    // Skips are persisted server-side via POST /api/trio/skip so they stick
-    // across sessions for (user, scoring_format).
-    async function skipTrio() {
-      if (locked || !currentTrio) return;
-      locked = true;
-
-      const sides = ['a', 'b', 'c'];
-      const unranked = sides.filter(s => !selectionOrder.includes(s));
-      const targets = (selectionOrder.length === 0 ? sides : unranked);
-
-      const players = {
-        a: currentTrio.player_a,
-        b: currentTrio.player_b,
-        c: currentTrio.player_c,
-      };
-      const player_ids = targets
-        .map(s => players[s] && players[s].id)
-        .filter(Boolean);
-
-      if (player_ids.length === 0) {
-        locked = false;
-        return;
-      }
-
-      try {
-        const res = await apiFetch('/api/trio/skip', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ player_ids }),
-        });
-        if (!res.ok) {
-          showToast('⚠️ Could not save skip — try again');
-        } else {
-          const count = player_ids.length;
-          showToast(count === 1
-            ? '🙈 Hidden from future trios'
-            : `🙈 ${count} players hidden from future trios`);
-        }
-      } catch {
-        showToast('Skip failed — check server connection');
-      }
-
-      // Reset selection + load a fresh trio (the new trio won't include
-      // the just-skipped players thanks to the backend filter).
-      selectionOrder = [];
-      locked = false;
-      loadTrio();
     }
 
     // Kick everything off

@@ -352,6 +352,12 @@
 
     .account-menu {
       position: absolute;
+      /* Visually offset 8px below the chip (preserves the prior look). The
+         8px gap between the chip's bottom edge and the menu's top edge used
+         to drop the :hover state as the cursor crossed it, hiding the menu
+         before the cursor could reach an item. The .account-chip::after
+         bridge below extends the chip's hover hit area down across the gap
+         so :hover stays active during the traverse. */
       top: calc(100% + 8px);
       right: 0;
       background: var(--surface);
@@ -363,6 +369,20 @@
       pointer-events: none;
       transition: opacity 0.15s;
       z-index: 50;
+    }
+    /* Invisible hover bridge: a 10px transparent strip directly below the
+       chip that fills the 8px gap to the menu. Because it is positioned
+       inside .account-chip (which is position:relative), hovering the strip
+       keeps .account-chip:hover true, which keeps .account-menu visible.
+       No JS, no opacity hacks — just a continuous hit area from chip to menu. */
+    .account-chip::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 100%;
+      height: 10px;
+      background: transparent;
     }
 
     .account-menu-item {
@@ -473,6 +493,27 @@
       transition: background 0.12s;
     }
     .notif-mark-all-btn:hover { background: rgba(79,124,255,0.1); }
+
+    .notif-panel-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .notif-clear-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: background 0.12s, color 0.12s;
+    }
+    .notif-clear-btn:hover {
+      background: rgba(239,68,68,0.1);
+      color: #ef4444;
+    }
 
     .notif-list {
       overflow-y: auto;
@@ -1937,9 +1978,33 @@
       padding: 8px 12px; white-space: nowrap; color: var(--text);
     }
     .rt-rank-col { width: 36px; text-align: center; color: var(--muted); font-weight: 600; }
-    .rt-drag-col { width: 24px; text-align: center; cursor: grab; color: var(--muted); opacity: 0.5; }
-    .rt-drag-col:hover { opacity: 1; }
     .rt-editable-col { width: 60px; }
+
+    /* Up/Down arrow column — small chevron buttons that move a row by 1 rank.
+       Reuses the same /api/rankings/reorder flow as drag-and-drop. */
+    .rt-move-col {
+      width: 44px; padding: 4px 6px !important;
+      white-space: nowrap; text-align: center;
+    }
+    .rt-move-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 20px; height: 20px; padding: 0; margin: 0 1px;
+      background: transparent; border: 1px solid var(--border);
+      border-radius: 4px; color: var(--muted);
+      font-size: 9px; line-height: 1; cursor: pointer;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .rt-move-btn:hover:not(:disabled) {
+      background: rgba(79,124,255,0.12);
+      border-color: var(--accent);
+      color: var(--text);
+    }
+    .rt-move-btn:active:not(:disabled) {
+      background: rgba(79,124,255,0.22);
+    }
+    .rt-move-btn:disabled {
+      opacity: 0.25; cursor: not-allowed;
+    }
     .rt-editable-cell {
       cursor: text; padding: 4px 8px; border-radius: 4px;
       min-width: 36px; text-align: center; font-weight: 600;
@@ -2167,6 +2232,39 @@
     }
     .picker-pos-tab:hover { color: var(--text); border-color: var(--text); }
     .picker-pos-tab.active { color: var(--text); border-color: var(--accent); background: rgba(79,124,255,0.1); }
+    /* Row that holds the position filter tabs on the left and the
+       Select all / Clear all toggle button on the right. */
+    .player-picker-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .picker-select-all-btn {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .picker-select-all-btn:hover {
+      border-color: var(--accent);
+      background: rgba(79,124,255,0.1);
+    }
+    .picker-select-all-btn.all-selected {
+      color: var(--muted);
+    }
+    .picker-select-all-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
     .selected-count-badge {
       font-size: 11px;
       font-weight: 700;
@@ -2242,6 +2340,31 @@
       flex-wrap: wrap; gap: 12px;
     }
     .league-summary-title { font-size: 22px; font-weight: 800; color: var(--text); }
+
+    /* In-place league switcher at the top of the League Summary page.
+       Lets users switch active leagues without navigating back to the picker.
+       Styled to match the existing .league-switcher-row in the Trades view. */
+    .league-summary-switcher-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 4px 0 0;
+      margin-top: -8px;
+    }
+    .league-summary-switcher-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+    /* The select inherits .league-select sizing. Allow it to grow a bit wider
+       on the League Summary page since it's the page's primary interactive
+       control. */
+    #league-summary-select { max-width: 420px; }
+
     .invite-btn {
       padding: 10px 18px;
       min-height: 44px;
@@ -3649,6 +3772,101 @@
       background: transparent;
       color: var(--muted);
       border: 1px dashed rgba(255,255,255,0.15);
+      font-weight: 600;
+    }
+
+    /* ── League roster (join status) ─────────────────────────────────── */
+    .league-roster-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 16px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .league-roster-header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 12px;
+    }
+    .league-roster-titleblock {
+      display: flex; flex-direction: column; gap: 4px;
+      min-width: 0;
+    }
+    .league-roster-title {
+      font-size: 15px; font-weight: 800; color: var(--text);
+    }
+    .league-roster-sub {
+      font-size: 12px; color: var(--muted); line-height: 1.4;
+    }
+    .league-roster-invite-btn {
+      flex-shrink: 0;
+      align-self: flex-start;
+    }
+    .league-roster-list {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .league-roster-loading,
+    .league-roster-empty {
+      padding: 14px 0;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+    .league-roster-row {
+      display: grid;
+      grid-template-columns: 36px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 10px;
+    }
+    .league-roster-row-avatar {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: var(--border);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text);
+      font-weight: 700;
+      font-size: 14px;
+      overflow: hidden;
+    }
+    .league-roster-row-avatar img {
+      width: 100%; height: 100%; object-fit: cover;
+    }
+    .league-roster-row-name {
+      display: flex; flex-direction: column; gap: 2px;
+      min-width: 0;
+    }
+    .league-roster-row-display {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .league-roster-row-username {
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .league-roster-row-state {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .league-roster-row-state-joined {
+      background: rgba(34,197,94,0.12);
+      color: #4ade80;
+      border: 1px solid rgba(74,222,128,0.35);
+    }
+    .league-roster-row-state-pending {
+      background: transparent;
+      color: var(--muted);
+      border: 1px dashed rgba(255,255,255,0.18);
       font-weight: 600;
     }
 
