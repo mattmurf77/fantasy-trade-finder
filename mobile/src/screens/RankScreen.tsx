@@ -33,7 +33,6 @@ import {
   getProgress,
   getStreak,
   submitTrioRanking,
-  skipPlayer,
 } from '../api/rankings';
 import type { Position, Trio } from '../shared/types';
 import { useFlag } from '../state/useFeatureFlags';
@@ -118,13 +117,16 @@ export default function RankScreen() {
     },
   });
 
-  const skipMutation = useMutation({
-    mutationFn: (playerId: string) => skipPlayer(playerId),
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['trio', position] });
-      setSelectionOrder([]);
-    },
-  });
+  // Skip = "show me a different trio" — DOES NOT permanently remove
+  // any player from the user's eligible pool. Aligned with the web
+  // client (PR #13, agent #20). Backend /api/trio/skip endpoint is
+  // intentionally left in place since older clients may still call it,
+  // but we no longer wire it up from this screen.
+  const isRefetchingTrio = trioQuery.isFetching && !trioQuery.isLoading;
+  const skipTrio = useCallback(() => {
+    setSelectionOrder([]);
+    queryClient.invalidateQueries({ queryKey: ['trio', position] });
+  }, [queryClient, position]);
 
   // ── Helpers ─────────────────────────────────────────────────────────
   const trio = trioQuery.data;
@@ -200,21 +202,10 @@ export default function RankScreen() {
   );
 
   const handleSkipEntireTrio = () => {
-    // Web app hits /api/trio/skip with a single player_id — we pick the
-    // user's first-displayed card. This removes that player from future
-    // trios for the active user + scoring format.
+    // Refetch a new trio without removing any player. Matches web's
+    // post-PR-#13 Skip semantics — Skip is now ephemeral.
     if (!trio) return;
-    skipMutation.mutate(trio.player_a.id);
-  };
-
-  const handleIDontKnow = () => {
-    // Skip the first *unranked* player. Covers the "I don't know who
-    // this one is, show me someone else" intent.
-    if (!trio) return;
-    const sides: ('a' | 'b' | 'c')[] = ['a', 'b', 'c'];
-    const firstUnranked =
-      sides.find((s) => !selectionOrder.includes(s)) || 'a';
-    skipMutation.mutate(playerForSide(trio, firstUnranked).id);
+    skipTrio();
   };
 
   // Open an info sheet for a player. Only exposed when the gesture-audit
@@ -381,7 +372,7 @@ export default function RankScreen() {
                   setSelectionOrder(() => [side]);
                   haptics.selection();
                 }}
-                disabled={submitMutation.isPending || skipMutation.isPending}
+                disabled={submitMutation.isPending || isRefetchingTrio}
               />
             ))}
           </View>
@@ -428,26 +419,18 @@ export default function RankScreen() {
           </Pressable>
         )}
 
-        {/* Bottom actions */}
+        {/* Bottom action — single Skip button. "I don't know" was removed
+            in alignment with the web client (PR #13, agent #20). Skip is
+            now ephemeral: refetches a different trio without persistently
+            removing any player from the eligible pool. */}
         <View style={styles.actions}>
           <Pressable
-            onPress={handleIDontKnow}
-            disabled={!trio || skipMutation.isPending}
-            style={({ pressed }) => [
-              styles.secondaryBtn,
-              pressed && { opacity: 0.6 },
-              (!trio || skipMutation.isPending) && { opacity: 0.4 },
-            ]}
-          >
-            <Text style={styles.secondaryBtnText}>🙈 I don't know</Text>
-          </Pressable>
-          <Pressable
             onPress={handleSkipEntireTrio}
-            disabled={!trio || skipMutation.isPending}
+            disabled={!trio || isRefetchingTrio}
             style={({ pressed }) => [
               styles.secondaryBtn,
               pressed && { opacity: 0.6 },
-              (!trio || skipMutation.isPending) && { opacity: 0.4 },
+              (!trio || isRefetchingTrio) && { opacity: 0.4 },
             ]}
           >
             <Text style={styles.secondaryBtnText}>Skip ↩</Text>

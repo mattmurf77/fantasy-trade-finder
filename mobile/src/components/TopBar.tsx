@@ -28,6 +28,17 @@ import { navigationRef } from '../navigation/RootNav';
 // so we don't double-pad.
 export const TOP_BAR_HEIGHT = 44;
 
+// Backend used to prefix match-notification bodies with an emoji that's
+// already conveyed by the visual icon badge — so it would render twice.
+// Backend stopped emitting the prefix in PR #13 (commit 397d8f1), but
+// older notifications already in the DB still carry it. Strip leading
+// type-icon emojis defensively so re-deliveries / DB residue look clean.
+// Mirrors the regex in web/js/app.js _renderNotifList.
+const LEADING_TYPE_EMOJI_RE = /^\s*(?:🤝|✅|❌|🎯|🔔)\s*/u;
+function stripLeadingTypeEmoji(body: string): string {
+  return body.replace(LEADING_TYPE_EMOJI_RE, '');
+}
+
 export default function TopBar() {
   const insets = useSafeAreaInsets();
   const items       = useNotifications((s) => s.items);
@@ -132,7 +143,9 @@ export default function TopBar() {
               {items.map((it) => (
                 <View key={it.id} style={styles.item}>
                   <Text style={styles.itemTitle}>{it.title}</Text>
-                  {it.body ? <Text style={styles.itemBody}>{it.body}</Text> : null}
+                  {it.body ? (
+                    <Text style={styles.itemBody}>{stripLeadingTypeEmoji(it.body)}</Text>
+                  ) : null}
                   <Text style={styles.itemTime}>
                     {relativeTime(new Date(it.receivedAt).toISOString())}
                   </Text>
