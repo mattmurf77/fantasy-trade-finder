@@ -800,13 +800,18 @@ class TradeService:
         ]
         total = len(eligible)
 
-        # Once we've collected ~max_per_opponent × 3 cards across all opponents,
-        # further scanning rarely surfaces a card good enough to crack the top
-        # 15-or-so the UI shows. Stop early to keep wall-time low for users
-        # in productive leagues. Cold leagues (returning 0 cards across 11
-        # opponents) still complete in one full pass — the cap doesn't help
-        # them, but the per-opponent deadline reduction does.
-        global_target = max(15, max_per_opponent * 3)
+        # Once we've collected enough cards across all opponents, further
+        # scanning rarely surfaces a card good enough to crack the top of
+        # the deck. The cap has to be loose enough that productive leagues
+        # don't truncate too early — we saw 7-of-10 opponents yielding 6
+        # cards trip the cap when set to 15, leaving 4 opponents unsampled.
+        # Bumping to 30 lets the typical 11-opponent league complete its
+        # full sweep in nearly all real cases (since the per-opponent yield
+        # is usually 1-2 cards) while still bounding pathological cases.
+        # Cold leagues (returning 0 cards across 11 opponents) still
+        # complete in one full pass — the cap never trips, but the
+        # per-opponent deadline reduction is what saves them.
+        global_target = max(30, max_per_opponent * 6)
 
         for idx, member in enumerate(eligible):
             opp_profile = analyze_roster_strengths(member.roster, self._players, scoring_format)
