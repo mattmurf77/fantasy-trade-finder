@@ -2560,8 +2560,26 @@
             if (!res.ok) continue;
             const data = await res.json();
             if (data.rankings && data.rankings.length > 0) {
-              // Cap at top 80 per position to keep the UI manageable
-              const ranked = data.rankings.slice(0, 80).map(r => ({
+              // Use ALL ranked players returned by /api/rankings (the
+              // backend already filters to DP-tracked players, so the
+              // total is roughly position-realistic — ~90 QBs, ~120 RBs).
+              //
+              // Earlier this slice was capped at 80, which silently
+              // dropped any player whose ELO ranked outside the top 80.
+              // For positions with > 80 ranked players (every position,
+              // really), tier placements in the bench band always fall
+              // in the tail — so they vanished from the rendered page
+              // even though the override survived in the DB. The user
+              // moved a player to Bench, refreshed, and saw an empty
+              // Bench tier.
+              //
+              // The drop zones already have max-height + overflow-y:auto,
+              // so a long tier just scrolls. Belt-and-suspenders cap at
+              // 300 to bound pathological cases (a position with > 300
+              // ranked players is unrealistic but we don't want to lock
+              // the UI if the API ever returns garbage).
+              const RANKED_CAP = 300;
+              const ranked = data.rankings.slice(0, RANKED_CAP).map(r => ({
                 id:   String(r.id),
                 name: r.name,
                 team: r.team || 'FA',
@@ -2589,7 +2607,7 @@
               const players = await res.json();
               const relevant = (players || [])
                 .filter(p => p.search_rank && p.search_rank <= 200 && p.full_name && p.team)
-                .slice(0, 80)
+                .slice(0, 300)
                 .map(p => ({
                   id:   String(p.player_id),
                   name: p.full_name,
