@@ -15,7 +15,29 @@ Progress is tracked in "interactions" (not raw swipes) for clean UX.
 from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime, timezone
+from pathlib import Path
+import json
 import random
+
+
+# ---------------------------------------------------------------------------
+# Tier-band config — single source of truth for both backend and frontend.
+# The frontend fetches the same JSON via GET /api/tier-config so the two
+# sides cannot drift. Each (scoring_format, position, tier) row carries a
+# [min, max] ELO band.
+# ---------------------------------------------------------------------------
+
+_TIER_CONFIG_PATH = Path(__file__).parent / "tier_config.json"
+
+def _load_tier_config() -> dict:
+    """Load and validate the tier band config. Cached per-process — the
+    file changes only on deploy, so no hot reload needed."""
+    raw = json.loads(_TIER_CONFIG_PATH.read_text())
+    # Strip the comment key. Keep the rest verbatim.
+    return {k: v for k, v in raw.items() if not k.startswith("_")}
+
+TIER_CONFIG: dict = _load_tier_config()
+ORDERED_TIERS: tuple[str, ...] = ("elite", "starter", "solid", "depth", "bench")
 
 
 # ---------------------------------------------------------------------------
@@ -687,35 +709,11 @@ class RankingService:
             reasoning="Tightest uncompared trio by Elo.",
         )
 
-    # ELO bands for tier-based saves. MUST stay in sync with
-    # ELO_TIER_THRESHOLDS in web/positional-tiers.html so that tier
-    # assignments round-trip correctly: each tier's band sits safely
-    # above the frontend's threshold for the SAME position+format combo.
-    #
-    # Two sets exist:
-    #   UNIFORM — RB/WR in every format, and ALL positions in SF TEP
-    #   QB_TE_1QB — QB/TE only, in 1QB PPR. Every tier shifts down one
-    #   slot vs. UNIFORM: elite → (uniform starter range), starter →
-    #   (uniform solid range), etc. Rationale: QBs and TEs in 1QB leagues
-    #   don't carry starter-tier dynasty value, so their "elite" cap
-    #   should match a RB/WR starter's cap.
-    UNIFORM_TIER_ELO_BANDS: dict[str, tuple[float, float]] = {
-        "elite":   (1720.0, 1790.0),
-        "starter": (1600.0, 1680.0),
-        "solid":   (1480.0, 1560.0),
-        "depth":   (1370.0, 1450.0),
-        "bench":   (1200.0, 1330.0),
-    }
-    QB_TE_1QB_TIER_ELO_BANDS: dict[str, tuple[float, float]] = {
-        "elite":   (1600.0, 1680.0),   # = RB/WR starter
-        "starter": (1480.0, 1560.0),   # = RB/WR solid
-        "solid":   (1370.0, 1450.0),   # = RB/WR depth
-        "depth":   (1200.0, 1330.0),   # = RB/WR bench
-        "bench":   (1060.0, 1180.0),   # new lower tier
-    }
-
-    # Back-compat alias — older callers reading the class attribute still work.
-    TIER_ELO_BANDS = UNIFORM_TIER_ELO_BANDS
+    # ELO bands for tier-based saves are now defined ONCE in
+    # backend/tier_config.json (loaded into TIER_CONFIG above) and shared
+    # with the frontend via GET /api/tier-config. The previous class
+    # attributes (UNIFORM_TIER_ELO_BANDS, QB_TE_1QB_TIER_ELO_BANDS) and
+    # the format-aware fallback they encoded have moved into that file.
 
     @classmethod
     def tier_bands_for(
@@ -724,11 +722,17 @@ class RankingService:
         scoring_format: str = "1qb_ppr",
     ) -> dict[str, tuple[float, float]]:
         """Return the (lo, hi) ELO band per tier for a given position +
-        scoring format. Used by apply_tiers server-side and mirrored by
-        ELO_TIER_THRESHOLDS on the frontend."""
-        if scoring_format == "1qb_ppr" and position in ("QB", "TE"):
-            return cls.QB_TE_1QB_TIER_ELO_BANDS
-        return cls.UNIFORM_TIER_ELO_BANDS
+        scoring format, sourced from TIER_CONFIG (backend/tier_config.json).
+        Used by apply_tiers server-side; the frontend reads the same JSON
+        via /api/tier-config so the two sides cannot drift."""
+        fmt_cfg = TIER_CONFIG.get(scoring_format) or TIER_CONFIG.get("1qb_ppr") or {}
+        # Fall back to RB row when position is unspecified (general pool case).
+        pos_key = position if position in fmt_cfg else "RB"
+        pos_cfg = fmt_cfg.get(pos_key, {})
+        return {
+            tier: (float(band["min"]), float(band["max"]))
+            for tier, band in pos_cfg.items()
+        }
 
     @classmethod
     def tier_for_elo(
@@ -765,20 +769,31 @@ class RankingService:
         position: Optional[str],
         tiers: dict[str, list[str]],
         scoring_format: str = "1qb_ppr",
+        cleared_pids: Optional[list[str]] = None,
     ) -> None:
         """
         Apply a positional-tier save by setting ELO overrides that fall
-        inside each tier's threshold band (see tier_bands_for).
-
-        In 1QB PPR, QB and TE use a compressed band set so their "elite"
-        tops out where RB/WR starters top out, etc. SF TEP uses uniform
-        bands across all four positions.
+        inside each tier's band (see tier_bands_for / tier_config.json).
 
         Within a tier, players are spread linearly across the band in the
         order they were submitted, preserving the user's intra-tier order.
+
+        ``cleared_pids`` — when the frontend removes a player from all
+        tiers (× button, "send to pool"), it forwards the pid here so we
+        can DELETE the override from the in-memory dict. Without this,
+        the player's old override survived and re-bucketed them on the
+        next refresh, snapping them right back into their previous tier.
         """
         pool_ids = {p.id for p in self._pool(position)}
         bands = self.tier_bands_for(position, scoring_format)
+
+        # Drop overrides for explicitly-cleared pids first, so a pid that's
+        # both cleared and re-tiered in the same save (rare, e.g. concurrent
+        # tab) ends up with the new tier's band rather than left without an
+        # override. The tier-write loop below will re-set it.
+        if cleared_pids:
+            for pid in cleared_pids:
+                self._elo_overrides.pop(pid, None)
 
         for tier_name, player_ids in tiers.items():
             band = bands.get(tier_name)
