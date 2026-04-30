@@ -81,6 +81,17 @@ _DEFAULT_CFG: dict[str, float] = {
     "roster_spot_penalty":       0.05,   # 5% penalty per extra roster spot used
     "roster_clogger_penalty":    0.10,   # 10% ADDITIONAL penalty per player beyond 2 in a 3+ one-way
     "roster_clogger_threshold":  3.0,    # 3+ players one-way triggers "clogger"
+    # Tier-priority multipliers — applied to composite_score based on the
+    # highest tier across both sides of the trade. Without this, the engine
+    # gravitates to depth-vs-bench trades because mismatch math favors
+    # players with high valuation variance (and depth tiers have more
+    # variance than elites). User feedback: trade suggestions over-index
+    # on depth tier; we want elite/starter players to dominate the deck.
+    "tier_mult_elite":      1.60,
+    "tier_mult_starter":    1.25,
+    "tier_mult_solid":      1.00,
+    "tier_mult_depth":      0.55,
+    "tier_mult_bench":      0.35,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -959,6 +970,32 @@ class TradeService:
             _dv_cache[pid] = v
             return v
 
+        # Tier-priority multiplier. Applied to composite_score so trades
+        # involving higher-tier players (Elite, Starter) outrank trades
+        # composed of Depth/Bench scraps — even when the depth-vs-depth
+        # mismatch math is "better" on paper. Tiers are derived from the
+        # USER's personal ELO (so it reflects how the user values the
+        # players, not the consensus). Thresholds mirror the uniform
+        # tier bands in backend/ranking_service.py:bucket_for. Picks the
+        # MAX tier across both sides — if a trade involves any one
+        # Elite-tier player, the whole trade gets the Elite multiplier.
+        _MULT_ELITE   = _c("tier_mult_elite")
+        _MULT_STARTER = _c("tier_mult_starter")
+        _MULT_SOLID   = _c("tier_mult_solid")
+        _MULT_DEPTH   = _c("tier_mult_depth")
+        _MULT_BENCH   = _c("tier_mult_bench")
+        def _tier_mult_for_pids(pids):
+            best = _MULT_BENCH
+            for pid in pids:
+                e = user_elo.get(pid, 1500)
+                if   e >= 1700: m = _MULT_ELITE
+                elif e >= 1580: m = _MULT_STARTER
+                elif e >= 1460: m = _MULT_SOLID
+                elif e >= 1350: m = _MULT_DEPTH
+                else:           m = _MULT_BENCH
+                if m > best: best = m
+            return best
+
         def _ktc_ok(give_ids: list[str], recv_ids: list[str]) -> bool:
             """
             Return True if the KTC package values satisfy fairness_threshold.
@@ -1018,6 +1055,7 @@ class TradeService:
                 fairness = self._fairness_score([give_id], [recv_id], seed_elo)
                 composite = (_c("mismatch_weight") * min(mismatch, 300) / 300 +
                              _c("fairness_weight") * fairness)
+                composite *= _tier_mult_for_pids([give_id, recv_id])
                 candidates.append((composite, mismatch, [give_id], [recv_id]))
 
                 if len(candidates) >= int(_c("max_candidates")):
@@ -1073,6 +1111,7 @@ class TradeService:
                     fairness = self._fairness_score([give_id_1, give_id_2], [recv_id], seed_elo)
                     composite = (_c("mismatch_weight") * min(mismatch, 400) / 400 +
                                  _c("fairness_weight") * fairness)
+                    composite *= _tier_mult_for_pids([give_id_1, give_id_2, recv_id])
                     candidates.append((composite, mismatch, [give_id_1, give_id_2], [recv_id]))
 
                     if len(candidates) >= int(_c("max_candidates")):
@@ -1125,6 +1164,7 @@ class TradeService:
                     fairness = self._fairness_score([give_id], [recv_id_1, recv_id_2], seed_elo)
                     composite = (_c("mismatch_weight") * min(mismatch, 400) / 400 +
                                  _c("fairness_weight") * fairness)
+                    composite *= _tier_mult_for_pids([give_id, recv_id_1, recv_id_2])
                     candidates.append((composite, mismatch, [give_id], [recv_id_1, recv_id_2]))
 
                     if len(candidates) >= int(_c("max_candidates")):
