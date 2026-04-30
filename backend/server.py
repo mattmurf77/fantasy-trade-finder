@@ -4018,13 +4018,31 @@ def session_init():
             except Exception as db_err:
                 log.warning("  [%s] DB replay failed: %s", fmt, db_err)
 
-            # Restore tier overrides for this format
+            # Restore tier overrides for this format.
+            #
+            # IMPORTANT — do NOT filter overrides by current pool membership.
+            # The previous version did:
+            #     svc._elo_overrides = {pid: elo for pid, elo in overrides.items() if pid in valid_ids}
+            # which silently dropped any pid that wasn't in fmt_pool at this
+            # session_init (e.g. a QB who was momentarily missing from the
+            # daily DP refresh, a rookie not yet ranked, a player rotated
+            # off Sleeper's active list, etc).
+            #
+            # The dropped overrides then survived in memory just long enough
+            # for the user's next save (any position) to overwrite the DB
+            # row with the truncated dict — permanently destroying the
+            # missing pids' overrides. A user who had 30+ QBs manually
+            # elevated to Elite could end up with only 5 the next time
+            # they opened the app.
+            #
+            # The fix is to keep the full override dict in memory unchanged.
+            # apply_tiers and apply_reorder both already filter by current
+            # pool when ASSIGNING overrides, so a stale pid sitting in the
+            # dict is harmless — it just doesn't influence current rankings
+            # until/unless that pid returns to the pool. No data loss.
             try:
                 overrides = load_tier_overrides(user_id=user_id, scoring_format=fmt)
-                valid_ids = {p.id for p in fmt_pool}
-                svc._elo_overrides = {
-                    pid: elo for pid, elo in overrides.items() if pid in valid_ids
-                }
+                svc._elo_overrides = {pid: float(elo) for pid, elo in overrides.items()}
                 if svc._elo_overrides:
                     log.info("  ✅ [%s] restored %d tier overrides", fmt, len(svc._elo_overrides))
             except Exception as db_err:
@@ -5515,9 +5533,10 @@ def _extension_build_session(user_id: str, username: str,
         except Exception as e:
             log.warning("  [%s] extension replay failed: %s", fmt, e)
         try:
+            # See server.py:4022 for why we no longer filter overrides
+            # through the current pool — the filter destroys data.
             overrides = load_tier_overrides(user_id=user_id, scoring_format=fmt)
-            valid_ids = {p.id for p in fmt_pool}
-            svc._elo_overrides = {pid: elo for pid, elo in overrides.items() if pid in valid_ids}
+            svc._elo_overrides = {pid: float(elo) for pid, elo in overrides.items()}
         except Exception as e:
             log.warning("  [%s] extension override restore failed: %s", fmt, e)
         new_services[fmt] = svc
