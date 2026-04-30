@@ -613,9 +613,13 @@ class RankingService:
     def _compute_elo(self, pool: list[Player]) -> dict[str, float]:
         pool_ids = {p.id for p in pool}
         # Seed each player's starting ELO.  Manual overrides (from tier saves
-        # or drag-and-drop reorders) take priority over the DP consensus seed —
-        # they represent the user's explicit rankings and become the anchor
-        # point that subsequent swipes evolve from.
+        # or drag-and-drop reorders) are the user's EXPLICIT ranking — once
+        # set, they pin the player's ELO and historical swipes do not move
+        # them. (Previous behavior re-applied every swipe on top of the
+        # override, which silently dragged tier-placed players away from
+        # where the user put them. For a user with many past trios swipes,
+        # tier saves became decorative — the round-trip broke and chips
+        # appeared in unexpected tiers after refresh.)
         ratings: dict[str, float] = {}
         for p in pool:
             if p.id in self._elo_overrides:
@@ -624,27 +628,38 @@ class RankingService:
                 ratings[p.id] = self._seed.get(p.id, self.ELO_INITIAL)
 
         elo_k = _c("elo_k")
+        override_ids = self._elo_overrides  # dict — `in` is O(1)
 
-        # Regular ranking swipes — full K factor. Applied AFTER overrides so
-        # tier-saved players' ELOs can still evolve when the user ranks them.
+        # Regular ranking swipes — full K factor.
+        # Skip the rating update for any pid that has an override: the user
+        # has explicitly placed them via tiers/reorder and wants that value
+        # to stick. The OTHER side of the swipe (if not overridden) still
+        # evolves against the overridden player's anchor ELO, which is the
+        # right behaviour: a non-tier-placed player who beat a tier-elite
+        # player should still gain ELO.
         for s in self._swipes:
             w, l = s.winner_id, s.loser_id
             if w not in pool_ids or l not in pool_ids:
                 continue
             ra, rb  = ratings[w], ratings[l]
             ea       = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
-            ratings[w] += elo_k * (1.0 - ea)
-            ratings[l] += elo_k * (0.0 - (1.0 - ea))
+            if w not in override_ids:
+                ratings[w] += elo_k * (1.0 - ea)
+            if l not in override_ids:
+                ratings[l] += elo_k * (0.0 - (1.0 - ea))
 
-        # Trade-decision swipes — reduced K factor (softer signal)
+        # Trade-decision swipes — reduced K factor (softer signal).
+        # Same anchoring rule as above.
         for s, k in self._trade_swipes:
             w, l = s.winner_id, s.loser_id
             if w not in pool_ids or l not in pool_ids:
                 continue
             ra, rb  = ratings[w], ratings[l]
             ea       = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
-            ratings[w] += k * (1.0 - ea)
-            ratings[l] += k * (0.0 - (1.0 - ea))
+            if w not in override_ids:
+                ratings[w] += k * (1.0 - ea)
+            if l not in override_ids:
+                ratings[l] += k * (0.0 - (1.0 - ea))
 
         return ratings
 
