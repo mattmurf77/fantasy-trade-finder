@@ -716,27 +716,65 @@
        active state mirrors the chips' selected styling. */
     .tier-multiselect-btn {
       margin-top: 6px;
-      background: transparent;
-      border: 1px solid var(--border);
+      /* Filled accent-tinted background + bright text — was transparent
+         + muted-grey text, which was nearly invisible against the
+         tier-label-area's tier-color tint (per user feedback). */
+      background: rgba(79, 124, 255, 0.18);
+      border: 1px solid rgba(79, 124, 255, 0.55);
       border-radius: 12px;
-      color: var(--muted);
+      color: var(--text);
       cursor: pointer;
       font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.2px;
-      padding: 4px 8px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+      padding: 5px 9px;
       line-height: 1;
-      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.06s;
       user-select: none;
     }
     .tier-multiselect-btn:hover {
+      background: rgba(79, 124, 255, 0.32);
       border-color: var(--accent);
-      color: var(--accent);
+      color: #fff;
+    }
+    .tier-multiselect-btn:active {
+      transform: translateY(1px);
     }
     .tier-multiselect-btn.active {
       background: var(--accent);
       border-color: var(--accent);
       color: #fff;
+      box-shadow: 0 0 0 2px rgba(79, 124, 255, 0.35);
+    }
+
+    /* "Copy tier list from <other format>" button — sits next to the
+       scoring-format toggle. Destructive action (replaces current format's
+       tiers), so it's styled as a secondary outlined pill, NOT the same
+       hue as the format-toggle's accent-fill. */
+    .copy-tiers-btn {
+      display: inline-flex;
+      align-items: center;
+      margin-left: 10px;
+      padding: 7px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      line-height: 1;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      user-select: none;
+    }
+    .copy-tiers-btn:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .copy-tiers-btn:disabled {
+      opacity: 0.55;
+      cursor: wait;
     }
 
     /* Chip styling when its tier is in multi-select mode. Cursor hints that
@@ -2643,6 +2681,7 @@
       const wrap = document.getElementById('scoring-toggle-wrap');
       if (!wrap) return;
       const active = tierGetActiveFormat();
+      const otherFmt = FORMAT_KEYS.find(f => f !== active);
       wrap.innerHTML = `
         <div class="scoring-toggle">
           ${FORMAT_KEYS.map(fmt => `
@@ -2651,7 +2690,70 @@
                     onclick="onTierScoringClick(this)">
               ${FORMAT_LABELS[fmt]}
             </button>`).join('')}
-        </div>`;
+        </div>
+        <button class="copy-tiers-btn" id="copy-tiers-btn"
+                data-from="${otherFmt}"
+                onclick="onCopyTiersFromOtherFormat(this)"
+                title="Copy your ${FORMAT_LABELS[otherFmt]} tier list into ${FORMAT_LABELS[active]}, preserving each player's tier and within-tier rank.">
+          ⇆ Copy tier list from ${FORMAT_LABELS[otherFmt]}
+        </button>`;
+    }
+
+    // Copy tier ASSIGNMENTS (tier label + within-tier rank) from the
+    // other scoring format into the active one. The backend handles the
+    // band-translation: a player at QB1 Elite in 1QB PPR (override 1680)
+    // becomes QB1 Elite in SF TEP (override 1790), so the on-screen tier
+    // and rank are preserved across formats with the appropriate ELO
+    // values for each format's band.
+    //
+    // Destructive: replaces the active format's existing tier overrides
+    // wholesale. We confirm before firing.
+    async function onCopyTiersFromOtherFormat(btn) {
+      const fromFmt = btn.dataset.from;
+      const toFmt   = tierGetActiveFormat();
+      if (!FORMAT_KEYS.includes(fromFmt) || fromFmt === toFmt) return;
+
+      const ok = window.confirm(
+        `Copy your ${FORMAT_LABELS[fromFmt]} tier list into ${FORMAT_LABELS[toFmt]}?\n\n` +
+        `This will REPLACE your current ${FORMAT_LABELS[toFmt]} tiers. Each player ` +
+        `keeps their tier and within-tier rank from ${FORMAT_LABELS[fromFmt]}; only ` +
+        `the underlying ELO values change to fit ${FORMAT_LABELS[toFmt]}'s bands.\n\n` +
+        `Cannot be undone via the Undo button.`
+      );
+      if (!ok) return;
+
+      btn.disabled = true;
+      btn.textContent = 'Copying…';
+      try {
+        const res = await fetch('/api/tiers/copy-from-format', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-Token': _getSessionToken(),
+          },
+          body: JSON.stringify({ from_format: fromFmt }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          showTierToast('Copy failed: ' + (data.error || 'Unknown error'), 'error');
+          return;
+        }
+        showTierToast(
+          `✓ Copied ${data.total} tier placements from ${FORMAT_LABELS[fromFmt]}`,
+          'success'
+        );
+        // Reload tier state from the server so the page reflects the new
+        // overrides. Wipe local saved-positions tracking so the position
+        // tabs re-checkmark from the persisted state.
+        savedPositions = new Set();
+        document.querySelectorAll('.pos-tab .check').forEach(el => el.remove());
+        await initFromAPI();
+      } catch (e) {
+        showTierToast('Copy failed: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+        renderTierScoringToggle();
+      }
     }
 
     async function onTierScoringClick(btn) {
