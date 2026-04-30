@@ -1811,6 +1811,152 @@ def get_tier_config():
     })
 
 
+@app.route("/api/tiers/copy-from-format", methods=["POST"])
+def copy_tiers_from_format_route():
+    """POST /api/tiers/copy-from-format {from_format: '1qb_ppr'}
+
+    Copy the user's tier ASSIGNMENTS (tier label + within-tier rank) from
+    one scoring format to the active scoring format. The raw ELO values
+    differ between formats because the bands differ — copying ELOs
+    directly would re-bucket players incorrectly. So we:
+
+      1) Read source overrides
+      2) For each pid, determine which tier it sits in under the SOURCE
+         format using tier_for_elo(elo, position, source_format).
+      3) Group by (position, tier) and sort each group by source ELO desc
+         (this preserves within-tier rank — Josh Allen at QB1 Elite stays
+         at QB1 Elite).
+      4) For each position, call to_svc.apply_tiers(position, tiers,
+         scoring_format=to_format) — which writes new override ELOs in
+         the TARGET format's band.
+      5) Wholesale-replace the target's _elo_overrides dict (i.e. clear
+         first) so leftover overrides not present in the source aren't
+         retained — the user asked to "copy", which implies overwrite.
+      6) Persist + mark all touched positions as saved + republish to
+         member_rankings.
+
+    Body:
+      from_format: '1qb_ppr' or 'sf_tep' — which format to copy FROM.
+      The TO format is the user's currently active format.
+
+    Response:
+      { ok: true, from_format, to_format, position_counts: {QB: N, ...},
+        total: N }
+    """
+    sess = _require_session()
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    body      = request.get_json(force=True) or {}
+    from_format = body.get("from_format")
+    to_format   = _active_format(sess)
+
+    valid_formats = ("1qb_ppr", "sf_tep")
+    if from_format not in valid_formats or to_format not in valid_formats:
+        return jsonify({"error": f"Invalid format. Got from={from_format!r} to={to_format!r}"}), 400
+    if from_format == to_format:
+        return jsonify({"error": "from and to formats must differ"}), 400
+
+    services = sess.get("services") or {}
+    from_svc = services.get(from_format)
+    to_svc   = services.get(to_format)
+    if not from_svc or not to_svc:
+        return jsonify({"error": "Per-format services not initialised — please refresh"}), 500
+
+    # Snapshot source overrides — they shouldn't be modified during copy.
+    from_overrides = dict(from_svc._elo_overrides or {})
+    if not from_overrides:
+        return jsonify({
+            "ok": False,
+            "error": f"No tiers saved in {from_format} to copy from",
+        }), 400
+
+    # Group by (position, tier_in_source_format), sorted by source ELO desc.
+    # The sort preserves within-tier rank — top of source-Elite ends up at
+    # top of target-Elite, etc.
+    grouped: dict[tuple[str, str], list[tuple[str, float]]] = {}
+    for pid, elo in from_overrides.items():
+        player = from_svc._players.get(pid)
+        if not player or not player.position:
+            continue
+        position = player.position
+        tier = RankingService.tier_for_elo(elo, position, from_format)
+        if not tier:
+            continue
+        grouped.setdefault((position, tier), []).append((pid, float(elo)))
+
+    for key in grouped:
+        grouped[key].sort(key=lambda pe: -pe[1])  # ELO desc
+
+    # Build per-position {tier_name: [pids in rank order]} dicts.
+    by_position: dict[str, dict[str, list[str]]] = {}
+    for (position, tier), pid_elo_list in grouped.items():
+        by_position.setdefault(position, {})[tier] = [pid for pid, _ in pid_elo_list]
+
+    # Wholesale replace: clear target overrides FIRST. The apply_tiers calls
+    # below then rewrite each position's slice fresh, in the target format's
+    # bands. Any pre-existing target override for a pid not in the source
+    # is dropped — that's what "copy" means here.
+    to_svc._elo_overrides = {}
+
+    for position, tiers in by_position.items():
+        to_svc.apply_tiers(
+            position=position,
+            tiers=tiers,
+            scoring_format=to_format,
+        )
+
+    # Persist override dict.
+    try:
+        save_tier_overrides(g_user_id, to_svc._elo_overrides, scoring_format=to_format)
+    except Exception as db_err:
+        log.warning("copy-from-format: save_tier_overrides failed: %s", db_err)
+        return jsonify({"error": f"DB write failed: {db_err}"}), 500
+
+    # Mark each touched position as saved for the target format.
+    for position in by_position:
+        try:
+            save_tiers_position(g_user_id, position, scoring_format=to_format)
+        except Exception as db_err:
+            log.warning("copy-from-format: save_tiers_position(%s) failed: %s", position, db_err)
+
+    # Republish to member_rankings so leaguemates see the new format's rank
+    # set when generating trades.
+    if g_league and g_league.league_id not in ("league_demo",):
+        try:
+            all_rankings = to_svc.get_rankings(position=None)
+            ranking_payload = [
+                {"player_id": rp.player.id, "elo": rp.elo}
+                for rp in all_rankings.rankings
+            ]
+            upsert_member_rankings(
+                user_id        = g_user_id,
+                league_id      = g_league.league_id,
+                rankings       = ranking_payload,
+                scoring_format = to_format,
+            )
+        except Exception as db_err:
+            log.warning("copy-from-format: member_rankings publish failed: %s", db_err)
+
+    # Invalidate any cached trade-generation jobs since rankings just changed.
+    try:
+        _invalidate_trade_jobs(user_id=g_user_id)
+    except Exception:
+        pass
+
+    position_counts = {pos: sum(len(pids) for pids in tiers.values())
+                       for pos, tiers in by_position.items()}
+    log.info("tiers/copy %s → %s for %s — copied %d overrides across %d positions",
+             from_format, to_format, g_user_id,
+             sum(position_counts.values()), len(position_counts))
+    return jsonify({
+        "ok":              True,
+        "from_format":     from_format,
+        "to_format":       to_format,
+        "position_counts": position_counts,
+        "total":           sum(position_counts.values()),
+    })
+
+
 @app.route("/api/tiers/save", methods=["POST"])
 def save_tiers_route():
     """POST /api/tiers/save {position: 'RB', tiers: {elite: [...ids], ...}, cleared_pids: [...]}

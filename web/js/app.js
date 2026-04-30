@@ -1477,7 +1477,21 @@
           } catch (_e) { /* ignore */ }
         }
 
-        if (data.threshold_met && data.interaction_count === data.threshold) {
+        // Fire the unlock-celebration modal AT MOST ONCE per user. The
+        // moment-of-crossing check (count === threshold) used to fire for
+        // every position the user crossed (4 modals over the course of
+        // ranking out the full board), and even subsequent re-completions
+        // could trigger it via edge cases. Per user feedback, we want the
+        // modal to be a one-time "you unlocked Find a Trade" flourish —
+        // not a repeated interruption.
+        //
+        // We persist the "shown" flag in localStorage keyed by user id so
+        // it survives reloads but doesn't bleed across accounts on a
+        // shared browser. Resetting rankings doesn't reset this flag —
+        // the celebration is a per-user lifecycle event.
+        if (data.threshold_met && data.interaction_count === data.threshold &&
+            !_hasShownUnlockCelebration()) {
+          _markUnlockCelebrationShown();
           _celebrationActive = true;
           showRankingCelebration(currentPosition);
         }
@@ -1497,6 +1511,25 @@
     // ── Ranking celebration modal ─────────────────────────────────────
     const POSITION_ORDER = ['QB', 'RB', 'WR', 'TE'];
     let _celebrationActive = false;
+
+    // One-time gate for the unlock-celebration modal. Keyed by user id
+    // so a shared browser doesn't suppress new accounts' first celebration.
+    const _UNLOCK_CELEB_KEY = (uid) => `ftf_unlock_celeb_shown_${uid || 'anon'}`;
+    function _currentUserIdForCeleb() {
+      try {
+        return localStorage.getItem('fumble_user_id') || '';
+      } catch (_) { return ''; }
+    }
+    function _hasShownUnlockCelebration() {
+      try {
+        return localStorage.getItem(_UNLOCK_CELEB_KEY(_currentUserIdForCeleb())) === '1';
+      } catch (_) { return false; }
+    }
+    function _markUnlockCelebrationShown() {
+      try {
+        localStorage.setItem(_UNLOCK_CELEB_KEY(_currentUserIdForCeleb()), '1');
+      } catch (_) { /* localStorage disabled — best-effort */ }
+    }
 
     async function showRankingCelebration(completedPosition) {
       // Fetch latest progress to determine which positions are done
