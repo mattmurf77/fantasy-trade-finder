@@ -153,6 +153,11 @@ export default function TiersScreen() {
   // Bin layouts are captured via onLayout into this ref. We compare the
   // drag's finalY against every known layout and pick the first match.
   const binLayouts = useRef<BinLayout[]>([]);
+  // Per-chip layouts (y + height), keyed by playerId. Captured via the
+  // chip's onLayout so we can resolve a drop position to an insertion
+  // index inside the destination bin (within-tier reordering, not just
+  // tier-to-tier moves).
+  const chipLayouts = useRef<Map<string, { y: number; height: number }>>(new Map());
 
   const setBinLayout = useCallback((zone: Zone, e: LayoutChangeEvent) => {
     const { y, height } = e.nativeEvent.layout;
@@ -162,6 +167,11 @@ export default function TiersScreen() {
     else binLayouts.current.push(entry);
   }, []);
 
+  const setChipLayout = useCallback((pid: string, e: LayoutChangeEvent) => {
+    const { y, height } = e.nativeEvent.layout;
+    chipLayouts.current.set(pid, { y, height });
+  }, []);
+
   const zoneAt = useCallback((absoluteY: number): Zone | null => {
     for (const b of binLayouts.current) {
       if (absoluteY >= b.y && absoluteY <= b.y + b.height) return b.zone;
@@ -169,21 +179,95 @@ export default function TiersScreen() {
     return null;
   }, []);
 
+  // Resolve a drop position (in screen Y) to {zone, insertIdx}. Excludes
+  // the dragged chip from the insertion-index walk so the math is in
+  // POST-removal coordinates — same convention as web's
+  // assignToTierAt. Returns null if the cursor isn't over any zone.
+  const dropTargetAt = useCallback(
+    (absoluteY: number, draggedPid: string): { zone: Zone; insertIdx: number } | null => {
+      const zone = zoneAt(absoluteY);
+      if (!zone) return null;
+      // For 'unassigned' (the pool) order doesn't drive any backend
+      // semantic; insert at end.
+      if (zone === 'unassigned') {
+        return { zone, insertIdx: 0 };
+      }
+      // Walk the bin's chips in array order. First chip whose vertical
+      // midpoint is BELOW the cursor → that's the insert index. Drag
+      // source is excluded so the index is correct after we splice it
+      // out of its original location.
+      const ordered = buckets[zone] || [];
+      let insertIdx = 0;
+      let visible = 0;
+      for (const p of ordered) {
+        if (p.id === draggedPid) continue;
+        const layout = chipLayouts.current.get(p.id);
+        if (!layout) {
+          // Layout not yet measured — assume below cursor so the index
+          // keeps growing. Safer than skipping which would produce a
+          // too-low index on first drop after a re-render.
+          insertIdx = visible + 1;
+          visible += 1;
+          continue;
+        }
+        if (absoluteY < layout.y + layout.height / 2) {
+          // Cursor is above this chip's midpoint → insert before it.
+          return { zone, insertIdx: visible };
+        }
+        visible += 1;
+        insertIdx = visible;
+      }
+      return { zone, insertIdx };
+    },
+    [buckets, zoneAt],
+  );
+
+  // Move a player into the given zone at a specific 0-based array index.
+  // `insertIdx` is interpreted in POST-removal coordinates (consistent
+  // with dropTargetAt above) — so we splice out FIRST and then splice in
+  // at exactly insertIdx with no further bookkeeping. When insertIdx is
+  // undefined, falls back to "append at end" for legacy call sites.
+  //
+  // Same-tier no-op detection: if the player already sits at the
+  // requested index in the requested zone, skip the splice round-trip
+  // entirely (avoids triggering an unnecessary save).
   const movePlayer = useCallback(
-    (playerId: string, toZone: Zone) => {
+    (playerId: string, toZone: Zone, insertIdx?: number) => {
+      let didMove = false;
       setBuckets((prev) => {
         const next = cloneBuckets(prev);
         let moved: RankedPlayer | null = null;
+        let fromZone: Zone | null = null;
+        let fromIdx = -1;
         for (const z of ALL_ZONES) {
           const idx = next[z].findIndex((p) => p.id === playerId);
           if (idx >= 0) {
-            [moved] = next[z].splice(idx, 1);
+            fromZone = z;
+            fromIdx  = idx;
+            [moved]  = next[z].splice(idx, 1);
             break;
           }
         }
-        if (moved) next[toZone].push(moved);
+        if (!moved) return prev;
+
+        // Resolve target index: undefined → end. Clamp to current length
+        // (post-removal). For same-zone no-op: if fromIdx === target idx
+        // in post-removal coords, restore and bail.
+        let targetIdx =
+          typeof insertIdx === 'number'
+            ? Math.max(0, Math.min(insertIdx, next[toZone].length))
+            : next[toZone].length;
+        if (fromZone === toZone && fromIdx === targetIdx) {
+          // Restore to original position; nothing changed.
+          next[fromZone].splice(fromIdx, 0, moved);
+          return prev;
+        }
+        next[toZone].splice(targetIdx, 0, moved);
+        didMove = true;
         return next;
       });
+      if (!didMove) return;
+
       // Track tier-out moves so the next save can DELETE the backend
       // override. If the user drags BACK into a tier later, the save
       // filter (`stillAssigned`) drops the id from the cleared list so
@@ -216,8 +300,12 @@ export default function TiersScreen() {
       <DraggableRow
         key={p.id}
         player={p}
-        zoneAt={zoneAt}
-        onDrop={(zone) => zone && movePlayer(p.id, zone)}
+        dropTargetAt={dropTargetAt}
+        onLayout={setChipLayout}
+        onDrop={(target) => {
+          if (!target) return;
+          movePlayer(p.id, target.zone, target.insertIdx);
+        }}
         onLongPress={() => {
           // Secondary dismiss via long-press confirm. Kept opt-in so
           // normal users don't accidentally banish players.
@@ -360,20 +448,31 @@ export default function TiersScreen() {
 }
 
 // ── DraggableRow — encapsulates the per-card gesture + Reanimated style.
+//
+// dropTargetAt: parent-supplied resolver that turns a screen-Y coordinate
+//   into {zone, insertIdx}. The chip's gesture calls it on release. The
+//   resolver excludes the dragged chip from its index walk so the
+//   returned insertIdx is in POST-removal coordinates — caller can splice
+//   directly without further adjustment.
+//
+// onLayout: parent hook that captures this chip's position so the
+//   resolver can do per-chip insertion-index math. We call it on every
+//   onLayout fire (cheap) so re-renders after a move stay in sync.
 interface DraggableRowProps {
   player: RankedPlayer;
-  zoneAt: (absoluteY: number) => Zone | null;
-  onDrop: (zone: Zone | null) => void;
+  dropTargetAt: (absoluteY: number, draggedPid: string) => { zone: Zone; insertIdx: number } | null;
+  onLayout: (pid: string, e: LayoutChangeEvent) => void;
+  onDrop: (target: { zone: Zone; insertIdx: number } | null) => void;
   onLongPress?: () => void;
 }
 
-function DraggableRow({ player, zoneAt, onDrop, onLongPress }: DraggableRowProps) {
+function DraggableRow({ player, dropTargetAt, onLayout, onDrop, onLongPress }: DraggableRowProps) {
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const scale = useSharedValue(1);
   const zIndex = useSharedValue(0);
 
-  // Pan activates after 150ms hold to avoid fighting ScrollView scrolling.
+  // Pan activates after 220ms hold to avoid fighting ScrollView scrolling.
   const pan = useMemo(
     () =>
       Gesture.Pan()
@@ -389,16 +488,16 @@ function DraggableRow({ player, zoneAt, onDrop, onLongPress }: DraggableRowProps
         })
         .onEnd((e) => {
           const absoluteY = e.absoluteY;
-          const z = zoneAt(absoluteY);
+          const target = dropTargetAt(absoluteY, player.id);
           // Snap back visually, then commit the move so the card re-renders
           // in its new bin.
           translateX.value = withTiming(0, { duration: 160 });
           translateY.value = withTiming(0, { duration: 160 });
           scale.value = withTiming(1, { duration: 160 });
           zIndex.value = 0;
-          runOnJS(onDrop)(z);
+          runOnJS(onDrop)(target);
         }),
-    [zoneAt, onDrop, translateX, translateY, scale, zIndex],
+    [dropTargetAt, onDrop, player.id, translateX, translateY, scale, zIndex],
   );
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -412,7 +511,10 @@ function DraggableRow({ player, zoneAt, onDrop, onLongPress }: DraggableRowProps
 
   return (
     <GestureDetector gesture={pan}>
-      <Animated.View style={animatedStyle}>
+      <Animated.View
+        style={animatedStyle}
+        onLayout={(e) => onLayout(player.id, e)}
+      >
         <PlayerCard player={player} compact onLongPress={onLongPress} />
       </Animated.View>
     </GestureDetector>
