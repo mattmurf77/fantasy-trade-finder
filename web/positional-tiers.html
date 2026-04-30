@@ -708,6 +708,118 @@
     }
     .reset-btn:hover { border-color: var(--red); color: var(--red); }
 
+    /* ── Multi-select toggle (one per tier) ───────────────────────────────
+       Sits at the bottom of each tier-label-area. Tapping it puts THAT tier
+       into "multi-select mode": clicking chips inside the tier toggles
+       their inclusion in the global multi-select set. The button is
+       also the visible affordance for "you're now in select mode" — its
+       active state mirrors the chips' selected styling. */
+    .tier-multiselect-btn {
+      margin-top: 6px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      padding: 4px 8px;
+      line-height: 1;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      user-select: none;
+    }
+    .tier-multiselect-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .tier-multiselect-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    /* Chip styling when its tier is in multi-select mode. Cursor hints that
+       a click toggles selection. */
+    .player-chip.multi-selectable {
+      cursor: pointer;
+    }
+    .player-chip.multi-selectable:hover {
+      box-shadow: 0 0 0 1px var(--accent) inset;
+    }
+    /* Chip is currently in the selection set. Highlight is intentionally
+       loud so a fast scan of the tier shows the group at a glance. */
+    .player-chip.multi-selected {
+      background: rgba(79,124,255,0.18);
+      box-shadow: 0 0 0 2px var(--accent) inset;
+    }
+
+    /* ── Floating action bar — appears when 2+ chips are selected ──
+       Centered at the bottom of the viewport. Two big arrow buttons drive
+       group moveUp/moveDown with the same edge-spillover semantics as the
+       per-chip arrows. A small count chip on the left says "3 selected". */
+    .multiselect-action-bar {
+      position: fixed;
+      left: 50%;
+      bottom: calc(16px + env(safe-area-inset-bottom));
+      transform: translate(-50%, 8px);
+      z-index: 110;             /* above autosave-bar */
+      display: none;            /* shown via .show */
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      border-radius: 24px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.45),
+                  0 0 0 4px rgba(79,124,255,0.12);
+      opacity: 0;
+      transition: opacity 0.18s, transform 0.18s;
+    }
+    .multiselect-action-bar.show {
+      display: inline-flex;
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    .multiselect-count {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent);
+      padding: 0 6px;
+      min-width: 60px;
+      text-align: center;
+    }
+    .multiselect-arrow-btn {
+      background: var(--accent);
+      border: none;
+      border-radius: 18px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 700;
+      width: 44px;
+      height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      transition: filter 0.12s, transform 0.06s;
+    }
+    .multiselect-arrow-btn:hover { filter: brightness(1.12); }
+    .multiselect-arrow-btn:active { transform: translateY(1px); }
+    .multiselect-clear-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 6px 10px;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .multiselect-clear-btn:hover { border-color: var(--red); color: var(--red); }
+
     /* Bottom padding on layout so sticky bar never covers the last tier */
     .tier-layout {
       padding-bottom: calc(72px + env(safe-area-inset-bottom));
@@ -1209,6 +1321,9 @@
           <div class="tier-label-name">Elite</div>
           <div class="tier-label-desc">League winners</div>
           <div class="tier-label-count" id="count-elite">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-elite"
+                  data-tier="elite" onclick="toggleMultiSelectMode('elite')"
+                  title="Select multiple players to move together">Multi-select</button>
         </div>
         <div class="tier-drop-zone empty" id="zone-elite"
              ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'elite')"></div>
@@ -1219,6 +1334,9 @@
           <div class="tier-label-name">Starter</div>
           <div class="tier-label-desc">Weekly locks</div>
           <div class="tier-label-count" id="count-starter">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-starter"
+                  data-tier="starter" onclick="toggleMultiSelectMode('starter')"
+                  title="Select multiple players to move together">Multi-select</button>
         </div>
         <div class="tier-drop-zone empty" id="zone-starter"
              ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'starter')"></div>
@@ -1229,6 +1347,9 @@
           <div class="tier-label-name">Solid</div>
           <div class="tier-label-desc">Flex / matchup plays</div>
           <div class="tier-label-count" id="count-solid">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-solid"
+                  data-tier="solid" onclick="toggleMultiSelectMode('solid')"
+                  title="Select multiple players to move together">Multi-select</button>
         </div>
         <div class="tier-drop-zone empty" id="zone-solid"
              ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'solid')"></div>
@@ -1239,6 +1360,9 @@
           <div class="tier-label-name">Depth</div>
           <div class="tier-label-desc">Bye-week fill-ins</div>
           <div class="tier-label-count" id="count-depth">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-depth"
+                  data-tier="depth" onclick="toggleMultiSelectMode('depth')"
+                  title="Select multiple players to move together">Multi-select</button>
         </div>
         <div class="tier-drop-zone empty" id="zone-depth"
              ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'depth')"></div>
@@ -1249,6 +1373,9 @@
           <div class="tier-label-name">Bench</div>
           <div class="tier-label-desc">Roster stashes</div>
           <div class="tier-label-count" id="count-bench">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-bench"
+                  data-tier="bench" onclick="toggleMultiSelectMode('bench')"
+                  title="Select multiple players to move together">Multi-select</button>
         </div>
         <div class="tier-drop-zone empty" id="zone-bench"
              ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'bench')"></div>
@@ -1262,6 +1389,20 @@
   <div class="autosave-bar">
     <span class="autosave-pill" id="autosave-pill"></span>
     <button class="reset-btn" onclick="resetCurrentPos()" title="Reset to default tiers">Reset</button>
+  </div>
+
+  <!-- ── Floating multi-select action bar ──
+       Hidden until 2+ chips are selected. Up/down arrows apply moveUp/
+       moveDown to the entire selection in current-index order, preserving
+       the per-chip arrow's edge-spillover semantics. -->
+  <div id="multiselect-action-bar" class="multiselect-action-bar" role="toolbar" aria-label="Move selected players">
+    <span class="multiselect-count" id="multiselect-count">0 selected</span>
+    <button class="multiselect-arrow-btn" onclick="groupMoveUp()"
+            title="Move selected players up" aria-label="Move selected players up">&#9650;</button>
+    <button class="multiselect-arrow-btn" onclick="groupMoveDown()"
+            title="Move selected players down" aria-label="Move selected players down">&#9660;</button>
+    <button class="multiselect-clear-btn" onclick="clearMultiSelect()"
+            title="Cancel multi-select">Cancel</button>
   </div>
 
   <!-- ── Undo toast ── -->
@@ -1436,6 +1577,168 @@
     let undoStack = [];     // {playerId, fromTier (null = pool), toTier}
     let draggedId = null;
 
+    // ══════════════════════════════════════════════════════
+    //  MULTI-SELECT MODULE
+    // ══════════════════════════════════════════════════════
+    // Lets the user select 2+ chips and move them all up or down with a
+    // single click. The "active tier" is the tier whose Multi-select
+    // toggle is currently on — clicking chips inside that tier toggles
+    // their inclusion in `multiSelect.ids`. Selection survives cross-
+    // tier spillovers (a chip that hopped to a different tier is still
+    // selected; subsequent group-moves continue to push it).
+    //
+    // Invariant: at most one tier's toggle is on at a time. Switching
+    // tiers preserves the selection set (so a user can hold a group of
+    // chips, change the active toggle, and add chips from a second tier).
+    // Switching `currentPos` (e.g. RB → WR) wipes selection entirely.
+    let multiSelect = { activeTier: null, ids: new Set() };
+
+    function toggleMultiSelectMode(tier) {
+      if (multiSelect.activeTier === tier) {
+        // Toggling off the active tier — also clear selection so the user
+        // doesn't accidentally have orphaned highlights with no toolbar.
+        clearMultiSelect();
+        return;
+      }
+      multiSelect.activeTier = tier;
+      // Selection is preserved across tier-toggle switches, so a user can
+      // build a multi-tier group. (No-op for the common single-tier case.)
+      updateMultiSelectUI();
+      render();
+    }
+
+    function clearMultiSelect() {
+      multiSelect = { activeTier: null, ids: new Set() };
+      updateMultiSelectUI();
+      render();
+    }
+
+    function toggleChipSelection(playerId) {
+      // Only the active tier responds to chip clicks. Defensive: if a chip
+      // somehow gets a click handler attached but its tier isn't active
+      // (state drift between renders), bail.
+      if (!multiSelect.activeTier) return;
+      if (multiSelect.ids.has(playerId)) multiSelect.ids.delete(playerId);
+      else                                multiSelect.ids.add(playerId);
+      updateMultiSelectUI();
+      render();
+    }
+
+    function updateMultiSelectUI() {
+      // Sync the per-tier toggle button states (active class).
+      document.querySelectorAll('.tier-multiselect-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tier === multiSelect.activeTier);
+      });
+      // Show the floating action bar only when ≥2 chips are selected.
+      // 1-selected with the bar visible would be strictly equivalent to a
+      // single-chip arrow click — no value-add for the extra UI surface.
+      const bar   = document.getElementById('multiselect-action-bar');
+      const count = document.getElementById('multiselect-count');
+      const n     = multiSelect.ids.size;
+      if (n >= 2) {
+        count.textContent = `${n} selected`;
+        bar.classList.add('show');
+      } else {
+        bar.classList.remove('show');
+      }
+    }
+
+    // Sort the current selection top-to-bottom in display order (TIERS index
+    // first, then per-tier rank). Used by group-move so the topmost chip
+    // moves first on Up (and vice-versa for Down).
+    function _multiSelectSortedTopDown() {
+      const state = tierState[currentPos];
+      const items = [];
+      for (const pid of multiSelect.ids) {
+        for (let ti = 0; ti < TIERS.length; ti++) {
+          const t = TIERS[ti];
+          const idx = state[t].indexOf(pid);
+          if (idx !== -1) {
+            items.push({ pid, tierIdx: ti, idx });
+            break;
+          }
+        }
+      }
+      items.sort((a, b) => a.tierIdx - b.tierIdx || a.idx - b.idx);
+      return items;
+    }
+
+    // Drop pids from the selection that no longer live in any tier
+    // (e.g. user clicked × on a selected chip). Called from render so
+    // the action bar count stays honest.
+    function _pruneMultiSelect() {
+      const state = tierState[currentPos];
+      const stillThere = new Set();
+      for (const pid of multiSelect.ids) {
+        for (const t of TIERS) {
+          if (state[t].indexOf(pid) !== -1) { stillThere.add(pid); break; }
+        }
+      }
+      if (stillThere.size !== multiSelect.ids.size) {
+        multiSelect.ids = stillThere;
+        updateMultiSelectUI();
+      }
+    }
+
+    // Locate a pid in the current-position tier state. Returns
+    // {tier, idx} or null. Used by groupMoveUp/Down because each
+    // iteration of moveUp/moveDown shifts indices, so we have to re-look
+    // up positions every step.
+    function _locatePid(pid) {
+      const state = tierState[currentPos];
+      for (const t of TIERS) {
+        const i = state[t].indexOf(pid);
+        if (i !== -1) return { tier: t, idx: i };
+      }
+      return null;
+    }
+
+    function groupMoveUp() {
+      // Top chip first — guarantees the topmost selected slot is filled
+      // before anyone below tries to swap into it. Each moveUp call uses
+      // the existing edge-spillover logic, so a top-of-tier selected chip
+      // hops to the end of the tier above just like the per-chip arrow.
+      //
+      // Skip rule: if the chip immediately ABOVE the current pid (within
+      // the same tier) is also selected, skip the move. That selected
+      // neighbor has already been processed (or is itself blocked at the
+      // tier top), and shifting on top of it would scramble relative
+      // order — e.g. [A,B,C] all selected, naive cascade produces
+      // [B,C,A], which the user did NOT ask for. With this rule the
+      // group behaves as a cohesive block: when blocked above, all three
+      // sit still.
+      const items = _multiSelectSortedTopDown();
+      if (items.length < 2) return;
+      for (const { pid } of items) {
+        const loc = _locatePid(pid);
+        if (!loc) continue;
+        if (loc.idx > 0) {
+          const above = tierState[currentPos][loc.tier][loc.idx - 1];
+          if (multiSelect.ids.has(above)) continue;
+        }
+        moveUp(pid);
+      }
+    }
+
+    function groupMoveDown() {
+      // Bottom chip first (reverse of Up) — same reasoning, mirrored.
+      // Skip rule mirrors groupMoveUp: if the chip immediately BELOW is
+      // also selected, skip — it's already moved or is at the bottom of
+      // its tier and the cascade would otherwise scramble.
+      const items = _multiSelectSortedTopDown().reverse();
+      if (items.length < 2) return;
+      for (const { pid } of items) {
+        const loc = _locatePid(pid);
+        if (!loc) continue;
+        const tierLen = tierState[currentPos][loc.tier].length;
+        if (loc.idx < tierLen - 1) {
+          const below = tierState[currentPos][loc.tier][loc.idx + 1];
+          if (multiSelect.ids.has(below)) continue;
+        }
+        moveDown(pid);
+      }
+    }
+
     // ── Auto-save: every tier change triggers a debounced save ──
     // Per-position debounce timers + in-flight guard so rapid changes
     // collapse into a single backend request per position.
@@ -1489,6 +1792,11 @@
     //  RENDERING
     // ══════════════════════════════════════════════════════
     function render() {
+      // Drop any selected pids that no longer live in a tier (e.g. user
+      // hit × on a selected chip, or undo restored a different state).
+      // Runs before the DOM rebuild so the UI reflects honest counts.
+      _pruneMultiSelect();
+
       const players = SAMPLE_PLAYERS[currentPos] || [];
       const assigned = new Set();
       TIERS.forEach(t => tierState[currentPos][t].forEach(id => assigned.add(id)));
@@ -1554,6 +1862,17 @@
       chip.setAttribute('draggable', 'true');
       chip.dataset.id = player.id;
       if (inTier) chip.dataset.rank = String(rankInTier ?? 0);
+
+      // Multi-select visual state — only meaningful for in-tier chips.
+      // - .multi-selectable: this chip's tier is the active toggle, so a
+      //   click toggles selection. Cursor & hover ring are the affordance.
+      // - .multi-selected: this chip is currently in the global selection
+      //   set. Highlight survives across tier-toggle switches and
+      //   cross-tier spills (until the user explicitly clears or removes).
+      const isActiveMSTier = inTier && multiSelect.activeTier === tierName;
+      const isMSSelected   = inTier && multiSelect.ids.has(player.id);
+      if (isActiveMSTier) chip.classList.add('multi-selectable');
+      if (isMSSelected)   chip.classList.add('multi-selected');
 
       const posClass = player.pos.toLowerCase();
       const tierIdx  = inTier ? TIERS.indexOf(tierName) : -1;
@@ -1652,6 +1971,22 @@
         // outside a drop zone (Esc, snap-back, etc.).
         _clearDropIndicators();
       });
+
+      // Multi-select click handler — only fires for chips in the tier
+      // whose Multi-select toggle is currently on. The arrow buttons and
+      // the × remove button already stop propagation on their own
+      // pointer/mouse/touch events, so they don't accidentally toggle
+      // selection. HTML5 drag does not synthesize a click when the user
+      // actually drags (only on click-without-drag), so dragging is
+      // unaffected.
+      if (isActiveMSTier) {
+        chip.addEventListener('click', (e) => {
+          // Defensive: re-check at click time in case state drifted.
+          if (multiSelect.activeTier !== tierName) return;
+          e.stopPropagation();
+          toggleChipSelection(player.id);
+        });
+      }
 
       // Pool chips use the tier-assign buttons instead of click-to-quick-assign
 
@@ -1943,7 +2278,11 @@
       document.querySelectorAll('.pos-tab').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
       undoStack = [];
-      render();
+      // Multi-select state is per-position — wipe it on switch so a
+      // selection from RB doesn't bleed into WR's view (where the pids
+      // would all be misses anyway). clearMultiSelect calls render(),
+      // so we don't need a separate render() call here.
+      clearMultiSelect();
       // Hide any stale autosave status pill from the previous position
       const pill = document.getElementById('autosave-pill');
       if (pill) pill.classList.remove('visible');
