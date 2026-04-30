@@ -1130,7 +1130,7 @@ def _run_trade_job(
             acquire_positions    = acquire_positions,
             trade_away_positions = trade_away_positions,
             pinned_give_players  = pinned_give or None,
-            scoring_format       = fmt,
+            scoring_format       = active_format,
             on_opponent_done     = progress_cb,
         )
 
