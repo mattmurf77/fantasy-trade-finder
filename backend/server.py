@@ -60,7 +60,7 @@ class _BufferHandler(logging.Handler):
 _bh = _BufferHandler()
 _bh.setFormatter(logging.Formatter("%(levelname)s  %(message)s"))
 log.addHandler(_bh)
-from .ranking_service import RankingService, Player
+from .ranking_service import RankingService, Player, TIER_CONFIG, ORDERED_TIERS
 from .data_loader import load_consensus_elo, load_consensus_values, seed_elo_for_players, normalise_name
 from .database import (
     init_db,
@@ -1783,11 +1783,43 @@ def switch_scoring_format():
     return jsonify({"ok": True, "active_format": fmt})
 
 
+@app.route("/api/tier-config")
+def get_tier_config():
+    """GET /api/tier-config — return the shared tier band table.
+
+    Single source of truth for both backend (apply_tiers) and frontend
+    (autoAssignTiers / autosave bucketing). Loaded from
+    backend/tier_config.json at process start. The frontend fetches this
+    once on init so the two sides cannot drift on (format, position, tier)
+    band ranges.
+
+    Response shape:
+      {
+        "tiers": ["elite","starter","solid","depth","bench"],   # display order
+        "config": {
+          "1qb_ppr": {
+            "QB": { "elite": {"min": 1600, "max": 1680}, ... },
+            "RB": {...}, "WR": {...}, "TE": {...}
+          },
+          "sf_tep": { ...same shape... }
+        }
+      }
+    """
+    return jsonify({
+        "tiers":  list(ORDERED_TIERS),
+        "config": TIER_CONFIG,
+    })
+
+
 @app.route("/api/tiers/save", methods=["POST"])
 def save_tiers_route():
-    """POST /api/tiers/save {position: 'RB', tiers: {elite: [...ids], starter: [...], ...}}
+    """POST /api/tiers/save {position: 'RB', tiers: {elite: [...ids], ...}, cleared_pids: [...]}
 
     Converts tier assignments into ELO overrides and marks the position as saved.
+
+    `cleared_pids` (optional): list of pids the user explicitly removed
+    from all tiers (× button → back to pool). Their override is deleted
+    so they don't snap back to a previous tier on the next refresh.
     """
     sess = _require_session()
     service   = sess["service"]
@@ -1797,21 +1829,33 @@ def save_tiers_route():
     body      = request.get_json(force=True) or {}
     position  = body.get("position")
     tiers     = body.get("tiers", {})
+    cleared_pids = body.get("cleared_pids") or []
+    if not isinstance(cleared_pids, list):
+        cleared_pids = []
+    cleared_pids = [str(x) for x in cleared_pids if x]
 
     if position not in ("QB", "RB", "WR", "TE"):
         return jsonify({"error": f"Invalid position: {position!r}"}), 400
 
-    # Must have at least one player in some tier
+    # Must have at least one player in some tier OR something to clear.
+    # (Pure "clear-only" saves are valid — e.g. user removes their last
+    # tier-placed RB; we still need to apply the deletion server-side.)
     total_assigned = sum(len(ids) for ids in tiers.values() if isinstance(ids, list))
-    if total_assigned == 0:
+    if total_assigned == 0 and not cleared_pids:
         return jsonify({"error": "No players in any tier"}), 400
 
     try:
-        # apply_tiers assigns ELOs inside each tier's threshold band so that
-        # when the frontend reloads and re-buckets by ELO, players land back
-        # in the tier the user chose. Bands are position+format-aware:
-        # QB/TE in 1QB PPR use compressed bands (see ranking_service).
-        service.apply_tiers(position=position, tiers=tiers, scoring_format=fmt)
+        # apply_tiers assigns ELOs inside each tier's band (see
+        # backend/tier_config.json) so on reload the frontend re-buckets
+        # players into the same tier they were placed. Bands are
+        # position+format-aware. cleared_pids lets the frontend tell us
+        # "this player is back in the pool — drop their override".
+        service.apply_tiers(
+            position=position,
+            tiers=tiers,
+            scoring_format=fmt,
+            cleared_pids=cleared_pids,
+        )
 
         # Persist the full tier override dict for THIS format so it survives
         # session rebuilds. The other format's overrides are untouched.

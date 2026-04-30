@@ -1503,63 +1503,90 @@
 
     const TIERS = ['elite', 'starter', 'solid', 'depth', 'bench'];
 
-    // ── Elo thresholds for auto-tiering ──
-    // Players are sorted by Elo descending, then bucketed using these cutoffs.
-    // Thresholds are applied per-position per-format. Two sets exist:
-    //   UNIFORM        — RB/WR in any format, and ALL positions in SF TEP
-    //   QB_TE_1QB      — QB/TE only, in 1QB PPR. Each tier is shifted down
-    //                    one slot so "elite" for a 1QB-league QB caps where
-    //                    an RB/WR starter caps. Mirrors the server-side
-    //                    bands in ranking_service.tier_bands_for().
-    const UNIFORM_ELO_TIER_THRESHOLDS = {
-      elite:   1700,   // top dynasty assets
-      starter: 1580,   // reliable weekly starters
-      solid:   1460,   // flex-worthy / matchup plays
-      depth:   1350,   // bye-week fill-ins
-      // everything below 1350 → bench
-    };
-    const QB_TE_1QB_ELO_TIER_THRESHOLDS = {
-      elite:   1580,   // = uniform starter
-      starter: 1460,   // = uniform solid
-      solid:   1350,   // = uniform depth
-      depth:   1190,   // new floor above the compressed bench
+    // ── Tier band config — single source of truth ──
+    // Populated from backend/tier_config.json via GET /api/tier-config (see
+    // refreshTierConfig below). The default below MUST stay in lockstep
+    // with the JSON; autoAssignTiers runs during module init (line ~1620
+    // `tierState[pos] = autoAssignTiers(pos)`) before the fetch lands, so
+    // we need a sensible same-shape default to bucket the placeholder
+    // SAMPLE_PLAYERS until the network round-trip completes.
+    //
+    // Each (format, position, tier) cell is { min, max }. apply_tiers on
+    // the backend writes ELOs in [min, max]; autoAssignTiers below buckets
+    // a player into tier T iff player.elo >= min_T (top-down walk),
+    // matching how the backend's `tier_for_elo` maps ELOs to tier labels.
+    let TIER_CONFIG = {
+      "1qb_ppr": {
+        "QB": { elite: {min:1600,max:1680}, starter:{min:1480,max:1560}, solid:{min:1370,max:1450}, depth:{min:1200,max:1330}, bench:{min:1060,max:1180} },
+        "RB": { elite: {min:1720,max:1790}, starter:{min:1600,max:1680}, solid:{min:1480,max:1560}, depth:{min:1370,max:1450}, bench:{min:1200,max:1330} },
+        "WR": { elite: {min:1720,max:1790}, starter:{min:1600,max:1680}, solid:{min:1480,max:1560}, depth:{min:1370,max:1450}, bench:{min:1200,max:1330} },
+        "TE": { elite: {min:1600,max:1680}, starter:{min:1480,max:1560}, solid:{min:1370,max:1450}, depth:{min:1200,max:1330}, bench:{min:1060,max:1180} },
+      },
+      "sf_tep": {
+        "QB": { elite: {min:1720,max:1790}, starter:{min:1600,max:1680}, solid:{min:1480,max:1560}, depth:{min:1370,max:1450}, bench:{min:1200,max:1330} },
+        "RB": { elite: {min:1720,max:1790}, starter:{min:1600,max:1680}, solid:{min:1480,max:1560}, depth:{min:1370,max:1450}, bench:{min:1200,max:1330} },
+        "WR": { elite: {min:1720,max:1790}, starter:{min:1600,max:1680}, solid:{min:1480,max:1560}, depth:{min:1370,max:1450}, bench:{min:1200,max:1330} },
+        "TE": { elite: {min:1720,max:1790}, starter:{min:1600,max:1680}, solid:{min:1480,max:1560}, depth:{min:1370,max:1450}, bench:{min:1200,max:1330} },
+      },
     };
 
-    function elTierThresholdsFor(pos) {
-      // Read localStorage directly — the LS_ACTIVE_FORMAT const and the
-      // tierGetActiveFormat() helper are declared later in this script,
-      // but autoAssignTiers (which calls us) runs during module init
-      // while those are still in the TDZ.
-      let fmt = '1qb_ppr';
+    // Read the active format from localStorage directly — the
+    // LS_ACTIVE_FORMAT const and tierGetActiveFormat() helper are
+    // declared later in this script and are in the TDZ during init.
+    function _activeFormatRaw() {
       try {
         const stored = localStorage.getItem('ftf_active_format');
-        if (stored === '1qb_ppr' || stored === 'sf_tep') fmt = stored;
-      } catch (_) { /* ignore; keep default */ }
-      if (fmt === '1qb_ppr' && (pos === 'QB' || pos === 'TE')) {
-        return QB_TE_1QB_ELO_TIER_THRESHOLDS;
-      }
-      return UNIFORM_ELO_TIER_THRESHOLDS;
+        if (stored === '1qb_ppr' || stored === 'sf_tep') return stored;
+      } catch (_) {}
+      return '1qb_ppr';
     }
 
-    // Back-compat: a few older call sites still read this variable directly.
-    const ELO_TIER_THRESHOLDS = UNIFORM_ELO_TIER_THRESHOLDS;
+    // Return the per-tier {min,max} band table for a (position, format)
+    // pair. Falls back to RB if a position is missing (defensive).
+    function tierBandsFor(pos) {
+      const fmt = _activeFormatRaw();
+      const fmtCfg = TIER_CONFIG[fmt] || TIER_CONFIG['1qb_ppr'] || {};
+      return fmtCfg[pos] || fmtCfg['RB'] || {};
+    }
+
+    // Re-fetch the config from the server. Called once on init, and
+    // again whenever the user toggles scoring format (so any future
+    // server-side band edits propagate without a hard refresh).
+    async function refreshTierConfig() {
+      try {
+        const res = await fetch('/api/tier-config');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && data.config) {
+          TIER_CONFIG = data.config;
+        }
+      } catch (_) { /* keep baked-in defaults on network failure */ }
+    }
 
     function autoAssignTiers(pos) {
       const players = (SAMPLE_PLAYERS[pos] || []).slice();
       // Sort by Elo descending so highest-rated appear first in each tier
       players.sort((a, b) => b.elo - a.elo);
 
-      const thresholds = elTierThresholdsFor(pos);
+      const bands = tierBandsFor(pos);
       const tiers = {};
       TIERS.forEach(t => tiers[t] = []);
 
+      // Walk tiers top-down. Use each band's `min` as the inclusive
+      // threshold — first match wins. ELOs above the elite max (rare
+      // but possible for boosted overrides) still register as elite
+      // because we walk top-down. ELOs below the bench min fall through
+      // to the unassigned pool (the function just doesn't push them
+      // anywhere; the chip ends up in `pool-list`).
       players.forEach(p => {
-        if      (p.elo >= thresholds.elite)   tiers.elite.push(p.id);
-        else if (p.elo >= thresholds.starter) tiers.starter.push(p.id);
-        else if (p.elo >= thresholds.solid)   tiers.solid.push(p.id);
-        else if (p.elo >= thresholds.depth)   tiers.depth.push(p.id);
-        // Players below depth threshold stay unassigned (in the pool),
-        // sorted by ELO so users can drag them into tiers as needed.
+        for (const t of TIERS) {
+          const band = bands[t];
+          if (band && p.elo >= band.min) {
+            tiers[t].push(p.id);
+            return;
+          }
+        }
+        // No matching band → stays in pool.
       });
 
       return tiers;
@@ -1576,6 +1603,29 @@
 
     let undoStack = [];     // {playerId, fromTier (null = pool), toTier}
     let draggedId = null;
+
+    // ── Cleared-pid tracking ──
+    // When the user × removes a player from a tier (sending them back to
+    // the pool), we need to tell the backend to DELETE that player's
+    // saved override. Without this, the override survives in the DB and
+    // the next refresh re-buckets them right back into their old tier
+    // (the "× snap-back bug"). The set is per-position because saves
+    // are per-position; it's drained as part of each successful save.
+    const _clearedPids = { QB: new Set(), RB: new Set(), WR: new Set(), TE: new Set() };
+
+    // Mark a pid as needing its override cleared on the next save for `pos`.
+    // Called from removeFromTier and from cross-tier moves only when the
+    // player ends up in the pool. If the same pid is later re-placed in a
+    // tier (still within the same save cycle), we drop the clear flag so
+    // we don't accidentally undo the new placement.
+    function _markCleared(pid, pos) {
+      const set = _clearedPids[pos || currentPos];
+      if (set) set.add(String(pid));
+    }
+    function _unmarkCleared(pid, pos) {
+      const set = _clearedPids[pos || currentPos];
+      if (set) set.delete(String(pid));
+    }
 
     // ══════════════════════════════════════════════════════
     //  MULTI-SELECT MODULE
@@ -2110,6 +2160,11 @@
       if (fromTier !== null) state[fromTier].splice(fromIdx, 1);
       state[targetTier].splice(toIdx, 0, playerId);
 
+      // The player is back in a tier — undo any pending "clear override"
+      // flag (e.g. user × removed them then dragged them back before the
+      // autosave fired).
+      _unmarkCleared(playerId);
+
       // Push undo with full positional context so undo is precise
       undoStack.push({ playerId, fromTier, fromIdx, toTier: targetTier, toIdx });
       showUndo(playerId);
@@ -2138,7 +2193,14 @@
           changed = true;
         }
       });
-      if (changed) markDirty();
+      if (changed) {
+        // Tell the next autosave to delete this pid's saved override.
+        // Without this the player's old ELO override survives the round
+        // trip and they snap back into their previous tier on refresh
+        // (the historical "× snap-back bug").
+        _markCleared(playerId);
+        markDirty();
+      }
       render();
     }
 
@@ -2217,11 +2279,15 @@
         return;
       }
 
-      // At bottom of current tier: spill to start of tier below
+      // At bottom of current tier: spill to start of tier below — UNLESS
+      // we're already at the bottom of the bottom tier (bench), in which
+      // case the move is a no-op. (Previously this called removeFromTier,
+      // sending the chip to the pool; users found that confusing because
+      // chips would disappear from the tiers entirely. Multi-select made
+      // the surprise more visible — a group-Down at the bench bottom
+      // would dump the whole group into the pool. Now they just sit.)
       const tierIdx = TIERS.indexOf(currentTier);
       if (tierIdx >= TIERS.length - 1) {
-        // At bottom of bench — back to pool (preserves legacy intent)
-        removeFromTier(playerId);
         return;
       }
       const below = TIERS[tierIdx + 1];
@@ -2328,8 +2394,18 @@
         }
       });
 
-      // If the position has NO tier assignments, nothing to save
-      if (Object.keys(tiers).length === 0) return;
+      // Pids the user × removed since the last save. Sent so the backend
+      // can DELETE their saved override (otherwise they snap back to
+      // their old tier on refresh — the historical "× snap-back bug").
+      // We snapshot the current set into an array, send it, then drain
+      // ON SUCCESS only (so a failed save preserves the intent).
+      const cleared_pids_set = _clearedPids[position] || new Set();
+      const cleared_pids = Array.from(cleared_pids_set);
+
+      // If the position has NO tier assignments AND nothing to clear,
+      // there's truly nothing to send. (A pure clear-only save IS valid
+      // and the backend accepts it — we just need to avoid empty no-ops.)
+      if (Object.keys(tiers).length === 0 && cleared_pids.length === 0) return;
 
       _autoSaveInFlight[position] = true;
       updateStatusPill(position, 'saving');
@@ -2341,7 +2417,7 @@
             'Content-Type': 'application/json',
             'X-Session-Token': _getSessionToken(),
           },
-          body: JSON.stringify({ position, tiers }),
+          body: JSON.stringify({ position, tiers, cleared_pids }),
         });
         const data = await res.json();
 
@@ -2350,6 +2426,10 @@
           showTierToast('Save failed: ' + (data.error || 'Unknown error'), 'error');
           return;
         }
+
+        // Drain the cleared-pid set ONLY on success. If the save failed
+        // the next attempt should re-send the same clears.
+        cleared_pids.forEach(pid => cleared_pids_set.delete(pid));
 
         savedPositions.add(position);
         updatePosTabs();
@@ -2458,6 +2538,12 @@
 
     async function initFromAPI() {
       const token = _getSessionToken();
+
+      // Pull the shared tier band config first so autoAssignTiers below
+      // buckets against the server's source of truth, not the baked-in
+      // defaults. Network failure here keeps the defaults in place —
+      // they were authored to match the JSON exactly.
+      await refreshTierConfig();
 
       // Use /api/rankings?position=XX as the primary source.
       // That endpoint returns the universal player pool already filtered

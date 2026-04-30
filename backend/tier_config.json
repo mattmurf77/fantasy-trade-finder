@@ -1,0 +1,65 @@
+{
+  "_comment": "Single source of truth for ELO tier bands. Read by the backend (ranking_service.tier_bands_for + apply_tiers) and by the web frontend (positional-tiers.html, via GET /api/tier-config). Every (scoring_format, position, tier) row carries a [min, max] ELO band. The backend's apply_tiers spreads ELOs linearly inside [min, max]; the frontend buckets a player into tier T iff player.elo is in [min_T, max_T] (top-down walk). Values seeded from the backend's UNIFORM_TIER_ELO_BANDS and QB_TE_1QB_TIER_ELO_BANDS class attributes — those constants have been removed in favour of this file.",
+
+  "1qb_ppr": {
+    "QB": {
+      "elite":   { "min": 1600, "max": 1680 },
+      "starter": { "min": 1480, "max": 1560 },
+      "solid":   { "min": 1370, "max": 1450 },
+      "depth":   { "min": 1200, "max": 1330 },
+      "bench":   { "min": 1060, "max": 1180 }
+    },
+    "RB": {
+      "elite":   { "min": 1720, "max": 1790 },
+      "starter": { "min": 1600, "max": 1680 },
+      "solid":   { "min": 1480, "max": 1560 },
+      "depth":   { "min": 1370, "max": 1450 },
+      "bench":   { "min": 1200, "max": 1330 }
+    },
+    "WR": {
+      "elite":   { "min": 1720, "max": 1790 },
+      "starter": { "min": 1600, "max": 1680 },
+      "solid":   { "min": 1480, "max": 1560 },
+      "depth":   { "min": 1370, "max": 1450 },
+      "bench":   { "min": 1200, "max": 1330 }
+    },
+    "TE": {
+      "elite":   { "min": 1600, "max": 1680 },
+      "starter": { "min": 1480, "max": 1560 },
+      "solid":   { "min": 1370, "max": 1450 },
+      "depth":   { "min": 1200, "max": 1330 },
+      "bench":   { "min": 1060, "max": 1180 }
+    }
+  },
+
+  "sf_tep": {
+    "QB": {
+      "elite":   { "min": 1720, "max": 1790 },
+      "starter": { "min": 1600, "max": 1680 },
+      "solid":   { "min": 1480, "max": 1560 },
+      "depth":   { "min": 1370, "max": 1450 },
+      "bench":   { "min": 1200, "max": 1330 }
+    },
+    "RB": {
+      "elite":   { "min": 1720, "max": 1790 },
+      "starter": { "min": 1600, "max": 1680 },
+      "solid":   { "min": 1480, "max": 1560 },
+      "depth":   { "min": 1370, "max": 1450 },
+      "bench":   { "min": 1200, "max": 1330 }
+    },
+    "WR": {
+      "elite":   { "min": 1720, "max": 1790 },
+      "starter": { "min": 1600, "max": 1680 },
+      "solid":   { "min": 1480, "max": 1560 },
+      "depth":   { "min": 1370, "max": 1450 },
+      "bench":   { "min": 1200, "max": 1330 }
+    },
+    "TE": {
+      "elite":   { "min": 1720, "max": 1790 },
+      "starter": { "min": 1600, "max": 1680 },
+      "solid":   { "min": 1480, "max": 1560 },
+      "depth":   { "min": 1370, "max": 1450 },
+      "bench":   { "min": 1200, "max": 1330 }
+    }
+  }
+}
