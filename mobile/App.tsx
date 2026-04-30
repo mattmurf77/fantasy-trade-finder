@@ -7,6 +7,8 @@ import RootNav from './src/navigation/RootNav';
 import { useSession } from './src/state/useSession';
 import { useFeatureFlags } from './src/state/useFeatureFlags';
 import { initSentry, wrap as sentryWrap } from './src/observability/sentry';
+import { getTierConfig } from './src/api/rankings';
+import { setTierConfigCache } from './src/utils/tierBands';
 
 // Initialize observability as early as possible so even crashes during
 // bootstrap are captured. No-ops cleanly when no DSN is configured.
@@ -35,9 +37,21 @@ function App() {
   const loadFlags = useFeatureFlags((s) => s.load);
 
   useEffect(() => {
-    // Restore persisted session + feature flags in parallel.
-    // Whichever resolves last flips booted=true so RootNav can render.
-    Promise.all([bootstrap(), loadFlags()])
+    // Restore persisted session + feature flags + tier config in parallel.
+    // Tier config is the (format, position, tier) → {min, max} table that
+    // backs autoBucket / tierForElo. Without it the app falls back to
+    // hardcoded thresholds which can drift from the backend; the live
+    // fetch keeps the two in sync. Treated as best-effort — a network
+    // failure here just means we ride on the seeded fallback bands.
+    const fetchTierConfig = async () => {
+      try {
+        const cfg = await getTierConfig();
+        setTierConfigCache(cfg);
+      } catch {
+        // Fallback bands stay in effect; not worth failing the boot.
+      }
+    };
+    Promise.all([bootstrap(), loadFlags(), fetchTierConfig()])
       .catch(() => { /* bootstrap is best-effort */ })
       .finally(() => setBooted(true));
   }, [bootstrap, loadFlags]);

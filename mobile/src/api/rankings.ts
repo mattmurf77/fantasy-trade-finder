@@ -51,12 +51,41 @@ export async function getRankings(position?: Position | null) {
 
 // POST /api/tiers/save — save a tier assignment for a position.
 // Body shape matches the web's save_tiers_route expectation:
-//   { position: 'RB', tiers: { elite: [id,...], starter: [...], ... } }
+//   { position: 'RB', tiers: { elite: [id,...], starter: [...], ... },
+//     cleared_pids: ['12345', ...] }
+//
+// `clearedPids`: players the user dragged OUT of any tier (back to the
+// pool) since the last save. Without this, the backend's
+// tier_overrides table would keep the old override and the chip would
+// reappear on next reload — the round-trip data-loss bug PR #25 fixed
+// for web. Passing `[]` is fine; passing the real removed IDs lets the
+// backend DELETE those override rows and respect the user's intent.
 export async function saveTiers(
   position: Position,
   tiers: Record<string, string[]>,
+  clearedPids: string[] = [],
 ) {
-  return api.post<any>('/api/tiers/save', { position, tiers });
+  return api.post<any>('/api/tiers/save', {
+    position,
+    tiers,
+    cleared_pids: clearedPids,
+  });
+}
+
+// GET /api/tier-config — shared tier-band table, single source of truth
+// across backend (apply_tiers / tier_for_elo) and frontend buckets. The
+// mobile app fetches this once at boot and caches it via the module-level
+// store in utils/tierBands so tier_for_elo / autoBucket can stay in sync
+// with the backend without baking thresholds into the bundle.
+export interface TierBand { min: number; max: number; }
+export interface TierConfigResponse {
+  /** Display order: ['elite','starter','solid','depth','bench'] */
+  tiers:  string[];
+  /** Nested: scoring_format → position → tier → {min, max}. */
+  config: Record<string, Record<string, Record<string, TierBand>>>;
+}
+export async function getTierConfig(): Promise<TierConfigResponse> {
+  return api.get<TierConfigResponse>('/api/tier-config');
 }
 
 // GET /api/tiers/status — per-position saved-state map
