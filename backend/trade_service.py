@@ -65,7 +65,13 @@ _DEFAULT_CFG: dict[str, float] = {
     "max_value_ratio":       2.5,
     "mismatch_weight":       0.70,
     "fairness_weight":       0.30,
-    "max_candidates":      500.0,
+    # Per-opponent candidate ceiling. Was 500 (which never bit, since
+    # max_per_opponent filters down to 5 anyway), so 1-for-1 / 2-for-1 /
+    # 1-for-2 enumeration ran to the 3s deadline on every opponent
+    # instead of short-circuiting once "enough" candidates were found.
+    # 30 is comfortably above the 5-card-per-opponent target while still
+    # bailing the inner loops early.
+    "max_candidates":       30.0,
     # Trade ELO gap filter
     "trade_elo_gap_max":   250.0,
     # Agent A8 — trade-math adjustments (all behind feature flags)
@@ -794,6 +800,14 @@ class TradeService:
         ]
         total = len(eligible)
 
+        # Once we've collected ~max_per_opponent × 3 cards across all opponents,
+        # further scanning rarely surfaces a card good enough to crack the top
+        # 15-or-so the UI shows. Stop early to keep wall-time low for users
+        # in productive leagues. Cold leagues (returning 0 cards across 11
+        # opponents) still complete in one full pass — the cap doesn't help
+        # them, but the per-opponent deadline reduction does.
+        global_target = max(15, max_per_opponent * 3)
+
         for idx, member in enumerate(eligible):
             opp_profile = analyze_roster_strengths(member.roster, self._players, scoring_format)
             match_ctx = build_match_context(user_profile, opp_profile, scoring_format, is_dynasty)
@@ -828,6 +842,12 @@ class TradeService:
                     on_opponent_done(idx + 1, total, snapshot)
                 except Exception:
                     pass  # callback issues must not derail the loop
+
+            # Global early exit: enough cards collected, stop scanning more
+            # opponents. Always lets the LAST opponent's results land first
+            # (the "snapshot" above already includes them).
+            if len(new_cards) >= global_target:
+                break
 
         # Filter out trades the user has already swiped on (within memory window)
         # and dedup, then sort by composite score
@@ -903,9 +923,13 @@ class TradeService:
         players    = self._players
         pinned_set = set(pinned_give_players) if pinned_give_players else None
 
-        # Time budget: bail out of expensive combination loops after 3s
-        # per opponent to keep the overall request under ~30s.
-        _deadline  = time.monotonic() + 3.0
+        # Time budget: bail out of expensive combination loops after 1s
+        # per opponent. Was 3s; combined with max_candidates=30 (was 500),
+        # opponents that won't yield candidates exit much faster. 11
+        # opponents × 1s worst case ≈ 11s total wall clock, vs the 33s
+        # we were burning before — pre-gen now actually beats the user
+        # to the Trades page in the common cold-cache flow.
+        _deadline  = time.monotonic() + 1.0
         _iter_budget = 200_000  # max iterations across multi-player sections
         _iters     = 0
 
