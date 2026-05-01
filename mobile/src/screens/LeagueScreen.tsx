@@ -107,9 +107,22 @@ export default function LeagueScreen() {
           />
         }
       >
-        {/* League name + scoring */}
-        <View style={styles.heroCard}>
-          <Text style={styles.heroLabel}>League</Text>
+        {/* League name + scoring. The whole hero card is now a Pressable
+            that opens the LeagueSwitcherSheet — matching the web feedback
+            ("Let me navigate/update my league directly from the page
+            itself"). The small ⇅ chevron in the top-right communicates
+            the affordance; the existing "Switch league →" button at the
+            bottom remains for users who scroll past the hero. */}
+        <Pressable
+          onPress={() => setSwitcherOpen(true)}
+          style={({ pressed }) => [styles.heroCard, pressed && { opacity: 0.85 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Switch league"
+        >
+          <View style={styles.heroHead}>
+            <Text style={styles.heroLabel}>League</Text>
+            <Text style={styles.heroChevron}>⇅</Text>
+          </View>
           <Text style={styles.heroName} numberOfLines={2}>
             {summary?.league_name || league?.league_name || 'Loading…'}
           </Text>
@@ -117,7 +130,7 @@ export default function LeagueScreen() {
             <Chip label={fmtScoring(summary?.default_scoring)} tone="accent" />
             <Chip label={`${num((summary as any)?.leaguemates_total ?? 0)} teams`} />
           </View>
-        </View>
+        </Pressable>
 
         {loading && !summary && !coverage ? (
           <View style={styles.center}>
@@ -281,6 +294,19 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     gap: spacing.sm,
+  },
+  // Header row inside the hero card — label on the left, switch chevron
+  // on the right. The chevron communicates that the whole card is
+  // pressable to open the league switcher.
+  heroHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  heroChevron: {
+    color: colors.muted,
+    fontSize: 16,
+    fontWeight: '700',
   },
   heroLabel: {
     color: colors.muted,
