@@ -2583,6 +2583,26 @@
       // they were authored to match the JSON exactly.
       await refreshTierConfig();
 
+      // Sync the backend session's active_format to whatever localStorage
+      // says (which is what the on-page toggle reflects). Without this,
+      // a user who lands on the Tiers page with localStorage already set
+      // to 'sf_tep' but the session still defaulting to '1qb_ppr' (because
+      // they never clicked the toggle in this session) would have all
+      // their fetches mis-scoped — rankings/tier saves/copy-from-format
+      // all key off `sess['active_format']`. Fire-and-forget.
+      if (token) {
+        try {
+          await fetch('/api/scoring/switch', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Session-Token': token,
+            },
+            body: JSON.stringify({ format: tierGetActiveFormat() }),
+          });
+        } catch (_) { /* best-effort; copy/saves all also send X-Scoring-Format */ }
+      }
+
       // Use /api/rankings?position=XX as the primary source.
       // That endpoint returns the universal player pool already filtered
       // to players with a DynastyProcess value > 0 — which automatically
@@ -2725,13 +2745,25 @@
       btn.disabled = true;
       btn.textContent = 'Copying…';
       try {
+        // Send the active format via X-Scoring-Format so the backend's
+        // _require_session() resolves the request's effective format
+        // explicitly. Without this, the copy endpoint would fall back to
+        // sess['active_format'] — and if the user landed on the Tiers
+        // page already on SF TEP without ever clicking the toggle in this
+        // session, sess['active_format'] is still the session_init default
+        // (1qb_ppr). The endpoint would then see from==to and error with
+        // "from and to formats must differ" even though the page UI says
+        // otherwise. The header is the explicit per-call override the
+        // backend already supports. Also send to_format in the body as a
+        // belt-and-suspenders for older deploys.
         const res = await fetch('/api/tiers/copy-from-format', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-Session-Token': _getSessionToken(),
+            'X-Scoring-Format': toFmt,
           },
-          body: JSON.stringify({ from_format: fromFmt }),
+          body: JSON.stringify({ from_format: fromFmt, to_format: toFmt }),
         });
         const data = await res.json();
         if (!res.ok || data.error) {
