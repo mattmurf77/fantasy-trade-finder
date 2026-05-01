@@ -56,6 +56,14 @@ export default function TiersScreen() {
   // tiers[position] = { elite: [player...], starter: [...], ..., unassigned: [...] }
   const [buckets, setBuckets] = useState<Record<Zone, RankedPlayer[]>>(() => emptyBuckets());
 
+  // Players the user has dragged OUT of any tier (back to the pool) since
+  // the last save. We pass these to /api/tiers/save as `cleared_pids` so
+  // the backend deletes the corresponding tier_overrides rows; without
+  // this the chip would reappear on next reload (the round-trip data-
+  // loss bug PR #25 fixed for web). Reset to empty after a save lands
+  // and on every position switch (the saved snapshot is per-position).
+  const [clearedPids, setClearedPids] = useState<Set<string>>(() => new Set());
+
   // ── Data ────────────────────────────────────────────────────────────
   const rankingsQuery = useQuery({
     queryKey: ['rankings', position],
@@ -78,12 +86,23 @@ export default function TiersScreen() {
         // Only send the 5 real tiers — `unassigned` isn't a real tier on the server.
         const payload: Record<string, string[]> = {};
         for (const t of TIERS) payload[t] = buckets[t].map((p) => p.id);
-        return saveTiers(position, payload);
+        // Pass the accumulated clearedPids so the backend can DELETE the
+        // matching tier_overrides rows for this position. Filter out any
+        // ID that's currently sitting in a tier (defensive — the user
+        // may have dragged-out then dragged-back-in within the same
+        // session); we never want a re-saved tier assignment to be
+        // simultaneously cleared.
+        const stillAssigned = new Set<string>();
+        for (const t of TIERS) for (const p of buckets[t]) stillAssigned.add(p.id);
+        const cleared = Array.from(clearedPids).filter((id) => !stillAssigned.has(id));
+        return saveTiers(position, payload, cleared);
       }),
     onSuccess: () => {
       setToast({ msg: '✓ Tiers saved', tone: 'success' });
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
       queryClient.invalidateQueries({ queryKey: ['progress'] });
+      // Reset the clearedPids set — the backend just absorbed them.
+      setClearedPids(new Set());
     },
     onError: (e: Error) => {
       setToast({ msg: e.message || 'Save failed', tone: 'warn' });
@@ -123,6 +142,10 @@ export default function TiersScreen() {
 
     const bucketed = autoBucket(players, position, fmt);
     setBuckets({ ...bucketed, unassigned: [] });
+    // The clearedPids set is per-position (the saved snapshot is too).
+    // Position switch or rankings-refetch invalidates the previous
+    // position's pending clears.
+    setClearedPids(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rankingsQuery.data, position, tiersStatusQuery.data?.scoring_format]);
 
@@ -161,6 +184,24 @@ export default function TiersScreen() {
         if (moved) next[toZone].push(moved);
         return next;
       });
+      // Track tier-out moves so the next save can DELETE the backend
+      // override. If the user drags BACK into a tier later, the save
+      // filter (`stillAssigned`) drops the id from the cleared list so
+      // we don't double-message the backend.
+      if (toZone === 'unassigned') {
+        setClearedPids((prev) => {
+          const next = new Set(prev);
+          next.add(playerId);
+          return next;
+        });
+      } else {
+        setClearedPids((prev) => {
+          if (!prev.has(playerId)) return prev;     // skip identity churn
+          const next = new Set(prev);
+          next.delete(playerId);
+          return next;
+        });
+      }
       haptics.success();
     },
     [],
