@@ -1848,7 +1848,17 @@ def copy_tiers_from_format_route():
     g_league  = sess["league"]
     body      = request.get_json(force=True) or {}
     from_format = body.get("from_format")
-    to_format   = _active_format(sess)
+
+    # Resolve target format with explicit overrides taking precedence over
+    # the session's stored active_format. This is critical because a user
+    # can land on the Tiers page on SF TEP without ever clicking the format
+    # toggle in this session — the localStorage UI state would say SF TEP
+    # but sess['active_format'] would still be the session_init default
+    # (1qb_ppr). _active_format reads sess['_effective_format'] (set by
+    # _require_session from the X-Scoring-Format header) first, then falls
+    # back to sess['active_format']. We ALSO accept to_format in the body
+    # as a final fallback so older deploys / cache scenarios still work.
+    to_format = body.get("to_format") or _active_format(sess)
 
     valid_formats = ("1qb_ppr", "sf_tep")
     if from_format not in valid_formats or to_format not in valid_formats:
