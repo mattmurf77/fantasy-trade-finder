@@ -1872,27 +1872,51 @@ def copy_tiers_from_format_route():
     if not from_svc or not to_svc:
         return jsonify({"error": "Per-format services not initialised — please refresh"}), 500
 
-    # Snapshot source overrides — they shouldn't be modified during copy.
-    from_overrides = dict(from_svc._elo_overrides or {})
-    if not from_overrides:
-        return jsonify({
-            "ok": False,
-            "error": f"No tiers saved in {from_format} to copy from",
-        }), 400
-
     # Group by (position, tier_in_source_format), sorted by source ELO desc.
     # The sort preserves within-tier rank — top of source-Elite ends up at
     # top of target-Elite, etc.
+    #
+    # CRITICAL: iterate every player's EFFECTIVE rendered ELO via
+    # get_rankings(), NOT just from_svc._elo_overrides. The override dict
+    # only contains players the user has EXPLICITLY tier-saved or
+    # manual-reordered. Players whose default-DP seed ELO happens to land
+    # inside a tier band ALSO render in that tier on the page (per
+    # autoAssignTiers) — but they don't have an explicit override.
+    #
+    # Real bug example: Kyler Murray's seed ELO in 1QB PPR is 1227.2,
+    # which falls in the 1QB QB depth band [1200, 1330], so the page
+    # renders him at "Depth QB20." But he has no override entry. The
+    # previous version of this code iterated from_overrides only, so
+    # Kyler was silently skipped during the copy. After the wholesale-
+    # clear of the target's overrides, he had no SF TEP override either,
+    # fell back to his SF TEP seed (~1300), and that seed landed in the
+    # SF TEP bench band [1200, 1330] → he showed up as "Bench QB1" in
+    # the target view, dropping a full tier from where he was supposed
+    # to be. With get_rankings() iteration we capture every visibly-
+    # tiered player, override or not.
     grouped: dict[tuple[str, str], list[tuple[str, float]]] = {}
-    for pid, elo in from_overrides.items():
-        player = from_svc._players.get(pid)
-        if not player or not player.position:
+    seen_anything = False
+    for position in ("QB", "RB", "WR", "TE"):
+        try:
+            rank_set = from_svc.get_rankings(position=position)
+        except Exception as e:
+            log.warning("copy-from-format: get_rankings(%s) failed: %s", position, e)
             continue
-        position = player.position
-        tier = RankingService.tier_for_elo(elo, position, from_format)
-        if not tier:
-            continue
-        grouped.setdefault((position, tier), []).append((pid, float(elo)))
+        for rp in rank_set.rankings:
+            seen_anything = True
+            elo = rp.elo
+            if elo is None:
+                continue
+            tier = RankingService.tier_for_elo(elo, position, from_format)
+            if not tier:
+                continue
+            grouped.setdefault((position, tier), []).append((rp.player.id, float(elo)))
+
+    if not seen_anything:
+        return jsonify({
+            "ok": False,
+            "error": f"No data to copy from {from_format}",
+        }), 400
 
     for key in grouped:
         grouped[key].sort(key=lambda pe: -pe[1])  # ELO desc
