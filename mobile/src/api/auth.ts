@@ -49,8 +49,32 @@ export interface SessionInitBody {
   active_format?: '1qb_ppr' | 'sf_tep';
 }
 
-export async function sessionInit(body: SessionInitBody) {
-  return api.post<any>('/api/session/init', body);
+// Backend response shape from /api/session/init.
+// `token` is what we care about: when the request goes out without an
+// X-Session-Token header (e.g. after a 401-driven clearSessionToken), the
+// backend creates a brand-new session and returns its token here. Without
+// saving it, every subsequent API call would 401 in a loop.
+export interface SessionInitResponse {
+  ok: boolean;
+  token: string;
+  player_count?: number;
+  pick_count?: number;
+  user_roster?: unknown[];
+  league_id?: string;
+  opponents?: number;
+}
+
+export async function sessionInit(body: SessionInitBody): Promise<SessionInitResponse> {
+  const res = await api.post<SessionInitResponse>('/api/session/init', body);
+  // Persist the returned token so the next request carries it. Critical
+  // when recovering from a session-expired state — the user goes through
+  // the league picker without a stored token, sessionInit mints a new
+  // one, and we MUST save it or the very next API call 401s again.
+  // Idempotent when the backend echoes back the existing token.
+  if (res?.token) {
+    await setSessionToken(res.token);
+  }
+  return res;
 }
 
 // GET /api/session/ping — session liveness check. 401 → token expired.

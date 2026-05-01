@@ -74,7 +74,13 @@ export const useSession = create<SessionState>((set, get) => ({
   setLeague: async (lg) => {
     if (lg) await AsyncStorage.setItem(SL_KEY, JSON.stringify(lg));
     else    await AsyncStorage.removeItem(SL_KEY);
-    set({ league: lg });
+    // When a league is pinned, a successful sessionInit just happened
+    // upstream — which means a valid session token is now in secure-store.
+    // Flip hasToken to true so consumers that gate on it (e.g. RootNav's
+    // progressQuery) start working again. Without this, recovering from
+    // a session-expired state would leave hasToken stuck at false even
+    // though the new token is fine.
+    set({ league: lg, hasToken: !!lg });
   },
 
   setLeagues: (lgs) => set({ leagues: lgs }),
