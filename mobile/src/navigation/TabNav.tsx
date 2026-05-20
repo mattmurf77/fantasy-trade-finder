@@ -11,6 +11,7 @@ import OverallRanksScreen from '../screens/OverallRanksScreen';
 import ManualRanksScreen from '../screens/ManualRanksScreen';
 import TrendsScreen from '../screens/TrendsScreen';
 import TradesScreen from '../screens/TradesScreen';
+import PortfolioScreen from '../screens/PortfolioScreen';
 import MatchesScreen from '../screens/MatchesScreen';
 import LeagueScreen from '../screens/LeagueScreen';
 import TopBar from '../components/TopBar';
@@ -21,8 +22,13 @@ import TopBar from '../components/TopBar';
 // tap away (was: tiny pill in corner).
 const Tab = createBottomTabNavigator();
 const RankStack = createNativeStackNavigator();
+// B3 — Trades tab becomes a small stack so Portfolio is reachable as a
+// sub-route. TradesScreen renders its own in-screen pill that pushes
+// Portfolio; the bottom-nav still surfaces just four tabs.
+const TradesStack = createNativeStackNavigator();
 
 export type RankRoute = 'Trios' | 'Tiers' | 'OverallRanks' | 'ManualRanks' | 'Trends';
+export type TradesRoute = 'TradesHome' | 'Portfolio';
 
 function RankStackNav() {
   return (
@@ -49,6 +55,24 @@ function RankStackNav() {
         options={{ headerShown: true, title: 'Trends', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
       />
     </RankStack.Navigator>
+  );
+}
+
+function TradesStackNav() {
+  return (
+    <TradesStack.Navigator screenOptions={{ headerShown: false }}>
+      <TradesStack.Screen name="TradesHome" component={TradesScreen} />
+      <TradesStack.Screen
+        name="Portfolio"
+        component={PortfolioScreen}
+        options={{
+          headerShown: true,
+          title: 'Portfolio',
+          headerStyle: { backgroundColor: colors.bg },
+          headerTintColor: colors.text,
+        }}
+      />
+    </TradesStack.Navigator>
   );
 }
 
@@ -98,7 +122,7 @@ export default function TabNav() {
         />
         <Tab.Screen
           name="Trades"
-          component={TradesScreen}
+          component={TradesStackNav}
           options={{ tabBarIcon: tabIcon('⚡') }}
         />
         <Tab.Screen

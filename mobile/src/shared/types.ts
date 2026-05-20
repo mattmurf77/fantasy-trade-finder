@@ -220,6 +220,27 @@ export interface NewPartnerEntry {
 
 export type FlagMap = Record<string, boolean>;
 
+// B3 — Cross-league portfolio row. The backend's /api/portfolio returns
+// a per-player aggregate of which leagues the user owns this player in.
+// Per-league tier info isn't part of the current backend response — the
+// `tier` field is reserved and defaults to 'pool' (no tier known) so the
+// UI can show a neutral chip per league. When the backend later starts
+// emitting tier-per-league, this type already accepts it.
+export type PortfolioTier = Tier | 'pool';
+export interface PortfolioExposure {
+  league_id: string;
+  league_name: string;
+  tier: PortfolioTier;
+}
+export interface PortfolioRow {
+  player: Player;
+  /** One entry per league this player appears on for the user. */
+  exposure: PortfolioExposure[];
+  /** Total leagues the user is in. Same value on every row — keeps the
+   *  "N of M" badge stable. */
+  total_leagues: number;
+}
+
 export interface NotificationPrefs {
   trade_matches: 0 | 1;
   weekly_digest: 0 | 1;

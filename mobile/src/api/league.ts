@@ -4,6 +4,8 @@ import type {
   ActivityEvent,
   ContrarianRow,
   NewPartnerEntry,
+  PortfolioRow,
+  PortfolioTier,
 } from '../shared/types';
 
 // ── League preferences (team outlook + positional prefs) ─────────
@@ -298,4 +300,74 @@ export async function getNewPartners(
   // Newest unlock first
   partners.sort((a, b) => (a.newly_unlocked_at < b.newly_unlocked_at ? 1 : -1));
   return { partners };
+}
+
+// ── Portfolio (cross-league exposure) ─────────────────────────────
+// Backend: GET /api/portfolio.
+// Server returns rows shaped like:
+//   { player_id, name, pos, exposure (int), total_leagues, league_names: [..] }
+// We adapt to the richer PortfolioRow shape the mobile UI expects.
+// The backend doesn't currently emit per-league tier info, so each
+// exposure entry is marked 'pool' — the UI shows a neutral chip.
+//
+// NB: league_id isn't returned (only league_names). We fall back to using
+// the league_name as the id for keying since names are unique within a
+// user's account in practice. If/when the backend adds league_ids we can
+// drop the fallback.
+export interface PortfolioApiRow {
+  player_id: string;
+  name: string;
+  pos: string;
+  exposure: number;
+  total_leagues: number;
+  league_names: string[];
+}
+export async function getPortfolio(): Promise<{ players: PortfolioRow[] }> {
+  const raw = await api.get<{ players: PortfolioApiRow[] }>('/api/portfolio');
+  const players: PortfolioRow[] = (raw?.players || []).map((r) => ({
+    player: {
+      id: r.player_id,
+      name: r.name || r.player_id,
+      position: r.pos || '',
+    },
+    exposure: (r.league_names || []).map((nm) => ({
+      league_id: nm,
+      league_name: nm,
+      tier: 'pool' as PortfolioTier,
+    })),
+    total_leagues: r.total_leagues || (r.league_names || []).length,
+  }));
+  return { players };
+}
+
+// ── Connect another league (paste a Sleeper URL) ──────────────────
+// Backend: POST /api/league/parse-url. Returns
+//   { platform, league_id, name, supported }
+// We surface the same data shape callers expect: { ok, league_id, league_name }.
+// Non-Sleeper platforms (supported=false) are reported as a soft error so
+// the caller can render a friendly "Sleeper-only for now" toast.
+export interface ConnectLeagueResult {
+  ok: boolean;
+  league_id: string;
+  league_name: string;
+  /** Sleeper / espn / mfl — set by the backend's URL parser. */
+  platform: 'sleeper' | 'espn' | 'mfl' | string;
+  /** When false, backend recognized the URL but full sync isn't wired up
+   *  yet (ESPN / MFL today). UI should keep the user where they are. */
+  supported: boolean;
+}
+export async function connectLeague(sleeperUrl: string): Promise<ConnectLeagueResult> {
+  const res = await api.post<{
+    platform: string;
+    league_id: string;
+    name?: string | null;
+    supported: boolean;
+  }>('/api/league/parse-url', { url: sleeperUrl });
+  return {
+    ok: !!res?.supported && !!res?.league_id,
+    league_id: res?.league_id || '',
+    league_name: res?.name || (res?.league_id ? `League ${res.league_id}` : ''),
+    platform: res?.platform || '',
+    supported: !!res?.supported,
+  };
 }
