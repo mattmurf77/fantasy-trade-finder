@@ -84,6 +84,11 @@ export interface TradeCard {
   match_score: number;            // 0–100
   fairness: number;               // 0–1 ratio
   reasons?: string[];             // present only when trade_math.human_explanations flag is on
+  // True when the opponent's ELOs came from their actual saved rankings
+  // (a real FTF user); false / undefined when they were noise-randomized
+  // off the consensus seed. Backend sets this on /api/trades/generate and
+  // /api/trades/status snapshots (server.py:_make_progress_cb).
+  real_opponent?: boolean;
 }
 
 export interface TradeMatch {
