@@ -294,6 +294,42 @@ notifications_table = Table("notifications", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# app_feedback_table — in-app feedback notes synced from clients
+# ---------------------------------------------------------------------------
+#
+# Authoritative store for feedback notes that users save via the mobile
+# FeedbackSheet (and eventually web). Mobile keeps a local copy in
+# AsyncStorage and POSTs to /api/feedback in the background; this table is
+# the canonical record so external TestFlight testers' notes land without
+# any manual share-sheet action.
+#
+# client_id: load-bearing dedup key. Mobile may retry the same note
+#   multiple times (background sync, foreground retry); we ignore
+#   duplicates so retries are idempotent.
+# user_id / username: best-effort session attribution. Null = anonymous
+#   submission (pre-sign-in flows are allowed).
+# severity: 'bug' | 'polish' | 'idea' — see cross-client-invariants.md.
+# ---------------------------------------------------------------------------
+
+app_feedback_table = Table("app_feedback", metadata,
+    Column("id",                Integer, primary_key=True, autoincrement=True),
+    Column("client_id",         String,  nullable=False, unique=True),
+    Column("user_id",           String),                  # nullable — anonymous allowed
+    Column("username",          String),                  # denormalized snapshot
+    Column("screen",            String,  nullable=False),
+    Column("severity",          String,  nullable=False), # bug | polish | idea
+    Column("text",              Text,    nullable=False),
+    Column("app_version",       String),
+    Column("platform",          String),                  # ios | android
+    Column("device_type",       String),                  # iphone | ipad | macos
+    Column("os_version",        String),
+    Column("client_created_at", String),                  # ISO from client
+    Column("created_at",        String,  nullable=False), # ISO from server (canonical)
+    Index("idx_app_feedback_created_at", "created_at"),
+    Index("idx_app_feedback_user_id",    "user_id"),
+)
+
+# ---------------------------------------------------------------------------
 # Agent 1 additions — user_player_skips
 # ---------------------------------------------------------------------------
 # Persistent skip/dismiss decisions:
@@ -609,6 +645,34 @@ def _migrate_db() -> None:
         try:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+        except Exception:
+            pass
+
+    # ── app_feedback migrations ────────────────────────────────────────────
+    # The table itself is created by metadata.create_all(); this block is
+    # for any future additive ALTERs. Indexes are declared on the Table
+    # definition so create_all() handles them on fresh DBs.
+    _app_feedback_migrations: list[tuple[str, str, str]] = [
+        # (table, column, type) — currently none; placeholder for future work
+    ]
+    for table, col, col_type in _app_feedback_migrations:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+        except Exception:
+            pass
+
+    # Ensure indexes exist on DBs that pre-date this table's index declarations.
+    _app_feedback_indexes = [
+        ("idx_app_feedback_created_at", "app_feedback", "created_at"),
+        ("idx_app_feedback_user_id",    "app_feedback", "user_id"),
+    ]
+    for idx_name, tbl, cols in _app_feedback_indexes:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})"
+                ))
         except Exception:
             pass
 
@@ -4440,3 +4504,120 @@ def load_all_signed_up_users() -> list[dict]:
     except Exception as e:
         print(f"[load_all_signed_up_users] failed: {e}")
     return out
+
+
+# ---------------------------------------------------------------------------
+# app_feedback — save / load helpers
+# ---------------------------------------------------------------------------
+
+def save_feedback(
+    *,
+    client_id: str,
+    screen: str,
+    severity: str,
+    text_body: str,
+    user_id: str | None = None,
+    username: str | None = None,
+    app_version: str | None = None,
+    platform: str | None = None,
+    device_type: str | None = None,
+    os_version: str | None = None,
+    client_created_at: str | None = None,
+) -> dict:
+    """Insert (idempotently on client_id) a feedback row and return
+    {server_id, created_at, duplicate}.
+
+    Retries with the same client_id are dropped: we look up the existing
+    row and return its ids so the mobile client can move on. SQLite uses
+    INSERT OR IGNORE; Postgres uses ON CONFLICT (client_id) DO NOTHING.
+    """
+    is_postgres = not DATABASE_URL.startswith("sqlite")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with engine.begin() as conn:
+        # Postgres: ON CONFLICT … DO NOTHING RETURNING id; if a row was
+        # actually inserted we get the new id back, otherwise empty.
+        if is_postgres:
+            res = conn.execute(
+                text(
+                    """
+                    INSERT INTO app_feedback
+                        (client_id, user_id, username, screen, severity, text,
+                         app_version, platform, device_type, os_version,
+                         client_created_at, created_at)
+                    VALUES
+                        (:client_id, :user_id, :username, :screen, :severity, :text,
+                         :app_version, :platform, :device_type, :os_version,
+                         :client_created_at, :created_at)
+                    ON CONFLICT (client_id) DO NOTHING
+                    RETURNING id
+                    """
+                ),
+                {
+                    "client_id": client_id,
+                    "user_id": user_id,
+                    "username": username,
+                    "screen": screen,
+                    "severity": severity,
+                    "text": text_body,
+                    "app_version": app_version,
+                    "platform": platform,
+                    "device_type": device_type,
+                    "os_version": os_version,
+                    "client_created_at": client_created_at,
+                    "created_at": now_iso,
+                },
+            ).fetchone()
+            if res:
+                return {"server_id": int(res[0]), "created_at": now_iso, "duplicate": False}
+        else:
+            # SQLite: INSERT OR IGNORE. Use rowcount (==1 on insert, 0 on
+            # conflict) to detect dedup — `lastrowid` is unreliable here
+            # because SQLite returns the previous successful insert's id
+            # on this connection when the current insert was ignored.
+            cur = conn.execute(
+                text(
+                    """
+                    INSERT OR IGNORE INTO app_feedback
+                        (client_id, user_id, username, screen, severity, text,
+                         app_version, platform, device_type, os_version,
+                         client_created_at, created_at)
+                    VALUES
+                        (:client_id, :user_id, :username, :screen, :severity, :text,
+                         :app_version, :platform, :device_type, :os_version,
+                         :client_created_at, :created_at)
+                    """
+                ),
+                {
+                    "client_id": client_id,
+                    "user_id": user_id,
+                    "username": username,
+                    "screen": screen,
+                    "severity": severity,
+                    "text": text_body,
+                    "app_version": app_version,
+                    "platform": platform,
+                    "device_type": device_type,
+                    "os_version": os_version,
+                    "client_created_at": client_created_at,
+                    "created_at": now_iso,
+                },
+            )
+            if cur.rowcount == 1 and cur.lastrowid:
+                return {"server_id": int(cur.lastrowid), "created_at": now_iso, "duplicate": False}
+
+        # Duplicate path — fetch the pre-existing row's id + created_at so
+        # the client gets a consistent response and can mark its local
+        # copy synced without another retry.
+        existing = conn.execute(
+            select(app_feedback_table.c.id, app_feedback_table.c.created_at)
+            .where(app_feedback_table.c.client_id == client_id)
+        ).fetchone()
+        if existing:
+            return {
+                "server_id": int(existing[0]),
+                "created_at": existing[1] or now_iso,
+                "duplicate": True,
+            }
+        # Shouldn't happen — either we just inserted (handled above) or a
+        # duplicate exists. Defensive fallback.
+        return {"server_id": 0, "created_at": now_iso, "duplicate": True}

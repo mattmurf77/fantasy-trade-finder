@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Pressable,
   Share,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme/colors';
@@ -27,14 +28,28 @@ const SEV_LABEL: Record<FeedbackItem['severity'], string> = {
 //     markdown so the user can AirDrop / email / paste back into chat.
 //   • Clear — wipes everything (with a confirm).
 export default function FeedbackInboxScreen() {
-  const items   = useFeedback((s) => s.items);
-  const hydrate = useFeedback((s) => s.hydrate);
-  const remove  = useFeedback((s) => s.remove);
-  const clear   = useFeedback((s) => s.clear);
+  const items     = useFeedback((s) => s.items);
+  const hydrate   = useFeedback((s) => s.hydrate);
+  const remove    = useFeedback((s) => s.remove);
+  const clear     = useFeedback((s) => s.clear);
+  const retrySync = useFeedback((s) => s.retrySync);
+
+  const [retrying, setRetrying] = useState(false);
+  const unsyncedCount = items.filter((i) => !i.synced).length;
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  async function onRetry() {
+    if (retrying || unsyncedCount === 0) return;
+    setRetrying(true);
+    try {
+      await retrySync();
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   async function onShare() {
     const md = formatFeedbackAsMarkdown(items);
@@ -77,6 +92,24 @@ export default function FeedbackInboxScreen() {
             {items.length} note{items.length === 1 ? '' : 's'} saved on this device
           </Text>
         </View>
+        {unsyncedCount > 0 && (
+          <Pressable
+            onPress={onRetry}
+            disabled={retrying}
+            style={({ pressed }) => [
+              styles.btn,
+              styles.btnGhost,
+              retrying && styles.btnDisabled,
+              pressed && !retrying && { opacity: 0.85 },
+            ]}
+          >
+            {retrying ? (
+              <ActivityIndicator size="small" color={colors.muted} />
+            ) : (
+              <Text style={styles.btnGhostText}>Retry sync</Text>
+            )}
+          </Pressable>
+        )}
         <Pressable
           onPress={onShare}
           disabled={items.length === 0}
@@ -115,21 +148,39 @@ export default function FeedbackInboxScreen() {
         <ScrollView
           contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}
         >
-          {items.map((it) => (
-            <Pressable
-              key={it.id}
-              onLongPress={() => onDelete(it)}
-              style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
-            >
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardSev}>{SEV_LABEL[it.severity]}</Text>
-                <Text style={styles.cardWhen}>{relativeTime(it.created_at)}</Text>
-              </View>
-              <Text style={styles.cardScreen}>{it.screen}</Text>
-              <Text style={styles.cardText}>{it.text}</Text>
-              <Text style={styles.cardHint}>Long-press to delete</Text>
-            </Pressable>
-          ))}
+          {items.map((it) => {
+            // Three visual states for the sync badge. Failed = there was
+            // a sync attempt that errored; Pending = never attempted yet
+            // OR the previous attempt is in flight. We can't distinguish
+            // those two from state alone, so we lean on last_sync_error
+            // as the proxy for "we tried and it didn't work".
+            const failed = !it.synced && !!it.last_sync_error;
+            const badgeStyle =
+              it.synced ? styles.badgeSynced :
+              failed    ? styles.badgeFailed :
+                          styles.badgePending;
+            const badgeText =
+              it.synced ? '✓ Synced' :
+              failed    ? `⚠ Sync failed: ${it.last_sync_error}` :
+                          '↻ Pending sync';
+            return (
+              <Pressable
+                key={it.id}
+                onLongPress={() => onDelete(it)}
+                style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
+              >
+                <View style={styles.cardHeader}>
+                  <Text style={styles.cardSev}>{SEV_LABEL[it.severity]}</Text>
+                  <Text style={styles.cardWhen}>{relativeTime(it.created_at)}</Text>
+                </View>
+                <Text style={styles.cardScreen}>{it.screen}</Text>
+                <Text style={styles.cardText}>{it.text}</Text>
+                <Text style={[styles.cardBadge, badgeStyle]} numberOfLines={2}>
+                  {badgeText}
+                </Text>
+              </Pressable>
+            );
+          })}
         </ScrollView>
       )}
     </SafeAreaView>
@@ -184,5 +235,17 @@ const styles = StyleSheet.create({
   cardWhen:   { color: colors.muted,  fontSize: fontSize.xs },
   cardScreen: { color: colors.muted,  fontSize: fontSize.xs, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: '700' },
   cardText:   { color: colors.text,   fontSize: fontSize.sm, lineHeight: 20 },
-  cardHint:   { color: colors.muted,  fontSize: 10, marginTop: 6, fontStyle: 'italic' },
+  // Per-card sync badge. Three visual states; colors are chosen so a
+  // glance at the inbox tells the tester at-a-glance which notes already
+  // made it to the backend.
+  cardBadge: {
+    fontSize: 10,
+    marginTop: 8,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    lineHeight: 14,
+  },
+  badgeSynced:  { color: colors.muted },
+  badgePending: { color: colors.gold },
+  badgeFailed:  { color: colors.red },
 });
