@@ -138,3 +138,75 @@ export interface NotificationPrefs {
   quiet_hours_enabled: 0 | 1;
   tz: string;
 }
+
+// ── Growth loop (Bundle 8) ───────────────────────────────────────────────
+// `landing.smart_start_cta` accepts either a bare Sleeper username or a full
+// league URL (Sleeper / ESPN / MyFantasyLeague). The mobile client decides
+// which path to take by inspecting the input first — if it looks like a URL
+// we POST /api/league/parse-url and surface platform / league_id; otherwise
+// we hand the raw string off to the existing username sign-in.
+export type SmartStartKind = 'username' | 'league_url' | 'invalid';
+
+export interface SmartStartResolution {
+  kind: SmartStartKind;
+  /** Lowercased Sleeper username when kind === 'username'. */
+  username?: string;
+  /** Detected platform when kind === 'league_url'. */
+  platform?: 'sleeper' | 'espn' | 'mfl';
+  league_id?: string;
+  /** Resolved league name from /api/league/parse-url (Sleeper only). */
+  league_name?: string;
+  /** True when the platform is supported end-to-end today (Sleeper). */
+  supported?: boolean;
+  /** Human-readable failure reason for kind === 'invalid'. */
+  message?: string;
+}
+
+// /api/profile/<username> — public, read-only snapshot of a user's ranking
+// activity. Only includes data the user has created themselves; no private
+// league info is exposed. Field shape matches backend/server.py:public_profile_data.
+export interface PublicProfileContrarianEntry {
+  player_id: string;
+  name: string;
+  user_elo: number;
+  community_elo: number;
+  delta: number;
+  raters: number;
+}
+
+export interface PublicProfileTierEntry {
+  player_id: string;
+  name: string;
+  elo: number;
+}
+
+export interface PublicProfile {
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  leagues_count: number;
+  scoring_format: ScoringFormat;
+  /** Top contrarian takes per position (above/below community consensus). */
+  contrarian_takes: Record<
+    string,
+    { above: PublicProfileContrarianEntry[]; below: PublicProfileContrarianEntry[] }
+  >;
+  /** {position: {tier: [{player_id, name, elo}]}} — only populated tiers. */
+  tiers_snapshot: Record<string, Record<string, PublicProfileTierEntry[]>>;
+}
+
+// /api/session/demo — bootstraps a seeded demo session (no Sleeper auth).
+// The backend returns a fresh session_token in `token`; mobile sets that as
+// the X-Session-Token for subsequent calls just like the normal flow.
+export interface DemoSessionResponse {
+  ok: true;
+  demo: true;
+  token: string;
+  user_id: string;
+  display_name: string;
+  league_id: string;
+  league_name: string;
+  player_count: number;
+  user_roster: Player[];
+  opponents: number;
+}

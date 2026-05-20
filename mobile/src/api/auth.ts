@@ -1,6 +1,11 @@
 import { api, setSessionToken } from './client';
 import { getLeagueRosters, getLeagueUsers } from './sleeper';
-import type { LeagueSummary } from '../shared/types';
+import type {
+  DemoSessionResponse,
+  LeagueSummary,
+  PublicProfile,
+  SmartStartResolution,
+} from '../shared/types';
 import type { SavedUser } from '../state/useSession';
 
 // POST /api/extension/auth — the lightweight, one-shot username auth endpoint.
@@ -116,6 +121,18 @@ export async function initLeagueSession(
     }))
     .filter((r) => r.player_ids.length > 0);
 
+  // Pull (and clear) any in-memory referral attribution captured from a
+  // deep link. Backend stores invited_by on the users row only on insert,
+  // so it's safe to forward on every session_init — repeat calls are no-ops.
+  // Loaded inline to avoid a circular import (useSession → auth.ts).
+  let invitedBy: string | null = null;
+  try {
+    const { useSession } = require('../state/useSession');
+    invitedBy = useSession.getState().consumeInvitedBy();
+  } catch {
+    /* require may fail in test contexts; non-fatal */
+  }
+
   await sessionInit({
     user_id:           user.user_id,
     username:          user.username,
@@ -125,5 +142,91 @@ export async function initLeagueSession(
     league_name:       lg.name,
     user_player_ids:   myPlayerIds,
     opponent_rosters:  opponentRosters,
+    invited_by:        invitedBy ?? undefined,
   });
+}
+
+// ── Bundle 8: Growth loop helpers ─────────────────────────────────────────
+
+// Heuristic: anything containing "://" or starting with a domain-shaped
+// prefix is treated as a URL; otherwise we assume the user typed a bare
+// Sleeper username. Mirrors the web's `smart-start` panel behavior — the
+// URL path goes through /api/league/parse-url, the username path goes
+// through the existing sign-in flow.
+function _looksLikeUrl(input: string): boolean {
+  const trimmed = input.trim();
+  if (!trimmed) return false;
+  if (/^https?:\/\//i.test(trimmed)) return true;
+  if (/^[a-z0-9-]+\.[a-z]{2,}\//i.test(trimmed)) return true;   // sleeper.com/league/...
+  return false;
+}
+
+interface ParseUrlResponse {
+  platform?: 'sleeper' | 'espn' | 'mfl';
+  league_id?: string;
+  name?: string | null;
+  supported?: boolean;
+  error?: string;
+  message?: string;
+}
+
+/** Smart-start resolver. Accepts either a Sleeper username or a league URL.
+ *  Returns a discriminated result the caller can branch on. Never throws —
+ *  parsing failures come back as kind='invalid' with a human message so the
+ *  UI can surface inline error text. */
+export async function resolveSmartStart(input: string): Promise<SmartStartResolution> {
+  const raw = (input || '').trim();
+  if (!raw) {
+    return { kind: 'invalid', message: 'Enter a Sleeper username or league URL.' };
+  }
+  if (!_looksLikeUrl(raw)) {
+    return { kind: 'username', username: raw.toLowerCase() };
+  }
+  try {
+    const body = await api.post<ParseUrlResponse>(
+      '/api/league/parse-url',
+      { url: raw },
+      { skipAuth: true },
+    );
+    if (!body || !body.platform || !body.league_id) {
+      return {
+        kind: 'invalid',
+        message: body?.message || "Couldn't recognize that URL.",
+      };
+    }
+    return {
+      kind:        'league_url',
+      platform:    body.platform,
+      league_id:   body.league_id,
+      league_name: body.name ?? undefined,
+      supported:   body.supported === true,
+    };
+  } catch (e: any) {
+    return {
+      kind:    'invalid',
+      message: e?.message || 'Could not parse that URL.',
+    };
+  }
+}
+
+/** Start a seeded demo session. The backend builds a complete league with
+ *  ranking + trade services attached to the returned token; mobile just
+ *  stores the token in SecureStore and treats the session as "demo". */
+export async function startDemoSession(): Promise<DemoSessionResponse> {
+  const res = await api.post<DemoSessionResponse>('/api/session/demo', undefined, {
+    skipAuth: true,
+  });
+  if (res?.token) {
+    await setSessionToken(res.token);
+  }
+  return res;
+}
+
+/** Public profile JSON — read-only snapshot of a user's tier overrides +
+ *  contrarian takes. Backend gates this on the `profiles.public_pages` flag;
+ *  a 404 there bubbles up as an ApiError, which the screen renders as a
+ *  "Profile not found" state. */
+export async function getPublicProfile(username: string): Promise<PublicProfile> {
+  const uname = encodeURIComponent((username || '').trim().toLowerCase());
+  return api.get<PublicProfile>(`/api/profile/${uname}`, { skipAuth: true });
 }
