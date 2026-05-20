@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   ScrollView,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -28,6 +29,7 @@ import FairnessSlider from '../components/FairnessSlider';
 import OutlookSheet from '../components/OutlookSheet';
 import LeaguePill from '../components/LeaguePill';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
+import QueueChip from '../components/QueueChip';
 import {
   generateTrades,
   getTradeStatus,
@@ -37,25 +39,96 @@ import {
 import {
   getLeaguePreferences,
   saveLeaguePreferences,
+  getNewPartners,
   type Outlook,
 } from '../api/league';
 import { useSession } from '../state/useSession';
-import type { TradeCard, TradeJobSnapshot } from '../shared/types';
+import { useTradeQueue } from '../state/useTradeQueue';
+import { useFlag } from '../state/useFeatureFlags';
+import NewPartnersBanner from '../components/NewPartnersBanner';
+import type { Player, TradeCard, TradeJobSnapshot } from '../shared/types';
 
 const SCREEN_W = Dimensions.get('window').width;
 const SWIPE_THRESHOLD = 120;
 
-export default function TradesScreen() {
+// Stable empty-array reference so the zustand selector doesn't return a
+// brand-new `[]` on every render (which would trigger an infinite re-render
+// loop in React via reference inequality).
+const EMPTY_QUEUE: never[] = [];
+
+export default function TradesScreen({ navigation }: any) {
   const queryClient = useQueryClient();
   const league = useSession((s) => s.league);
   const switching = useSession((s) => s.switching);
+  const user = useSession((s) => s.user);
+  // B3 — Portfolio is only meaningful when the user has 2+ leagues. The
+  // sub-route pill at the top of this screen hides itself otherwise.
+  const leagues = useSession((s) => s.leagues);
+  const showPortfolioPill = (leagues?.length || 0) >= 2;
   const leagueId = league?.league_id || null;
+  const userId   = user?.user_id || '';
+
+  // B7 — new-partners banner. Flag-gated; query only fires when the flag
+  // is on AND we have both a league and a user (the banner's dismissal
+  // key depends on both).
+  const newPartnersFlag = useFlag('trades.new_partners_alerts');
+  const newPartnersQuery = useQuery({
+    queryKey: ['new-partners', leagueId, userId],
+    queryFn:  () => getNewPartners(leagueId!),
+    enabled:  !!leagueId && !!userId && newPartnersFlag,
+    staleTime: 60_000,
+  });
   const [fairness, setFairness] = useState(0.75);
+  // Equal-only checkbox: when on, the slider is locked to 1.0 (100%) and
+  // disabled. Stash the prior slider value so unchecking restores it.
+  // Screen-local only — not worth a global store.
+  const [equalOnly, setEqualOnly] = useState(false);
+  const [prevFairness, setPrevFairness] = useState(0.75);
   const [deck, setDeck] = useState<TradeCard[]>([]);
   const [deckIdx, setDeckIdx] = useState(0);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
   const [outlookOpen, setOutlookOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [queueSheetOpen, setQueueSheetOpen] = useState(false);
+
+  // Trade queue (Bundle 5 — flag `trades.queue_2k`). When the flag is off,
+  // the queue UI is hidden but the store stays functional; this keeps the
+  // hook-call order stable so flag flips don't trip React's rules-of-hooks.
+  const queueEnabled = useFlag('trades.queue_2k');
+  const hydrateQueue  = useTradeQueue((s) => s.hydrate);
+  const enqueueTrade  = useTradeQueue((s) => s.enqueue);
+  const dequeueTrade  = useTradeQueue((s) => s.dequeue);
+  const sendAllTrades = useTradeQueue((s) => s.sendAll);
+  // Subscribe to just the slice for the active league so other-league
+  // mutations don't trigger re-renders here.
+  const queuedTrades = useTradeQueue(
+    (s) => (leagueId ? s.byLeague[leagueId] || EMPTY_QUEUE : EMPTY_QUEUE),
+  );
+
+  // Re-hydrate when the signed-in user changes (incl. on first mount once
+  // useSession.bootstrap finishes). Keyed on `userId` so a sign-out/sign-in
+  // cycle picks up the new user's blob.
+  useEffect(() => {
+    if (!queueEnabled) return;
+    void hydrateQueue();
+  }, [userId, queueEnabled, hydrateQueue]);
+
+  // Effective threshold sent to the backend — 1.0 when Equal-only is on,
+  // otherwise the slider's current value.
+  const effectiveFairness = equalOnly ? 1.0 : fairness;
+
+  function toggleEqualOnly() {
+    if (equalOnly) {
+      // Unchecking: restore the prior slider value.
+      setEqualOnly(false);
+      setFairness(prevFairness);
+    } else {
+      // Checking: stash the current slider value, lock to 100%.
+      setPrevFairness(fairness);
+      setFairness(1.0);
+      setEqualOnly(true);
+    }
+  }
 
   // Preferences — open outlook sheet the first time the user lands here
   // without an outlook set.
@@ -82,7 +155,7 @@ export default function TradesScreen() {
     mutationFn: () =>
       generateTrades({
         league_id: leagueId!,
-        fairness_threshold: fairness,
+        fairness_threshold: effectiveFairness,
       }),
     onSuccess: (snapshot) => {
       setJob(snapshot);
@@ -203,6 +276,39 @@ export default function TradesScreen() {
     }
   }
 
+  // ── Queue helpers (flag `trades.queue_2k`) ─────────────────────────
+  const isQueued = (tradeId: string): boolean =>
+    queuedTrades.some((q) => q.trade_id === tradeId);
+
+  function handleQueue(card: TradeCard) {
+    if (!leagueId) return;
+    // Re-tapping Queue on an already-queued card dequeues it (matches the
+    // web's toggle behavior). Otherwise capture a light snapshot of the
+    // card metadata needed for the deep-link + chip rendering.
+    if (isQueued(card.trade_id)) {
+      dequeueTrade(leagueId, card.trade_id);
+      setToast({ msg: 'Removed from queue', tone: 'success' });
+      return;
+    }
+    enqueueTrade(leagueId, {
+      trade_id:        card.trade_id,
+      league_id:       card.league_id || leagueId,
+      sleeper_url:     buildSleeperUrl(card),
+      give_summary:    summarizePlayers(card.give_players),
+      receive_summary: summarizePlayers(card.receive_players),
+      queued_at:       new Date().toISOString(),
+    });
+    haptics.swipe();
+    setToast({ msg: `Added to queue (${queuedTrades.length + 1})`, tone: 'success' });
+  }
+
+  async function handleSendAll() {
+    if (!leagueId) return;
+    setQueueSheetOpen(false);
+    await sendAllTrades(leagueId);
+    setToast({ msg: 'Opened queued trades on Sleeper', tone: 'success' });
+  }
+
   async function handleOutlookSubmit(
     outlook: NonNullable<Outlook>,
     acquire: string[],
@@ -257,6 +363,39 @@ export default function TradesScreen() {
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!topCard || !generateMutation.isPending}
       >
+        {/* B7 — new-partners alert. Banner self-dismisses via AsyncStorage
+            keyed on the latest partner; renders null when the flag is off
+            (query is gated upstream) or there are no new partners. */}
+        {newPartnersFlag && leagueId && userId && (newPartnersQuery.data?.partners?.length ?? 0) > 0 ? (
+          <NewPartnersBanner
+            partners={newPartnersQuery.data!.partners}
+            userId={userId}
+            leagueId={leagueId}
+          />
+        ) : null}
+
+        {/* B3 — Sub-route pills. Trades is the active screen here;
+            Portfolio is a sibling in the Trades stack and only shows
+            when the user has 2+ connected leagues. */}
+        {showPortfolioPill ? (
+          <View style={styles.subnavRow}>
+            <View style={[styles.subnavPill, styles.subnavPillActive]}>
+              <Text style={[styles.subnavPillText, styles.subnavPillTextActive]}>
+                Trades
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => navigation?.navigate?.('Portfolio')}
+              style={({ pressed }) => [
+                styles.subnavPill,
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Text style={styles.subnavPillText}>Portfolio</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {/* League selector pill — opens LeagueSwitcherSheet on tap. */}
         <LeaguePill
           label="Trading in"
@@ -281,7 +420,27 @@ export default function TradesScreen() {
             </Pressable>
           </View>
 
-          <FairnessSlider value={fairness} onChange={setFairness} />
+          {/* Equal-only shortcut: one-tap "100% fair only", locks the
+              slider. Sits above the slider so the visual flow reads
+              "shortcut → control → live value." */}
+          <Pressable
+            onPress={toggleEqualOnly}
+            style={({ pressed }) => [styles.equalRow, pressed && { opacity: 0.7 }]}
+            hitSlop={8}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: equalOnly }}
+          >
+            <View style={[styles.checkbox, equalOnly && styles.checkboxChecked]}>
+              {equalOnly && <Text style={styles.checkboxMark}>✓</Text>}
+            </View>
+            <Text style={styles.equalLabel}>Only equal trades (100% fair)</Text>
+          </Pressable>
+
+          <FairnessSlider
+            value={fairness}
+            onChange={setFairness}
+            disabled={equalOnly}
+          />
 
           {/* Find-a-Trade button. While a job is running, the button is
               disabled — the progress strip below acts as the live signal.
@@ -352,6 +511,29 @@ export default function TradesScreen() {
                 onLike={() => advance('like')}
                 onPass={() => advance('pass')}
               />
+              {/* Queue action — Pass / Interested are driven by swipe
+                  gestures on the top card; Queue is a third option that
+                  stashes the trade for "Send All" later. Flag-gated so the
+                  feature can be tested before broad rollout. */}
+              {queueEnabled && leagueId ? (
+                <Pressable
+                  onPress={() => handleQueue(topCard)}
+                  style={({ pressed }) => [
+                    styles.queueBtn,
+                    isQueued(topCard.trade_id) && styles.queueBtnQueued,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.queueBtnText,
+                      isQueued(topCard.trade_id) && styles.queueBtnTextQueued,
+                    ]}
+                  >
+                    {isQueued(topCard.trade_id) ? '✓ Queued' : '+ Queue'}
+                  </Text>
+                </Pressable>
+              ) : null}
               <Text style={styles.deckHint}>
                 Swipe right to like · Swipe left to pass
               </Text>
@@ -387,8 +569,121 @@ export default function TradesScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Queue footer bar — anchored above the bottom tab nav. Tap the
+          left side to expand the queue sheet; tap "Send All" to fire the
+          staggered Sleeper deep-links and clear. Flag-gated. */}
+      {queueEnabled && queuedTrades.length > 0 ? (
+        <View style={styles.queueFooter}>
+          <Pressable
+            onPress={() => setQueueSheetOpen(true)}
+            style={({ pressed }) => [styles.queueFooterTap, pressed && { opacity: 0.7 }]}
+          >
+            <Text style={styles.queueFooterCount}>{queuedTrades.length}</Text>
+            <Text style={styles.queueFooterLabel}>
+              queued · tap to review
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={handleSendAll}
+            style={({ pressed }) => [styles.queueSendBtn, pressed && { opacity: 0.85 }]}
+          >
+            <Text style={styles.queueSendText}>Send All →</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* Queue bottom-sheet — lists each queued trade with × dequeue. */}
+      <Modal
+        visible={queueSheetOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setQueueSheetOpen(false)}
+      >
+        <Pressable
+          style={styles.queueBackdrop}
+          onPress={() => setQueueSheetOpen(false)}
+        />
+        <View style={styles.queueSheet}>
+          <View style={styles.queueHandle} />
+          <View style={styles.queueSheetHeader}>
+            <Text style={styles.queueSheetTitle}>Trade queue</Text>
+            <Text style={styles.queueSheetSub}>
+              {queuedTrades.length} queued · "Send All" opens each on Sleeper
+            </Text>
+          </View>
+
+          <ScrollView style={styles.queueSheetScroll} contentContainerStyle={{ gap: spacing.sm }}>
+            {queuedTrades.length === 0 ? (
+              <Text style={styles.queueEmpty}>
+                Queue is empty. Tap "+ Queue" on any trade card to stack it here.
+              </Text>
+            ) : (
+              queuedTrades.map((q) => (
+                <QueueChip
+                  key={q.trade_id}
+                  trade={q}
+                  onRemove={() => leagueId && dequeueTrade(leagueId, q.trade_id)}
+                />
+              ))
+            )}
+          </ScrollView>
+
+          <View style={styles.queueSheetActions}>
+            <Pressable
+              onPress={() => setQueueSheetOpen(false)}
+              style={({ pressed }) => [styles.queueSheetCancel, pressed && { opacity: 0.6 }]}
+            >
+              <Text style={styles.queueSheetCancelText}>Close</Text>
+            </Pressable>
+            <Pressable
+              disabled={queuedTrades.length === 0}
+              onPress={handleSendAll}
+              style={({ pressed }) => [
+                styles.queueSheetSend,
+                pressed && { opacity: 0.85 },
+                queuedTrades.length === 0 && { opacity: 0.4 },
+              ]}
+            >
+              <Text style={styles.queueSheetSendText}>Send All →</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
+}
+
+// Sleeper trade-propose URL. Mirrors web's `_buildSleeperTradeUrl`:
+//   https://sleeper.com/leagues/<league_id>/trade?add_receiver_id=...
+//   &give_player_id=...&add_player_id=...
+// Sleeper doesn't publish a programmatic trade endpoint; this deep-link is
+// the pragmatic v1 and lands the user on the league's trade surface even
+// if the params are ignored.
+function buildSleeperUrl(card: TradeCard): string {
+  const params = new URLSearchParams();
+  if (card.opponent_user_id) params.append('add_receiver_id', card.opponent_user_id);
+  for (const id of card.give_player_ids || []) {
+    if (id) params.append('give_player_id', id);
+  }
+  for (const id of card.receive_player_ids || []) {
+    if (id) params.append('add_player_id', id);
+  }
+  const qs = params.toString();
+  return `https://sleeper.com/leagues/${card.league_id}/trade${qs ? `?${qs}` : ''}`;
+}
+
+// "RB Bijan Robinson + WR DJ Moore" style summary for the queue chip.
+// Caps at two names plus a "+N" suffix so a 3+ player side doesn't blow
+// out the chip width.
+function summarizePlayers(players: Player[]): string {
+  if (!Array.isArray(players) || players.length === 0) return '?';
+  const first = players.slice(0, 2).map((p) => {
+    const pos = p.position ? `${p.position} ` : '';
+    return `${pos}${p.name}`;
+  });
+  if (players.length <= 2) return first.join(' + ');
+  return `${first.join(' + ')} +${players.length - 2}`;
 }
 
 // ── SwipableTopCard — Tinder-style gesture on the top card only ─────
@@ -451,6 +746,31 @@ function cap(s: string) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: spacing.lg, gap: spacing.lg, paddingBottom: 96 },
+  // B3 — sub-route pill row (Trades / Portfolio)
+  subnavRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  subnavPill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  subnavPillActive: {
+    borderColor: colors.accent,
+    backgroundColor: 'rgba(79,124,255,0.12)',
+  },
+  subnavPillText: {
+    color: colors.muted,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+  subnavPillTextActive: {
+    color: colors.accent,
+  },
   switchingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(15,17,23,0.85)',
@@ -489,6 +809,37 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   editBtnText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
+  equalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: radius.sm,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  checkboxMark: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '900',
+    lineHeight: 14,
+  },
+  equalLabel: {
+    color: colors.text,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
   findBtn: {
     backgroundColor: colors.accent,
     paddingVertical: 14,
@@ -580,4 +931,143 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
   },
+
+  // Queue button — appears below the swipable card under the queue flag.
+  queueBtn: {
+    alignSelf: 'center',
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  queueBtnQueued: {
+    borderColor: colors.accent,
+    backgroundColor: 'rgba(79,124,255,0.12)',
+  },
+  queueBtnText: {
+    color: colors.muted,
+    fontSize: fontSize.sm,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  queueBtnTextQueued: { color: colors.accent },
+
+  // Queue footer — anchored above the tab bar (the SafeAreaView already
+  // reserves the bottom inset). Visible only when queue has ≥ 1 item.
+  queueFooter: {
+    position: 'absolute',
+    left: spacing.md,
+    right: spacing.md,
+    bottom: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    // Drop-shadow for elevation over the deck below.
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  queueFooterTap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+  },
+  queueFooterCount: {
+    minWidth: 28,
+    height: 28,
+    paddingHorizontal: 8,
+    textAlign: 'center',
+    lineHeight: 28,
+    borderRadius: 14,
+    backgroundColor: colors.accent,
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: fontSize.sm,
+    overflow: 'hidden',
+  },
+  queueFooterLabel: {
+    color: colors.text,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+    flex: 1,
+  },
+  queueSendBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.accent,
+  },
+  queueSendText: { color: '#fff', fontWeight: '800', fontSize: fontSize.sm },
+
+  // Queue bottom-sheet modal
+  queueBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  queueSheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    maxHeight: '80%',
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl,
+    gap: spacing.sm,
+  },
+  queueHandle: {
+    alignSelf: 'center',
+    width: 44,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    marginBottom: spacing.sm,
+  },
+  queueSheetHeader: { gap: 2 },
+  queueSheetTitle: { color: colors.text, fontSize: fontSize.xl, fontWeight: '800' },
+  queueSheetSub: { color: colors.muted, fontSize: fontSize.sm },
+  queueSheetScroll: { maxHeight: 420, marginTop: spacing.sm },
+  queueEmpty: {
+    color: colors.muted,
+    fontSize: fontSize.sm,
+    textAlign: 'center',
+    padding: spacing.xl,
+  },
+  queueSheetActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  queueSheetCancel: {
+    flex: 1,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+  },
+  queueSheetCancelText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
+  queueSheetSend: {
+    flex: 2,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+  },
+  queueSheetSendText: { color: '#fff', fontSize: fontSize.sm, fontWeight: '800' },
 });

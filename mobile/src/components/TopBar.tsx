@@ -65,7 +65,6 @@ export default function TopBar() {
           <Pressable
             onPress={() => {
               if (navigationRef.isReady()) {
-                // @ts-expect-error — top-level Settings route on AuthStack
                 navigationRef.navigate('Settings');
               }
             }}

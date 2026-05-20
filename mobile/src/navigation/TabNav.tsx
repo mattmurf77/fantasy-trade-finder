@@ -8,18 +8,27 @@ import { spacing, radius, fontSize } from '../theme/spacing';
 import RankScreen from '../screens/RankScreen';
 import TiersScreen from '../screens/TiersScreen';
 import OverallRanksScreen from '../screens/OverallRanksScreen';
+import ManualRanksScreen from '../screens/ManualRanksScreen';
+import TrendsScreen from '../screens/TrendsScreen';
 import TradesScreen from '../screens/TradesScreen';
+import PortfolioScreen from '../screens/PortfolioScreen';
 import MatchesScreen from '../screens/MatchesScreen';
 import LeagueScreen from '../screens/LeagueScreen';
 import TopBar from '../components/TopBar';
 
-// Tab definitions. The "Rank" tab fans out into 3 sub-screens — Trios swipe,
-// Tiers (drag-to-bin), and Overall Ranks (flat list). Tapping the tab opens
-// an action sheet so all three are one tap away (was: tiny pill in corner).
+// Tab definitions. The "Rank" tab fans out into 4 sub-screens — Trios swipe,
+// Tiers (drag-to-bin), Overall Ranks (flat list), and Trends (movers +
+// consensus gap). Tapping the tab opens an action sheet so all four are one
+// tap away (was: tiny pill in corner).
 const Tab = createBottomTabNavigator();
 const RankStack = createNativeStackNavigator();
+// B3 — Trades tab becomes a small stack so Portfolio is reachable as a
+// sub-route. TradesScreen renders its own in-screen pill that pushes
+// Portfolio; the bottom-nav still surfaces just four tabs.
+const TradesStack = createNativeStackNavigator();
 
-export type RankRoute = 'Trios' | 'Tiers' | 'OverallRanks';
+export type RankRoute = 'Trios' | 'Tiers' | 'OverallRanks' | 'ManualRanks' | 'Trends';
+export type TradesRoute = 'TradesHome' | 'Portfolio';
 
 function RankStackNav() {
   return (
@@ -35,7 +44,35 @@ function RankStackNav() {
         component={OverallRanksScreen}
         options={{ headerShown: true, title: 'Overall Ranks', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
       />
+      <RankStack.Screen
+        name="ManualRanks"
+        component={ManualRanksScreen}
+        options={{ headerShown: true, title: 'Manual Ranks', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
+      />
+      <RankStack.Screen
+        name="Trends"
+        component={TrendsScreen}
+        options={{ headerShown: true, title: 'Trends', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
+      />
     </RankStack.Navigator>
+  );
+}
+
+function TradesStackNav() {
+  return (
+    <TradesStack.Navigator screenOptions={{ headerShown: false }}>
+      <TradesStack.Screen name="TradesHome" component={TradesScreen} />
+      <TradesStack.Screen
+        name="Portfolio"
+        component={PortfolioScreen}
+        options={{
+          headerShown: true,
+          title: 'Portfolio',
+          headerStyle: { backgroundColor: colors.bg },
+          headerTintColor: colors.text,
+        }}
+      />
+    </TradesStack.Navigator>
   );
 }
 
@@ -85,7 +122,7 @@ export default function TabNav() {
         />
         <Tab.Screen
           name="Trades"
-          component={TradesScreen}
+          component={TradesStackNav}
           options={{ tabBarIcon: tabIcon('⚡') }}
         />
         <Tab.Screen
@@ -133,7 +170,9 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
   const items: { route: RankRoute; emoji: string; label: string; sub: string }[] = [
     { route: 'Trios',         emoji: '🏈', label: 'Trios',         sub: '3-at-a-time swipe ranking' },
     { route: 'Tiers',         emoji: '📋', label: 'Tiers',         sub: 'Drag players into Elite / Starter / Solid / Depth / Bench' },
+    { route: 'ManualRanks',   emoji: '✋', label: 'Manual Ranks',  sub: 'Drag rows or tap a rank number to re-order your board by hand' },
     { route: 'OverallRanks',  emoji: '🏅', label: 'Overall Ranks', sub: 'Full ELO-sorted list of every player you\'ve ranked' },
+    { route: 'Trends',        emoji: '📈', label: 'Trends',        sub: 'See your biggest movers and how you differ from consensus' },
   ];
 
   return (

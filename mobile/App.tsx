@@ -3,12 +3,14 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import * as Linking from 'expo-linking';
 import RootNav from './src/navigation/RootNav';
 import { useSession } from './src/state/useSession';
 import { useFeatureFlags } from './src/state/useFeatureFlags';
 import { initSentry, wrap as sentryWrap } from './src/observability/sentry';
 import { getTierConfig } from './src/api/rankings';
 import { setTierConfigCache } from './src/utils/tierBands';
+import { handleDeepLink } from './src/utils/deepLinks';
 
 // Initialize observability as early as possible so even crashes during
 // bootstrap are captured. No-ops cleanly when no DSN is configured.
@@ -55,6 +57,29 @@ function App() {
       .catch(() => { /* bootstrap is best-effort */ })
       .finally(() => setBooted(true));
   }, [bootstrap, loadFlags]);
+
+  // Deep-link handling. Two surfaces:
+  //   • ?ref=<username>  — referral attribution. Captured into useSession's
+  //     invitedBy and forwarded on the next /api/session/init.
+  //   • /u/<username>    — public profile route (react-navigation Linking
+  //     config also handles this; the explicit listener here covers the
+  //     cold-start case where the navigator hasn't mounted yet).
+  // Both the initial URL (cold start) and subsequent URL events (warm
+  // start via tap or Universal Link) flow through the same handler.
+  useEffect(() => {
+    let canceled = false;
+    Linking.getInitialURL().then((url) => {
+      if (canceled || !url) return;
+      handleDeepLink(url);
+    });
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      handleDeepLink(url);
+    });
+    return () => {
+      canceled = true;
+      sub.remove();
+    };
+  }, []);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

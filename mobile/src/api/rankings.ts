@@ -1,5 +1,54 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from './client';
-import type { Trio, RankingProgress, Position } from '../shared/types';
+import type {
+  Trio,
+  RankingProgress,
+  Position,
+  Player,
+  ScoringFormat,
+  TrendRow,
+  ContrarianGapEntry,
+} from '../shared/types';
+
+// Active scoring format (1qb_ppr / sf_tep). Stored locally — mirrors web's
+// localStorage `ftf_active_format` key — and surfaced as the X-Scoring-Format
+// header on per-call API requests that the backend's `_active_format` reads.
+// Persisted lazily; reads cache in-memory after the first AsyncStorage hit
+// so request paths don't have to await on every call.
+const LS_ACTIVE_FORMAT_KEY = 'ftf_active_format';
+let _activeFormatCache: ScoringFormat | null = null;
+
+export async function getActiveScoringFormat(): Promise<ScoringFormat | null> {
+  if (_activeFormatCache) return _activeFormatCache;
+  try {
+    const v = await AsyncStorage.getItem(LS_ACTIVE_FORMAT_KEY);
+    if (v === '1qb_ppr' || v === 'sf_tep') {
+      _activeFormatCache = v;
+      return v;
+    }
+  } catch {
+    /* AsyncStorage failure is non-fatal — backend uses session default. */
+  }
+  return null;
+}
+
+export async function setActiveScoringFormat(fmt: ScoringFormat): Promise<void> {
+  _activeFormatCache = fmt;
+  try {
+    await AsyncStorage.setItem(LS_ACTIVE_FORMAT_KEY, fmt);
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Helper: build the `{ 'X-Scoring-Format': <fmt> }` header dict — or `{}`
+ *  when no format has been stored locally yet (so the backend falls back
+ *  to the session's active_format). Use as `headers: await formatHeader()`
+ *  on any request that should honor the user's chosen per-call format. */
+export async function formatHeader(): Promise<Record<string, string>> {
+  const fmt = await getActiveScoringFormat();
+  return fmt ? { 'X-Scoring-Format': fmt } : {};
+}
 
 export interface Streak {
   current: number;
@@ -47,6 +96,24 @@ export async function getProgress() {
 export async function getRankings(position?: Position | null) {
   const qs = position ? `?position=${position}` : '';
   return api.get<{ position: string | null; rankings: any[] }>(`/api/rankings${qs}`);
+}
+
+// POST /api/rankings/reorder — apply a manual reorder to the user's rankings.
+// The ordered_ids list represents the user's desired ranking from best
+// (index 0) to worst. Backend overrides ELO values to match this order.
+// Sends X-Scoring-Format so the reorder writes to the right per-format
+// override dict — without it the backend's `_active_format` falls back to
+// the session's active_format which may not match the user's current UI
+// selection (see web's parallel comment on copy-from-format).
+export async function reorderRankings(
+  position: Position | null,
+  orderedIds: string[],
+) {
+  return api.post<{ ok: true; count: number; scoring_format: string }>(
+    '/api/rankings/reorder',
+    { position, ordered_ids: orderedIds },
+    { headers: await formatHeader() },
+  );
 }
 
 // POST /api/tiers/save — save a tier assignment for a position.
@@ -101,4 +168,79 @@ export async function dismissPlayer(playerId: string) {
 // POST /api/ranking-method — record the user's chosen method (trio/manual/tiers)
 export async function setRankingMethod(method: 'trio' | 'manual' | 'tiers') {
   return api.post<any>('/api/ranking-method', { method });
+}
+
+// GET /api/rookies — rookie / pre-draft prospect players for the dynasty
+// rookie draft board. Backend groups them by position and returns a total
+// count. Rookie rows may include `college` on top of the standard Player
+// fields; not all Player fields are populated.
+export interface RookiePlayer extends Player {
+  college?: string | null;
+}
+export interface RookiesResponse {
+  grouped: Record<Position, RookiePlayer[]>;
+  total: number;
+}
+export async function getRookies(_opts?: { season?: string }) {
+  // The backend doesn't currently consume a season param — accepted in the
+  // function signature for future-proofing and parity with the plan doc.
+  return api.get<RookiesResponse>('/api/rookies');
+}
+
+// ── Trends (Bundle 2) ───────────────────────────────────────────────────
+// All three endpoints share the same session/format resolution path on the
+// backend (see _require_session in backend/server.py). Passing
+// `scoringFormat` adds the X-Scoring-Format header so the caller can peek
+// at a non-active format without flipping the session; omit it to use the
+// user's active format.
+
+export interface RisersFallersResponse {
+  risers:  Record<'QB' | 'RB' | 'WR' | 'TE' | 'ALL', TrendRow[]>;
+  fallers: Record<'QB' | 'RB' | 'WR' | 'TE' | 'ALL', TrendRow[]>;
+  window_days: number;
+  sample_size: number;
+  has_history: boolean;
+}
+
+// GET /api/trends/risers-fallers?window_days=30&top_n=10
+// Returns biggest ELO movers over the window, grouped by position. Position
+// filtering is client-side — pre-segmented in the response.
+export async function getRisersAndFallers(opts?: {
+  position?: Position | null;       // accepted for API symmetry — currently unused server-side
+  days?: number;                    // window in days (default 30)
+  topN?: number;                    // per-side, per-position cap (default 5)
+  scoringFormat?: ScoringFormat;
+}) {
+  const days = opts?.days ?? 30;
+  const topN = opts?.topN ?? 10;
+  const headers: Record<string, string> = {};
+  if (opts?.scoringFormat) headers['X-Scoring-Format'] = opts.scoringFormat;
+  return api.get<RisersFallersResponse>(
+    `/api/trends/risers-fallers?window_days=${days}&top_n=${topN}`,
+    { headers },
+  );
+}
+
+export interface ConsensusGapResponse {
+  has_baseline: boolean;
+  baseline_user_count: number;
+  easiest_sells: ContrarianGapEntry[];
+  easiest_buys:  ContrarianGapEntry[];
+  reason?: string;
+}
+
+// GET /api/trends/consensus-gap?league_id=...&top_n=5
+// "Easiest sells" = roster players you over-value vs market.
+// "Easiest buys"  = non-roster players you over-value vs that owner.
+export async function getContrarianGap(opts: {
+  leagueId: string;
+  position?: Position | null;       // accepted for symmetry; backend is league-wide
+  topN?: number;
+  scoringFormat?: ScoringFormat;
+}) {
+  const topN = opts.topN ?? 5;
+  const headers: Record<string, string> = {};
+  if (opts.scoringFormat) headers['X-Scoring-Format'] = opts.scoringFormat;
+  const qs = `?league_id=${encodeURIComponent(opts.leagueId)}&top_n=${topN}`;
+  return api.get<ConsensusGapResponse>(`/api/trends/consensus-gap${qs}`, { headers });
 }

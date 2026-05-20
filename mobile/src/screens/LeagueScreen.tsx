@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,10 +13,20 @@ import { useQuery } from '@tanstack/react-query';
 
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
-import { getLeagueSummary, getLeagueCoverage, getLeagueMembers } from '../api/league';
+import {
+  getLeagueSummary,
+  getLeagueCoverage,
+  getLeagueMembers,
+  getLeagueMemberUnlockStates,
+  getActivityFeed,
+  getContrarianLeaderboard,
+} from '../api/league';
 import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import LeaderboardsSection from '../components/LeaderboardsSection';
+import ActivityFeed from '../components/ActivityFeed';
+import ContrarianLeaderboard from '../components/ContrarianLeaderboard';
 
 // League tab v1 — replaces the prior PlaceholderScreen. Pulls
 // /api/league/summary + /api/league/coverage and renders:
@@ -54,10 +64,53 @@ export default function LeagueScreen() {
     staleTime: 60_000,
   });
 
+  // B7 — flag-gated surfaces. Each query is enabled only when its flag is
+  // on so a flag-off user incurs zero network cost.
+  const showActivity     = useFlag('league.activity_feed');
+  const showUnlockBadges = useFlag('league.unlock_badges_per_member');
+
+  const activityQuery = useQuery({
+    queryKey: ['league-activity', leagueId],
+    queryFn:  () => getActivityFeed(leagueId!, 10),
+    enabled:  !!leagueId && showActivity,
+    staleTime: 60_000,
+  });
+
+  const contrarianQuery = useQuery({
+    queryKey: ['league-contrarian', leagueId],
+    queryFn:  () => getContrarianLeaderboard(leagueId!),
+    enabled:  !!leagueId,
+    staleTime: 5 * 60_000,
+  });
+
+  const unlocksQuery = useQuery({
+    queryKey: ['league-member-unlocks', leagueId],
+    queryFn:  () => getLeagueMemberUnlockStates(leagueId!),
+    enabled:  !!leagueId && showUnlockBadges,
+    staleTime: 60_000,
+  });
+
+  // Map user_id → unlock state for cheap per-row chip lookups. Backend
+  // returns `flag_off: true` and `members: []` when the flag is off, which
+  // collapses to an empty Map naturally.
+  const unlocksById = useMemo(() => {
+    const m = new Map<string, { unlocked: boolean; has_method: boolean }>();
+    for (const u of unlocksQuery.data?.members ?? []) {
+      m.set(u.user_id, {
+        unlocked:   (u.unlocked_count || 0) > 0,
+        has_method: !!u.has_ranking_method,
+      });
+    }
+    return m;
+  }, [unlocksQuery.data]);
+
   const refetchAll = () => {
     summaryQuery.refetch();
     coverageQuery.refetch();
     membersQuery.refetch();
+    if (showActivity) activityQuery.refetch();
+    contrarianQuery.refetch();
+    if (showUnlockBadges) unlocksQuery.refetch();
   };
 
   // No league yet — funnel back to the picker. Should be rare since the
@@ -167,29 +220,67 @@ export default function LeagueScreen() {
 
         {/* Leaguemate roster — names + join status. Backend sorts joined
             first then not-joined. Empty state stays silent (rare in
-            practice; the join-count card above already conveys 0). */}
+            practice; the join-count card above already conveys 0).
+            When `league.unlock_badges_per_member` flag is on, each joined
+            row also gets an unlock-status chip (✓ Unlocked / in progress). */}
         {membersQuery.data?.members && membersQuery.data.members.length > 0 ? (
           <View style={styles.card}>
-            {membersQuery.data.members.map((m) => (
-              <View key={m.user_id} style={styles.memberRow}>
-                <Text style={styles.memberName} numberOfLines={1}>
-                  {m.display_name || m.username || m.user_id}
-                </Text>
-                <View style={[
-                  styles.memberBadge,
-                  m.joined ? styles.memberBadgeJoined : styles.memberBadgeNotJoined,
-                ]}>
-                  <Text style={[
-                    styles.memberBadgeText,
-                    m.joined ? styles.memberBadgeTextJoined : styles.memberBadgeTextNotJoined,
-                  ]}>
-                    {m.joined ? '✓ Joined' : 'Not joined'}
+            {membersQuery.data.members.map((m) => {
+              const unlock = showUnlockBadges ? unlocksById.get(m.user_id) : undefined;
+              return (
+                <View key={m.user_id} style={styles.memberRow}>
+                  <Text style={styles.memberName} numberOfLines={1}>
+                    {m.display_name || m.username || m.user_id}
                   </Text>
+                  {showUnlockBadges && m.joined ? (
+                    <View style={[
+                      styles.unlockChip,
+                      unlock?.unlocked ? styles.unlockChipOn : styles.unlockChipOff,
+                    ]}>
+                      <Text style={[
+                        styles.unlockChipText,
+                        unlock?.unlocked ? styles.unlockChipTextOn : styles.unlockChipTextOff,
+                      ]}>
+                        {unlock?.unlocked ? '✓ Unlocked' : 'in progress'}
+                      </Text>
+                    </View>
+                  ) : null}
+                  <View style={[
+                    styles.memberBadge,
+                    m.joined ? styles.memberBadgeJoined : styles.memberBadgeNotJoined,
+                  ]}>
+                    <Text style={[
+                      styles.memberBadgeText,
+                      m.joined ? styles.memberBadgeTextJoined : styles.memberBadgeTextNotJoined,
+                    ]}>
+                      {m.joined ? '✓ Joined' : 'Not joined'}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         ) : null}
+
+        {/* Recent activity — flag-gated. Backend already short-circuits to
+            an empty list when the flag is off, but we also gate the section
+            header to avoid showing an empty "Recent activity" stub. */}
+        {showActivity ? (
+          <>
+            <View style={styles.divider} />
+            <SectionTitle>Recent activity</SectionTitle>
+            <ActivityFeed events={activityQuery.data?.events ?? []} limit={10} />
+          </>
+        ) : null}
+
+        {/* Contrarian ranks — always shown; renders an invite-prompt empty
+            state when the league has too few ranking-takers for a baseline. */}
+        <SectionTitle>Contrarian ranks</SectionTitle>
+        <ContrarianLeaderboard
+          rows={contrarianQuery.data?.rows ?? []}
+          insufficientData={!!contrarianQuery.data?.insufficient_data}
+          message={contrarianQuery.data?.message}
+        />
 
         {/* Ranking coverage */}
         <SectionTitle>Coverage</SectionTitle>
@@ -410,6 +501,31 @@ const styles = StyleSheet.create({
   memberBadgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
   memberBadgeTextJoined: { color: colors.green },
   memberBadgeTextNotJoined: { color: colors.muted },
+
+  unlockChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    marginRight: spacing.xs,
+  },
+  unlockChipOn: {
+    backgroundColor: 'rgba(34,197,94,0.10)',
+    borderColor: 'rgba(34,197,94,0.40)',
+  },
+  unlockChipOff: {
+    backgroundColor: 'transparent',
+    borderColor: colors.border,
+  },
+  unlockChipText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
+  unlockChipTextOn: { color: colors.green },
+  unlockChipTextOff: { color: colors.muted },
+
+  divider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginTop: spacing.md,
+  },
 
   progressTrack: {
     height: 6,

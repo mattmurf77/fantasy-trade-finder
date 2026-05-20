@@ -7,6 +7,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Pressable,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -28,6 +29,15 @@ import type { NotificationPrefs } from '../shared/types';
 export default function SettingsScreen({ navigation }: any) {
   const queryClient = useQueryClient();
   const signOut = useSession((s) => s.signOut);
+  // B3 — Multi-league controls (Switch / Add another league).
+  const leagues       = useSession((s) => s.leagues);
+  const activeLeague  = useSession((s) => s.league);
+  const switchLeague  = useSession((s) => s.switchLeague);
+  const connectLeague = useSession((s) => s.connectLeague);
+  const switching     = useSession((s) => s.switching);
+  const [busyLeagueId, setBusyLeagueId] = useState<string | null>(null);
+  const [connectUrl, setConnectUrl] = useState('');
+  const [connectBusy, setConnectBusy] = useState(false);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
   // Local mirror of server prefs so toggles feel instant. Hydrated from the
   // query below; updates push through `mutation` and the query is invalidated
@@ -64,6 +74,51 @@ export default function SettingsScreen({ navigation }: any) {
     mutation.mutate({ [key]: nextVal as 0 | 1 } as Partial<NotificationPrefs>);
   };
 
+  // ── B3 multi-league handlers ───────────────────────────────────
+  async function handleSwitch(lgId: string, lgName: string) {
+    if (busyLeagueId) return;
+    if (lgId === activeLeague?.league_id) return;
+    setBusyLeagueId(lgId);
+    try {
+      await switchLeague({ league_id: lgId, league_name: lgName });
+      setToast({ msg: `Switched to ${lgName}`, tone: 'success' });
+    } catch (e: any) {
+      setToast({ msg: e?.message || 'Failed to switch', tone: 'warn' });
+    } finally {
+      setBusyLeagueId(null);
+    }
+  }
+
+  async function handleConnect() {
+    const url = connectUrl.trim();
+    if (!url || connectBusy) return;
+    setConnectBusy(true);
+    try {
+      const result = await connectLeague(url);
+      if (!result.ok) {
+        // Backend recognized a non-Sleeper URL — surface as a soft warn.
+        const label =
+          result.platform === 'espn' ? 'ESPN' :
+          result.platform === 'mfl'  ? 'MyFantasyLeague' :
+          'That platform';
+        setToast({
+          msg: `${label} sync isn't supported yet — Sleeper URLs only.`,
+          tone: 'warn',
+        });
+        return;
+      }
+      setConnectUrl('');
+      // Refresh portfolio so the newly-connected league lights it up
+      // immediately if the user navigates there next.
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      setToast({ msg: `Connected ${result.league_name}`, tone: 'success' });
+    } catch (e: any) {
+      setToast({ msg: e?.message || 'Could not connect that league', tone: 'warn' });
+    } finally {
+      setConnectBusy(false);
+    }
+  }
+
   if (prefsQuery.isLoading || !local) {
     return (
       <SafeAreaView style={styles.root} edges={['bottom']}>
@@ -76,7 +131,80 @@ export default function SettingsScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        {/* B3 — Multi-league: switch + add. The Switch section is hidden
+            when the user only has one league so single-league users see
+            just the "Connect another league" card. */}
+        {leagues.length > 1 ? (
+          <>
+            <Text style={styles.section}>Switch league</Text>
+            {leagues.map((lg) => {
+              const isActive = lg.league_id === activeLeague?.league_id;
+              const isBusy   = busyLeagueId === lg.league_id || (switching && isActive);
+              const dim      = (busyLeagueId !== null && !isBusy) || (switching && !isActive);
+              return (
+                <Pressable
+                  key={lg.league_id}
+                  onPress={() => handleSwitch(lg.league_id, lg.name)}
+                  disabled={busyLeagueId !== null || switching || isActive}
+                  style={({ pressed }) => [
+                    styles.leagueRow,
+                    isActive && styles.leagueRowActive,
+                    dim && styles.leagueRowDim,
+                    pressed && !dim && !isActive && { opacity: 0.7 },
+                  ]}
+                >
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.leagueName} numberOfLines={1}>{lg.name}</Text>
+                    <Text style={styles.leagueMeta}>
+                      {(lg.total_rosters as number | undefined) || 12} teams
+                    </Text>
+                  </View>
+                  {isBusy ? (
+                    <ActivityIndicator color={colors.accent} />
+                  ) : isActive ? (
+                    <Text style={styles.check}>✓</Text>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </>
+        ) : null}
+
+        <Text style={styles.section}>
+          {leagues.length > 1 ? 'Add another league' : 'Connect another league'}
+        </Text>
+        <View style={styles.connectCard}>
+          <Text style={styles.connectHelp}>
+            Paste a Sleeper league URL (or bare league ID) to sync it.
+          </Text>
+          <TextInput
+            value={connectUrl}
+            onChangeText={setConnectUrl}
+            placeholder="sleeper.com/leagues/..."
+            placeholderTextColor={colors.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!connectBusy}
+            style={styles.connectInput}
+          />
+          <Pressable
+            onPress={handleConnect}
+            disabled={!connectUrl.trim() || connectBusy}
+            style={({ pressed }) => [
+              styles.connectBtn,
+              (!connectUrl.trim() || connectBusy) && styles.connectBtnDisabled,
+              pressed && connectUrl.trim() && !connectBusy && { opacity: 0.85 },
+            ]}
+          >
+            {connectBusy ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.connectBtnText}>Connect</Text>
+            )}
+          </Pressable>
+        </View>
+
         <Text style={styles.section}>Notifications</Text>
 
         <Row
@@ -193,4 +321,60 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   signOutText: { color: colors.red, fontWeight: '700', fontSize: fontSize.base },
+  // B3 — Switch league row + Connect another league card
+  leagueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  leagueRowActive: {
+    borderColor: colors.accent,
+    backgroundColor: 'rgba(79,124,255,0.08)',
+  },
+  leagueRowDim: { opacity: 0.45 },
+  leagueName: { color: colors.text, fontSize: fontSize.base, fontWeight: '700' },
+  leagueMeta: { color: colors.muted, fontSize: fontSize.xs, marginTop: 2 },
+  check: { color: colors.accent, fontSize: 22, fontWeight: '800' },
+  connectCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  connectHelp: {
+    color: colors.muted,
+    fontSize: fontSize.xs,
+    lineHeight: 18,
+  },
+  connectInput: {
+    color: colors.text,
+    fontSize: fontSize.sm,
+    backgroundColor: colors.bg,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+  },
+  connectBtn: {
+    backgroundColor: colors.accent,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  connectBtnDisabled: {
+    opacity: 0.45,
+  },
+  connectBtnText: {
+    color: '#fff',
+    fontSize: fontSize.base,
+    fontWeight: '800',
+  },
 });
