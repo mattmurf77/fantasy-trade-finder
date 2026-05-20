@@ -45,10 +45,14 @@ import type { TradeCard, TradeJobSnapshot } from '../shared/types';
 const SCREEN_W = Dimensions.get('window').width;
 const SWIPE_THRESHOLD = 120;
 
-export default function TradesScreen() {
+export default function TradesScreen({ navigation }: any) {
   const queryClient = useQueryClient();
   const league = useSession((s) => s.league);
   const switching = useSession((s) => s.switching);
+  // B3 — Portfolio is only meaningful when the user has 2+ leagues. The
+  // sub-route pill at the top of this screen hides itself otherwise.
+  const leagues = useSession((s) => s.leagues);
+  const showPortfolioPill = (leagues?.length || 0) >= 2;
   const leagueId = league?.league_id || null;
   const [fairness, setFairness] = useState(0.75);
   const [deck, setDeck] = useState<TradeCard[]>([]);
@@ -257,6 +261,28 @@ export default function TradesScreen() {
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!topCard || !generateMutation.isPending}
       >
+        {/* B3 — Sub-route pills. Trades is the active screen here;
+            Portfolio is a sibling in the Trades stack and only shows
+            when the user has 2+ connected leagues. */}
+        {showPortfolioPill ? (
+          <View style={styles.subnavRow}>
+            <View style={[styles.subnavPill, styles.subnavPillActive]}>
+              <Text style={[styles.subnavPillText, styles.subnavPillTextActive]}>
+                Trades
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => navigation?.navigate?.('Portfolio')}
+              style={({ pressed }) => [
+                styles.subnavPill,
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Text style={styles.subnavPillText}>Portfolio</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {/* League selector pill — opens LeagueSwitcherSheet on tap. */}
         <LeaguePill
           label="Trading in"
@@ -451,6 +477,31 @@ function cap(s: string) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: spacing.lg, gap: spacing.lg, paddingBottom: 96 },
+  // B3 — sub-route pill row (Trades / Portfolio)
+  subnavRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  subnavPill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  subnavPillActive: {
+    borderColor: colors.accent,
+    backgroundColor: 'rgba(79,124,255,0.12)',
+  },
+  subnavPillText: {
+    color: colors.muted,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+  subnavPillTextActive: {
+    color: colors.accent,
+  },
   switchingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(15,17,23,0.85)',
