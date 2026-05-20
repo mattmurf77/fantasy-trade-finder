@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { ScoringFormat } from '../shared/types';
 
 // ── League preferences (team outlook + positional prefs) ─────────
 // Mirrors the web app's saveOutlookAndPreferences flow.
@@ -94,5 +95,42 @@ export interface LeagueMember {
 export async function getLeagueMembers(leagueId: string) {
   return api.get<{ members: LeagueMember[] }>(
     `/api/league/members?league_id=${encodeURIComponent(leagueId)}`,
+  );
+}
+
+// ── Copy tiers from one scoring format to the other ───────────────────
+// POST /api/tiers/copy-from-format
+//
+// Copies the user's tier assignments (tier label + within-tier rank) from
+// `fromFormat` into `toFormat`. Backend handles the per-format band
+// translation: a player at QB1 Elite in 1QB PPR stays at QB1 Elite in SF
+// TEP, with new ELO values appropriate to SF TEP's bands.
+//
+// Sends X-Scoring-Format: toFormat so the backend's `_active_format`
+// resolves to the target format explicitly — without this, a user who
+// landed on Tiers already on SF TEP without ever toggling the format in
+// this session would have sess['active_format'] still set to the
+// session_init default (1qb_ppr), the endpoint would see from==to and
+// error. Mirrors the web `onCopyTiersFromOtherFormat` belt-and-suspenders
+// pattern (header AND body to_format).
+//
+// Destructive: replaces the target format's existing tier overrides
+// wholesale. Caller should confirm before invoking.
+export interface CopyTiersResponse {
+  ok: boolean;
+  from_format?: ScoringFormat;
+  to_format?: ScoringFormat;
+  position_counts?: Record<string, number>;
+  total?: number;
+  error?: string;
+}
+export async function copyTiersFromFormat(
+  fromFormat: ScoringFormat,
+  toFormat: ScoringFormat,
+): Promise<CopyTiersResponse> {
+  return api.post<CopyTiersResponse>(
+    '/api/tiers/copy-from-format',
+    { from_format: fromFormat, to_format: toFormat },
+    { headers: { 'X-Scoring-Format': toFormat } },
   );
 }
