@@ -62,6 +62,11 @@ function normalizeTradeCard(raw: any): TradeCard {
     match_score:        matchScore,
     fairness:           fairness,
     reasons:            Array.isArray(raw?.reasons) ? raw.reasons : undefined,
+    // Backend injects `real_opponent` on streaming snapshots (generate +
+    // status). Coerce to a strict boolean if present; leave undefined so
+    // the card can distinguish "unknown" from a real "false" in legacy
+    // response shapes that don't include the field.
+    real_opponent:      typeof raw?.real_opponent === 'boolean' ? raw.real_opponent : undefined,
   };
 }
 

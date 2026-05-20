@@ -51,11 +51,33 @@ export default function TradesScreen() {
   const switching = useSession((s) => s.switching);
   const leagueId = league?.league_id || null;
   const [fairness, setFairness] = useState(0.75);
+  // Equal-only checkbox: when on, the slider is locked to 1.0 (100%) and
+  // disabled. Stash the prior slider value so unchecking restores it.
+  // Screen-local only — not worth a global store.
+  const [equalOnly, setEqualOnly] = useState(false);
+  const [prevFairness, setPrevFairness] = useState(0.75);
   const [deck, setDeck] = useState<TradeCard[]>([]);
   const [deckIdx, setDeckIdx] = useState(0);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
   const [outlookOpen, setOutlookOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+
+  // Effective threshold sent to the backend — 1.0 when Equal-only is on,
+  // otherwise the slider's current value.
+  const effectiveFairness = equalOnly ? 1.0 : fairness;
+
+  function toggleEqualOnly() {
+    if (equalOnly) {
+      // Unchecking: restore the prior slider value.
+      setEqualOnly(false);
+      setFairness(prevFairness);
+    } else {
+      // Checking: stash the current slider value, lock to 100%.
+      setPrevFairness(fairness);
+      setFairness(1.0);
+      setEqualOnly(true);
+    }
+  }
 
   // Preferences — open outlook sheet the first time the user lands here
   // without an outlook set.
@@ -82,7 +104,7 @@ export default function TradesScreen() {
     mutationFn: () =>
       generateTrades({
         league_id: leagueId!,
-        fairness_threshold: fairness,
+        fairness_threshold: effectiveFairness,
       }),
     onSuccess: (snapshot) => {
       setJob(snapshot);
@@ -281,7 +303,27 @@ export default function TradesScreen() {
             </Pressable>
           </View>
 
-          <FairnessSlider value={fairness} onChange={setFairness} />
+          {/* Equal-only shortcut: one-tap "100% fair only", locks the
+              slider. Sits above the slider so the visual flow reads
+              "shortcut → control → live value." */}
+          <Pressable
+            onPress={toggleEqualOnly}
+            style={({ pressed }) => [styles.equalRow, pressed && { opacity: 0.7 }]}
+            hitSlop={8}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: equalOnly }}
+          >
+            <View style={[styles.checkbox, equalOnly && styles.checkboxChecked]}>
+              {equalOnly && <Text style={styles.checkboxMark}>✓</Text>}
+            </View>
+            <Text style={styles.equalLabel}>Only equal trades (100% fair)</Text>
+          </Pressable>
+
+          <FairnessSlider
+            value={fairness}
+            onChange={setFairness}
+            disabled={equalOnly}
+          />
 
           {/* Find-a-Trade button. While a job is running, the button is
               disabled — the progress strip below acts as the live signal.
@@ -489,6 +531,37 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   editBtnText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
+  equalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: radius.sm,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  checkboxMark: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '900',
+    lineHeight: 14,
+  },
+  equalLabel: {
+    color: colors.text,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
   findBtn: {
     backgroundColor: colors.accent,
     paddingVertical: 14,

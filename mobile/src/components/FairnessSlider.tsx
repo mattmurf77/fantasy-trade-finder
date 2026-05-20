@@ -14,12 +14,19 @@ interface Props {
   onChange: (v: number) => void;
   min?: number;            // default 0.5
   max?: number;            // default 1.0
+  disabled?: boolean;      // gray-lock the slider (e.g. equal-only checked)
 }
 
 // Small custom slider to avoid pulling in @react-native-community/slider
 // just for one control. Drag the track to set the fairness threshold;
 // the value is snapped to 2 decimal places for sanity.
-export default function FairnessSlider({ value, onChange, min = 0.5, max = 1 }: Props) {
+export default function FairnessSlider({
+  value,
+  onChange,
+  min = 0.5,
+  max = 1,
+  disabled = false,
+}: Props) {
   const [width, setWidth] = useState(0);
   const trackRef = useRef<View>(null);
 
@@ -43,22 +50,38 @@ export default function FairnessSlider({ value, onChange, min = 0.5, max = 1 }: 
   };
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, disabled && styles.wrapDisabled]}>
       <View style={styles.row}>
-        <Text style={styles.label}>Trade fairness</Text>
-        <Text style={styles.value}>{Math.round(value * 100)}%</Text>
+        <Text style={[styles.label, disabled && styles.labelDisabled]}>Trade fairness</Text>
+        <Text style={[styles.value, disabled && styles.valueDisabled]}>
+          {Math.round(value * 100)}%
+        </Text>
       </View>
       <View
         ref={trackRef}
         onLayout={onLayout}
-        onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={() => true}
+        // Refuse all touches when disabled so the locked 100% can't be
+        // dragged off. Re-enables instantly when the prop flips back.
+        onStartShouldSetResponder={() => !disabled}
+        onMoveShouldSetResponder={() => !disabled}
         onResponderGrant={onMove}
         onResponderMove={onMove}
         style={styles.track}
       >
-        <View style={[styles.fill, { width: `${pct * 100}%` }]} />
-        <View style={[styles.thumb, { left: `${pct * 100}%` }]} />
+        <View
+          style={[
+            styles.fill,
+            { width: `${pct * 100}%` },
+            disabled && styles.fillDisabled,
+          ]}
+        />
+        <View
+          style={[
+            styles.thumb,
+            { left: `${pct * 100}%` },
+            disabled && styles.thumbDisabled,
+          ]}
+        />
       </View>
       <View style={styles.row}>
         <Text style={styles.legend}>Lean your way</Text>
@@ -118,4 +141,12 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 10,
   },
+  // Disabled state: locked at 100% when Equal-only is checked. Visually
+  // dim the whole control to communicate non-interactive — the checkbox
+  // above is the source of truth in that state.
+  wrapDisabled: { opacity: 0.5 },
+  labelDisabled: { color: colors.muted },
+  valueDisabled: { color: colors.muted },
+  fillDisabled: { backgroundColor: colors.muted },
+  thumbDisabled: { borderColor: colors.muted },
 });

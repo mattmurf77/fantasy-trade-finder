@@ -4,6 +4,7 @@ import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
+import { useFlag } from '../state/useFeatureFlags';
 import type { TradeCard as TradeCardData } from '../shared/types';
 
 interface Props {
@@ -36,13 +37,40 @@ export default function TradeCardComp({
   // an empty side, which is recoverable visually.
   const receivePlayers = Array.isArray(data.receive_players) ? data.receive_players : [];
   const givePlayers    = Array.isArray(data.give_players)    ? data.give_players    : [];
+  // Reasons render only when the flag is on AND backend supplied them.
+  // Mirrors the web gate at app.js:3205. Even though the backend already
+  // omits `reasons` when the flag is off, double-gating client-side keeps
+  // the rendering predictable if flags drift (e.g. cached job snapshot).
+  const reasonsEnabled = useFlag('trade_math.human_explanations');
+  const showReasons = reasonsEnabled
+    && Array.isArray(data.reasons)
+    && data.reasons.length > 0;
+  // Real vs estimated opponent badge — only rendered when the backend
+  // explicitly returned the field. Undefined = legacy/static path, hide
+  // the chip entirely rather than guessing.
+  const hasOpponentConfidence = typeof data.real_opponent === 'boolean';
 
   return (
     <View style={styles.card}>
       <View style={styles.header}>
         <View>
           <Text style={styles.headerLabel}>Trade with</Text>
-          <Text style={styles.headerName}>@{data.opponent_username}</Text>
+          <View style={styles.nameRow}>
+            <Text style={styles.headerName}>@{data.opponent_username}</Text>
+            {hasOpponentConfidence && (
+              data.real_opponent ? (
+                <View style={styles.opBadge}>
+                  <Text style={styles.opBadgeDotReal}>●</Text>
+                  <Text style={styles.opBadgeTextReal}>real</Text>
+                </View>
+              ) : (
+                <View style={styles.opBadge}>
+                  <Text style={styles.opBadgeDotEst}>○</Text>
+                  <Text style={styles.opBadgeTextEst}>est.</Text>
+                </View>
+              )
+            )}
+          </View>
         </View>
       </View>
 
@@ -80,10 +108,11 @@ export default function TradeCardComp({
       )}
 
       {/* Human-readable reasons (flag trade_math.human_explanations is ON).
-          Rendered only when the backend returns a non-empty list. */}
-      {Array.isArray(data.reasons) && data.reasons.length > 0 && (
+          Rendered only when the flag is on AND the backend returns a
+          non-empty list. */}
+      {showReasons && (
         <View style={styles.reasons}>
-          {data.reasons.map((r, i) => (
+          {data.reasons!.map((r, i) => (
             <Text key={`${i}:${r}`} style={styles.reasonLine}>• {r}</Text>
           ))}
         </View>
@@ -143,6 +172,42 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   headerName: { color: colors.text, fontSize: fontSize.base, fontWeight: '800' },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  // Opponent-confidence chip: small dot + 4-letter label next to @handle.
+  // Green/filled = real (their actual saved rankings); muted/outlined =
+  // estimated (noise-randomized off consensus seed). Mirrors web's
+  // app.js:3198-3200 styling.
+  opBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  opBadgeDotReal: {
+    color: colors.green,
+    fontSize: 10,
+    lineHeight: 12,
+  },
+  opBadgeTextReal: {
+    color: colors.green,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  opBadgeDotEst: {
+    color: colors.muted,
+    fontSize: 10,
+    lineHeight: 12,
+  },
+  opBadgeTextEst: {
+    color: colors.muted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
   split: {
     flexDirection: 'row',
     gap: spacing.md,
