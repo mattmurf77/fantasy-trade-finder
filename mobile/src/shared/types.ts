@@ -163,6 +163,20 @@ export interface ContrarianGapEntry {
   score: number; // 0-99 normalised magnitude for the bar
 }
 
+// Trade queue (Bundle 5 — flag `trades.queue_2k`). Lightweight snapshot of
+// a generated trade that the user has stacked for later "Send All" via
+// Sleeper deep-links. Persisted per-user in AsyncStorage; queue is scoped
+// per-league inside the store.
+export interface QueuedTrade {
+  trade_id: string;
+  league_id: string;
+  match_id?: string;
+  sleeper_url: string;
+  give_summary: string;     // e.g. "RB Bijan Robinson"
+  receive_summary: string;
+  queued_at: string;
+}
+
 export type FlagMap = Record<string, boolean>;
 
 export interface NotificationPrefs {
