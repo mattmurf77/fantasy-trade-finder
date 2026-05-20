@@ -129,6 +129,47 @@ export interface NotificationItem {
   metadata?: Record<string, unknown>;
 }
 
+// B7 — League surfaces. ActivityEvent mirrors the per-row shape returned by
+// /api/league/activity (see backend/database.py:load_league_activity).
+// The backend ships an ISO `ts` + a pre-formatted `message`; we re-derive
+// the relative time on the client via utils/relativeTime so the timestamp
+// stays fresh as the list ages on screen.
+export interface ActivityEvent {
+  id: string;                 // synthesized client-side (`${ts}-${actor}-${i}`)
+  occurred_at: string;        // ISO timestamp from `ts`
+  user_id: string;            // from `actor_user_id`
+  username: string;           // best-effort label extracted from `message`
+  event_type:
+    | 'trade_match'
+    | 'trade_accepted'
+    | 'trade_declined'
+    | 'tier_save'
+    | 'league_sync'
+    | 'unlock'
+    | string;                 // permissive — backend may add new types
+  summary: string;            // backend-formatted human-readable message
+  emoji?: string;
+}
+
+// Aggregated per-user divergence score across the 4 positions returned by
+// /api/league/contrarian. Aggregation lives in api/league.ts so screens
+// consume a flat sorted list.
+export interface ContrarianRow {
+  user_id: string;
+  username: string;
+  divergence_score: number;   // mean abs ELO deviation, averaged across positions
+}
+
+// "Newly unlocked" leaguemates — derived client-side from the activity feed
+// (events with event_type === 'unlock'). The backend doesn't expose a
+// dedicated endpoint; the activity-feed unlock entries are emitted whenever
+// a tier_save flips a format from locked to unlocked.
+export interface NewPartnerEntry {
+  user_id: string;
+  username: string;
+  newly_unlocked_at: string;  // ISO timestamp
+}
+
 export type FlagMap = Record<string, boolean>;
 
 export interface NotificationPrefs {
