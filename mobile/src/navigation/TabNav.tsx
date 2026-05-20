@@ -8,6 +8,7 @@ import { spacing, radius, fontSize } from '../theme/spacing';
 import RankScreen from '../screens/RankScreen';
 import TiersScreen from '../screens/TiersScreen';
 import OverallRanksScreen from '../screens/OverallRanksScreen';
+import ManualRanksScreen from '../screens/ManualRanksScreen';
 import TradesScreen from '../screens/TradesScreen';
 import MatchesScreen from '../screens/MatchesScreen';
 import LeagueScreen from '../screens/LeagueScreen';
@@ -19,7 +20,7 @@ import TopBar from '../components/TopBar';
 const Tab = createBottomTabNavigator();
 const RankStack = createNativeStackNavigator();
 
-export type RankRoute = 'Trios' | 'Tiers' | 'OverallRanks';
+export type RankRoute = 'Trios' | 'Tiers' | 'OverallRanks' | 'ManualRanks';
 
 function RankStackNav() {
   return (
@@ -34,6 +35,11 @@ function RankStackNav() {
         name="OverallRanks"
         component={OverallRanksScreen}
         options={{ headerShown: true, title: 'Overall Ranks', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
+      />
+      <RankStack.Screen
+        name="ManualRanks"
+        component={ManualRanksScreen}
+        options={{ headerShown: true, title: 'Manual Ranks', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
       />
     </RankStack.Navigator>
   );
@@ -133,6 +139,7 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
   const items: { route: RankRoute; emoji: string; label: string; sub: string }[] = [
     { route: 'Trios',         emoji: '🏈', label: 'Trios',         sub: '3-at-a-time swipe ranking' },
     { route: 'Tiers',         emoji: '📋', label: 'Tiers',         sub: 'Drag players into Elite / Starter / Solid / Depth / Bench' },
+    { route: 'ManualRanks',   emoji: '✋', label: 'Manual Ranks',  sub: 'Drag rows or tap a rank number to re-order your board by hand' },
     { route: 'OverallRanks',  emoji: '🏅', label: 'Overall Ranks', sub: 'Full ELO-sorted list of every player you\'ve ranked' },
   ];
 

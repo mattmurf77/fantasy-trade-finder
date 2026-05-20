@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   ScrollView,
   LayoutChangeEvent,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -31,8 +32,17 @@ import {
   getTiersStatus,
   dismissPlayer,
 } from '../api/rankings';
+import { copyTiersFromFormat } from '../api/league';
 import { autoBucket, TIERS } from '../utils/tierBands';
 import type { Position, RankedPlayer, Tier, ScoringFormat } from '../shared/types';
+
+// Format-key → human label for the copy button + confirm dialog. Mirrors
+// web/positional-tiers.html's FORMAT_LABELS.
+const FORMAT_LABELS: Record<ScoringFormat, string> = {
+  '1qb_ppr': '🏈 1QB PPR',
+  sf_tep:    '🏟 SF TEP',
+};
+const FORMAT_KEYS: ScoringFormat[] = ['1qb_ppr', 'sf_tep'];
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
 
@@ -128,6 +138,37 @@ export default function TiersScreen() {
     },
     onError: (e: Error) => {
       setToast({ msg: e.message || 'Save failed', tone: 'warn' });
+    },
+  });
+
+  // ── Copy tiers from the OTHER scoring format ───────────────────────
+  // Pulls the user's tier assignments from the other format (e.g. SF TEP
+  // when currently on 1QB PPR) and re-stamps them onto the active format
+  // with format-appropriate ELOs. Destructive: replaces existing target-
+  // format tier overrides wholesale, so we confirm via Alert first. On
+  // success we refetch the per-position rankings + tier-status caches so
+  // the screen re-renders with the new state.
+  const copyMutation = useMutation({
+    mutationFn: ({ from, to }: { from: ScoringFormat; to: ScoringFormat }) =>
+      copyTiersFromFormat(from, to),
+    onSuccess: (data) => {
+      if (!data?.ok) {
+        setToast({ msg: data?.error || 'Copy failed', tone: 'warn' });
+        return;
+      }
+      const n = data.total ?? 0;
+      setToast({ msg: `✓ Copied ${n} tier placements`, tone: 'success' });
+      // Invalidate rankings/tier caches so the per-position load picks up
+      // the new override ELOs. Same pattern as saveMutation.onSuccess.
+      queryClient.invalidateQueries({ queryKey: ['rankings'] });
+      queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
+      queryClient.invalidateQueries({ queryKey: ['progress'] });
+      // Reset clearedPids — the cleared set is per-position-load and
+      // we're about to reload anyway.
+      setClearedPids(new Set());
+    },
+    onError: (e: Error) => {
+      setToast({ msg: e.message || 'Copy failed', tone: 'warn' });
     },
   });
 
@@ -394,6 +435,41 @@ export default function TiersScreen() {
     );
   }
 
+  // ── Copy-from-format button derivation ─────────────────────────────
+  // The active format is best discovered from the tiers/status response
+  // (the backend tells us which format the user is currently on). If
+  // unknown, default to '1qb_ppr' — same fallback the screen already uses
+  // for the autoBucket call. The button's `from` is the OTHER format.
+  const activeFormat: ScoringFormat =
+    (tiersStatusQuery.data?.scoring_format as ScoringFormat) || '1qb_ppr';
+  const otherFormat: ScoringFormat =
+    FORMAT_KEYS.find((f) => f !== activeFormat) || 'sf_tep';
+
+  const onCopyFromOtherFormat = useCallback(() => {
+    // Destructive — confirm before firing. Copy preserves tier label +
+    // within-tier rank; only the underlying ELO bands change to fit the
+    // target format. Matches web's Alert copy verbatim where practical.
+    Alert.alert(
+      `Copy tier list from ${FORMAT_LABELS[otherFormat]}?`,
+      `This will REPLACE your current ${FORMAT_LABELS[activeFormat]} tiers. ` +
+        `Each player keeps their tier and within-tier rank from ` +
+        `${FORMAT_LABELS[otherFormat]}; only the underlying ELO values ` +
+        `change to fit ${FORMAT_LABELS[activeFormat]}'s bands.\n\n` +
+        `Cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Copy',
+          style: 'destructive',
+          onPress: () => {
+            haptics.warning();
+            copyMutation.mutate({ from: otherFormat, to: activeFormat });
+          },
+        },
+      ],
+    );
+  }, [activeFormat, otherFormat, copyMutation]);
+
   // ── Render ──────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -471,6 +547,28 @@ export default function TiersScreen() {
           );
         })}
       </View>
+
+      {/* Copy tier list from the OTHER scoring format. Mirrors web's
+          `copy-tiers-btn` — the from-format reads as a label so the user
+          knows EXACTLY which format they're pulling tiers from. Disabled
+          while the copy is in flight. */}
+      <Pressable
+        disabled={copyMutation.isPending}
+        onPress={onCopyFromOtherFormat}
+        style={({ pressed }) => [
+          styles.copyBtn,
+          pressed && { opacity: 0.7 },
+          copyMutation.isPending && { opacity: 0.5 },
+        ]}
+      >
+        {copyMutation.isPending ? (
+          <ActivityIndicator color={colors.accent} size="small" />
+        ) : (
+          <Text style={styles.copyBtnText}>
+            ⇆ Copy tier list from {FORMAT_LABELS[otherFormat]}
+          </Text>
+        )}
+      </Pressable>
 
       <Text style={styles.hint}>
         {multiSelect
@@ -834,6 +932,29 @@ const styles = StyleSheet.create({
   switcherBtnActive: { backgroundColor: 'rgba(79,124,255,0.14)' },
   switcherText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
   switcherTextActive: { color: colors.accent },
+  // Copy-tiers-from-other-format pill. Sits between the position switcher
+  // and the hint line, full-width with a dashed-ish accent border so it
+  // reads as an "action that imports state" rather than a primary CTA.
+  copyBtn: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(79,124,255,0.45)',
+    backgroundColor: 'rgba(79,124,255,0.08)',
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    minHeight: 36,
+  },
+  copyBtnText: {
+    color: colors.accent,
+    fontSize: fontSize.xs,
+    fontWeight: '800',
+  },
   hint: {
     color: colors.muted,
     fontSize: fontSize.xs,

@@ -1,5 +1,46 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from './client';
-import type { Trio, RankingProgress, Position } from '../shared/types';
+import type { Trio, RankingProgress, Position, ScoringFormat } from '../shared/types';
+
+// Active scoring format (1qb_ppr / sf_tep). Stored locally — mirrors web's
+// localStorage `ftf_active_format` key — and surfaced as the X-Scoring-Format
+// header on per-call API requests that the backend's `_active_format` reads.
+// Persisted lazily; reads cache in-memory after the first AsyncStorage hit
+// so request paths don't have to await on every call.
+const LS_ACTIVE_FORMAT_KEY = 'ftf_active_format';
+let _activeFormatCache: ScoringFormat | null = null;
+
+export async function getActiveScoringFormat(): Promise<ScoringFormat | null> {
+  if (_activeFormatCache) return _activeFormatCache;
+  try {
+    const v = await AsyncStorage.getItem(LS_ACTIVE_FORMAT_KEY);
+    if (v === '1qb_ppr' || v === 'sf_tep') {
+      _activeFormatCache = v;
+      return v;
+    }
+  } catch {
+    /* AsyncStorage failure is non-fatal — backend uses session default. */
+  }
+  return null;
+}
+
+export async function setActiveScoringFormat(fmt: ScoringFormat): Promise<void> {
+  _activeFormatCache = fmt;
+  try {
+    await AsyncStorage.setItem(LS_ACTIVE_FORMAT_KEY, fmt);
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Helper: build the `{ 'X-Scoring-Format': <fmt> }` header dict — or `{}`
+ *  when no format has been stored locally yet (so the backend falls back
+ *  to the session's active_format). Use as `headers: await formatHeader()`
+ *  on any request that should honor the user's chosen per-call format. */
+export async function formatHeader(): Promise<Record<string, string>> {
+  const fmt = await getActiveScoringFormat();
+  return fmt ? { 'X-Scoring-Format': fmt } : {};
+}
 
 export interface Streak {
   current: number;
@@ -47,6 +88,24 @@ export async function getProgress() {
 export async function getRankings(position?: Position | null) {
   const qs = position ? `?position=${position}` : '';
   return api.get<{ position: string | null; rankings: any[] }>(`/api/rankings${qs}`);
+}
+
+// POST /api/rankings/reorder — apply a manual reorder to the user's rankings.
+// The ordered_ids list represents the user's desired ranking from best
+// (index 0) to worst. Backend overrides ELO values to match this order.
+// Sends X-Scoring-Format so the reorder writes to the right per-format
+// override dict — without it the backend's `_active_format` falls back to
+// the session's active_format which may not match the user's current UI
+// selection (see web's parallel comment on copy-from-format).
+export async function reorderRankings(
+  position: Position | null,
+  orderedIds: string[],
+) {
+  return api.post<{ ok: true; count: number; scoring_format: string }>(
+    '/api/rankings/reorder',
+    { position, ordered_ids: orderedIds },
+    { headers: await formatHeader() },
+  );
 }
 
 // POST /api/tiers/save — save a tier assignment for a position.
