@@ -129,6 +129,35 @@ export interface NotificationItem {
   metadata?: Record<string, unknown>;
 }
 
+// Trends (Bundle 2). Mirrors the rows returned by /api/trends/risers-fallers
+// and /api/trends/consensus-gap (see backend/trends_service.py). The backend
+// measures movement as an ELO delta, not a rank delta — the screen renders
+// the magnitude with a direction arrow.
+export interface TrendRow {
+  player_id: string;
+  name?: string;
+  position?: Position | string;
+  team?: string | null;
+  current_elo: number;
+  previous_elo: number;
+  delta: number; // positive = riser, negative = faller
+}
+
+export interface ContrarianGapEntry {
+  player_id: string;
+  name?: string;
+  position?: Position | string;
+  team?: string | null;
+  user_elo: number;
+  // "easiest sells" rows compare to community mean; "easiest buys" rows
+  // compare to the specific owner's ELO. Only one of the two is set per row.
+  community_elo?: number;
+  owner_elo?: number;
+  owner_username?: string;
+  gap: number;   // user_elo - (community_elo | owner_elo)
+  score: number; // 0-99 normalised magnitude for the bar
+}
+
 export type FlagMap = Record<string, boolean>;
 
 export interface NotificationPrefs {

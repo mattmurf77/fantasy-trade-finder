@@ -1,5 +1,13 @@
 import { api } from './client';
-import type { Trio, RankingProgress, Position, Player } from '../shared/types';
+import type {
+  Trio,
+  RankingProgress,
+  Position,
+  Player,
+  ScoringFormat,
+  TrendRow,
+  ContrarianGapEntry,
+} from '../shared/types';
 
 export interface Streak {
   current: number;
@@ -118,4 +126,62 @@ export async function getRookies(_opts?: { season?: string }) {
   // The backend doesn't currently consume a season param — accepted in the
   // function signature for future-proofing and parity with the plan doc.
   return api.get<RookiesResponse>('/api/rookies');
+}
+
+// ── Trends (Bundle 2) ───────────────────────────────────────────────────
+// All three endpoints share the same session/format resolution path on the
+// backend (see _require_session in backend/server.py). Passing
+// `scoringFormat` adds the X-Scoring-Format header so the caller can peek
+// at a non-active format without flipping the session; omit it to use the
+// user's active format.
+
+export interface RisersFallersResponse {
+  risers:  Record<'QB' | 'RB' | 'WR' | 'TE' | 'ALL', TrendRow[]>;
+  fallers: Record<'QB' | 'RB' | 'WR' | 'TE' | 'ALL', TrendRow[]>;
+  window_days: number;
+  sample_size: number;
+  has_history: boolean;
+}
+
+// GET /api/trends/risers-fallers?window_days=30&top_n=10
+// Returns biggest ELO movers over the window, grouped by position. Position
+// filtering is client-side — pre-segmented in the response.
+export async function getRisersAndFallers(opts?: {
+  position?: Position | null;       // accepted for API symmetry — currently unused server-side
+  days?: number;                    // window in days (default 30)
+  topN?: number;                    // per-side, per-position cap (default 5)
+  scoringFormat?: ScoringFormat;
+}) {
+  const days = opts?.days ?? 30;
+  const topN = opts?.topN ?? 10;
+  const headers: Record<string, string> = {};
+  if (opts?.scoringFormat) headers['X-Scoring-Format'] = opts.scoringFormat;
+  return api.get<RisersFallersResponse>(
+    `/api/trends/risers-fallers?window_days=${days}&top_n=${topN}`,
+    { headers },
+  );
+}
+
+export interface ConsensusGapResponse {
+  has_baseline: boolean;
+  baseline_user_count: number;
+  easiest_sells: ContrarianGapEntry[];
+  easiest_buys:  ContrarianGapEntry[];
+  reason?: string;
+}
+
+// GET /api/trends/consensus-gap?league_id=...&top_n=5
+// "Easiest sells" = roster players you over-value vs market.
+// "Easiest buys"  = non-roster players you over-value vs that owner.
+export async function getContrarianGap(opts: {
+  leagueId: string;
+  position?: Position | null;       // accepted for symmetry; backend is league-wide
+  topN?: number;
+  scoringFormat?: ScoringFormat;
+}) {
+  const topN = opts.topN ?? 5;
+  const headers: Record<string, string> = {};
+  if (opts.scoringFormat) headers['X-Scoring-Format'] = opts.scoringFormat;
+  const qs = `?league_id=${encodeURIComponent(opts.leagueId)}&top_n=${topN}`;
+  return api.get<ConsensusGapResponse>(`/api/trends/consensus-gap${qs}`, { headers });
 }
