@@ -59,7 +59,6 @@ const EMPTY_QUEUE: never[] = [];
 export default function TradesScreen({ navigation }: any) {
   const queryClient = useQueryClient();
   const league = useSession((s) => s.league);
-  const userId = useSession((s) => s.user?.user_id);
   const switching = useSession((s) => s.switching);
   const user = useSession((s) => s.user);
   // B3 — Portfolio is only meaningful when the user has 2+ leagues. The
