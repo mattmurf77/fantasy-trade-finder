@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { Trio, RankingProgress, Position } from '../shared/types';
+import type { Trio, RankingProgress, Position, Player } from '../shared/types';
 
 export interface Streak {
   current: number;
@@ -101,4 +101,21 @@ export async function dismissPlayer(playerId: string) {
 // POST /api/ranking-method — record the user's chosen method (trio/manual/tiers)
 export async function setRankingMethod(method: 'trio' | 'manual' | 'tiers') {
   return api.post<any>('/api/ranking-method', { method });
+}
+
+// GET /api/rookies — rookie / pre-draft prospect players for the dynasty
+// rookie draft board. Backend groups them by position and returns a total
+// count. Rookie rows may include `college` on top of the standard Player
+// fields; not all Player fields are populated.
+export interface RookiePlayer extends Player {
+  college?: string | null;
+}
+export interface RookiesResponse {
+  grouped: Record<Position, RookiePlayer[]>;
+  total: number;
+}
+export async function getRookies(_opts?: { season?: string }) {
+  // The backend doesn't currently consume a season param — accepted in the
+  // function signature for future-proofing and parity with the plan doc.
+  return api.get<RookiesResponse>('/api/rookies');
 }

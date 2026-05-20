@@ -28,6 +28,7 @@ import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import PlayerCard from '../components/PlayerCard';
 import Toast from '../components/Toast';
+import RookieDraftBoardSheet from '../components/RookieDraftBoardSheet';
 import {
   getNextTrio,
   getProgress,
@@ -48,6 +49,7 @@ export default function RankScreen() {
   const [selectionOrder, setSelectionOrder] = useState<('a' | 'b' | 'c')[]>([]);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' } | null>(null);
   const [infoSheet, setInfoSheet] = useState<{ name: string; info: string } | null>(null);
+  const [rookieBoardOpen, setRookieBoardOpen] = useState(false);
   // I AM SPEED — when ON we auto-rank the 3rd choice + auto-submit after the
   // user picks 2. Default OFF (manual confirm). Persisted to AsyncStorage so
   // the toggle survives app restarts. Mirrors web/js/app.js's autoConfirmEnabled.
@@ -264,6 +266,23 @@ export default function RankScreen() {
           </View>
         ) : null}
 
+        {/* Rookie draft board trigger — small pill button near the position
+            tabs, mirroring the web's "Rookie Draft Board" overlay button. */}
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => {
+              haptics.selection();
+              setRookieBoardOpen(true);
+            }}
+            style={({ pressed }) => [
+              styles.rookieBtn,
+              pressed && { opacity: 0.7 },
+            ]}
+          >
+            <Text style={styles.rookieBtnText}>🏈 Rookies</Text>
+          </Pressable>
+        </View>
+
         {/* Position switcher */}
         <View style={styles.switcher}>
           {POSITIONS.map((p) => {
@@ -446,6 +465,11 @@ export default function RankScreen() {
         )}
       </ScrollView>
 
+      <RookieDraftBoardSheet
+        visible={rookieBoardOpen}
+        onClose={() => setRookieBoardOpen(false)}
+      />
+
       {/* Long-press info sheet, gesture-audit flag */}
       {infoSheet && (
         <View style={styles.infoOverlay}>
@@ -575,6 +599,20 @@ const styles = StyleSheet.create({
   streakNum: { color: '#ffb27a', fontSize: fontSize.base, fontWeight: '800' },
   streakLabel: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '600' },
   streakArrow: { color: colors.muted, fontSize: fontSize.base, marginLeft: 2 },
+  headerActions: { flexDirection: 'row', justifyContent: 'flex-end' },
+  rookieBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  rookieBtnText: {
+    color: colors.text,
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+  },
   switcher: {
     flexDirection: 'row',
     gap: spacing.xs,
