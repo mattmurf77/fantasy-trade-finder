@@ -721,6 +721,24 @@ function DraggableRow({
   const zIndex = useSharedValue(0);
 
   // Pan activates after 220ms hold to avoid fighting ScrollView scrolling.
+  //
+  // CRITICAL: with Reanimated 4 + new architecture (`newArchEnabled: true`
+  // in app.json), gesture callbacks run as worklets on the UI thread.
+  // Any JS-side function call from inside .onEnd / .onStart / .onUpdate
+  // MUST go through runOnJS — calling a non-worklet directly is a hard
+  // crash on release builds. Earlier code called dropTargetAt(...)
+  // synchronously from .onEnd, which crashed every drop. Now the worklet
+  // only mutates shared values + hands the y-coordinate off to a single
+  // JS-side resolver (`handleRelease`) that does the dropTargetAt +
+  // onDrop work on the JS thread.
+  const handleRelease = useCallback(
+    (absoluteY: number) => {
+      const target = dropTargetAt(absoluteY, player.id);
+      onDrop(target);
+    },
+    [dropTargetAt, onDrop, player.id],
+  );
+
   const pan = useMemo(
     () =>
       Gesture.Pan()
@@ -736,16 +754,15 @@ function DraggableRow({
         })
         .onEnd((e) => {
           const absoluteY = e.absoluteY;
-          const target = dropTargetAt(absoluteY, player.id);
-          // Snap back visually, then commit the move so the card re-renders
-          // in its new bin.
+          // Snap back visually first (worklet-safe), then hand off the
+          // resolution + commit work to the JS thread in a single trip.
           translateX.value = withTiming(0, { duration: 160 });
           translateY.value = withTiming(0, { duration: 160 });
           scale.value = withTiming(1, { duration: 160 });
           zIndex.value = 0;
-          runOnJS(onDrop)(target);
+          runOnJS(handleRelease)(absoluteY);
         }),
-    [dropTargetAt, onDrop, player.id, translateX, translateY, scale, zIndex],
+    [handleRelease, translateX, translateY, scale, zIndex],
   );
 
   const animatedStyle = useAnimatedStyle(() => ({
