@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -7,6 +8,7 @@ import * as Linking from 'expo-linking';
 import RootNav from './src/navigation/RootNav';
 import { useSession } from './src/state/useSession';
 import { useFeatureFlags } from './src/state/useFeatureFlags';
+import { useFeedback } from './src/state/useFeedback';
 import { initSentry, wrap as sentryWrap } from './src/observability/sentry';
 import { getTierConfig } from './src/api/rankings';
 import { setTierConfigCache } from './src/utils/tierBands';
@@ -77,6 +79,22 @@ function App() {
     });
     return () => {
       canceled = true;
+      sub.remove();
+    };
+  }, []);
+
+  // Flush any queued / failed feedback notes whenever the app returns to
+  // the foreground. retrySync() is a no-op when nothing is unsynced, so
+  // this is safe to fire on every active transition (no rate-limiting
+  // beyond that needed for now).
+  useEffect(() => {
+    const onChange = (next: AppStateStatus) => {
+      if (next === 'active') {
+        void useFeedback.getState().retrySync();
+      }
+    };
+    const sub = AppState.addEventListener('change', onChange);
+    return () => {
       sub.remove();
     };
   }, []);

@@ -1,24 +1,36 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { submitFeedback } from '../api/feedback';
 
 // In-app feedback capture (TestFlight-era helper).
 //
-// Lives only on-device until the user explicitly shares it out via the
-// Settings → Test feedback inbox screen. No backend round-trip — keeps
-// the surface tiny and makes the feature trivially removable when the
-// app graduates to a real release.
+// Local AsyncStorage is still the source of truth from the user's POV —
+// every save lands on-device immediately and never blocks the UI. A
+// background POST to /api/feedback then mirrors the note into the backend
+// store; `synced` tracks whether the round-trip succeeded. Failures are
+// silent except for the badge in FeedbackInboxScreen, and `retrySync()`
+// + the App.tsx AppState foreground hook re-attempt unsynced items.
 
 export type FeedbackSeverity = 'bug' | 'polish' | 'idea';
 
 export interface FeedbackItem {
   id: string;
-  created_at: string;        // ISO
+  created_at: string;        // ISO — client capture time, doubles as client_id payload field
   screen: string;            // e.g. 'Trades' / 'Tiers' / 'Rank/Trios'
   severity: FeedbackSeverity;
   text: string;
   // Lightweight context the user didn't have to think about. Useful when
   // we read these back weeks later.
   app_version?: string;
+
+  // ── Sync state ───────────────────────────────────────────────────────
+  // synced=true means the backend confirmed the row. Items hydrated from
+  // pre-sync storage default to true (see hydrate()) so we don't re-POST
+  // stale captures the user already moved on from.
+  synced: boolean;
+  server_id?: number;
+  last_sync_attempt?: string; // ISO; debug-only visibility for the inbox
+  last_sync_error?: string;   // short human string; cleared on success
 }
 
 const STORAGE_KEY = 'ftf_inapp_feedback_v1';
@@ -27,9 +39,10 @@ interface FeedbackState {
   items: FeedbackItem[];
   hydrated: boolean;
   hydrate: () => Promise<void>;
-  add: (entry: Omit<FeedbackItem, 'id' | 'created_at'>) => Promise<FeedbackItem>;
+  add: (entry: Omit<FeedbackItem, 'id' | 'created_at' | 'synced'>) => Promise<FeedbackItem>;
   remove: (id: string) => Promise<void>;
   clear: () => Promise<void>;
+  retrySync: () => Promise<void>;
 }
 
 async function persist(items: FeedbackItem[]): Promise<void> {
@@ -37,6 +50,47 @@ async function persist(items: FeedbackItem[]): Promise<void> {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items));
   } catch {
     /* AsyncStorage full / privacy mode — best-effort */
+  }
+}
+
+// Best-effort short error string for last_sync_error. Avoids dumping a
+// full stack into the inbox UI.
+function _describeSyncError(err: unknown): string {
+  if (err && typeof err === 'object') {
+    const anyErr = err as { status?: number; message?: string };
+    if (typeof anyErr.status === 'number') {
+      return anyErr.message ? `HTTP ${anyErr.status} — ${anyErr.message}` : `HTTP ${anyErr.status}`;
+    }
+    if (anyErr.message) return anyErr.message;
+  }
+  return 'network error';
+}
+
+// POST a single item; merge the result back into the items array (returns
+// the new array, not the state). Pure-ish helper so add() and retrySync()
+// share the patch logic.
+async function _syncOne(item: FeedbackItem): Promise<Partial<FeedbackItem>> {
+  const nowIso = new Date().toISOString();
+  try {
+    const res = await submitFeedback({
+      client_id: item.id,
+      screen: item.screen,
+      severity: item.severity,
+      text: item.text,
+      client_created_at: item.created_at,
+    });
+    return {
+      synced: true,
+      server_id: res.server_id,
+      last_sync_attempt: nowIso,
+      last_sync_error: undefined,
+    };
+  } catch (err) {
+    return {
+      synced: false,
+      last_sync_attempt: nowIso,
+      last_sync_error: _describeSyncError(err),
+    };
   }
 }
 
@@ -49,9 +103,17 @@ export const useFeedback = create<FeedbackState>((set, get) => ({
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       const parsed: FeedbackItem[] = raw ? JSON.parse(raw) : [];
+      // Backfill: items written before the sync field existed get
+      // synced=true so we don't suddenly POST a backlog of stale captures
+      // the user already mentally moved on from. New items go through
+      // add() and start as synced=false.
+      const normalized = parsed.map((it) => ({
+        ...it,
+        synced: typeof it.synced === 'boolean' ? it.synced : true,
+      }));
       // Newest first — display order matches what the user just typed.
-      parsed.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-      set({ items: parsed, hydrated: true });
+      normalized.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+      set({ items: normalized, hydrated: true });
     } catch {
       set({ items: [], hydrated: true });
     }
@@ -62,10 +124,23 @@ export const useFeedback = create<FeedbackState>((set, get) => ({
       ...entry,
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       created_at: new Date().toISOString(),
+      synced: false,
     };
     const next = [item, ...get().items];
     set({ items: next });
     await persist(next);
+
+    // Fire-and-forget background sync. Resolves into a patch on the item;
+    // we never throw to the caller — UI shouldn't care whether the POST
+    // landed (the badge will reflect it). Use an IIFE so we don't await.
+    void (async () => {
+      const patch = await _syncOne(item);
+      const current = get().items;
+      const merged = current.map((i) => (i.id === item.id ? { ...i, ...patch } : i));
+      set({ items: merged });
+      await persist(merged);
+    })();
+
     return item;
   },
 
@@ -78,6 +153,27 @@ export const useFeedback = create<FeedbackState>((set, get) => ({
   clear: async () => {
     set({ items: [] });
     await persist([]);
+  },
+
+  retrySync: async () => {
+    // Snapshot the unsynced ids up front; new items added during the loop
+    // handle their own sync via add()'s background path.
+    const initialPending = get().items.filter((i) => !i.synced);
+    if (initialPending.length === 0) return;
+
+    // Sequential — small N (a tester's feedback inbox) and we'd rather not
+    // hammer the backend with parallel POSTs from a single device.
+    for (const target of initialPending) {
+      // Re-read in case state mutated mid-loop (delete, clear, etc.).
+      const live = get().items.find((i) => i.id === target.id);
+      if (!live || live.synced) continue;
+
+      const patch = await _syncOne(live);
+      const current = get().items;
+      const merged = current.map((i) => (i.id === target.id ? { ...i, ...patch } : i));
+      set({ items: merged });
+      await persist(merged);
+    }
   },
 }));
 

@@ -116,6 +116,8 @@ from .database import (
     NOTIF_KIND_TO_BUCKET, NOTIF_PREF_DEFAULTS,
     # Leaderboards — read-only aggregations across users / leagues
     load_leaderboard, get_self_leaderboard_row,
+    # In-app feedback (TestFlight helper) — POST /api/feedback writes here
+    save_feedback,
 )
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
@@ -1989,6 +1991,94 @@ def copy_tiers_from_format_route():
         "position_counts": position_counts,
         "total":           sum(position_counts.values()),
     })
+
+
+@app.route("/api/feedback", methods=["POST"])
+def submit_feedback_route():
+    """POST /api/feedback — in-app feedback capture from mobile.
+
+    Body:
+      client_id           required, unique per note (mobile's local id)
+      screen              required, non-empty (≤ 100 chars; truncated)
+      severity            required, one of bug | polish | idea
+      text                required, non-empty, ≤ 2000 chars
+      client_created_at   required, ISO timestamp from the client
+
+    Auth is best-effort: if X-Session-Token resolves to a session we
+    attribute the note to that user, otherwise we accept anonymously.
+    External testers' submissions land regardless of sign-in state.
+
+    Idempotent on client_id — retries return 200 with `duplicate: true`.
+
+    Contract spec: docs/plans/feedback-backend-sync.md
+    """
+    body = request.get_json(force=True, silent=True) or {}
+
+    client_id_raw = body.get("client_id")
+    screen_raw    = body.get("screen")
+    severity_raw  = body.get("severity")
+    text_raw      = body.get("text")
+    client_created_at = body.get("client_created_at")
+
+    # ── Validation (matches the locked contract in the plan doc) ────────
+    if not isinstance(client_id_raw, str) or not client_id_raw.strip():
+        return jsonify({"error": "missing_field", "field": "client_id"}), 400
+    if not isinstance(screen_raw, str) or not screen_raw.strip():
+        return jsonify({"error": "missing_field", "field": "screen"}), 400
+    if not isinstance(text_raw, str) or not text_raw.strip():
+        return jsonify({"error": "missing_field", "field": "text"}), 400
+    if severity_raw not in ("bug", "polish", "idea"):
+        return jsonify({"error": "invalid_severity"}), 400
+
+    client_id = client_id_raw.strip()[:100]
+    screen    = screen_raw.strip()[:100]
+    severity  = severity_raw
+    text_body = text_raw.strip()
+    if len(text_body) > 2000:
+        return jsonify({"error": "text_too_long", "limit": 2000}), 400
+
+    # ── Best-effort session lookup; anonymous on miss ──────────────────
+    user_id = None
+    username = None
+    token = request.headers.get("X-Session-Token", "")
+    if token:
+        with _sessions_lock:
+            sess = _sessions.get(token)
+        if sess:
+            user_id  = sess.get("user_id")
+            username = sess.get("display_name") or sess.get("username")
+
+    # Device snapshot — same headers client.ts already attaches.
+    platform_label = "ios" if (request.headers.get("X-Device") or "").lower() in ("iphone", "ipad", "macos") else None
+    device_type    = request.headers.get("X-Device")
+    os_version     = request.headers.get("X-OS-Version")
+    app_version    = request.headers.get("X-App-Version")
+
+    try:
+        result = save_feedback(
+            client_id=client_id,
+            screen=screen,
+            severity=severity,
+            text_body=text_body,
+            user_id=user_id,
+            username=username,
+            app_version=app_version,
+            platform=platform_label,
+            device_type=device_type,
+            os_version=os_version,
+            client_created_at=client_created_at if isinstance(client_created_at, str) else None,
+        )
+    except Exception as e:
+        log.exception("save_feedback failed: %s", e)
+        return jsonify({"error": "internal"}), 500
+
+    status = 200 if result.get("duplicate") else 201
+    return jsonify({
+        "ok":          True,
+        "server_id":   result["server_id"],
+        "created_at":  result["created_at"],
+        "duplicate":   bool(result.get("duplicate")),
+    }), status
 
 
 @app.route("/api/tiers/save", methods=["POST"])
