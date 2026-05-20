@@ -1,5 +1,5 @@
 import { api, setSessionToken } from './client';
-import { getLeagueRosters, getLeagueUsers } from './sleeper';
+import { getLeagueRosters, getLeagueUsers, warmPlayerCache } from './sleeper';
 import type {
   DemoSessionResponse,
   LeagueSummary,
@@ -102,9 +102,24 @@ export async function initLeagueSession(
   user: SavedUser,
   lg: LeagueLite,
 ): Promise<void> {
+  // Warm the backend's Sleeper player-DB cache in parallel with the
+  // roster/users fetches. session_init below errors with
+  //   "Player database not cached — call GET /api/sleeper/players first"
+  // when this hasn't been called for the current backend process (e.g.
+  // right after a Render free-tier dyno cold-start, or a redeploy).
+  // The web client warms it from its boot flow; mobile previously didn't,
+  // which surfaced as a hard error on first league-pick after any cold
+  // start. Warm result is discarded (server-side cache is the value);
+  // the call is ~5MB on a cold cache and ~50ms on a warm one.
   const [rosters, leagueUsers] = await Promise.all([
     getLeagueRosters(lg.league_id),
     getLeagueUsers(lg.league_id),
+    warmPlayerCache().catch(() => {
+      // Best-effort. If the warm call itself fails we still try
+      // sessionInit; if the cache is also empty it errors with the
+      // same message and the user can retry. Don't fail the whole
+      // init on a transient warm-call failure.
+    }),
   ]);
   const usernameMap: Record<string, string> = {};
   for (const u of leagueUsers || []) {
