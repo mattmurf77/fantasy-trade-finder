@@ -19,7 +19,9 @@
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -54,7 +56,11 @@
     ],
     "extra": {
       "apiBaseUrl": "https://fantasy-trade-finder.onrender.com",
-      "sentryDsn": "https://cd5ebfea837c8bd07ef3b749dc2daa73@o4511305516187648.ingest.us.sentry.io/4511305531326464"
-    }
+      "sentryDsn": "https://cd5ebfea837c8bd07ef3b749dc2daa73@o4511305516187648.ingest.us.sentry.io/4511305531326464",
+      "eas": {
+        "projectId": "68beb3f2-c99e-408b-b03c-1c326a64b4ec"
+      }
+    },
+    "owner": "mattmurf77"
   }
 }

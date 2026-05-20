@@ -238,6 +238,20 @@ export default function SettingsScreen({ navigation }: any) {
           <Text style={styles.tzValue}>{local.tz}</Text>
         </View>
 
+        <Text style={styles.section}>Testing</Text>
+        <Pressable
+          onPress={() => navigation.navigate?.('FeedbackInbox')}
+          style={({ pressed }) => [styles.feedbackRow, pressed && { opacity: 0.85 }]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.feedbackTitle}>Test feedback</Text>
+            <Text style={styles.feedbackSub}>
+              Review and share notes you captured with the floating 📝 button.
+            </Text>
+          </View>
+          <Text style={styles.feedbackChevron}>›</Text>
+        </Pressable>
+
         <View style={{ height: spacing.xxl }} />
         <Pressable
           onPress={async () => {
@@ -321,6 +335,19 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   signOutText: { color: colors.red, fontWeight: '700', fontSize: fontSize.base },
+  feedbackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  feedbackTitle:   { color: colors.text,  fontSize: fontSize.base, fontWeight: '700' },
+  feedbackSub:     { color: colors.muted, fontSize: fontSize.xs,   marginTop: 2, lineHeight: 16 },
+  feedbackChevron: { color: colors.muted, fontSize: 24 },
   // B3 — Switch league row + Connect another league card
   leagueRow: {
     flexDirection: 'row',

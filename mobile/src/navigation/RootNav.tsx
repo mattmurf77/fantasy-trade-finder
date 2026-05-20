@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   NavigationContainer,
   DarkTheme,
@@ -15,7 +15,9 @@ import LeaguePickerScreen from '../screens/LeaguePickerScreen';
 import TabNav from './TabNav';
 import SettingsScreen from '../screens/SettingsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import FeedbackInboxScreen from '../screens/FeedbackInboxScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
+import FeedbackFAB from '../components/FeedbackFAB';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { getProgress } from '../api/rankings';
 import { navigationIntegration } from '../observability/sentry';
@@ -26,6 +28,7 @@ type AuthStack = {
   Main: undefined;
   Settings: undefined;
   Profile: { username: string };
+  FeedbackInbox: undefined;
 };
 
 const Stack = createNativeStackNavigator<AuthStack>();
@@ -35,6 +38,11 @@ export default function RootNav({ booted }: { booted: boolean }) {
   const user = useSession((s) => s.user);
   const league = useSession((s) => s.league);
   const hasToken = useSession((s) => s.hasToken);
+  // Tracks the active route label so the in-app feedback FAB can pre-fill
+  // the "Screen" field with whatever the user was looking at when they
+  // tapped it. Updated on every navigation state change. Cheap because
+  // the FAB only reads it when opened.
+  const [activeScreen, setActiveScreen] = useState<string>('—');
 
   // Tap-router: the push hook decodes `data.type` and tells us which tab
   // to focus. We intentionally don't pass match_id deeper — the Matches
@@ -129,6 +137,13 @@ export default function RootNav({ booted }: { booted: boolean }) {
         // Hand the container ref to Sentry so it can tag spans by screen.
         // No-op when Sentry isn't initialized.
         navigationIntegration.registerNavigationContainer(navigationRef);
+        // Seed the active-screen tracker with whatever's mounted at boot.
+        const r = navigationRef.getCurrentRoute?.();
+        if (r?.name) setActiveScreen(r.name);
+      }}
+      onStateChange={() => {
+        const r = navigationRef.getCurrentRoute?.();
+        if (r?.name) setActiveScreen(r.name);
       }}
       theme={{
         ...DarkTheme,
@@ -172,6 +187,12 @@ export default function RootNav({ booted }: { booted: boolean }) {
             <>
               <TabNav />
               <PushPrimingModal />
+              {/* In-app feedback capture (TestFlight). Floats above the
+                  tab bar on every authed screen. Settings → Test feedback
+                  exposes the inbox + share button. Remove this <FeedbackFAB />
+                  line (and the matching Settings row) when the app graduates
+                  to a public App Store release. */}
+              <FeedbackFAB activeScreen={activeScreen} />
             </>
           )}
         </Stack.Screen>
@@ -197,6 +218,17 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerStyle: { backgroundColor: colors.bg },
             headerTintColor: colors.text,
           })}
+        />
+        <Stack.Screen
+          name="FeedbackInbox"
+          component={FeedbackInboxScreen}
+          options={{
+            presentation: 'modal',
+            headerShown: true,
+            title: 'Test feedback',
+            headerStyle: { backgroundColor: colors.bg },
+            headerTintColor: colors.text,
+          }}
         />
       </Stack.Navigator>
     </NavigationContainer>
