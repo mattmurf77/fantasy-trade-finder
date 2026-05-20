@@ -13,25 +13,41 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
-import { signIn } from '../api/auth';
+import { resolveSmartStart, signIn } from '../api/auth';
 import { useSession } from '../state/useSession';
-import { getLeagues } from '../api/sleeper';
+import { useFlag } from '../state/useFeatureFlags';
+import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import { getLastUsername, setLastUsername } from '../api/client';
 
 interface Props {
   onSignedIn: () => void;
+  /** Called when the user opts into the seeded demo session. Bundle 8 sends
+   *  them straight into the Main tabs (no league picker). */
+  onDemoStarted?: () => void;
 }
 
 // Sign-in: Sleeper username → POST /api/extension/auth.
 // Same one-shot auth flow the Chrome extension uses. After success we
 // prefetch the user's leagues so the next screen has data ready.
-export default function SignInScreen({ onSignedIn }: Props) {
+//
+// Bundle 8 layers two growth-loop CTAs on top, each behind a flag:
+//   • landing.smart_start_cta   — accept a Sleeper league URL as well as a
+//     bare username; URL inputs go through /api/league/parse-url to find
+//     a roster owner, then drop into the normal username sign-in.
+//   • landing.try_before_sync   — "Try the app on a sample league →" link
+//     under the primary button that calls /api/session/demo and skips the
+//     league picker entirely.
+export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
   const [username, setUsername] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const setUser = useSession((s) => s.setUser);
   const setLeagues = useSession((s) => s.setLeagues);
+  const startDemoSession = useSession((s) => s.startDemoSession);
+  const smartStartEnabled = useFlag('landing.smart_start_cta');
+  const tryDemoEnabled    = useFlag('landing.try_before_sync');
 
   useEffect(() => {
     getLastUsername().then((u) => {
@@ -44,16 +60,65 @@ export default function SignInScreen({ onSignedIn }: Props) {
 
   async function handleSubmit(override?: string) {
     if (busy) return;
-    const trimmed = (override ?? username).trim().toLowerCase();
-    if (!trimmed) {
+    const rawInput = (override ?? username).trim();
+    if (!rawInput) {
       setError('Enter your Sleeper username');
       return;
     }
     setBusy(true);
     setError(null);
     Keyboard.dismiss();
+
+    let usernameToAuth = rawInput.toLowerCase();
+
+    // Smart-start: when the flag is on, the field accepts either a bare
+    // username or a Sleeper / ESPN / MFL league URL. URLs get parsed into
+    // a (platform, league_id) tuple; we then look up an owner and drop
+    // into the existing username flow. Mirrors the web's smart-start panel.
+    if (smartStartEnabled) {
+      const resolved = await resolveSmartStart(rawInput);
+      if (resolved.kind === 'invalid') {
+        setError(resolved.message || "Couldn't parse that URL.");
+        setBusy(false);
+        return;
+      }
+      if (resolved.kind === 'league_url') {
+        if (resolved.platform !== 'sleeper' || !resolved.supported || !resolved.league_id) {
+          setError(
+            `${resolved.platform === 'espn' ? 'ESPN' : resolved.platform === 'mfl' ? 'MyFantasyLeague' : 'That platform'} sync is coming soon — paste a Sleeper league URL or your username for now.`,
+          );
+          setBusy(false);
+          return;
+        }
+        // Sleeper URL: resolve a roster owner and use their username.
+        try {
+          const [rosters, leagueUsers] = await Promise.all([
+            getLeagueRosters(resolved.league_id),
+            getLeagueUsers(resolved.league_id),
+          ]);
+          const firstOwner = (rosters || [])
+            .map((r) => r?.owner_id)
+            .find((id) => !!id);
+          if (!firstOwner) throw new Error('No roster owners found.');
+          const ownerRow = (leagueUsers || []).find((u) => u.user_id === firstOwner);
+          const ownerName = ownerRow?.username || ownerRow?.display_name;
+          if (!ownerName) throw new Error('Could not resolve a league owner.');
+          usernameToAuth = ownerName.toLowerCase();
+        } catch (e: any) {
+          setError(
+            e?.message ||
+              "We found that league but couldn't resolve a username. Try typing your Sleeper username.",
+          );
+          setBusy(false);
+          return;
+        }
+      } else {
+        usernameToAuth = resolved.username || rawInput.toLowerCase();
+      }
+    }
+
     try {
-      const auth = await signIn(trimmed);
+      const auth = await signIn(usernameToAuth);
       await setUser({
         user_id: auth.user_id,
         username: auth.username,
@@ -74,6 +139,22 @@ export default function SignInScreen({ onSignedIn }: Props) {
       setError(err?.message || 'Sign-in failed. Try again.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleTryDemo() {
+    if (demoBusy || busy) return;
+    setDemoBusy(true);
+    setError(null);
+    try {
+      await startDemoSession();
+      // The demo flow drops the user straight into Main — RootNav's gating
+      // (user + league + token) is already satisfied by startDemoSession.
+      onDemoStarted?.();
+    } catch (err: any) {
+      setError(err?.message || 'Demo unavailable — try again.');
+    } finally {
+      setDemoBusy(false);
     }
   }
 
@@ -122,7 +203,7 @@ export default function SignInScreen({ onSignedIn }: Props) {
             ) : null}
             <TextInput
               style={styles.input}
-              placeholder="Sleeper username"
+              placeholder={smartStartEnabled ? 'Sleeper username or league URL' : 'Sleeper username'}
               placeholderTextColor="#3e4258"
               value={username}
               onChangeText={setUsername}
@@ -131,18 +212,23 @@ export default function SignInScreen({ onSignedIn }: Props) {
               autoComplete="off"
               returnKeyType="go"
               onSubmitEditing={() => handleSubmit()}
-              editable={!busy}
+              editable={!busy && !demoBusy}
               inputMode="text"
             />
+            {smartStartEnabled ? (
+              <Text style={styles.fieldHint}>
+                Paste your Sleeper username or league URL.
+              </Text>
+            ) : null}
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <Pressable
               style={({ pressed }) => [
                 styles.button,
-                (busy || !username.trim()) && styles.buttonDisabled,
+                (busy || demoBusy || !username.trim()) && styles.buttonDisabled,
                 pressed && styles.buttonPressed,
               ]}
               onPress={() => handleSubmit()}
-              disabled={busy || !username.trim()}
+              disabled={busy || demoBusy || !username.trim()}
             >
               {busy ? (
                 <ActivityIndicator color="#fff" />
@@ -150,6 +236,26 @@ export default function SignInScreen({ onSignedIn }: Props) {
                 <Text style={styles.buttonText}>Connect →</Text>
               )}
             </Pressable>
+
+            {tryDemoEnabled ? (
+              <Pressable
+                onPress={handleTryDemo}
+                disabled={busy || demoBusy}
+                style={({ pressed }) => [
+                  styles.tryDemoBtn,
+                  pressed && { opacity: 0.6 },
+                ]}
+                hitSlop={8}
+              >
+                {demoBusy ? (
+                  <ActivityIndicator color={colors.muted} />
+                ) : (
+                  <Text style={styles.tryDemoText}>
+                    Try the app on a sample league →
+                  </Text>
+                )}
+              </Pressable>
+            ) : null}
 
             <View style={styles.taglines}>
               <Text style={styles.tagline}>📈 Rank</Text>
@@ -254,4 +360,20 @@ const styles = StyleSheet.create({
   },
   hintLabel: { color: colors.muted, fontSize: fontSize.sm },
   hintName: { color: colors.accent, fontSize: fontSize.base, fontWeight: '700' },
+  fieldHint: {
+    color: colors.muted,
+    fontSize: fontSize.sm,
+    marginTop: -spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  tryDemoBtn: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+  },
+  tryDemoText: {
+    color: colors.muted,
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+  },
 });

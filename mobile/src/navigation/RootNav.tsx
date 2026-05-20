@@ -7,12 +7,14 @@ import {
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
+import * as Linking from 'expo-linking';
 import { colors } from '../theme/colors';
 import { useSession } from '../state/useSession';
 import SignInScreen from '../screens/SignInScreen';
 import LeaguePickerScreen from '../screens/LeaguePickerScreen';
 import TabNav from './TabNav';
 import SettingsScreen from '../screens/SettingsScreen';
+import ProfileScreen from '../screens/ProfileScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { getProgress } from '../api/rankings';
@@ -23,6 +25,7 @@ type AuthStack = {
   LeaguePicker: undefined;
   Main: undefined;
   Settings: undefined;
+  Profile: { username: string };
 };
 
 const Stack = createNativeStackNavigator<AuthStack>();
@@ -100,9 +103,28 @@ export default function RootNav({ booted }: { booted: boolean }) {
     ? 'LeaguePicker'
     : 'Main';
 
+  // Linking config — react-navigation translates incoming Universal Links
+  // and `dtf://` deep links into navigation actions. We register the same
+  // /u/<username> route the web hosts so a single share URL works in both
+  // surfaces. The `?ref=` capture is handled separately in utils/deepLinks
+  // (we keep both so referrals work even when the URL has no path).
+  const linking = {
+    prefixes: [Linking.createURL('/'), 'https://fantasy-trade-finder.onrender.com'],
+    config: {
+      screens: {
+        SignIn:       'signin',
+        LeaguePicker: 'leagues',
+        Main:         'app',
+        Settings:     'settings',
+        Profile:      'u/:username',
+      },
+    },
+  };
+
   return (
     <NavigationContainer
       ref={navigationRef}
+      linking={linking}
       onReady={() => {
         // Hand the container ref to Sentry so it can tag spans by screen.
         // No-op when Sentry isn't initialized.
@@ -126,7 +148,12 @@ export default function RootNav({ booted }: { booted: boolean }) {
       >
         <Stack.Screen name="SignIn">
           {({ navigation }) => (
-            <SignInScreen onSignedIn={() => navigation.replace('LeaguePicker')} />
+            <SignInScreen
+              onSignedIn={() => navigation.replace('LeaguePicker')}
+              // Demo flow already pinned a synthetic league + token in
+              // useSession.startDemoSession, so we jump straight to Main.
+              onDemoStarted={() => navigation.replace('Main')}
+            />
           )}
         </Stack.Screen>
         <Stack.Screen name="LeaguePicker">
@@ -158,6 +185,18 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerStyle: { backgroundColor: colors.bg },
             headerTintColor: colors.text,
           }}
+        />
+        <Stack.Screen
+          name="Profile"
+          component={ProfileScreen}
+          options={({ route }) => ({
+            headerShown: true,
+            // route.params is typed via AuthStack; cast to a known shape
+            // so we can read username without unsafe `any`.
+            title: `@${(route.params as { username?: string })?.username || 'profile'}`,
+            headerStyle: { backgroundColor: colors.bg },
+            headerTintColor: colors.text,
+          })}
         />
       </Stack.Navigator>
     </NavigationContainer>
