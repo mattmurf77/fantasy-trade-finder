@@ -1,5 +1,10 @@
 import { api } from './client';
-import type { ScoringFormat } from '../shared/types';
+import type {
+  ScoringFormat,
+  ActivityEvent,
+  ContrarianRow,
+  NewPartnerEntry,
+} from '../shared/types';
 
 // ── League preferences (team outlook + positional prefs) ─────────
 // Mirrors the web app's saveOutlookAndPreferences flow.
@@ -133,4 +138,164 @@ export async function copyTiersFromFormat(
     { from_format: fromFormat, to_format: toFormat },
     { headers: { 'X-Scoring-Format': toFormat } },
   );
+}
+// ── League member unlock states (B7 — flag `league.unlock_badges_per_member`)
+// Backend: GET /api/league/member-unlock-states. When the flag is off the
+// backend returns `{members: [], flag_off: true}`. Used to chip each
+// leaguemate row with "✓ Unlocked" / "in progress" on LeagueScreen.
+export interface LeagueMemberUnlockState {
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar: string | null;
+  joined: boolean;
+  unlocked_formats: string[];   // e.g. ["1qb_ppr", "sf_tep"]
+  unlocked_count: number;
+  has_ranking_method: boolean;
+}
+export async function getLeagueMemberUnlockStates(leagueId: string) {
+  return api.get<{ members: LeagueMemberUnlockState[]; flag_off?: boolean }>(
+    `/api/league/member-unlock-states?league_id=${encodeURIComponent(leagueId)}`,
+  );
+}
+
+// ── Activity feed (B7 — flag `league.activity_feed`) ───────────────
+// Backend: GET /api/league/activity?league_id=...&limit=20
+// Response shape (per backend/database.py:load_league_activity):
+//   { events: [{ts, emoji, message, actor_user_id, event_type}, ...] }
+// When the flag is off the backend returns {events: [], flag_off: true}.
+// We normalise to ActivityEvent on the client so screen code sees a stable
+// shape regardless of which backend key naming wins.
+interface RawActivityRow {
+  ts: string;
+  emoji?: string;
+  message: string;
+  actor_user_id: string | null;
+  event_type: string;
+}
+export async function getActivityFeed(
+  leagueId: string,
+  limit?: number,
+): Promise<{ events: ActivityEvent[] }> {
+  const qs =
+    `league_id=${encodeURIComponent(leagueId)}` +
+    (limit ? `&limit=${encodeURIComponent(String(limit))}` : '');
+  const raw = await api.get<{ events: RawActivityRow[]; flag_off?: boolean }>(
+    `/api/league/activity?${qs}`,
+  );
+  const rows = raw?.events || [];
+  // Pull `@handle` from the backend's pre-formatted message as a best-effort
+  // username — the activity row's own user table lookup already shaped this
+  // string, so re-extracting it avoids a second roundtrip.
+  const events: ActivityEvent[] = rows.map((r, i) => {
+    const match = r.message?.match(/@([A-Za-z0-9_.\-]+)/);
+    return {
+      id:          `${r.ts || ''}-${r.actor_user_id || 'system'}-${i}`,
+      occurred_at: r.ts,
+      user_id:     r.actor_user_id || '',
+      username:    match ? match[1] : '',
+      event_type:  r.event_type,
+      summary:     r.message,
+      emoji:       r.emoji,
+    };
+  });
+  return { events };
+}
+
+// ── Contrarian leaderboard (B7) ─────────────────────────────────────
+// Backend: GET /api/league/contrarian?league_id=...&format=...
+// Returns a per-position breakdown of {most_contrarian, most_consensus}.
+// To surface a single sorted leaderboard on mobile, we flatten across
+// positions: each user's `divergence_score` is the mean of their per-
+// position deviations (deviation = mean abs ELO diff vs community).
+interface RawContrarianUser {
+  user_id: string;
+  username: string;
+  deviation: number;
+  player_count?: number;
+}
+interface RawContrarianPositionBlock {
+  most_contrarian: RawContrarianUser[];
+  most_consensus:  RawContrarianUser[];
+  ranked_users:    number;
+  player_count:    number;
+}
+interface RawContrarianResponse {
+  league_id: string;
+  format: string;
+  insufficient_data: boolean;
+  ranked_users?: number;
+  needed?: number;
+  message?: string;
+  qb: RawContrarianPositionBlock | null;
+  rb: RawContrarianPositionBlock | null;
+  wr: RawContrarianPositionBlock | null;
+  te: RawContrarianPositionBlock | null;
+}
+export async function getContrarianLeaderboard(
+  leagueId: string,
+): Promise<{ rows: ContrarianRow[]; insufficient_data: boolean; message?: string }> {
+  const raw = await api.get<RawContrarianResponse>(
+    `/api/league/contrarian?league_id=${encodeURIComponent(leagueId)}`,
+  );
+  if (raw?.insufficient_data) {
+    return { rows: [], insufficient_data: true, message: raw.message };
+  }
+  // Aggregate per user: collect every (user_id, deviation) tuple across all
+  // four position blocks (both contrarian and consensus halves — they're the
+  // top/bottom of the same per-user list). Average to get a single score.
+  const acc = new Map<string, { username: string; sum: number; n: number }>();
+  const blocks = [raw?.qb, raw?.rb, raw?.wr, raw?.te];
+  for (const block of blocks) {
+    if (!block) continue;
+    const seenInBlock = new Set<string>();
+    for (const u of [...(block.most_contrarian || []), ...(block.most_consensus || [])]) {
+      if (!u?.user_id || seenInBlock.has(u.user_id)) continue;
+      seenInBlock.add(u.user_id);
+      const cur = acc.get(u.user_id);
+      if (cur) {
+        cur.sum += u.deviation;
+        cur.n   += 1;
+      } else {
+        acc.set(u.user_id, { username: u.username, sum: u.deviation, n: 1 });
+      }
+    }
+  }
+  const rows: ContrarianRow[] = [...acc.entries()].map(([user_id, v]) => ({
+    user_id,
+    username:         v.username,
+    divergence_score: Math.round((v.sum / v.n) * 10) / 10,
+  }));
+  rows.sort((a, b) => b.divergence_score - a.divergence_score);
+  return { rows, insufficient_data: false };
+}
+
+// ── New trade partners (B7 — flag `trades.new_partners_alerts`) ────
+// No dedicated backend route exists for this — the web client derives the
+// banner client-side from a per-league localStorage diff of trade_ids.
+// On mobile we derive newly-unlocked leaguemates from the activity feed:
+// every time a tier_save unlocks a format, backend appends an event with
+// event_type === 'unlock' (see backend/database.py:2315). Those entries
+// are the canonical "this leaguemate just became tradeable" signal.
+export async function getNewPartners(
+  leagueId: string,
+): Promise<{ partners: NewPartnerEntry[] }> {
+  // Pull a generous window so a returning user catches anything they
+  // missed; the screen filters out already-dismissed entries.
+  const { events } = await getActivityFeed(leagueId, 50);
+  const seen = new Set<string>();
+  const partners: NewPartnerEntry[] = [];
+  for (const e of events) {
+    if (e.event_type !== 'unlock' || !e.user_id) continue;
+    if (seen.has(e.user_id)) continue;
+    seen.add(e.user_id);
+    partners.push({
+      user_id:           e.user_id,
+      username:          e.username,
+      newly_unlocked_at: e.occurred_at,
+    });
+  }
+  // Newest unlock first
+  partners.sort((a, b) => (a.newly_unlocked_at < b.newly_unlocked_at ? 1 : -1));
+  return { partners };
 }

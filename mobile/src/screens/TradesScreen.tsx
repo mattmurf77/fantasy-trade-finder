@@ -39,11 +39,13 @@ import {
 import {
   getLeaguePreferences,
   saveLeaguePreferences,
+  getNewPartners,
   type Outlook,
 } from '../api/league';
 import { useSession } from '../state/useSession';
 import { useTradeQueue } from '../state/useTradeQueue';
 import { useFlag } from '../state/useFeatureFlags';
+import NewPartnersBanner from '../components/NewPartnersBanner';
 import type { Player, TradeCard, TradeJobSnapshot } from '../shared/types';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -59,7 +61,20 @@ export default function TradesScreen() {
   const league = useSession((s) => s.league);
   const userId = useSession((s) => s.user?.user_id);
   const switching = useSession((s) => s.switching);
+  const user = useSession((s) => s.user);
   const leagueId = league?.league_id || null;
+  const userId   = user?.user_id || '';
+
+  // B7 — new-partners banner. Flag-gated; query only fires when the flag
+  // is on AND we have both a league and a user (the banner's dismissal
+  // key depends on both).
+  const newPartnersFlag = useFlag('trades.new_partners_alerts');
+  const newPartnersQuery = useQuery({
+    queryKey: ['new-partners', leagueId, userId],
+    queryFn:  () => getNewPartners(leagueId!),
+    enabled:  !!leagueId && !!userId && newPartnersFlag,
+    staleTime: 60_000,
+  });
   const [fairness, setFairness] = useState(0.75);
   // Equal-only checkbox: when on, the slider is locked to 1.0 (100%) and
   // disabled. Stash the prior slider value so unchecking restores it.
@@ -345,6 +360,17 @@ export default function TradesScreen() {
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!topCard || !generateMutation.isPending}
       >
+        {/* B7 — new-partners alert. Banner self-dismisses via AsyncStorage
+            keyed on the latest partner; renders null when the flag is off
+            (query is gated upstream) or there are no new partners. */}
+        {newPartnersFlag && leagueId && userId && (newPartnersQuery.data?.partners?.length ?? 0) > 0 ? (
+          <NewPartnersBanner
+            partners={newPartnersQuery.data!.partners}
+            userId={userId}
+            leagueId={leagueId}
+          />
+        ) : null}
+
         {/* League selector pill — opens LeagueSwitcherSheet on tap. */}
         <LeaguePill
           label="Trading in"
