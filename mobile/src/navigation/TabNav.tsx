@@ -8,18 +8,20 @@ import { spacing, radius, fontSize } from '../theme/spacing';
 import RankScreen from '../screens/RankScreen';
 import TiersScreen from '../screens/TiersScreen';
 import OverallRanksScreen from '../screens/OverallRanksScreen';
+import TrendsScreen from '../screens/TrendsScreen';
 import TradesScreen from '../screens/TradesScreen';
 import MatchesScreen from '../screens/MatchesScreen';
 import LeagueScreen from '../screens/LeagueScreen';
 import TopBar from '../components/TopBar';
 
-// Tab definitions. The "Rank" tab fans out into 3 sub-screens — Trios swipe,
-// Tiers (drag-to-bin), and Overall Ranks (flat list). Tapping the tab opens
-// an action sheet so all three are one tap away (was: tiny pill in corner).
+// Tab definitions. The "Rank" tab fans out into 4 sub-screens — Trios swipe,
+// Tiers (drag-to-bin), Overall Ranks (flat list), and Trends (movers +
+// consensus gap). Tapping the tab opens an action sheet so all four are one
+// tap away (was: tiny pill in corner).
 const Tab = createBottomTabNavigator();
 const RankStack = createNativeStackNavigator();
 
-export type RankRoute = 'Trios' | 'Tiers' | 'OverallRanks';
+export type RankRoute = 'Trios' | 'Tiers' | 'OverallRanks' | 'Trends';
 
 function RankStackNav() {
   return (
@@ -34,6 +36,11 @@ function RankStackNav() {
         name="OverallRanks"
         component={OverallRanksScreen}
         options={{ headerShown: true, title: 'Overall Ranks', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
+      />
+      <RankStack.Screen
+        name="Trends"
+        component={TrendsScreen}
+        options={{ headerShown: true, title: 'Trends', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
       />
     </RankStack.Navigator>
   );
@@ -134,6 +141,7 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
     { route: 'Trios',         emoji: '🏈', label: 'Trios',         sub: '3-at-a-time swipe ranking' },
     { route: 'Tiers',         emoji: '📋', label: 'Tiers',         sub: 'Drag players into Elite / Starter / Solid / Depth / Bench' },
     { route: 'OverallRanks',  emoji: '🏅', label: 'Overall Ranks', sub: 'Full ELO-sorted list of every player you\'ve ranked' },
+    { route: 'Trends',        emoji: '📈', label: 'Trends',        sub: 'See your biggest movers and how you differ from consensus' },
   ];
 
   return (
