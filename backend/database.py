@@ -4621,3 +4621,50 @@ def save_feedback(
         # Shouldn't happen — either we just inserted (handled above) or a
         # duplicate exists. Defensive fallback.
         return {"server_id": 0, "created_at": now_iso, "duplicate": True}
+
+
+def list_feedback(*, since_id: int = 0, limit: int = 100) -> list[dict]:
+    """Return feedback rows with id > since_id, oldest first, capped at
+    `limit`. Used by GET /api/feedback/admin so an operator can stream
+    new captures since their last poll. Caller must enforce auth.
+    """
+    limit = max(1, min(int(limit), 500))
+    with engine.begin() as conn:
+        rows = conn.execute(
+            select(
+                app_feedback_table.c.id,
+                app_feedback_table.c.client_id,
+                app_feedback_table.c.user_id,
+                app_feedback_table.c.username,
+                app_feedback_table.c.screen,
+                app_feedback_table.c.severity,
+                app_feedback_table.c.text,
+                app_feedback_table.c.app_version,
+                app_feedback_table.c.platform,
+                app_feedback_table.c.device_type,
+                app_feedback_table.c.os_version,
+                app_feedback_table.c.client_created_at,
+                app_feedback_table.c.created_at,
+            )
+            .where(app_feedback_table.c.id > int(since_id))
+            .order_by(app_feedback_table.c.id.asc())
+            .limit(limit)
+        ).fetchall()
+    return [
+        {
+            "id": int(r[0]),
+            "client_id": r[1],
+            "user_id": r[2],
+            "username": r[3],
+            "screen": r[4],
+            "severity": r[5],
+            "text": r[6],
+            "app_version": r[7],
+            "platform": r[8],
+            "device_type": r[9],
+            "os_version": r[10],
+            "client_created_at": r[11],
+            "created_at": r[12],
+        }
+        for r in rows
+    ]
