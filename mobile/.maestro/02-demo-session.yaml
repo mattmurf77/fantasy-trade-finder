@@ -1,0 +1,15 @@
+appId: com.fantasytradefinder.app
+---
+# Demo session bootstrap: should land in main tabs with no Sleeper auth.
+# Requires the `landing.try_before_sync` flag to be enabled (it is in
+# config/features.json).
+- launchApp:
+    clearState: true
+    stopApp: true
+- assertVisible: "Try the app on a sample league"
+- tapOn: "Try the app on a sample league"
+# Demo bootstrap hits /api/session/demo on the backend — give it room.
+- extendedWaitUntil:
+    visible: "Trades"
+    timeout: 20000
+- takeScreenshot: 02-main-tabs

@@ -1,0 +1,166 @@
+# Architecture
+
+High-level data flow and component boundaries. Update when modules are added, removed, or significantly re-wired.
+
+## Data flow
+
+```mermaid
+flowchart LR
+  subgraph External
+    SL[Sleeper API]
+    DP[DynastyProcess CSV]
+    AN[Anthropic Claude API]
+    EX[Expo Push]
+    CR[Render Cron]
+  end
+
+  subgraph Backend [backend/ — Flask]
+    DL[data_loader.py]
+    DB[(SQLite<br/>trade_finder.db)]
+    TC[tier_config.json]
+    RS[ranking_service.py]
+    TS[trade_service.py]
+    TN[trade_narrative.py]
+    SMG[smart_matchup_generator.py]
+    TR[trends_service.py]
+    WC[wrapped_collector.py]
+    OG[og_image.py]
+    FF[feature_flags.py]
+    SRV[server.py<br/>routes + dispatcher]
+  end
+
+  subgraph Clients
+    WEB[web/<br/>HTML+JS]
+    MOB[mobile/<br/>React Native]
+    EXT[extension/<br/>Chrome MV3]
+  end
+
+  SL -->|users, leagues, rosters, players| SRV
+  DP -->|consensus values| DL
+  DL -->|seed Elo| DB
+  TC -->|tier bands| RS
+  TC -->|tier bands via /api/tier-config| WEB
+  SRV <--> DB
+  RS <--> DB
+  TS <--> DB
+  TS --> TN
+  TR <--> DB
+  WC --> DB
+  SMG -->|candidate pairs| AN
+  AN -->|chosen pair| SMG
+  SMG --> SRV
+  SRV -->|push| EX
+  CR -->|cron ticks| SRV
+  FF --> SRV
+  FF --> TS
+
+  WEB <-->|/api/*| SRV
+  MOB <-->|/api/*| SRV
+  EXT <-->|/api/extension/*| SRV
+```
+
+## Components
+
+### Backend (`backend/`)
+
+| Module | Lines | Role |
+|---|---|---|
+| `server.py` | ~6.4k | Flask routes, session management, Sleeper passthrough, in-memory ring-buffer debug log (`/api/debug/log?n=100`), typed push dispatcher (`_send_typed_push`) with prefs/dedup/quiet-hours, cron tick handlers |
+| `database.py` | ~4.4k | SQLAlchemy Core schema (20 tables), `_migrate_db()` idempotent ALTERs, `_MODEL_CONFIG_DEFAULTS` seeded via INSERT OR IGNORE |
+| `ranking_service.py` | ~860 | Elo math; pairwise + 3-player decomposition; `tier_bands_for` + `apply_tiers` read from `tier_config.json` |
+| `trade_service.py` | ~1.4k | Cross-user mutual-gain trade discovery; outlook multipliers, positional preference modifiers, package diminishing returns, flag-gated taxes (QB / star / roster) |
+| `trade_narrative.py` | ~100 | Deterministic template-based rationale strings for trade cards. No LLM. Used by `trade_service.generate_trades()` to fill `TradeCard.narrative` |
+| `smart_matchup_generator.py` | ~530 | Claude-assisted matchup picker + algorithmic fallback. Includes `community_trio_signal` + `find_qc_trio` for QC checks |
+| `data_loader.py` | ~280 | Pulls DynastyProcess CSV; maps consensus values → seed Elo (KTC curve) |
+| `trends_service.py` | ~420 | Risers/fallers, contrarian, consensus-gap; reads `elo_history` |
+| `wrapped_collector.py` | ~70 | Exposes `record_event()` — dual-write into `user_events` + denormalized `users.last_*_at` |
+| `og_image.py` | ~690 | Open Graph share images (1200×630 PNG) for tiers and trades |
+| `feature_flags.py` | ~220 | Reads `config/features.json`; supports `FTF_FLAGS` env override; `/api/feature-flags/reload` re-reads at runtime |
+
+### Backend support files
+
+- `backend/tier_config.json` — **single source of truth for Elo tier bands**, keyed by `(scoring_format, position, tier)` with `[min, max]` ranges. Read by `ranking_service.tier_bands_for` + `apply_tiers` on the server; served to the web SPA via `GET /api/tier-config` so the frontend buckets players the same way. Replaces the old `UNIFORM_TIER_ELO_BANDS` / `QB_TE_1QB_TIER_ELO_BANDS` class constants.
+- `backend/scripts/` — one-off maintenance scripts (e.g. `rescale_pick_values.py`).
+- `backend/tests/` — pytest suite for non-trivial pure logic: `test_pick_value_scaling.py`, `test_roster_profile.py`, `test_trade_narrative.py`.
+
+### Clients
+
+| Client | Path | Stack | Talks to |
+|---|---|---|---|
+| Web SPA | `web/` | Vanilla HTML/CSS/JS | `/api/*` (same origin) |
+| Mobile | `mobile/` | React Native + Expo | `/api/*` (network) |
+| Extension | `extension/` | Chrome MV3 | `/api/extension/*` (bearer token) |
+
+### Skills (development tooling)
+
+- `feature-evaluator/` — Claude Code skill that reviews a feature area and emits an improvement report.
+- `project-reorganizer/` — Claude Code skill that reorganizes a flat project into a conventional layout.
+
+Both are exercised in `*-workspace/` sibling folders (throwaway eval output).
+
+## Request lifecycle (typical ranking flow)
+
+1. Client `GET /api/trio` → `server.py` calls `smart_matchup_generator.py`.
+2. SMG fetches live Elo via `ranking_service.py`, builds ~10 candidates respecting tier engine settings (`tier_engine_enabled`, `tier_size`, mix-in rates), optionally consults Claude.
+3. Returns `(player_a, player_b, player_c)`.
+4. User orders best→worst; client `POST /api/rank3` with the ordering.
+5. `server.py` decomposes into 3 pairwise updates → `swipe_decisions` rows + Elo updates → `member_rankings` snapshot + `elo_history` row per changed player.
+6. `record_event('trio_swipe', …)` in `wrapped_collector.py` writes `user_events` and bumps `users.last_active_at` / `last_rank_at` / `events_count`.
+7. Returns updated progress; client repaints the bar.
+
+## Request lifecycle (trade card)
+
+1. Client `POST /api/trades/generate` for a league.
+2. `trade_service.TradeService` enumerates candidates per opponent (up to `max_candidates=500`), scores them with:
+   - Mismatch (user-Elo gap) and fairness (consensus-value gap), weighted `0.70 / 0.30`.
+   - Outlook multiplier (`team_outlook_multiplier`).
+   - Positional preference multiplier (`positional_preference_multiplier`, capped at `pos_multiplier_cap=2.00`).
+   - Package diminishing returns (`package_value`).
+   - Flag-gated taxes: `qb_tax_adjustment`, `star_tax_adjustment`, `roster_clogger_adjustment`.
+3. Filters by `min_mismatch_score`, `max_value_ratio`, `trade_elo_gap_max`.
+4. For each surviving card, `trade_narrative.build_narrative()` fills `TradeCard.narrative` from signals already computed.
+5. Cards returned via `GET /api/trades`.
+
+## Request lifecycle (trade match)
+
+1. Either user `POST /api/trades/swipe` with `like`.
+2. `server.py` checks for a mirrored existing like from the other side.
+3. If found: insert `trade_matches` row (status `pending`), insert two `notifications` rows, dispatch typed push for both users.
+4. Either user `POST /api/trades/matches/<id>/disposition` with `accept` or `decline`. Updates `user_a_decision` / `user_b_decision`; rolls `status` → `accepted` / `declined` once both have decided (or any user declines).
+5. Counterparties receive `trade_accepted` / `trade_declined` notifications + push.
+
+## Push dispatcher
+
+`_send_typed_push(user_id, kind, title, body, data, dedup_key)` is the single entry point.
+
+1. Resolve `kind` → bucket via `get_pref_bucket()`. If the user's `notification_prefs` toggle for that bucket is off → drop.
+2. Check `notification_events_log` for `(user_id, kind, dedup_key)`. If duplicate → drop.
+3. If `quiet_hours_enabled = 1` and now is in the user's quiet window → insert into `notification_queue` with `deliver_after = next 8am local` and return.
+4. Otherwise: send via Expo to all `device_tokens` for the user; append a row to `notification_events_log`.
+
+## Cron ticks
+
+External scheduler (Render cron) hits three endpoints:
+
+| Endpoint | Cadence | What it does |
+|---|---|---|
+| `POST /api/cron/realtime-tick` | every 1–5 min | Drain `notification_queue` rows whose `deliver_after` has passed |
+| `POST /api/cron/hourly-tick` | hourly | Bundle drain + quiet-hours summary push at user's local 8am |
+| `POST /api/cron/daily-tick` | once daily | Weekly digests + re-engagement scans (`winback_dormant`-style kinds) |
+
+## Event recording
+
+`record_event(user_id, event_type, props=…)` in `wrapped_collector.py` does a dual-write:
+
+1. Append to `user_events` (full structured row with device/source/session/league context).
+2. Update the matching `users.last_*_at` denormalized column, plus `events_count`, `last_device_type`, `last_os_version`, `last_app_version`.
+
+Hot-read endpoints (inactivity scans, "last login" lookups) read the denormalized `users.*` columns. Analytical reads scan `user_events` via the `(user_id, occurred_at)` or `(event_type, occurred_at)` indexes.
+
+## Tier bands flow
+
+1. `backend/tier_config.json` is the single source of truth.
+2. Server boots → `ranking_service` loads it via `_load_tier_config()`.
+3. `apply_tiers` spreads Elos linearly inside each `[min, max]` band per `(scoring_format, position, tier)`.
+4. Web SPA `GET /api/tier-config` → buckets players client-side using the same `[min, max]` ranges (top-down walk). This guarantees server and web tier assignments match.
+5. Mobile + extension use their own `tierBands` constants — keep in sync with this file (see [cross-client-invariants.md](cross-client-invariants.md)).

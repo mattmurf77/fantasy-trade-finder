@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DTF Web Experience — Feedback Capture</title>
+<style>
+  :root {
+    --bg:        #0f1117;
+    --surface:   #1a1d27;
+    --surface-2: #232734;
+    --border:    #2a2f3d;
+    --text:      #e6e8ee;
+    --muted:     #8b91a3;
+    --accent:    #4f7cff;
+    --green:     #22c55e;
+    --red:       #ef4444;
+    --amber:     #facc15;
+    --purple:    #a855f7;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  /* ── Header ─────────────────────────────────────────────────── */
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(15,17,23,0.92);
+    backdrop-filter: saturate(140%) blur(8px);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 {
+    font-size: 16px; font-weight: 800; letter-spacing: -0.2px;
+    margin: 0; flex: 1;
+  }
+  .saved-status {
+    font-size: 11px; color: var(--muted);
+    padding: 4px 8px; border-radius: 6px;
+    background: var(--surface);
+  }
+  .saved-status.dirty { color: var(--amber); }
+  .saved-status.saved { color: var(--green); }
+  .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.15s, background 0.15s;
+    font-family: inherit;
+  }
+  button:hover  { background: var(--surface-2); }
+  button:active { opacity: 0.7; }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  button.danger {
+    color: var(--red);
+    border-color: rgba(239,68,68,0.3);
+  }
+
+  /* ── Layout ─────────────────────────────────────────────────── */
+  main {
+    max-width: 1400px; margin: 0 auto; padding: 20px 24px 80px;
+  }
+  .empty-state {
+    text-align: center; color: var(--muted);
+    padding: 80px 24px;
+    border: 1px dashed var(--border);
+    border-radius: 12px; margin-top: 40px;
+  }
+  .empty-state h2 { color: var(--text); margin: 0 0 8px; font-weight: 700; }
+
+  /* ── Page card ─────────────────────────────────────────────── */
+  .page {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 18px;
+    overflow: hidden;
+  }
+  .page-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .page-head input.title {
+    flex: 1; min-width: 240px;
+    background: transparent; border: none; color: var(--text);
+    font-size: 16px; font-weight: 800; padding: 4px 6px;
+    border-radius: 4px;
+    font-family: inherit;
+  }
+  .page-head input.title:focus {
+    outline: none; background: var(--surface-2);
+  }
+  .page-head .pages-count {
+    font-size: 11px; color: var(--muted); font-weight: 700;
+    letter-spacing: 0.4px;
+  }
+  .page-actions { display: flex; gap: 6px; }
+  .page-actions button { padding: 6px 10px; font-size: 11px; }
+
+  /* ── Platform multipicklist ─────────────────────────────────── */
+  .platforms {
+    display: flex; gap: 6px; align-items: center;
+    padding: 10px 16px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .platforms .label {
+    font-size: 10px; font-weight: 700; color: var(--muted);
+    letter-spacing: 0.6px; text-transform: uppercase;
+    margin-right: 4px;
+  }
+  .pill {
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 11px; font-weight: 700;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.15s;
+  }
+  .pill:hover { background: var(--bg); }
+  .pill.on.web      { background: rgba(79,124,255,0.15); border-color: var(--accent); color: var(--accent); }
+  .pill.on.mweb     { background: rgba(168,85,247,0.15); border-color: var(--purple); color: var(--purple); }
+  .pill.on.react    { background: rgba(34,197,94,0.15);  border-color: var(--green);  color: var(--green); }
+
+  /* ── Three-column grid ─────────────────────────────────────── */
+  .columns {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+  }
+  @media (max-width: 900px) {
+    .columns { grid-template-columns: 1fr; }
+  }
+  .col {
+    border-right: 1px solid var(--border);
+    padding: 12px 14px;
+    min-height: 120px;
+  }
+  .col:last-child { border-right: none; }
+  @media (max-width: 900px) {
+    .col { border-right: none; border-bottom: 1px solid var(--border); }
+    .col:last-child { border-bottom: none; }
+  }
+  .col-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .col-title {
+    font-size: 11px; font-weight: 800;
+    letter-spacing: 0.6px; text-transform: uppercase;
+  }
+  .col.enhancements .col-title { color: var(--accent); }
+  .col.issues       .col-title { color: var(--red); }
+  .col.questions    .col-title { color: var(--amber); }
+  .col-count {
+    font-size: 10px; color: var(--muted);
+    background: var(--surface-2);
+    padding: 2px 7px;
+    border-radius: 999px;
+  }
+
+  .notes { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  .note {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    display: flex; align-items: flex-start; gap: 8px;
+  }
+  .note textarea {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    resize: none;
+    overflow: hidden;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.45;
+    padding: 0;
+    min-height: 18px;
+  }
+  .note textarea:focus { outline: none; }
+  .note-del {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    padding: 0;
+    width: 20px; height: 20px;
+    line-height: 1;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .note-del:hover { background: rgba(239,68,68,0.12); color: var(--red); }
+  .add-note {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--muted);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px; font-weight: 700;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+  }
+  .add-note:hover { color: var(--text); border-color: var(--muted); background: var(--surface-2); }
+
+  /* ── Collapsed state ───────────────────────────────────────── */
+  .page.collapsed .platforms,
+  .page.collapsed .columns { display: none; }
+  .collapse-btn::before { content: "▾"; display: inline-block; transition: transform 0.15s; }
+  .page.collapsed .collapse-btn::before { transform: rotate(-90deg); }
+
+  /* ── Modal overlay ─────────────────────────────────────────── */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 100; padding: 24px;
+  }
+  .overlay.show { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 100%; max-width: 600px;
+    padding: 20px;
+    max-height: 80vh;
+    display: flex; flex-direction: column;
+  }
+  .modal h2 { margin: 0 0 8px; font-size: 18px; font-weight: 800; }
+  .modal p  { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+  .modal textarea {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 10px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px; min-height: 200px; resize: vertical;
+  }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 24px;
+    transform: translateX(-50%);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 13px; font-weight: 700;
+    opacity: 0; transition: opacity 0.2s;
+    z-index: 200; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>DTF Web Experience — Feedback</h1>
+  <span class="saved-status saved" id="saved-status">Saved</span>
+  <div class="header-actions">
+    <button id="add-page-btn" class="primary">+ Add page</button>
+    <button id="import-btn">Import</button>
+    <button id="export-btn">Export JSON</button>
+    <button id="copy-md-btn">Copy as Markdown</button>
+    <button id="reset-btn" class="danger">Reset</button>
+  </div>
+</header>
+
+<main id="pages-container"></main>
+
+<!-- Import modal -->
+<div class="overlay" id="import-overlay">
+  <div class="modal">
+    <h2>Import feedback</h2>
+    <p>Paste a JSON export to load it. Replaces all current entries (the current state is auto-saved to your browser, but Import overwrites it).</p>
+    <textarea id="import-textarea" placeholder='{ "version": 1, "pages": [...] }'></textarea>
+    <div class="modal-actions">
+      <button id="import-cancel">Cancel</button>
+      <button id="import-load" class="primary">Load</button>
+    </div>
+  </div>
+</div>
+
+<!-- Export modal -->
+<div class="overlay" id="export-overlay">
+  <div class="modal">
+    <h2>Export JSON</h2>
+    <p>Copy the JSON below, or click Download to save it as a file you can drop into a Claude conversation.</p>
+    <textarea id="export-textarea" readonly></textarea>
+    <div class="modal-actions">
+      <button id="export-cancel">Close</button>
+      <button id="export-copy">Copy</button>
+      <button id="export-download" class="primary">Download .json</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ─── State ──────────────────────────────────────────────────────
+const STORAGE_KEY = 'ftf-feedback-v1';
+const STATE_VERSION = 1;
+
+const PLATFORMS = [
+  { id: 'web',   label: 'Web' },
+  { id: 'mweb',  label: 'mWeb' },
+  { id: 'react', label: 'React App' },
+];
+
+const DEFAULT_SEED = [
+  { title: 'Sign In / Auth' },
+  { title: 'League Picker' },
+  { title: 'Trios (Ranking)' },
+  { title: 'Tiers' },
+  { title: 'Find a Trade' },
+  { title: 'Trade Matches' },
+  { title: 'League Summary' },
+  { title: 'Leaderboards' },
+  { title: 'Settings / Notifications' },
+];
+
+let state = loadState();
+let saveTimer = null;
+
+function newId() {
+  return 'id_' + Math.random().toString(36).slice(2, 10);
+}
+
+function newPage(title) {
+  return {
+    id: newId(),
+    title: title || 'Untitled page',
+    platforms: ['web'],   // default selection — most relevant given context
+    enhancements: [],
+    issues: [],
+    questions: [],
+    collapsed: false,
+  };
+}
+
+function newNote(text) {
+  return { id: newId(), text: text || '' };
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.version === STATE_VERSION && Array.isArray(parsed.pages)) {
+        return parsed;
+      }
+    }
+  } catch {
+    // fall through to seed
+  }
+  return {
+    version: STATE_VERSION,
+    updatedAt: new Date().toISOString(),
+    pages: DEFAULT_SEED.map((s) => newPage(s.title)),
+  };
+}
+
+function saveState() {
+  state.updatedAt = new Date().toISOString();
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    showToast('Save failed: ' + (e.message || 'storage error'));
+    return;
+  }
+  setSavedStatus('saved');
+}
+
+function setSavedStatus(kind) {
+  const el = document.getElementById('saved-status');
+  el.classList.remove('saved', 'dirty');
+  if (kind === 'dirty') {
+    el.classList.add('dirty');
+    el.textContent = 'Saving…';
+  } else {
+    el.classList.add('saved');
+    const t = new Date();
+    el.textContent = 'Saved · ' + t.toLocaleTimeString();
+  }
+}
+
+function debounceSave() {
+  setSavedStatus('dirty');
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveState, 300);
+}
+
+// ─── DOM helpers ───────────────────────────────────────────────
+function el(tag, props, ...children) {
+  const node = document.createElement(tag);
+  if (props) {
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'class') node.className = v;
+      else if (k === 'on' && v && typeof v === 'object') {
+        for (const [evt, fn] of Object.entries(v)) node.addEventListener(evt, fn);
+      } else if (k in node) node[k] = v;
+      else node.setAttribute(k, v);
+    }
+  }
+  for (const c of children) {
+    if (c == null || c === false) continue;
+    if (typeof c === 'string') node.appendChild(document.createTextNode(c));
+    else node.appendChild(c);
+  }
+  return node;
+}
+
+function autoGrow(textarea) {
+  textarea.style.height = 'auto';
+  textarea.style.height = textarea.scrollHeight + 'px';
+}
+
+// ─── Render ────────────────────────────────────────────────────
+function render() {
+  const container = document.getElementById('pages-container');
+  container.innerHTML = '';
+  if (state.pages.length === 0) {
+    container.appendChild(
+      el('div', { class: 'empty-state' },
+        el('h2', null, 'No pages yet'),
+        el('p', null, 'Hit "Add page" in the header to create your first feedback section.')
+      )
+    );
+    return;
+  }
+  state.pages.forEach((page, idx) => {
+    container.appendChild(renderPage(page, idx));
+  });
+  // Auto-grow all textareas after layout
+  container.querySelectorAll('textarea').forEach(autoGrow);
+}
+
+function renderPage(page, idx) {
+  // Header bar
+  const titleInput = el('input', {
+    class: 'title',
+    type: 'text',
+    value: page.title,
+    placeholder: 'Page name (e.g. Find a Trade)',
+    on: {
+      input: (e) => {
+        page.title = e.target.value;
+        debounceSave();
+      },
+    },
+  });
+
+  const totalCount = page.enhancements.length + page.issues.length + page.questions.length;
+  const countEl = el('span', { class: 'pages-count' },
+    `${totalCount} note${totalCount === 1 ? '' : 's'}`
+  );
+
+  const collapseBtn = el('button', {
+    class: 'collapse-btn',
+    title: page.collapsed ? 'Expand' : 'Collapse',
+    on: { click: () => {
+      page.collapsed = !page.collapsed;
+      saveState();
+      render();
+    }},
+  });
+
+  const moveUpBtn = el('button', {
+    title: 'Move up',
+    disabled: idx === 0,
+    on: { click: () => {
+      if (idx === 0) return;
+      [state.pages[idx-1], state.pages[idx]] = [state.pages[idx], state.pages[idx-1]];
+      saveState(); render();
+    }},
+  }, '↑');
+
+  const moveDownBtn = el('button', {
+    title: 'Move down',
+    disabled: idx === state.pages.length - 1,
+    on: { click: () => {
+      if (idx === state.pages.length - 1) return;
+      [state.pages[idx+1], state.pages[idx]] = [state.pages[idx], state.pages[idx+1]];
+      saveState(); render();
+    }},
+  }, '↓');
+
+  const deleteBtn = el('button', {
+    class: 'danger',
+    title: 'Delete page',
+    on: { click: () => {
+      const n = page.enhancements.length + page.issues.length + page.questions.length;
+      const msg = n > 0
+        ? `Delete "${page.title}" and its ${n} note${n === 1 ? '' : 's'}?`
+        : `Delete "${page.title}"?`;
+      if (!confirm(msg)) return;
+      state.pages.splice(idx, 1);
+      saveState(); render();
+    }},
+  }, '✕');
+
+  const head = el('div', { class: 'page-head' },
+    titleInput,
+    countEl,
+    el('div', { class: 'page-actions' },
+      moveUpBtn, moveDownBtn, collapseBtn, deleteBtn
+    )
+  );
+
+  // Platform multipicklist
+  const platformsRow = el('div', { class: 'platforms' },
+    el('span', { class: 'label' }, 'Platforms'),
+    ...PLATFORMS.map(({ id, label }) => {
+      const on = page.platforms.includes(id);
+      return el('span', {
+        class: `pill ${id} ${on ? 'on' : ''}`,
+        on: { click: () => {
+          if (on) page.platforms = page.platforms.filter((p) => p !== id);
+          else    page.platforms = [...page.platforms, id];
+          saveState(); render();
+        }},
+      }, label);
+    })
+  );
+
+  // Three columns
+  const columns = el('div', { class: 'columns' },
+    renderColumn('enhancements', 'Enhancements', page.enhancements, page),
+    renderColumn('issues',       'Issues',       page.issues,       page),
+    renderColumn('questions',    'Questions',    page.questions,    page),
+  );
+
+  return el('div', { class: `page ${page.collapsed ? 'collapsed' : ''}`, 'data-page-id': page.id },
+    head,
+    platformsRow,
+    columns,
+  );
+}
+
+function renderColumn(kind, title, notes, page) {
+  const head = el('div', { class: 'col-head' },
+    el('span', { class: 'col-title' }, title),
+    el('span', { class: 'col-count' }, String(notes.length)),
+  );
+
+  const list = el('div', { class: 'notes' },
+    ...notes.map((note, noteIdx) => renderNote(note, noteIdx, kind, page))
+  );
+
+  const addBtn = el('button', {
+    class: 'add-note',
+    on: { click: () => {
+      page[kind].push(newNote(''));
+      saveState();
+      render();
+      // Focus the newly-added note
+      const lastNote = document.querySelectorAll(`[data-page-id="${page.id}"] .col.${kind} .note textarea`);
+      if (lastNote.length) lastNote[lastNote.length - 1].focus();
+    }},
+  }, `+ Add ${title.toLowerCase().slice(0, -1)}`);
+
+  return el('div', { class: `col ${kind}` }, head, list, addBtn);
+}
+
+function renderNote(note, noteIdx, kind, page) {
+  const ta = el('textarea', {
+    placeholder: 'Type here…',
+    rows: 1,
+    on: {
+      input: (e) => {
+        note.text = e.target.value;
+        debounceSave();
+        autoGrow(e.target);
+      },
+      blur: () => {
+        // Trim and re-render count if content changed
+        if (note.text !== note.text.trim()) {
+          note.text = note.text.trim();
+          saveState();
+        }
+      },
+    },
+  });
+  ta.value = note.text;
+
+  const delBtn = el('button', {
+    class: 'note-del',
+    title: 'Delete note',
+    on: { click: () => {
+      page[kind].splice(noteIdx, 1);
+      saveState(); render();
+    }},
+  }, '×');
+
+  return el('div', { class: 'note' }, ta, delBtn);
+}
+
+// ─── Buttons ───────────────────────────────────────────────────
+document.getElementById('add-page-btn').addEventListener('click', () => {
+  state.pages.push(newPage('New page'));
+  saveState();
+  render();
+  // scroll to end + focus the new title
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  setTimeout(() => {
+    const inputs = document.querySelectorAll('.page-head input.title');
+    if (inputs.length) inputs[inputs.length - 1].focus();
+  }, 50);
+});
+
+document.getElementById('reset-btn').addEventListener('click', () => {
+  if (!confirm('Wipe ALL feedback and reset to the default page list? Cannot be undone.')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  state = loadState();
+  saveState();
+  render();
+  showToast('Reset to defaults');
+});
+
+// ── Export ────────────────────────────────────────────────────
+document.getElementById('export-btn').addEventListener('click', () => {
+  const json = JSON.stringify(state, null, 2);
+  const ta = document.getElementById('export-textarea');
+  ta.value = json;
+  document.getElementById('export-overlay').classList.add('show');
+  setTimeout(() => { ta.select(); }, 50);
+});
+document.getElementById('export-cancel').addEventListener('click', () => {
+  document.getElementById('export-overlay').classList.remove('show');
+});
+document.getElementById('export-copy').addEventListener('click', async () => {
+  const ta = document.getElementById('export-textarea');
+  try {
+    await navigator.clipboard.writeText(ta.value);
+    showToast('Copied to clipboard');
+  } catch {
+    ta.select();
+    document.execCommand('copy');
+    showToast('Copied');
+  }
+});
+document.getElementById('export-download').addEventListener('click', () => {
+  const json = document.getElementById('export-textarea').value;
+  const blob = new Blob([json], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `dtf-feedback-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 100);
+  showToast('Downloaded');
+});
+
+// ── Import ────────────────────────────────────────────────────
+document.getElementById('import-btn').addEventListener('click', () => {
+  document.getElementById('import-textarea').value = '';
+  document.getElementById('import-overlay').classList.add('show');
+  setTimeout(() => document.getElementById('import-textarea').focus(), 50);
+});
+document.getElementById('import-cancel').addEventListener('click', () => {
+  document.getElementById('import-overlay').classList.remove('show');
+});
+document.getElementById('import-load').addEventListener('click', () => {
+  const raw = document.getElementById('import-textarea').value.trim();
+  if (!raw) return;
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { alert('Invalid JSON: ' + e.message); return; }
+  if (!parsed || parsed.version !== STATE_VERSION || !Array.isArray(parsed.pages)) {
+    alert('JSON does not look like a feedback export (expected {version: 1, pages: [...]}).');
+    return;
+  }
+  if (!confirm(`Replace current state with ${parsed.pages.length} imported page(s)? Current data will be overwritten.`)) return;
+  // Re-stamp ids so we don't collide if imported twice
+  state = {
+    version: STATE_VERSION,
+    updatedAt: new Date().toISOString(),
+    pages: parsed.pages.map((p) => ({
+      id: newId(),
+      title: String(p.title || 'Untitled'),
+      platforms: Array.isArray(p.platforms) ? p.platforms.filter((x) => PLATFORMS.find((pl) => pl.id === x)) : [],
+      enhancements: (p.enhancements || []).map((n) => ({ id: newId(), text: String(n.text || '') })),
+      issues:       (p.issues       || []).map((n) => ({ id: newId(), text: String(n.text || '') })),
+      questions:    (p.questions    || []).map((n) => ({ id: newId(), text: String(n.text || '') })),
+      collapsed: !!p.collapsed,
+    })),
+  };
+  saveState();
+  render();
+  document.getElementById('import-overlay').classList.remove('show');
+  showToast('Imported');
+});
+
+// ── Markdown export (clipboard) ───────────────────────────────
+document.getElementById('copy-md-btn').addEventListener('click', async () => {
+  const md = toMarkdown(state);
+  try {
+    await navigator.clipboard.writeText(md);
+    showToast('Markdown copied');
+  } catch {
+    // fallback: open export modal with markdown
+    const ta = document.getElementById('export-textarea');
+    ta.value = md;
+    document.getElementById('export-overlay').classList.add('show');
+    setTimeout(() => ta.select(), 50);
+  }
+});
+
+function toMarkdown(s) {
+  const platformLabel = (id) => (PLATFORMS.find((p) => p.id === id) || {}).label || id;
+  const lines = [];
+  lines.push(`# DTF Web Experience — Feedback`);
+  lines.push(`_Updated ${new Date(s.updatedAt).toLocaleString()}_`);
+  lines.push('');
+  s.pages.forEach((p) => {
+    lines.push(`## ${p.title || 'Untitled'}`);
+    if (p.platforms.length) {
+      lines.push(`**Platforms:** ${p.platforms.map(platformLabel).join(', ')}`);
+    }
+    lines.push('');
+    const sections = [
+      ['Enhancements', p.enhancements],
+      ['Issues',       p.issues],
+      ['Questions',    p.questions],
+    ];
+    for (const [name, notes] of sections) {
+      const non = notes.filter((n) => n.text.trim());
+      if (non.length === 0) continue;
+      lines.push(`### ${name}`);
+      non.forEach((n) => {
+        // Indent multi-line notes under a single bullet
+        const text = n.text.trim().split('\n').map((ln, i) => i === 0 ? ln : '  ' + ln).join('\n');
+        lines.push(`- ${text}`);
+      });
+      lines.push('');
+    }
+  });
+  return lines.join('\n').trim() + '\n';
+}
+
+// ── Toast ─────────────────────────────────────────────────────
+let toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+// ── Close modals on Escape / backdrop click ───────────────────
+['import-overlay', 'export-overlay'].forEach((id) => {
+  const overlay = document.getElementById(id);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.classList.remove('show');
+  });
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.overlay.show').forEach((o) => o.classList.remove('show'));
+  }
+});
+
+// ── Initial render ────────────────────────────────────────────
+render();
+saveState();    // ensure version stamp is current
+</script>
+</body>
+</html>

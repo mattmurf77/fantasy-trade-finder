@@ -1,0 +1,32 @@
+appId: com.fantasytradefinder.app
+---
+# Regression: in build #6, releasing a dragged Tiers chip crashed the app
+# (worklet/JS boundary in Gesture.Pan().onEnd — see commit f5c8bc3).
+# The smoke we want: long-press a chip, drag, release, and the app is
+# still alive on the same screen.
+- launchApp:
+    clearState: true
+    stopApp: true
+- tapOn: "Try the app on a sample league"
+- extendedWaitUntil:
+    visible: "Trades"
+    timeout: 20000
+- tapOn: "Rank"
+- tapOn:
+    text: "Tiers"
+    index: 0
+- extendedWaitUntil:
+    visible: "RB"
+    timeout: 10000
+# Long-press + drag a player chip. Coordinates target the middle of the
+# screen where a chip almost certainly sits in the Solid/Depth band; the
+# drag goes ~200px up which should land it in a different tier. Maestro's
+# swipe `duration` ≥ 250ms triggers Gesture.Pan().activateAfterLongPress(220).
+- swipe:
+    start: 50%, 60%
+    end: 50%, 30%
+    duration: 1200
+# If the worklet bug regressed, the app would crash here. Asserting the
+# Tiers screen header is still visible proves we survived.
+- assertVisible: "RB"
+- takeScreenshot: 06-tiers-after-drag
