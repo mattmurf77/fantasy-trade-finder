@@ -71,6 +71,7 @@ from .database import (
     load_member_rankings, load_league_members, get_ranking_coverage,
     check_for_match, match_already_exists,
     create_trade_match, load_matches,
+    load_awaiting_trades,
     record_match_disposition,
     upsert_league_preference, load_league_preference,
     sync_players, needs_player_sync,
@@ -3117,6 +3118,88 @@ def get_trade_matches_all():
         return jsonify(enriched)
     except Exception as e:
         log.warning("get_trade_matches_all error: %s", e)
+        return jsonify([])
+
+
+@app.route("/api/trades/awaiting")
+def get_awaiting_trades():
+    """
+    GET /api/trades/awaiting
+    Returns cross-league trades the caller has liked that have NOT yet
+    matured into a mutual match. Powers the "Awaiting them" segment on
+    MatchesScreen so users can see their one-sided likes — the gap between
+    "I swiped accept" and "we both swiped accept".
+
+    Response shape (bare array, mirrors /api/trades/matches/all where it
+    overlaps so the same mobile tile component can render either):
+      [
+        {
+          trade_id, league_id, league_name?,
+          partner_id, partner_name,
+          my_give[], my_receive[],
+          my_give_names[], my_receive_names[],
+          liked_at,
+        },
+        ...
+      ]
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    if not g_user_id:
+        return jsonify([])
+
+    try:
+        awaiting = load_awaiting_trades(user_id=g_user_id)
+        if not awaiting:
+            return jsonify([])
+
+        # Batch enrichment — same pattern as /api/trades/matches/all so we
+        # don't N+1 the players/leagues tables.
+        from sqlalchemy import select as _sa_select
+        from .database import leagues_table, players_table, engine as _engine
+
+        league_ids = {a["league_id"] for a in awaiting}
+        all_pids: set[str] = set()
+        for a in awaiting:
+            all_pids.update(a.get("my_give") or [])
+            all_pids.update(a.get("my_receive") or [])
+
+        league_name_by_id: dict[str, str] = {}
+        player_name_by_id: dict[str, str] = {}
+        with _engine.connect() as _conn:
+            if league_ids:
+                lrows = _conn.execute(
+                    _sa_select(
+                        leagues_table.c.sleeper_league_id,
+                        leagues_table.c.name,
+                    ).where(leagues_table.c.sleeper_league_id.in_(league_ids))
+                ).fetchall()
+                for lr in lrows:
+                    league_name_by_id.setdefault(lr.sleeper_league_id, lr.name or "")
+            if all_pids:
+                prows = _conn.execute(
+                    _sa_select(
+                        players_table.c.player_id,
+                        players_table.c.full_name,
+                    ).where(players_table.c.player_id.in_(all_pids))
+                ).fetchall()
+                for pr in prows:
+                    player_name_by_id[pr.player_id] = pr.full_name or pr.player_id
+
+        enriched = []
+        for a in awaiting:
+            give_ids    = a.get("my_give")    or []
+            receive_ids = a.get("my_receive") or []
+            enriched.append({
+                **a,
+                "league_name":      league_name_by_id.get(a["league_id"], ""),
+                "my_give_names":    [player_name_by_id.get(pid, pid) for pid in give_ids],
+                "my_receive_names": [player_name_by_id.get(pid, pid) for pid in receive_ids],
+            })
+        return jsonify(enriched)
+    except Exception as e:
+        log.warning("get_awaiting_trades error: %s", e)
         return jsonify([])
 
 

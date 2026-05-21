@@ -18,12 +18,13 @@ import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import TradeCardComp from '../components/TradeCard';
 import Toast from '../components/Toast';
-import { getAllMatches, setMatchDisposition } from '../api/trades';
+import { getAllMatches, getAwaitingTrades, setMatchDisposition } from '../api/trades';
 import { useSession } from '../state/useSession';
 import { relativeTime } from '../utils/relativeTime';
-import type { TradeMatch, Player } from '../shared/types';
+import type { TradeMatch, AwaitingTrade, Player } from '../shared/types';
 
 type LeagueFilter = string | 'all';
+type Segment = 'mutual' | 'awaiting';
 
 // Cross-league matches inbox. Pulls /api/trades/matches/all so users can
 // see pending / accepted / declined matches regardless of which league is
@@ -32,12 +33,17 @@ type LeagueFilter = string | 'all';
 //
 // On Accept: deep-link to the Sleeper trade-propose URL so the user can
 // ratify the trade on Sleeper directly.
+//
+// The "Awaiting them" segment surfaces the gap between "I swiped accept"
+// and "we both swiped accept" — trades the caller has liked that haven't
+// yet been mirrored by the counterparty. Backed by /api/trades/awaiting.
 export default function MatchesScreen() {
   const queryClient = useQueryClient();
   const leagues = useSession((s) => s.leagues);
   const activeLeague = useSession((s) => s.league);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
   const [filterLeagueId, setFilterLeagueId] = useState<LeagueFilter>('all');
+  const [segment, setSegment] = useState<Segment>('mutual');
 
   // Stable query key — `'all'` not the active league. The endpoint returns
   // every-league results, so league switching shouldn't invalidate this
@@ -49,6 +55,16 @@ export default function MatchesScreen() {
     queryFn:  getAllMatches,
     staleTime: 15_000,
     placeholderData: (prev) => prev,
+  });
+
+  // Awaiting trades — fetched lazily the first time the segment is opened,
+  // then kept warm so toggling back is instant. Same cross-league scope
+  // as matches/all; client-side league filter is reused.
+  const awaitingQuery = useQuery({
+    queryKey: ['awaiting-trades'],
+    queryFn:  getAwaitingTrades,
+    staleTime: 15_000,
+    enabled:  segment === 'awaiting',
   });
 
   const dispMutation = useMutation({
@@ -112,38 +128,60 @@ export default function MatchesScreen() {
   }
 
   const allMatches: TradeMatch[] = matchesQuery.data || [];
+  const allAwaiting: AwaitingTrade[] = awaitingQuery.data || [];
 
   const visibleMatches = useMemo(() => {
     if (filterLeagueId === 'all') return allMatches;
     return allMatches.filter((m) => m.league_id === filterLeagueId);
   }, [allMatches, filterLeagueId]);
 
-  // Filter chips: "All" + one per league. We default to using the cached
-  // useSession.leagues list so the chips are stable even if the user has
-  // matches in leagues no longer in their cache (rare). Any league that
-  // appears in the match data but not the cache gets a fallback chip.
+  const visibleAwaiting = useMemo(() => {
+    if (filterLeagueId === 'all') return allAwaiting;
+    return allAwaiting.filter((a) => a.league_id === filterLeagueId);
+  }, [allAwaiting, filterLeagueId]);
+
+  // Filter chips: "All" + one per league. Default to the cached session
+  // leagues so chips are stable even if the user has matches in leagues no
+  // longer in their cache. Awaiting trades can also surface unknown
+  // leagues — fold both lists into the "extras" set so neither segment is
+  // missing chips for the leagues it actually contains.
   const filterChips = useMemo(() => {
     const seenIds = new Set(leagues.map((l) => l.league_id));
-    const extras = allMatches
+    const extrasMatches = allMatches
       .filter((m) => !seenIds.has(m.league_id))
       .map((m) => ({ id: m.league_id, name: m.league_name || 'Unknown league' }));
+    const extrasAwaiting = allAwaiting
+      .filter((a) => !seenIds.has(a.league_id))
+      .map((a) => ({ id: a.league_id, name: a.league_name || 'Unknown league' }));
     const cachedChips = leagues.map((l) => ({ id: l.league_id, name: l.name }));
     // Dedupe extras by id
     const seenExtra = new Set<string>();
-    const uniqueExtras = extras.filter((e) => {
+    const uniqueExtras = [...extrasMatches, ...extrasAwaiting].filter((e) => {
       if (seenExtra.has(e.id)) return false;
       seenExtra.add(e.id);
       return true;
     });
     return [{ id: 'all' as const, name: 'All' }, ...cachedChips, ...uniqueExtras];
-  }, [leagues, allMatches]);
+  }, [leagues, allMatches, allAwaiting]);
 
   const filteredLeagueName =
     filterLeagueId === 'all'
       ? null
       : leagues.find((l) => l.league_id === filterLeagueId)?.name
         || allMatches.find((m) => m.league_id === filterLeagueId)?.league_name
+        || allAwaiting.find((a) => a.league_id === filterLeagueId)?.league_name
         || 'this league';
+
+  const isLoading = segment === 'mutual' ? matchesQuery.isLoading : awaitingQuery.isLoading;
+  const isError   = segment === 'mutual' ? matchesQuery.isError   : awaitingQuery.isError;
+  const isFetching =
+    segment === 'mutual'
+      ? matchesQuery.isFetching && !matchesQuery.isLoading
+      : awaitingQuery.isFetching && !awaitingQuery.isLoading;
+  const onRefresh = () => {
+    if (segment === 'mutual') matchesQuery.refetch();
+    else                      awaitingQuery.refetch();
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -157,8 +195,25 @@ export default function MatchesScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Matches</Text>
         <Text style={styles.subtitle}>
-          Trades where you and a leaguemate both said yes — across every league.
+          {segment === 'mutual'
+            ? 'Trades where you and a leaguemate both said yes — across every league.'
+            : "Trades you've liked — waiting on the other owner to swipe."}
         </Text>
+      </View>
+
+      {/* Segment toggle. Two-pill control to flip between mutual matches
+          (default) and one-sided likes waiting on the counterparty. */}
+      <View style={styles.segmentRow}>
+        <SegmentBtn
+          label="Mutual matches"
+          active={segment === 'mutual'}
+          onPress={() => setSegment('mutual')}
+        />
+        <SegmentBtn
+          label="Awaiting them"
+          active={segment === 'awaiting'}
+          onPress={() => setSegment('awaiting')}
+        />
       </View>
 
       {/* League filter chip row. Horizontally scrollable so 5+ leagues
@@ -192,7 +247,10 @@ export default function MatchesScreen() {
         })}
       </ScrollView>
 
-      {matchesQuery.data === undefined && matchesQuery.isLoading ? (
+      {(segment === 'mutual'
+          ? matchesQuery.data === undefined && matchesQuery.isLoading
+          : awaitingQuery.data === undefined && awaitingQuery.isLoading
+        ) ? (
         <View style={styles.list}>
           {[0, 1, 2].map((i) => (
             <View key={i} style={{ gap: spacing.xs, marginBottom: spacing.lg }}>
@@ -204,62 +262,137 @@ export default function MatchesScreen() {
             </View>
           ))}
         </View>
-      ) : matchesQuery.isError ? (
+      ) : isError ? (
         <View style={styles.centered}>
-          <Text style={styles.errorText}>Could not load matches.</Text>
-        </View>
-      ) : visibleMatches.length === 0 ? (
-        <View style={styles.centered}>
-          <Text style={styles.emptyTitle}>
-            {filterLeagueId === 'all'
-              ? 'No matches in any of your leagues yet'
-              : `No matches in ${filteredLeagueName} yet`}
-          </Text>
-          <Text style={styles.emptyBody}>
-            Head to the Trades tab and swipe on some proposals. When a
-            leaguemate likes the same trade, it'll show up here.
+          <Text style={styles.errorText}>
+            {segment === 'mutual' ? 'Could not load matches.' : 'Could not load pending trades.'}
           </Text>
         </View>
-      ) : (
-        <FlatList
-          contentContainerStyle={styles.list}
-          data={visibleMatches}
-          keyExtractor={(m) => m.match_id}
-          refreshControl={
-            <RefreshControl
-              refreshing={matchesQuery.isFetching && !matchesQuery.isLoading}
-              onRefresh={() => matchesQuery.refetch()}
-              tintColor={colors.accent}
-            />
-          }
-          renderItem={({ item }) => (
-            <View style={{ gap: spacing.xs }}>
-              {/* League badge — only shown in the "All" view; redundant
-                  when a single-league filter is active. */}
-              {filterLeagueId === 'all' && item.league_name ? (
-                <View style={styles.leagueBadgeRow}>
-                  <Text style={styles.leagueBadge}>🏈 {item.league_name}</Text>
-                </View>
-              ) : null}
-              <View style={styles.matchHeader}>
-                <Text style={styles.matchLabel}>
-                  🎯 New match with @{item.counterparty_username}
-                </Text>
-                <Text style={styles.matchTime}>{relativeTime(item.created_at)}</Text>
-              </View>
-              <TradeCardComp
-                variant="match"
-                data={matchToTradeCardShape(item, activeLeague?.league_id)}
-                onAccept={() => handleAccept(item)}
-                onDecline={() => handleDecline(item)}
-                acting={dispMutation.isPending}
+      ) : segment === 'mutual' ? (
+        visibleMatches.length === 0 ? (
+          <View style={styles.centered}>
+            <Text style={styles.emptyTitle}>
+              {filterLeagueId === 'all'
+                ? 'No matches in any of your leagues yet'
+                : `No matches in ${filteredLeagueName} yet`}
+            </Text>
+            <Text style={styles.emptyBody}>
+              Head to the Trades tab and swipe on some proposals. When a
+              leaguemate likes the same trade, it'll show up here.
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            contentContainerStyle={styles.list}
+            data={visibleMatches}
+            keyExtractor={(m) => m.match_id}
+            refreshControl={
+              <RefreshControl
+                refreshing={isFetching}
+                onRefresh={onRefresh}
+                tintColor={colors.accent}
               />
-            </View>
-          )}
-          ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
-        />
+            }
+            renderItem={({ item }) => (
+              <View style={{ gap: spacing.xs }}>
+                {/* League badge — only shown in the "All" view; redundant
+                    when a single-league filter is active. */}
+                {filterLeagueId === 'all' && item.league_name ? (
+                  <View style={styles.leagueBadgeRow}>
+                    <Text style={styles.leagueBadge}>🏈 {item.league_name}</Text>
+                  </View>
+                ) : null}
+                <View style={styles.matchHeader}>
+                  <Text style={styles.matchLabel}>
+                    🎯 New match with @{item.counterparty_username}
+                  </Text>
+                  <Text style={styles.matchTime}>{relativeTime(item.created_at)}</Text>
+                </View>
+                <TradeCardComp
+                  variant="match"
+                  data={matchToTradeCardShape(item, activeLeague?.league_id)}
+                  onAccept={() => handleAccept(item)}
+                  onDecline={() => handleDecline(item)}
+                  acting={dispMutation.isPending}
+                />
+              </View>
+            )}
+            ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
+          />
+        )
+      ) : (
+        // Awaiting-them segment
+        visibleAwaiting.length === 0 ? (
+          <View style={styles.centered}>
+            <Text style={styles.emptyTitle}>No pending trades.</Text>
+            <Text style={styles.emptyBody}>
+              Swipe more in the Trades tab.
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            contentContainerStyle={styles.list}
+            data={visibleAwaiting}
+            keyExtractor={(a) => `${a.league_id}:${a.trade_id}`}
+            refreshControl={
+              <RefreshControl
+                refreshing={isFetching}
+                onRefresh={onRefresh}
+                tintColor={colors.accent}
+              />
+            }
+            renderItem={({ item }) => (
+              <View style={{ gap: spacing.xs }}>
+                {filterLeagueId === 'all' && item.league_name ? (
+                  <View style={styles.leagueBadgeRow}>
+                    <Text style={styles.leagueBadge}>🏈 {item.league_name}</Text>
+                  </View>
+                ) : null}
+                <View style={styles.matchHeader}>
+                  <Text style={styles.awaitingLabel}>
+                    ⏳ Waiting on @{item.counterparty_username}
+                  </Text>
+                  <Text style={styles.matchTime}>{relativeTime(item.liked_at)}</Text>
+                </View>
+                {/* Reuse swipe variant — no Accept/Decline buttons because
+                    the user has already swiped accept. They're just waiting
+                    on the other owner. */}
+                <TradeCardComp
+                  variant="swipe"
+                  data={awaitingToTradeCardShape(item, activeLeague?.league_id)}
+                />
+              </View>
+            )}
+            ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
+          />
+        )
       )}
     </SafeAreaView>
+  );
+}
+
+function SegmentBtn({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.segmentBtn,
+        active && styles.segmentBtnActive,
+        pressed && { opacity: 0.7 },
+      ]}
+    >
+      <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -296,6 +429,38 @@ function matchToTradeCardShape(m: TradeMatch, fallbackLeague: string | undefined
   };
 }
 
+// Same adapter pattern for awaiting trades — parallel TradeMatch shape so
+// we don't pay for a second TradeCard variant. Match score is unknown for
+// historical likes (the in-memory card may not still be around), so we
+// show 100 to keep the strength bar consistent with mutual matches.
+function awaitingToTradeCardShape(a: AwaitingTrade, fallbackLeague: string | undefined) {
+  const POS_UNKNOWN = 'FLX' as any;
+  const give = a.my_side_player_ids.map((id, i): Player => ({
+    id,
+    name:     a.my_side_player_names?.[i] || id,
+    position: POS_UNKNOWN,
+    team:     '',
+  }));
+  const recv = a.their_side_player_ids.map((id, i): Player => ({
+    id,
+    name:     a.their_side_player_names?.[i] || id,
+    position: POS_UNKNOWN,
+    team:     '',
+  }));
+  return {
+    trade_id:           a.trade_id,
+    league_id:          a.league_id || fallbackLeague || '',
+    give_player_ids:    a.my_side_player_ids,
+    receive_player_ids: a.their_side_player_ids,
+    give_players:       give,
+    receive_players:    recv,
+    opponent_user_id:   a.counterparty_user_id,
+    opponent_username:  a.counterparty_username,
+    match_score:        100,
+    fairness:           1,
+  };
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
@@ -305,6 +470,29 @@ const styles = StyleSheet.create({
   // flexGrow:0 prevents the horizontal ScrollView from stretching to fill
   // remaining vertical space when the body below is an empty-state View.
   chipScroll: { flexGrow: 0, flexShrink: 0 },
+  segmentRow: {
+    flexDirection: 'row',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    gap: spacing.xs,
+  },
+  segmentBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+  },
+  segmentBtnActive: {
+    borderColor: colors.accent,
+    backgroundColor: 'rgba(79,124,255,0.10)',
+  },
+  segmentText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
+  segmentTextActive: { color: colors.accent },
+
   chipRow: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
@@ -344,6 +532,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   matchLabel: { color: colors.green, fontSize: fontSize.sm, fontWeight: '700' },
+  awaitingLabel: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
   matchTime: { color: colors.muted, fontSize: fontSize.xs },
   centered: {
     flex: 1,
