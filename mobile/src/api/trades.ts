@@ -39,9 +39,17 @@ function normalizeTradeCard(raw: any): TradeCard {
   // Backend's `mismatch_score` is the human-facing "deal compellingness"
   // value — same field the legacy web reads. `match_score` was the type
   // we picked when scaffolding; keep that name internal.
+  //
+  // The web renders the raw mismatch as a number (e.g. "Match score 247"),
+  // but the mobile UI treats `match_score` as a 0–100 percentage and feeds
+  // it to a clamped StrengthBar. Without scaling, anything with a raw
+  // mismatch ≥ 100 (i.e. essentially every surfaced trade — threshold is
+  // 40 and good deals are 100–300+) renders as a maxed-out 100% bar.
+  // Scale by /300 to match the same ceiling the backend's composite-score
+  // math already uses (trade_service.py: `min(mismatch, 300) / 300`).
   const matchScore =
     typeof raw?.match_score    === 'number' ? raw.match_score
-  : typeof raw?.mismatch_score === 'number' ? raw.mismatch_score
+  : typeof raw?.mismatch_score === 'number' ? Math.min(100, Math.max(0, (raw.mismatch_score / 300) * 100))
   : 0;
   // `fairness` may not be present (backend doesn't expose fairness_score
   // today). Pass through whatever we get; UI hides the row when undefined.
