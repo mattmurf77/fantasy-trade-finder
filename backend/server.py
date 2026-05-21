@@ -3039,7 +3039,9 @@ def get_trade_matches_all():
             all_pids.update(m.get("my_receive") or [])
 
         league_name_by_id: dict[str, str] = {}
-        player_name_by_id: dict[str, str] = {}
+        player_name_by_id: dict[str, str]     = {}
+        player_team_by_id: dict[str, str]     = {}
+        player_pos_by_id:  dict[str, str]     = {}
         with _engine.connect() as _conn:
             if league_ids:
                 lrows = _conn.execute(
@@ -3053,14 +3055,22 @@ def get_trade_matches_all():
                     # the names are the same regardless of which user owns it.
                     league_name_by_id.setdefault(lr.sleeper_league_id, lr.name or "")
             if all_pids:
+                # team + position come from the global players_table — mobile
+                # MatchesScreen needs them to render chips, and they're not
+                # available in the active league's session state for
+                # cross-league matches.
                 prows = _conn.execute(
                     _sa_select(
                         players_table.c.player_id,
                         players_table.c.full_name,
+                        players_table.c.team,
+                        players_table.c.position,
                     ).where(players_table.c.player_id.in_(all_pids))
                 ).fetchall()
                 for pr in prows:
                     player_name_by_id[pr.player_id] = pr.full_name or pr.player_id
+                    player_team_by_id[pr.player_id] = pr.team or ""
+                    player_pos_by_id[pr.player_id]  = pr.position or ""
 
         enriched = []
         for m in matches:
@@ -3068,9 +3078,13 @@ def get_trade_matches_all():
             receive_ids = m.get("my_receive") or []
             enriched.append({
                 **m,
-                "league_name":      league_name_by_id.get(m["league_id"], ""),
-                "my_give_names":    [player_name_by_id.get(pid, pid) for pid in give_ids],
-                "my_receive_names": [player_name_by_id.get(pid, pid) for pid in receive_ids],
+                "league_name":         league_name_by_id.get(m["league_id"], ""),
+                "my_give_names":       [player_name_by_id.get(pid, pid) for pid in give_ids],
+                "my_receive_names":    [player_name_by_id.get(pid, pid) for pid in receive_ids],
+                "my_give_teams":       [player_team_by_id.get(pid, "") for pid in give_ids],
+                "my_receive_teams":    [player_team_by_id.get(pid, "") for pid in receive_ids],
+                "my_give_positions":   [player_pos_by_id.get(pid, "")  for pid in give_ids],
+                "my_receive_positions":[player_pos_by_id.get(pid, "")  for pid in receive_ids],
             })
         return jsonify(enriched)
     except Exception as e:
@@ -3110,7 +3124,11 @@ def disposition_trade_match(match_id):
     if decision not in ("accept", "decline"):
         return jsonify({"error": "decision must be 'accept' or 'decline'"}), 400
 
-    if not g_user_id or not g_league:
+    # Disposition is keyed on match_id alone — the match carries its own
+    # league_id, so we don't require the caller's active session league to
+    # match. This lets the cross-league Matches inbox accept/decline a
+    # match from any league without first switching context.
+    if not g_user_id:
         return jsonify({"error": "session not initialised"}), 400
 
     try:
@@ -3266,10 +3284,12 @@ def disposition_trade_match(match_id):
             except Exception as _notif_err:
                 log.warning("Disposition notification failed (non-fatal): %s", _notif_err)
 
-        # Return refreshed match list so the frontend can re-render
-        league_id    = g_league.league_id
-        matches      = load_matches(user_id=g_user_id, league_id=league_id)
-        players_dict = {p.id: p for p in g_players}
+        # Return refreshed match list so the frontend can re-render.
+        # Use the match's own league_id (not the caller's active session
+        # league) so a cross-league disposition refreshes the correct slice.
+        match_league_id = result.get("league_id") or (g_league.league_id if g_league else None)
+        matches      = load_matches(user_id=g_user_id, league_id=match_league_id)
+        players_dict = {p.id: p for p in g_players} if g_players else {}
 
         enriched = []
         for m in matches:

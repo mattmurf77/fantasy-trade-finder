@@ -3053,6 +3053,7 @@ def record_match_disposition(
     return {
         "status":          "ok",
         "match_id":        match_id,
+        "league_id":       row.league_id,
         "both_decided":    both_decided,
         "outcome":         outcome,
         "partner_user_id": (row.user_b_id if is_a else row.user_a_id),

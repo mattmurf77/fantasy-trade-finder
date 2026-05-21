@@ -160,11 +160,14 @@ export default function MatchesScreen() {
       </View>
 
       {/* League filter chip row. Horizontally scrollable so 5+ leagues
-          don't cramp the viewport. Defaults to "All". */}
+          don't cramp the viewport. Defaults to "All". flexGrow:0 keeps the
+          row sized to its content even when the body below renders an
+          empty-state View with flex:1. */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         keyboardShouldPersistTaps="always"
+        style={styles.chipScroll}
         contentContainerStyle={styles.chipRow}
       >
         {filterChips.map((c) => {
@@ -252,22 +255,22 @@ export default function MatchesScreen() {
 
 // TradeMatch and TradeCard have overlapping but not identical shapes.
 // Cross-league enrichment (server.py: /api/trades/matches/all) provides
-// my_side_player_names + their_side_player_names — use those when present.
-// Falls back to the player ID as the display name (legacy behavior, only
-// happens when the backend hasn't been redeployed yet).
+// names + teams + positions as parallel arrays — use those when present.
+// Falls back to ID-as-name / "FA" / "FLX" (legacy behavior, only happens
+// when the backend hasn't been redeployed with the enrichment yet).
 function matchToTradeCardShape(m: TradeMatch, fallbackLeague: string | undefined) {
   const POS_UNKNOWN = 'FLX' as any;
   const give = m.my_side_player_ids.map((id, i): Player => ({
     id,
-    name:     m.my_side_player_names?.[i] || id,
-    position: POS_UNKNOWN,
-    team:     '',
+    name:     m.my_side_player_names?.[i]     || id,
+    position: m.my_side_player_positions?.[i] || POS_UNKNOWN,
+    team:     m.my_side_player_teams?.[i]     || '',
   }));
   const recv = m.their_side_player_ids.map((id, i): Player => ({
     id,
-    name:     m.their_side_player_names?.[i] || id,
-    position: POS_UNKNOWN,
-    team:     '',
+    name:     m.their_side_player_names?.[i]     || id,
+    position: m.their_side_player_positions?.[i] || POS_UNKNOWN,
+    team:     m.their_side_player_teams?.[i]     || '',
   }));
   return {
     trade_id:           m.match_id,
@@ -289,14 +292,20 @@ const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '800' },
   subtitle: { color: colors.muted, fontSize: fontSize.sm, marginTop: 4 },
 
+  // flexGrow:0 prevents the horizontal ScrollView from stretching to fill
+  // remaining vertical space when the body below is an empty-state View.
+  chipScroll: { flexGrow: 0, flexShrink: 0 },
   chipRow: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
     gap: spacing.xs,
+    alignItems: 'center',
   },
   chip: {
     paddingHorizontal: spacing.md,
-    paddingVertical: 6,
+    paddingVertical: 8,
+    minHeight: 32,
+    justifyContent: 'center',
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.border,
@@ -306,7 +315,8 @@ const styles = StyleSheet.create({
     borderColor: colors.accent,
     backgroundColor: 'rgba(79,124,255,0.10)',
   },
-  chipText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
+  // Explicit lineHeight prevents descenders ("g", "p") clipping at xs.
+  chipText: { color: colors.muted, fontSize: fontSize.xs, lineHeight: 16, fontWeight: '700' },
   chipTextActive: { color: colors.accent },
 
   list: { padding: spacing.lg, paddingBottom: 96 },

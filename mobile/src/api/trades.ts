@@ -144,18 +144,22 @@ function normalizeTradeMatch(raw: any): TradeMatch {
     return undefined;
   };
   return {
-    match_id:                String(raw?.match_id ?? ''),
-    league_id:               String(raw?.league_id ?? ''),
-    league_name:             raw?.league_name || undefined,
-    my_side_player_ids:      Array.isArray(raw?.my_give)    ? raw.my_give    : [],
-    their_side_player_ids:   Array.isArray(raw?.my_receive) ? raw.my_receive : [],
-    my_side_player_names:    Array.isArray(raw?.my_give_names)    ? raw.my_give_names    : undefined,
-    their_side_player_names: Array.isArray(raw?.my_receive_names) ? raw.my_receive_names : undefined,
-    counterparty_user_id:    String(raw?.partner_id ?? ''),
-    counterparty_username:   String(raw?.partner_name ?? raw?.partner_id ?? ''),
-    created_at:              String(raw?.matched_at ?? raw?.created_at ?? ''),
-    my_disposition:          decisionToDisposition(raw?.my_decision),
-    their_disposition:       decisionToDisposition(raw?.their_decision),
+    match_id:                    String(raw?.match_id ?? ''),
+    league_id:                   String(raw?.league_id ?? ''),
+    league_name:                 raw?.league_name || undefined,
+    my_side_player_ids:          Array.isArray(raw?.my_give)    ? raw.my_give    : [],
+    their_side_player_ids:       Array.isArray(raw?.my_receive) ? raw.my_receive : [],
+    my_side_player_names:        Array.isArray(raw?.my_give_names)        ? raw.my_give_names        : undefined,
+    their_side_player_names:     Array.isArray(raw?.my_receive_names)     ? raw.my_receive_names     : undefined,
+    my_side_player_teams:        Array.isArray(raw?.my_give_teams)        ? raw.my_give_teams        : undefined,
+    their_side_player_teams:     Array.isArray(raw?.my_receive_teams)     ? raw.my_receive_teams     : undefined,
+    my_side_player_positions:    Array.isArray(raw?.my_give_positions)    ? raw.my_give_positions    : undefined,
+    their_side_player_positions: Array.isArray(raw?.my_receive_positions) ? raw.my_receive_positions : undefined,
+    counterparty_user_id:        String(raw?.partner_id ?? ''),
+    counterparty_username:       String(raw?.partner_name ?? raw?.partner_id ?? ''),
+    created_at:                  String(raw?.matched_at ?? raw?.created_at ?? ''),
+    my_disposition:              decisionToDisposition(raw?.my_decision),
+    their_disposition:           decisionToDisposition(raw?.their_decision),
   };
 }
 
