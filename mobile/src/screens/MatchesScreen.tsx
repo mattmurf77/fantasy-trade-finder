@@ -5,7 +5,6 @@ import {
   StyleSheet,
   FlatList,
   RefreshControl,
-  ActivityIndicator,
   Linking,
   Alert,
   Pressable,
@@ -43,10 +42,13 @@ export default function MatchesScreen() {
   // Stable query key — `'all'` not the active league. The endpoint returns
   // every-league results, so league switching shouldn't invalidate this
   // cache. Filtering is done client-side below.
+  // `placeholderData: (prev) => prev` keeps the previous list visible
+  // across refetches so the screen doesn't blank on re-entry.
   const matchesQuery = useQuery({
     queryKey: ['matches', 'all'],
     queryFn:  getAllMatches,
     staleTime: 15_000,
+    placeholderData: (prev) => prev,
   });
 
   const dispMutation = useMutation({
@@ -187,9 +189,17 @@ export default function MatchesScreen() {
         })}
       </ScrollView>
 
-      {matchesQuery.isLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color={colors.accent} />
+      {matchesQuery.data === undefined && matchesQuery.isLoading ? (
+        <View style={styles.list}>
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={{ gap: spacing.xs, marginBottom: spacing.lg }}>
+              <View style={styles.matchHeader}>
+                <View style={styles.skeletonLabel} />
+                <View style={styles.skeletonTime} />
+              </View>
+              <View style={styles.skeletonCard} />
+            </View>
+          ))}
         </View>
       ) : matchesQuery.isError ? (
         <View style={styles.centered}>
@@ -333,6 +343,29 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   errorText: { color: colors.red, fontSize: fontSize.sm },
+
+  // Skeleton tiles — same outer dimensions as a real TradeCard match
+  // tile (radius.xl, border, surface bg) so the page shape is stable on
+  // first paint. Static — no shimmer/animation library introduced.
+  skeletonCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.xl,
+    height: 220,
+  },
+  skeletonLabel: {
+    width: 180,
+    height: 12,
+    borderRadius: radius.sm,
+    backgroundColor: colors.border,
+  },
+  skeletonTime: {
+    width: 48,
+    height: 10,
+    borderRadius: radius.sm,
+    backgroundColor: colors.border,
+  },
   emptyTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800', textAlign: 'center' },
   emptyBody: {
     color: colors.muted,
