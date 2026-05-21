@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
-  ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -40,11 +39,14 @@ export default function LeagueScreen() {
   const leagueId = league?.league_id || null;
   const [switcherOpen, setSwitcherOpen] = useState(false);
 
+  // `placeholderData: (prev) => prev` keeps the previous value visible
+  // across refetches so the screen doesn't blank when re-entered.
   const summaryQuery = useQuery({
     queryKey: ['league-summary', leagueId],
     queryFn:  () => getLeagueSummary(leagueId!),
     enabled:  !!leagueId,
     staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 
   const coverageQuery = useQuery({
@@ -52,6 +54,7 @@ export default function LeagueScreen() {
     queryFn:  () => getLeagueCoverage(leagueId!),
     enabled:  !!leagueId,
     staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 
   // Leaguemate roster (joined ✓ / not-joined ✗). Mirrors the web
@@ -62,6 +65,7 @@ export default function LeagueScreen() {
     queryFn:  () => getLeagueMembers(leagueId!),
     enabled:  !!leagueId,
     staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 
   // B7 — flag-gated surfaces. Each query is enabled only when its flag is
@@ -74,6 +78,7 @@ export default function LeagueScreen() {
     queryFn:  () => getActivityFeed(leagueId!, 10),
     enabled:  !!leagueId && showActivity,
     staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 
   const contrarianQuery = useQuery({
@@ -81,6 +86,7 @@ export default function LeagueScreen() {
     queryFn:  () => getContrarianLeaderboard(leagueId!),
     enabled:  !!leagueId,
     staleTime: 5 * 60_000,
+    placeholderData: (prev) => prev,
   });
 
   const unlocksQuery = useQuery({
@@ -88,6 +94,7 @@ export default function LeagueScreen() {
     queryFn:  () => getLeagueMemberUnlockStates(leagueId!),
     enabled:  !!leagueId && showUnlockBadges,
     staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 
   // Map user_id → unlock state for cheap per-row chip lookups. Backend
@@ -130,7 +137,10 @@ export default function LeagueScreen() {
 
   const summary  = summaryQuery.data;
   const coverage = coverageQuery.data;
-  const loading  = summaryQuery.isLoading || coverageQuery.isLoading;
+  // First-paint flag: render skeleton chips instead of zeros so the page
+  // shape is stable while data is in flight on initial mount.
+  const summaryPending  = !summary  && summaryQuery.isLoading;
+  const coveragePending = !coverage && coverageQuery.isLoading;
 
   // Defensive number reader. Backend keys may vary slightly from typed shape.
   const num = (v: unknown, fallback = 0) =>
@@ -185,17 +195,11 @@ export default function LeagueScreen() {
           </View>
         </Pressable>
 
-        {loading && !summary && !coverage ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={colors.accent} />
-          </View>
-        ) : null}
-
         {/* Matches roll-up */}
         <SectionTitle>Matches</SectionTitle>
         <View style={styles.statRow}>
-          <StatCard label="Pending"  value={matchesPending}  emoji="🤝" />
-          <StatCard label="Accepted" value={matchesAccepted} emoji="✅" />
+          <StatCard label="Pending"  value={summaryPending ? '—' : matchesPending}  emoji="🤝" />
+          <StatCard label="Accepted" value={summaryPending ? '—' : matchesAccepted} emoji="✅" />
         </View>
 
         {/* Leaguemate progress */}
@@ -204,17 +208,17 @@ export default function LeagueScreen() {
           <View style={styles.statBetween}>
             <Text style={styles.cardLabel}>Joined the app</Text>
             <Text style={styles.cardValue}>
-              {joinedMates}/{totalMates || '—'}
+              {summaryPending ? '—' : `${joinedMates}/${totalMates || '—'}`}
             </Text>
           </View>
-          <ProgressBar pct={joinPct} />
+          <ProgressBar pct={summaryPending ? 0 : joinPct} />
           <View style={[styles.statBetween, { marginTop: spacing.md }]}>
             <Text style={styles.cardSubLabel}>Unlocked 1QB</Text>
-            <Text style={styles.cardSubValue}>{unlocked1qb}</Text>
+            <Text style={styles.cardSubValue}>{summaryPending ? '—' : unlocked1qb}</Text>
           </View>
           <View style={styles.statBetween}>
             <Text style={styles.cardSubLabel}>Unlocked SF</Text>
-            <Text style={styles.cardSubValue}>{unlockedSf}</Text>
+            <Text style={styles.cardSubValue}>{summaryPending ? '—' : unlockedSf}</Text>
           </View>
         </View>
 
@@ -288,15 +292,17 @@ export default function LeagueScreen() {
           <View style={styles.statBetween}>
             <Text style={styles.cardLabel}>Opponents you've ranked vs</Text>
             <Text style={styles.cardValue}>
-              {rankedOpps}/{totalOpps || '—'}
+              {coveragePending ? '—' : `${rankedOpps}/${totalOpps || '—'}`}
             </Text>
           </View>
-          <ProgressBar pct={coveragePct} />
-          <Text style={styles.cardHint}>
-            {coveragePct === 100
-              ? "You're matched up against every leaguemate. Nice."
-              : `Rank more players to widen the trade pool — ${100 - coveragePct}% to go.`}
-          </Text>
+          <ProgressBar pct={coveragePending ? 0 : coveragePct} />
+          {coveragePending ? null : (
+            <Text style={styles.cardHint}>
+              {coveragePct === 100
+                ? "You're matched up against every leaguemate. Nice."
+                : `Rank more players to widen the trade pool — ${100 - coveragePct}% to go.`}
+            </Text>
+          )}
         </View>
 
         {/* Leaderboards — League-specific + Universal sections inline. */}
@@ -347,7 +353,7 @@ function Chip({ label, tone }: { label: string; tone?: 'accent' }) {
   );
 }
 
-function StatCard({ label, value, emoji }: { label: string; value: number; emoji: string }) {
+function StatCard({ label, value, emoji }: { label: string; value: number | string; emoji: string }) {
   return (
     <View style={styles.statCard}>
       <Text style={styles.statEmoji}>{emoji}</Text>
