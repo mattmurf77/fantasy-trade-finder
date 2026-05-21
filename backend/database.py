@@ -2931,7 +2931,9 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
         my_give, my_receive, liked_at }
     Sorted by liked_at descending (most recent first).
     """
-    # Pull all "like" decisions for the user across every league.
+    # Pull recent "like" decisions for the user across every league.
+    # Bounded to the 500 most recent so a long-tenured user with thousands
+    # of historical swipes doesn't pull an unbounded result set into memory.
     with engine.connect() as conn:
         like_rows = conn.execute(
             select(trade_decisions_table).where(
@@ -2939,21 +2941,22 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
                     trade_decisions_table.c.user_id  == user_id,
                     trade_decisions_table.c.decision == "like",
                 )
-            ).order_by(trade_decisions_table.c.created_at.desc())
+            ).order_by(trade_decisions_table.c.created_at.desc()).limit(500)
         ).fetchall()
 
         if not like_rows:
             return []
 
-        # Pull every match the user is part of so we can filter out the
-        # already-matured ones. Set comparison handles JSON ordering.
+        # Pull recent matches the user is part of so we can filter out the
+        # already-matured ones. Set comparison handles JSON ordering. Same
+        # 500-row defense as above.
         match_rows = conn.execute(
             select(trade_matches_table).where(
                 or_(
                     trade_matches_table.c.user_a_id == user_id,
                     trade_matches_table.c.user_b_id == user_id,
                 )
-            )
+            ).order_by(trade_matches_table.c.created_at.desc()).limit(500)
         ).fetchall()
 
         # Fan out one league_members fetch covering every league the user
