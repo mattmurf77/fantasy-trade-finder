@@ -90,6 +90,18 @@ export default function TradesScreen({ navigation }: any) {
   const [outlookOpen, setOutlookOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
+  const [slowSwitch, setSlowSwitch] = useState(false);
+
+  // Render free-tier cold starts run 30–60s. Hold the friendly default for
+  // the first 4s so warm switches never show the alarming "waking up" copy.
+  useEffect(() => {
+    if (!switching) {
+      setSlowSwitch(false);
+      return;
+    }
+    const t = setTimeout(() => setSlowSwitch(true), 4000);
+    return () => clearTimeout(t);
+  }, [switching]);
 
   // Trade queue (Bundle 5 — flag `trades.queue_2k`). When the flag is off,
   // the queue UI is hidden but the store stays functional; this keeps the
@@ -354,7 +366,11 @@ export default function TradesScreen({ navigation }: any) {
       {switching ? (
         <View style={styles.switchingOverlay} pointerEvents="auto">
           <ActivityIndicator color={colors.accent} size="large" />
-          <Text style={styles.switchingText}>Switching league…</Text>
+          <Text style={styles.switchingText}>
+            {slowSwitch
+              ? 'Waking up server — first request after a quiet period can take 30s.'
+              : 'Switching league…'}
+          </Text>
         </View>
       ) : null}
 
@@ -783,6 +799,8 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: fontSize.base,
     fontWeight: '700',
+    textAlign: 'center',
+    paddingHorizontal: spacing.xl,
   },
   controlCard: {
     backgroundColor: colors.surface,

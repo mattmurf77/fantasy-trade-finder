@@ -32,6 +32,18 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
   const [loading, setLoading] = useState(cached.length === 0);
   const [selectingId, setSelectingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [slowLoad, setSlowLoad] = useState(false);
+
+  // Render free-tier cold starts run 30–60s. Hold the friendly default for
+  // the first 4s so warm requests never show the alarming "waking up" copy.
+  useEffect(() => {
+    if (!loading) {
+      setSlowLoad(false);
+      return;
+    }
+    const t = setTimeout(() => setSlowLoad(true), 4000);
+    return () => clearTimeout(t);
+  }, [loading]);
 
   useEffect(() => {
     if (!user) return;
@@ -86,7 +98,11 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator color={colors.accent} />
-          <Text style={styles.loadingText}>Loading your leagues…</Text>
+          <Text style={styles.loadingText}>
+            {slowLoad
+              ? 'Waking up server — first request after a quiet period can take 30s.'
+              : 'Loading your leagues…'}
+          </Text>
         </View>
       ) : error ? (
         <View style={styles.centered}>
@@ -166,7 +182,7 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     gap: spacing.md,
   },
-  loadingText: { color: colors.muted, fontSize: fontSize.sm },
+  loadingText: { color: colors.muted, fontSize: fontSize.sm, textAlign: 'center' },
   error: { color: colors.red, fontSize: fontSize.sm, textAlign: 'center' },
   retry: { color: colors.accent, fontSize: fontSize.sm, fontWeight: '700' },
   list: { padding: spacing.lg, gap: spacing.sm },
