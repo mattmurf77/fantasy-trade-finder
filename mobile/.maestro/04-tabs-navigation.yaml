@@ -1,0 +1,20 @@
+appId: com.fantasytradefinder.app
+---
+# Cycle through every main tab — smoke check that each screen renders
+# without a crash.
+- launchApp:
+    clearState: true
+    stopApp: true
+- tapOn: "Try the app on a sample league"
+- extendedWaitUntil:
+    visible: "Trades"
+    timeout: 20000
+# Trades tab — already focused after demo bootstrap.
+- tapOn: "Trades"
+- takeScreenshot: 04-tab-trades
+# Matches tab.
+- tapOn: "Matches"
+- takeScreenshot: 04-tab-matches
+# League tab.
+- tapOn: "League"
+- takeScreenshot: 04-tab-league

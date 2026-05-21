@@ -1,0 +1,9 @@
+appId: com.fantasytradefinder.app
+---
+# Smoke: app boots, sign-in screen visible, no early crash.
+- launchApp:
+    clearState: true
+    stopApp: true
+- assertVisible: "Dynasty Fantasy Football"
+- assertVisible: "Connect"
+- takeScreenshot: 01-signin

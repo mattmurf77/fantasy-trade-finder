@@ -1,0 +1,21 @@
+appId: com.fantasytradefinder.app
+---
+# Open Tiers screen via Rank tab -> action sheet.
+- launchApp:
+    clearState: true
+    stopApp: true
+- tapOn: "Try the app on a sample league"
+- extendedWaitUntil:
+    visible: "Trades"
+    timeout: 20000
+# Rank tab opens an action sheet rather than a direct nav (TabNav.tsx:117).
+- tapOn: "Rank"
+- assertVisible: "Tiers"
+- tapOn:
+    text: "Tiers"
+    index: 0
+# Tiers screen header. RB is the default position the screen lands on.
+- extendedWaitUntil:
+    visible: "RB"
+    timeout: 10000
+- takeScreenshot: 03-tiers-rendered

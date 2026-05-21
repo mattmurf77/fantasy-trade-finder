@@ -1,0 +1,23 @@
+appId: com.fantasytradefinder.app
+---
+# In-app feedback capture: tap the floating 📝 button -> compose a note ->
+# save. Verifies the FeedbackSheet flow + that hydrate() doesn't crash
+# on prior captures.
+- launchApp:
+    clearState: true
+    stopApp: true
+- tapOn: "Try the app on a sample league"
+- extendedWaitUntil:
+    visible: "Trades"
+    timeout: 20000
+# Floating feedback button (FeedbackFAB).
+- tapOn: "📝"
+- assertVisible: "Capture feedback"
+- tapOn: "💡 Idea"
+- tapOn: "What did you notice?"
+- inputText: "Maestro smoke test note — please ignore."
+- tapOn: "Save"
+# Modal should dismiss. We don't have a definitive post-save text, so
+# just verify the sheet's title is gone.
+- assertNotVisible: "Capture feedback"
+- takeScreenshot: 05-feedback-saved
