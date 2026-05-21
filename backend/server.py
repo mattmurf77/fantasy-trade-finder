@@ -118,6 +118,8 @@ from .database import (
     load_leaderboard, get_self_leaderboard_row,
     # In-app feedback (TestFlight helper) — POST /api/feedback writes here
     save_feedback,
+    # GET /api/feedback/admin — operator readback, CRON_SECRET-protected
+    list_feedback,
 )
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
@@ -2079,6 +2081,40 @@ def submit_feedback_route():
         "created_at":  result["created_at"],
         "duplicate":   bool(result.get("duplicate")),
     }), status
+
+
+@app.route("/api/feedback/admin", methods=["GET"])
+def list_feedback_route():
+    """GET /api/feedback/admin?since_id=N&limit=M — operator readback of
+    captured TestFlight feedback.
+
+    Auth: same CRON_SECRET pattern as /api/cron/* (X-Cron-Secret header).
+    Local dev with no CRON_SECRET set: open. Prod without CRON_SECRET:
+    503 (fail closed).
+
+    Response:
+      {
+        "items": [{id, client_id, screen, severity, text, user_id,
+                   username, app_version, platform, device_type,
+                   os_version, client_created_at, created_at}, ...],
+        "count": N,
+        "next_since_id": <max id in items, or input since_id when empty>
+      }
+
+    Poll with `since_id=<last next_since_id>` to stream new captures.
+    """
+    _require_cron_auth()
+    try:
+        since_id = int(request.args.get("since_id", 0))
+    except (TypeError, ValueError):
+        since_id = 0
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (TypeError, ValueError):
+        limit = 100
+    items = list_feedback(since_id=since_id, limit=limit)
+    next_since = items[-1]["id"] if items else since_id
+    return jsonify({"items": items, "count": len(items), "next_since_id": next_since})
 
 
 @app.route("/api/tiers/save", methods=["POST"])
