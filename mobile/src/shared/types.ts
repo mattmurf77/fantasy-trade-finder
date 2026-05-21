@@ -120,6 +120,23 @@ export interface TradeMatch {
   their_disposition?: 'pending' | 'accepted' | 'declined';
 }
 
+// Trades the user has liked that have NOT yet matured into a mutual
+// match. Renders on MatchesScreen's "Awaiting them" segment. Shape is
+// deliberately parallel to TradeMatch so the same tile component can
+// render either with minor adaptation. Source: /api/trades/awaiting.
+export interface AwaitingTrade {
+  trade_id: string;
+  league_id: string;
+  league_name?: string;
+  my_side_player_ids: string[];
+  their_side_player_ids: string[];
+  my_side_player_names?: string[];
+  their_side_player_names?: string[];
+  counterparty_user_id: string;
+  counterparty_username: string;
+  liked_at: string;
+}
+
 // Returned by /api/trades/generate and /api/trades/status. The actual
 // generation runs in a background thread on the server; the client polls
 // with the `job_id` to stream cards into the deck as they're produced.

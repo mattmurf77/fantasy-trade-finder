@@ -2909,6 +2909,146 @@ def load_matches(user_id: str, league_id: str | None = None) -> list[dict]:
     return result
 
 
+def load_awaiting_trades(user_id: str) -> list[dict]:
+    """
+    Return cross-league trades the user has swiped "like" on that have NOT
+    yet matured into mutual matches. Used by /api/trades/awaiting to power
+    the "Awaiting them" segment on MatchesScreen.
+
+    A trade decision is "awaiting" when:
+      - decision == 'like'
+      - no trade_matches row exists for the same league + same player sets
+        (in either user_a/user_b orientation).
+
+    Counterparty resolution: the trade_decisions row does NOT store the
+    target user, so we recover it by looking up which league member's
+    roster contains the receive_player_ids. This adds one league_members
+    fetch per league touched, batched.
+
+    Returns dicts shaped to mirror load_matches() output where it overlaps
+    so the mobile client can render them with the same tile component:
+      { trade_id, league_id, partner_id, partner_name,
+        my_give, my_receive, liked_at }
+    Sorted by liked_at descending (most recent first).
+    """
+    # Pull recent "like" decisions for the user across every league.
+    # Bounded to the 500 most recent so a long-tenured user with thousands
+    # of historical swipes doesn't pull an unbounded result set into memory.
+    with engine.connect() as conn:
+        like_rows = conn.execute(
+            select(trade_decisions_table).where(
+                and_(
+                    trade_decisions_table.c.user_id  == user_id,
+                    trade_decisions_table.c.decision == "like",
+                )
+            ).order_by(trade_decisions_table.c.created_at.desc()).limit(500)
+        ).fetchall()
+
+        if not like_rows:
+            return []
+
+        # Pull recent matches the user is part of so we can filter out the
+        # already-matured ones. Set comparison handles JSON ordering. Same
+        # 500-row defense as above.
+        match_rows = conn.execute(
+            select(trade_matches_table).where(
+                or_(
+                    trade_matches_table.c.user_a_id == user_id,
+                    trade_matches_table.c.user_b_id == user_id,
+                )
+            ).order_by(trade_matches_table.c.created_at.desc()).limit(500)
+        ).fetchall()
+
+        # Fan out one league_members fetch covering every league the user
+        # has liked trades in — needed to resolve the counterparty by
+        # roster ownership.
+        league_ids = {r.league_id for r in like_rows}
+        member_rows = []
+        if league_ids:
+            member_rows = conn.execute(
+                select(league_members_table).where(
+                    league_members_table.c.league_id.in_(league_ids)
+                )
+            ).fetchall()
+
+    # Build a per-(league_id, player_id) → owner_user_id index from rosters.
+    # Multiple owners of the same player ID inside a single league shouldn't
+    # exist (Sleeper rosters are exclusive), but if the data is dirty we
+    # take the first hit.
+    owner_by_league_pid: dict[tuple[str, str], str] = {}
+    owner_username_by_id: dict[tuple[str, str], str] = {}
+    for mr in member_rows:
+        try:
+            roster_ids = json.loads(mr.roster_data) if mr.roster_data else []
+        except (json.JSONDecodeError, TypeError):
+            roster_ids = []
+        owner_username_by_id[(mr.league_id, mr.user_id)] = (
+            mr.username or mr.display_name or mr.user_id
+        )
+        for pid in roster_ids:
+            owner_by_league_pid.setdefault((mr.league_id, pid), mr.user_id)
+
+    # Build a set of matched player-set keys so we can skip already-matched
+    # trades. We normalise by league + frozenset(give) + frozenset(receive)
+    # from the caller's perspective.
+    matched_keys: set[tuple[str, frozenset, frozenset]] = set()
+    for r in match_rows:
+        try:
+            a_give    = json.loads(r.user_a_give)
+            a_receive = json.loads(r.user_a_receive)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if r.user_a_id == user_id:
+            my_give, my_receive = a_give, a_receive
+        else:
+            # Caller is user_b — flip perspective.
+            my_give, my_receive = a_receive, a_give
+        matched_keys.add(
+            (r.league_id, frozenset(my_give), frozenset(my_receive))
+        )
+
+    result = []
+    for r in like_rows:
+        try:
+            give    = json.loads(r.give_player_ids)
+            receive = json.loads(r.receive_player_ids)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        key = (r.league_id, frozenset(give), frozenset(receive))
+        if key in matched_keys:
+            continue   # already matured into a match
+
+        # Recover counterparty: owner of any of the receive players in this
+        # league. If we can't find one (stale roster cache, missing member
+        # data), skip — we can't render a useful tile without naming the
+        # other owner.
+        partner_id: str | None = None
+        for pid in receive:
+            cand = owner_by_league_pid.get((r.league_id, pid))
+            if cand and cand != user_id:
+                partner_id = cand
+                break
+        if not partner_id:
+            continue
+
+        partner_name = owner_username_by_id.get(
+            (r.league_id, partner_id), partner_id
+        )
+
+        result.append({
+            "trade_id":     r.trade_id,
+            "league_id":    r.league_id,
+            "partner_id":   partner_id,
+            "partner_name": partner_name,
+            "my_give":      give,
+            "my_receive":   receive,
+            "liked_at":     r.created_at,
+        })
+
+    return result
+
+
 # K-factors for disposition ELO signals — loaded live from model_config.
 # These local lambdas fall back to the hardcoded defaults if the table
 # isn't available yet (e.g. during the very first init_db() call).

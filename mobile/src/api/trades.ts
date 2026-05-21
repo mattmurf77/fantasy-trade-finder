@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { TradeCard, TradeJobSnapshot, TradeMatch, Player } from '../shared/types';
+import type { TradeCard, TradeJobSnapshot, TradeMatch, AwaitingTrade, Player } from '../shared/types';
 
 export interface GenerateBody {
   league_id: string;
@@ -207,4 +207,34 @@ export async function getLikedTrades(): Promise<{ liked_count: number; trades: T
   const res = await api.get<any>('/api/trades/liked');
   const trades = asArray<any>(res).map(normalizeTradeCard);
   return { liked_count: trades.length, trades };
+}
+
+// ── Awaiting-trade normalizer ────────────────────────────────────────
+// Backend (server.py: /api/trades/awaiting) returns:
+//   { trade_id, league_id, league_name?, partner_id, partner_name,
+//     my_give[], my_receive[], my_give_names?[], my_receive_names?[],
+//     liked_at }
+// Frontend (shared/types#AwaitingTrade) uses the same vocabulary as
+// TradeMatch so the same tile component can render either.
+function normalizeAwaitingTrade(raw: any): AwaitingTrade {
+  return {
+    trade_id:                String(raw?.trade_id ?? ''),
+    league_id:               String(raw?.league_id ?? ''),
+    league_name:             raw?.league_name || undefined,
+    my_side_player_ids:      Array.isArray(raw?.my_give)    ? raw.my_give    : [],
+    their_side_player_ids:   Array.isArray(raw?.my_receive) ? raw.my_receive : [],
+    my_side_player_names:    Array.isArray(raw?.my_give_names)    ? raw.my_give_names    : undefined,
+    their_side_player_names: Array.isArray(raw?.my_receive_names) ? raw.my_receive_names : undefined,
+    counterparty_user_id:    String(raw?.partner_id ?? ''),
+    counterparty_username:   String(raw?.partner_name ?? raw?.partner_id ?? ''),
+    liked_at:                String(raw?.liked_at ?? ''),
+  };
+}
+
+// GET /api/trades/awaiting — trades the user liked that haven't matured
+// into mutual matches yet. Used by the "Awaiting them" segment on the
+// Matches tab so users can see their one-sided likes.
+export async function getAwaitingTrades(): Promise<AwaitingTrade[]> {
+  const res = await api.get<any>('/api/trades/awaiting');
+  return asArray<any>(res).map(normalizeAwaitingTrade);
 }
