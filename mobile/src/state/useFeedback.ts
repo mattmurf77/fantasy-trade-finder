@@ -103,13 +103,19 @@ export const useFeedback = create<FeedbackState>((set, get) => ({
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       const parsed: FeedbackItem[] = raw ? JSON.parse(raw) : [];
-      // Backfill: items written before the sync field existed get
-      // synced=true so we don't suddenly POST a backlog of stale captures
-      // the user already mentally moved on from. New items go through
-      // add() and start as synced=false.
+      // Authoritative test for "actually synced": the backend assigned a
+      // server_id. Anything else needs a sync attempt. This catches two
+      // cases the prior hydrate logic mis-handled:
+      //   1. Items written before the sync field existed (synced undefined).
+      //   2. Items written by the first sync-aware build that got stamped
+      //      synced=true by the old "default to true" hydrate but were
+      //      never actually POSTed (no server_id present).
+      // Real synced items always carry a server_id from _syncOne, so this
+      // is also a no-op for them. The next foreground tick of retrySync()
+      // will drain whatever this flips back to unsynced.
       const normalized = parsed.map((it) => ({
         ...it,
-        synced: typeof it.synced === 'boolean' ? it.synced : true,
+        synced: !!it.server_id,
       }));
       // Newest first — display order matches what the user just typed.
       normalized.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
