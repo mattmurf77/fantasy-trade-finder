@@ -142,8 +142,8 @@ export default function LeagueScreen() {
   const joinedMates     = num((summary as any)?.leaguemates_joined);
   const unlocked1qb     = num((summary as any)?.leaguemates_unlocked_1qb);
   const unlockedSf      = num((summary as any)?.leaguemates_unlocked_sf);
-  const totalOpps       = num(coverage?.total_opponents);
-  const rankedOpps      = num(coverage?.ranked_opponents);
+  const totalOpps       = num(coverage?.total);
+  const rankedOpps      = num(coverage?.ranked);
 
   const coveragePct = totalOpps > 0 ? Math.round((rankedOpps / totalOpps) * 100) : 0;
   const joinPct     = totalMates > 0 ? Math.round((joinedMates / totalMates) * 100) : 0;

@@ -44,9 +44,9 @@ export async function saveLeaguePreferences(leagueId: string, prefs: LeaguePrefe
 }
 
 export interface LeagueCoverage {
-  league_id: string;
-  total_opponents: number;
-  ranked_opponents: number;
+  ranked: number;
+  total: number;
+  members?: Array<{ user_id: string; username: string; has_rankings: boolean }>;
 }
 export async function getLeagueCoverage(leagueId: string) {
   return api.get<LeagueCoverage>(
