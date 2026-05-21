@@ -8,6 +8,7 @@ import {
   ScrollView,
   Dimensions,
   Modal,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -18,6 +19,7 @@ import Animated, {
   runOnJS,
   Easing,
 } from 'react-native-reanimated';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { haptics } from '../utils/haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -25,7 +27,6 @@ import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import TradeCardComp from '../components/TradeCard';
 import Toast from '../components/Toast';
-import FairnessSlider from '../components/FairnessSlider';
 import OutlookSheet from '../components/OutlookSheet';
 import LeaguePill from '../components/LeaguePill';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
@@ -56,6 +57,16 @@ const SWIPE_THRESHOLD = 120;
 // loop in React via reference inequality).
 const EMPTY_QUEUE: never[] = [];
 
+// Persisted user pref: is the fairness filter on (recommended trades must
+// be reasonably balanced in consensus value) or off (recommend purely by
+// ranking mismatch between owners)?
+const FAIRNESS_PREF_KEY = 'ftf:trades:fairness_on';
+// When fairness ON, ask the backend for balanced trades — same default the
+// old slider opened to. When OFF, ask for the broadest pool the backend
+// will return so client-side sort-by-mismatch sees real candidates.
+const FAIRNESS_ON_THRESHOLD = 0.75;
+const FAIRNESS_OFF_THRESHOLD = 0.5;
+
 export default function TradesScreen({ navigation }: any) {
   const queryClient = useQueryClient();
   const league = useSession((s) => s.league);
@@ -78,12 +89,13 @@ export default function TradesScreen({ navigation }: any) {
     enabled:  !!leagueId && !!userId && newPartnersFlag,
     staleTime: 60_000,
   });
-  const [fairness, setFairness] = useState(0.75);
-  // Equal-only checkbox: when on, the slider is locked to 1.0 (100%) and
-  // disabled. Stash the prior slider value so unchecking restores it.
-  // Screen-local only — not worth a global store.
-  const [equalOnly, setEqualOnly] = useState(false);
-  const [prevFairness, setPrevFairness] = useState(0.75);
+  // Trade-fairness toggle. ON = backend filters to balanced trades and
+  // sorts by composite_score (current behavior). OFF = broaden the
+  // backend filter to its loosest (0.5) and re-sort the deck client-side
+  // by ranking-mismatch magnitude (TradeCard.match_score, which is the
+  // server's mismatch_score: how big the ELO gap between owners is on
+  // the swapped players). Persisted across sessions via AsyncStorage.
+  const [fairnessOn, setFairnessOn] = useState(true);
   const [deck, setDeck] = useState<TradeCard[]>([]);
   const [deckIdx, setDeckIdx] = useState(0);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
@@ -125,21 +137,38 @@ export default function TradesScreen({ navigation }: any) {
     void hydrateQueue();
   }, [userId, queueEnabled, hydrateQueue]);
 
-  // Effective threshold sent to the backend — 1.0 when Equal-only is on,
-  // otherwise the slider's current value.
-  const effectiveFairness = equalOnly ? 1.0 : fairness;
+  // Effective threshold sent to the backend. OFF still passes a (low)
+  // value rather than dropping the field so the cache key on the server
+  // stays stable — `_trade_job_is_fresh` keys on fairness_threshold.
+  const effectiveFairness = fairnessOn ? FAIRNESS_ON_THRESHOLD : FAIRNESS_OFF_THRESHOLD;
 
-  function toggleEqualOnly() {
-    if (equalOnly) {
-      // Unchecking: restore the prior slider value.
-      setEqualOnly(false);
-      setFairness(prevFairness);
-    } else {
-      // Checking: stash the current slider value, lock to 100%.
-      setPrevFairness(fairness);
-      setFairness(1.0);
-      setEqualOnly(true);
-    }
+  // Hydrate the persisted toggle on mount. Default is ON if nothing's
+  // stored — matches the prior slider's 0.75 starting position.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(FAIRNESS_PREF_KEY);
+        if (cancelled) return;
+        if (raw === 'off') setFairnessOn(false);
+        else if (raw === 'on') setFairnessOn(true);
+      } catch {
+        /* AsyncStorage unavailable — fall back to default ON */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  function handleToggleFairness(next: boolean) {
+    setFairnessOn(next);
+    // Fire-and-forget persistence; a write failure shouldn't block the UI.
+    AsyncStorage.setItem(FAIRNESS_PREF_KEY, next ? 'on' : 'off').catch(() => {});
+    // Toggling the threshold invalidates the current deck — the next
+    // Find-a-Trade tap should request a fresh set under the new mode.
+    // Also avoids visual shuffle if streaming cards were still arriving.
+    setDeck([]);
+    setDeckIdx(0);
+    setJob(null);
   }
 
   // Preferences — open outlook sheet the first time the user lands here
@@ -175,7 +204,12 @@ export default function TradesScreen({ navigation }: any) {
       // populates immediately via the snapshot effect below. For 'running'
       // responses the polling effect takes over.
       if (snapshot.status === 'complete' && snapshot.cards.length === 0) {
-        setToast({ msg: 'No fair trades found. Try lowering the fairness bar.', tone: 'warn' });
+        setToast({
+          msg: fairnessOn
+            ? 'No fair trades found. Try turning Trade fairness off.'
+            : 'No trades found. Rank more players or try again later.',
+          tone: 'warn',
+        });
       }
     },
     onError: (e: Error) => {
@@ -245,9 +279,9 @@ export default function TradesScreen({ navigation }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.cards.length, job?.status]);
 
-  // When the user picks a different fairness slider position or switches
-  // leagues, drop the local deck/job so the next "Find a Trade" tap kicks
-  // off a fresh job instead of streaming into stale state.
+  // When the user switches leagues, drop the local deck/job so the next
+  // "Find a Trade" tap kicks off a fresh job instead of streaming into
+  // stale state. (The fairness toggle handles its own reset inline.)
   useEffect(() => {
     setDeck([]);
     setDeckIdx(0);
@@ -273,8 +307,19 @@ export default function TradesScreen({ navigation }: any) {
     staleTime: 30_000,
   });
 
-  const topCard = deck[deckIdx];
-  const nextCard = deck[deckIdx + 1];
+  // When Trade fairness is OFF, the user wants trades ranked purely by
+  // the ELO mismatch between owners — bigger gap = better trade. The
+  // backend's `mismatch_score` (normalized to `TradeCard.match_score`)
+  // is exactly that signal: opp_surplus + user_surplus across the swap.
+  // When ON, the backend already sorts by composite_score (fairness +
+  // mismatch + tier priority) and we leave that order alone.
+  const sortedDeck = useMemo(() => {
+    if (fairnessOn) return deck;
+    return [...deck].sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
+  }, [deck, fairnessOn]);
+
+  const topCard = sortedDeck[deckIdx];
+  const nextCard = sortedDeck[deckIdx + 1];
 
   function advance(decision: 'like' | 'pass') {
     if (!topCard) return;
@@ -436,27 +481,28 @@ export default function TradesScreen({ navigation }: any) {
             </Pressable>
           </View>
 
-          {/* Equal-only shortcut: one-tap "100% fair only", locks the
-              slider. Sits above the slider so the visual flow reads
-              "shortcut → control → live value." */}
-          <Pressable
-            onPress={toggleEqualOnly}
-            style={({ pressed }) => [styles.equalRow, pressed && { opacity: 0.7 }]}
-            hitSlop={8}
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: equalOnly }}
-          >
-            <View style={[styles.checkbox, equalOnly && styles.checkboxChecked]}>
-              {equalOnly && <Text style={styles.checkboxMark}>✓</Text>}
+          {/* Trade-fairness toggle. ON: backend filters to balanced
+              trades and sorts by composite_score (fairness-weighted).
+              OFF: broaden the backend filter to its loosest and re-sort
+              the deck client-side by ranking mismatch (the ELO gap
+              between owners on the swapped players). */}
+          <View style={styles.fairnessRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fairnessLabel}>Trade fairness</Text>
+              <Text style={styles.fairnessHint}>
+                {fairnessOn
+                  ? 'Recommend balanced trades'
+                  : 'Rank by ranking mismatch only'}
+              </Text>
             </View>
-            <Text style={styles.equalLabel}>Only equal trades (100% fair)</Text>
-          </Pressable>
-
-          <FairnessSlider
-            value={fairness}
-            onChange={setFairness}
-            disabled={equalOnly}
-          />
+            <Switch
+              value={fairnessOn}
+              onValueChange={handleToggleFairness}
+              trackColor={{ false: colors.border, true: colors.accent }}
+              thumbColor="#fff"
+              ios_backgroundColor={colors.border}
+            />
+          </View>
 
           {/* Find-a-Trade button. While a job is running, the button is
               disabled — the progress strip below acts as the live signal.
@@ -827,36 +873,24 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   editBtnText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  equalRow: {
+  fairnessRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     paddingVertical: spacing.xs,
   },
-  checkbox: {
-    width: 18,
-    height: 18,
-    borderRadius: radius.sm,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
+  fairnessLabel: {
+    color: colors.muted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
-  checkboxChecked: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
-  },
-  checkboxMark: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '900',
-    lineHeight: 14,
-  },
-  equalLabel: {
+  fairnessHint: {
     color: colors.text,
     fontSize: fontSize.sm,
     fontWeight: '700',
+    marginTop: 2,
   },
   findBtn: {
     backgroundColor: colors.accent,
