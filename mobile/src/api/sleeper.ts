@@ -40,9 +40,10 @@ export async function getLeagueUsers(leagueId: string) {
   return api.get<LeagueUser[]>(`/api/sleeper/league_users/${leagueId}`);
 }
 
-// GET /api/sleeper/players — warms the 5MB player cache. Don't call from
-// a tight loop; we call it once during session init and then rely on the
-// backend's server-side cache.
-export async function warmPlayerCache() {
-  return api.get<Record<string, any>>('/api/sleeper/players');
+// GET /api/sleeper/players/warm — triggers the same server-side cache
+// hydration as /api/sleeper/players but returns only {ok, count}. The full
+// route serializes ~4.8MB of player JSON the mobile client never reads;
+// this variant keeps the response body to a few hundred bytes.
+export async function warmPlayerCache(): Promise<{ ok: boolean; count?: number }> {
+  return api.get<{ ok: boolean; count?: number }>('/api/sleeper/players/warm');
 }

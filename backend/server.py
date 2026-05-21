@@ -4248,6 +4248,20 @@ def sleeper_players():
         return jsonify({"error": str(e)}), 500
 
 
+# Mobile callers only want the side-effect (server-side cache hydration);
+# the full /api/sleeper/players payload is ~4.8MB and discarded on the floor.
+# This variant returns only {ok, count} so the warm hop is a few hundred bytes.
+# Web client keeps /api/sleeper/players because it consumes the body.
+@app.route("/api/sleeper/players/warm")
+def sleeper_players_warm():
+    try:
+        cache = _ensure_sleeper_cache_populated()
+        return jsonify({"ok": True, "count": len(cache)})
+    except Exception as e:
+        log.error("  sleeper_players_warm fetch error: %s\n%s", e, traceback.format_exc())
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ---------------------------------------------------------------------------
 # Session Init — rebuilds player pool from real Sleeper roster
 # ---------------------------------------------------------------------------

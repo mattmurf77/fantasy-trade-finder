@@ -11,6 +11,7 @@ import { useFeatureFlags } from './src/state/useFeatureFlags';
 import { useFeedback } from './src/state/useFeedback';
 import { initSentry, wrap as sentryWrap } from './src/observability/sentry';
 import { getTierConfig } from './src/api/rankings';
+import { warmPlayerCache } from './src/api/sleeper';
 import { setTierConfigCache } from './src/utils/tierBands';
 import { handleDeepLink } from './src/utils/deepLinks';
 
@@ -55,7 +56,16 @@ function App() {
         // Fallback bands stay in effect; not worth failing the boot.
       }
     };
-    Promise.all([bootstrap(), loadFlags(), fetchTierConfig()])
+    // Fire-and-forget warm ping. On a sleeping Render dyno the cold-start
+    // takes 30–60s; kicking it off during splash means the first user
+    // action lands on a warm server. Errors are silent — boot must not
+    // block on a network failure.
+    Promise.all([
+      bootstrap(),
+      loadFlags(),
+      fetchTierConfig(),
+      warmPlayerCache().catch(() => {}),
+    ])
       .catch(() => { /* bootstrap is best-effort */ })
       .finally(() => setBooted(true));
   }, [bootstrap, loadFlags]);
