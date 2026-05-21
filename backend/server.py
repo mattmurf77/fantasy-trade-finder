@@ -178,6 +178,13 @@ DEMO_PLAYERS = [
 DEMO_USER_ROSTER = ["rb_1", "rb_3", "rb_8", "wr_2", "wr_5", "wr_8", "qb_6", "te_2", "te_4"]
 DEMO_USER_ID     = "user_me"
 
+# QC ("quality control") trio throttle — at most one QC trio per
+# QC_TRIO_INTERVAL rankings, per (session, position). TestFlight bug #19
+# (was probabilistic 1/15 ≈ 6.7% per trio; users reported QC trios firing
+# too often). Counter lives on the in-memory session dict under
+# sess["_qc_counters"]: { position_str: rankings_since_last_qc }.
+QC_TRIO_INTERVAL = 50
+
 # ---------------------------------------------------------------------------
 # Mutable session state (replaced when a Sleeper league is loaded)
 # ---------------------------------------------------------------------------
@@ -1277,15 +1284,24 @@ def get_trio():
         log.warning("load_skips failed (continuing without filter): %s", _skip_err)
         skipped_ids = set()
     try:
-        # Agent A1 — swipe.qc_compliments: occasionally (~1/15) substitute
-        # a lopsided "QC" trio so we can reward the user when they match the
-        # community consensus. Flag-off behavior is unchanged.
+        # Agent A1 — swipe.qc_compliments: periodically substitute a lopsided
+        # "QC" trio so we can reward the user when they match the community
+        # consensus. Throttled to at most 1 QC trio per QC_TRIO_INTERVAL
+        # rankings per position (deterministic counter — see TestFlight bug
+        # #19). Flag-off behavior is unchanged.
         qc_trio_obj = None
         qc_expected_order: list = []
+        qc_counter_key: str | None = None  # set below if QC eligible
         if is_enabled("swipe.qc_compliments"):
             try:
-                import random as _rand
-                if _rand.random() < (1.0 / 15.0):
+                # Per-session counter keyed by position (or "" for cross-pos).
+                # Counts rankings *since* the last QC trio for that position.
+                # First request of a session starts at 0 so users don't get a
+                # QC trio on their very first ranking after login.
+                qc_counters = sess.setdefault("_qc_counters", {})
+                qc_counter_key = position or ""
+                rankings_since_last = qc_counters.get(qc_counter_key, 0)
+                if rankings_since_last >= QC_TRIO_INTERVAL:
                     from .smart_matchup_generator import find_qc_trio as _find_qc
                     _pool = service._pool(position)
                     if skipped_ids:
@@ -1340,6 +1356,18 @@ def get_trio():
         if is_enabled("swipe.qc_compliments") and qc_trio_obj is not None and qc_expected_order:
             resp["is_qc_trio"] = True
             resp["qc_expected_order"] = qc_expected_order
+
+        # Throttle counter: reset on QC served, otherwise increment. Only
+        # touched when the flag is on so non-QC sessions stay cheap.
+        if qc_counter_key is not None:
+            qc_counters = sess.get("_qc_counters")
+            if qc_counters is not None:
+                if qc_trio_obj is not None:
+                    qc_counters[qc_counter_key] = 0
+                else:
+                    qc_counters[qc_counter_key] = (
+                        qc_counters.get(qc_counter_key, 0) + 1
+                    )
 
         return jsonify(resp)
     except Exception as e:
