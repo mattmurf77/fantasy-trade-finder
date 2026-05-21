@@ -105,6 +105,14 @@ export interface TradeMatch {
    *  session state (which is league-scoped). */
   my_side_player_names?: string[];
   their_side_player_names?: string[];
+  /** Pre-resolved player team abbreviations + positions, parallel arrays
+   *  to *_player_ids. Populated by /all enrichment for the same reason as
+   *  *_player_names — the active session's player pool only covers one
+   *  league. Empty strings ("") mean unknown / free-agent. */
+  my_side_player_teams?: string[];
+  their_side_player_teams?: string[];
+  my_side_player_positions?: string[];
+  their_side_player_positions?: string[];
   counterparty_user_id: string;
   counterparty_username: string;
   created_at: string;
