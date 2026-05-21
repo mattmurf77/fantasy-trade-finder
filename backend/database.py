@@ -3689,11 +3689,20 @@ def load_user_cross_league_exposure(user_id: str) -> list[dict]:
     leagues (for human-readable league names) and players (for name/position).
 
     Returns a list of dicts sorted by exposure count desc:
-        [{player_id, name, pos, exposure, total_leagues, league_names}, ...]
+        [{player_id, name, pos, exposure, total_leagues,
+          leagues: [{league_id, league_name}, ...],
+          league_names: [...]}, ...]
 
     total_leagues is identical on every row — it's the number of leagues
     this user has a roster in.  exposure is the subset where the player
     is on this user's team.
+
+    `leagues` is the authoritative per-league exposure list — it pairs
+    each league_id with its display name so the client can disambiguate
+    identically-named leagues (Sleeper allows duplicate league names
+    across a user's account; two same-named leagues otherwise render as
+    indistinguishable chips and look like double-counting).
+    `league_names` is preserved for any existing consumers.
     """
     with engine.connect() as conn:
         # Pull every (league_id, roster_data) row where this user owns the team.
@@ -3753,15 +3762,23 @@ def load_user_cross_league_exposure(user_id: str) -> list[dict]:
     result = []
     for pid, lid_set in exposure.items():
         meta = player_meta.get(pid, {})
+        # Sort leagues by display name (stable), tie-break on league_id so
+        # same-named leagues have a deterministic order.
+        leagues_list = sorted(
+            (
+                {"league_id": lid, "league_name": league_name_map.get(lid, lid)}
+                for lid in lid_set
+            ),
+            key=lambda x: (x["league_name"].lower(), x["league_id"]),
+        )
         result.append({
             "player_id":     pid,
             "name":          meta.get("name") or pid,
             "pos":           meta.get("pos") or "",
             "exposure":      len(lid_set),
             "total_leagues": total_leagues,
-            "league_names":  sorted(
-                league_name_map.get(lid, lid) for lid in lid_set
-            ),
+            "leagues":       leagues_list,
+            "league_names":  [lg["league_name"] for lg in leagues_list],
         })
 
     # Primary sort: exposure desc; secondary: name asc for stability

@@ -141,6 +141,16 @@ export default function PortfolioScreen() {
 
 function PortfolioRowItem({ row, total }: { row: PortfolioRow; total: number }) {
   const own = row.exposure.length;
+  // Sleeper lets a user have multiple leagues that share a display name.
+  // The backend already returns distinct league_ids per exposure (so the
+  // count is correct), but two chips with identical labels look to the
+  // user like the same league counted twice. Append a short league_id
+  // suffix only on the chips whose names collide within this row, so the
+  // common case (unique names) stays clean.
+  const nameCounts = row.exposure.reduce<Record<string, number>>((acc, ex) => {
+    acc[ex.league_name] = (acc[ex.league_name] || 0) + 1;
+    return acc;
+  }, {});
   return (
     <View style={styles.row}>
       <View style={styles.rowTop}>
@@ -159,16 +169,28 @@ function PortfolioRowItem({ row, total }: { row: PortfolioRow; total: number }) 
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.tierStrip}
       >
-        {row.exposure.map((ex, idx) => (
-          <LeagueTierChip
-            key={`${ex.league_id}-${idx}`}
-            leagueName={ex.league_name}
-            tier={ex.tier}
-          />
-        ))}
+        {row.exposure.map((ex, idx) => {
+          const collides = (nameCounts[ex.league_name] || 0) > 1;
+          const suffix = collides ? ` · ${shortLeagueId(ex.league_id)}` : '';
+          return (
+            <LeagueTierChip
+              key={`${ex.league_id}-${idx}`}
+              leagueName={`${ex.league_name}${suffix}`}
+              tier={ex.tier}
+            />
+          );
+        })}
       </ScrollView>
     </View>
   );
+}
+
+// Last 4 chars of the league_id are enough to disambiguate same-named
+// leagues for a single user (their leagues count is small; collisions
+// on the last 4 are vanishingly rare in practice).
+function shortLeagueId(leagueId: string): string {
+  if (!leagueId) return '';
+  return leagueId.length <= 4 ? leagueId : leagueId.slice(-4);
 }
 
 function LeagueTierChip({

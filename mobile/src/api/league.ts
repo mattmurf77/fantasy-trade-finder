@@ -305,38 +305,51 @@ export async function getNewPartners(
 // ── Portfolio (cross-league exposure) ─────────────────────────────
 // Backend: GET /api/portfolio.
 // Server returns rows shaped like:
-//   { player_id, name, pos, exposure (int), total_leagues, league_names: [..] }
+//   { player_id, name, pos, exposure (int), total_leagues,
+//     leagues: [{league_id, league_name}, ...],
+//     league_names: [..] }                     // legacy, kept for compat
 // We adapt to the richer PortfolioRow shape the mobile UI expects.
 // The backend doesn't currently emit per-league tier info, so each
 // exposure entry is marked 'pool' — the UI shows a neutral chip.
 //
-// NB: league_id isn't returned (only league_names). We fall back to using
-// the league_name as the id for keying since names are unique within a
-// user's account in practice. If/when the backend adds league_ids we can
-// drop the fallback.
+// Prefer the structured `leagues` list so identically-named leagues
+// (Sleeper allows duplicate display names across a user's leagues)
+// keep distinct league_ids and don't render as visual duplicates that
+// look like double-counting. Fall back to `league_names` only when an
+// older backend is still in front.
+export interface PortfolioApiLeague {
+  league_id: string;
+  league_name: string;
+}
 export interface PortfolioApiRow {
   player_id: string;
   name: string;
   pos: string;
   exposure: number;
   total_leagues: number;
-  league_names: string[];
+  leagues?: PortfolioApiLeague[];
+  league_names?: string[];
 }
 export async function getPortfolio(): Promise<{ players: PortfolioRow[] }> {
   const raw = await api.get<{ players: PortfolioApiRow[] }>('/api/portfolio');
-  const players: PortfolioRow[] = (raw?.players || []).map((r) => ({
-    player: {
-      id: r.player_id,
-      name: r.name || r.player_id,
-      position: r.pos || '',
-    },
-    exposure: (r.league_names || []).map((nm) => ({
-      league_id: nm,
-      league_name: nm,
-      tier: 'pool' as PortfolioTier,
-    })),
-    total_leagues: r.total_leagues || (r.league_names || []).length,
-  }));
+  const players: PortfolioRow[] = (raw?.players || []).map((r) => {
+    const exposureSource: PortfolioApiLeague[] = r.leagues && r.leagues.length > 0
+      ? r.leagues
+      : (r.league_names || []).map((nm) => ({ league_id: nm, league_name: nm }));
+    return {
+      player: {
+        id: r.player_id,
+        name: r.name || r.player_id,
+        position: r.pos || '',
+      },
+      exposure: exposureSource.map((lg) => ({
+        league_id: lg.league_id,
+        league_name: lg.league_name,
+        tier: 'pool' as PortfolioTier,
+      })),
+      total_leagues: r.total_leagues || exposureSource.length,
+    };
+  });
   return { players };
 }
 
