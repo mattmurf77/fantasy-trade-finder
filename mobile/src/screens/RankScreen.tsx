@@ -283,6 +283,8 @@ export default function RankScreen() {
           </Pressable>
         </View>
 
+        <Text style={styles.modeHint}>Trios · tap 🏈 Rank below for more modes ›</Text>
+
         {/* Position switcher */}
         <View style={styles.switcher}>
           {POSITIONS.map((p) => {
@@ -310,14 +312,16 @@ export default function RankScreen() {
                 >
                   {p}
                 </Text>
-                <Text
-                  style={[
-                    styles.switcherCount,
-                    isActive && styles.switcherCountActive,
-                  ]}
-                >
-                  {Math.min(count, threshold)}/{threshold}
-                </Text>
+                {!isUnlockedEverywhere && (
+                  <Text
+                    style={[
+                      styles.switcherCount,
+                      isActive && styles.switcherCountActive,
+                    ]}
+                  >
+                    {Math.min(count, threshold)}/{threshold}
+                  </Text>
+                )}
               </Pressable>
             );
           })}
@@ -612,6 +616,13 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: fontSize.xs,
     fontWeight: '700',
+  },
+  modeHint: {
+    color: colors.muted,
+    fontSize: fontSize.xs,
+    textAlign: 'center',
+    fontWeight: '600',
+    marginTop: -spacing.xs,
   },
   switcher: {
     flexDirection: 'row',
