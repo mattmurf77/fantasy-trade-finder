@@ -237,26 +237,46 @@ export default function TiersScreen() {
   const draggedSrcZoneSV = useSharedValue<string>('');
   const draggedSrcIdxSV = useSharedValue<number>(-1);
 
-  // Bin layouts are captured via onLayout into this ref. We compare the
-  // drag's finalY against every known layout and pick the first match.
+  // Bin + chip layouts live in screen-Y coordinates so they're directly
+  // comparable to gesture `e.absoluteY` (which is also screen-Y). We
+  // CANNOT use `nativeEvent.layout.y` directly: that's relative to the
+  // immediate parent (the ScrollView's content view) and is off from
+  // the gesture coords by the screen offset of the ScrollView. Pre-fix
+  // this caused drops to land one or two tiers below the user's target
+  // (TestFlight feedback #23). measureInWindow gives us screen-Y.
   const binLayouts = useRef<BinLayout[]>([]);
-  // Per-chip layouts (y + height), keyed by playerId. Captured via the
-  // chip's onLayout so we can resolve a drop position to an insertion
-  // index inside the destination bin (within-tier reordering, not just
-  // tier-to-tier moves).
   const chipLayouts = useRef<Map<string, { y: number; height: number }>>(new Map());
 
-  const setBinLayout = useCallback((zone: Zone, e: LayoutChangeEvent) => {
-    const { y, height } = e.nativeEvent.layout;
-    const existing = binLayouts.current.findIndex((b) => b.zone === zone);
-    const entry: BinLayout = { zone, y, height };
-    if (existing >= 0) binLayouts.current[existing] = entry;
-    else binLayouts.current.push(entry);
+  // Refs to each bin's outer <View> so we can measureInWindow on layout.
+  // TierBin is already a forwardRef. Per-zone setter callbacks are memo'd
+  // so React doesn't see a new prop identity each render.
+  const binRefs = useRef<Partial<Record<Zone, View | null>>>({});
+  const binRefSetters = useMemo(() => {
+    const setters: Partial<Record<Zone, (node: View | null) => void>> = {};
+    for (const z of ALL_ZONES) {
+      setters[z] = (node: View | null) => { binRefs.current[z] = node; };
+    }
+    return setters as Record<Zone, (node: View | null) => void>;
   }, []);
 
-  const setChipLayout = useCallback((pid: string, e: LayoutChangeEvent) => {
-    const { y, height } = e.nativeEvent.layout;
-    chipLayouts.current.set(pid, { y, height });
+  // Bin onLayout: re-measure in screen coords. measureInWindow is async
+  // but onLayout fires before any user interaction is possible, so the
+  // cache is warm by the first drag.
+  const setBinLayout = useCallback((zone: Zone, _e: LayoutChangeEvent) => {
+    const node = binRefs.current[zone];
+    if (!node) return;
+    node.measureInWindow((_x, y, _w, height) => {
+      const existing = binLayouts.current.findIndex((b) => b.zone === zone);
+      const entry: BinLayout = { zone, y, height };
+      if (existing >= 0) binLayouts.current[existing] = entry;
+      else binLayouts.current.push(entry);
+    });
+  }, []);
+
+  // Chip onLayout: DraggableRow does its own measureInWindow against
+  // its outer Animated.View ref and hands us screen-Y + height directly.
+  const setChipLayout = useCallback((pid: string, screenY: number, height: number) => {
+    chipLayouts.current.set(pid, { y: screenY, height });
   }, []);
 
   const zoneAt = useCallback((absoluteY: number): Zone | null => {
@@ -679,6 +699,7 @@ export default function TiersScreen() {
         >
           {/* Unassigned pool up top */}
           <TierBin
+            ref={binRefSetters.unassigned}
             tier="unassigned"
             count={buckets.unassigned.length}
             onLayout={(e) => setBinLayout('unassigned', e)}
@@ -694,6 +715,7 @@ export default function TiersScreen() {
           {TIERS.map((t) => (
             <TierBin
               key={t}
+              ref={binRefSetters[t]}
               tier={t}
               count={buckets[t].length}
               onLayout={(e) => setBinLayout(t, e)}
@@ -802,7 +824,7 @@ interface DraggableRowProps {
   onDragStart: (pid: string) => void;
   onDragUpdate: (absoluteY: number, pid: string) => void;
   onDragEnd: () => void;
-  onLayout: (pid: string, e: LayoutChangeEvent) => void;
+  onLayout: (pid: string, screenY: number, height: number) => void;
   onDropAt: (absoluteY: number, pid: string) => void;
   onLongPressDismiss?: () => void;
   onEnterMultiSelect: () => void;
@@ -841,6 +863,19 @@ function DraggableRow({
   const translateY = useSharedValue(0);
   const scale = useSharedValue(1);
   const zIndex = useSharedValue(0);
+
+  // Outer-view ref for measureInWindow inside the onLayout handler so
+  // we can hand the parent a screen-Y (matches gesture.absoluteY's
+  // coordinate space). Without this, drops resolve against parent-
+  // relative Y and land in the wrong tier (TestFlight feedback #23).
+  const wrapRef = useRef<View | null>(null);
+  const handleLayout = useCallback(() => {
+    const node = wrapRef.current;
+    if (!node) return;
+    node.measureInWindow((_x, y, _w, height) => {
+      onLayout(player.id, y, height);
+    });
+  }, [onLayout, player.id]);
 
   // Gap-shift for non-dragged chips (issue #14). Derived from the
   // parent's drag-preview shared values so the eased interpolation
@@ -946,8 +981,9 @@ function DraggableRow({
   if (selectionMode) {
     return (
       <Pressable
+        ref={wrapRef as any}
         onPress={onTapInSelection}
-        onLayout={(e) => onLayout(player.id, e)}
+        onLayout={handleLayout}
         style={({ pressed }) => [
           styles.chipSelectableWrap,
           isSelected && styles.chipSelected,
@@ -972,8 +1008,9 @@ function DraggableRow({
   return (
     <GestureDetector gesture={composed}>
       <Animated.View
+        ref={wrapRef as any}
         style={animatedStyle}
-        onLayout={(e) => onLayout(player.id, e)}
+        onLayout={handleLayout}
       >
         <PlayerCard player={player} compact onLongPress={onLongPressDismiss} />
       </Animated.View>
