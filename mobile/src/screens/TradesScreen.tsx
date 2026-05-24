@@ -293,12 +293,48 @@ export default function TradesScreen({ navigation }: any) {
   const swipeMutation = useMutation({
     mutationFn: ({ tradeId, decision }: { tradeId: string; decision: 'like' | 'pass' }) =>
       swipeTrade(tradeId, decision),
+    onMutate: ({ tradeId }) => {
+      // Snapshot the index this card was at when the swipe fired. On
+      // error we use this to decide whether to rewind the deck — only
+      // safe if the user hasn't already swiped past it. Capturing the
+      // index inside the deck (rather than the position in `sortedDeck`)
+      // keeps the rollback correct under fairness re-sorts that happen
+      // between the swipe and the error.
+      const dispatchedIdx = deck.findIndex((c) => c.trade_id === tradeId);
+      return { tradeId, dispatchedIdx };
+    },
     onSuccess: (_, vars) => {
       if (vars.decision === 'like') {
         // Liked-trades count is per-league (backend filters by session). Use a
         // league-scoped key so switching leagues doesn't show a stale count.
         queryClient.invalidateQueries({ queryKey: ['liked-trades', leagueId] });
       }
+    },
+    onError: (_err, _vars, ctx) => {
+      // Silent-deck-advance was the bug (api-layer review onError + silent
+      // bugs sweep). `advance()` bumps deckIdx synchronously regardless of
+      // mutation outcome; on a network/5xx failure the deck has already
+      // moved on and the user has no signal the swipe didn't land.
+      //
+      // Rewind ONLY when the failed card is exactly one swipe behind the
+      // current top — i.e. the user hasn't already swiped past it. If
+      // they have, jumping the deck backwards would be more disorienting
+      // than just toasting; same logic the api-layer review describes.
+      // Also refetch the liked-trades count in case the optimistic
+      // `like` invalidation has populated a stale entry; idempotent
+      // when no like was in flight.
+      setDeckIdx((cur) => {
+        const tradeId = ctx?.tradeId;
+        if (!tradeId) return cur;
+        // The card that was at the top when we swiped lives at cur-1
+        // post-advance. If sortedDeck no longer has it there, the user
+        // has swiped further or the deck was re-sorted — don't rewind.
+        const prevCard = sortedDeck[cur - 1];
+        if (prevCard && prevCard.trade_id === tradeId) return cur - 1;
+        return cur;
+      });
+      queryClient.invalidateQueries({ queryKey: ['liked-trades', leagueId] });
+      setToast({ msg: "Swipe didn't save — try again.", tone: 'warn' });
     },
   });
 
