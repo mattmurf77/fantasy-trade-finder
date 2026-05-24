@@ -35,7 +35,7 @@ import {
   getStreak,
   submitTrioRanking,
 } from '../api/rankings';
-import type { Position, Trio } from '../shared/types';
+import type { Position, Trio, RankingProgress } from '../shared/types';
 import { useFlag } from '../state/useFeatureFlags';
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
@@ -83,12 +83,14 @@ export default function RankScreen() {
     queryKey: ['progress'],
     queryFn: getProgress,
     staleTime: 15_000,
+    placeholderData: (prev) => prev,
   });
 
   const streakQuery = useQuery({
     queryKey: ['streak'],
     queryFn: getStreak,
     staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 
   const submitMutation = useMutation({
@@ -100,7 +102,40 @@ export default function RankScreen() {
         submitTrioRanking(rankedIds),
       ),
     onSuccess: (resp) => {
-      queryClient.invalidateQueries({ queryKey: ['progress'] });
+      // Local-merge the progress cache instead of invalidating — every
+      // trio submit otherwise eats a ~250 ms /api/rankings/progress
+      // refetch (API #A3 + Backend #B5). The /api/rank3 response
+      // carries the new `interaction_count` for the submitted position
+      // and the global `threshold`, which is all we need to keep the
+      // progress bar + per-position counters live.
+      //
+      // Edge case: the very rank that pushes the user past
+      // `total_required` flips `unlocked` server-side and unlocks the
+      // Trade Finder banner. We can't derive `unlocked` purely from the
+      // submitted position (it requires all positions to be at
+      // threshold), so on a threshold cross we fall back to invalidating
+      // ONCE — keeps the banner correct without paying the round-trip
+      // on every swipe.
+      const prevProgress = queryClient.getQueryData<RankingProgress>(['progress']);
+      const crossedThreshold =
+        prevProgress != null &&
+        !prevProgress.unlocked &&
+        resp.threshold_met === true;
+      if (crossedThreshold) {
+        queryClient.invalidateQueries({ queryKey: ['progress'] });
+      } else if (prevProgress) {
+        const prevCount = prevProgress[position] ?? 0;
+        // Don't decrement on a same-day re-rank (server returns the
+        // same count) — `Math.max` keeps the local counter monotonic.
+        const nextCount = Math.max(prevCount, resp.interaction_count);
+        const delta = nextCount - prevCount;
+        queryClient.setQueryData<RankingProgress>(['progress'], {
+          ...prevProgress,
+          [position]: nextCount,
+          threshold: resp.threshold,
+          total_completed: prevProgress.total_completed + delta,
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ['trio', position] });
       setSelectionOrder([]);
       // Detect streak increment from inline response — compare to the
@@ -366,8 +401,18 @@ export default function RankScreen() {
 
         {/* Cards */}
         {trioQuery.isLoading || !trio ? (
-          <View style={styles.centered}>
-            <ActivityIndicator color={colors.accent} />
+          // Three skeleton cards keep the page shape stable during the
+          // /api/trio round-trip (Mobile #M1). Mirrors the static-fill
+          // pattern from MatchesScreen.tsx:253-264 — no animation
+          // library, just muted boxes at the real card dimensions.
+          <View style={styles.cards}>
+            {[0, 1, 2].map((i) => (
+              <View key={i} style={styles.skeletonCard}>
+                <View style={styles.skeletonChip} />
+                <View style={styles.skeletonName} />
+                <View style={styles.skeletonMeta} />
+              </View>
+            ))}
           </View>
         ) : trioQuery.isError ? (
           <View style={styles.centered}>
@@ -671,6 +716,37 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xxl,
     alignItems: 'center',
     gap: spacing.md,
+  },
+  // Skeleton tiles — match the real PlayerCard outer shape (surface bg,
+  // border, radius.lg, padding) so the layout doesn't shift when the
+  // /api/trio response lands. Static fills, no shimmer (consistent with
+  // MatchesScreen skeleton — see Mobile #M1).
+  skeletonCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    gap: spacing.sm,
+    minHeight: 96,
+  },
+  skeletonChip: {
+    width: 44,
+    height: 18,
+    borderRadius: radius.sm,
+    backgroundColor: colors.border,
+  },
+  skeletonName: {
+    width: 160,
+    height: 18,
+    borderRadius: radius.sm,
+    backgroundColor: colors.border,
+  },
+  skeletonMeta: {
+    width: 120,
+    height: 12,
+    borderRadius: radius.sm,
+    backgroundColor: colors.border,
   },
   errorText: { color: colors.red, fontSize: fontSize.sm, textAlign: 'center' },
   retryText: { color: colors.accent, fontSize: fontSize.sm, fontWeight: '700' },

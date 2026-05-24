@@ -3,8 +3,10 @@ import { Text, Pressable, View, StyleSheet, Modal } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainerRefContext, CommonActions } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
+import { getNextTrio } from '../api/rankings';
 import RankScreen from '../screens/RankScreen';
 import TiersScreen from '../screens/TiersScreen';
 import OverallRanksScreen from '../screens/OverallRanksScreen';
@@ -155,8 +157,24 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
   // We need the root navigation (the Tab navigator), not a screen-local one.
   // Grabbing it through context lets this stay outside any specific Screen.
   const navContext = React.useContext(NavigationContainerRefContext as any) as any;
+  const queryClient = useQueryClient();
 
   const go = (screen: RankRoute) => {
+    // Prefetch the Trios payload during the modal-close + tab-transition
+    // animation (~250–400 ms of otherwise-dead time). RankScreen's
+    // `useQuery(['trio', 'QB'])` will adopt the in-flight request when it
+    // mounts, so the user effectively gets a free head start on the
+    // /api/trio round-trip. Only fires for the Trios destination — the
+    // other Rank sub-screens have their own data shapes (Mobile #M2).
+    if (screen === 'Trios') {
+      // Fire-and-forget — prefetchQuery surfaces errors via the query's
+      // own error state once RankScreen reads it, so swallow here.
+      void queryClient.prefetchQuery({
+        queryKey: ['trio', 'QB'],
+        queryFn: () => getNextTrio('QB'),
+        staleTime: 0,
+      });
+    }
     onClose();
     if (!navContext) return;
     navContext.dispatch(
