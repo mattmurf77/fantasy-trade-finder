@@ -8,10 +8,24 @@ export async function getNotifications(userId: string) {
   );
 }
 
-// POST /api/notifications/read — mark one read
+// POST /api/notifications/read — mark one read.
+// Backend (server.py:4878-4898) reads `body["ids"]` (a list). Previously
+// this wrapper sent `{notification_id}`, which the backend silently
+// ignored — server returned `{ok:true, updated:0}` and the row stayed
+// unread. Latent until a UI caller wired it up (see review #A1 / Fix 11).
 export async function markNotificationRead(notificationId: string | number) {
   return api.post<any>('/api/notifications/read', {
-    notification_id: notificationId,
+    ids: [notificationId],
+  });
+}
+
+// POST /api/notifications/read — bulk variant. Backend supports a list of
+// ids in one request, so expose that directly for callers that batch.
+export async function markNotificationsRead(
+  notificationIds: Array<string | number>,
+) {
+  return api.post<any>('/api/notifications/read', {
+    ids: notificationIds,
   });
 }
 
