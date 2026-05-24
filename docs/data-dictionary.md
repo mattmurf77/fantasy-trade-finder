@@ -66,6 +66,8 @@ Atomic interaction log — every pairwise comparison. Insert-only.
 
 A 3-player ranking A>B>C writes 3 rows with `decision_type='rank'`. Trade swipes write rows with `decision_type='trade'` and a smaller `k_factor`.
 
+Indexes: `ix_swipe_dec_user_format` on `(user_id, scoring_format)` — `load_swipe_decisions` is read on every `session_init` (one query per format).
+
 ---
 
 ## `trade_decisions`
@@ -82,6 +84,8 @@ High-level trade card decisions — audit trail.
 | `receive_player_ids` | JSON text | array |
 | `decision` | str | `'like'` / `'pass'` |
 | `created_at` | str | |
+
+Indexes: `ix_trade_dec_user_league_decision` on `(user_id, league_id, decision)` — `check_for_match` fires on every "like" swipe filtering on these three columns.
 
 ---
 
@@ -114,6 +118,8 @@ Latest Elo per (user, league, player). Replaced atomically (delete + insert) on 
 | `scoring_format` | str | `'1qb_ppr'` / `'sf_tep'` (null = legacy) |
 | `updated_at` | str | |
 
+Indexes: `ix_member_rankings_league_fmt_user` on `(league_id, scoring_format, user_id)` — `load_member_rankings` filters by `(league_id, scoring_format)` on every `/api/trades/generate`; trailing `user_id` covers per-user replace.
+
 ---
 
 ## `trade_matches`
@@ -126,7 +132,7 @@ Created when both users like mirrored trades. Lifecycle: `pending → accepted |
 | `league_id` | str | |
 | `user_a_id`, `user_b_id` | str | A swiped first |
 | `user_a_give`, `user_a_receive` | JSON text | from A's perspective |
-| `status` | str | `pending` / `accepted` / `declined` (default `pending`) |
+| `status` | str | `pending` / `accepted` / `declined` (default `pending`). Pre-2026-05 rows could be `active`; `_migrate_db()` flips any remaining `active` → `pending` once. |
 | `user_a_decision`, `user_b_decision` | str | `accept` / `decline` / null |
 | `user_a_decided_at`, `user_b_decided_at` | str | |
 | `matched_at` | str | |
@@ -233,6 +239,8 @@ Append-only Elo snapshots powering the Trends tab. Written on every `save_rankin
 | `snapshot_at` | str | ISO UTC |
 
 Compaction (snapshots >90 days) is a future maintenance task — not done in v1.
+
+Indexes: `ix_elo_history_user_fmt_at` on `(user_id, scoring_format, snapshot_at)` — `/api/trends/risers-fallers` scans per (user, format) ordered by snapshot.
 
 ---
 

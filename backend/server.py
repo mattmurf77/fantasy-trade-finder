@@ -1396,6 +1396,43 @@ def _leaderboard_cached(metric: str, window: str | None, league_id: str | None) 
     return data
 
 
+# ── League members / unlock-states cache (review #B4) ─────────────────────
+# Both /api/league/members and /api/league/member-unlock-states call the
+# same `load_league_member_unlock_states(league_id, exclude_user_id)`
+# loader, which runs two SELECTs + JSON parsing. Mobile/web hit both on
+# first render of the League screen → doubled DB chatter. Mirror the
+# leaderboard cache: short TTL, keyed on (league_id, exclude_user_id).
+# Writes that change membership/rankings invalidate via
+# `_invalidate_league_members_cache(league_id)`.
+_LEAGUE_MEMBERS_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
+_LEAGUE_MEMBERS_TTL_SECONDS = 60
+
+
+def _league_members_cached(league_id: str, exclude_user_id: str | None) -> list[dict]:
+    key = (league_id, exclude_user_id or "")
+    now = time.time()
+    hit = _LEAGUE_MEMBERS_CACHE.get(key)
+    if hit and (now - hit[0]) < _LEAGUE_MEMBERS_TTL_SECONDS:
+        return hit[1]
+    data = load_league_member_unlock_states(
+        league_id=league_id, exclude_user_id=exclude_user_id,
+    )
+    _LEAGUE_MEMBERS_CACHE[key] = (now, data)
+    return data
+
+
+def _invalidate_league_members_cache(league_id: str) -> None:
+    """Drop any cached entries for `league_id` (all exclude_user_id variants).
+    Called from write paths that change leaguemate roster, unlock state, or
+    ranking_method — the three fields the loader projects.
+    """
+    if not league_id:
+        return
+    stale = [k for k in _LEAGUE_MEMBERS_CACHE if k[0] == league_id]
+    for k in stale:
+        _LEAGUE_MEMBERS_CACHE.pop(k, None)
+
+
 @app.route("/api/leaderboard", methods=["GET"])
 def get_leaderboard():
     """GET /api/leaderboard?scope=league|universal&metric=streak|ranks&window=week|month|season|all&league_id=...
@@ -1707,11 +1744,33 @@ def get_rankings_progress():
     # list), `was_first` will be False and the event/push fan-out won't
     # spuriously fire.
     if unlocked:
+        # Short-circuit when the user is already unlocked in this format.
+        # `mark_format_unlocked` is monotonic and inserts only on the first
+        # transition (returns inserted=False, was_first=False otherwise), so
+        # skipping it here is equivalent — we save the write txn + the
+        # subsequent peer-push fanout on every poll for already-unlocked users.
+        # The transition write still runs because `fmt in unlocked_formats_list`
+        # is only True after `mark_format_unlocked` has previously persisted.
+        _already_unlocked = fmt in unlocked_formats_list
         _unlock_res = {"inserted": False, "was_first": False}
-        try:
-            _unlock_res = mark_format_unlocked(g_user_id, fmt) or _unlock_res
-        except Exception as db_err:
-            log.warning("mark_format_unlocked failed: %s", db_err)
+        if not _already_unlocked:
+            try:
+                _unlock_res = mark_format_unlocked(g_user_id, fmt) or _unlock_res
+            except Exception as db_err:
+                log.warning("mark_format_unlocked failed: %s", db_err)
+
+        if _unlock_res.get("inserted"):
+            # User's `unlocked_formats` just changed → drop cached
+            # member-unlock-states for the active league so leaguemates
+            # see the new badge on next fetch.
+            try:
+                _lid_for_invalidate = getattr(
+                    sess.get("league"), "league_id", None
+                )
+                if _lid_for_invalidate:
+                    _invalidate_league_members_cache(_lid_for_invalidate)
+            except Exception:
+                pass
 
         if _unlock_res.get("was_first"):
             try:
@@ -1783,6 +1842,16 @@ def set_ranking_method_route():
     try:
         set_ranking_method(g_user_id, method)
         log.info("ranking-method set for %s: %s", g_user_id, method)
+        # `has_ranking_method` is one of the fields the league-members
+        # loader projects; flip the cache so leaguemates see the update.
+        try:
+            _lid_for_invalidate = getattr(
+                sess.get("league"), "league_id", None
+            )
+            if _lid_for_invalidate:
+                _invalidate_league_members_cache(_lid_for_invalidate)
+        except Exception:
+            pass
         return jsonify({"ok": True, "method": method})
     except Exception as e:
         log.error("set ranking-method error: %s", e)
@@ -3350,10 +3419,15 @@ def disposition_trade_match(match_id):
                 _my_name      = _members_map.get(g_user_id, g_user_id)
                 _partner_name = _members_map.get(_partner_uid, _partner_uid or "your leaguemate")
 
-                # Get player names from the current user's match perspective
-                _raw_ms   = load_matches(user_id=g_user_id, league_id=g_league.league_id
-                                         if g_league else "")
-                _this_m   = next((m for m in _raw_ms if m["id"] == match_id), None)
+                # Get player names from the current user's match perspective.
+                # Use the match's own league_id (not the caller's active session
+                # league) so cross-league dispositions still find the row —
+                # mirrors the refresh path below (~3401). `load_matches` keys
+                # rows on "match_id", not "id".
+                _match_league_id = result.get("league_id") or (
+                    g_league.league_id if g_league else "")
+                _raw_ms   = load_matches(user_id=g_user_id, league_id=_match_league_id)
+                _this_m   = next((m for m in _raw_ms if m["match_id"] == match_id), None)
                 _pd       = {p.id: p for p in g_players}
                 _gv_names = ([_pd[pid].name for pid in _this_m["my_give"]    if pid in _pd]
                              if _this_m else [])
@@ -3722,7 +3796,7 @@ def league_member_unlock_states_route():
         return jsonify({"members": [], "flag_off": True})
 
     try:
-        members = load_league_member_unlock_states(
+        members = _league_members_cached(
             league_id       = league_id,
             exclude_user_id = g_user_id,
         )
@@ -3770,8 +3844,9 @@ def league_members_route():
     try:
         # Reuse existing per-member loader, then trim to the join-status
         # fields this section needs. Keeps a single source of truth for
-        # the join determination.
-        rows = load_league_member_unlock_states(
+        # the join determination. Cached (60s TTL) to coalesce the
+        # back-to-back League screen calls — see _league_members_cached.
+        rows = _league_members_cached(
             league_id       = league_id,
             exclude_user_id = g_user_id,
         )
@@ -4773,6 +4848,9 @@ def session_init():
         ]
         upsert_league_members(league_id=league_id, members=all_members_for_db)
         log.info("  ✅ league_members upserted (%d members)", len(all_members_for_db))
+        # Roster changed → drop cached _league_members projections so the
+        # next /api/league/members call rebuilds the join-status list.
+        _invalidate_league_members_cache(league_id)
     except Exception as db_err:
         log.warning("  league_members upsert failed (continuing): %s", db_err)
 

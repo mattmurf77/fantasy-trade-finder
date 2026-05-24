@@ -695,6 +695,54 @@ def _migrate_db() -> None:
         except Exception:
             pass
 
+    # ── Hot-cold-start indexes (review #B1) ────────────────────────────────
+    # These tables were declared with no composite indexes and full-scan on
+    # every session_init / swipe / trends tab. Add idempotently — same
+    # `CREATE INDEX IF NOT EXISTS` pattern as above. Column lists are
+    # aligned to the actual hot-path readers:
+    #   - swipe_decisions.(user_id, scoring_format) → load_swipe_decisions
+    #     full-scans for one user's format-tagged rows on every session_init
+    #     (table has no league_id column; format is the second filter).
+    #   - trade_decisions.(user_id, league_id, decision) → check_for_match
+    #     filters on `user_id = ? AND league_id = ? AND decision = 'like'`
+    #     per swipe.
+    #   - member_rankings.(league_id, scoring_format, user_id) →
+    #     load_member_rankings filters by `(league_id, scoring_format)`;
+    #     adding user_id covers the per-user upsert delete.
+    #   - elo_history.(user_id, scoring_format, snapshot_at) →
+    #     /api/trends/risers-fallers scans per user+format ordered by ts.
+    _hot_path_indexes = [
+        ("ix_swipe_dec_user_format", "swipe_decisions",
+         "user_id, scoring_format"),
+        ("ix_trade_dec_user_league_decision", "trade_decisions",
+         "user_id, league_id, decision"),
+        ("ix_member_rankings_league_fmt_user", "member_rankings",
+         "league_id, scoring_format, user_id"),
+        ("ix_elo_history_user_fmt_at", "elo_history",
+         "user_id, scoring_format, snapshot_at"),
+    ]
+    for idx_name, tbl, cols in _hot_path_indexes:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})"
+                ))
+        except Exception:
+            pass
+
+    # ── trade_matches.status: 'active' → 'pending' (review P0) ─────────────
+    # Earlier code wrote status='active' on insert; every cron reader filters
+    # on status='pending'. Idempotent — only flips rows currently 'active'.
+    # Safe to run repeatedly: once flipped, the WHERE clause matches nothing.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE trade_matches SET status = 'pending' "
+                "WHERE status = 'active'"
+            ))
+    except Exception:
+        pass
+
     # Seed model_config defaults in a single clean transaction.
     with engine.begin() as conn:
         for key, value, description in _MODEL_CONFIG_DEFAULTS:
@@ -2765,7 +2813,7 @@ def create_trade_match(
                 user_a_give  = json.dumps(user_a_give),
                 user_a_receive = json.dumps(user_a_receive),
                 matched_at   = now,
-                status       = "active",
+                status       = "pending",
             )
         )
         match_id = result.inserted_primary_key[0]
@@ -2787,7 +2835,7 @@ def create_trade_match(
         "user_a_give": user_a_give,
         "user_a_receive": user_a_receive,
         "matched_at":  now,
-        "status":      "active",
+        "status":      "pending",
     }
 
 
