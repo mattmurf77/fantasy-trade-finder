@@ -88,6 +88,7 @@ export default function TradesScreen({ navigation }: any) {
     queryFn:  () => getNewPartners(leagueId!),
     enabled:  !!leagueId && !!userId && newPartnersFlag,
     staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
   // Trade-fairness toggle. ON = backend filters to balanced trades and
   // sorts by composite_score (current behavior). OFF = broaden the
@@ -178,6 +179,7 @@ export default function TradesScreen({ navigation }: any) {
     queryFn: () => getLeaguePreferences(leagueId!),
     enabled: !!leagueId,
     staleTime: 5 * 60_000,
+    placeholderData: (prev) => prev,
   });
 
   useEffect(() => {
@@ -305,6 +307,7 @@ export default function TradesScreen({ navigation }: any) {
     queryFn: getLikedTrades,
     enabled: !!leagueId,
     staleTime: 30_000,
+    placeholderData: (prev) => prev,
   });
 
   // When Trade fairness is OFF, the user wants trades ranked purely by

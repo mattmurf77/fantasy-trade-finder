@@ -103,12 +103,14 @@ export default function TiersScreen() {
     queryKey: ['rankings', position],
     queryFn: () => getRankings(position),
     staleTime: 30_000,
+    placeholderData: (prev) => prev,
   });
 
   const tiersStatusQuery = useQuery({
     queryKey: ['tiers-status'],
     queryFn: getTiersStatus,
     staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 
   const saveMutation = useMutation({
