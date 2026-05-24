@@ -5,6 +5,7 @@ import { initLeagueSession, startDemoSession as apiStartDemoSession } from '../a
 import { connectLeague as apiConnectLeague } from '../api/league';
 import { getLeagues } from '../api/sleeper';
 import { setUser as sentrySetUser } from '../observability/sentry';
+import { queryClient } from './queryClient';
 import type { LeagueSummary } from '../shared/types';
 
 // Storage keys kept identical to the web app where practical, so the server
@@ -172,6 +173,15 @@ export const useSession = create<SessionState>((set, get) => ({
         name:      lg.league_name,
       });
       await get().setLeague(lg);
+      // Invalidate league-agnostic caches whose CONTENTS change on a
+      // league swap. `[leagueId]`-keyed queries auto-refetch on key
+      // change, but stable keys don't — so portfolio, the cross-league
+      // matches inbox, and awaiting-trades all keep the previous
+      // league's data for up to staleTime (30s/15s respectively).
+      // Mirrors api-layer review #A4.
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['matches', 'all'] });
+      queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
     } finally {
       set({ switching: false });
     }

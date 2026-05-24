@@ -91,6 +91,17 @@ export default function MatchesScreen() {
       if (vars.d === 'accepted') {
         haptics.success();
       }
+      // An accept/decline shouldn't just disappear the match from the
+      // Mutual segment — the same match can sit in the "Awaiting them"
+      // bucket (when only the counterparty has yet to swipe) and in the
+      // user's liked-trades list. Invalidate both so the inbox is
+      // consistent across segments without a manual refresh. The match
+      // inbox is cross-league, so we invalidate every league's
+      // liked-trades cache via the partial-key match (TanStack matches
+      // any queryKey that starts with the supplied array).
+      // Mirrors api-layer review #A2 + silent-bugs review bug #5.
+      queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
+      queryClient.invalidateQueries({ queryKey: ['liked-trades'] });
     },
   });
 

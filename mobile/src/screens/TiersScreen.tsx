@@ -137,6 +137,12 @@ export default function TiersScreen() {
       setToast({ msg: '✓ Tiers saved', tone: 'success' });
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
       queryClient.invalidateQueries({ queryKey: ['progress'] });
+      // Tier saves rewrite per-position ELO overrides on the backend,
+      // which the Overall / Manual / Tiers screens all read via the
+      // `['rankings', ...]` family. Without this, those screens show
+      // stale ELOs for up to 30s (the rankings staleTime) post-save.
+      // Mirrors api-layer review #A2.
+      queryClient.invalidateQueries({ queryKey: ['rankings'] });
       // Reset the clearedPids set — the backend just absorbed them.
       setClearedPids(new Set());
     },
@@ -179,12 +185,30 @@ export default function TiersScreen() {
   const dismissMutation = useMutation({
     mutationFn: (pid: string) => dismissPlayer(pid),
     onMutate: (pid) => {
-      // Optimistic: pull the player out of every bucket immediately
+      // Optimistic: pull the player out of every bucket immediately.
+      // Snapshot the PRE-removal bucket layout so onError can restore the
+      // chip in its original tier + index if the backend rejects the
+      // dismiss. Without this, a failed POST silently vanishes the chip
+      // until the next rankings refetch (silent-bugs review bug #3).
+      const snapshot = cloneBuckets(buckets);
       setBuckets((prev) => {
         const next = cloneBuckets(prev);
         for (const z of ALL_ZONES) next[z] = next[z].filter((p) => p.id !== pid);
         return next;
       });
+      return { snapshot };
+    },
+    onError: (_err, _pid, ctx) => {
+      // Restore the snapshot taken in onMutate. We replace the entire
+      // bucket map rather than re-inserting the single chip because
+      // there's no source-zone bookkeeping (the optimistic filter
+      // scans every zone). If the user has already mutated buckets in
+      // the meantime (e.g. dragged another chip between optimistic
+      // remove and error), this rollback wins — that's the safest
+      // semantic for a "this hide failed" error: revert to last-known
+      // good and let the user redo the drag.
+      if (ctx?.snapshot) setBuckets(ctx.snapshot);
+      setToast({ msg: "Couldn't hide player — try again.", tone: 'warn' });
     },
     onSuccess: () => {
       setToast({ msg: 'Player hidden from your pool', tone: 'success' });

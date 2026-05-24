@@ -47,7 +47,7 @@ export default function RankScreen() {
   const navigation  = useNavigation();
   const [position, setPosition] = useState<Position>('QB');
   const [selectionOrder, setSelectionOrder] = useState<('a' | 'b' | 'c')[]>([]);
-  const [toast, setToast] = useState<{ msg: string; tone?: 'success' } | null>(null);
+  const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
   const [infoSheet, setInfoSheet] = useState<{ name: string; info: string } | null>(null);
   const [rookieBoardOpen, setRookieBoardOpen] = useState(false);
   // I AM SPEED — when ON we auto-rank the 3rd choice + auto-submit after the
@@ -137,6 +137,12 @@ export default function RankScreen() {
         });
       }
       queryClient.invalidateQueries({ queryKey: ['trio', position] });
+      // Submitting a trio rewrites per-position ELOs server-side; the
+      // Overall / Manual / Tiers screens all read these via the
+      // `['rankings', ...]` family. Without this invalidation those
+      // screens render stale ELOs for up to 30s post-submit.
+      // Mirrors api-layer review #A2.
+      queryClient.invalidateQueries({ queryKey: ['rankings'] });
       setSelectionOrder([]);
       // Detect streak increment from inline response — compare to the
       // currently-cached value before writing through. If the new value
@@ -151,6 +157,20 @@ export default function RankScreen() {
       if (resp.streak) {
         queryClient.setQueryData(['streak'], resp.streak);
       }
+    },
+    onError: () => {
+      // Submit failed (network or 5xx). Today the deck doesn't advance
+      // because `['trio', position]` is only invalidated on success — so
+      // the user is still looking at the same three cards. Clear the
+      // selection so the rank badges don't visually imply "this saved",
+      // refetch the trio to make sure we're aligned with whatever the
+      // backend currently considers the active trio for this position
+      // (in case of a partial commit), and surface a toast so the user
+      // knows their rank didn't land. Mirrors the rollback pattern in
+      // MatchesScreen.dispMutation.
+      setSelectionOrder([]);
+      queryClient.invalidateQueries({ queryKey: ['trio', position] });
+      setToast({ msg: "Couldn't save your rank — try again.", tone: 'warn' });
     },
   });
 

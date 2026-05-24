@@ -3,12 +3,13 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
 import RootNav from './src/navigation/RootNav';
 import { useSession } from './src/state/useSession';
 import { useFeatureFlags } from './src/state/useFeatureFlags';
 import { useFeedback } from './src/state/useFeedback';
+import { queryClient } from './src/state/queryClient';
 import { initSentry, wrap as sentryWrap } from './src/observability/sentry';
 import { getTierConfig } from './src/api/rankings';
 import { warmPlayerCache } from './src/api/sleeper';
@@ -18,29 +19,6 @@ import { handleDeepLink } from './src/utils/deepLinks';
 // Initialize observability as early as possible so even crashes during
 // bootstrap are captured. No-ops cleanly when no DSN is configured.
 initSentry();
-
-// One QueryClient for the app lifetime. Defaults tuned for a consumer
-// mobile app: retry once, keep data fresh for 30s, background-refresh
-// on mount so reopening the app shows current info.
-// `gcTime: 30min` (vs TanStack's 5min default) keeps cached query data
-// around long enough that tab-switches and AppState suspensions don't
-// silently nuke the cache — combined with `placeholderData: (prev) => prev`
-// on screen-level queries, this gives "instant content, refetch silently"
-// behavior across the tabs (Mobile review #M5).
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      gcTime: 30 * 60_000,
-      retry: 1,
-      refetchOnReconnect: true,
-      refetchOnWindowFocus: false,
-    },
-    mutations: {
-      retry: 0,
-    },
-  },
-});
 
 function App() {
   const [booted, setBooted] = useState(false);
