@@ -15,6 +15,7 @@ data is fetched from the Sleeper public API (no OAuth required).
 """
 
 import collections
+import concurrent.futures
 import json
 import logging
 import os
@@ -4566,9 +4567,24 @@ def session_init():
     need_rebuild = existing_services is None or existing_tagged_user != user_id
 
     if need_rebuild:
-        new_services: dict = {}
         from .database import SCORING_FORMATS as DB_SCORING_FORMATS
-        for fmt in DB_SCORING_FORMATS:
+
+        def _build_service_for_format(fmt: str) -> tuple[str, RankingService]:
+            """Build one format's RankingService — runs in a worker thread.
+
+            Each format's pool/seed read from g_universal_by_format is
+            read-only (populated by _ensure_universal_pools above), and the
+            RankingService instance is freshly allocated here, so there is
+            no shared mutable state between workers. DB reads
+            (load_swipe_decisions, load_tier_overrides) use the engine's
+            connection pool which is thread-safe.
+
+            Exceptions on the per-format DB reads are already caught
+            individually below to preserve the original behavior (partial
+            replay is better than no service); any other unexpected
+            exception propagates up to the executor and is re-raised from
+            the main thread so the caller still sees the error.
+            """
             fmt_pool, fmt_seed = _get_universal_pool(fmt)
             svc = RankingService(
                 players           = fmt_pool,
@@ -4618,7 +4634,29 @@ def session_init():
             except Exception as db_err:
                 log.warning("  [%s] tier override restore failed: %s", fmt, db_err)
 
-            new_services[fmt] = svc
+            return fmt, svc
+
+        # Build each format's RankingService in parallel. The two formats
+        # are independent (separate pools, separate DB queries, separate
+        # service instances), so wall time drops to ~max(fmt_a, fmt_b)
+        # instead of the sum. Result is required before /api/trio can run,
+        # so we block on completion here — see "critical path" in PR.
+        new_services: dict = {}
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(DB_SCORING_FORMATS),
+            thread_name_prefix="session-init-rank",
+        ) as pool:
+            futures = [pool.submit(_build_service_for_format, fmt)
+                       for fmt in DB_SCORING_FORMATS]
+            for fut in concurrent.futures.as_completed(futures):
+                # If a worker raised, surface it here. The inner try/except
+                # blocks already swallow DB-read failures (preserving the
+                # original "best-effort replay" behavior); anything that
+                # reaches this point is a real programming error and
+                # should fail the request loudly rather than silently
+                # returning a half-built session.
+                fmt, svc = fut.result()
+                new_services[fmt] = svc
     else:
         new_services = existing_services
         log.info("  ✅ ranking services preserved (same user, universal pools)")
@@ -4690,169 +4728,219 @@ def session_init():
             token = secrets.token_urlsafe(32)
             _sessions[token] = session_payload
 
-    # ── Persist user + league snapshot ──────────────────────────────────
-    # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE upsert_user runs
-    # so we can emit a one-time referral-receipt notification on the referred
-    # user's first session. upsert_user only applies `invited_by` on INSERT,
-    # so this is also our only window to attribute the join.
-    _is_new_user = False
-    try:
-        _is_new_user = not user_exists(user_id)
-    except Exception as _check_err:
-        log.warning("  referral receipt: user_exists check failed (%s)", _check_err)
-    try:
-        upsert_user(
-            sleeper_user_id=user_id,
-            username=username,
-            display_name=display_name,
-            avatar=avatar,
-            invited_by=invited_by,
-        )
-        upsert_league(
-            league_id        = league_id,
-            user_id          = user_id,
-            name             = league_name,
-            season           = "2026",
-            user_player_ids  = new_user_roster,
-            opponent_rosters = opponent_rosters,
-        )
-        log.info("  ✅ user + league upserted in DB")
+    # ── Defer DB upserts + push fanout + Sleeper meta to a daemon ────────
+    # Everything below this point that isn't required for the response
+    # (session is already in `_sessions`, all in-memory services are
+    # built) runs on a background daemon thread so the client sees the
+    # response as soon as the ranking services are ready.
+    #
+    # What runs on the daemon (all best-effort, no caller depends on it
+    # before /api/trio fires):
+    #   • upsert_user + upsert_league + record_event
+    #   • referral_joined push (first-session-with-invited_by only)
+    #   • league_member_joined peer push fanout (N peers × push)
+    #   • _fetch_sleeper_league_meta + set_league_scoring (auto-detect)
+    #   • upsert_league_members
+    #
+    # Why this is safe:
+    #   • The Flask `g` is request-scoped and unsafe to touch from
+    #     another thread, so `device_info` is captured here.
+    #   • All other names used inside the closure are local variables
+    #     bound at function entry (request body, computed locals like
+    #     `token`, `new_user_roster`, `opponent_rosters`) — they remain
+    #     valid for the lifetime of the daemon since the closure holds
+    #     references to them.
+    #   • Each sub-step is already wrapped in try/except in the original
+    #     code; the outer wrapper here is the explicit "swallow all"
+    #     boundary required for daemon threads (silent swallowed
+    #     exceptions in daemons are the silent-bug anti-pattern, so we
+    #     log.exception any escapee).
+    _ev_info = getattr(g, "device_info", {}) or {}
 
-        # User-event log: signup on first session, app_open thereafter.
-        # Fires after upsert_user so the row is guaranteed to exist for the
-        # FK-style update inside record_event().
-        _ev_info = getattr(g, "device_info", {}) or {}
+    def _session_init_background_writes() -> None:
+        """Run after-response side effects on a daemon thread.
+
+        Wrapped in a single broad except — a daemon that raises silently
+        is exactly the silent-bug pattern called out in
+        docs/reviews/2026-05-22-silent-bugs.md, so we log.exception on
+        any escape rather than letting the thread die quietly.
+        """
         try:
-            record_event(
-                user_id,
-                "signup" if _is_new_user else "app_open",
-                league_id  = league_id,
-                session_id = token,
-                source     = "api",
-                **_ev_info,
-            )
-        except Exception as _ev_err:
-            log.warning("  record_event failed: %s", _ev_err)
-
-        # ── Agent 4: referral receipt notification ─────────────────────────
-        # Fires exactly once: on the NEW user's very first session_init when
-        # they arrived with an invited_by attribution. Posts a bell
-        # notification to the referrer resolved-by-username.
-        if _is_new_user and invited_by:
+            # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE
+            # upsert_user runs so we can emit a one-time referral-receipt
+            # notification on the referred user's first session.
+            # upsert_user only applies `invited_by` on INSERT, so this is
+            # also our only window to attribute the join.
+            _is_new_user = False
             try:
-                referrer = get_user_by_username(invited_by)
-                if referrer and referrer.get("sleeper_user_id"):
-                    referrer_uid  = referrer["sleeper_user_id"]
-                    new_username  = username or display_name or user_id
-                    push_notification(
-                        user_id=referrer_uid,
-                        type="referral_joined",
-                        body=f"🤝 @{new_username} joined Fantasy Trade Finder via your invite.",
-                        meta={
-                            "new_user_id":   user_id,
-                            "new_username":  new_username,
-                            "invited_by":    invited_by,
-                        },
-                    )
-                    log.info("  ✅ referral_joined notification → @%s (uid=%s)",
-                             invited_by, referrer_uid)
-                else:
-                    log.info("  referral_joined: referrer @%s not found in users table",
-                             invited_by)
-            except Exception as ref_err:
-                log.warning("  referral receipt emit failed (continuing): %s", ref_err)
-
-        # ── league_member_joined: ping existing leaguemates on the app ──
-        # Fires once per (existing leaguemate, joining user) pair on the
-        # joining user's first session. Doesn't ping the joiner. Capped
-        # implicitly by the dedup_key — a returning user re-init won't
-        # re-fire because _is_new_user is False.
-        if _is_new_user:
+                _is_new_user = not user_exists(user_id)
+            except Exception as _check_err:
+                log.warning("  referral receipt: user_exists check failed (%s)", _check_err)
             try:
-                _new_username = username or display_name or user_id
-                _peers = load_league_member_unlock_states(
-                    league_id, exclude_user_id=user_id,
+                upsert_user(
+                    sleeper_user_id=user_id,
+                    username=username,
+                    display_name=display_name,
+                    avatar=avatar,
+                    invited_by=invited_by,
                 )
-                for _p in _peers:
-                    if not _p.get("joined") or not _p.get("user_id"):
-                        continue
-                    _send_typed_push(
-                        _p["user_id"],
-                        "league_member_joined",
-                        title = "🤝 New leaguemate on Fantasy Trade Finder",
-                        body  = f"@{_new_username} joined {league_name}. More trades may unlock.",
-                        data  = {"new_user_id":  user_id,
-                                 "new_username": _new_username,
-                                 "league_id":    league_id,
-                                 "league_name":  league_name},
-                        dedup_key = f"joined:{user_id}:{_p['user_id']}",
+                upsert_league(
+                    league_id        = league_id,
+                    user_id          = user_id,
+                    name             = league_name,
+                    season           = "2026",
+                    user_player_ids  = new_user_roster,
+                    opponent_rosters = opponent_rosters,
+                )
+                log.info("  ✅ user + league upserted in DB (bg)")
+
+                # User-event log: signup on first session, app_open
+                # thereafter. Fires after upsert_user so the row is
+                # guaranteed to exist for the FK-style update inside
+                # record_event().
+                try:
+                    record_event(
+                        user_id,
+                        "signup" if _is_new_user else "app_open",
+                        league_id  = league_id,
+                        session_id = token,
+                        source     = "api",
+                        **_ev_info,
                     )
-            except Exception as lm_err:
-                log.warning("  league_member_joined push failed: %s", lm_err)
+                except Exception as _ev_err:
+                    log.warning("  record_event failed: %s", _ev_err)
 
-        # ── Auto-detect league scoring format from Sleeper metadata ─────────
-        # Fires on every session/init for leagues without a format on file.
-        # Retrying on each init (when existing_fmt is falsy) self-heals
-        # leagues whose first sync hit a Sleeper API flake — subsequent
-        # logins keep attempting until detection succeeds. Once stored, the
-        # Sleeper call is skipped.
-        #
-        # AUDIT (2026-04-16): session/init is the only path that calls
-        # upsert_league — no other league-sync code path exists in server.py,
-        # so guarding auto-detect here covers every new + returning league
-        # connection. If additional sync paths are introduced, they must
-        # also invoke _detect_scoring_format_from_meta + set_league_scoring.
-        # Re-detect scoring format on EVERY session_init (not just when
-        # unset) so any previously-miscategorized league self-heals. Cost
-        # is one cached Sleeper API call per init; writes only happen when
-        # the detected value differs from what's on file.
-        try:
-            existing_fmt = None
+                # ── Referral receipt notification ────────────────────
+                # Fires exactly once: on the NEW user's very first
+                # session_init when they arrived with an invited_by
+                # attribution. Posts a bell notification to the
+                # referrer resolved-by-username.
+                if _is_new_user and invited_by:
+                    try:
+                        referrer = get_user_by_username(invited_by)
+                        if referrer and referrer.get("sleeper_user_id"):
+                            referrer_uid  = referrer["sleeper_user_id"]
+                            new_username  = username or display_name or user_id
+                            push_notification(
+                                user_id=referrer_uid,
+                                type="referral_joined",
+                                body=f"🤝 @{new_username} joined Fantasy Trade Finder via your invite.",
+                                meta={
+                                    "new_user_id":   user_id,
+                                    "new_username":  new_username,
+                                    "invited_by":    invited_by,
+                                },
+                            )
+                            log.info("  ✅ referral_joined notification → @%s (uid=%s)",
+                                     invited_by, referrer_uid)
+                        else:
+                            log.info("  referral_joined: referrer @%s not found in users table",
+                                     invited_by)
+                    except Exception as ref_err:
+                        log.warning("  referral receipt emit failed (continuing): %s", ref_err)
+
+                # ── league_member_joined peer push fanout ────────────
+                # Fires once per (existing leaguemate, joining user)
+                # pair on the joining user's first session. Doesn't ping
+                # the joiner. Capped implicitly by the dedup_key — a
+                # returning user re-init won't re-fire because
+                # _is_new_user is False.
+                if _is_new_user:
+                    try:
+                        _new_username = username or display_name or user_id
+                        _peers = load_league_member_unlock_states(
+                            league_id, exclude_user_id=user_id,
+                        )
+                        for _p in _peers:
+                            if not _p.get("joined") or not _p.get("user_id"):
+                                continue
+                            _send_typed_push(
+                                _p["user_id"],
+                                "league_member_joined",
+                                title = "🤝 New leaguemate on Fantasy Trade Finder",
+                                body  = f"@{_new_username} joined {league_name}. More trades may unlock.",
+                                data  = {"new_user_id":  user_id,
+                                         "new_username": _new_username,
+                                         "league_id":    league_id,
+                                         "league_name":  league_name},
+                                dedup_key = f"joined:{user_id}:{_p['user_id']}",
+                            )
+                    except Exception as lm_err:
+                        log.warning("  league_member_joined push failed: %s", lm_err)
+
+                # ── Auto-detect league scoring format from Sleeper ───
+                # Fires on every session/init for leagues without a
+                # format on file. Retrying on each init (when
+                # existing_fmt is falsy) self-heals leagues whose first
+                # sync hit a Sleeper API flake — subsequent logins keep
+                # attempting until detection succeeds. Once stored, the
+                # Sleeper call is skipped.
+                #
+                # NOTE: now runs on the background daemon. The session
+                # response uses whatever format `get_league_scoring`
+                # returned at request time (or the body override). On
+                # a brand-new league this is the DB default until the
+                # daemon writes the detected format — the next
+                # session_init picks it up. Existing leagues are
+                # unaffected: the detected format already matches the
+                # stored format in steady state.
+                try:
+                    existing_fmt = None
+                    try:
+                        existing_fmt = get_league_scoring(league_id)
+                    except Exception:
+                        pass
+                    meta = _fetch_sleeper_league_meta(league_id)
+                    if meta:
+                        detected = _detect_scoring_format_from_meta(meta)
+                        if detected != existing_fmt:
+                            set_league_scoring(league_id, detected)
+                            log.info("  ✅ league scoring (re-)detected: %s (was: %r)", detected, existing_fmt)
+                        else:
+                            log.info("  ✅ league scoring confirmed: %s", detected)
+                    else:
+                        log.info("  ℹ️  league scoring auto-detect deferred — Sleeper meta unavailable")
+                except Exception as e:
+                    log.warning("  league scoring auto-detect failed (continuing): %s", e)
+            except Exception as db_err:
+                log.warning("  DB upsert failed (continuing): %s", db_err)
+
+            # ── Persist full league membership roster ────────────────
             try:
-                existing_fmt = get_league_scoring(league_id)
-            except Exception:
-                pass
-            meta = _fetch_sleeper_league_meta(league_id)
-            if meta:
-                detected = _detect_scoring_format_from_meta(meta)
-                if detected != existing_fmt:
-                    set_league_scoring(league_id, detected)
-                    log.info("  ✅ league scoring (re-)detected: %s (was: %r)", detected, existing_fmt)
-                else:
-                    log.info("  ✅ league scoring confirmed: %s", detected)
-            else:
-                log.info("  ℹ️  league scoring auto-detect deferred — Sleeper meta unavailable")
-        except Exception as e:
-            log.warning("  league scoring auto-detect failed (continuing): %s", e)
-    except Exception as db_err:
-        log.warning("  DB upsert failed (continuing): %s", db_err)
+                all_members_for_db = [
+                    {
+                        "user_id":      user_id,
+                        "username":     display_name or username or user_id,
+                        "display_name": display_name,
+                        "player_ids":   new_user_roster,
+                    }
+                ] + [
+                    {
+                        "user_id":      str(opp.get("user_id", "")),
+                        "username":     opp.get("username", ""),
+                        "display_name": opp.get("username", ""),
+                        "player_ids":   [str(x) for x in opp.get("player_ids", [])],
+                    }
+                    for opp in opponent_rosters
+                    if opp.get("user_id")
+                ]
+                upsert_league_members(league_id=league_id, members=all_members_for_db)
+                log.info("  ✅ league_members upserted (%d members)", len(all_members_for_db))
+                # Roster changed → drop cached _league_members projections
+                # so the next /api/league/members call rebuilds the
+                # join-status list. (Picked up from PR #63 #B4 cache.)
+                _invalidate_league_members_cache(league_id)
+            except Exception as db_err:
+                log.warning("  league_members upsert failed (continuing): %s", db_err)
+        except Exception:
+            # Daemon top-level catch — see docstring. Never silently die.
+            log.exception("session/init background writes crashed")
 
-    # ── Persist full league membership roster ────────────────────────────
-    try:
-        all_members_for_db = [
-            {
-                "user_id":      user_id,
-                "username":     display_name or username or user_id,
-                "display_name": display_name,
-                "player_ids":   new_user_roster,
-            }
-        ] + [
-            {
-                "user_id":      str(opp.get("user_id", "")),
-                "username":     opp.get("username", ""),
-                "display_name": opp.get("username", ""),
-                "player_ids":   [str(x) for x in opp.get("player_ids", [])],
-            }
-            for opp in opponent_rosters
-            if opp.get("user_id")
-        ]
-        upsert_league_members(league_id=league_id, members=all_members_for_db)
-        log.info("  ✅ league_members upserted (%d members)", len(all_members_for_db))
-        # Roster changed → drop cached _league_members projections so the
-        # next /api/league/members call rebuilds the join-status list.
-        _invalidate_league_members_cache(league_id)
-    except Exception as db_err:
-        log.warning("  league_members upsert failed (continuing): %s", db_err)
+    threading.Thread(
+        target=_session_init_background_writes,
+        name="session-init-bg-writes",
+        daemon=True,
+    ).start()
 
     generic_pick_count = sum(1 for p in g_universal_players if p.pick_value is not None)
     log.info("✅ session/init done — %d universal players (%d generic picks), %d on roster, %d opponents",
