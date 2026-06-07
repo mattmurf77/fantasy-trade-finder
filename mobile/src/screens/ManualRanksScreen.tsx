@@ -22,6 +22,7 @@ import PositionChip from '../components/PositionChip';
 import { getRankings, reorderRankings } from '../api/rankings';
 import { haptics } from '../utils/haptics';
 import { startSpan } from '../observability/sentry';
+import { useSession } from '../state/useSession';
 import type { Position, RankedPlayer } from '../shared/types';
 
 // ── Manual Ranks ──────────────────────────────────────────────────────
@@ -74,6 +75,7 @@ const RankEditRow = React.memo(RankEditRowInner);
 
 export default function ManualRanksScreen() {
   const queryClient = useQueryClient();
+  const activeFormat = useSession((s) => s.activeFormat);
   const [filter, setFilter] = useState<Position | 'ALL'>('ALL');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -88,7 +90,7 @@ export default function ManualRanksScreen() {
   // endpoint accepts a per-position `ordered_ids` payload — when the
   // filter is 'ALL' we send `position: null` and the full ID list.
   const ranksQuery = useQuery({
-    queryKey: ['rankings', 'all'],
+    queryKey: ['rankings', activeFormat, 'all'],
     queryFn: () => getRankings(null),
     staleTime: 30_000,
   });
@@ -132,12 +134,10 @@ export default function ManualRanksScreen() {
       setSaveStatus('saved');
       setErrorText(null);
       // Reorder may invalidate downstream caches (tier status, progress)
-      // — refetch lazily. Scope to the active position + 'all' so
-      // unrelated position caches aren't evicted unnecessarily.
-      queryClient.invalidateQueries({ queryKey: ['rankings', filter === 'ALL' ? 'all' : filter] });
-      if (filter !== 'ALL') {
-        queryClient.invalidateQueries({ queryKey: ['rankings', 'all'] });
-      }
+      // — refetch lazily. Scope to activeFormat so only the current
+      // format's cache entries are stale; the other format's data is
+      // still valid.
+      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat] });
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
       queryClient.invalidateQueries({ queryKey: ['progress'] });
     },

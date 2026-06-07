@@ -36,6 +36,7 @@ import {
 } from '../api/rankings';
 import { copyTiersFromFormat } from '../api/league';
 import { autoBucket, TIERS } from '../utils/tierBands';
+import { useSession } from '../state/useSession';
 import type { Position, RankedPlayer, Tier, ScoringFormat } from '../shared/types';
 
 // Format-key → human label for the copy button + confirm dialog. Mirrors
@@ -62,6 +63,7 @@ interface BinLayout {
 
 export default function TiersScreen() {
   const queryClient = useQueryClient();
+  const sessionFormat = useSession((s) => s.activeFormat);
   const [position, setPosition] = useState<Position>('QB');
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
 
@@ -100,7 +102,7 @@ export default function TiersScreen() {
 
   // ── Data ────────────────────────────────────────────────────────────
   const rankingsQuery = useQuery({
-    queryKey: ['rankings', position],
+    queryKey: ['rankings', sessionFormat, position],
     queryFn: () => getRankings(position),
     staleTime: 30_000,
     placeholderData: (prev) => prev,
@@ -139,11 +141,11 @@ export default function TiersScreen() {
       queryClient.invalidateQueries({ queryKey: ['progress'] });
       // Tier saves rewrite per-position ELO overrides on the backend,
       // which the Overall / Manual / Tiers screens all read via the
-      // `['rankings', ...]` family. Scope to the saved position + 'all'
-      // so unrelated position caches aren't evicted unnecessarily.
-      // Mirrors api-layer review #A2.
-      queryClient.invalidateQueries({ queryKey: ['rankings', position] });
-      queryClient.invalidateQueries({ queryKey: ['rankings', 'all'] });
+      // `['rankings', ...]` family. Without this, those screens show
+      // stale ELOs for up to 30s (the rankings staleTime) post-save.
+      // Invalidate all format+position variants by prefix.
+      queryClient.invalidateQueries({ queryKey: ['rankings', sessionFormat, position] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', sessionFormat, 'all'] });
       // Reset the clearedPids set — the backend just absorbed them.
       setClearedPids(new Set());
     },
@@ -171,10 +173,8 @@ export default function TiersScreen() {
       setToast({ msg: `✓ Copied ${n} tier placements`, tone: 'success' });
       // Invalidate rankings/tier caches so the per-position load picks up
       // the new override ELOs. Same pattern as saveMutation.onSuccess.
-      // A format copy affects all positions, so we invalidate position +
-      // 'all' for the current position and let the broad prefix cover the rest.
-      queryClient.invalidateQueries({ queryKey: ['rankings', position] });
-      queryClient.invalidateQueries({ queryKey: ['rankings', 'all'] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', sessionFormat, position] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', sessionFormat, 'all'] });
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
       queryClient.invalidateQueries({ queryKey: ['progress'] });
       // Reset clearedPids — the cleared set is per-position-load and

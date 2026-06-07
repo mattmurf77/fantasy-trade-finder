@@ -3,7 +3,10 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { QueryClientProvider, focusManager } from '@tanstack/react-query';
+import { focusManager } from '@tanstack/react-query';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
+import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
 import RootNav from './src/navigation/RootNav';
 import { useSession } from './src/state/useSession';
@@ -19,6 +22,15 @@ import { handleDeepLink } from './src/utils/deepLinks';
 // Initialize observability as early as possible so even crashes during
 // bootstrap are captured. No-ops cleanly when no DSN is configured.
 initSentry();
+
+// INIT-07 — AsyncStorage persister for cold-cache restoration. Queries
+// whose first key segment is in the allow-list below are dehydrated to
+// AsyncStorage on every successful fetch and rehydrated on the next cold
+// start — so the app shows cached data immediately while the network
+// round-trip is in flight. maxAge = 30 minutes keeps stale data from
+// being loaded hours later when player values may have shifted.
+const asyncStoragePersister = createAsyncStoragePersister({ storage: AsyncStorage });
+const PERSIST_KEYS = new Set(['rankings', 'progress', 'matches', 'tiers-status', 'liked-trades']);
 
 function App() {
   const [booted, setBooted] = useState(false);
@@ -115,10 +127,24 @@ function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <QueryClientProvider client={queryClient}>
+        <PersistQueryClientProvider
+          client={queryClient}
+          persistOptions={{
+            persister: asyncStoragePersister,
+            // 30 min — matches the period where cached player ELOs are
+            // still fresh enough to be useful on cold start.
+            maxAge: 30 * 60 * 1000,
+            dehydrateOptions: {
+              shouldDehydrateQuery: (query) => {
+                const key = query.queryKey[0];
+                return PERSIST_KEYS.has(key as string);
+              },
+            },
+          }}
+        >
           <RootNav booted={booted} />
           <StatusBar style="light" />
-        </QueryClientProvider>
+        </PersistQueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

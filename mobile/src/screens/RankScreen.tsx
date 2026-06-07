@@ -37,6 +37,7 @@ import {
 } from '../api/rankings';
 import type { Position, Trio, RankingProgress } from '../shared/types';
 import { useFlag } from '../state/useFeatureFlags';
+import { useSession } from '../state/useSession';
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
 const THRESHOLD_FALLBACK = 10;
@@ -45,6 +46,8 @@ const SPEED_MODE_KEY = 'ftf.trios.speedMode';
 export default function RankScreen() {
   const queryClient = useQueryClient();
   const navigation  = useNavigation();
+  const activeFormat = useSession((s) => s.activeFormat);
+  const leagueId = useSession((s) => s.league?.league_id ?? null);
   const [position, setPosition] = useState<Position>('QB');
   const [selectionOrder, setSelectionOrder] = useState<('a' | 'b' | 'c')[]>([]);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
@@ -80,14 +83,14 @@ export default function RankScreen() {
   });
 
   const progressQuery = useQuery({
-    queryKey: ['progress'],
+    queryKey: ['progress', leagueId, activeFormat],
     queryFn: getProgress,
     staleTime: 15_000,
     placeholderData: (prev) => prev,
   });
 
   const streakQuery = useQuery({
-    queryKey: ['streak'],
+    queryKey: ['streak', leagueId, activeFormat],
     queryFn: getStreak,
     staleTime: 60_000,
     placeholderData: (prev) => prev,
@@ -116,20 +119,20 @@ export default function RankScreen() {
       // threshold), so on a threshold cross we fall back to invalidating
       // ONCE — keeps the banner correct without paying the round-trip
       // on every swipe.
-      const prevProgress = queryClient.getQueryData<RankingProgress>(['progress']);
+      const prevProgress = queryClient.getQueryData<RankingProgress>(['progress', leagueId, activeFormat]);
       const crossedThreshold =
         prevProgress != null &&
         !prevProgress.unlocked &&
         resp.threshold_met === true;
       if (crossedThreshold) {
-        queryClient.invalidateQueries({ queryKey: ['progress'] });
+        queryClient.invalidateQueries({ queryKey: ['progress', leagueId, activeFormat] });
       } else if (prevProgress) {
         const prevCount = prevProgress[position] ?? 0;
         // Don't decrement on a same-day re-rank (server returns the
         // same count) — `Math.max` keeps the local counter monotonic.
         const nextCount = Math.max(prevCount, resp.interaction_count);
         const delta = nextCount - prevCount;
-        queryClient.setQueryData<RankingProgress>(['progress'], {
+        queryClient.setQueryData<RankingProgress>(['progress', leagueId, activeFormat], {
           ...prevProgress,
           [position]: nextCount,
           threshold: resp.threshold,
@@ -156,7 +159,7 @@ export default function RankScreen() {
         haptics.success();
       }
       if (resp.streak) {
-        queryClient.setQueryData(['streak'], resp.streak);
+        queryClient.setQueryData(['streak', leagueId, activeFormat], resp.streak);
       }
     },
     onError: () => {
