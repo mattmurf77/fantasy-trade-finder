@@ -131,6 +131,22 @@ const SLOW_TIMEOUT_MS = 30_000;
 // suffix so the base-URL prefix doesn't matter.
 const SLOW_POST_PATHS = ['/api/session/init', '/api/trades/generate'];
 
+// ── GET-only retry (INIT-12b) ─────────────────────────────────────────────
+// Retry only safe GETs on transient gateway / network errors. Paths that
+// trigger long-lived server-side side-effects (session init, generation,
+// ranking submissions) are excluded so a retry doesn't double-book work.
+const NO_RETRY_PATHS = [
+  '/api/session/init',
+  '/api/trades/generate',
+  '/api/rank3',
+  '/api/tiers',
+  '/api/trades/swipe',
+];
+const RETRY_STATUSES = new Set([502, 503, 504]);
+const MAX_RETRIES = 2;
+const RETRY_BASE_MS = 400;
+const RETRY_FACTOR = 3; // 400ms → 1200ms
+
 // User-facing copy for a deadline abort (FR-4).
 const TIMEOUT_MESSAGE = 'Server is waking up — please retry.';
 
@@ -196,52 +212,117 @@ export async function apiRequest<T = unknown>(
     }
   }
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method,
-      headers,
-      body:
-        opts.body !== undefined
-          ? typeof opts.body === 'string'
-            ? opts.body
-            : JSON.stringify(opts.body)
-          : undefined,
-      signal: timeoutController.signal,
-    });
-  } catch (err: any) {
-    // Our deadline fired — and it wasn't the caller cancelling. Surface a typed
-    // timeout the UI can act on. If the caller's own signal aborted, let the
-    // original AbortError propagate untouched (not a timeout — FR-4).
-    if (timedOut && !(callerSignal && callerSignal.aborted)) {
-      throw new ApiError(0, null, TIMEOUT_MESSAGE, true);
+  // ── Retry eligibility (INIT-12b) ──────────────────────────────────────────
+  // Only GET requests on non-side-effecting paths are candidates for retry.
+  // We check caller abort + timeout abort during any retry delay so the user's
+  // navigation or the deadline can still cancel cleanly mid-backoff.
+  const canRetry =
+    method === 'GET' &&
+    !NO_RETRY_PATHS.some((p) => path.includes(p));
+
+  let attempt = 0;
+  let lastError: unknown;
+
+  const fetchOnce = async (): Promise<Response> => {
+    try {
+      return await fetch(url, {
+        method,
+        headers,
+        body:
+          opts.body !== undefined
+            ? typeof opts.body === 'string'
+              ? opts.body
+              : JSON.stringify(opts.body)
+            : undefined,
+        signal: timeoutController.signal,
+      });
+    } catch (err: any) {
+      // Our deadline fired — and it wasn't the caller cancelling. Surface a
+      // typed timeout the UI can act on. If the caller's own signal aborted,
+      // let the original AbortError propagate untouched (not a timeout — FR-4).
+      if (timedOut && !(callerSignal && callerSignal.aborted)) {
+        throw new ApiError(0, null, TIMEOUT_MESSAGE, true);
+      }
+      throw err;
     }
-    throw err;
+  };
+
+  try {
+    // Retry loop — executes at least once (attempt 0), then up to MAX_RETRIES
+    // additional times for eligible requests that hit transient errors.
+    while (true) {
+      let res: Response;
+      let networkError = false;
+
+      try {
+        res = await fetchOnce();
+      } catch (err: any) {
+        // Don't retry timeouts or caller cancellations — those are intentional.
+        const isTimeout = err instanceof ApiError && err.isTimeout;
+        const isCallerAbort = callerSignal && callerSignal.aborted;
+        if (isTimeout || isCallerAbort || !canRetry || attempt >= MAX_RETRIES) {
+          throw err;
+        }
+        lastError = err;
+        networkError = true;
+        res = undefined as unknown as Response; // satisfies TS; networkError=true guards usage
+      }
+
+      if (!networkError) {
+        // Gateway errors — retry on eligible status codes.
+        if (canRetry && RETRY_STATUSES.has(res!.status) && attempt < MAX_RETRIES) {
+          lastError = new ApiError(res!.status, null, `HTTP ${res!.status}`);
+        } else {
+          // Successful response or non-retryable error — process normally.
+          const text = await res!.text();
+          let parsed: any = null;
+          if (text) {
+            try {
+              parsed = JSON.parse(text);
+            } catch {
+              parsed = text;
+            }
+          }
+
+          if (!res!.ok) {
+            // 401 = session expired. Caller should redirect to sign-in.
+            if (res!.status === 401) {
+              await clearSessionToken();
+            }
+            const msg = (parsed && (parsed.message || parsed.error)) || `HTTP ${res!.status}`;
+            throw new ApiError(res!.status, parsed, msg);
+          }
+
+          return parsed as T;
+        }
+      }
+
+      // Back off before the next attempt. Jitter ±20% to spread retried
+      // requests across the backoff window and avoid thundering-herd.
+      attempt += 1;
+      const baseMs = attempt === 1 ? RETRY_BASE_MS : RETRY_BASE_MS * RETRY_FACTOR;
+      const jitter = baseMs * 0.2 * (Math.random() * 2 - 1);
+      const delay = Math.round(baseMs + jitter);
+
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, delay);
+        // If the timeout fires or the caller aborts during the backoff delay,
+        // cancel the wait and propagate the abort immediately.
+        const onAbortDuringDelay = () => {
+          clearTimeout(t);
+          reject(
+            timedOut && !(callerSignal && callerSignal.aborted)
+              ? new ApiError(0, null, TIMEOUT_MESSAGE, true)
+              : new DOMException('Aborted', 'AbortError'),
+          );
+        };
+        timeoutController.signal.addEventListener('abort', onAbortDuringDelay, { once: true });
+      });
+    }
   } finally {
     clearTimeout(timer);
     if (callerSignal) callerSignal.removeEventListener('abort', onCallerAbort);
   }
-
-  const text = await res.text();
-  let parsed: any = null;
-  if (text) {
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = text;
-    }
-  }
-
-  if (!res.ok) {
-    // 401 = session expired. Caller should redirect to sign-in.
-    if (res.status === 401) {
-      await clearSessionToken();
-    }
-    const msg = (parsed && (parsed.message || parsed.error)) || `HTTP ${res.status}`;
-    throw new ApiError(res.status, parsed, msg);
-  }
-
-  return parsed as T;
 }
 
 // Convenience helpers so screen code reads naturally
