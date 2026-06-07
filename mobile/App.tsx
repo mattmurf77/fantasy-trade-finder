@@ -3,7 +3,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
 import RootNav from './src/navigation/RootNav';
 import { useSession } from './src/state/useSession';
@@ -23,36 +23,37 @@ initSentry();
 function App() {
   const [booted, setBooted] = useState(false);
   const bootstrap = useSession((s) => s.bootstrap);
-  const loadFlags = useFeatureFlags((s) => s.load);
+  const loadCachedFlags = useFeatureFlags((s) => s.loadCachedFlags);
+  const revalidateFlags = useFeatureFlags((s) => s.revalidateFlags);
 
   useEffect(() => {
-    // Restore persisted session + feature flags + tier config in parallel.
-    // Tier config is the (format, position, tier) → {min, max} table that
-    // backs autoBucket / tierForElo. Without it the app falls back to
-    // hardcoded thresholds which can drift from the backend; the live
-    // fetch keeps the two in sync. Treated as best-effort — a network
-    // failure here just means we ride on the seeded fallback bands.
-    const fetchTierConfig = async () => {
-      try {
-        const cfg = await getTierConfig();
-        setTierConfigCache(cfg);
-      } catch {
-        // Fallback bands stay in effect; not worth failing the boot.
-      }
-    };
-    // Fire-and-forget warm ping. On a sleeping Render dyno the cold-start
-    // takes 30–60s; kicking it off during splash means the first user
-    // action lands on a warm server. Errors are silent — boot must not
-    // block on a network failure.
-    Promise.all([
-      bootstrap(),
-      loadFlags(),
-      fetchTierConfig(),
-      warmPlayerCache().catch(() => {}),
-    ])
-      .catch(() => { /* bootstrap is best-effort */ })
+    // INIT-01 — gate the splash on LOCAL-state legs only.
+    //
+    // Routing (SignIn / LeaguePicker / Main) depends solely on what
+    // bootstrap() restores from AsyncStorage/SecureStore plus the cached
+    // feature-flag map. Both are local IO and resolve in milliseconds, so
+    // the first screen renders without waiting on any network round-trip.
+    Promise.all([bootstrap(), loadCachedFlags()])
+      .catch(() => { /* both legs are best-effort */ })
       .finally(() => setBooted(true));
-  }, [bootstrap, loadFlags]);
+
+    // Detached network legs — fire-and-forget. None of these gate the
+    // splash; the app already tolerates their failure via fallbacks.
+    //
+    // Tier config is the (format, position, tier) → {min, max} table that
+    // backs autoBucket / tierForElo. Without it the app rides on the
+    // seeded fallback bands; the live fetch keeps it in sync.
+    void getTierConfig()
+      .then(setTierConfigCache)
+      .catch(() => {});
+    // Network revalidate of the feature flags. Flag-gated UI settles to
+    // cached values until this resolves, then updates in place.
+    void revalidateFlags().catch(() => {});
+    // Warm ping. On a sleeping Render dyno the cold-start takes 30–60s;
+    // kicking it off during boot means the first user action lands on a
+    // warm server. Errors are silent — boot must not block on it.
+    void warmPlayerCache().catch(() => {});
+  }, [bootstrap, loadCachedFlags, revalidateFlags]);
 
   // Deep-link handling. Two surfaces:
   //   • ?ref=<username>  — referral attribution. Captured into useSession's
@@ -77,10 +78,16 @@ function App() {
     };
   }, []);
 
-  // Flush any queued / failed feedback notes whenever the app returns to
-  // the foreground. retrySync() is a no-op when nothing is unsynced, so
-  // this is safe to fire on every active transition (no rate-limiting
-  // beyond that needed for now).
+  // AppState → app-wide foreground signals. Two consumers ride this one
+  // listener:
+  //   1. Feedback sync — flush any queued / failed feedback notes on
+  //      return to foreground. retrySync() is a no-op when nothing is
+  //      unsynced, so it's safe on every active transition.
+  //   2. INIT-05 — bridge TanStack Query's focusManager to AppState so
+  //      `refetchOnWindowFocus: true` queries (e.g. ['progress']) actually
+  //      revalidate on resume. We register focusManager's event listener
+  //      separately so it owns its own subscription lifecycle (and gets
+  //      handleFocus once at startup), per the TanStack RN guidance.
   useEffect(() => {
     const onChange = (next: AppStateStatus) => {
       if (next === 'active') {
@@ -88,6 +95,18 @@ function App() {
       }
     };
     const sub = AppState.addEventListener('change', onChange);
+
+    focusManager.setEventListener((handleFocus) => {
+      const focusSub = AppState.addEventListener('change', (state) => {
+        handleFocus(state === 'active');
+      });
+      return () => focusSub.remove();
+    });
+
+    // TODO(wave2): wire onlineManager when NetInfo is added
+    // (@react-native-community/netinfo is not a dependency in Wave 1, so
+    // refetchOnReconnect stays unbridged for now).
+
     return () => {
       sub.remove();
     };

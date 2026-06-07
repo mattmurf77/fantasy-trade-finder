@@ -194,6 +194,26 @@ class RankingService:
         self._seed       = seed_ratings or {}
         self._elo_overrides: dict[str, float] = {}  # manual reorder overrides
 
+        # INIT-03: instance-level memo for _compute_elo / _compute_stats.
+        # Both methods re-iterate the full swipe history and are called 3-4x
+        # per rank request. The inputs change only on a state mutation, which
+        # every mutator already signals by bumping _version. We invalidate
+        # automatically whenever _version moves.
+        #
+        # Both computations are POOL-DEPENDENT (a swipe is applied only when
+        # both players are in the pool, and the result is keyed to the pool),
+        # so the cache key is (_version, pool fingerprint) — not _version
+        # alone. Keying on _version only would return a wrong-pool result when
+        # different pools are passed at the same version (e.g. get_rankings'
+        # full pool vs. _tier_info's top tier), violating the pure-pass-through
+        # invariant. The pool fingerprint is the tuple of pool player ids.
+        self._elo_cache: Optional[dict[str, float]] = None
+        self._elo_cache_version: int = 0
+        self._elo_cache_key: Optional[tuple] = None
+        self._stats_cache: Optional[dict[str, dict]] = None
+        self._stats_cache_version: int = 0
+        self._stats_cache_key: Optional[tuple] = None
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -611,6 +631,19 @@ class RankingService:
         }
 
     def _compute_elo(self, pool: list[Player]) -> dict[str, float]:
+        # INIT-03 memo: return the cached ratings when neither the ranking
+        # state (_version) nor the pool has changed since the last full
+        # compute. The returned object is shared by reference (identity is
+        # intentional — see AC-1); all current callers treat the result as
+        # read-only (audited: get_rankings, _algorithmic_trio, apply_reorder).
+        cache_key = tuple(p.id for p in pool)
+        if (
+            self._elo_cache is not None
+            and self._elo_cache_version == self._version
+            and self._elo_cache_key == cache_key
+        ):
+            return self._elo_cache
+
         pool_ids = {p.id for p in pool}
         # Seed each player's starting ELO.  Manual overrides (from tier saves
         # or drag-and-drop reorders) are the user's EXPLICIT ranking — once
@@ -661,9 +694,24 @@ class RankingService:
             if l not in override_ids:
                 ratings[l] += k * (0.0 - (1.0 - ea))
 
+        self._elo_cache = ratings
+        self._elo_cache_version = self._version
+        self._elo_cache_key = cache_key
         return ratings
 
     def _compute_stats(self, pool: list[Player]) -> dict[str, dict]:
+        # INIT-03 memo: same (_version, pool) keying as _compute_elo. The
+        # returned dict contains mutable sets ("compared"); all current callers
+        # are read-only (audited: get_rankings, _tiered_pool, _tier_info,
+        # _algorithmic_trio), so the cached object is shared by reference.
+        cache_key = tuple(p.id for p in pool)
+        if (
+            self._stats_cache is not None
+            and self._stats_cache_version == self._version
+            and self._stats_cache_key == cache_key
+        ):
+            return self._stats_cache
+
         pool_ids = {p.id for p in pool}
         stats    = {p.id: {"wins": 0, "losses": 0, "compared": set()} for p in pool}
         for s in self._swipes:
@@ -674,6 +722,10 @@ class RankingService:
             stats[l]["losses"] += 1
             stats[w]["compared"].add(l)
             stats[l]["compared"].add(w)
+
+        self._stats_cache = stats
+        self._stats_cache_version = self._version
+        self._stats_cache_key = cache_key
         return stats
 
     def _algorithmic_trio(self, pool: list[Player], position: Optional[str] = None) -> MatchupTrio:

@@ -610,12 +610,18 @@ def build_universal_pool(
     sleeper_cache: dict | None = None,
     dp_elo: dict[str, float] | None = None,
     dp_vals: dict[str, float] | None = None,
+    all_db_players: list | None = None,
 ) -> tuple[list[Player], dict[str, float]]:
     """
     Build the universal ranking pool: every Sleeper player that has a
     DynastyProcess value > 0.
 
     Returns (players, seed_ratings) where seed_ratings maps player.id → elo.
+
+    ``all_db_players`` is the pre-loaded players-table scan, passed in by the
+    caller so it is read once and reused across both format builds (instead of
+    re-querying the full table per format). When None, falls back to loading it
+    here so direct callers still work.
     """
     if not sleeper_cache or not dp_vals:
         return [], {}
@@ -624,9 +630,11 @@ def build_universal_pool(
     seeds: dict[str, float] = {}
     seen_ids: set[str] = set()
 
-    # Try to load enriched DB records first
+    # Use the enriched DB records passed in by the caller (loaded once and
+    # reused across formats); only hit the DB here if none were provided.
     try:
-        all_db_players = load_players(position=None)
+        if all_db_players is None:
+            all_db_players = load_players(position=None)
         db_by_id = {str(p["player_id"]): p for p in all_db_players} if all_db_players else {}
     except Exception:
         db_by_id = {}
@@ -756,19 +764,53 @@ def _ensure_universal_pools() -> None:
         return
 
     from .data_loader import SCORING_FORMATS as DL_SCORING_FORMATS
+
+    # Read the enriched players table ONCE and reuse it across both format
+    # builds, instead of re-scanning the full table inside each build.
+    try:
+        all_db_players = load_players(position=None)
+    except Exception:
+        all_db_players = None
+
+    # The per-format DynastyProcess CSV fetches are independent network calls.
+    # Run the two formats concurrently so the build phase isn't bottlenecked on
+    # serial round-trips. Each task loads that format's values + elo maps.
+    # A fetch failure inside load_consensus_* is already handled gracefully by
+    # data_loader (returns {} → flat-Elo baseline), so a failing format yields
+    # empty maps rather than raising; we still guard the future result here so
+    # one format's failure can never block or break the other.
+    def _load_format_dp(fmt: str) -> tuple[dict[str, float], dict[str, float]]:
+        return (
+            load_consensus_values(scoring=fmt),
+            load_consensus_elo(scoring=fmt),
+        )
+
+    pending = [
+        fmt for fmt in DL_SCORING_FORMATS
+        if fmt not in g_universal_by_format
+        and (fmt not in dp_values_by_format or fmt not in dp_elo_by_format)
+    ]
+    if pending:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(pending)) as ex:
+            future_to_fmt = {ex.submit(_load_format_dp, fmt): fmt for fmt in pending}
+            for future in concurrent.futures.as_completed(future_to_fmt):
+                fmt = future_to_fmt[future]
+                try:
+                    vals, elo = future.result()
+                except Exception as e:
+                    log.warning("  DP fetch failed for %s (%s) — flat-Elo baseline", fmt, e)
+                    vals, elo = {}, {}
+                dp_values_by_format.setdefault(fmt, vals)
+                dp_elo_by_format.setdefault(fmt, elo)
+
     for fmt in DL_SCORING_FORMATS:
         if fmt in g_universal_by_format:
             continue
-        # Load per-format DP data
-        if fmt not in dp_values_by_format:
-            dp_values_by_format[fmt] = load_consensus_values(scoring=fmt)
-        if fmt not in dp_elo_by_format:
-            dp_elo_by_format[fmt] = load_consensus_elo(scoring=fmt)
-
         players, seed = build_universal_pool(
             sleeper_cache=cache,
-            dp_elo=dp_elo_by_format[fmt],
-            dp_vals=dp_values_by_format[fmt],
+            dp_elo=dp_elo_by_format.get(fmt, {}),
+            dp_vals=dp_values_by_format.get(fmt, {}),
+            all_db_players=all_db_players,
         )
         g_universal_by_format[fmt] = {"players": players, "seed": seed}
         log.info("  universal pool built for %s: %d players", fmt, len(players))
@@ -960,6 +1002,15 @@ threading.Thread(target=_cleanup_loop, daemon=True).start()
 # We deliberately do NOT write a user_events row per request — that would
 # be O(requests) writes. App-open events are fired explicitly from the
 # session-create flow; per-request we only bump the cheap denorm column.
+#
+# That denorm bump (touch_user_activity → UPDATE users) is throttled per
+# session: at most one write per TOUCH_THROTTLE_S, so a poll storm (e.g.
+# /api/trades/status at 1.5s) collapses to ≤1 write/min/user. last_active_at
+# is a coarse "last seen" pointer (see database.py touch_user_activity); ~1min
+# staleness is acceptable. Discrete actions still write precise user_events rows.
+TOUCH_THROTTLE_S = 60  # min seconds between per-session last_active_at writes
+
+
 def _device_info_from_request() -> dict:
     return {
         "device_type": request.headers.get("X-Device") or None,
@@ -989,8 +1040,18 @@ def _stash_device_and_touch_activity() -> None:
     user_id = sess.get("user_id")
     if not user_id:
         return
+    # Throttle the synchronous UPDATE users write: skip it unless the in-session
+    # last_active pointer is at least TOUCH_THROTTLE_S old. A fresh session has
+    # no 'last_active' yet → the .get(...) default of 0 makes the first request
+    # always touch. Collapses poll storms into ≤1 write/min/user.
+    now = time.time()
+    if now - sess.get("last_active", 0) < TOUCH_THROTTLE_S:
+        return
     try:
         touch_user_activity(user_id, **info)
+        # Record the write only after it's dispatched, so a failed touch doesn't
+        # suppress the next attempt for a full TOUCH_THROTTLE_S window.
+        sess["last_active"] = now
     except Exception:
         pass  # never break the request on activity logging
 

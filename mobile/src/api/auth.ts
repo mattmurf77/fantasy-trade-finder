@@ -1,5 +1,5 @@
 import { api, setSessionToken } from './client';
-import { getLeagueRosters, getLeagueUsers, warmPlayerCache } from './sleeper';
+import { getLeagueRosters, getLeagueUsers, warmPlayerCache, resetWarmedFlag } from './sleeper';
 import type {
   DemoSessionResponse,
   LeagueSummary,
@@ -111,14 +111,19 @@ export async function initLeagueSession(
   // which surfaced as a hard error on first league-pick after any cold
   // start. Warm result is discarded (server-side cache is the value);
   // the call is ~5MB on a cold cache and ~50ms on a warm one.
+  //
+  // This warm is now deduped per launch (INIT-12 FR-5/6): warmPlayerCache()
+  // short-circuits with no round-trip if App.tsx already warmed at boot.
+  // If the backend's cache was lost *after* boot, the warmedThisLaunch flag
+  // wouldn't know — so the session_init "not cached" recovery below resets
+  // the flag and re-warms once.
   const [rosters, leagueUsers] = await Promise.all([
     getLeagueRosters(lg.league_id),
     getLeagueUsers(lg.league_id),
     warmPlayerCache().catch(() => {
       // Best-effort. If the warm call itself fails we still try
       // sessionInit; if the cache is also empty it errors with the
-      // same message and the user can retry. Don't fail the whole
-      // init on a transient warm-call failure.
+      // same message and the recovery path below re-warms once.
     }),
   ]);
   const usernameMap: Record<string, string> = {};
@@ -148,7 +153,7 @@ export async function initLeagueSession(
     /* require may fail in test contexts; non-fatal */
   }
 
-  await sessionInit({
+  const initBody: SessionInitBody = {
     user_id:           user.user_id,
     username:          user.username,
     display_name:      user.display_name,
@@ -158,7 +163,31 @@ export async function initLeagueSession(
     user_player_ids:   myPlayerIds,
     opponent_rosters:  opponentRosters,
     invited_by:        invitedBy ?? undefined,
-  });
+  };
+
+  try {
+    await sessionInit(initBody);
+  } catch (e: any) {
+    // Cold-restart recovery (INIT-12 FR-7 / AC-6): if the backend process lost
+    // its player cache *after* this launch warmed once, warmedThisLaunch is
+    // stale-true and the warm above was a no-op, so session_init fails with
+    // "Player database not cached". Reset the flag, re-warm for real, and retry
+    // session_init exactly once. Any other failure bubbles unchanged.
+    if (_isPlayerCacheMissing(e)) {
+      resetWarmedFlag();
+      await warmPlayerCache();
+      await sessionInit(initBody);
+    } else {
+      throw e;
+    }
+  }
+}
+
+// Recognises the backend's "Player database not cached" 400 (server.py:4476).
+// The wrapper folds the backend `error`/`message` into ApiError.message.
+function _isPlayerCacheMissing(e: any): boolean {
+  const msg = typeof e?.message === 'string' ? e.message : '';
+  return /player database not cached/i.test(msg);
 }
 
 // ── Bundle 8: Growth loop helpers ─────────────────────────────────────────
