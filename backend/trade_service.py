@@ -932,6 +932,7 @@ class TradeService:
         acquire_positions: list[str] | None = None,
         trade_away_positions: list[str] | None = None,
         pinned_give_players: list[str] | None = None,
+        prune_candidates: bool = True,
     ) -> list[TradeCard]:
 
         opp_elo    = opponent.elo_ratings
@@ -1028,15 +1029,54 @@ class TradeService:
         candidates: list[tuple[float, float, list[str], list[str]]] = []
 
         # ------------------------------------------------------------------
+        # Pre-prune: restrict iteration space to players whose ELO divergence
+        # creates a give-side surplus for the opponent (give_candidates) or a
+        # receive-side surplus for the user (recv_candidates).  This mirrors
+        # the condition _mismatch_score must see > 0.
+        #
+        # Threshold 0.97 (slightly below 1.0) ensures equal-ELO boundary
+        # players are INCLUDED rather than dropped (AC-4).
+        #
+        # Fallback: if either pruned set is too small (< 5 players) we use the
+        # full roster for that side so new users with all-ELO-at-1500 still get
+        # trade cards (AC-5).
+        # ------------------------------------------------------------------
+        _PRUNE_THRESHOLD = 0.97
+        _PRUNE_MIN_SIZE  = 5
+
+        if prune_candidates:
+            _give_cands = [
+                pid for pid in user_roster
+                if pid in user_elo and pid in opp_elo
+                and opp_elo[pid] >= user_elo[pid] * _PRUNE_THRESHOLD
+            ]
+            _recv_cands = [
+                pid for pid in opp_roster
+                if pid in user_elo and pid in opp_elo
+                and opp_elo[pid] >= user_elo[pid] * _PRUNE_THRESHOLD
+            ]
+            # Fallback: if the pruned set is too thin (e.g. all-1500 new user)
+            # use the full roster so we still surface trade cards.
+            give_candidates = (
+                _give_cands if len(_give_cands) >= _PRUNE_MIN_SIZE else user_roster
+            )
+            recv_candidates = (
+                _recv_cands if len(_recv_cands) >= _PRUNE_MIN_SIZE else opp_roster
+            )
+        else:
+            give_candidates = user_roster
+            recv_candidates = opp_roster
+
+        # ------------------------------------------------------------------
         # 1-for-1 trades
         # ------------------------------------------------------------------
-        for give_id in user_roster:
+        for give_id in give_candidates:
             if give_id not in user_elo or give_id not in opp_elo:
                 continue
             # When pinned players specified, only consider those as give candidates
             if pinned_set and give_id not in pinned_set:
                 continue
-            for recv_id in opp_roster:
+            for recv_id in recv_candidates:
                 if recv_id not in user_elo or recv_id not in opp_elo:
                     continue
 
@@ -1068,14 +1108,14 @@ class TradeService:
         # ------------------------------------------------------------------
         _budget_exceeded = False
         if len(candidates) < int(_c("max_candidates")):
-            for recv_id in opp_roster:
+            for recv_id in recv_candidates:
                 if _budget_exceeded or time.monotonic() > _deadline:
                     break
                 if recv_id not in user_elo or recv_id not in opp_elo:
                     continue
                 recv_dv = _dv(recv_id)
 
-                for give_id_1, give_id_2 in combinations(user_roster, 2):
+                for give_id_1, give_id_2 in combinations(give_candidates, 2):
                     _iters += 1
                     if _iters > _iter_budget:
                         _budget_exceeded = True
@@ -1123,7 +1163,7 @@ class TradeService:
         # 1-for-2 trades (user gives 1 elite, receives 2)
         # ------------------------------------------------------------------
         if len(candidates) < int(_c("max_candidates")) and not _budget_exceeded:
-            for give_id in user_roster:
+            for give_id in give_candidates:
                 if _budget_exceeded or time.monotonic() > _deadline:
                     break
                 if give_id not in user_elo or give_id not in opp_elo:
@@ -1131,7 +1171,7 @@ class TradeService:
                 if pinned_set and give_id not in pinned_set:
                     continue
 
-                for recv_id_1, recv_id_2 in combinations(opp_roster, 2):
+                for recv_id_1, recv_id_2 in combinations(recv_candidates, 2):
                     _iters += 1
                     if _iters > _iter_budget:
                         _budget_exceeded = True
@@ -1176,7 +1216,7 @@ class TradeService:
         # 3-for-2 trades (user gives 3, receives 2)
         # ------------------------------------------------------------------
         if len(candidates) < int(_c("max_candidates")) and not _budget_exceeded:
-            for recv_id_1, recv_id_2 in combinations(opp_roster, 2):
+            for recv_id_1, recv_id_2 in combinations(recv_candidates, 2):
                 if _budget_exceeded or time.monotonic() > _deadline:
                     break
                 if recv_id_1 not in user_elo or recv_id_2 not in user_elo:
@@ -1185,7 +1225,7 @@ class TradeService:
                 recv_dv_2 = _dv(recv_id_2)
                 recv_pkg_dv = package_value([recv_dv_1, recv_dv_2])
 
-                for give_id_1, give_id_2, give_id_3 in combinations(user_roster, 3):
+                for give_id_1, give_id_2, give_id_3 in combinations(give_candidates, 3):
                     _iters += 1
                     if _iters > _iter_budget:
                         _budget_exceeded = True
