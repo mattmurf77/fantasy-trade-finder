@@ -20,7 +20,7 @@ interface Props {
 // mutual matches (MatchesScreen list). The only difference between the
 // two variants is the action buttons at the bottom — swipe decks don't
 // show buttons (gestures drive the decision), match cards do.
-export default function TradeCardComp({
+function TradeCardComp({
   data,
   variant = 'swipe',
   onAccept,
@@ -149,6 +149,8 @@ export default function TradeCardComp({
     </View>
   );
 }
+
+export default React.memo(TradeCardComp);
 
 const styles = StyleSheet.create({
   card: {

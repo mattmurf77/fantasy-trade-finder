@@ -139,10 +139,11 @@ export default function RankScreen() {
       queryClient.invalidateQueries({ queryKey: ['trio', position] });
       // Submitting a trio rewrites per-position ELOs server-side; the
       // Overall / Manual / Tiers screens all read these via the
-      // `['rankings', ...]` family. Without this invalidation those
-      // screens render stale ELOs for up to 30s post-submit.
+      // `['rankings', ...]` family. Scope to the submitted position +
+      // 'all' so unrelated position caches aren't evicted unnecessarily.
       // Mirrors api-layer review #A2.
-      queryClient.invalidateQueries({ queryKey: ['rankings'] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', position] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', 'all'] });
       setSelectionOrder([]);
       // Detect streak increment from inline response — compare to the
       // currently-cached value before writing through. If the new value

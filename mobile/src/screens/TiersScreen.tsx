@@ -139,10 +139,11 @@ export default function TiersScreen() {
       queryClient.invalidateQueries({ queryKey: ['progress'] });
       // Tier saves rewrite per-position ELO overrides on the backend,
       // which the Overall / Manual / Tiers screens all read via the
-      // `['rankings', ...]` family. Without this, those screens show
-      // stale ELOs for up to 30s (the rankings staleTime) post-save.
+      // `['rankings', ...]` family. Scope to the saved position + 'all'
+      // so unrelated position caches aren't evicted unnecessarily.
       // Mirrors api-layer review #A2.
-      queryClient.invalidateQueries({ queryKey: ['rankings'] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', position] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', 'all'] });
       // Reset the clearedPids set — the backend just absorbed them.
       setClearedPids(new Set());
     },
@@ -170,7 +171,10 @@ export default function TiersScreen() {
       setToast({ msg: `✓ Copied ${n} tier placements`, tone: 'success' });
       // Invalidate rankings/tier caches so the per-position load picks up
       // the new override ELOs. Same pattern as saveMutation.onSuccess.
-      queryClient.invalidateQueries({ queryKey: ['rankings'] });
+      // A format copy affects all positions, so we invalidate position +
+      // 'all' for the current position and let the broad prefix cover the rest.
+      queryClient.invalidateQueries({ queryKey: ['rankings', position] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', 'all'] });
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
       queryClient.invalidateQueries({ queryKey: ['progress'] });
       // Reset clearedPids — the cleared set is per-position-load and
@@ -518,6 +522,19 @@ export default function TiersScreen() {
   const saving = saveMutation.isPending;
   const loading = rankingsQuery.isLoading || rankingsQuery.isFetching;
 
+  // Stable callback: resolves the drop target and commits the move.
+  // Does NOT close over any per-player state — pid is passed in as a
+  // parameter by DraggableRow, so this ref is stable across renders
+  // (deps: dropTargetAt, movePlayer) and can be shared by all chips.
+  const handleDropAt = useCallback(
+    (absoluteY: number, pid: string) => {
+      const target = dropTargetAt(absoluteY, pid);
+      if (!target) return;
+      movePlayer(pid, target.zone, target.insertIdx);
+    },
+    [dropTargetAt, movePlayer],
+  );
+
   function renderPlayerCard(p: RankedPlayer, binZone: Zone, binIndex: number) {
     return (
       <DraggableRow
@@ -534,11 +551,7 @@ export default function TiersScreen() {
         onDragUpdate={updateDragPreview}
         onDragEnd={endDragPreview}
         onLayout={setChipLayout}
-        onDropAt={(absoluteY, pid) => {
-          const target = dropTargetAt(absoluteY, pid);
-          if (!target) return;
-          movePlayer(pid, target.zone, target.insertIdx);
-        }}
+        onDropAt={handleDropAt}
         onLongPressDismiss={
           // In multi-select mode, long-press dismiss is too easy to
           // misfire; suppress so the only chip-level action is tap-to-
