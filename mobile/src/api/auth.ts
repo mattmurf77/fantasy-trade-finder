@@ -95,8 +95,14 @@ export async function sessionPing(): Promise<{ ok: true }> {
 // state (e.g. setLeague) after this resolves successfully.
 //
 // Throws on failure so callers can surface error UI. The Sleeper calls
-// are short and synchronous; sessionInit is the slow leg (5–10s on
+// are short (~2-3s); sessionInit is the slow leg (5–10s on
 // Render's free tier when rebuilding rosters + members).
+//
+// INIT-08-client: LeaguePickerScreen calls the two phases separately so
+// the user can navigate to Main after phase-1 (Sleeper) completes, while
+// phase-2 (sessionInit) runs in the background. switchLeague still uses
+// the combined `initLeagueSession` path (inline league switch must be
+// atomic — no backgrounding needed there).
 export interface LeagueLite { league_id: string; name: string }
 export async function initLeagueSession(
   user: SavedUser,
@@ -177,6 +183,78 @@ export async function initLeagueSession(
       resetWarmedFlag();
       await warmPlayerCache();
       await sessionInit(initBody);
+    } else {
+      throw e;
+    }
+  }
+}
+
+// ── INIT-08-client: two-phase session init for optimistic navigation ───
+//
+// Phase 1 — fetch Sleeper data and build the session_init payload.
+// Resolves in ~2-3s (Sleeper round-trips + player-cache warm). Throws on
+// network failure so the caller can show a meaningful error before
+// navigating away from LeaguePicker.
+//
+// Returns a `SessionInitBody` ready to pass to `submitSessionInit`.
+export async function buildSessionInitBody(
+  user: SavedUser,
+  lg: LeagueLite,
+): Promise<SessionInitBody> {
+  const [rosters, leagueUsers] = await Promise.all([
+    getLeagueRosters(lg.league_id),
+    getLeagueUsers(lg.league_id),
+    warmPlayerCache().catch(() => { /* best-effort */ }),
+  ]);
+  const usernameMap: Record<string, string> = {};
+  for (const u of leagueUsers || []) {
+    usernameMap[u.user_id] = u.display_name || u.username || u.user_id;
+  }
+  const myRoster = (rosters || []).find((r) => r.owner_id === user.user_id);
+  const myPlayerIds = (myRoster?.players || []).filter(Boolean);
+  const opponentRosters = (rosters || [])
+    .filter((r) => r.owner_id && r.owner_id !== user.user_id)
+    .map((r) => ({
+      user_id: r.owner_id,
+      username: usernameMap[r.owner_id] || `Team ${r.roster_id}`,
+      player_ids: (r.players || []).filter(Boolean),
+    }))
+    .filter((r) => r.player_ids.length > 0);
+
+  let invitedBy: string | null = null;
+  try {
+    const { useSession } = require('../state/useSession');
+    invitedBy = useSession.getState().consumeInvitedBy();
+  } catch {
+    /* require may fail in test contexts; non-fatal */
+  }
+
+  return {
+    user_id:          user.user_id,
+    username:         user.username,
+    display_name:     user.display_name,
+    avatar:           user.avatar_id,
+    league_id:        lg.league_id,
+    league_name:      lg.name,
+    user_player_ids:  myPlayerIds,
+    opponent_rosters: opponentRosters,
+    invited_by:       invitedBy ?? undefined,
+  };
+}
+
+// Phase 2 — POST the built body to /api/session/init with cold-restart
+// recovery. Call this AFTER navigating to Main so the ~5-10s backend
+// processing doesn't block UI. Returns a promise the caller can attach
+// error handling to. Does not throw on "player database not cached" —
+// retries once automatically (same recovery path as initLeagueSession).
+export async function submitSessionInit(body: SessionInitBody): Promise<void> {
+  try {
+    await sessionInit(body);
+  } catch (e: any) {
+    if (_isPlayerCacheMissing(e)) {
+      resetWarmedFlag();
+      await warmPlayerCache();
+      await sessionInit(body);
     } else {
       throw e;
     }
