@@ -160,6 +160,8 @@ Canonical player reference, synced from Sleeper bulk payload (skill positions, A
 | `adp` | float | |
 | `last_synced` | str | |
 
+Indexes: `ix_players_position` on `position` — `load_players(position=...)` and `load_rookies` filter by position on every positional ranking board request and trio generation (shipped Wave 1, PR #66 / INIT-14a).
+
 ---
 
 ## `league_preferences`

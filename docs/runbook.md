@@ -104,3 +104,9 @@ If these stop firing, queued pushes pile up in `notification_queue` and digests/
 POST /api/reset
 ```
 Wipes the current user's `swipe_decisions`, `trade_decisions`, `member_rankings`.
+
+---
+
+## HTTP compression / encoding (OBS-API-02)
+
+React Native's `fetch` auto-negotiates `Accept-Encoding: gzip, deflate, br` on every request. Cloudflare and Render both compress at the edge, so JSON responses are gzip-compressed in transit without any Flask-side configuration. The mobile app uses `/api/warm` (a lightweight ping) instead of fetching the full player payload on startup, so the largest payload (`/api/players`) is only fetched on first-run or after a 24-hour staleness. No additional Flask middleware is needed for current load; add `flask-compress` only if a new heavy endpoint is introduced that bypasses edge caching.
