@@ -1986,45 +1986,54 @@ def upsert_league_members(league_id: str, members: list[dict]) -> None:
 
     Called during session_init so every user who logs into the same league
     contributes their view of the membership roster.
+
+    Uses a single dialect-aware bulk upsert (INSERT OR REPLACE for SQLite,
+    INSERT … ON CONFLICT DO UPDATE for PostgreSQL) to replace the old N+1
+    select-then-insert/update loop.
     """
+    if not members:
+        return
+
     now = _now()
+    rows = [
+        {
+            "league_id":    league_id,
+            "user_id":      str(m.get("user_id", "")),
+            "username":     m.get("username", ""),
+            "display_name": m.get("display_name") or m.get("username", ""),
+            "roster_data":  json.dumps(m.get("player_ids", [])),
+            "updated_at":   now,
+        }
+        for m in members
+        if m.get("user_id")
+    ]
+    if not rows:
+        return
+
     with engine.begin() as conn:
-        for m in members:
-            uid          = str(m.get("user_id", ""))
-            username     = m.get("username", "")
-            display_name = m.get("display_name", username)
-            roster_json  = json.dumps(m.get("player_ids", []))
-
-            existing = conn.execute(
-                select(league_members_table).where(
-                    (league_members_table.c.league_id == league_id) &
-                    (league_members_table.c.user_id   == uid)
-                )
-            ).fetchone()
-
-            if existing:
-                conn.execute(
-                    update(league_members_table)
-                    .where(
-                        (league_members_table.c.league_id == league_id) &
-                        (league_members_table.c.user_id   == uid)
-                    )
-                    .values(
-                        username=username,
-                        display_name=display_name,
-                        roster_data=roster_json,
-                        updated_at=now,
-                    )
-                )
-            else:
-                conn.execute(insert(league_members_table).values(
-                    league_id    = league_id,
-                    user_id      = uid,
-                    username     = username,
-                    display_name = display_name,
-                    roster_data  = roster_json,
-                    updated_at   = now,
-                ))
+        if DATABASE_URL.startswith("sqlite"):
+            # INSERT OR REPLACE honours the uq_league_member constraint and
+            # always writes the freshest values (newest-wins).
+            conn.execute(text(
+                "INSERT OR REPLACE INTO league_members "
+                "(league_id, user_id, username, display_name, roster_data, updated_at) "
+                "VALUES (:league_id, :user_id, :username, :display_name, :roster_data, :updated_at)"
+            ), rows)
+        else:
+            # PostgreSQL: upsert on the unique constraint using the
+            # dialect-specific insert that supports on_conflict_do_update.
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            stmt = pg_insert(league_members_table).values(rows)
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_league_member",
+                set_={
+                    "username":     stmt.excluded.username,
+                    "display_name": stmt.excluded.display_name,
+                    "roster_data":  stmt.excluded.roster_data,
+                    "updated_at":   stmt.excluded.updated_at,
+                },
+            )
+            conn.execute(stmt)
 
 
 def load_league_members(league_id: str) -> list[dict]:
@@ -2583,6 +2592,9 @@ def upsert_member_rankings(
         if rows:
             conn.execute(insert(member_rankings_table), rows)
 
+    # Invalidate community-ELO cache so the next Trends call gets fresh data.
+    _COMMUNITY_ELO_CACHE.pop((league_id, scoring_format), None)
+
 
 def load_member_rankings(
     league_id: str,
@@ -2719,13 +2731,18 @@ def check_for_match(
     give_set    = set(give_player_ids)
     receive_set = set(receive_player_ids)
 
+    cutoff = datetime.utcnow() - timedelta(days=90)
     with engine.connect() as conn:
         rows = conn.execute(
-            select(trade_decisions_table).where(
+            select(
+                trade_decisions_table.c.give_player_ids,
+                trade_decisions_table.c.receive_player_ids,
+            ).where(
                 and_(
                     trade_decisions_table.c.user_id    == target_user_id,
                     trade_decisions_table.c.league_id  == league_id,
                     trade_decisions_table.c.decision   == "like",
+                    trade_decisions_table.c.created_at >= cutoff.isoformat(),
                 )
             )
         ).fetchall()
@@ -4199,6 +4216,15 @@ def load_elo_history(
     return [dict(r._mapping) for r in rows]
 
 
+# In-process cache for load_community_elo_for_league.
+# Keyed on (league_id, scoring_format) — exclude_user_id is NOT part of the key
+# because the same leaguemate snapshot is shared across callers in the same
+# process (Trends tab hits this repeatedly for different users in the same league).
+# Invalidated by upsert_member_rankings so the next Trends call gets fresh data.
+_COMMUNITY_ELO_CACHE: dict = {}   # (league_id, scoring_format) → (timestamp_str, result)
+_COMMUNITY_ELO_TTL = 300          # 5 minutes
+
+
 def load_community_elo_for_league(
     league_id: str,
     exclude_user_id: str,
@@ -4209,13 +4235,24 @@ def load_community_elo_for_league(
     service has a dedicated, clearly-named dependency separate from the
     trade engine's usage of the same data.
 
-    Returns the same shape as load_member_rankings().
+    Returns the same shape as load_member_rankings(). Results are cached for
+    up to 5 minutes and invalidated on each upsert_member_rankings call.
     """
-    return load_member_rankings(
+    cache_key = (league_id, scoring_format)
+    entry = _COMMUNITY_ELO_CACHE.get(cache_key)
+    if entry is not None:
+        ts, result = entry
+        age = (datetime.utcnow() - datetime.fromisoformat(ts)).total_seconds()
+        if age < _COMMUNITY_ELO_TTL:
+            return result
+
+    result = load_member_rankings(
         league_id       = league_id,
         exclude_user_id = exclude_user_id,
         scoring_format  = scoring_format,
     )
+    _COMMUNITY_ELO_CACHE[cache_key] = (datetime.utcnow().isoformat(), result)
+    return result
 
 
 # ---------------------------------------------------------------------------
