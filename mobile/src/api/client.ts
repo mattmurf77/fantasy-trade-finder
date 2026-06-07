@@ -104,10 +104,15 @@ export async function setLastUsername(username: string): Promise<void> {
 }
 
 export class ApiError extends Error {
+  // isTimeout marks an error produced by the internal request deadline (FR-4),
+  // so UI layers can surface "Server is waking up — retry." instead of a
+  // generic network failure. A caller-supplied signal abort (e.g. TanStack
+  // Query cancellation) is NOT a timeout and never sets this.
   constructor(
     public status: number,
     public body: unknown,
     message?: string,
+    public isTimeout = false,
   ) {
     super(message || `HTTP ${status}`);
     this.name = 'ApiError';
@@ -115,6 +120,25 @@ export class ApiError extends Error {
   get isUnauthorized() {
     return this.status === 401;
   }
+}
+
+// ── Request deadlines (INIT-12 Wave 1, FR-1/FR-2) ───────────────────────────
+// Default cap for any request; the known-slow cold-start POSTs get a generous
+// cap so a legitimately-slow-but-progressing session_init isn't aborted.
+const DEFAULT_TIMEOUT_MS = 15_000;
+const SLOW_TIMEOUT_MS = 30_000;
+// Paths documented at 5–10 s on Render's free tier (auth.ts:98–99). Matched by
+// suffix so the base-URL prefix doesn't matter.
+const SLOW_POST_PATHS = ['/api/session/init', '/api/trades/generate'];
+
+// User-facing copy for a deadline abort (FR-4).
+const TIMEOUT_MESSAGE = 'Server is waking up — please retry.';
+
+function timeoutForRequest(path: string, method: string): number {
+  if (method === 'POST' && SLOW_POST_PATHS.some((p) => path.includes(p))) {
+    return SLOW_TIMEOUT_MS;
+  }
+  return DEFAULT_TIMEOUT_MS;
 }
 
 interface RequestOptions {
@@ -146,17 +170,57 @@ export async function apiRequest<T = unknown>(
     if (tok) headers['X-Session-Token'] = tok;
   }
 
-  const res = await fetch(url, {
-    method: opts.method || 'GET',
-    headers,
-    body:
-      opts.body !== undefined
-        ? typeof opts.body === 'string'
-          ? opts.body
-          : JSON.stringify(opts.body)
-        : undefined,
-    signal: opts.signal,
-  });
+  const method = opts.method || 'GET';
+
+  // ── Timeout (INIT-12 Wave 1, FR-1/2/3) ────────────────────────────────────
+  // Compose an internal deadline controller with the caller's signal so that
+  // either source can abort the request — whichever fires first wins. We track
+  // *which* fired so a deadline abort can be reported as a typed timeout while
+  // a caller cancellation (e.g. TanStack Query navigation) is left to bubble as
+  // a plain AbortError. AbortSignal.any/.timeout aren't reliably present in the
+  // Hermes/RN runtime, so the composition is done by hand.
+  const timeoutController = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    timeoutController.abort();
+  }, timeoutForRequest(path, method));
+
+  const callerSignal = opts.signal;
+  const onCallerAbort = () => timeoutController.abort();
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      timeoutController.abort();
+    } else {
+      callerSignal.addEventListener('abort', onCallerAbort);
+    }
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      body:
+        opts.body !== undefined
+          ? typeof opts.body === 'string'
+            ? opts.body
+            : JSON.stringify(opts.body)
+          : undefined,
+      signal: timeoutController.signal,
+    });
+  } catch (err: any) {
+    // Our deadline fired — and it wasn't the caller cancelling. Surface a typed
+    // timeout the UI can act on. If the caller's own signal aborted, let the
+    // original AbortError propagate untouched (not a timeout — FR-4).
+    if (timedOut && !(callerSignal && callerSignal.aborted)) {
+      throw new ApiError(0, null, TIMEOUT_MESSAGE, true);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    if (callerSignal) callerSignal.removeEventListener('abort', onCallerAbort);
+  }
 
   const text = await res.text();
   let parsed: any = null;

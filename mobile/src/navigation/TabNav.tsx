@@ -6,7 +6,9 @@ import { NavigationContainerRefContext, CommonActions } from '@react-navigation/
 import { useQueryClient } from '@tanstack/react-query';
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
-import { getNextTrio } from '../api/rankings';
+import { getNextTrio, getRankings, getTiersStatus } from '../api/rankings';
+import { getLikedTrades, getAllMatches } from '../api/trades';
+import { useSession } from '../state/useSession';
 import RankScreen from '../screens/RankScreen';
 import TiersScreen from '../screens/TiersScreen';
 import OverallRanksScreen from '../screens/OverallRanksScreen';
@@ -86,6 +88,7 @@ const tabIcon = (emoji: string) =>
 
 export default function TabNav() {
   const [rankMenuOpen, setRankMenuOpen] = useState(false);
+  const queryClient = useQueryClient();
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -126,11 +129,42 @@ export default function TabNav() {
           name="Trades"
           component={TradesStackNav}
           options={{ tabBarIcon: tabIcon('⚡') }}
+          listeners={() => ({
+            // Warm the liked-trades cache during the tab transition so
+            // TradesScreen's `useQuery(['liked-trades', leagueId])` adopts
+            // the in-flight request on mount. Don't preventDefault — the
+            // tab should still navigate normally. Read leagueId from the
+            // session store (same source TradesScreen uses) and skip the
+            // prefetch when no league is active (the screen's query is
+            // `enabled: !!leagueId`).
+            tabPress: () => {
+              const leagueId = useSession.getState().league?.league_id ?? null;
+              if (!leagueId) return;
+              void queryClient.prefetchQuery({
+                queryKey: ['liked-trades', leagueId],
+                queryFn: getLikedTrades,
+                staleTime: 30_000,
+              });
+            },
+          })}
         />
         <Tab.Screen
           name="Matches"
           component={MatchesScreen}
           options={{ tabBarIcon: tabIcon('🤝') }}
+          listeners={() => ({
+            // Warm the cross-league matches cache during the tab transition
+            // so MatchesScreen's `useQuery(['matches', 'all'])` adopts the
+            // in-flight request on mount. Fire-and-forget; errors surface on
+            // the screen's own query.
+            tabPress: () => {
+              void queryClient.prefetchQuery({
+                queryKey: ['matches', 'all'],
+                queryFn: getAllMatches,
+                staleTime: 15_000,
+              });
+            },
+          })}
         />
         <Tab.Screen
           name="League"
@@ -160,21 +194,45 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
   const queryClient = useQueryClient();
 
   const go = (screen: RankRoute) => {
-    // Prefetch the Trios payload during the modal-close + tab-transition
-    // animation (~250–400 ms of otherwise-dead time). RankScreen's
-    // `useQuery(['trio', 'QB'])` will adopt the in-flight request when it
-    // mounts, so the user effectively gets a free head start on the
-    // /api/trio round-trip. Only fires for the Trios destination — the
-    // other Rank sub-screens have their own data shapes (Mobile #M2).
+    // Prefetch the destination's payload during the modal-close + tab-
+    // transition animation (~250–400 ms of otherwise-dead time). Each Rank
+    // sub-screen's `useQuery` adopts the in-flight request when it mounts,
+    // so the user gets a free head start on the round-trip. All calls are
+    // fire-and-forget — prefetchQuery surfaces errors via the query's own
+    // error state once the destination screen reads it, so we swallow here.
+    // NOTE: keys are the destinations' CURRENT flat shapes; key-scoping
+    // (format/leagueId) is a separate Wave-2 initiative (INIT-07).
     if (screen === 'Trios') {
-      // Fire-and-forget — prefetchQuery surfaces errors via the query's
-      // own error state once RankScreen reads it, so swallow here.
       void queryClient.prefetchQuery({
         queryKey: ['trio', 'QB'],
         queryFn: () => getNextTrio('QB'),
         staleTime: 0,
       });
+    } else if (screen === 'Tiers') {
+      // TiersScreen opens on position 'QB' (TiersScreen.tsx:65) and also
+      // pulls the per-position saved-state map.
+      void queryClient.prefetchQuery({
+        queryKey: ['rankings', 'QB'],
+        queryFn: () => getRankings('QB'),
+        staleTime: 30_000,
+      });
+      void queryClient.prefetchQuery({
+        queryKey: ['tiers-status'],
+        queryFn: getTiersStatus,
+        staleTime: 60_000,
+      });
+    } else if (screen === 'OverallRanks' || screen === 'ManualRanks') {
+      // Both screens pull the full unfiltered list once and filter
+      // client-side (OverallRanksScreen.tsx:29 / ManualRanksScreen.tsx:59).
+      void queryClient.prefetchQuery({
+        queryKey: ['rankings', 'all'],
+        queryFn: () => getRankings(null),
+        staleTime: 30_000,
+      });
     }
+    // Trends is intentionally not prefetched: its queries take runtime args
+    // (window_days/top_n, plus a league_id for the consensus-gap call) and
+    // don't match a single obvious flat key — deferred per the LLD.
     onClose();
     if (!navContext) return;
     navContext.dispatch(

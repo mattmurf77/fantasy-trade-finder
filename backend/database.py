@@ -720,6 +720,8 @@ def _migrate_db() -> None:
          "league_id, scoring_format, user_id"),
         ("ix_elo_history_user_fmt_at", "elo_history",
          "user_id, scoring_format, snapshot_at"),
+        ("ix_players_position", "players",
+         "position"),
     ]
     for idx_name, tbl, cols in _hot_path_indexes:
         try:
