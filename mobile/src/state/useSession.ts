@@ -122,6 +122,10 @@ export const useSession = create<SessionState>((set, get) => ({
     set({ user, league, leagues, hasToken: !!tok, activeFormat: fmt });
   },
 
+  setActiveFormat: (fmt) => {
+    set({ activeFormat: fmt });
+  },
+
   setUser: async (u) => {
     if (u) await AsyncStorage.setItem(SU_KEY, JSON.stringify(u));
     else   await AsyncStorage.removeItem(SU_KEY);
@@ -152,10 +156,6 @@ export const useSession = create<SessionState>((set, get) => ({
       /* non-fatal — cache is opportunistic */
     }
     set({ leagues: lgs });
-  },
-
-  setActiveFormat: (fmt) => {
-    set({ activeFormat: fmt });
   },
 
   switchLeague: async (lg) => {
