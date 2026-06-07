@@ -118,7 +118,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
   );
 });
 
-export default PlayerCard;
+export default React.memo(PlayerCard);
 
 const styles = StyleSheet.create({
   card: {

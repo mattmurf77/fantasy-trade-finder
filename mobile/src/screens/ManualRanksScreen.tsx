@@ -41,6 +41,37 @@ const DRAG_ACTIVATION_MS = 220;
 
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
+// ── RankEditRow ───────────────────────────────────────────────────────────
+// Owns the draft string locally so the renderItem useCallback no longer
+// depends on `editValue` state — only on `editingPid` + `commitRankEdit`.
+// Keeps TextInput re-renders scoped to this component alone.
+interface RankEditRowProps {
+  initialValue: string;
+  onCommit: (val: string) => void;
+  onBlur?: () => void;
+}
+function RankEditRowInner({ initialValue, onCommit, onBlur }: RankEditRowProps) {
+  const [draft, setDraft] = useState(initialValue);
+  const handleCommit = useCallback(() => {
+    onCommit(draft);
+    onBlur?.();
+  }, [draft, onCommit, onBlur]);
+  return (
+    <TextInput
+      autoFocus
+      keyboardType="number-pad"
+      value={draft}
+      onChangeText={setDraft}
+      onBlur={handleCommit}
+      onSubmitEditing={handleCommit}
+      maxLength={4}
+      style={styles.rankInput}
+      selectTextOnFocus
+    />
+  );
+}
+const RankEditRow = React.memo(RankEditRowInner);
+
 export default function ManualRanksScreen() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<Position | 'ALL'>('ALL');
@@ -101,8 +132,12 @@ export default function ManualRanksScreen() {
       setSaveStatus('saved');
       setErrorText(null);
       // Reorder may invalidate downstream caches (tier status, progress)
-      // — refetch lazily.
-      queryClient.invalidateQueries({ queryKey: ['rankings'] });
+      // — refetch lazily. Scope to the active position + 'all' so
+      // unrelated position caches aren't evicted unnecessarily.
+      queryClient.invalidateQueries({ queryKey: ['rankings', filter === 'ALL' ? 'all' : filter] });
+      if (filter !== 'ALL') {
+        queryClient.invalidateQueries({ queryKey: ['rankings', 'all'] });
+      }
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
       queryClient.invalidateQueries({ queryKey: ['progress'] });
     },
@@ -186,18 +221,15 @@ export default function ManualRanksScreen() {
   );
 
   // ── Inline rank edit ──────────────────────────────────────────────
-  // Tap a row's rank number → that row enters edit mode. The TextInput
-  // shows current visible-index+1; on blur (or submit) we move the row
-  // to the typed target index in the filtered view, then splice the
-  // change back into `rows` like the drag path.
+  // Tap a row's rank number → that row enters edit mode. RankEditRow owns
+  // the draft string internally; commitRankEdit receives the committed value
+  // so renderItem's useCallback no longer depends on `editValue`.
   const [editingPid, setEditingPid] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
 
-  const commitRankEdit = useCallback(() => {
+  const commitRankEdit = useCallback((val: string) => {
     if (!editingPid) return;
-    const target = parseInt(editValue, 10);
+    const target = parseInt(val, 10);
     setEditingPid(null);
-    setEditValue('');
     if (!Number.isFinite(target) || target < 1) return;
 
     setRows((prev) => {
@@ -225,7 +257,7 @@ export default function ManualRanksScreen() {
       haptics.success();
       return next;
     });
-  }, [editingPid, editValue, filter, scheduleSave]);
+  }, [editingPid, filter, scheduleSave]);
 
   // ── Render helpers ────────────────────────────────────────────────
   const renderItem = useCallback(
@@ -247,22 +279,14 @@ export default function ManualRanksScreen() {
           ]}
         >
           {isEditing ? (
-            <TextInput
-              autoFocus
-              keyboardType="number-pad"
-              value={editValue}
-              onChangeText={setEditValue}
-              onBlur={commitRankEdit}
-              onSubmitEditing={commitRankEdit}
-              maxLength={4}
-              style={styles.rankInput}
-              selectTextOnFocus
+            <RankEditRow
+              initialValue={String(rankNum)}
+              onCommit={commitRankEdit}
             />
           ) : (
             <Pressable
               onPress={() => {
                 setEditingPid(item.id);
-                setEditValue(String(rankNum));
                 haptics.selection();
               }}
               hitSlop={8}
@@ -286,7 +310,7 @@ export default function ManualRanksScreen() {
         </Pressable>
       );
     },
-    [commitRankEdit, editValue, editingPid],
+    [commitRankEdit, editingPid],
   );
 
   // ── Header save indicator ─────────────────────────────────────────
@@ -321,7 +345,6 @@ export default function ManualRanksScreen() {
                 // Dismiss any in-flight rank edit; the visible index would
                 // be ambiguous across a filter switch.
                 setEditingPid(null);
-                setEditValue('');
                 Keyboard.dismiss();
                 setFilter(f);
               }}

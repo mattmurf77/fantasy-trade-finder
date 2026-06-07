@@ -18,6 +18,11 @@ import type { Position, RankedPlayer } from '../shared/types';
 
 const FILTERS: (Position | 'ALL')[] = ['ALL', 'QB', 'RB', 'WR', 'TE'];
 
+// Row height: paddingVertical (spacing.md=12) * 2 + two text lines (fontSize.base=15 each) + gap ≈ 58px.
+// Used by getItemLayout so FlatList can skip off-screen measurement entirely.
+const ROW_HEIGHT = 58;
+const SEP_HEIGHT = 1;
+
 // Flat scrollable list of every player the current user has ranked, sorted
 // by ELO (best → worst). Read-only. Useful for users who want a holistic
 // view of their board outside the Tiers UX.
@@ -88,6 +93,11 @@ export default function OverallRanksScreen() {
           contentContainerStyle={styles.list}
           renderItem={({ item, index }) => <Row player={item} overallRank={index + 1} />}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
+          getItemLayout={(_data, index) => ({
+            length: ROW_HEIGHT,
+            offset: (ROW_HEIGHT + SEP_HEIGHT) * index,
+            index,
+          })}
           refreshing={ranksQuery.isFetching && !ranksQuery.isLoading}
           onRefresh={() => ranksQuery.refetch()}
         />
@@ -100,7 +110,7 @@ interface RowProps {
   player: RankedPlayer;
   overallRank: number;
 }
-function Row({ player, overallRank }: RowProps) {
+const Row = React.memo(function Row({ player, overallRank }: RowProps) {
   const ageStr = player.age != null ? `${player.age} yo` : null;
   return (
     <View style={styles.row}>
@@ -119,7 +129,7 @@ function Row({ player, overallRank }: RowProps) {
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },

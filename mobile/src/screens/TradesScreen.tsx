@@ -219,28 +219,57 @@ export default function TradesScreen({ navigation }: any) {
     },
   });
 
-  // Poll while a job is running. 1500ms cadence matches the backend's
-  // per-opponent budget (one opponent done every ~3s → ~2 polls per
-  // increment). Cleared when status flips to complete/error or the
-  // component unmounts.
+  // Poll while a job is running. Self-scheduling setTimeout loop with
+  // exponential backoff (INIT-13): starts at 800ms, resets on progress,
+  // backs off to 4000ms when the backend isn't advancing.
   //
-  // Failure handling: a single network blip is fine, but a backend that
-  // 500s for an extended period would otherwise leave the user staring
-  // at "Searching…" forever. After MAX_POLL_FAILURES consecutive errors
-  // we surface a toast and clear the local job so the UI returns to its
+  // Failure handling: after MAX_POLL_FAILURES consecutive errors we
+  // surface a toast and clear the local job so the UI returns to its
   // pre-tap state. The server-side worker keeps running so the next tap
   // can hit the warm cache.
+  //
+  // Shallow-equal guard (FR-3 / INIT-11a FR-W2-5): skip setJob when
+  // nothing the UI reads has actually changed, avoiding a re-render on
+  // every poll tick even when the job snapshot is identical.
   useEffect(() => {
     if (!job || job.status !== 'running' || !job.job_id) return;
     let cancelled = false;
     let failures = 0;
     const MAX_POLL_FAILURES = 4;
+    let intervalMs = 800;
+    let prevOpponentsDone = job.opponents_done ?? 0;
+
     const tick = async () => {
+      if (cancelled) return;
       try {
         const next = await getTradeStatus(job.job_id);
         if (cancelled) return;
         failures = 0;
-        setJob(next);
+
+        // Shallow-equal guard: skip setState if nothing the UI reads has changed.
+        const changed = (
+          next.status !== job.status ||
+          (next.opponents_done ?? 0) !== (job.opponents_done ?? 0) ||
+          (next.opponents_total ?? 0) !== (job.opponents_total ?? 0) ||
+          next.cards.length !== job.cards.length
+        );
+        if (changed) setJob(next);
+
+        // Backoff: reset on progress, increase on no-change.
+        if ((next.opponents_done ?? 0) > prevOpponentsDone) {
+          intervalMs = 800;
+          prevOpponentsDone = next.opponents_done ?? 0;
+        } else {
+          intervalMs = Math.min(Math.round(intervalMs * 1.5), 4000);
+        }
+
+        // Add ±10% jitter to spread polls and avoid thundering-herd.
+        const jitter = intervalMs * 0.1 * (Math.random() * 2 - 1);
+        const nextDelay = Math.round(intervalMs + jitter);
+
+        if (!cancelled && next.status === 'running') {
+          setTimeout(tick, nextDelay);
+        }
       } catch {
         if (cancelled) return;
         failures += 1;
@@ -250,13 +279,16 @@ export default function TradesScreen({ navigation }: any) {
             tone: 'warn',
           });
           setJob(null);
+        } else if (!cancelled) {
+          setTimeout(tick, intervalMs);
         }
       }
     };
-    const id = setInterval(tick, 1500);
+
+    const firstTimer = setTimeout(tick, intervalMs);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      clearTimeout(firstTimer);
     };
   }, [job?.job_id, job?.status]);
 
