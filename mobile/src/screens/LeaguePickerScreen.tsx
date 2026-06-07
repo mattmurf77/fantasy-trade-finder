@@ -13,7 +13,7 @@ import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import { useSession } from '../state/useSession';
 import { getLeagues } from '../api/sleeper';
-import { initLeagueSession } from '../api/auth';
+import { buildSessionInitBody, submitSessionInit } from '../api/auth';
 import type { LeagueSummary } from '../shared/types';
 
 interface Props {
@@ -74,9 +74,29 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
     setSelectingId(lg.league_id);
     setError(null);
     try {
-      await initLeagueSession(user, { league_id: lg.league_id, name: lg.name });
+      // INIT-08-client: two-phase optimistic navigation.
+      //
+      // Phase 1 (~2-3s): fetch rosters + users from Sleeper and build the
+      // session_init payload. This is the "data-gather" leg — fast enough
+      // that we block on it so we can surface Sleeper errors inline.
+      const body = await buildSessionInitBody(user, { league_id: lg.league_id, name: lg.name });
+
+      // Persist the league so RootNav gates to 'Main' immediately and the
+      // user sees their tabs while the backend is still processing.
       await setLeague({ league_id: lg.league_id, league_name: lg.name });
       onLeaguePicked();
+
+      // Phase 2 (~5-10s, background): POST to /api/session/init. Runs
+      // detached so it doesn't block the tab transition. On failure we
+      // can't navigate back (the user is already in Main) — surface a
+      // toast or let the tabs' query retry handle it gracefully. Any
+      // queries that fire before this lands will see a 401 or "session
+      // not initialized" and retry via their own error/refetch logic.
+      submitSessionInit(body).catch((e) => {
+        // Non-fatal: the tabs will retry their queries. Log for Sentry
+        // triage but don't interrupt the user's session.
+        console.warn('[INIT-08] background sessionInit failed:', e?.message);
+      });
     } catch (e: any) {
       setError(e?.message || 'Failed to import this league');
       setSelectingId(null);
