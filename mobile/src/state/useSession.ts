@@ -6,7 +6,8 @@ import { connectLeague as apiConnectLeague } from '../api/league';
 import { getLeagues } from '../api/sleeper';
 import { setUser as sentrySetUser } from '../observability/sentry';
 import { queryClient } from './queryClient';
-import type { LeagueSummary } from '../shared/types';
+import { getActiveScoringFormat } from '../api/rankings';
+import type { LeagueSummary, ScoringFormat } from '../shared/types';
 
 // Storage keys kept identical to the web app where practical, so the server
 // sees consistent shape from both clients.
@@ -32,6 +33,9 @@ interface SessionState {
   league: SavedLeague | null;
   leagues: LeagueSummary[];         // cached list for the switcher
   hasToken: boolean;
+  /** Active scoring format — hydrated from AsyncStorage via rankings.ts.
+   *  Null until bootstrap() completes (or the user hasn't set a format). */
+  activeFormat: ScoringFormat | null;
   /** True while a switchLeague() call is in flight. UI uses this to
    *  disable the switcher rows / show a spinner. */
   switching: boolean;
@@ -55,6 +59,10 @@ interface SessionState {
    *  failure; UI should wrap in try/catch. No-ops if `lg` matches the
    *  current league or another switch is in progress. */
   switchLeague: (lg: SavedLeague) => Promise<void>;
+  /** Update the in-store active format after calling setActiveScoringFormat.
+   *  Called by the settings screen / format-picker so query keys that
+   *  include activeFormat invalidate correctly. */
+  setActiveFormat: (fmt: ScoringFormat | null) => void;
   /** Record a referral attribution to forward on the next session_init.
    *  Stored in-memory only; the next sessionInit call picks it up via
    *  consumeInvitedBy(). Safe to call multiple times — last value wins. */
@@ -89,16 +97,18 @@ export const useSession = create<SessionState>((set, get) => ({
   league: null,
   leagues: [],
   hasToken: false,
+  activeFormat: null,
   switching: false,
   isDemo: false,
   invitedBy: null,
 
   bootstrap: async () => {
-    const [userRaw, leagueRaw, leaguesRaw, tok] = await Promise.all([
+    const [userRaw, leagueRaw, leaguesRaw, tok, fmt] = await Promise.all([
       AsyncStorage.getItem(SU_KEY),
       AsyncStorage.getItem(SL_KEY),
       AsyncStorage.getItem(SLG_KEY),
       getSessionToken(),
+      getActiveScoringFormat(),
     ]);
     let user: SavedUser | null = null;
     let league: SavedLeague | null = null;
@@ -109,7 +119,11 @@ export const useSession = create<SessionState>((set, get) => ({
       const parsed = JSON.parse(leaguesRaw);
       if (Array.isArray(parsed)) leagues = parsed;
     } } catch {}
-    set({ user, league, leagues, hasToken: !!tok });
+    set({ user, league, leagues, hasToken: !!tok, activeFormat: fmt });
+  },
+
+  setActiveFormat: (fmt) => {
+    set({ activeFormat: fmt });
   },
 
   setUser: async (u) => {
@@ -182,6 +196,12 @@ export const useSession = create<SessionState>((set, get) => ({
       queryClient.invalidateQueries({ queryKey: ['portfolio'] });
       queryClient.invalidateQueries({ queryKey: ['matches', 'all'] });
       queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
+      // League switch means rankings/progress/streak are all stale —
+      // invalidate all format/position variants by prefix.
+      queryClient.invalidateQueries({ queryKey: ['rankings'] });
+      queryClient.invalidateQueries({ queryKey: ['progress'] });
+      queryClient.invalidateQueries({ queryKey: ['streak'] });
+      queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
     } finally {
       set({ switching: false });
     }

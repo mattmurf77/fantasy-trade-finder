@@ -14,6 +14,7 @@ import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import PositionChip from '../components/PositionChip';
 import { getRankings } from '../api/rankings';
+import { useSession } from '../state/useSession';
 import type { Position, RankedPlayer } from '../shared/types';
 
 const FILTERS: (Position | 'ALL')[] = ['ALL', 'QB', 'RB', 'WR', 'TE'];
@@ -28,11 +29,12 @@ const SEP_HEIGHT = 1;
 // view of their board outside the Tiers UX.
 export default function OverallRanksScreen() {
   const [filter, setFilter] = useState<Position | 'ALL'>('ALL');
+  const activeFormat = useSession((s) => s.activeFormat);
 
   // Pull the full unfiltered list once — we filter client-side so flipping
   // between QB/RB/etc. is instant and doesn't refetch.
   const ranksQuery = useQuery({
-    queryKey: ['rankings', 'all'],
+    queryKey: ['rankings', activeFormat, 'all'],
     queryFn: () => getRankings(null),
     staleTime: 30_000,
   });

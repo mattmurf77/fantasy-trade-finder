@@ -38,6 +38,8 @@ export default function RootNav({ booted }: { booted: boolean }) {
   const user = useSession((s) => s.user);
   const league = useSession((s) => s.league);
   const hasToken = useSession((s) => s.hasToken);
+  const activeFormat = useSession((s) => s.activeFormat);
+  const leagueId = league?.league_id ?? null;
   // Tracks the active route label so the in-app feedback FAB can pre-fill
   // the "Screen" field with whatever the user was looking at when they
   // tapped it. Updated on every navigation state change. Cheap because
@@ -73,7 +75,7 @@ export default function RootNav({ booted }: { booted: boolean }) {
   // loop alive forever.
   const everUnlockedRef = useRef(false);
   const progressQuery = useQuery({
-    queryKey: ['progress'],
+    queryKey: ['progress', leagueId, activeFormat],
     queryFn: getProgress,
     enabled: !!user && hasToken && !everUnlockedRef.current,
     staleTime: 15_000,

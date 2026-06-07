@@ -36,6 +36,7 @@ import {
 } from '../api/rankings';
 import { copyTiersFromFormat } from '../api/league';
 import { autoBucket, TIERS } from '../utils/tierBands';
+import { useSession } from '../state/useSession';
 import type { Position, RankedPlayer, Tier, ScoringFormat } from '../shared/types';
 
 // Format-key → human label for the copy button + confirm dialog. Mirrors
@@ -62,6 +63,7 @@ interface BinLayout {
 
 export default function TiersScreen() {
   const queryClient = useQueryClient();
+  const activeFormat = useSession((s) => s.activeFormat);
   const [position, setPosition] = useState<Position>('QB');
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
 
@@ -100,7 +102,7 @@ export default function TiersScreen() {
 
   // ── Data ────────────────────────────────────────────────────────────
   const rankingsQuery = useQuery({
-    queryKey: ['rankings', position],
+    queryKey: ['rankings', activeFormat, position],
     queryFn: () => getRankings(position),
     staleTime: 30_000,
     placeholderData: (prev) => prev,
@@ -139,11 +141,10 @@ export default function TiersScreen() {
       queryClient.invalidateQueries({ queryKey: ['progress'] });
       // Tier saves rewrite per-position ELO overrides on the backend,
       // which the Overall / Manual / Tiers screens all read via the
-      // `['rankings', ...]` family. Scope to the saved position + 'all'
-      // so unrelated position caches aren't evicted unnecessarily.
-      // Mirrors api-layer review #A2.
-      queryClient.invalidateQueries({ queryKey: ['rankings', position] });
-      queryClient.invalidateQueries({ queryKey: ['rankings', 'all'] });
+      // `['rankings', ...]` family. Scope to the saved format+position
+      // + 'all' to avoid evicting unrelated caches.
+      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, position] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, 'all'] });
       // Reset the clearedPids set — the backend just absorbed them.
       setClearedPids(new Set());
     },
@@ -171,10 +172,9 @@ export default function TiersScreen() {
       setToast({ msg: `✓ Copied ${n} tier placements`, tone: 'success' });
       // Invalidate rankings/tier caches so the per-position load picks up
       // the new override ELOs. Same pattern as saveMutation.onSuccess.
-      // A format copy affects all positions, so we invalidate position +
-      // 'all' for the current position and let the broad prefix cover the rest.
-      queryClient.invalidateQueries({ queryKey: ['rankings', position] });
-      queryClient.invalidateQueries({ queryKey: ['rankings', 'all'] });
+      // A format copy affects all positions; use the broad prefix so the
+      // format-level cache is fully invalidated.
+      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat] });
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
       queryClient.invalidateQueries({ queryKey: ['progress'] });
       // Reset clearedPids — the cleared set is per-position-load and
@@ -576,14 +576,12 @@ export default function TiersScreen() {
   }
 
   // ── Copy-from-format button derivation ─────────────────────────────
-  // The active format is best discovered from the tiers/status response
-  // (the backend tells us which format the user is currently on). If
-  // unknown, default to '1qb_ppr' — same fallback the screen already uses
-  // for the autoBucket call. The button's `from` is the OTHER format.
-  const activeFormat: ScoringFormat =
-    (tiersStatusQuery.data?.scoring_format as ScoringFormat) || '1qb_ppr';
+  // Resolve the format to copy INTO (the "target"). Prefer the session
+  // activeFormat; fall back to the tiers/status response or '1qb_ppr'.
+  const copyTargetFormat: ScoringFormat =
+    activeFormat ?? (tiersStatusQuery.data?.scoring_format as ScoringFormat) ?? '1qb_ppr';
   const otherFormat: ScoringFormat =
-    FORMAT_KEYS.find((f) => f !== activeFormat) || 'sf_tep';
+    FORMAT_KEYS.find((f) => f !== copyTargetFormat) || 'sf_tep';
 
   const onCopyFromOtherFormat = useCallback(() => {
     // Destructive — confirm before firing. Copy preserves tier label +
@@ -591,10 +589,10 @@ export default function TiersScreen() {
     // target format. Matches web's Alert copy verbatim where practical.
     Alert.alert(
       `Copy tier list from ${FORMAT_LABELS[otherFormat]}?`,
-      `This will REPLACE your current ${FORMAT_LABELS[activeFormat]} tiers. ` +
+      `This will REPLACE your current ${FORMAT_LABELS[copyTargetFormat]} tiers. ` +
         `Each player keeps their tier and within-tier rank from ` +
         `${FORMAT_LABELS[otherFormat]}; only the underlying ELO values ` +
-        `change to fit ${FORMAT_LABELS[activeFormat]}'s bands.\n\n` +
+        `change to fit ${FORMAT_LABELS[copyTargetFormat]}'s bands.\n\n` +
         `Cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
@@ -603,12 +601,12 @@ export default function TiersScreen() {
           style: 'destructive',
           onPress: () => {
             haptics.warning();
-            copyMutation.mutate({ from: otherFormat, to: activeFormat });
+            copyMutation.mutate({ from: otherFormat, to: copyTargetFormat });
           },
         },
       ],
     );
-  }, [activeFormat, otherFormat, copyMutation]);
+  }, [copyTargetFormat, otherFormat, copyMutation]);
 
   // ── Render ──────────────────────────────────────────────────────────
   return (

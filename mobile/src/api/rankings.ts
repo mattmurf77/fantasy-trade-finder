@@ -18,6 +18,14 @@ import type {
 const LS_ACTIVE_FORMAT_KEY = 'ftf_active_format';
 let _activeFormatCache: ScoringFormat | null = null;
 
+/** Synchronous read of the in-memory format cache. Returns null when
+ *  the format hasn't been loaded yet (before the first async read or
+ *  before the user has ever set a format). Safe to call from non-async
+ *  contexts such as query-key builders in component render. */
+export function getActiveFormatSync(): ScoringFormat | null {
+  return _activeFormatCache;
+}
+
 export async function getActiveScoringFormat(): Promise<ScoringFormat | null> {
   if (_activeFormatCache) return _activeFormatCache;
   try {
