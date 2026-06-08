@@ -3393,10 +3393,14 @@ def disposition_trade_match(match_id):
     """
     sess = _require_session()
     sess["last_active"] = time.time()
-    service   = sess["service"]
-    g_user_id = sess["user_id"]
-    g_league  = sess["league"]
-    g_players = sess["players"]
+    # Null-guard every session read: extension sessions (and partially-built
+    # main sessions) may lack `league` / `players`, and `service` is only set
+    # when the effective format has a built RankingService. A missing key must
+    # never raise KeyError and turn a legitimate tap into "Action failed".
+    service   = sess.get("service")
+    g_user_id = sess.get("user_id")
+    g_league  = sess.get("league")
+    g_players = sess.get("players") or []
     body     = request.get_json(force=True) or {}
     decision = body.get("decision")
 
@@ -3410,6 +3414,12 @@ def disposition_trade_match(match_id):
     if not g_user_id:
         return jsonify({"error": "session not initialised"}), 400
 
+    # Resolved inside the try once the match is loaded; pre-seed so the
+    # diagnostic logging in the except block can reference them even if the
+    # failure happens before they're assigned.
+    _match_league_id = None
+    is_cross_league = False
+
     try:
         result = record_match_disposition(
             match_id = match_id,
@@ -3421,6 +3431,19 @@ def disposition_trade_match(match_id):
             return jsonify({"error": "match not found"}), 404
         if result["status"] == "already_decided":
             return jsonify({"error": "you have already recorded a decision for this match"}), 409
+
+        # Cross-league flag: the match carries its own league_id. The active
+        # in-memory `service` belongs to the session's active league/format, so
+        # applying an ELO signal to it for a DIFFERENT league's match would
+        # mutate the wrong service. When cross-league, we skip the in-memory
+        # apply and rely on persistence (save_trade_swipes below) — the signal
+        # replays into the correct service on that league's next session_init.
+        _match_league_id = result.get("league_id")
+        _active_league_id = g_league.league_id if g_league else None
+        is_cross_league = bool(
+            _match_league_id and _active_league_id
+            and _match_league_id != _active_league_id
+        )
 
         try:
             record_event(
@@ -3477,15 +3500,22 @@ def disposition_trade_match(match_id):
         # ── Apply ELO signals when both parties have decided ─────────────
         if result["both_decided"] and result["elo_signals"]:
             for sig in result["elo_signals"]:
-                # 1. Apply to in-memory service for the current user
-                if sig["user_id"] == g_user_id:
+                # 1. Apply to in-memory service for the current user — but ONLY
+                #    when the match belongs to the active league. For a
+                #    cross-league disposition the active `service`'s ratings are
+                #    for a different league, so we skip the apply and let
+                #    persistence (step 2) replay it on next session_init.
+                if (sig["user_id"] == g_user_id
+                        and service is not None
+                        and not is_cross_league):
                     service.record_disposition_signal(
                         winner_ids = sig["winner_ids"],
                         loser_ids  = sig["loser_ids"],
                         k_factor   = sig["k_factor"],
                     )
                 # 2. Persist swipes for both users (non-current user gets
-                #    them on next session_init via replay_from_db)
+                #    them on next session_init via replay_from_db). This ALWAYS
+                #    runs — including cross-league — so the decision survives.
                 try:
                     save_trade_swipes(
                         user_id        = sig["user_id"],
@@ -3588,8 +3618,19 @@ def disposition_trade_match(match_id):
                         "outcome": result["outcome"], "matches": enriched})
 
     except Exception as e:
-        log.error("disposition_trade_match error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        # FB-01: capture the REAL exception + traceback with full context so a
+        # live "Action failed" repro surfaces the actual cause. Return a typed
+        # error the client can render instead of a bare unhandled 500.
+        log.error(
+            "disposition_trade_match failed — match_id=%s user_id=%s "
+            "decision=%s match_league_id=%s cross_league=%s — %s\n%s",
+            match_id, g_user_id, decision, _match_league_id, is_cross_league,
+            e, traceback.format_exc(),
+        )
+        return jsonify({
+            "error": "disposition_failed",
+            "message": "Could not record your decision. Please try again.",
+        }), 500
 
 
 @app.route("/api/leagues")
