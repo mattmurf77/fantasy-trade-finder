@@ -50,7 +50,7 @@ def mem_engine():
 
 def _insert_trade_like(conn, user_id, league_id, give_ids, recv_ids, age_days):
     """Helper: insert a 'like' row with created_at = now - age_days."""
-    created = (datetime.utcnow() - timedelta(days=age_days)).isoformat()
+    created = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=age_days)).isoformat()
     conn.execute(text(
         "INSERT INTO trade_decisions "
         "(user_id, league_id, give_player_ids, receive_player_ids, decision, created_at) "
