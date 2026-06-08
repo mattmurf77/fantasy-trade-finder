@@ -19,6 +19,7 @@ export interface PlayerCardProps {
   posRank?: string;                // e.g. "QB4"
   compact?: boolean;               // shorter card for tier bins / trade cards
   rightSlot?: React.ReactNode;     // optional right-side widget (drag handle, trend arrow, etc.)
+  showInjury?: boolean;            // render the injury-status tag (default true). Off for Trios tiles (feedback #33).
 }
 
 // Shared player-card primitive. Consumed by RankScreen (Trios) today and
@@ -36,6 +37,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     posRank,
     compact = false,
     rightSlot,
+    showInjury = true,
   },
   ref,
 ) {
@@ -103,7 +105,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
             <Text style={styles.metaText}>{expStr}</Text>
           </>
         )}
-        {player.injury_status ? (
+        {showInjury && player.injury_status ? (
           <>
             <Text style={styles.metaDot}>·</Text>
             <Text style={[styles.metaText, styles.injuryText]}>
