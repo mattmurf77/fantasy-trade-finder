@@ -5,20 +5,19 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
-  ScrollView,
   LayoutChangeEvent,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  useDerivedValue,
-  withTiming,
-  runOnJS,
-  SharedValue,
-} from 'react-native-reanimated';
+import { runOnJS } from 'react-native-reanimated';
+import {
+  NestableScrollContainer,
+  NestableDraggableFlatList,
+  ScaleDecorator,
+  RenderItemParams,
+  DragEndParams,
+} from 'react-native-draggable-flatlist';
 import { haptics } from '../utils/haptics';
 import { startSpan } from '../observability/sentry';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -49,6 +48,10 @@ const FORMAT_KEYS: ScoringFormat[] = ['1qb_ppr', 'sf_tep'];
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
 
+// Hold duration before a chip is picked up for drag. Matches ManualRanks'
+// DRAG_ACTIVATION_MS so the pickup feel is identical across screens.
+const DRAG_ACTIVATION_MS = 220;
+
 /** Which zone a card's center falls into at drag-end.  "unassigned" is
  *  a first-class zone — you can drag a player out of a tier back to the pool. */
 type Zone = Tier | 'unassigned';
@@ -56,7 +59,7 @@ type Zone = Tier | 'unassigned';
 interface BinLayout {
   zone: Zone;
   // Absolute-to-screen Y bounds; we key drop zones on vertical overlap
-  // only (the screen is single-column within the ScrollView).
+  // only (the screen is single-column within the scroll container).
   y: number;
   height: number;
 }
@@ -79,11 +82,11 @@ export default function TiersScreen() {
   const [clearedPids, setClearedPids] = useState<Set<string>>(() => new Set());
 
   // ── Multi-select state ──────────────────────────────────────────────
-  // When `multiSelect` is on, taps on chips toggle selection (drag is
-  // suppressed). The footer action bar shows when the set is non-empty
-  // and lets the user move every selected chip up or down by exactly
-  // one tier in a single action. Mirrors web's PR #23 with a touch-
-  // friendly interaction model.
+  // Multi-select is entered ONLY via the "Select" button (FB-02 Part B —
+  // the two-stage long-press from PR #58 is removed). While ON, tapping a
+  // chip toggles its selection (a lighter-blue full-tile fill marks it)
+  // and drag is suppressed. Up/down arrows move the selection as a
+  // collapsed contiguous block by one rank per tap.
   const [multiSelect, setMultiSelect] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const exitMultiSelect = useCallback(() => {
@@ -241,41 +244,45 @@ export default function TiersScreen() {
     // Position switch or rankings-refetch invalidates the previous
     // position's pending clears.
     setClearedPids(new Set());
+    // A position switch / fresh load should not leave us stuck in a stale
+    // multi-select over players that no longer exist in the new view.
+    exitMultiSelect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rankingsQuery.data, position, tiersStatusQuery.data?.scoring_format]);
 
-  // ── Drag-drop infrastructure ───────────────────────────────────────
-  // Live drop-preview shared values (issue #14). Updated each gesture
-  // tick via runOnJS so non-dragged chips can react in their animated
-  // styles without forcing a React re-render. Empty-string sentinel
-  // means "no drag in flight" → all chips render with translateY = 0.
+  // ── Cross-tier drop infrastructure (PR #60 invariant) ──────────────
+  // The drag engine itself is `react-native-draggable-flatlist`: each tier
+  // (and the unassigned pool) is its own NestableDraggableFlatList, which
+  // gives the Apple "make room" animation WITHIN a tier for free. The
+  // library only reorders within its own list, though — it can't move a
+  // chip across bins. So cross-tier moves are resolved on drop using the
+  // SAME screen-Y model PR #60 introduced:
   //
-  //   proposedZoneSV       — destination zone the dragged chip would
-  //                          land in given current finger Y (or '').
-  //   proposedInsertIdxSV  — post-removal insertion index in that zone.
-  //   draggedPidSV         — id of the chip currently being dragged.
-  //   draggedSrcZoneSV     — source zone the dragged chip came from.
-  //   draggedSrcIdxSV      — source pre-removal array index.
+  //   • Each bin measures its screen-Y bounds via measureInWindow on
+  //     layout (binLayouts). These are directly comparable to a finger's
+  //     `absoluteY` (screen-Y) — NOT parent-relative layout.y, which
+  //     drifts by the scroll container's offset and made drops land one
+  //     or two tiers too low (TestFlight feedback #23).
+  //   • Each chip measures its own screen-Y on layout (chipLayouts) so we
+  //     can resolve the precise insertion index within the target bin.
+  //   • A non-activating "spy" Pan tracks the live finger screen-Y. It
+  //     uses manualActivation(true) so it NEVER competes with the
+  //     library's own drag gesture; it only reads onTouchesMove.absoluteY.
   //
-  // The "post-removal index" model is the same one dropTargetAt uses
-  // (see comments on dropTargetAt below); the gap-shift worklet on each
-  // chip translates the chip's pre-removal index into post-removal
-  // coordinates before comparing against proposedInsertIdxSV.
-  const proposedZoneSV = useSharedValue<string>('');
-  const proposedInsertIdxSV = useSharedValue<number>(-1);
-  const draggedPidSV = useSharedValue<string>('');
-  const draggedSrcZoneSV = useSharedValue<string>('');
-  const draggedSrcIdxSV = useSharedValue<number>(-1);
-
-  // Bin + chip layouts live in screen-Y coordinates so they're directly
-  // comparable to gesture `e.absoluteY` (which is also screen-Y). We
-  // CANNOT use `nativeEvent.layout.y` directly: that's relative to the
-  // immediate parent (the ScrollView's content view) and is off from
-  // the gesture coords by the screen offset of the ScrollView. Pre-fix
-  // this caused drops to land one or two tiers below the user's target
-  // (TestFlight feedback #23). measureInWindow gives us screen-Y.
+  // On a bin's onDragEnd we compare the last finger screen-Y to the bin
+  // layouts. If the finger is over a DIFFERENT zone than the drag's source
+  // bin, we treat it as a cross-tier move (resolve zone+index in screen-Y
+  // and splice across buckets). If it's over the same zone, we apply the
+  // library's within-bin reorder verbatim (preserving the make-room slot).
   const binLayouts = useRef<BinLayout[]>([]);
   const chipLayouts = useRef<Map<string, { y: number; height: number }>>(new Map());
+
+  // Live finger screen-Y, written by the spy-pan's onTouchesMove worklet
+  // via runOnJS. Read at drag-end to resolve the drop zone.
+  const fingerScreenY = useRef<number>(-1);
+  const setFingerScreenY = useCallback((y: number) => {
+    fingerScreenY.current = y;
+  }, []);
 
   // Refs to each bin's outer <View> so we can measureInWindow on layout.
   // TierBin is already a forwardRef. Per-zone setter callbacks are memo'd
@@ -303,8 +310,8 @@ export default function TiersScreen() {
     });
   }, []);
 
-  // Chip onLayout: DraggableRow does its own measureInWindow against
-  // its outer Animated.View ref and hands us screen-Y + height directly.
+  // Chip onLayout: TierRow does its own measureInWindow against its outer
+  // View ref and hands us screen-Y + height directly.
   const setChipLayout = useCallback((pid: string, screenY: number, height: number) => {
     chipLayouts.current.set(pid, { y: screenY, height });
   }, []);
@@ -318,8 +325,8 @@ export default function TiersScreen() {
 
   // Resolve a drop position (in screen Y) to {zone, insertIdx}. Excludes
   // the dragged chip from the insertion-index walk so the math is in
-  // POST-removal coordinates — same convention as web's
-  // assignToTierAt. Returns null if the cursor isn't over any zone.
+  // POST-removal coordinates — same convention as web's assignToTierAt.
+  // Returns null if the cursor isn't over any zone.
   const dropTargetAt = useCallback(
     (absoluteY: number, draggedPid: string): { zone: Zone; insertIdx: number } | null => {
       const zone = zoneAt(absoluteY);
@@ -327,7 +334,7 @@ export default function TiersScreen() {
       // For 'unassigned' (the pool) order doesn't drive any backend
       // semantic; insert at end.
       if (zone === 'unassigned') {
-        return { zone, insertIdx: 0 };
+        return { zone, insertIdx: buckets.unassigned.length };
       }
       // Walk the bin's chips in array order. First chip whose vertical
       // midpoint is BELOW the cursor → that's the insert index. Drag
@@ -358,48 +365,6 @@ export default function TiersScreen() {
     },
     [buckets, zoneAt],
   );
-
-  // Drag-preview helpers (issue #14). Called via runOnJS from gesture
-  // worklets — JS-thread only because they read buckets/chipLayouts.
-  // beginDragPreview captures the dragged chip's source location once
-  // at .onStart; updateDragPreview resolves drop target on each tick
-  // and writes it to shared values; endDragPreview resets on release.
-  const beginDragPreview = useCallback(
-    (pid: string) => {
-      for (const z of ALL_ZONES) {
-        const idx = buckets[z].findIndex((p) => p.id === pid);
-        if (idx >= 0) {
-          draggedPidSV.value = pid;
-          draggedSrcZoneSV.value = z;
-          draggedSrcIdxSV.value = idx;
-          return;
-        }
-      }
-    },
-    [buckets, draggedPidSV, draggedSrcZoneSV, draggedSrcIdxSV],
-  );
-
-  const updateDragPreview = useCallback(
-    (absoluteY: number, pid: string) => {
-      const t = dropTargetAt(absoluteY, pid);
-      if (!t) {
-        proposedZoneSV.value = '';
-        proposedInsertIdxSV.value = -1;
-        return;
-      }
-      proposedZoneSV.value = t.zone;
-      proposedInsertIdxSV.value = t.insertIdx;
-    },
-    [dropTargetAt, proposedZoneSV, proposedInsertIdxSV],
-  );
-
-  const endDragPreview = useCallback(() => {
-    proposedZoneSV.value = '';
-    proposedInsertIdxSV.value = -1;
-    draggedPidSV.value = '';
-    draggedSrcZoneSV.value = '';
-    draggedSrcIdxSV.value = -1;
-  }, [proposedZoneSV, proposedInsertIdxSV, draggedPidSV, draggedSrcZoneSV, draggedSrcIdxSV]);
 
   // Move a player into the given zone at a specific 0-based array index.
   // `insertIdx` is interpreted in POST-removal coordinates (consistent
@@ -470,49 +435,101 @@ export default function TiersScreen() {
     [],
   );
 
-  // ── Bulk move (multi-select) ────────────────────────────────────────
-  // Move every currently-selected chip by exactly ONE tier in `direction`.
-  // Order-preserving: chips in the same source tier keep their relative
-  // order at the destination's end. Chips already at the boundary stay
-  // (top of `elite` for 'up', bottom of `bench` for 'down') — matches
-  // web's clamp behavior.
+  // Reorder a single bin in place (within-tier drag — the library's
+  // onDragEnd gives us the post-move data array for that bin). No
+  // clearedPids change: nothing leaves a tier here.
+  const reorderWithinZone = useCallback(
+    (zone: Zone, data: RankedPlayer[]) => {
+      setBuckets((prev) => {
+        const next = cloneBuckets(prev);
+        next[zone] = data;
+        return next;
+      });
+      haptics.success();
+    },
+    [],
+  );
+
+  // ── Bulk move (multi-select, collapse-into-a-block) ─────────────────
+  // Locked decision: the selected players COLLAPSE INTO A CONTIGUOUS
+  // BLOCK and move together one rank per tap (NOT shift-each-
+  // independently). The block stays together as it moves, including
+  // across tier boundaries.
+  //
+  // Model: flatten the five tiers into one ordered list (elite→bench).
+  // The selected players form a block; we anchor the block at the
+  // position of its FIRST selected member, remove all selected from the
+  // flat list, then re-insert the contiguous block one slot up or down
+  // from that anchor. Re-bucketing the flat list back into tiers makes
+  // the block naturally cross a tier boundary when it reaches one.
   const bulkMove = useCallback(
     (direction: 'up' | 'down') => {
       if (selectedIds.size === 0) return;
-      const TIER_LIST: Tier[] = [...TIERS];
       setBuckets((prev) => {
-        const next = cloneBuckets(prev);
-        // Group selected by source tier so we can preserve within-tier
-        // relative order across the move.
-        const grouped: Record<string, RankedPlayer[]> = {};
+        // 1. Flatten the five real tiers into one ordered list, tagging
+        //    each player with its source tier so we can re-bucket later.
+        const flat: { p: RankedPlayer; tier: Tier }[] = [];
         for (const t of TIERS) {
-          for (const p of next[t]) {
-            if (selectedIds.has(p.id)) {
-              (grouped[t] ||= []).push(p);
-            }
-          }
+          for (const p of prev[t]) flat.push({ p, tier: t });
         }
-        for (const sourceTier of Object.keys(grouped)) {
-          const players = grouped[sourceTier];
-          const srcIdx = TIER_LIST.indexOf(sourceTier as Tier);
-          const dstIdx =
-            direction === 'up'
-              ? Math.max(0, srcIdx - 1)
-              : Math.min(TIER_LIST.length - 1, srcIdx + 1);
-          if (dstIdx === srcIdx) continue;          // already at boundary
-          const dst = TIER_LIST[dstIdx];
-          // Pull each player from source, append to destination in
-          // their original within-tier order.
-          for (const p of players) {
-            const i = next[sourceTier as Tier].findIndex((x) => x.id === p.id);
-            if (i >= 0) next[sourceTier as Tier].splice(i, 1);
-            next[dst].push(p);
+
+        // 2. Pull out the selected block, preserving its internal order.
+        //    Anchor = index (in the post-removal list) where the block
+        //    should be re-inserted. We anchor on the FIRST selected
+        //    member's original flat index, adjusted for removals above it.
+        const selectedBlock: { p: RankedPlayer; tier: Tier }[] = [];
+        const remaining: { p: RankedPlayer; tier: Tier }[] = [];
+        let firstSelectedFlatIdx = -1;
+        flat.forEach((entry, i) => {
+          if (selectedIds.has(entry.p.id)) {
+            if (firstSelectedFlatIdx < 0) firstSelectedFlatIdx = i;
+            selectedBlock.push(entry);
+          } else {
+            remaining.push(entry);
           }
+        });
+        if (selectedBlock.length === 0) return prev;
+
+        // Anchor in post-removal coordinates: how many NON-selected
+        // entries sit above the first selected one.
+        let anchor = 0;
+        for (let i = 0; i < firstSelectedFlatIdx; i++) {
+          if (!selectedIds.has(flat[i].p.id)) anchor += 1;
         }
+
+        // 3. Shift the anchor one slot in the requested direction, clamped
+        //    to the bounds of the remaining list. If we're already at the
+        //    boundary the move is a no-op (matches web's clamp behavior).
+        const maxAnchor = remaining.length;          // can insert at end
+        const target =
+          direction === 'up'
+            ? Math.max(0, anchor - 1)
+            : Math.min(maxAnchor, anchor + 1);
+        if (target === anchor) return prev;           // already at boundary
+
+        // 4. Re-insert the contiguous block at the shifted anchor.
+        const merged = [
+          ...remaining.slice(0, target),
+          ...selectedBlock,
+          ...remaining.slice(target),
+        ];
+
+        // 5. Re-bucket the flat list back into tiers. Tier membership is
+        //    decided positionally by the original tier-size partition —
+        //    walk `merged` and refill each tier to its ORIGINAL count so
+        //    the block visibly crosses a boundary as it passes through.
+        const next = cloneBuckets(prev);
+        let cursor = 0;
+        for (const t of TIERS) {
+          const size = prev[t].length;
+          next[t] = merged.slice(cursor, cursor + size).map((e) => e.p);
+          cursor += size;
+        }
+        // `unassigned` is untouched by bulk moves.
         return next;
       });
       // No clearedPids change — bulk moves keep all selected players in
-      // some tier (boundary chips stay put).
+      // some tier (the flat list only ever contains tier members).
       haptics.success();
     },
     [selectedIds],
@@ -522,58 +539,63 @@ export default function TiersScreen() {
   const saving = saveMutation.isPending;
   const loading = rankingsQuery.isLoading || rankingsQuery.isFetching;
 
-  // Stable callback: resolves the drop target and commits the move.
-  // Does NOT close over any per-player state — pid is passed in as a
-  // parameter by DraggableRow, so this ref is stable across renders
-  // (deps: dropTargetAt, movePlayer) and can be shared by all chips.
-  const handleDropAt = useCallback(
-    (absoluteY: number, pid: string) => {
-      const target = dropTargetAt(absoluteY, pid);
-      if (!target) return;
-      movePlayer(pid, target.zone, target.insertIdx);
+  // Stable per-chip dismiss (long-press in normal mode only). Suppressed
+  // in select mode so the only chip-level action there is tap-to-toggle.
+  const handleDismiss = useCallback(
+    (pid: string) => {
+      haptics.warning();
+      dismissMutation.mutate(pid);
     },
-    [dropTargetAt, movePlayer],
+    [dismissMutation],
   );
 
-  function renderPlayerCard(p: RankedPlayer, binZone: Zone, binIndex: number) {
-    return (
-      <DraggableRow
-        key={p.id}
-        player={p}
-        binZone={binZone}
-        binIndex={binIndex}
-        proposedZoneSV={proposedZoneSV}
-        proposedInsertIdxSV={proposedInsertIdxSV}
-        draggedPidSV={draggedPidSV}
-        draggedSrcZoneSV={draggedSrcZoneSV}
-        draggedSrcIdxSV={draggedSrcIdxSV}
-        onDragStart={beginDragPreview}
-        onDragUpdate={updateDragPreview}
-        onDragEnd={endDragPreview}
-        onLayout={setChipLayout}
-        onDropAt={handleDropAt}
-        onLongPressDismiss={
-          // In multi-select mode, long-press dismiss is too easy to
-          // misfire; suppress so the only chip-level action is tap-to-
-          // toggle.
-          multiSelect
-            ? undefined
-            : () => {
-                haptics.warning();
-                dismissMutation.mutate(p.id);
-              }
+  // renderItem factory bound to a specific zone. DraggableFlatList passes
+  // {item, drag, isActive, getIndex}; `drag` is the library's own
+  // long-press-to-pickup trigger (gives the make-room feel). In select
+  // mode we render a tappable, light-blue-fillable tile and ignore `drag`.
+  const makeRenderItem = useCallback(
+    (zone: Zone) =>
+      ({ item, drag, isActive }: RenderItemParams<RankedPlayer>) => (
+        <TierRow
+          player={item}
+          drag={drag}
+          isActive={isActive}
+          onLayout={setChipLayout}
+          onDismiss={multiSelect ? undefined : handleDismiss}
+          selectionMode={multiSelect}
+          isSelected={selectedIds.has(item.id)}
+          onTapInSelection={() => toggleSelected(item.id)}
+        />
+      ),
+    [multiSelect, selectedIds, setChipLayout, handleDismiss, toggleSelected],
+  );
+
+  // Per-bin drag-end. The library hands us {data, from, to} for THIS bin
+  // only. We decide within-tier vs cross-tier from the finger's last
+  // screen-Y (PR #60 model).
+  const makeOnDragEnd = useCallback(
+    (zone: Zone) =>
+      ({ data, from, to }: DragEndParams<RankedPlayer>) => {
+        // The dragged chip is the one that was at `from` in this bin's
+        // PRE-move array; after the library's reorder it sits at `to` in
+        // `data`. We recover its id from the moved item.
+        const movedId = data[to]?.id;
+        const fingerY = fingerScreenY.current;
+        const target = movedId != null ? dropTargetAt(fingerY, movedId) : null;
+
+        // Cross-tier: finger ended over a DIFFERENT zone than this bin.
+        if (target && target.zone !== zone && movedId != null) {
+          movePlayer(movedId, target.zone, target.insertIdx);
+          return;
         }
-        onEnterMultiSelect={() => {
-          setMultiSelect(true);
-          setSelectedIds(new Set([p.id]));
-          haptics.selection();
-        }}
-        selectionMode={multiSelect}
-        isSelected={selectedIds.has(p.id)}
-        onTapInSelection={() => toggleSelected(p.id)}
-      />
-    );
-  }
+        // Same-zone (or unresolved finger) → apply the library's within-
+        // bin reorder verbatim. The make-room animation already showed
+        // the user exactly this order.
+        if (from === to) return;        // no-op drag
+        reorderWithinZone(zone, data);
+      },
+    [dropTargetAt, movePlayer, reorderWithinZone],
+  );
 
   // ── Copy-from-format button derivation ─────────────────────────────
   // Resolve the format to copy INTO (the "target"). Prefer the session
@@ -608,6 +630,23 @@ export default function TiersScreen() {
     );
   }, [copyTargetFormat, otherFormat, copyMutation]);
 
+  // ── Spy-pan: live finger screen-Y for cross-tier resolution ─────────
+  // manualActivation(true) means this gesture NEVER activates and so never
+  // competes with the per-bin drag gestures owned by the draggable lists.
+  // It only observes touch moves to record screen-Y (PR #60 coordinate
+  // space). Worklet/JS boundary (PR #44): the only JS call is setFinger-
+  // ScreenY, routed through runOnJS.
+  const spyPan = useMemo(
+    () =>
+      Gesture.Pan()
+        .manualActivation(true)
+        .onTouchesMove((e) => {
+          const t = e.changedTouches[0] ?? e.allTouches[0];
+          if (t) runOnJS(setFingerScreenY)(t.absoluteY);
+        }),
+    [setFingerScreenY],
+  );
+
   // ── Render ──────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -621,9 +660,11 @@ export default function TiersScreen() {
       <View style={styles.headerRow}>
         <Text style={styles.title}>Positional Tiers</Text>
         <View style={styles.headerActions}>
-          {/* Multi-select toggle. While ON, chip tap toggles selection
-              (drag is suppressed); tapping again here cancels and clears
-              the set. The bottom action bar handles the actual moves. */}
+          {/* Multi-select toggle (FB-02 Part B — the ONLY way into select
+              mode; long-press no longer triggers it). While ON, chip tap
+              toggles selection (drag is suppressed); tapping again here
+              cancels and clears the set. The bottom action bar handles
+              the actual grouped moves. */}
           <Pressable
             onPress={() => {
               if (multiSelect) exitMultiSelect();
@@ -715,7 +756,7 @@ export default function TiersScreen() {
       <Text style={styles.hint}>
         {multiSelect
           ? 'Tap chips to select. Use the bar below to move all selected up or down.'
-          : 'Hold + drag to move a card. Hold still to enter multi-select.'}
+          : 'Hold + drag a card to re-rank it; the others slide to make room.'}
       </Text>
 
       {loading ? (
@@ -730,46 +771,64 @@ export default function TiersScreen() {
           </Pressable>
         </View>
       ) : (
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* Unassigned pool up top */}
-          <TierBin
-            ref={binRefSetters.unassigned}
-            tier="unassigned"
-            count={buckets.unassigned.length}
-            onLayout={(e) => setBinLayout('unassigned', e)}
+        <GestureDetector gesture={spyPan}>
+          <NestableScrollContainer
+            contentContainerStyle={styles.scroll}
+            keyboardShouldPersistTaps="handled"
           >
-            {buckets.unassigned.length === 0 ? (
-              <Text style={styles.emptyBin}>Every player is in a tier.</Text>
-            ) : (
-              buckets.unassigned.map((p, i) => renderPlayerCard(p, 'unassigned', i))
-            )}
-          </TierBin>
-
-          {/* The five tier bins */}
-          {TIERS.map((t) => (
+            {/* Unassigned pool up top */}
             <TierBin
-              key={t}
-              ref={binRefSetters[t]}
-              tier={t}
-              count={buckets[t].length}
-              onLayout={(e) => setBinLayout(t, e)}
+              ref={binRefSetters.unassigned}
+              tier="unassigned"
+              count={buckets.unassigned.length}
+              onLayout={(e) => setBinLayout('unassigned', e)}
             >
-              {buckets[t].length === 0 ? (
-                <Text style={styles.emptyBin}>Drag players here</Text>
+              {buckets.unassigned.length === 0 ? (
+                <Text style={styles.emptyBin}>Every player is in a tier.</Text>
               ) : (
-                buckets[t].map((p, i) => renderPlayerCard(p, t, i))
+                <NestableDraggableFlatList
+                  data={buckets.unassigned}
+                  keyExtractor={keyExtractor}
+                  renderItem={makeRenderItem('unassigned')}
+                  onDragEnd={makeOnDragEnd('unassigned')}
+                  activationDistance={12}
+                  scrollEnabled={false}
+                  ItemSeparatorComponent={Separator}
+                />
               )}
             </TierBin>
-          ))}
-        </ScrollView>
+
+            {/* The five tier bins */}
+            {TIERS.map((t) => (
+              <TierBin
+                key={t}
+                ref={binRefSetters[t]}
+                tier={t}
+                count={buckets[t].length}
+                onLayout={(e) => setBinLayout(t, e)}
+              >
+                {buckets[t].length === 0 ? (
+                  <Text style={styles.emptyBin}>Drag players here</Text>
+                ) : (
+                  <NestableDraggableFlatList
+                    data={buckets[t]}
+                    keyExtractor={keyExtractor}
+                    renderItem={makeRenderItem(t)}
+                    onDragEnd={makeOnDragEnd(t)}
+                    activationDistance={12}
+                    scrollEnabled={false}
+                    ItemSeparatorComponent={Separator}
+                  />
+                )}
+              </TierBin>
+            ))}
+          </NestableScrollContainer>
+        </GestureDetector>
       )}
 
       {/* Multi-select action bar — only shown in select mode with at
           least one chip selected. Sits above the save bar so the user
-          can still commit after a bulk move without leaving select
+          can still commit after a grouped move without leaving select
           mode. "Done" exits select mode without canceling the moves. */}
       {multiSelect && selectedIds.size > 0 ? (
         <View style={styles.actionBar}>
@@ -781,13 +840,13 @@ export default function TiersScreen() {
               onPress={() => bulkMove('up')}
               style={({ pressed }) => [styles.actionBarBtn, pressed && { opacity: 0.7 }]}
             >
-              <Text style={styles.actionBarBtnText}>↑ Up tier</Text>
+              <Text style={styles.actionBarBtnText}>↑ Up</Text>
             </Pressable>
             <Pressable
               onPress={() => bulkMove('down')}
               style={({ pressed }) => [styles.actionBarBtn, pressed && { opacity: 0.7 }]}
             >
-              <Text style={styles.actionBarBtnText}>↓ Down tier</Text>
+              <Text style={styles.actionBarBtnText}>↓ Down</Text>
             </Pressable>
             <Pressable
               onPress={exitMultiSelect}
@@ -821,90 +880,43 @@ export default function TiersScreen() {
   );
 }
 
-// ── DraggableRow — encapsulates the per-card gesture + Reanimated style.
+// ── TierRow — one player chip inside a NestableDraggableFlatList ───────
 //
-// Worklet/JS-boundary rule (preserved from PR #44): every JS-side call
-// from a gesture worklet — including the JS function that resolves the
-// drop target, the JS function that updates parent state, and even
-// `haptics.pickup` — goes through `runOnJS`. Worklets only mutate
-// shared values directly. Violating this crashed release builds before.
+// Two render modes:
+//   • Normal: a draggable cell. `drag` (passed by the library) is wired to
+//     the row's onLongPress so a hold-then-move picks the chip up — the
+//     library then animates the OTHER cells out of the way to open the
+//     destination slot (the Apple "make room" feel, matching ManualRanks).
+//     ScaleDecorator lifts the active cell. A separate, longer long-press
+//     on the card itself dismisses the player (kept from the prior screen).
+//   • Select mode: a plain tappable tile. Tapping toggles selection; a
+//     selected tile gets a LIGHTER-BLUE FULL-TILE FILL (FB-02 Part B).
+//     Drag is fully suppressed in this mode.
 //
-// Gesture wiring for issue #15 (two-stage long-press):
-//   - Pan().activateAfterLongPress(220) — short hold then ≥(GH default)
-//     finger movement triggers a drag (Gesture Handler's own movement
-//     threshold gates pan activation on translation).
-//   - LongPress().minDuration(550).maxDistance(8) — same finger held
-//     within 8px past 550ms fires `onEnterMultiSelect` (flips multi-
-//     select on with this chip pre-selected) instead of starting a
-//     drag.
-//   - Race(longPress, pan) — whichever activates first wins; the other
-//     is canceled. Finger movement wins via the pan; stillness wins
-//     via the long-press.
-//
-// Live drop-preview wiring for issue #14:
-//   The chip's `useDerivedValue` worklet reads the parent-owned shared
-//   values (proposedZoneSV / proposedInsertIdxSV / dragged{Pid,SrcZone,
-//   SrcIdx}SV). Each non-dragged chip translates ±10px when it's the
-//   chip immediately adjacent to the proposed insertion point in the
-//   proposed zone — opening a visible gap exactly where the chip would
-//   land. Computation is index math only (no map lookups), safe inside
-//   a worklet.
-interface DraggableRowProps {
+// The outer view measures its own screen-Y on layout (measureInWindow) and
+// hands it to the parent so cross-tier drop resolution stays in screen-Y
+// (PR #60). React.memo keeps re-renders scoped to selection/active changes.
+interface TierRowProps {
   player: RankedPlayer;
-  binZone: Zone;
-  binIndex: number;
-  proposedZoneSV: SharedValue<string>;
-  proposedInsertIdxSV: SharedValue<number>;
-  draggedPidSV: SharedValue<string>;
-  draggedSrcZoneSV: SharedValue<string>;
-  draggedSrcIdxSV: SharedValue<number>;
-  onDragStart: (pid: string) => void;
-  onDragUpdate: (absoluteY: number, pid: string) => void;
-  onDragEnd: () => void;
+  drag: () => void;
+  isActive: boolean;
   onLayout: (pid: string, screenY: number, height: number) => void;
-  onDropAt: (absoluteY: number, pid: string) => void;
-  onLongPressDismiss?: () => void;
-  onEnterMultiSelect: () => void;
-  selectionMode?: boolean;
-  isSelected?: boolean;
-  onTapInSelection?: () => void;
+  onDismiss?: (pid: string) => void;
+  selectionMode: boolean;
+  isSelected: boolean;
+  onTapInSelection: () => void;
 }
 
-// Vertical translation applied to chips bordering the proposed drop
-// slot. The chip immediately above the slot shifts UP; the chip at-or-
-// below shifts DOWN — opening a visible gap right where the dragged
-// chip would land.
-const GAP_SHIFT_PX = 10;
-
-function DraggableRow({
+function TierRowInner({
   player,
-  binZone,
-  binIndex,
-  proposedZoneSV,
-  proposedInsertIdxSV,
-  draggedPidSV,
-  draggedSrcZoneSV,
-  draggedSrcIdxSV,
-  onDragStart,
-  onDragUpdate,
-  onDragEnd,
+  drag,
+  isActive,
   onLayout,
-  onDropAt,
-  onLongPressDismiss,
-  onEnterMultiSelect,
-  selectionMode = false,
-  isSelected = false,
+  onDismiss,
+  selectionMode,
+  isSelected,
   onTapInSelection,
-}: DraggableRowProps) {
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
-  const scale = useSharedValue(1);
-  const zIndex = useSharedValue(0);
-
-  // Outer-view ref for measureInWindow inside the onLayout handler so
-  // we can hand the parent a screen-Y (matches gesture.absoluteY's
-  // coordinate space). Without this, drops resolve against parent-
-  // relative Y and land in the wrong tier (TestFlight feedback #23).
+}: TierRowProps) {
   const wrapRef = useRef<View | null>(null);
   const handleLayout = useCallback(() => {
     const node = wrapRef.current;
@@ -914,150 +926,74 @@ function DraggableRow({
     });
   }, [onLayout, player.id]);
 
-  // Gap-shift for non-dragged chips (issue #14). Derived from the
-  // parent's drag-preview shared values so the eased interpolation
-  // happens once per change rather than on every animated-style read.
-  const gapShiftY = useDerivedValue(() => {
-    'worklet';
-    if (
-      draggedPidSV.value === '' ||
-      draggedPidSV.value === player.id ||
-      proposedZoneSV.value !== binZone ||
-      proposedInsertIdxSV.value < 0
-    ) {
-      return withTiming(0, { duration: 140 });
-    }
-    // Translate this chip's pre-removal binIndex into the post-
-    // removal coords used by dropTargetAt. If the dragged chip came
-    // from this same zone AND its source index sits above this chip,
-    // this chip's post-removal index is binIndex - 1; else equal.
-    let effective = binIndex;
-    if (
-      draggedSrcZoneSV.value === binZone &&
-      draggedSrcIdxSV.value < binIndex
-    ) {
-      effective = binIndex - 1;
-    }
-    if (effective === proposedInsertIdxSV.value) {
-      return withTiming(GAP_SHIFT_PX, { duration: 140 });
-    }
-    if (effective === proposedInsertIdxSV.value - 1) {
-      return withTiming(-GAP_SHIFT_PX, { duration: 140 });
-    }
-    return withTiming(0, { duration: 140 });
-  });
-
-  // JS-thread finalizer. Parent owns `dropTargetAt` + movePlayer; we
-  // just hand off the screen-Y so the parent can resolve + commit.
-  // onDragEnd resets the shared-value preview state before the JS-side
-  // bucket mutation triggers a re-render (so the gap doesn't briefly
-  // animate against the new layout).
-  const handleDropAt = useCallback(
-    (absoluteY: number) => {
-      onDragEnd();
-      onDropAt(absoluteY, player.id);
-    },
-    [onDragEnd, onDropAt, player.id],
-  );
-
-  const longPress = useMemo(
-    () =>
-      Gesture.LongPress()
-        .minDuration(550)
-        .maxDistance(8)
-        .onStart(() => {
-          runOnJS(haptics.selection)();
-          runOnJS(onEnterMultiSelect)();
-        }),
-    [onEnterMultiSelect],
-  );
-
-  const pan = useMemo(
-    () =>
-      Gesture.Pan()
-        .activateAfterLongPress(220)
-        .onStart(() => {
-          scale.value = withTiming(1.04, { duration: 120 });
-          zIndex.value = 10;
-          runOnJS(haptics.pickup)();
-          runOnJS(onDragStart)(player.id);
-        })
-        .onUpdate((e) => {
-          translateX.value = e.translationX;
-          translateY.value = e.translationY;
-          runOnJS(onDragUpdate)(e.absoluteY, player.id);
-        })
-        .onEnd((e) => {
-          const absoluteY = e.absoluteY;
-          translateX.value = withTiming(0, { duration: 160 });
-          translateY.value = withTiming(0, { duration: 160 });
-          scale.value = withTiming(1, { duration: 160 });
-          zIndex.value = 0;
-          runOnJS(handleDropAt)(absoluteY);
-        }),
-    [onDragStart, onDragUpdate, handleDropAt, player.id, translateX, translateY, scale, zIndex],
-  );
-
-  // Race ensures only one of {drag, multi-select-enter} fires per
-  // gesture. Movement past pan's activation threshold wins for drag;
-  // 550ms of stillness wins for long-press.
-  const composed = useMemo(
-    () => Gesture.Race(longPress, pan),
-    [longPress, pan],
-  );
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX.value },
-      { translateY: translateY.value + gapShiftY.value },
-      { scale: scale.value },
-    ],
-    zIndex: zIndex.value,
-  }));
-
   if (selectionMode) {
     return (
-      <Pressable
-        ref={wrapRef as any}
-        onPress={onTapInSelection}
+      <View
+        ref={wrapRef}
         onLayout={handleLayout}
+        style={[styles.chipWrap, isSelected && styles.chipSelected]}
+      >
+        <Pressable
+          onPress={onTapInSelection}
+          style={({ pressed }) => [pressed && { opacity: 0.85 }]}
+        >
+          <PlayerCard player={player} compact />
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <ScaleDecorator activeScale={1.04}>
+      <Pressable
+        ref={wrapRef}
+        onLayout={handleLayout}
+        // Long-press picks the chip up — this is the library's `drag`
+        // trigger, mirroring ManualRanks' `onLongPress={drag}` (220ms).
+        // Once held, the library animates the OTHER cells out of the way
+        // to open the destination slot (the "make room" feel).
+        onLongPress={drag}
+        delayLongPress={DRAG_ACTIVATION_MS}
+        disabled={isActive}
         style={({ pressed }) => [
-          styles.chipSelectableWrap,
-          isSelected && styles.chipSelected,
-          pressed && { opacity: 0.85 },
+          styles.chipWrap,
+          isActive && styles.chipActive,
+          pressed && !isActive && { opacity: 0.92 },
         ]}
       >
         <PlayerCard
           player={player}
           compact
+          // Hide-from-pool affordance. A long-press now belongs to the
+          // drag engine, so dismiss moves to an explicit tap target in
+          // the card's rightSlot (a supported PlayerCard prop — no edit
+          // to PlayerCard). hitSlop keeps it comfortably tappable without
+          // stealing the long-press that starts a drag.
           rightSlot={
-            isSelected ? (
-              <View style={styles.chipCheckBadge}>
-                <Text style={styles.chipCheckBadgeText}>✓</Text>
-              </View>
+            onDismiss ? (
+              <Pressable
+                onPress={() => onDismiss(player.id)}
+                hitSlop={10}
+                style={({ pressed }) => [styles.hideBtn, pressed && { opacity: 0.6 }]}
+              >
+                <Text style={styles.hideBtnText}>✕</Text>
+              </Pressable>
             ) : undefined
           }
         />
       </Pressable>
-    );
-  }
-
-  return (
-    <GestureDetector gesture={composed}>
-      <Animated.View
-        ref={wrapRef as any}
-        style={animatedStyle}
-        onLayout={handleLayout}
-      >
-        <PlayerCard player={player} compact onLongPress={onLongPressDismiss} />
-      </Animated.View>
-    </GestureDetector>
+    </ScaleDecorator>
   );
 }
+
+const TierRow = React.memo(TierRowInner);
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
 const ALL_ZONES: Zone[] = ['unassigned', 'elite', 'starter', 'solid', 'depth', 'bench'];
+
+const keyExtractor = (p: RankedPlayer) => p.id;
+const Separator = () => <View style={styles.sep} />;
 
 function emptyBuckets(): Record<Zone, RankedPlayer[]> {
   return {
@@ -1117,36 +1053,39 @@ const styles = StyleSheet.create({
   },
   selectBtnText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
   selectBtnTextActive: { color: colors.accent },
-  // Wrapper around each chip in multi-select mode. Always present so
-  // toggling selection doesn't shift the layout.
-  chipSelectableWrap: {
+  // Wrapper around each chip. Always present so toggling selection / drag-
+  // active state never shifts the surrounding layout.
+  chipWrap: {
     borderRadius: radius.md,
-    borderWidth: 2,
-    borderColor: 'transparent',
   },
-  // Selected-chip state (multi-select mode, issue #16). Accent ring +
-  // tinted background + checkmark badge — three signals so selection
-  // reads clearly including for color-vision-impaired users.
+  // Selected-chip state (FB-02 Part B): a LIGHTER-BLUE FULL-TILE FILL —
+  // a clear, whole-tile signal (not a subtle border). The fill sits on
+  // the wrapper so it reads as the entire chip turning light blue.
   chipSelected: {
-    backgroundColor: 'rgba(79,124,255,0.14)',
-    borderColor: colors.accent,
+    backgroundColor: 'rgba(79,124,255,0.28)',
   },
-  chipCheckBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.accent,
+  // Active (being dragged) chip — subtle lift tint so the picked-up card
+  // reads as elevated. ScaleDecorator handles the scale.
+  chipActive: {
+    backgroundColor: 'rgba(79,124,255,0.06)',
+  },
+  // Hide-from-pool tap target in the card's rightSlot (normal mode only).
+  hideBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(122,127,150,0.18)',
   },
-  chipCheckBadgeText: {
-    color: '#fff',
+  hideBtnText: {
+    color: colors.muted,
     fontSize: 13,
     fontWeight: '800',
-    lineHeight: 16,
+    lineHeight: 15,
   },
-  // Floating action bar — shown above the save bar when 2+ chips are
-  // selected. Up / Down move all selected by one tier; Done exits.
+  // Floating action bar — shown above the save bar when ≥1 chip is
+  // selected. Up / Down move the selected block by one rank; Done exits.
   actionBar: {
     position: 'absolute',
     left: 0,
@@ -1256,6 +1195,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     paddingBottom: 96, // room for the Save bar
   },
+  sep: { height: spacing.xs },
   emptyBin: {
     color: colors.muted,
     fontSize: fontSize.xs,
