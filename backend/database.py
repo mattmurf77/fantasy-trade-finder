@@ -2731,7 +2731,7 @@ def check_for_match(
     give_set    = set(give_player_ids)
     receive_set = set(receive_player_ids)
 
-    cutoff = datetime.utcnow() - timedelta(days=90)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)
     with engine.connect() as conn:
         rows = conn.execute(
             select(
@@ -4254,7 +4254,7 @@ def load_community_elo_for_league(
     entry = _COMMUNITY_ELO_CACHE.get(cache_key)
     if entry is not None:
         ts, result = entry
-        age = (datetime.utcnow() - datetime.fromisoformat(ts)).total_seconds()
+        age = (datetime.now(timezone.utc).replace(tzinfo=None) - datetime.fromisoformat(ts)).total_seconds()
         if age < _COMMUNITY_ELO_TTL:
             return result
 
@@ -4263,7 +4263,7 @@ def load_community_elo_for_league(
         exclude_user_id = exclude_user_id,
         scoring_format  = scoring_format,
     )
-    _COMMUNITY_ELO_CACHE[cache_key] = (datetime.utcnow().isoformat(), result)
+    _COMMUNITY_ELO_CACHE[cache_key] = (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), result)
     return result
 
 
