@@ -161,8 +161,10 @@ export interface NotificationItem {
 
 // Trends (Bundle 2). Mirrors the rows returned by /api/trends/risers-fallers
 // and /api/trends/consensus-gap (see backend/trends_service.py). The backend
-// measures movement as an ELO delta, not a rank delta — the screen renders
-// the magnitude with a direction arrow.
+// ships both the raw ELO delta and a derived RANK view (FB-04): rank is the
+// player's position when the pool is sorted by ELO (highest = #1). Rank fields
+// are nullable — null/undefined when historical rank can't be derived, so the
+// screen renders "—" instead of crashing.
 export interface TrendRow {
   player_id: string;
   name?: string;
@@ -171,6 +173,13 @@ export interface TrendRow {
   current_elo: number;
   previous_elo: number;
   delta: number; // positive = riser, negative = faller
+  // Rank view (FB-04). overall_rank = position in the whole pool; pos_rank =
+  // position within the player's own position group. *_delta = previous_rank -
+  // current_rank, so positive = moved UP toward #1.
+  overall_rank?: number | null;
+  overall_rank_delta?: number | null;
+  pos_rank?: number | null;
+  pos_rank_delta?: number | null;
 }
 
 export interface ContrarianGapEntry {
@@ -186,6 +195,15 @@ export interface ContrarianGapEntry {
   owner_username?: string;
   gap: number;   // user_elo - (community_elo | owner_elo)
   score: number; // 0-99 normalised magnitude for the bar
+  // Rank view (FB-04). user_rank vs comparison_rank (community for sells, the
+  // owner for buys); *_gap = comparison_rank - user_rank, so positive = you
+  // rank them nearer #1 than the comparison. Nullable when not derivable.
+  user_rank?: number | null;
+  comparison_rank?: number | null;
+  rank_gap?: number | null;
+  user_pos_rank?: number | null;
+  comparison_pos_rank?: number | null;
+  pos_rank_gap?: number | null;
 }
 
 // Trade queue (Bundle 5 — flag `trades.queue_2k`). Lightweight snapshot of
