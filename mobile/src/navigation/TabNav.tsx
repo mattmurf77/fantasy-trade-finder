@@ -11,7 +11,6 @@ import { getLikedTrades, getAllMatches } from '../api/trades';
 import { useSession } from '../state/useSession';
 import RankScreen from '../screens/RankScreen';
 import TiersScreen from '../screens/TiersScreen';
-import OverallRanksScreen from '../screens/OverallRanksScreen';
 import ManualRanksScreen from '../screens/ManualRanksScreen';
 import TrendsScreen from '../screens/TrendsScreen';
 import TradesScreen from '../screens/TradesScreen';
@@ -21,9 +20,9 @@ import LeagueScreen from '../screens/LeagueScreen';
 import TopBar from '../components/TopBar';
 
 // Tab definitions. The "Rank" tab fans out into 4 sub-screens — Trios swipe,
-// Tiers (drag-to-bin), Overall Ranks (flat list), and Trends (movers +
-// consensus gap). Tapping the tab opens an action sheet so all four are one
-// tap away (was: tiny pill in corner).
+// Tiers (drag-to-bin), Overall Ranks (the editable drag/tap board), and
+// Trends (movers + consensus gap). Tapping the tab opens an action sheet so
+// all four are one tap away (was: tiny pill in corner).
 const Tab = createBottomTabNavigator();
 const RankStack = createNativeStackNavigator();
 // B3 — Trades tab becomes a small stack so Portfolio is reachable as a
@@ -31,7 +30,7 @@ const RankStack = createNativeStackNavigator();
 // Portfolio; the bottom-nav still surfaces just four tabs.
 const TradesStack = createNativeStackNavigator();
 
-export type RankRoute = 'Trios' | 'Tiers' | 'OverallRanks' | 'ManualRanks' | 'Trends';
+export type RankRoute = 'Trios' | 'Tiers' | 'ManualRanks' | 'Trends';
 export type TradesRoute = 'TradesHome' | 'Portfolio';
 
 function RankStackNav() {
@@ -44,14 +43,9 @@ function RankStackNav() {
         options={{ headerShown: true, title: 'Tiers', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
       />
       <RankStack.Screen
-        name="OverallRanks"
-        component={OverallRanksScreen}
-        options={{ headerShown: true, title: 'Overall Ranks', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
-      />
-      <RankStack.Screen
         name="ManualRanks"
         component={ManualRanksScreen}
-        options={{ headerShown: true, title: 'Manual Ranks', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
+        options={{ headerShown: true, title: 'Overall Ranks', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
       />
       <RankStack.Screen
         name="Trends"
@@ -86,6 +80,21 @@ const tabIcon = (emoji: string) =>
   ({ focused }: { focused: boolean }) =>
     <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.55 }}>{emoji}</Text>;
 
+// Rank tab icon — same emoji glyph as the others, but with a small chevron
+// (▾) beside it to signal that tapping fans out a MENU of rank modes (Trios,
+// Tiers, Overall Ranks, Trends) rather than opening a single screen. The
+// chevron inherits the tab's active/inactive tint so it stays consistent with
+// the rest of the bar. Laid out in a tight row so nothing clips on the
+// fixed-height tab bar.
+const rankTabIcon = (emoji: string) =>
+  ({ focused, color }: { focused: boolean; color: string }) =>
+    (
+      <View style={styles.rankIconWrap}>
+        <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.55 }}>{emoji}</Text>
+        <Text style={[styles.rankIconChevron, { color, opacity: focused ? 1 : 0.55 }]}>▾</Text>
+      </View>
+    );
+
 export default function TabNav() {
   const [rankMenuOpen, setRankMenuOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -114,7 +123,7 @@ export default function TabNav() {
         <Tab.Screen
           name="Rank"
           component={RankStackNav}
-          options={{ tabBarIcon: tabIcon('🏈') }}
+          options={{ tabBarIcon: rankTabIcon('🏈') }}
           listeners={() => ({
             // Intercept the tap on the Rank tab — open the action sheet
             // instead of jumping into a sub-screen. We still keep the tab
@@ -182,7 +191,7 @@ export default function TabNav() {
 }
 
 // ── Rank action sheet ────────────────────────────────────────────────
-// Bottom-sheet style picker for the three Rank sub-screens. Tapping a row
+// Bottom-sheet style picker for the four Rank sub-screens. Tapping a row
 // dispatches a navigation action that focuses the Rank tab AND pushes the
 // chosen sub-route inside the RankStack. Driven from TabNav so we can use
 // a single root-nav handle (the Rank stack's child screens can't reach the
@@ -221,9 +230,9 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
         queryFn: getTiersStatus,
         staleTime: 60_000,
       });
-    } else if (screen === 'OverallRanks' || screen === 'ManualRanks') {
-      // Both screens pull the full unfiltered list once and filter
-      // client-side (OverallRanksScreen.tsx:29 / ManualRanksScreen.tsx:59).
+    } else if (screen === 'ManualRanks') {
+      // The Overall Ranks screen (ManualRanksScreen) pulls the full
+      // unfiltered list once and filters client-side (ManualRanksScreen.tsx:92).
       void queryClient.prefetchQuery({
         queryKey: ['rankings', 'all'],
         queryFn: () => getRankings(null),
@@ -246,8 +255,7 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
   const items: { route: RankRoute; emoji: string; label: string; sub: string }[] = [
     { route: 'Trios',         emoji: '🏈', label: 'Trios',         sub: '3-at-a-time swipe ranking' },
     { route: 'Tiers',         emoji: '📋', label: 'Tiers',         sub: 'Drag players into Elite / Starter / Solid / Depth / Bench' },
-    { route: 'ManualRanks',   emoji: '✋', label: 'Manual Ranks',  sub: 'Drag rows or tap a rank number to re-order your board by hand' },
-    { route: 'OverallRanks',  emoji: '🏅', label: 'Overall Ranks', sub: 'Full ELO-sorted list of every player you\'ve ranked' },
+    { route: 'ManualRanks',   emoji: '🏅', label: 'Overall Ranks', sub: 'Drag rows or tap a rank number to re-order your board by hand' },
     { route: 'Trends',        emoji: '📈', label: 'Trends',        sub: 'See your biggest movers and how you differ from consensus' },
   ];
 
@@ -284,6 +292,12 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
 }
 
 const styles = StyleSheet.create({
+  // Rank tab icon: emoji + menu chevron in a tight row. The negative left
+  // margin pulls the chevron snug to the glyph; nothing extends past the
+  // tab's icon box so there's no clipping on the bottom bar.
+  rankIconWrap: { flexDirection: 'row', alignItems: 'center' },
+  rankIconChevron: { fontSize: 11, fontWeight: '900', marginLeft: 1, marginTop: 2 },
+
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: {
     position: 'absolute',
