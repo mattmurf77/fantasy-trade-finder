@@ -667,6 +667,40 @@ export default function TradesScreen({ navigation }: any) {
                   </Text>
                 </Pressable>
               ) : null}
+              {/* ✓ / ✗ disposition buttons — same outcome as swiping right/left.
+                  Both wire to advance() so deck-advance, haptics, and the API
+                  call are identical to the swipe path. Disabled while a swipe
+                  mutation is in flight to prevent double-firing. */}
+              <View style={styles.dispositionRow}>
+                <Pressable
+                  onPress={() => advance('pass')}
+                  disabled={swipeMutation.isPending}
+                  style={({ pressed }) => [
+                    styles.dispositionBtn,
+                    styles.dispositionBtnPass,
+                    pressed && { opacity: 0.7 },
+                    swipeMutation.isPending && { opacity: 0.4 },
+                  ]}
+                  accessibilityLabel="Pass on this trade"
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.dispositionBtnText, styles.dispositionBtnTextPass]}>✗</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => advance('like')}
+                  disabled={swipeMutation.isPending}
+                  style={({ pressed }) => [
+                    styles.dispositionBtn,
+                    styles.dispositionBtnLike,
+                    pressed && { opacity: 0.7 },
+                    swipeMutation.isPending && { opacity: 0.4 },
+                  ]}
+                  accessibilityLabel="Accept this trade"
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.dispositionBtnText, styles.dispositionBtnTextLike]}>✓</Text>
+                </Pressable>
+              </View>
               <Text style={styles.deckHint}>
                 Swipe right to like · Swipe left to pass
               </Text>
@@ -1193,4 +1227,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   queueSheetSendText: { color: '#fff', fontSize: fontSize.sm, fontWeight: '800' },
+
+  // FB-05 — ✓ / ✗ disposition button row beneath the top trade card.
+  // Placed between SwipableTopCard (and optional Queue button) and deckHint.
+  dispositionRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.xl,
+    marginTop: spacing.lg,
+  },
+  dispositionBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dispositionBtnPass: {
+    borderColor: colors.red,
+    backgroundColor: 'rgba(239,68,68,0.10)',
+  },
+  dispositionBtnLike: {
+    borderColor: colors.green,
+    backgroundColor: 'rgba(34,197,94,0.10)',
+  },
+  dispositionBtnText: {
+    fontSize: fontSize.xl,
+    fontWeight: '800',
+  },
+  dispositionBtnTextPass: { color: colors.red },
+  dispositionBtnTextLike: { color: colors.green },
 });
