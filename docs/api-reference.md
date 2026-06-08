@@ -31,7 +31,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/players` | All players (filterable) |
+| GET | `/api/players` | All players (filterable by `?position=`, projection via `?view=summary\|detail\|full`) |
 | GET | `/api/players/<player_id>` | One player |
 | GET | `/api/rookies` | Rookie list |
 

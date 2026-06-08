@@ -3513,14 +3513,26 @@ def sync_players(player_db: dict, adp_map: dict | None = None) -> int:
     return len(rows)
 
 
-def load_players(position: str | None = None) -> list[dict]:
+def load_players(
+    position: str | None = None,
+    columns: list[str] | None = None,
+) -> list[dict]:
     """
     Return all synced players, optionally filtered by position.
     Sorted by search_rank ascending (lower = more relevant); players
     without a search_rank are appended last.
+
+    ``columns`` restricts the SELECT to the named DB columns (e.g.
+    ``['player_id', 'full_name', 'team', 'age', 'search_rank']``).
+    Unknown column names are silently ignored.  Pass ``None`` (default)
+    to return every column.
     """
     with engine.connect() as conn:
-        q = select(players_table)
+        if columns:
+            valid = [players_table.c[c] for c in columns if c in players_table.c]
+            q = select(*valid) if valid else select(players_table)
+        else:
+            q = select(players_table)
         if position:
             q = q.where(players_table.c.position == position.upper())
         # Rows with no search_rank sort last
