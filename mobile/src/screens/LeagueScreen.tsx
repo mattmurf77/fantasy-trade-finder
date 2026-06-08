@@ -191,7 +191,7 @@ export default function LeagueScreen() {
           </Text>
           <View style={styles.heroChips}>
             <Chip label={fmtScoring(summary?.default_scoring)} tone="accent" />
-            <Chip label={`${num((summary as any)?.leaguemates_total ?? 0)} teams`} />
+            <Chip label={summary ? `${num((summary as any)?.leaguemates_total) + 1} teams` : '— teams'} />
           </View>
         </Pressable>
 
