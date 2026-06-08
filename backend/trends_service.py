@@ -33,6 +33,77 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
+# 0. Rank derivation (shared helper)
+# ---------------------------------------------------------------------------
+#
+# Rank is a pure presentation view of the ELOs the backend already has: sort
+# players by ELO (highest = rank 1) and read off the 1-based index.  We expose
+# two views:
+#
+#   • Overall rank  — position in the whole pool.
+#   • Positional rank — position within the player's own position group
+#                       (RB rank, WR rank, …).
+#
+# "Previous rank" is the same computation applied to a prior-ELO snapshot
+# (reconstructed from elo_history).  A rank DELTA is previous_rank - current_rank
+# so that a player who climbed from #10 to #7 reports +3 (moved UP 3 spots),
+# matching the up/down direction of the ELO delta.  Players missing from a
+# snapshot get no rank there, and downstream callers degrade to None ("—").
+# ---------------------------------------------------------------------------
+
+
+def _rank_map(elo_by_id: dict[str, float]) -> dict[str, int]:
+    """Return { player_id: overall_rank } (1-based) sorted by ELO desc.
+
+    Ties broken by player_id for a stable, deterministic ordering.  Non-numeric
+    ELOs are skipped (player simply has no rank).
+    """
+    cleaned: list[tuple[str, float]] = []
+    for pid, elo in (elo_by_id or {}).items():
+        try:
+            cleaned.append((pid, float(elo)))
+        except (TypeError, ValueError):
+            continue
+    cleaned.sort(key=lambda t: (-t[1], t[0]))
+    return {pid: i + 1 for i, (pid, _) in enumerate(cleaned)}
+
+
+def _pos_rank_map(
+    elo_by_id: dict[str, float],
+    players_by_id: dict[str, dict] | None,
+) -> dict[str, int]:
+    """Return { player_id: positional_rank } (1-based) within each position.
+
+    Players whose position is unknown (no enrichment) are omitted — there is
+    no position group to rank them in.
+    """
+    by_pos: dict[str, list[tuple[str, float]]] = {}
+    for pid, elo in (elo_by_id or {}).items():
+        pos = ((players_by_id or {}).get(pid) or {}).get("position")
+        if not pos:
+            continue
+        try:
+            val = float(elo)
+        except (TypeError, ValueError):
+            continue
+        by_pos.setdefault(pos, []).append((pid, val))
+
+    out: dict[str, int] = {}
+    for rows in by_pos.values():
+        rows.sort(key=lambda t: (-t[1], t[0]))
+        for i, (pid, _) in enumerate(rows):
+            out[pid] = i + 1
+    return out
+
+
+def _rank_delta(prev_rank: int | None, curr_rank: int | None) -> int | None:
+    """previous_rank - current_rank → positive = moved UP (toward #1)."""
+    if prev_rank is None or curr_rank is None:
+        return None
+    return prev_rank - curr_rank
+
+
+# ---------------------------------------------------------------------------
 # 1. Contrarian meter
 # ---------------------------------------------------------------------------
 #
@@ -247,6 +318,27 @@ def compute_consensus_gap(
 
     roster_set = set(user_roster or [])
 
+    # Rank views — express the gap as "your rank vs the comparison rank".
+    #   • user ranks come from the user's own ELO pool.
+    #   • community ranks come from the community-mean pool (sells comparison).
+    #   • owner ranks are derived per-owner on demand (buys comparison),
+    #     memoised so each owner is sorted at most once.
+    user_overall  = _rank_map(user_elo)
+    user_pos      = _pos_rank_map(user_elo, players_by_id)
+    comm_overall  = _rank_map(community_elo)
+    comm_pos      = _pos_rank_map(community_elo, players_by_id)
+
+    _owner_rank_cache: dict[str, tuple[dict[str, int], dict[str, int]]] = {}
+
+    def _owner_ranks(owner_uid: str) -> tuple[dict[str, int], dict[str, int]]:
+        if owner_uid not in _owner_rank_cache:
+            ratings = ((community_rankings or {}).get(owner_uid) or {}).get("elo_ratings") or {}
+            _owner_rank_cache[owner_uid] = (
+                _rank_map(ratings),
+                _pos_rank_map(ratings, players_by_id),
+            )
+        return _owner_rank_cache[owner_uid]
+
     def _enrich(pid: str, row: dict) -> dict:
         if players_by_id and pid in players_by_id:
             p = players_by_id[pid]
@@ -269,12 +361,23 @@ def compute_consensus_gap(
         if gap <= 0:
             # Only surface players where YOU value them ABOVE the market.
             continue
+        u_rank = user_overall.get(pid)
+        c_rank = comm_overall.get(pid)
+        u_prank = user_pos.get(pid)
+        c_prank = comm_pos.get(pid)
         sells.append(_enrich(pid, {
             "player_id":     pid,
             "user_elo":      round(u, 1),
             "community_elo": round(c, 1),
             "gap":           round(gap, 1),
             "score":         _normalise_gap(gap),
+            # Rank view: positive rank_gap = you rank them nearer #1 than market.
+            "user_rank":          u_rank,
+            "comparison_rank":    c_rank,
+            "rank_gap":           _rank_delta(c_rank, u_rank),
+            "user_pos_rank":      u_prank,
+            "comparison_pos_rank": c_prank,
+            "pos_rank_gap":       _rank_delta(c_prank, u_prank),
         }))
     sells.sort(key=lambda d: d["gap"], reverse=True)
     sells = sells[:top_n]
@@ -306,6 +409,16 @@ def compute_consensus_gap(
         gap = u - o
         if gap <= 0:
             continue
+        # Owner rank comparison mirrors the ELO fallback: use the owner's own
+        # ranking when present, else the community-mean ranking.
+        if owner_data:
+            o_overall, o_pos = _owner_ranks(owner_uid)
+        else:
+            o_overall, o_pos = comm_overall, comm_pos
+        u_rank  = user_overall.get(pid)
+        o_rank  = o_overall.get(pid)
+        u_prank = user_pos.get(pid)
+        o_prank = o_pos.get(pid)
         buys.append(_enrich(pid, {
             "player_id":       pid,
             "user_elo":        round(u, 1),
@@ -314,6 +427,13 @@ def compute_consensus_gap(
             "owner_username":  owner_uname,
             "gap":             round(gap, 1),
             "score":           _normalise_gap(gap),
+            # Rank view: positive rank_gap = you rank them nearer #1 than owner.
+            "user_rank":          u_rank,
+            "comparison_rank":    o_rank,
+            "rank_gap":           _rank_delta(o_rank, u_rank),
+            "user_pos_rank":      u_prank,
+            "comparison_pos_rank": o_prank,
+            "pos_rank_gap":       _rank_delta(o_prank, u_prank),
         }))
     buys.sort(key=lambda d: d["gap"], reverse=True)
     buys = buys[:top_n]
@@ -374,6 +494,23 @@ def compute_risers_fallers(
         if pid not in earliest:
             earliest[pid] = e
 
+    # Rank derivation (pure view of the ELOs we already have).
+    #   • current  ranks come from the full current_elo pool.
+    #   • previous ranks come from a reconstructed prior snapshot: each player's
+    #     earliest in-window ELO, falling back to their current ELO when there
+    #     is no history for them so the prior ranking stays complete/comparable.
+    prev_snapshot: dict[str, float] = {}
+    for pid, curr in (current_elo or {}).items():
+        try:
+            prev_snapshot[pid] = earliest[pid] if pid in earliest else float(curr)
+        except (TypeError, ValueError):
+            continue
+
+    curr_overall = _rank_map(current_elo)
+    prev_overall = _rank_map(prev_snapshot)
+    curr_pos     = _pos_rank_map(current_elo, players_by_id)
+    prev_pos     = _pos_rank_map(prev_snapshot, players_by_id)
+
     moves: list[dict[str, Any]] = []
     for pid, curr in (current_elo or {}).items():
         if pid not in earliest:
@@ -385,11 +522,19 @@ def compute_risers_fallers(
         delta = c - earliest[pid]
         if abs(delta) < 1e-3:
             continue
+        # Previous rank only meaningful when this player had real history;
+        # `earliest` membership guarantees that here.
+        overall_rank = curr_overall.get(pid)
+        pos_rank     = curr_pos.get(pid)
         row = {
-            "player_id":     pid,
-            "current_elo":   round(c, 1),
-            "previous_elo":  round(earliest[pid], 1),
-            "delta":         round(delta, 1),
+            "player_id":        pid,
+            "current_elo":      round(c, 1),
+            "previous_elo":     round(earliest[pid], 1),
+            "delta":            round(delta, 1),
+            "overall_rank":       overall_rank,
+            "overall_rank_delta": _rank_delta(prev_overall.get(pid), overall_rank),
+            "pos_rank":           pos_rank,
+            "pos_rank_delta":     _rank_delta(prev_pos.get(pid), pos_rank),
         }
         if players_by_id and pid in players_by_id:
             p = players_by_id[pid]

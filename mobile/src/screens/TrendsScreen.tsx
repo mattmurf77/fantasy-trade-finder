@@ -191,6 +191,22 @@ function maxAbsDelta(rows: TrendRow[]): number {
   return rows.reduce((m, r) => Math.max(m, Math.abs(r.delta || 0)), 0);
 }
 
+// Format a rank delta with an up/down arrow. Returns null when the delta can't
+// be derived (insufficient history) so callers can degrade to "—".
+function formatRankDelta(delta?: number | null): string | null {
+  if (delta == null) return null;
+  if (delta > 0) return `▲${delta}`;
+  if (delta < 0) return `▼${Math.abs(delta)}`;
+  return '–0';
+}
+
+// Position-aware label for a positional rank, e.g. "RB7". Falls back to "#7".
+function posRankLabel(rank?: number | null, position?: string): string | null {
+  if (rank == null) return null;
+  const pos = (position || '').toUpperCase();
+  return pos ? `${pos}${rank}` : `#${rank}`;
+}
+
 function filterGap(rows: ContrarianGapEntry[] | undefined, f: PositionFilter): ContrarianGapEntry[] {
   if (!rows) return [];
   if (f === 'ALL') return rows;
@@ -246,8 +262,29 @@ interface MoveRowProps {
 function MoveRow({ row, max, kind }: MoveRowProps) {
   const delta = row.delta || 0;
   const sign  = delta > 0 ? '+' : '';
-  const arrow = kind === 'up' ? '↑' : '↓';
   const deltaColor = kind === 'up' ? colors.green : colors.red;
+
+  // Rank deltas are the primary, more-intuitive signal (FB-04). ELO delta stays
+  // as a clearly-labeled secondary number on the right.
+  const overallRank      = row.overall_rank;
+  const overallRankDelta = formatRankDelta(row.overall_rank_delta);
+  const posRankDelta     = formatRankDelta(row.pos_rank_delta);
+  const posLabel         = posRankLabel(row.pos_rank, row.position as string);
+
+  // Compose the rank line, e.g. "Overall #12 ▲3 · RB7 ▲1". Degrades to "—".
+  const rankParts: string[] = [];
+  if (overallRank != null) {
+    rankParts.push(
+      `Overall #${overallRank}${overallRankDelta ? ` ${overallRankDelta}` : ''}`,
+    );
+  } else if (overallRankDelta) {
+    rankParts.push(`Overall ${overallRankDelta}`);
+  }
+  if (posLabel != null) {
+    rankParts.push(`${posLabel}${posRankDelta ? ` ${posRankDelta}` : ''}`);
+  }
+  const rankLine = rankParts.length ? rankParts.join(' · ') : '—';
+
   return (
     <View style={styles.row}>
       <View style={{ flex: 1, minWidth: 0 }}>
@@ -259,6 +296,9 @@ function MoveRow({ row, max, kind }: MoveRowProps) {
             <PositionChip position={row.position as Position} size="sm" />
           ) : null}
         </View>
+        <Text style={[styles.rankLine, { color: deltaColor }]} numberOfLines={1}>
+          {rankLine}
+        </Text>
         <Text style={styles.meta} numberOfLines={1}>
           {Math.round(row.previous_elo)} → {Math.round(row.current_elo)} ELO
         </Text>
@@ -268,7 +308,7 @@ function MoveRow({ row, max, kind }: MoveRowProps) {
       </View>
       <View style={styles.deltaWrap}>
         <Text style={[styles.deltaNum, { color: deltaColor }]}>
-          {arrow} {sign}{delta.toFixed(1)}
+          {sign}{delta.toFixed(1)}
         </Text>
         <Text style={styles.deltaLabel}>ELO</Text>
       </View>
@@ -303,6 +343,16 @@ function GapBlock({ label, rows, mode }: GapBlockProps) {
 function GapRow({ row, mode }: { row: ContrarianGapEntry; mode: 'sell' | 'buy' }) {
   const compareElo = mode === 'sell' ? row.community_elo : row.owner_elo;
   const compareLabel = mode === 'sell' ? 'consensus' : (row.owner_username || 'owner');
+
+  // Express the gap as a rank difference where meaningful (FB-04): your rank vs
+  // the comparison rank. Prefer the rank view; fall back to the ELO gap when no
+  // rank could be derived.
+  const rankGap = row.rank_gap;
+  const haveRanks = row.user_rank != null && row.comparison_rank != null;
+  const rankMeta = haveRanks
+    ? `You #${row.user_rank} · ${compareLabel} #${row.comparison_rank}`
+    : null;
+
   return (
     <View style={styles.row}>
       <View style={{ flex: 1, minWidth: 0 }}>
@@ -314,16 +364,32 @@ function GapRow({ row, mode }: { row: ContrarianGapEntry; mode: 'sell' | 'buy' }
             <PositionChip position={row.position as Position} size="sm" />
           ) : null}
         </View>
+        {rankMeta ? (
+          <Text style={styles.meta} numberOfLines={1}>
+            {rankMeta}
+          </Text>
+        ) : null}
         <Text style={styles.meta} numberOfLines={1}>
           You {Math.round(row.user_elo)} · {compareLabel}{' '}
           {compareElo != null ? Math.round(compareElo) : '—'}
         </Text>
       </View>
       <View style={styles.deltaWrap}>
-        <Text style={[styles.deltaNum, { color: colors.green }]}>
-          +{(row.gap || 0).toFixed(1)}
-        </Text>
-        <Text style={styles.deltaLabel}>GAP</Text>
+        {rankGap != null && rankGap > 0 ? (
+          <>
+            <Text style={[styles.deltaNum, { color: colors.green }]}>
+              ▲{rankGap}
+            </Text>
+            <Text style={styles.deltaLabel}>RANK</Text>
+          </>
+        ) : (
+          <>
+            <Text style={[styles.deltaNum, { color: colors.green }]}>
+              +{(row.gap || 0).toFixed(1)}
+            </Text>
+            <Text style={styles.deltaLabel}>GAP</Text>
+          </>
+        )}
       </View>
     </View>
   );
@@ -402,6 +468,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     flexShrink: 1,
   },
+  rankLine: { fontSize: fontSize.sm, fontWeight: '700', marginTop: 2 },
   meta: { color: colors.muted, fontSize: fontSize.xs, marginTop: 2 },
   barWrap: { marginTop: spacing.sm },
 
