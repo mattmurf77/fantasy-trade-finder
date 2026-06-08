@@ -2660,7 +2660,7 @@
         if (!anyLoaded) {
           for (const pos of POS_ORDER) {
             try {
-              const res = await fetch(`/api/players?position=${pos}`);
+              const res = await fetch(`/api/players?position=${pos}&view=summary`);
               if (!res.ok) continue;
               const players = await res.json();
               const relevant = (players || [])

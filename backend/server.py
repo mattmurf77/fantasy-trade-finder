@@ -16,6 +16,7 @@ data is fetched from the Sleeper public API (no OAuth required).
 
 import collections
 import concurrent.futures
+import hashlib
 import json
 import logging
 import os
@@ -33,7 +34,7 @@ import urllib.request
 
 from datetime import datetime, timedelta, timezone
 
-from flask import Flask, g, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, make_response, request, send_from_directory
 
 # ---------------------------------------------------------------------------
 # Logging setup — writes to stdout AND keeps a ring-buffer for /api/debug/log
@@ -2627,18 +2628,54 @@ def index():
 # Player DB Routes
 # ---------------------------------------------------------------------------
 
+# Column projection views for GET /api/players?view=<name>.
+# Each entry lists exactly the DB column names to SELECT.
+# 'full' / omitted: all columns (backward-compatible default).
+_PLAYER_VIEWS: dict[str, list[str]] = {
+    # Tier-board / pool display: id, name, position, team, age, relevance rank.
+    "summary": [
+        "player_id", "full_name", "position", "team", "age", "search_rank",
+    ],
+    # Rank/swipe info-sheet: adds experience, injury, ADP.
+    "detail": [
+        "player_id", "full_name", "first_name", "last_name",
+        "position", "team", "age", "years_exp",
+        "injury_status", "adp", "search_rank",
+    ],
+}
+
+
 @app.route("/api/players")
 def get_players_route():
     """
-    GET /api/players?position=RB
-    Returns all synced players from the DB, optionally filtered by position.
-    Each record includes all extended attributes: depth chart, injury status,
-    age, years_exp, height/weight, college, search_rank, ADP.
+    GET /api/players?position=RB[&view=summary|detail|full]
+
+    Returns synced players from the DB, optionally filtered by position.
+
+    ``view`` controls which fields are returned:
+      - ``summary`` — id, name, position, team, age, search_rank (6 fields)
+      - ``detail``  — adds years_exp, injury_status, adp (11 fields)
+      - ``full`` or omitted — all columns, backward-compatible default
+
+    Responses include ETag and Cache-Control headers so browsers serve
+    repeat requests from disk (player data changes at most once per day).
     """
     position = request.args.get("position") or None
+    view     = (request.args.get("view") or "full").lower()
+    columns  = _PLAYER_VIEWS.get(view)   # None → select all (full)
     try:
-        players = load_players(position=position)
-        return jsonify(players)
+        players  = load_players(position=position, columns=columns)
+        payload  = json.dumps(players)
+        etag     = '"' + hashlib.md5(payload.encode()).hexdigest()[:16] + '"'
+
+        if request.headers.get("If-None-Match") == etag:
+            return "", 304
+
+        resp = make_response(payload, 200)
+        resp.headers["Content-Type"]  = "application/json"
+        resp.headers["ETag"]          = etag
+        resp.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=3600"
+        return resp
     except Exception as e:
         log.error("get_players error: %s", e)
         return jsonify({"error": str(e)}), 500
