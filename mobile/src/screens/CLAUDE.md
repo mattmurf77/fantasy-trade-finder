@@ -9,7 +9,7 @@ One file per top-level route.
 | `LeagueScreen` | League home / settings |
 | `RankScreen` | 3-player swipe matchup loop |
 | `TiersScreen` | Tiered roster view |
-| `OverallRanksScreen` | Linear ranked list |
+| `ManualRanksScreen` | Editable drag/tap rank board — labeled "Overall Ranks" in the UI |
 | `TradesScreen` | Trade card browser |
 | `MatchesScreen` | Mutual trade matches inbox |
 | `PlaceholderScreen` | Stub for unfinished routes |

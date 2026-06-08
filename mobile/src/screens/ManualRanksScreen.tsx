@@ -25,8 +25,10 @@ import { startSpan } from '../observability/sentry';
 import { useSession } from '../state/useSession';
 import type { Position, RankedPlayer } from '../shared/types';
 
-// ── Manual Ranks ──────────────────────────────────────────────────────
-// Editable counterpart to OverallRanksScreen. Users can:
+// ── Overall Ranks ─────────────────────────────────────────────────────
+// The single editable rank board (labeled "Overall Ranks" in the UI; the
+// component keeps the ManualRanks name for its route + drag engine, which
+// FB-02 reads). Users can:
 //   • Long-press (220ms) a row and drag it to a new position.
 //   • Tap the rank number to type in a target rank (jump-to-rank).
 // Both gestures kick the same `reorderRankings` save path.
@@ -86,7 +88,7 @@ export default function ManualRanksScreen() {
   const [rows, setRows] = useState<RankedPlayer[]>([]);
 
   // Pull the full unfiltered list once and filter client-side so flipping
-  // chips is instant (same approach as OverallRanksScreen). The reorder
+  // chips is instant. The reorder
   // endpoint accepts a per-position `ordered_ids` payload — when the
   // filter is 'ALL' we send `position: null` and the full ID list.
   const ranksQuery = useQuery({
@@ -97,7 +99,7 @@ export default function ManualRanksScreen() {
 
   // Snapshot the server result into local state on load. Re-sync whenever
   // the underlying query data changes (e.g. invalidation from elsewhere).
-  // We dedupe ELO-sort so the initial order matches OverallRanks.
+  // ELO-sort so the initial order is best → worst.
   useEffect(() => {
     const all = (ranksQuery.data?.rankings || []) as RankedPlayer[];
     const sorted = [...all].sort((a, b) => (b.elo || 0) - (a.elo || 0));
@@ -325,7 +327,7 @@ export default function ManualRanksScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Manual Ranks</Text>
+        <Text style={styles.title}>Overall Ranks</Text>
         <SaveIndicator status={saveStatus} errorText={errorText} />
       </View>
 
