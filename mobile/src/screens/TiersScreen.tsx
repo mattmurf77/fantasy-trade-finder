@@ -726,7 +726,7 @@ export default function TiersScreen() {
       <Text style={styles.hint}>
         {multiSelect
           ? 'Tap chips to select. Use the bar below to move all selected up or down.'
-          : 'Hold + drag to move a card. Hold still to enter multi-select.'}
+          : 'Hold + drag to move a card. Tap “Select” to move several at once.'}
       </Text>
 
       {loading ? (
@@ -1018,17 +1018,23 @@ function DraggableRow({
           pressed && { opacity: 0.85 },
         ]}
       >
-        <PlayerCard
-          player={player}
-          compact
-          rightSlot={
-            isSelected ? (
-              <View style={styles.chipCheckBadge}>
-                <Text style={styles.chipCheckBadgeText}>✓</Text>
-              </View>
-            ) : undefined
-          }
-        />
+        {/* pointerEvents="none" so PlayerCard's own inner Pressable can't
+            become the touch responder — without this the inner Pressable
+            swallows the tap and the outer selection onPress never fires,
+            leaving multi-select dead (no way to toggle a chip). */}
+        <View pointerEvents="none">
+          <PlayerCard
+            player={player}
+            compact
+            rightSlot={
+              isSelected ? (
+                <View style={styles.chipCheckBadge}>
+                  <Text style={styles.chipCheckBadgeText}>✓</Text>
+                </View>
+              ) : undefined
+            }
+          />
+        </View>
       </Pressable>
     );
   }
