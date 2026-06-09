@@ -36,5 +36,7 @@
   "trade.marginal_value":            true,
   "trade.outlook_blend":             true,
   "trade.likes_you":                 true,
-  "trade.fuzzy_match":               true
+  "trade.fuzzy_match":               true,
+  "trade.thompson_deck":             true,
+  "trade.deck_diversity":            true
 }

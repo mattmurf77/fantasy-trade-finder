@@ -132,6 +132,14 @@ _DEFAULT_CFG: dict[str, float] = {
     "outlook_alpha_not_sure":     0.50,   # also used for outlook=None/unknown
     "outlook_alpha_rebuilder":    0.25,
     "outlook_alpha_jets":         0.10,
+    # ------------------------------------------------------------------
+    # Tier 2 amendment A6 — league-wide deck diversification
+    # (flag: trade.deck_diversity — consumed by server._order_deck)
+    # ------------------------------------------------------------------
+    "diversity_window_days":      7.0,   # lookback for league impression counts
+    "diversity_user_cap":         3.0,   # >= this many OTHER members shown a target → penalize
+    "diversity_penalty":          0.6,   # ordering-key multiplier for saturated targets
+    "deck_max_per_target":        3.0,   # intra-deck cap: cards per top receive asset
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.

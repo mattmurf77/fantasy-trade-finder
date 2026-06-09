@@ -2101,6 +2101,98 @@ def log_trade_impressions(user_id: str, league_id: str, cards: list) -> None:
         pass  # training-data logging is strictly best-effort
 
 
+def load_trade_decision_shape_counts(
+    user_id: str,
+    league_id: str,
+    since_days: int | None = None,
+) -> dict[str, tuple[int, int]]:
+    """
+    Read-only — per package-shape like/pass counts for one user in one league.
+
+    Shape is f"{len(give)}x{len(receive)}" ('1x1', '2x1', …), derived purely
+    from the JSON array lengths on each trade_decisions row — the only card
+    feature both decisions and live cards can compute without a fragile join
+    to trade_impressions. Feeds the A5 Thompson-sampling Beta posteriors in
+    server._order_deck.
+
+    Returns {shape: (likes, passes)}. Rows with undecodable JSON or a
+    decision other than like/pass are skipped.
+    """
+    with engine.connect() as conn:
+        q = select(
+            trade_decisions_table.c.give_player_ids,
+            trade_decisions_table.c.receive_player_ids,
+            trade_decisions_table.c.decision,
+        ).where(
+            and_(
+                trade_decisions_table.c.user_id   == user_id,
+                trade_decisions_table.c.league_id == league_id,
+            )
+        )
+        if since_days is not None:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=since_days)).isoformat()
+            q = q.where(trade_decisions_table.c.created_at >= cutoff)
+        rows = conn.execute(q).fetchall()
+
+    counts: dict[str, tuple[int, int]] = {}
+    for r in rows:
+        try:
+            give = json.loads(r.give_player_ids)
+            recv = json.loads(r.receive_player_ids)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if r.decision not in ("like", "pass"):
+            continue
+        shape = f"{len(give)}x{len(recv)}"
+        likes, passes = counts.get(shape, (0, 0))
+        if r.decision == "like":
+            likes += 1
+        else:
+            passes += 1
+        counts[shape] = (likes, passes)
+    return counts
+
+
+def load_recent_impression_target_user_counts(
+    league_id: str,
+    exclude_user_id: str,
+    days: int = 7,
+) -> dict[str, int]:
+    """
+    Read-only — for each player id appearing as a RECEIVE asset in this
+    league's trade_impressions within the last `days` days, the number of
+    DISTINCT users (excluding `exclude_user_id`) whose decks featured him.
+
+    Feeds the A6 diversification penalty in server._order_deck: a player can
+    only be traded once, so saturating every member's deck with him
+    mathematically caps total possible matches.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                trade_impressions_table.c.user_id,
+                trade_impressions_table.c.receive_player_ids,
+            ).where(
+                and_(
+                    trade_impressions_table.c.league_id == league_id,
+                    trade_impressions_table.c.user_id   != exclude_user_id,
+                    trade_impressions_table.c.shown_at  >= cutoff,
+                )
+            )
+        ).fetchall()
+
+    users_by_pid: dict[str, set] = {}
+    for r in rows:
+        try:
+            recv = json.loads(r.receive_player_ids)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for pid in recv:
+            users_by_pid.setdefault(pid, set()).add(r.user_id)
+    return {pid: len(users) for pid, users in users_by_pid.items()}
+
+
 # ---------------------------------------------------------------------------
 # League member operations
 # ---------------------------------------------------------------------------

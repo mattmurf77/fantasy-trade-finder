@@ -70,6 +70,7 @@ from .database import (
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, log_trade_impressions,
+    load_trade_decision_shape_counts, load_recent_impression_target_user_counts,
     upsert_league_members, upsert_member_rankings,
     load_member_rankings, load_league_members, get_ranking_coverage,
     check_for_match, match_already_exists,
@@ -1253,6 +1254,172 @@ def _inject_likes_you_cards(
     return sorted(new_cards + cards, key=lambda c: c.composite_score, reverse=True)
 
 
+# ─── Tier 2 amendments A5 + A6 — deck ordering helpers ───────────────────
+# A5 (flag trade.thompson_deck): Thompson-sample a Beta posterior of the
+# user's like-rate per card bucket and scale each card's sort key by the
+# sampled probability. Works at n≈0 decisions, keeps the deck from serving
+# the same cards in the same order forever, and generates the exploration
+# data the future learned acceptance model (2.4) needs.
+#
+# Bucket choice: package_shape only — f"{len(give)}x{len(receive)}" ("1x1",
+# "2x1", …). It is the ONLY card feature derivable from BOTH a live card
+# and a historical trade_decisions row (basis / likes_you live only on
+# trade_impressions; joining impressions→decisions on give/receive sets is
+# fragile and the data volume — 20 decisions — doesn't justify it). One
+# Beta sample per bucket per job, so cards in the same bucket keep their
+# relative composite order; cross-bucket inversions are bounded by the
+# (0.5, 1.5) multiplier.
+#
+# A6 (flag trade.deck_diversity): a player can only be traded once, so one
+# stud saturating every league member's deck caps total possible matches.
+# Cards whose top receive asset already appeared in >= diversity_user_cap
+# OTHER members' recent decks get their key multiplied by diversity_penalty,
+# and the served deck keeps at most deck_max_per_target cards per target
+# (never dropping likes_you cards, never shrinking below _DECK_MIN_CARDS).
+
+_DECK_MIN_CARDS = 5   # intra-deck cap never shrinks the deck below this
+
+
+def _thompson_deck_enabled() -> bool:
+    return getattr(FLAGS, "trade_thompson_deck", False)
+
+
+def _deck_diversity_enabled() -> bool:
+    return getattr(FLAGS, "trade_deck_diversity", False)
+
+
+def _deck_cfg(key: str, default: float) -> float:
+    """model_config key via trade_service's live config dict (same pattern
+    as _fuzzy_match_tau). Defaults inline so a missing key never breaks
+    the trade path. Keys are also declared in trade_service._DEFAULT_CFG."""
+    try:
+        from .trade_service import _cfg as _ts_cfg
+        return float(_ts_cfg.get(key, default))
+    except Exception:
+        return float(default)
+
+
+def _deck_rng_seed(user_id: str, league_id: str, job_id: str) -> int:
+    """Deterministic per-job RNG seed — re-polls of the same job (and a
+    re-run of the same job id in tests) see a stable order. hashlib, not
+    hash(): Python salts str hashes per process."""
+    digest = hashlib.sha256(f"{user_id}|{league_id}|{job_id}".encode()).digest()
+    return int.from_bytes(digest[:8], "big")
+
+
+def _card_shape(card) -> str:
+    give = getattr(card, "give_player_ids", None) or []
+    recv = getattr(card, "receive_player_ids", None) or []
+    return f"{len(give)}x{len(recv)}"
+
+
+def _top_receive_asset(card, seed_map: dict) -> str | None:
+    """The card's most valuable receive asset by consensus (seed) value —
+    the 'target' for diversification purposes. Falls back to the first
+    receive id when seed values are missing (all tie at 1500)."""
+    recv = getattr(card, "receive_player_ids", None) or []
+    if not recv:
+        return None
+    return max(recv, key=lambda pid: seed_map.get(pid, 1500.0))
+
+
+def _cap_per_target(ordered: list, seed_map: dict, max_per: int) -> list:
+    """A6 intra-deck cap: at most `max_per` cards per top receive asset,
+    keeping the best (the deck is already sorted). Edge cases: likes_you
+    cards are never dropped (they still occupy a slot in the count); if
+    dropping would shrink the deck below _DECK_MIN_CARDS, the best dropped
+    cards are restored (in their original positions)."""
+    if len(ordered) <= _DECK_MIN_CARDS or max_per <= 0:
+        return ordered
+    kept, dropped = [], []
+    per_target: dict = {}
+    for c in ordered:
+        pid = _top_receive_asset(c, seed_map)
+        if (pid is not None
+                and per_target.get(pid, 0) >= max_per
+                and not getattr(c, "likes_you", False)):
+            dropped.append(c)
+            continue
+        if pid is not None:
+            per_target[pid] = per_target.get(pid, 0) + 1
+        kept.append(c)
+    # Never serve a deck thinner than _DECK_MIN_CARDS because of the cap.
+    while len(kept) < _DECK_MIN_CARDS and dropped:
+        kept.append(dropped.pop(0))   # dropped[] is still in deck (score) order
+    if len(kept) < len(ordered):
+        original_pos = {id(c): i for i, c in enumerate(ordered)}
+        kept.sort(key=lambda c: original_pos[id(c)])
+    return kept
+
+
+def _order_deck(
+    cards: list,
+    *,
+    user_id: str,
+    league_id: str,
+    job_id: str,
+    seed_map: dict,
+) -> list:
+    """Apply A5 (Thompson ordering) and A6 (diversification) to a generated
+    deck. Returns a new list; the input is never mutated. Both flags off →
+    the input list is returned untouched. Likes-you cards stay pinned to
+    the top regardless of sampling or penalties."""
+    thompson  = _thompson_deck_enabled()
+    diversity = _deck_diversity_enabled()
+    if not cards or not (thompson or diversity):
+        return cards
+
+    key = {id(c): float(getattr(c, "composite_score", 0.0) or 0.0) for c in cards}
+
+    if thompson:
+        rng = random.Random(_deck_rng_seed(user_id, league_id, job_id))
+        try:
+            shape_counts = load_trade_decision_shape_counts(user_id, league_id)
+        except Exception as e:
+            log.warning("thompson deck: shape counts unavailable: %s", e)
+            shape_counts = {}
+        sample_by_shape: dict[str, float] = {}
+        # Sample shapes in sorted order so the draw sequence (hence the
+        # ordering) doesn't depend on the incoming card order.
+        for shape in sorted({_card_shape(c) for c in cards}):
+            likes, passes = shape_counts.get(shape, (0, 0))
+            # Beta(1 + likes, 2 + passes): exploration-friendly prior that
+            # still expects passes (mean 1/3 at n=0).
+            sample_by_shape[shape] = rng.betavariate(1 + likes, 2 + passes)
+        for c in cards:
+            # Bounded multiplier in (0.5, 1.5) — exploration reorders across
+            # buckets but never fully inverts quality.
+            key[id(c)] *= 0.5 + sample_by_shape[_card_shape(c)]
+
+    if diversity:
+        user_cap = int(_deck_cfg("diversity_user_cap", 3))
+        penalty  = _deck_cfg("diversity_penalty", 0.6)
+        window   = int(_deck_cfg("diversity_window_days", 7))
+        try:
+            target_counts = load_recent_impression_target_user_counts(
+                league_id, exclude_user_id=user_id, days=window,
+            )
+        except Exception as e:
+            log.warning("deck diversity: impression counts unavailable: %s", e)
+            target_counts = {}
+        if target_counts:
+            for c in cards:
+                pid = _top_receive_asset(c, seed_map)
+                if pid is not None and target_counts.get(pid, 0) >= user_cap:
+                    key[id(c)] *= penalty
+
+    ordered = sorted(
+        cards,
+        key=lambda c: (bool(getattr(c, "likes_you", False)), key[id(c)]),
+        reverse=True,
+    )
+
+    if diversity:
+        ordered = _cap_per_target(ordered, seed_map, int(_deck_cfg("deck_max_per_target", 3)))
+
+    return ordered
+
+
 def _run_trade_job(
     job_id: str,
     sess_token: str,
@@ -1384,6 +1551,36 @@ def _run_trade_job(
                         j["cards"] = snapshot
             except Exception as ly_err:
                 log.warning("likes-you injection failed (non-fatal): %s", ly_err)
+
+        # Tier 2 amendments A5 + A6 — Thompson-sampled ordering + league-wide
+        # diversification. Runs AFTER likes-you injection (so pinning sees
+        # the final likes_you flags) and BEFORE impression logging (so
+        # trade_impressions records true served positions). Deterministically
+        # seeded per job, so /status re-polls see a stable order. Non-fatal:
+        # any failure serves the deck exactly as generated.
+        if league_id != "league_demo" and (_thompson_deck_enabled() or _deck_diversity_enabled()):
+            try:
+                ordered = _order_deck(
+                    final_cards,
+                    user_id   = g_user_id,
+                    league_id = league_id,
+                    job_id    = job_id,
+                    seed_map  = seed_map,
+                )
+                if [id(c) for c in ordered] != [id(c) for c in final_cards]:
+                    final_cards = ordered
+                    snapshot = []
+                    for c in final_cards:
+                        d = trade_card_to_dict(c, players_dict)
+                        d["real_opponent"] = c.target_user_id in real_user_ids
+                        d["outlook"]       = outlook_value
+                        snapshot.append(d)
+                    with _trade_jobs_lock:
+                        j = _trade_jobs.get(job_id)
+                        if j is not None and j["status"] == "running":
+                            j["cards"] = snapshot
+            except Exception as ord_err:
+                log.warning("deck ordering (A5/A6) failed (non-fatal): %s", ord_err)
 
         # Tier 2 (2.4) — impression logging: one row per card in final deck
         # order, once per completed job (NOT per /status poll — polls only

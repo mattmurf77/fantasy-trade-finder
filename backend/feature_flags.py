@@ -82,6 +82,8 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.outlook_blend",    # 2.2 now/future valuation blend (trade_service.py)
     "trade.likes_you",        # 2.3a likes-you queue (server.py)
     "trade.fuzzy_match",      # 2.3b fuzzy mirror matching (database.py)
+    "trade.thompson_deck",    # A5 Thompson-sampled deck ordering (server.py)
+    "trade.deck_diversity",   # A6 league-wide deck diversification (server.py)
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
