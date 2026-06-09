@@ -471,48 +471,64 @@ export default function TiersScreen() {
   );
 
   // ── Bulk move (multi-select) ────────────────────────────────────────
-  // Move every currently-selected chip by exactly ONE tier in `direction`.
-  // Order-preserving: chips in the same source tier keep their relative
-  // order at the destination's end. Chips already at the boundary stay
-  // (top of `elite` for 'up', bottom of `bench` for 'down') — matches
-  // web's clamp behavior.
+  // Collapse the selected chips into a CONTIGUOUS BLOCK and move the whole
+  // block by ONE rank in `direction` (#32). Non-adjacent selections gather
+  // together; the block crosses tier boundaries as a single unit; clamps
+  // at the top of `elite` / bottom of `bench`.
   const bulkMove = useCallback(
     (direction: 'up' | 'down') => {
       if (selectedIds.size === 0) return;
-      const TIER_LIST: Tier[] = [...TIERS];
       setBuckets((prev) => {
+        // 1. Flatten the five real tiers into one ordered list.
+        const flat: { p: RankedPlayer; tier: Tier }[] = [];
+        for (const t of TIERS) for (const p of prev[t]) flat.push({ p, tier: t });
+
+        // 2. Split into the selected block (internal order preserved) and
+        //    the remaining list; note the first selected flat index.
+        const selectedBlock: { p: RankedPlayer; tier: Tier }[] = [];
+        const remaining: { p: RankedPlayer; tier: Tier }[] = [];
+        let firstSelectedFlatIdx = -1;
+        flat.forEach((entry, i) => {
+          if (selectedIds.has(entry.p.id)) {
+            if (firstSelectedFlatIdx < 0) firstSelectedFlatIdx = i;
+            selectedBlock.push(entry);
+          } else {
+            remaining.push(entry);
+          }
+        });
+        if (selectedBlock.length === 0) return prev;
+
+        // 3. Anchor = how many non-selected entries sit above the first
+        //    selected one (post-removal coords); shift one slot, clamped.
+        let anchor = 0;
+        for (let i = 0; i < firstSelectedFlatIdx; i++) {
+          if (!selectedIds.has(flat[i].p.id)) anchor += 1;
+        }
+        const target =
+          direction === 'up'
+            ? Math.max(0, anchor - 1)
+            : Math.min(remaining.length, anchor + 1);
+        if (target === anchor) return prev;            // already at boundary
+
+        // 4. Re-insert the contiguous block at the shifted anchor.
+        const merged = [
+          ...remaining.slice(0, target),
+          ...selectedBlock,
+          ...remaining.slice(target),
+        ];
+
+        // 5. Re-bucket into tiers, refilling each to its ORIGINAL size so
+        //    the block visibly crosses a boundary as it passes through.
         const next = cloneBuckets(prev);
-        // Group selected by source tier so we can preserve within-tier
-        // relative order across the move.
-        const grouped: Record<string, RankedPlayer[]> = {};
+        let cursor = 0;
         for (const t of TIERS) {
-          for (const p of next[t]) {
-            if (selectedIds.has(p.id)) {
-              (grouped[t] ||= []).push(p);
-            }
-          }
+          const size = prev[t].length;
+          next[t] = merged.slice(cursor, cursor + size).map((e) => e.p);
+          cursor += size;
         }
-        for (const sourceTier of Object.keys(grouped)) {
-          const players = grouped[sourceTier];
-          const srcIdx = TIER_LIST.indexOf(sourceTier as Tier);
-          const dstIdx =
-            direction === 'up'
-              ? Math.max(0, srcIdx - 1)
-              : Math.min(TIER_LIST.length - 1, srcIdx + 1);
-          if (dstIdx === srcIdx) continue;          // already at boundary
-          const dst = TIER_LIST[dstIdx];
-          // Pull each player from source, append to destination in
-          // their original within-tier order.
-          for (const p of players) {
-            const i = next[sourceTier as Tier].findIndex((x) => x.id === p.id);
-            if (i >= 0) next[sourceTier as Tier].splice(i, 1);
-            next[dst].push(p);
-          }
-        }
+        // `unassigned` is untouched by bulk moves.
         return next;
       });
-      // No clearedPids change — bulk moves keep all selected players in
-      // some tier (boundary chips stay put).
       haptics.success();
     },
     [selectedIds],
@@ -563,11 +579,6 @@ export default function TiersScreen() {
                 dismissMutation.mutate(p.id);
               }
         }
-        onEnterMultiSelect={() => {
-          setMultiSelect(true);
-          setSelectedIds(new Set([p.id]));
-          haptics.selection();
-        }}
         selectionMode={multiSelect}
         isSelected={selectedIds.has(p.id)}
         onTapInSelection={() => toggleSelected(p.id)}
@@ -781,13 +792,13 @@ export default function TiersScreen() {
               onPress={() => bulkMove('up')}
               style={({ pressed }) => [styles.actionBarBtn, pressed && { opacity: 0.7 }]}
             >
-              <Text style={styles.actionBarBtnText}>↑ Up tier</Text>
+              <Text style={styles.actionBarBtnText}>↑ Up</Text>
             </Pressable>
             <Pressable
               onPress={() => bulkMove('down')}
               style={({ pressed }) => [styles.actionBarBtn, pressed && { opacity: 0.7 }]}
             >
-              <Text style={styles.actionBarBtnText}>↓ Down tier</Text>
+              <Text style={styles.actionBarBtnText}>↓ Down</Text>
             </Pressable>
             <Pressable
               onPress={exitMultiSelect}
@@ -829,26 +840,18 @@ export default function TiersScreen() {
 // `haptics.pickup` — goes through `runOnJS`. Worklets only mutate
 // shared values directly. Violating this crashed release builds before.
 //
-// Gesture wiring for issue #15 (two-stage long-press):
-//   - Pan().activateAfterLongPress(220) — short hold then ≥(GH default)
-//     finger movement triggers a drag (Gesture Handler's own movement
-//     threshold gates pan activation on translation).
-//   - LongPress().minDuration(550).maxDistance(8) — same finger held
-//     within 8px past 550ms fires `onEnterMultiSelect` (flips multi-
-//     select on with this chip pre-selected) instead of starting a
-//     drag.
-//   - Race(longPress, pan) — whichever activates first wins; the other
-//     is canceled. Finger movement wins via the pan; stillness wins
-//     via the long-press.
+// Gesture wiring:
+//   - Pan().activateAfterLongPress(220) — a short hold then finger
+//     movement starts a drag. This is the ONLY chip gesture now; the
+//     two-stage long-press-to-multi-select (#15/PR#58) was removed —
+//     multi-select is entered via the "Select" button (#32).
 //
-// Live drop-preview wiring for issue #14:
-//   The chip's `useDerivedValue` worklet reads the parent-owned shared
-//   values (proposedZoneSV / proposedInsertIdxSV / dragged{Pid,SrcZone,
-//   SrcIdx}SV). Each non-dragged chip translates ±10px when it's the
-//   chip immediately adjacent to the proposed insertion point in the
-//   proposed zone — opening a visible gap exactly where the chip would
-//   land. Computation is index math only (no map lookups), safe inside
-//   a worklet.
+// Live drop-preview wiring (#27/#29): the chip's `useDerivedValue`
+// worklet reads the parent-owned shared values (proposedZoneSV /
+// proposedInsertIdxSV / dragged{Pid,SrcZone,SrcIdx}SV). Every non-dragged
+// chip at or below the proposed insertion point translates DOWN by a full
+// row (ROW_SHIFT_PX), opening a clear one-row gap exactly where the chip
+// would land. Index math only — safe inside a worklet.
 interface DraggableRowProps {
   player: RankedPlayer;
   binZone: Zone;
@@ -864,7 +867,6 @@ interface DraggableRowProps {
   onLayout: (pid: string, screenY: number, height: number) => void;
   onDropAt: (absoluteY: number, pid: string) => void;
   onLongPressDismiss?: () => void;
-  onEnterMultiSelect: () => void;
   selectionMode?: boolean;
   isSelected?: boolean;
   onTapInSelection?: () => void;
@@ -874,7 +876,11 @@ interface DraggableRowProps {
 // slot. The chip immediately above the slot shifts UP; the chip at-or-
 // below shifts DOWN — opening a visible gap right where the dragged
 // chip would land.
-const GAP_SHIFT_PX = 10;
+// Full compact player-row pitch. Non-dragged chips at/below the proposed
+// drop slot shift DOWN by this much to open a clear one-row gap where the
+// dragged chip will land — the Apple-reorder "make room" feel (feedback
+// #27/#29; the old ±10px gap was too subtle to aim by).
+const ROW_SHIFT_PX = 52;
 
 function DraggableRow({
   player,
@@ -891,7 +897,6 @@ function DraggableRow({
   onLayout,
   onDropAt,
   onLongPressDismiss,
-  onEnterMultiSelect,
   selectionMode = false,
   isSelected = false,
   onTapInSelection,
@@ -938,11 +943,12 @@ function DraggableRow({
     ) {
       effective = binIndex - 1;
     }
-    if (effective === proposedInsertIdxSV.value) {
-      return withTiming(GAP_SHIFT_PX, { duration: 140 });
-    }
-    if (effective === proposedInsertIdxSV.value - 1) {
-      return withTiming(-GAP_SHIFT_PX, { duration: 140 });
+    // Make room: every chip at or below the proposed insert slot shifts
+    // DOWN by a full row, opening a clear one-row gap exactly where the
+    // dragged chip will land (#27/#29 — "the full tile should move up to
+    // the spot it will move").
+    if (effective >= proposedInsertIdxSV.value) {
+      return withTiming(ROW_SHIFT_PX, { duration: 140 });
     }
     return withTiming(0, { duration: 140 });
   });
@@ -958,18 +964,6 @@ function DraggableRow({
       onDropAt(absoluteY, player.id);
     },
     [onDragEnd, onDropAt, player.id],
-  );
-
-  const longPress = useMemo(
-    () =>
-      Gesture.LongPress()
-        .minDuration(550)
-        .maxDistance(8)
-        .onStart(() => {
-          runOnJS(haptics.selection)();
-          runOnJS(onEnterMultiSelect)();
-        }),
-    [onEnterMultiSelect],
   );
 
   const pan = useMemo(
@@ -998,13 +992,10 @@ function DraggableRow({
     [onDragStart, onDragUpdate, handleDropAt, player.id, translateX, translateY, scale, zIndex],
   );
 
-  // Race ensures only one of {drag, multi-select-enter} fires per
-  // gesture. Movement past pan's activation threshold wins for drag;
-  // 550ms of stillness wins for long-press.
-  const composed = useMemo(
-    () => Gesture.Race(longPress, pan),
-    [longPress, pan],
-  );
+  // Multi-select is entered ONLY via the "Select" button now (#32 — the
+  // long-press-to-multi-select trigger is removed). A long hold simply
+  // activates the drag via pan.activateAfterLongPress.
+  const composed = pan;
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [
@@ -1128,7 +1119,9 @@ const styles = StyleSheet.create({
   // tinted background + checkmark badge — three signals so selection
   // reads clearly including for color-vision-impaired users.
   chipSelected: {
-    backgroundColor: 'rgba(79,124,255,0.14)',
+    // Clear lighter-blue fill across the whole tile (#32 — the old 0.14
+    // alpha read as a faint border-only state).
+    backgroundColor: 'rgba(79,124,255,0.30)',
     borderColor: colors.accent,
   },
   chipCheckBadge: {
