@@ -69,6 +69,7 @@ from .database import (
     upsert_user, upsert_league,
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
+    load_recent_league_likes, log_trade_impressions,
     upsert_league_members, upsert_member_rankings,
     load_member_rankings, load_league_members, get_ranking_coverage,
     check_for_match, match_already_exists,
@@ -128,7 +129,7 @@ from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
 from . import trends_service as _trends_service_mod
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
-from .trade_service import TradeService, League, LeagueMember
+from .trade_service import TradeService, TradeCard, League, LeagueMember
 
 # ---------------------------------------------------------------------------
 # Demo Player Pool (used until Sleeper roster is loaded)
@@ -1119,6 +1120,139 @@ def _make_progress_cb(job_id: str, players_dict: dict, real_user_ids: set, outlo
     return _cb
 
 
+# ─── Tier 2 (2.3) — likes-you queue + fuzzy mirror helpers ────────────────
+# Flags read via getattr so server keeps working until the orchestrator
+# registers "trade.likes_you" / "trade.fuzzy_match" in feature_flags.FLAG_KEYS
+# (FLAGS raises AttributeError for unknown attrs; getattr defaults to False).
+
+def _likes_you_enabled() -> bool:
+    return getattr(FLAGS, "trade_likes_you", False)
+
+
+def _fuzzy_match_enabled() -> bool:
+    return getattr(FLAGS, "trade_fuzzy_match", False)
+
+
+def _fuzzy_match_tau() -> float:
+    """model_config key 'fuzzy_match_tau' (default 0.8), read through
+    trade_service's live config dict so database.py stays config-free.
+    Defensive: a missing key or import problem can never break the swipe path."""
+    try:
+        from .trade_service import _cfg as _ts_cfg
+        return float(_ts_cfg.get("fuzzy_match_tau", 0.8))
+    except Exception:
+        return 0.8
+
+
+_LIKES_YOU_CAP = 3   # max likes-you injections per generated deck
+
+
+def _inject_likes_you_cards(
+    cards: list,
+    trade_service,
+    user_id: str,
+    league_id: str,
+    league,
+    user_roster: list,
+    seed_map: dict,
+) -> list:
+    """Tier 2 work item 2.3a — surface trades the counterparty already liked.
+
+    Queries league-mates' 'like' decisions (90 days) that are still
+    actionable (their give ⊆ their current roster, their receive ⊆ the
+    user's current roster) and mirrors each into the user's perspective:
+    give = their_receive, receive = their_give, target = that opponent.
+
+    - If an equivalent card (same give/receive sets, same opponent) already
+      exists in the generated deck: flag likes_you=True and boost its
+      composite_score to max(existing)+1.0 so it sorts to the top.
+    - Otherwise synthesize a consensus-basis TradeCard (fairness from summed
+      seed elo per side — deliberately simple; the card's pull is "they
+      already want this", not its score) and give it the same boost.
+    - At most _LIKES_YOU_CAP injections; trades the user already swiped on
+      (past_decision_keys) are skipped.
+
+    Returns the deck re-sorted by composite_score descending. Synthesized
+    cards are registered in trade_service._trade_cards so /api/trades/swipe
+    can resolve them by trade_id.
+    """
+    likes = load_recent_league_likes(
+        league_id=league_id, exclude_user_id=user_id, days=90,
+    )
+    if not likes:
+        return cards
+
+    members_by_id   = {m.user_id: m for m in league.members}
+    user_roster_set = set(user_roster)
+    boost_score     = round(max((c.composite_score for c in cards), default=0.0) + 1.0, 3)
+    existing_by_key = {
+        (frozenset(c.give_player_ids), frozenset(c.receive_player_ids), c.target_user_id): c
+        for c in cards
+    }
+
+    injected  = 0
+    seen_keys = set()
+    new_cards = []
+    for like in likes:
+        if injected >= _LIKES_YOU_CAP:
+            break
+        opp = members_by_id.get(like["user_id"])
+        if opp is None or opp.user_id == user_id:
+            continue
+        their_give = like["give_player_ids"]
+        their_recv = like["receive_player_ids"]
+        if not their_give or not their_recv:
+            continue
+        # Still actionable? Rosters change — their give must still be theirs,
+        # their receive must still be on the user's roster.
+        if not set(their_give) <= set(opp.roster):
+            continue
+        if not set(their_recv) <= user_roster_set:
+            continue
+
+        my_give, my_recv = list(their_recv), list(their_give)
+        key = (frozenset(my_give), frozenset(my_recv), opp.user_id)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        # Don't resurface a trade the user already swiped on.
+        if (key[0], key[1]) in trade_service._past_decision_keys:
+            continue
+
+        existing = existing_by_key.get(key)
+        if existing is not None:
+            existing.likes_you       = True
+            existing.composite_score = boost_score
+            injected += 1
+            continue
+
+        give_val = sum(seed_map.get(pid, 1500.0) for pid in my_give)
+        recv_val = sum(seed_map.get(pid, 1500.0) for pid in my_recv)
+        fairness = (round(min(give_val, recv_val) / max(give_val, recv_val), 3)
+                    if give_val > 0 and recv_val > 0 else 0.0)
+        card = TradeCard(
+            trade_id           = f"likesyou_{uuid.uuid4().hex[:12]}",
+            league_id          = league_id,
+            proposing_user_id  = user_id,
+            target_user_id     = opp.user_id,
+            target_username    = opp.username,
+            give_player_ids    = my_give,
+            receive_player_ids = my_recv,
+            mismatch_score     = 0.0,
+            fairness_score     = fairness,
+            composite_score    = boost_score,
+            basis              = "consensus",
+            likes_you          = True,
+        )
+        trade_service._trade_cards[card.trade_id] = card
+        new_cards.append(card)
+        injected += 1
+
+    if injected == 0:
+        return cards
+    return sorted(new_cards + cards, key=lambda c: c.composite_score, reverse=True)
+
+
 def _run_trade_job(
     job_id: str,
     sess_token: str,
@@ -1206,13 +1340,14 @@ def _run_trade_job(
         # session has no ranking service for this format.
         confidence_counts = service.comparison_counts() if service else None
 
-        trade_service.generate_trades(
+        final_cards = trade_service.generate_trades(
             user_id              = g_user_id,
             user_elo             = elo_map_rt,
             user_roster          = g_user_roster,
             league_id            = league_id,
             seed_elo             = seed_map,
             confidence           = confidence_counts,
+            outlook              = outlook_value,
             fairness_threshold   = fairness_threshold,
             acquire_positions    = acquire_positions,
             trade_away_positions = trade_away_positions,
@@ -1221,8 +1356,47 @@ def _run_trade_job(
             on_opponent_done     = progress_cb,
         )
 
+        # Tier 2 (2.3a) — likes-you queue. Inject/boost cards league-mates
+        # already liked the mirror of, then republish the final snapshot so
+        # the served deck includes them. Non-fatal: a failure here serves
+        # the organic deck exactly as before. Skipped for pinned-give decks
+        # ("what can I get for X?") — unrelated injections would pollute them.
+        if _likes_you_enabled() and league_id != "league_demo" and not pinned_give:
+            try:
+                final_cards = _inject_likes_you_cards(
+                    cards         = final_cards,
+                    trade_service = trade_service,
+                    user_id       = g_user_id,
+                    league_id     = league_id,
+                    league        = g_league,
+                    user_roster   = g_user_roster,
+                    seed_map      = seed_map,
+                )
+                snapshot = []
+                for c in final_cards:
+                    d = trade_card_to_dict(c, players_dict)
+                    d["real_opponent"] = c.target_user_id in real_user_ids
+                    d["outlook"]       = outlook_value
+                    snapshot.append(d)
+                with _trade_jobs_lock:
+                    j = _trade_jobs.get(job_id)
+                    if j is not None and j["status"] == "running":
+                        j["cards"] = snapshot
+            except Exception as ly_err:
+                log.warning("likes-you injection failed (non-fatal): %s", ly_err)
+
+        # Tier 2 (2.4) — impression logging: one row per card in final deck
+        # order, once per completed job (NOT per /status poll — polls only
+        # read the stored snapshot). This is the training-data pipeline for
+        # the future acceptance model. Never allowed to break generation.
+        try:
+            if league_id != "league_demo":
+                log_trade_impressions(g_user_id, league_id, final_cards)
+        except Exception as imp_err:
+            log.warning("trade impression logging failed (non-fatal): %s", imp_err)
+
         # Mark complete. Final card snapshot was already published by the
-        # last on_opponent_done invocation.
+        # last on_opponent_done invocation (or the likes-you republish above).
         with _trade_jobs_lock:
             j = _trade_jobs.get(job_id)
             if j is not None:
@@ -2783,6 +2957,10 @@ def trade_card_to_dict(card, players: dict) -> dict:
         "decision":          card.decision,
         "expires_at":        card.expires_at,
     }
+    # Tier 2 (2.3a) — only serialized when true so payloads for ordinary
+    # cards stay byte-identical to the pre-likes-you shape.
+    if getattr(card, "likes_you", False):
+        out["likes_you"] = True
     # Agent A8 — expose human-readable reasons only when the flag is on
     # AND the card actually has some. Keeps legacy JSON identical when off.
     reasons = getattr(card, "reasons", None)
@@ -3015,6 +3193,10 @@ def swipe_trade():
                     target_user_id     = card.target_user_id,
                     give_player_ids    = card.give_player_ids,
                     receive_player_ids = card.receive_player_ids,
+                    # Tier 2 (2.3b) — fuzzy mirror matching behind
+                    # trade.fuzzy_match; exact behavior unchanged when off.
+                    fuzzy              = _fuzzy_match_enabled(),
+                    fuzzy_tau          = _fuzzy_match_tau(),
                 )
                 if is_mirror:
                     already = match_already_exists(

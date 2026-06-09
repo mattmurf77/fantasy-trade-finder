@@ -110,6 +110,28 @@ _DEFAULT_CFG: dict[str, float] = {
     # Confidence shrinkage + range-overlap fairness (Change 4 + amendment A4)
     "shrink_pseudocount":    4.0,     # n0 in w = n/(n+n0) shrinkage toward seed
     "range_base":            0.35,    # value half-width FRACTION at n=0 comparisons
+    # ------------------------------------------------------------------
+    # Tier 2 — work item 2.1: marginal (over-replacement) valuation
+    # (flag: trade.marginal_value — docs/plans/trade-engine-tier2-models.md)
+    # ------------------------------------------------------------------
+    "bench_credit_rate":         0.15,   # fraction of raw value depth keeps
+    "waiver_baseline_value":   250.0,    # replacement floor when a position is thin
+    # min_side_surplus replacement when the marginal flag is ON: marginal
+    # values are systematically smaller than raw values (a package collapses
+    # to over-replacement deltas + a 15% bench credit), so the raw-value
+    # 150 bar would gate out nearly every legitimate marginal-gain trade.
+    "min_side_surplus_marginal": 60.0,
+    # ------------------------------------------------------------------
+    # Tier 2 — work item 2.2: outlook as now/future valuation blend
+    # (flag: trade.outlook_blend). α = weight on NOW value; 1−α on FUTURE.
+    # Age-curve breakpoints/slopes live as a code constant table
+    # (_AGE_NOW_CURVE / _AGE_FUTURE_CURVE below) — see comment there.
+    # ------------------------------------------------------------------
+    "outlook_alpha_championship": 1.00,
+    "outlook_alpha_contender":    0.75,
+    "outlook_alpha_not_sure":     0.50,   # also used for outlook=None/unknown
+    "outlook_alpha_rebuilder":    0.25,
+    "outlook_alpha_jets":         0.10,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -135,83 +157,6 @@ def reload_config() -> None:
 def _c(key: str) -> float:
     """Convenience accessor: return live config value with default fallback."""
     return _cfg.get(key, _DEFAULT_CFG[key])
-
-
-def team_outlook_multiplier(
-    give_player_ids: list[str],
-    receive_player_ids: list[str],
-    outlook: str | None,
-    player_ages: dict[str, int],
-) -> float:
-    # NOT WIRED — never called by the live trade path; see Tier 2 plan
-    # (docs/plans/trade-engine-tier2-models.md) which replaces this with an
-    # outlook-as-valuation-blend mechanism.
-    """
-    Return a composite-score multiplier based on the user's team outlook
-    and the ages of the players in the trade.
-
-    Applied *after* the standard mismatch/fairness scoring so it acts as
-    a soft re-ordering of the generated cards rather than a hard filter.
-
-    Age lookup: player_ages maps player_id → age (int).  Players with no age
-    data are excluded from the average; if no data is available at all the
-    multiplier falls back to 1.0 (neutral).
-
-    Outlooks
-    ────────
-    championship   Strongly prefer receiving veterans (≥27) for youth (<27).
-                   Penalise receiving youth for vets.
-    contender      Same direction, roughly half the magnitude.
-    rebuilder      Mirror of championship: prefer receiving youth (≤26) for vets.
-    jets           Extreme rebuilder: strong boost for ≤25 received;
-                   heavy penalty for anything ≥26 received.
-    not_sure       No adjustment (×1.0).
-    """
-    if not outlook or outlook == "not_sure":
-        return _c("neutral")
-
-    def _avg(ids: list[str]) -> float:
-        ages = [player_ages[pid] for pid in ids
-                if pid in player_ages and player_ages[pid] > 0]
-        return sum(ages) / len(ages) if ages else 0.0
-
-    recv_avg = _avg(receive_player_ids)
-    give_avg = _avg(give_player_ids)
-
-    if recv_avg == 0.0:
-        return _c("neutral")   # no age data — can't meaningfully adjust
-
-    vet_age   = _c("vet_age")
-    youth_age = _c("youth_age")
-    jets_age  = _c("jets_age")
-
-    if outlook == "championship":
-        if recv_avg >= vet_age and give_avg < vet_age:
-            return _c("boost_strong")    # receiving veterans, giving youth ✓
-        if recv_avg < vet_age and give_avg >= vet_age:
-            return _c("penalty_mod")     # receiving youth, giving veterans ✗
-        return _c("neutral")
-
-    if outlook == "contender":
-        if recv_avg >= vet_age and give_avg < vet_age:
-            return _c("boost_moderate")  # same direction, softer signal
-        if recv_avg < vet_age and give_avg >= vet_age:
-            return _c("penalty_soft")    # ~half the championship penalty
-        return _c("neutral")
-
-    if outlook == "rebuilder":
-        if recv_avg <= youth_age and give_avg > youth_age:
-            return _c("boost_strong")    # receiving youth, giving veterans ✓
-        if recv_avg > youth_age and give_avg <= youth_age:
-            return _c("penalty_mod")     # receiving veterans, giving youth ✗
-        return _c("neutral")
-
-    if outlook == "jets":
-        if recv_avg <= jets_age:
-            return _c("boost_strong")    # ≤25 received — extreme youth mode
-        return _c("penalty_heavy")       # ≥26 received — hard pass
-
-    return _c("neutral")
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +386,163 @@ def analyze_roster_strengths(
     }
 
 
+# ---------------------------------------------------------------------------
+# Tier 2 — work item 2.1: marginal (over-replacement) valuation
+# (flag: trade.marginal_value — docs/plans/trade-engine-tier2-models.md)
+# ---------------------------------------------------------------------------
+
+
+def _starters_at(pos: str, scoring_format: str) -> int:
+    """Starter slots for a position — _STARTER_NEED, QB bumped to 2 in SF."""
+    n = _STARTER_NEED.get(pos, 0)
+    if pos == "QB" and scoring_format.startswith("sf"):
+        n = 2
+    return n
+
+
+def replacement_levels(
+    roster_player_ids: list[str],
+    value_of,                            # callable pid → value (one side's space)
+    players: dict,
+    scoring_format: str = "1qb_ppr",
+) -> dict[str, float]:
+    """
+    Per-position replacement level for a roster:
+
+        replacement(R, pos) = value of R's best player at pos NOT in the
+                              starting lineup (the player who would start
+                              if a starter left)
+
+    Starters per position come from _STARTER_NEED (QB → 2 in superflex).
+    If the position has fewer than starters+1 players the replacement is
+    the waiver baseline (config waiver_baseline_value) — losing anyone
+    there means dipping into waivers.
+
+    Computed from the PRE-trade roster (Tier 2 approximation; exact
+    post-trade lineup re-optimization is a Tier 3 ILP feature). Only
+    QB/RB/WR/TE have a replacement concept — other positions are absent
+    from the returned dict.
+    """
+    waiver = _c("waiver_baseline_value")
+    by_pos: dict[str, list[float]] = {pos: [] for pos in _STARTER_NEED}
+    for pid in roster_player_ids:
+        p = players.get(pid)
+        pos = getattr(p, "position", None) if p else None
+        if pos in by_pos:
+            by_pos[pos].append(value_of(pid))
+    levels: dict[str, float] = {}
+    for pos, vals in by_pos.items():
+        starters = _starters_at(pos, scoring_format)
+        if len(vals) < starters + 1:
+            levels[pos] = waiver
+        else:
+            vals.sort(reverse=True)
+            levels[pos] = vals[starters]
+    return levels
+
+
+def marginal_value(
+    pid: str,
+    value_of,                            # callable pid → value (same space)
+    repl_levels: dict[str, float],       # from replacement_levels()
+    players: dict,
+) -> float:
+    """
+    Value of a player OVER the roster's replacement at his position, plus
+    a small bench credit so depth keeps some worth (byes, injuries):
+
+        marginal(p, R) = max(0, value(p) - replacement(R, pos(p)))
+                         + bench_credit_rate * value(p)
+
+    Positions without a replacement concept (picks, unknown, anything
+    outside QB/RB/WR/TE) keep their raw value.
+    """
+    v = value_of(pid)
+    p = players.get(pid)
+    pos = getattr(p, "position", None) if p else None
+    if pos not in repl_levels:
+        return v
+    return max(0.0, v - repl_levels[pos]) + _c("bench_credit_rate") * v
+
+
+# ---------------------------------------------------------------------------
+# Tier 2 — work item 2.2: outlook as now/future valuation blend
+# (flag: trade.outlook_blend — replaces the deleted, never-wired
+#  team_outlook_multiplier post-hoc multiplier)
+# ---------------------------------------------------------------------------
+# DESIGN CHOICE: the per-position age curves live here as a code constant
+# table rather than ~30 model_config keys. The breakpoints and slopes were
+# calibrated together as a set (DynastyProcess pattern: RB cliff ~26, WR
+# plateau into ~29, QB ~flat into the 30s, TE late peak) and only make
+# sense moving together; exposing each number individually would explode
+# the config surface for no tuning benefit. The outlook → α map IS
+# config-tunable (outlook_alpha_* keys) since it's a genuine product knob.
+#
+# Each entry maps age → multiplier, piecewise-linear with a floor.
+
+_AGE_NOW_CURVE = {
+    # win-now weight: peak-age production favored
+    "QB": lambda a: 0.95 if a < 23 else 1.0,
+    "RB": lambda a: (0.95 if a < 23 else
+                     1.05 if a <= 26 else
+                     max(0.60, 1.05 - 0.12 * (a - 26))),
+    "WR": lambda a: (0.92 if a < 23 else
+                     1.0 if a <= 29 else
+                     max(0.65, 1.00 - 0.10 * (a - 29))),
+    "TE": lambda a: (0.90 if a < 24 else
+                     1.0 if a <= 31 else
+                     max(0.70, 1.00 - 0.10 * (a - 31))),
+}
+
+_AGE_FUTURE_CURVE = {
+    # youth-weighted mirror: long-horizon value favored
+    "QB": lambda a: 1.05 if a <= 25 else max(0.70, 1.05 - 0.05 * (a - 25)),
+    "RB": lambda a: 1.10 if a <= 23 else max(0.40, 1.10 - 0.12 * (a - 23)),
+    "WR": lambda a: 1.10 if a <= 24 else max(0.50, 1.10 - 0.09 * (a - 24)),
+    "TE": lambda a: 1.05 if a <= 25 else max(0.55, 1.05 - 0.08 * (a - 25)),
+}
+
+
+def age_now_mult(pos: str | None, age) -> float:
+    """Win-now age multiplier. Unknown position or missing age → 1.0."""
+    if not age or age <= 0:
+        return 1.0
+    fn = _AGE_NOW_CURVE.get(pos)
+    return fn(age) if fn else 1.0
+
+
+def age_future_mult(pos: str | None, age) -> float:
+    """Future-value age multiplier. Unknown position or missing age → 1.0."""
+    if not age or age <= 0:
+        return 1.0
+    fn = _AGE_FUTURE_CURVE.get(pos)
+    return fn(age) if fn else 1.0
+
+
+_OUTLOOK_ALPHA_CFG_KEY = {
+    "championship": "outlook_alpha_championship",
+    "contender":    "outlook_alpha_contender",
+    "not_sure":     "outlook_alpha_not_sure",
+    "rebuilder":    "outlook_alpha_rebuilder",
+    "jets":         "outlook_alpha_jets",
+}
+
+
+def outlook_alpha(outlook: str | None) -> float:
+    """Blend weight α (1.0 = pure now-value, 0.0 = pure future-value).
+    None / unknown outlooks fall back to the not_sure 50/50 blend."""
+    key = _OUTLOOK_ALPHA_CFG_KEY.get(outlook or "not_sure",
+                                     "outlook_alpha_not_sure")
+    return _c(key)
+
+
+def outlook_blend_mult(pos: str | None, age, alpha: float) -> float:
+    """Combined now/future multiplier: α·now_mult + (1−α)·future_mult.
+    Players with no age data get exactly 1.0 from both curves."""
+    return (alpha * age_now_mult(pos, age)
+            + (1.0 - alpha) * age_future_mult(pos, age))
+
+
 def build_match_context(
     user_profile: dict,
     opponent_profile: dict,
@@ -477,79 +579,6 @@ def build_match_context(
         },
         "positional_rationale": rationale,
     }
-
-
-def positional_preference_multiplier(
-    give_player_ids: list[str],
-    receive_player_ids: list[str],
-    acquire_positions: list[str],
-    trade_away_positions: list[str],
-    player_db: dict,  # player_id → player object with .position attribute
-) -> float:
-    # NOT WIRED — never called by the live trade path (positional preferences
-    # act as a hard filter inside _generate_for_pair instead); see Tier 2 plan.
-    """
-    Soft composite-score multiplier based on the user's positional preferences.
-
-    Applied *after* ELO/KTC scoring so it re-orders cards rather than filtering.
-    Capped at ×2.0 to prevent extreme over-weighting.
-
-    Boost rules:
-      +20% per received player whose position is in acquire_positions
-      +15% per given player whose position is in trade_away_positions
-
-    Penalty rule:
-      -15% per received player whose position is in trade_away_positions
-      (but NOT in acquire_positions) — signals the user explicitly wants
-      to move that position, not stack it.
-    """
-    if not acquire_positions and not trade_away_positions:
-        return 1.0
-
-    multiplier = 1.0
-
-    acq_bonus   = _c("pos_acquire_bonus")
-    away_bonus  = _c("pos_tradeaway_bonus")
-    conf_pen    = _c("pos_conflict_penalty")
-    mult_cap    = _c("pos_multiplier_cap")
-
-    # Boost: receiving positions the user wants
-    if acquire_positions:
-        recv_positions = [
-            player_db[pid].position
-            for pid in receive_player_ids
-            if pid in player_db and player_db[pid].position
-        ]
-        matches = sum(1 for p in recv_positions if p in acquire_positions)
-        if matches > 0:
-            multiplier *= (1.0 + acq_bonus * matches)
-
-    # Boost: giving away positions the user wants to shed
-    if trade_away_positions:
-        give_positions = [
-            player_db[pid].position
-            for pid in give_player_ids
-            if pid in player_db and player_db[pid].position
-        ]
-        matches = sum(1 for p in give_positions if p in trade_away_positions)
-        if matches > 0:
-            multiplier *= (1.0 + away_bonus * matches)
-
-    # Mild penalty: receiving a position the user explicitly wants to shed
-    if trade_away_positions and acquire_positions:
-        recv_positions = [
-            player_db[pid].position
-            for pid in receive_player_ids
-            if pid in player_db and player_db[pid].position
-        ]
-        conflicts = sum(
-            1 for p in recv_positions
-            if p in trade_away_positions and p not in acquire_positions
-        )
-        if conflicts > 0:
-            multiplier *= ((1.0 - conf_pen) ** conflicts)
-
-    return min(round(multiplier, 4), mult_cap)
 
 
 # ---------------------------------------------------------------------------
@@ -842,6 +871,9 @@ class TradeCard:
     #   "consensus"   — fallback card vs an opponent with no rankings; built
     #                   purely from consensus (seed) values + roster fit
     basis: str = "divergence"
+    # Tier 2 (2.3a) — True when the counterparty already liked the mirror of
+    # this trade (flag trade.likes_you). Serialized only when true.
+    likes_you: bool = False
 
 
 @dataclass
@@ -903,6 +935,9 @@ class TradeService:
         on_opponent_done = None,             # callback(idx_done, total, sorted_cards_so_far)
         confidence: dict[str, int] | None = None,  # pid → comparison count for the
                                                    # requesting user (v2 shrinkage; A4 ranges)
+        outlook: str | None = None,          # championship | contender | not_sure |
+                                             # rebuilder | jets | None — Tier 2 (2.2)
+                                             # now/future blend; v2-only, legacy ignores it
     ) -> list[TradeCard]:
         """
         Generate trade cards for the user against all league members
@@ -945,6 +980,7 @@ class TradeService:
                 is_dynasty           = is_dynasty,
                 on_opponent_done     = on_opponent_done,
                 confidence           = confidence,
+                outlook              = outlook,
             )
 
         new_cards: list[TradeCard] = []
@@ -1083,6 +1119,7 @@ class TradeService:
         is_dynasty: bool,
         on_opponent_done,
         confidence: dict[str, int] | None,
+        outlook: str | None = None,
     ) -> list[TradeCard]:
         """v2 orchestration: mirrors the legacy loop structure (profiles,
         narrative, streaming callback, global target, dedup) but routes each
@@ -1093,6 +1130,22 @@ class TradeService:
         # Confidence shrinkage BEFORE the value transform (Change 4).
         shrunk_elo = _shrink_user_elo(user_elo, seed_elo, confidence)
         user_value = {pid: elo_to_value(e) for pid, e in shrunk_elo.items()}
+
+        # Tier 2 (2.2) — outlook blend applied to the USER's value map only:
+        # the α blend encodes the USER's contender↔rebuilder stance; we don't
+        # know the opponent's outlook here (future: read their stored league
+        # preference). Because the blend is an INPUT to surplus math it
+        # composes with the fairness gate, unlike the old post-hoc multiplier.
+        # Flag OFF → values untouched (exactly the Tier 1 output).
+        if FLAGS.trade_outlook_blend:
+            alpha = outlook_alpha(outlook)
+            for pid in user_value:
+                p = self._players.get(pid)
+                user_value[pid] *= outlook_blend_mult(
+                    getattr(p, "position", None) if p else None,
+                    getattr(p, "age", None) if p else None,
+                    alpha,
+                )
 
         _vs_cache: dict[str, float] = {}
         def _vs(pid: str) -> float:
@@ -1129,6 +1182,7 @@ class TradeService:
                     trade_away_positions = trade_away_positions or [],
                     pinned_give_players  = pinned_give_players,
                     confidence           = confidence,
+                    scoring_format       = scoring_format,
                 )
             else:
                 cards = self._generate_consensus_for_pair(
@@ -1182,6 +1236,7 @@ class TradeService:
         trade_away_positions: list[str],
         pinned_give_players: list[str] | None,
         confidence: dict[str, int] | None,
+        scoring_format: str = "1qb_ppr",
     ) -> list[TradeCard]:
         """Divergence-based v2 generation for one (user, opponent) pair.
 
@@ -1201,7 +1256,13 @@ class TradeService:
         _iter_budget = 200_000
         _iters       = 0
 
-        MIN_SIDE = _c("min_side_surplus")
+        # Tier 2 (2.1) — when the marginal flag is on, surpluses are computed
+        # on over-replacement values, which run much smaller than raw values,
+        # so the per-side gate switches to min_side_surplus_marginal (see the
+        # _DEFAULT_CFG comment for the rationale).
+        MARGINAL = FLAGS.trade_marginal_value
+        MIN_SIDE = (_c("min_side_surplus_marginal") if MARGINAL
+                    else _c("min_side_surplus"))
         GAIN_CAP = max(_c("mutual_gain_cap"), 1.0)
         WAIVER   = _c("waiver_slot_cost")
         MAX_GAP  = _c("trade_elo_gap_max")
@@ -1215,6 +1276,39 @@ class TradeService:
                 v = elo_to_value(opp_elo.get(pid, 1500.0))
                 _vo_cache[pid] = v
             return v
+
+        if MARGINAL:
+            # Replacement levels computed ONCE per pair from the PRE-trade
+            # rosters, in each side's own value space — the two (roster,
+            # value-map) combos the surplus formulas need: the acquiring
+            # side values an incoming player at his marginal over THEIR
+            # roster, and the shedding side's loss is his marginal on their
+            # own roster. (Exact post-trade re-optimization is Tier 3.)
+            _def_uval = elo_to_value(1500.0)
+            def _uv(pid: str) -> float:
+                return user_value.get(pid, _def_uval)
+            user_repl = replacement_levels(
+                user_roster, _uv, players, scoring_format)
+            opp_repl = replacement_levels(
+                opponent.roster, _vo, players, scoring_format)
+
+            _mu_cache: dict[str, float] = {}
+            def _mu(pid: str) -> float:
+                """Marginal value of pid on the USER's roster, user's space."""
+                v = _mu_cache.get(pid)
+                if v is None:
+                    v = marginal_value(pid, _uv, user_repl, players)
+                    _mu_cache[pid] = v
+                return v
+
+            _mo_cache: dict[str, float] = {}
+            def _mo(pid: str) -> float:
+                """Marginal value of pid on the OPPONENT's roster, opp space."""
+                v = _mo_cache.get(pid)
+                if v is None:
+                    v = marginal_value(pid, _vo, opp_repl, players)
+                    _mo_cache[pid] = v
+                return v
 
         def _gap_ok(give_ids: list[str], recv_ids: list[str]) -> bool:
             """Same guard as legacy _elo_gap_ok, on the shrunk user Elo."""
@@ -1292,14 +1386,26 @@ class TradeService:
                 return
 
             # Package values in EACH side's own value space (Change 2).
-            uvals_give = [user_value[p] for p in give_ids]
-            uvals_recv = [user_value[p] for p in recv_ids]
+            # Tier 2 (2.1): with the marginal flag on, each side's packages
+            # are built from over-replacement values against THAT side's own
+            # pre-trade roster — clogger packages collapse, need-fillers
+            # keep their value. Same package_value_v2 + waiver math after.
+            if MARGINAL:
+                uvals_give = [_mu(p) for p in give_ids]
+                uvals_recv = [_mu(p) for p in recv_ids]
+            else:
+                uvals_give = [user_value[p] for p in give_ids]
+                uvals_recv = [user_value[p] for p in recv_ids]
             u_max = max(uvals_give + uvals_recv)
             give_val_user = package_value_v2(uvals_give, u_max)
             recv_val_user = package_value_v2(uvals_recv, u_max)
 
-            ovals_give = [_vo(p) for p in give_ids]
-            ovals_recv = [_vo(p) for p in recv_ids]
+            if MARGINAL:
+                ovals_give = [_mo(p) for p in give_ids]
+                ovals_recv = [_mo(p) for p in recv_ids]
+            else:
+                ovals_give = [_vo(p) for p in give_ids]
+                ovals_recv = [_vo(p) for p in recv_ids]
             o_max = max(ovals_give + ovals_recv)
             give_val_opp = package_value_v2(ovals_give, o_max)  # opp receives
             recv_val_opp = package_value_v2(ovals_recv, o_max)  # opp gives
