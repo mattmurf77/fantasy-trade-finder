@@ -89,6 +89,20 @@ export interface TradeCard {
   // off the consensus seed. Backend sets this on /api/trades/generate and
   // /api/trades/status snapshots (server.py:_make_progress_cb).
   real_opponent?: boolean;
+  // v2 engine: how the card was built. 'divergence' = real ranking
+  // disagreement between the two owners; 'consensus' = fair-value idea vs
+  // an opponent who hasn't ranked players yet. Normalizer defaults missing
+  // values to 'divergence' (the legacy behavior). Optional so the
+  // MatchesScreen adapter shapes (which never carry it) still typecheck.
+  basis?: 'divergence' | 'consensus';
+  // True when the counterparty already liked the mirror of this trade.
+  // Backend serializes `likes_you` only when true; normalizer defaults
+  // to false.
+  likesYou?: boolean;
+  // Low-value player added by the engine to balance an otherwise-unfair
+  // trade. The player is ALREADY in give_players/receive_players — this
+  // just identifies which one, so the UI can call it out.
+  sweetener?: { playerId: string; side: 'give' | 'receive' };
 }
 
 export interface TradeMatch {
