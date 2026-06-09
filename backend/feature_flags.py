@@ -75,6 +75,8 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade_math.star_tax",
     "trade_math.roster_clogger",
     "trade_math.human_explanations",
+    # Trade engine v2 — Tier 1 scorer rebuild (docs/plans/trade-engine-tier1-fixes.md)
+    "trade_engine.v2",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

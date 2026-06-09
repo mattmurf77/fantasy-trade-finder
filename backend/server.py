@@ -285,6 +285,9 @@ def _build_demo_league(players: list[Player], base_seed: dict) -> tuple[League, 
                 base_seed,
                 static_biases.get(uid, {}),
             ),
+            # Demo league: simulated opinions count as rankings so the
+            # trade-engine v2 ranked-opponent gate leaves demo unchanged.
+            has_rankings = True,
         )
         for uid, name in [
             ("opp_1", "DynastyKing"),
@@ -1168,6 +1171,9 @@ def _run_trade_job(
                         if ue:
                             member.elo_ratings = ue
                             member.username    = rd["username"] or member.username
+                            # Trade-engine v2: mark members whose values come
+                            # from real member_rankings rows (vs. seed/sim).
+                            member.has_rankings = True
                             real_count += 1
                 real_user_ids = set(real_rankings.keys()) if real_count else set()
         except Exception as db_err:
@@ -1195,12 +1201,18 @@ def _run_trade_job(
         players_dict = {p.id: p for p in g_players}
         progress_cb  = _make_progress_cb(job_id, players_dict, real_user_ids, outlook_value)
 
+        # Per-player comparison counts for the requesting user — feeds the
+        # v2 confidence-shrinkage step (Tier 1, Change 4). None when the
+        # session has no ranking service for this format.
+        confidence_counts = service.comparison_counts() if service else None
+
         trade_service.generate_trades(
             user_id              = g_user_id,
             user_elo             = elo_map_rt,
             user_roster          = g_user_roster,
             league_id            = league_id,
             seed_elo             = seed_map,
+            confidence           = confidence_counts,
             fairness_threshold   = fairness_threshold,
             acquire_positions    = acquire_positions,
             trade_away_positions = trade_away_positions,
@@ -2761,7 +2773,13 @@ def trade_card_to_dict(card, players: dict) -> dict:
         "give":              [p(pid) for pid in card.give_player_ids],
         "receive":           [p(pid) for pid in card.receive_player_ids],
         "mismatch_score":    card.mismatch_score,
+        # P1-9: true fairness in [0,1] — mobile's fairness meter
+        # (mobile/src/api/trades.ts, TradeCard.tsx) reads this field and
+        # multiplies by 100; it was never serialized before.
+        "fairness_score":    card.fairness_score,
         "composite_score":   card.composite_score,
+        # v2 cards may be consensus/need-based vs. disagreement-driven.
+        "basis":             getattr(card, "basis", "divergence"),
         "decision":          card.decision,
         "expires_at":        card.expires_at,
     }
@@ -4630,6 +4648,14 @@ def session_init():
     players_dict = {p.id: p for p in ranking_pool}
 
     # ── Build opponent LeagueMembers (league-specific for trades) ────────
+    # Trade-engine v2 (P0-3): real league members must NOT get fabricated
+    # random-noise valuations. Members without saved member_rankings carry
+    # the consensus seed verbatim (has_rankings stays False); members WITH
+    # real rankings get them injected later (_run_trade_job sets
+    # has_rankings=True). Legacy path (flag off) keeps the noise byte-
+    # for-byte. The simulated-fallback block further down is demo-only and
+    # keeps its noise in both modes.
+    _v2 = getattr(FLAGS, "trade_engine_v2", False)
     members: list[LeagueMember] = []
     for opp in opponent_rosters:
         opp_id    = str(opp.get("user_id", f"opp_{len(members)+1}"))
@@ -4637,7 +4663,10 @@ def session_init():
         opp_ids   = [str(x) for x in opp.get("player_ids", []) if str(x) in players_dict]
         if not opp_ids:
             continue
-        opp_elo = _biased_elo_random(opp_ids, ranking_seed)
+        if _v2:
+            opp_elo = {pid: ranking_seed.get(pid, 1500) for pid in opp_ids}
+        else:
+            opp_elo = _biased_elo_random(opp_ids, ranking_seed)
         members.append(LeagueMember(
             user_id     = opp_id,
             username    = opp_name,
@@ -4659,11 +4688,16 @@ def session_init():
             dbm_ids = [str(x) for x in dbm.get("player_ids", []) if str(x) in players_dict]
             if not dbm_ids:
                 continue
+            if _v2:
+                # Real league member (DB-stored) — consensus seed, no noise.
+                dbm_elo = {pid: ranking_seed.get(pid, 1500) for pid in dbm_ids}
+            else:
+                dbm_elo = _biased_elo_random(dbm_ids, ranking_seed)
             members.append(LeagueMember(
                 user_id     = dbm_uid,
                 username    = dbm.get("username") or dbm.get("display_name") or dbm_uid,
                 roster      = dbm_ids,
-                elo_ratings = _biased_elo_random(dbm_ids, ranking_seed),
+                elo_ratings = dbm_elo,
             ))
             log.info("  📎 injected DB league member %s (%s) with %d roster players",
                      dbm_uid, dbm.get("username"), len(dbm_ids))
@@ -4679,10 +4713,14 @@ def session_init():
             if not opp_ids:
                 break
             members.append(LeagueMember(
-                user_id     = f"opp_{i+1}",
-                username    = opp_name,
-                roster      = opp_ids,
-                elo_ratings = _biased_elo_random(opp_ids, ranking_seed),
+                user_id      = f"opp_{i+1}",
+                username     = opp_name,
+                roster       = opp_ids,
+                # Simulated (demo-style) opponents: keep the random-bias
+                # opinions and treat them as "ranked" so demo behavior is
+                # unchanged under trade-engine v2.
+                elo_ratings  = _biased_elo_random(opp_ids, ranking_seed),
+                has_rankings = True,
             ))
 
     new_league = League(

@@ -29,5 +29,7 @@
   "trade_math.qb_tax":               false,
   "trade_math.star_tax":             true,
   "trade_math.roster_clogger":       false,
-  "trade_math.human_explanations":   true
+  "trade_math.human_explanations":   true,
+
+  "trade_engine.v2":                 true
 }
