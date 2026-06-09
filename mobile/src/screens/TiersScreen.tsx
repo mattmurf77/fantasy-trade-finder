@@ -385,6 +385,11 @@ export default function TiersScreen() {
       }
 
       // Normal mode: long-press to pick up; the others slide to make room.
+      // pointerEvents="none" on the PlayerCard wrapper is REQUIRED — PlayerCard
+      // renders its own inner Pressable, which would otherwise become the touch
+      // responder and swallow the long-press so onLongPress={drag} never fires
+      // (the row then only scrolls, never lifts). With touches passing through,
+      // the outer Pressable gets the long-press and calls the library's drag().
       return (
         <Pressable
           onLongPress={drag}
@@ -396,7 +401,9 @@ export default function TiersScreen() {
             pressed && !isActive && { opacity: 0.9 },
           ]}
         >
-          <PlayerCard player={item.player} compact />
+          <View pointerEvents="none">
+            <PlayerCard player={item.player} compact />
+          </View>
         </Pressable>
       );
     },
