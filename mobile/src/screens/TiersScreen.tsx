@@ -246,23 +246,27 @@ export default function TiersScreen() {
             : Math.min(remaining.length, anchor + 1);
         if (target === anchor) return prev;            // already at boundary
 
-        // 4. Re-insert the contiguous block at the shifted anchor.
-        const merged = [
+        // 4. Re-insert the contiguous block at the shifted anchor. The block
+        //    adopts the tier of the single non-selected entry it swaps past,
+        //    so ONLY the selected players can change tier. Every non-selected
+        //    player keeps its own tier — moving the selection no longer shoves
+        //    boundary players across tiers to preserve fixed tier sizes (the
+        //    refill-by-size approach did that and was wrong).
+        const passed =
+          direction === 'down' ? remaining[anchor] : remaining[anchor - 1];
+        const blockTier: Tier = passed ? passed.tier : selectedBlock[0].tier;
+        const merged: { p: RankedPlayer; tier: Tier }[] = [
           ...remaining.slice(0, target),
-          ...selectedBlock,
+          ...selectedBlock.map((e) => ({ p: e.p, tier: blockTier })),
           ...remaining.slice(target),
         ];
 
-        // 5. Re-bucket into tiers, refilling each to its ORIGINAL size so
-        //    the block visibly crosses a boundary as it passes through.
-        const next = cloneBuckets(prev);
-        let cursor = 0;
-        for (const t of TIERS) {
-          const size = prev[t].length;
-          next[t] = merged.slice(cursor, cursor + size).map((e) => e.p);
-          cursor += size;
-        }
-        // `unassigned` is untouched by bulk moves.
+        // 5. Re-bucket by each entry's carried tier: non-selected entries keep
+        //    their original tier, the block is blockTier. Walking in global
+        //    order preserves within-tier ordering. `unassigned` is untouched.
+        const next = emptyBuckets();
+        next.unassigned = [...prev.unassigned];
+        for (const e of merged) next[e.tier].push(e.p);
         return next;
       });
       haptics.success();
@@ -640,17 +644,6 @@ function emptyBuckets(): Record<Zone, RankedPlayer[]> {
     solid: [],
     depth: [],
     bench: [],
-  };
-}
-
-function cloneBuckets(src: Record<Zone, RankedPlayer[]>): Record<Zone, RankedPlayer[]> {
-  return {
-    unassigned: [...src.unassigned],
-    elite: [...src.elite],
-    starter: [...src.starter],
-    solid: [...src.solid],
-    depth: [...src.depth],
-    bench: [...src.bench],
   };
 }
 
