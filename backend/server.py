@@ -3158,6 +3158,11 @@ def trade_card_to_dict(card, players: dict) -> dict:
     # cards stay byte-identical to the pre-likes-you shape.
     if getattr(card, "likes_you", False):
         out["likes_you"] = True
+    # Tier 3 (3.4) — sweetener annotation, only when present. The sweetener
+    # player is already inside the give/receive arrays; this identifies it.
+    sweetener = getattr(card, "sweetener", None)
+    if sweetener:
+        out["sweetener"] = sweetener
     # Agent A8 — expose human-readable reasons only when the flag is on
     # AND the card actually has some. Keeps legacy JSON identical when off.
     reasons = getattr(card, "reasons", None)

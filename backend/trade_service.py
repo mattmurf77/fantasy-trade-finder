@@ -140,6 +140,17 @@ _DEFAULT_CFG: dict[str, float] = {
     "diversity_user_cap":         3.0,   # >= this many OTHER members shown a target → penalize
     "diversity_penalty":          0.6,   # ordering-key multiplier for saturated targets
     "deck_max_per_target":        3.0,   # intra-deck cap: cards per top receive asset
+    # ------------------------------------------------------------------
+    # Tier 3 — trade_optimizer.py (flags: trade_engine.v3, trade.three_team)
+    # ------------------------------------------------------------------
+    "v3_pool_size":              12.0,   # per-side candidate pool for exact enumeration
+    "sweetener_band":             0.15,  # fairness shortfall band eligible for a sweetener
+    "sweetener_max_cards":        2.0,   # max sweetened cards per opponent pair
+    "cycle_edge_min_gain":      100.0,   # min per-transfer marginal gain for a cycle edge
+    "cycle_min_net":            200.0,   # min net gain per team for a 3-team cycle
+    "cycle_max_results":          3.0,   # max 3-team cycles returned per league
+    # Tier 2 (2.3b) — fuzzy mirror matching tolerance (consumed by server)
+    "fuzzy_match_tau":            0.8,   # Jaccard threshold per side
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -882,6 +893,10 @@ class TradeCard:
     # Tier 2 (2.3a) — True when the counterparty already liked the mirror of
     # this trade (flag trade.likes_you). Serialized only when true.
     likes_you: bool = False
+    # Tier 3 (3.4) — when a low-value player was added to balance an
+    # otherwise-unfair trade: {"player_id": str, "side": "give"|"receive"}.
+    # The player is already included in that side's id list. None otherwise.
+    sweetener: Optional[dict] = None
 
 
 @dataclass
@@ -1176,22 +1191,47 @@ class TradeService:
             match_ctx = build_match_context(user_profile, opp_profile, scoring_format, is_dynasty)
 
             if member.has_rankings and member.elo_ratings:
-                cards = self._generate_for_pair_v2(
-                    user_id              = user_id,
-                    shrunk_user_elo      = shrunk_elo,
-                    user_value           = user_value,
-                    user_roster          = user_roster,
-                    opponent             = member,
-                    league_id            = league_id,
-                    seed_value           = _vs,
-                    max_cards            = max_per_opponent,
-                    fairness_threshold   = fairness_threshold,
-                    acquire_positions    = acquire_positions or [],
-                    trade_away_positions = trade_away_positions or [],
-                    pinned_give_players  = pinned_give_players,
-                    confidence           = confidence,
-                    scoring_format       = scoring_format,
-                )
+                if FLAGS.trade_engine_v3:
+                    # Tier 3 — exact top-K package construction within pruned
+                    # candidate pools (trade_optimizer). Same objective as
+                    # _generate_for_pair_v2; adds 2x2/2x3/3x3 shapes, lineup
+                    # feasibility, and sweeteners. Lazy import: the optimizer
+                    # imports this module, so a top-level import would cycle.
+                    from .trade_optimizer import generate_pair_trades_v3
+                    cards = generate_pair_trades_v3(
+                        user_id              = user_id,
+                        shrunk_user_elo      = shrunk_elo,
+                        user_value           = user_value,
+                        user_roster          = user_roster,
+                        opponent             = member,
+                        league_id            = league_id,
+                        seed_elo             = seed_elo,
+                        confidence           = confidence,
+                        max_cards            = max_per_opponent,
+                        fairness_threshold   = fairness_threshold,
+                        scoring_format       = scoring_format,
+                        acquire_positions    = acquire_positions or [],
+                        trade_away_positions = trade_away_positions or [],
+                        pinned_give_players  = pinned_give_players,
+                        players              = self._players,
+                    )
+                else:
+                    cards = self._generate_for_pair_v2(
+                        user_id              = user_id,
+                        shrunk_user_elo      = shrunk_elo,
+                        user_value           = user_value,
+                        user_roster          = user_roster,
+                        opponent             = member,
+                        league_id            = league_id,
+                        seed_value           = _vs,
+                        max_cards            = max_per_opponent,
+                        fairness_threshold   = fairness_threshold,
+                        acquire_positions    = acquire_positions or [],
+                        trade_away_positions = trade_away_positions or [],
+                        pinned_give_players  = pinned_give_players,
+                        confidence           = confidence,
+                        scoring_format       = scoring_format,
+                    )
             else:
                 cards = self._generate_consensus_for_pair(
                     user_id              = user_id,

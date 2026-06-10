@@ -595,6 +595,37 @@ _MODEL_CONFIG_DEFAULTS = [
     ("roster_spot_penalty",      0.05,  "Roster clogger: % penalty per extra roster spot used"),
     ("roster_clogger_penalty",   0.10,  "Roster clogger: ADDITIONAL % penalty per player beyond 2 for 3+ one-way trades"),
     ("roster_clogger_threshold", 3.0,   "Roster clogger: minimum one-side player count that triggers the clogger tag"),
+    # ── Trade engine v2 — Tier 1 (flag trade_engine.v2) ──────────────────
+    ("elo_value_k",             0.0050, "v2: steepness of the Elo→value exponential curve"),
+    ("elo_value_ref",         1500.0,   "v2: Elo that maps to the reference value"),
+    ("elo_value_base",        1000.0,   "v2: value at the reference Elo"),
+    ("package_adj_gamma",        1.5,   "v2: KTC-style package adjustment exponent (lesser assets discounted)"),
+    ("min_side_surplus",       150.0,   "v2: min per-side perceived value gain to surface a trade"),
+    ("mutual_gain_cap",       1500.0,   "v2: normalization ceiling for the harmonic-mean mutual gain"),
+    ("waiver_slot_cost",       425.0,   "v2: value cost per extra player received (waiver-drop proxy)"),
+    ("shrink_pseudocount",       4.0,   "v2: n0 in w=n/(n+n0) confidence shrinkage toward seed"),
+    ("range_base",               0.35,  "v2: value half-width fraction at 0 comparisons (range-overlap fairness)"),
+    # ── Trade engine Tier 2 ──────────────────────────────────────────────
+    ("bench_credit_rate",        0.15,  "2.1: fraction of raw value retained by bench depth in marginal valuation"),
+    ("waiver_baseline_value",  250.0,   "2.1: replacement value when a position is too thin to have one"),
+    ("min_side_surplus_marginal", 60.0, "2.1: per-side surplus gate when marginal valuation is on"),
+    ("outlook_alpha_championship", 1.0, "2.2: now-value weight for championship outlook"),
+    ("outlook_alpha_contender",  0.75,  "2.2: now-value weight for contender outlook"),
+    ("outlook_alpha_not_sure",   0.5,   "2.2: now-value weight for not-sure/unknown outlook"),
+    ("outlook_alpha_rebuilder",  0.25,  "2.2: now-value weight for rebuilder outlook"),
+    ("outlook_alpha_jets",       0.1,   "2.2: now-value weight for jets (extreme rebuild) outlook"),
+    ("fuzzy_match_tau",          0.8,   "2.3b: Jaccard threshold per side for fuzzy mirror matching"),
+    ("diversity_window_days",    7.0,   "A6: lookback window for league impression saturation counts"),
+    ("diversity_user_cap",       3.0,   "A6: other-member count at which a target player is 'saturated'"),
+    ("diversity_penalty",        0.6,   "A6: ordering-key multiplier applied to saturated targets"),
+    ("deck_max_per_target",      3.0,   "A6: intra-deck cap on cards sharing the same top receive asset"),
+    # ── Trade engine Tier 3 (flags trade_engine.v3, trade.three_team) ────
+    ("v3_pool_size",            12.0,   "v3: per-side candidate pool size for exact enumeration"),
+    ("sweetener_band",           0.15,  "v3: fairness shortfall band eligible for a sweetener rescue"),
+    ("sweetener_max_cards",      2.0,   "v3: max sweetened cards per opponent pair"),
+    ("cycle_edge_min_gain",    100.0,   "v3: min per-transfer marginal gain for a 3-team cycle edge"),
+    ("cycle_min_net",          200.0,   "v3: min net gain per team for a 3-team cycle"),
+    ("cycle_max_results",        3.0,   "v3: max 3-team cycles returned per league"),
 ]
 
 

@@ -84,6 +84,9 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.fuzzy_match",      # 2.3b fuzzy mirror matching (database.py)
     "trade.thompson_deck",    # A5 Thompson-sampled deck ordering (server.py)
     "trade.deck_diversity",   # A6 league-wide deck diversification (server.py)
+    # Trade engine Tier 3 (docs/plans/trade-engine-tier3-rebuild.md)
+    "trade_engine.v3",        # exact per-pair package construction + sweeteners
+    "trade.three_team",       # 3-team cycle generation (no client surface yet)
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
