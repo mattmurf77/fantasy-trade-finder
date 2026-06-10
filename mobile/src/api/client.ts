@@ -288,8 +288,16 @@ export async function apiRequest<T = unknown>(
 
           if (!res!.ok) {
             // 401 = session expired. Caller should redirect to sign-in.
+            // FB-45 guard: only clear when the token THIS request sent is
+            // still the stored one — a background revalidateSession() may
+            // have minted a fresh token while this request was in flight,
+            // and a stale 401 must not destroy it.
             if (res!.status === 401) {
-              await clearSessionToken();
+              const sent = headers['X-Session-Token'];
+              const current = await getSessionToken();
+              if (sent && current && sent === current) {
+                await clearSessionToken();
+              }
             }
             const msg = (parsed && (parsed.message || parsed.error)) || `HTTP ${res!.status}`;
             throw new ApiError(res!.status, parsed, msg);

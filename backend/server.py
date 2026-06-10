@@ -3141,6 +3141,10 @@ def trade_card_to_dict(card, players: dict) -> dict:
     out = {
         "trade_id":          card.trade_id,
         "league_id":         card.league_id,
+        # FB-46: clients echo this back on /api/trades/swipe so a card can
+        # be reconstructed (and match detection still works) after a server
+        # restart wipes the in-memory deck.
+        "target_user_id":    card.target_user_id,
         "target_username":   card.target_username,
         "give":              [p(pid) for pid in card.give_player_ids],
         "receive":           [p(pid) for pid in card.receive_player_ids],
@@ -3312,9 +3316,50 @@ def get_trades():
     return jsonify([trade_card_to_dict(c, players_dict) for c in cards])
 
 
+def _reconstruct_swipe_card(trade_service, body: dict, user_id: str, league_id: str):
+    """FB-46 — rebuild a TradeCard from the swipe payload's card context.
+
+    Trade decks live in the per-session TradeService's memory; a Render
+    deploy (or session re-init) wipes them while clients may still be
+    displaying the old deck. When record_decision can't find the trade_id,
+    this reconstructs the card from the give/receive ids the client echoes
+    back, registers it, and lets the normal decision flow proceed — Elo
+    signal, persistence, and mutual-match detection all behave identically.
+
+    Returns the registered TradeCard, or None when the payload doesn't
+    carry enough context (legacy clients) — callers should re-raise then.
+    """
+    give_ids = body.get("give_player_ids") or []
+    recv_ids = body.get("receive_player_ids") or []
+    if not (isinstance(give_ids, list) and isinstance(recv_ids, list)
+            and give_ids and recv_ids):
+        return None
+    card = TradeCard(
+        trade_id           = str(body.get("trade_id")),
+        league_id          = str(body.get("league_id") or league_id),
+        proposing_user_id  = user_id,
+        target_user_id     = str(body.get("target_user_id") or ""),
+        target_username    = str(body.get("target_username") or ""),
+        give_player_ids    = [str(x) for x in give_ids],
+        receive_player_ids = [str(x) for x in recv_ids],
+        mismatch_score     = 0.0,
+        fairness_score     = 0.0,
+        composite_score    = 0.0,
+    )
+    trade_service._trade_cards[card.trade_id] = card
+    return card
+
+
 @app.route("/api/trades/swipe", methods=["POST"])
 def swipe_trade():
-    """POST /api/trades/swipe  {trade_id, decision: 'like'|'pass'}"""
+    """POST /api/trades/swipe  {trade_id, decision: 'like'|'pass'}
+
+    Optional card-context fields (give_player_ids, receive_player_ids,
+    target_user_id, target_username, league_id) make the swipe
+    restart-proof: if the in-memory deck was lost since generation, the
+    card is reconstructed from them instead of failing with
+    "Unknown trade_id" (FB-46).
+    """
     sess = _require_session()
     sess["last_active"] = time.time()
     service       = sess["service"]
@@ -3330,7 +3375,19 @@ def swipe_trade():
         return jsonify({"error": "trade_id and decision required"}), 400
 
     try:
-        card = trade_service.record_decision(trade_id=trade_id, decision=decision)
+        try:
+            card = trade_service.record_decision(trade_id=trade_id, decision=decision)
+        except ValueError as ve:
+            # Unknown trade_id → deck predates a restart/re-init. Recover
+            # from the client-echoed card context when present; otherwise
+            # surface the original error (legacy payloads).
+            if "Unknown trade_id" not in str(ve):
+                raise
+            rebuilt = _reconstruct_swipe_card(trade_service, body, g_user_id, g_league.league_id)
+            if rebuilt is None:
+                raise
+            log.info("swipe: reconstructed card %s from payload context (FB-46)", trade_id)
+            card = trade_service.record_decision(trade_id=trade_id, decision=decision)
 
         if decision == "like":
             service.record_trade_signal(
@@ -4056,13 +4113,20 @@ def get_leagues():
 
 @app.route("/api/portfolio")
 def get_portfolio():
-    """GET /api/portfolio → aggregate exposure across every league this user
-    has synced. Returns {players: [...]} sorted by exposure desc."""
+    """GET /api/portfolio?league_ids=a,b,c → aggregate exposure across this
+    user's leagues. Returns {players: [...]} sorted by exposure desc.
+
+    league_ids (optional, FB-48): comma-separated allow-list. Sleeper mints
+    a new league_id per season, so the DB accumulates last season's instance
+    of each league; clients pass their current-season list so carried-over
+    players aren't double-counted. Omitted → all synced leagues (legacy)."""
     sess = _require_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
     try:
-        players = load_user_cross_league_exposure(g_user_id)
+        raw_ids = (request.args.get("league_ids") or "").strip()
+        league_ids = [x for x in (s.strip() for s in raw_ids.split(",")) if x] or None
+        players = load_user_cross_league_exposure(g_user_id, league_ids=league_ids)
         return jsonify({"players": players})
     except Exception as e:
         log.error("get_portfolio error: %s", e)

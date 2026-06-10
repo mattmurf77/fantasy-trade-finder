@@ -17,6 +17,13 @@ const SL_KEY = 'sleeper_league';
 // populated without waiting for a Sleeper round-trip.
 const SLG_KEY = 'sleeper_leagues';
 
+// FB-45 — revalidation bookkeeping (module-level: internal, not UI state).
+// The throttle keeps quick app-switches from re-running the full league
+// handshake; the in-flight flag prevents overlapping handshakes.
+let _revalidating = false;
+let _lastRevalidateMs = 0;
+const REVALIDATE_MIN_INTERVAL_MS = 60_000;
+
 export interface SavedUser {
   user_id: string;
   username: string;
@@ -51,6 +58,13 @@ interface SessionState {
   invitedBy: string | null;
 
   bootstrap: () => Promise<void>;
+  /** FB-45 — server sessions are in-memory; a deploy/restart orphans the
+   *  stored token while the app still routes to Main. Re-run the league
+   *  handshake to mint a fresh server session on cold launch and on
+   *  foreground resume. No-ops without a persisted user+league (or in
+   *  demo mode); throttled; never throws — offline keeps the cached
+   *  token, which may still be valid. */
+  revalidateSession: () => Promise<void>;
   setUser: (u: SavedUser | null) => Promise<void>;
   setLeague: (lg: SavedLeague | null) => Promise<void>;
   setLeagues: (lgs: LeagueSummary[]) => Promise<void>;
@@ -120,6 +134,30 @@ export const useSession = create<SessionState>((set, get) => ({
       if (Array.isArray(parsed)) leagues = parsed;
     } } catch {}
     set({ user, league, leagues, hasToken: !!tok, activeFormat: fmt });
+  },
+
+  revalidateSession: async () => {
+    const { user, league, isDemo } = get();
+    if (!user || !league || isDemo) return;
+    const now = Date.now();
+    if (_revalidating || now - _lastRevalidateMs < REVALIDATE_MIN_INTERVAL_MS) return;
+    _revalidating = true;
+    try {
+      // initLeagueSession mints a fresh server session + token and stores
+      // it in secure-store, replacing whatever (possibly orphaned) token
+      // the app restored at boot.
+      await initLeagueSession(user, {
+        league_id: league.league_id,
+        name:      league.league_name,
+      });
+      _lastRevalidateMs = Date.now();
+      set({ hasToken: true });
+    } catch {
+      // Offline or backend down — keep current state. The cached token may
+      // still be valid; never sign the user out from a failed revalidate.
+    } finally {
+      _revalidating = false;
+    }
   },
 
   setActiveFormat: (fmt) => {

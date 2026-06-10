@@ -337,9 +337,10 @@ export default function TradesScreen({ navigation }: any) {
   }, [leagueId]);
 
   const swipeMutation = useMutation({
-    mutationFn: ({ tradeId, decision }: { tradeId: string; decision: 'like' | 'pass' }) =>
-      swipeTrade(tradeId, decision),
-    onMutate: ({ tradeId }) => {
+    mutationFn: ({ card, decision }: { card: TradeCard; decision: 'like' | 'pass' }) =>
+      swipeTrade(card, decision),
+    onMutate: ({ card }) => {
+      const tradeId = card.trade_id;
       // Snapshot the index this card was at when the swipe fired. On
       // error we use this to decide whether to rewind the deck — only
       // safe if the user hasn't already swiped past it. Capturing the
@@ -416,7 +417,7 @@ export default function TradesScreen({ navigation }: any) {
 
   function advance(decision: 'like' | 'pass') {
     if (!topCard) return;
-    swipeMutation.mutate({ tradeId: topCard.trade_id, decision });
+    swipeMutation.mutate({ card: topCard, decision });
     setDeckIdx((i) => i + 1);
     if (decision === 'like') {
       haptics.success();

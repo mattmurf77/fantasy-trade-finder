@@ -32,9 +32,13 @@ export default function PortfolioScreen() {
   const leagues = useSession((s) => s.leagues);
   const hasMultiLeague = (leagues?.length || 0) >= 2;
 
+  // FB-48 — scope the aggregation to the current-season league list (the
+  // same set the switcher shows). The DB also holds last season's instance
+  // of each Sleeper league; unscoped, carried-over players double-count.
+  const leagueIds = (leagues || []).map((lg) => lg.league_id);
   const query = useQuery({
-    queryKey: ['portfolio'],
-    queryFn: getPortfolio,
+    queryKey: ['portfolio', leagueIds.join(',')],
+    queryFn: () => getPortfolio(leagueIds),
     enabled: hasMultiLeague,
     staleTime: 60_000,
   });

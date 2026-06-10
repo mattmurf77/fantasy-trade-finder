@@ -74,7 +74,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 | POST | `/api/trades/generate` | Generate trade cards |
 | GET | `/api/trades/status` | Generation job status |
 | GET | `/api/trades` | List current trade cards |
-| POST | `/api/trades/swipe` | Like/pass a trade |
+| POST | `/api/trades/swipe` | Like/pass a trade. Optional card-context fields (`give_player_ids`, `receive_player_ids`, `target_user_id`, `target_username`, `league_id`) let the server reconstruct the card after a restart wiped the in-memory deck (FB-46) |
 | GET | `/api/trades/liked` | Trades the user liked |
 | GET | `/api/trades/matches` | Mutual matches (current league) |
 | GET | `/api/trades/matches/all` | Mutual matches across all leagues |
@@ -164,7 +164,7 @@ Triggered by an external scheduler (Render cron). All POST.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/portfolio` | User's portfolio |
+| GET | `/api/portfolio` | User's cross-league exposure. Optional `?league_ids=a,b,c` (FB-48) scopes to the caller's current-season leagues — Sleeper mints a new league_id per season, so unscoped queries double-count carried-over players |
 | GET | `/u/<username>` | Public profile page |
 | GET | `/api/profile/<username>` | Profile JSON |
 | GET | `/og/tiers/<pos>/<username>.png` | OG image (tiers) |

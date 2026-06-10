@@ -4384,11 +4384,20 @@ def mark_notifications_read(
 # Agent 6 — Cross-league portfolio
 # ---------------------------------------------------------------------------
 
-def load_user_cross_league_exposure(user_id: str) -> list[dict]:
+def load_user_cross_league_exposure(
+    user_id: str,
+    league_ids: list[str] | None = None,
+) -> list[dict]:
     """
     Aggregate this user's player exposure across every league they own a
     roster in.  Joins league_members (to get the user's own rosters) with
     leagues (for human-readable league names) and players (for name/position).
+
+    league_ids (FB-48): when provided, restrict aggregation to these leagues.
+    Sleeper mints a NEW league_id every season, so league_members accumulates
+    last season's instance of each league alongside the current one — without
+    this filter every carried-over player counts twice. Clients pass their
+    current-season league list (the same one the switcher shows).
 
     Returns a list of dicts sorted by exposure count desc:
         [{player_id, name, pos, exposure, total_leagues,
@@ -4408,12 +4417,15 @@ def load_user_cross_league_exposure(user_id: str) -> list[dict]:
     """
     with engine.connect() as conn:
         # Pull every (league_id, roster_data) row where this user owns the team.
-        member_rows = conn.execute(
-            select(
-                league_members_table.c.league_id,
-                league_members_table.c.roster_data,
-            ).where(league_members_table.c.user_id == user_id)
-        ).fetchall()
+        member_q = select(
+            league_members_table.c.league_id,
+            league_members_table.c.roster_data,
+        ).where(league_members_table.c.user_id == user_id)
+        if league_ids:
+            member_q = member_q.where(
+                league_members_table.c.league_id.in_([str(x) for x in league_ids])
+            )
+        member_rows = conn.execute(member_q).fetchall()
 
         if not member_rows:
             return []

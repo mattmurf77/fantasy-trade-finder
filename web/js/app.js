@@ -3814,7 +3814,12 @@
 
       body.innerHTML = `<div class="portfolio-empty">Loading portfolio…</div>`;
       try {
-        const res  = await apiFetch('/api/portfolio');
+        // FB-48: scope to the current-season league list — the backend also
+        // holds last season's instance of each Sleeper league (new league_id
+        // per season), which double-counts carried-over players unscoped.
+        const _lgIds = (_cachedLeagues || []).map(lg => lg.league_id).filter(Boolean);
+        const _lgQs  = _lgIds.length ? `?league_ids=${encodeURIComponent(_lgIds.join(','))}` : '';
+        const res  = await apiFetch(`/api/portfolio${_lgQs}`);
         const data = await res.json();
         const players = (data && data.players) || [];
         if (!players.length) {

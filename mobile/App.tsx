@@ -47,7 +47,14 @@ function App() {
     // the first screen renders without waiting on any network round-trip.
     Promise.all([bootstrap(), loadCachedFlags()])
       .catch(() => { /* both legs are best-effort */ })
-      .finally(() => setBooted(true));
+      .finally(() => {
+        setBooted(true);
+        // FB-45 — detached: mint a fresh server session for the restored
+        // user+league. Server sessions are in-memory and die on every
+        // deploy; without this, a restored token 401s on all calls and
+        // the app looks broken until a fresh sign-in.
+        void useSession.getState().revalidateSession();
+      });
 
     // Detached network legs — fire-and-forget. None of these gate the
     // splash; the app already tolerates their failure via fallbacks.
@@ -104,6 +111,9 @@ function App() {
     const onChange = (next: AppStateStatus) => {
       if (next === 'active') {
         void useFeedback.getState().retrySync();
+        // FB-45 — re-mint the server session on foreground resume (it may
+        // have died with a deploy while backgrounded). Throttled inside.
+        void useSession.getState().revalidateSession();
       }
     };
     const sub = AppState.addEventListener('change', onChange);
