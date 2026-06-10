@@ -3199,6 +3199,48 @@
           ? `<span title="Based on this leaguemate's actual rankings" style="font-size:10px;color:var(--green);margin-left:4px;font-weight:700;">● real</span>`
           : `<span title="Opponent rankings estimated" style="font-size:10px;color:var(--muted);margin-left:4px;">○ est.</span>`;
 
+        // v2 — likes-you: counterparty already liked the mirror of this
+        // trade. Backend serializes the field only when true.
+        const likesYouHTML = card.likes_you === true
+          ? `<div class="likes-you-pill">👀 They're interested</div>`
+          : '';
+
+        // v2 — consensus basis: fair-value idea vs an opponent who hasn't
+        // ranked yet. Muted tag + title tooltip (same pattern as dataTag).
+        const consensusTag = card.basis === 'consensus'
+          ? `<span class="consensus-tag" title="This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.">Fair-value idea</span>`
+          : '';
+
+        // v2 — fairness meter (0–100%), same semantics as mobile's
+        // TradeCard fairness row: fairness_score is a 0–1 ratio. Rendered
+        // only when the backend supplied it (defensive vs cached payloads).
+        const fairnessHTML = typeof card.fairness_score === 'number'
+          ? (() => {
+              const pct = Math.round(Math.min(1, Math.max(0, card.fairness_score)) * 100);
+              return `<div class="trade-fairness">
+                <span class="trade-fairness-label">Fairness</span>
+                <div class="trade-fairness-track"><div class="trade-fairness-fill" style="width:${pct}%"></div></div>
+                <span class="trade-fairness-value">${pct}%</span>
+              </div>`;
+            })()
+          : '';
+
+        // v2 (coming soon) — sweetener: a low-value player the engine
+        // added to balance the deal. The player is already in give/receive;
+        // resolve the name from those arrays and annotate the right side.
+        let giveSweetenerHTML = '', recvSweetenerHTML = '';
+        if (card.sweetener && typeof card.sweetener.player_id === 'string') {
+          const sideArr = card.sweetener.side === 'give' ? card.give
+                        : card.sweetener.side === 'receive' ? card.receive
+                        : null;
+          const sw = (sideArr || []).find(p => (p.id || p.player_id) === card.sweetener.player_id);
+          if (sw) {
+            const line = `<div class="trade-sweetener">+ ${escapeHtml(sw.name)} added to balance the deal</div>`;
+            if (card.sweetener.side === 'give') giveSweetenerHTML = line;
+            else                                recvSweetenerHTML = line;
+          }
+        }
+
         // Agent A8 — human-readable trade explanations (flag-gated).
         // Render only when the flag is on AND the backend supplied reasons.
         let reasonsHTML = '';
@@ -3211,21 +3253,25 @@
         }
 
         return `<div class="trade-card ${cls}" id="tc-${card.trade_id}">
+          ${likesYouHTML}
           <div class="trade-meta">
-            <span>vs <span class="trade-league">${escapeHtml(card.target_username)}</span>${dataTag}</span>
+            <span>vs <span class="trade-league">${escapeHtml(card.target_username)}</span>${dataTag}${consensusTag}</span>
             <span class="score-pill">Match score ${score}</span>
           </div>
           <div class="trade-sides">
             <div class="trade-side give">
               <div class="trade-side-label">You give</div>
               ${givePlayers}
+              ${giveSweetenerHTML}
             </div>
             <div class="trade-arrow">⇄</div>
             <div class="trade-side recv">
               <div class="trade-side-label">You receive</div>
               ${recvPlayers}
+              ${recvSweetenerHTML}
             </div>
           </div>
+          ${fairnessHTML}
           ${reasonsHTML}
           ${actionBtns}
         </div>`;

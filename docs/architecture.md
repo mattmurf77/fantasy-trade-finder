@@ -66,9 +66,10 @@ flowchart LR
 | Module | Lines | Role |
 |---|---|---|
 | `server.py` | ~6.4k | Flask routes, session management, Sleeper passthrough, in-memory ring-buffer debug log (`/api/debug/log?n=100`), typed push dispatcher (`_send_typed_push`) with prefs/dedup/quiet-hours, cron tick handlers |
-| `database.py` | ~4.4k | SQLAlchemy Core schema (20 tables), `_migrate_db()` idempotent ALTERs, `_MODEL_CONFIG_DEFAULTS` seeded via INSERT OR IGNORE |
+| `database.py` | ~5.2k | SQLAlchemy Core schema (22 tables), `_migrate_db()` idempotent ALTERs, `_MODEL_CONFIG_DEFAULTS` seeded via INSERT OR IGNORE; mirror/fuzzy match check (`check_for_match`) |
 | `ranking_service.py` | ~860 | Elo math; pairwise + 3-player decomposition; `tier_bands_for` + `apply_tiers` read from `tier_config.json` |
-| `trade_service.py` | ~1.4k | Cross-user mutual-gain trade discovery; outlook multipliers, positional preference modifiers, package diminishing returns, flag-gated taxes (QB / star / roster) |
+| `trade_service.py` | ~2.1k | Cross-user mutual-gain trade discovery. Two paths: **v2 engine** (flag `trade_engine.v2` — single value space, marginal valuation, two-sided surplus gate, harmonic ranking) and the **legacy scorer** as flag-off fallback (mismatch/fairness weights, package diminishing returns, flag-gated QB/star/clogger taxes). The old `team_outlook_multiplier` and `positional_preference_multiplier` are **deleted**: outlook is now a now/future valuation *blend* (`trade.outlook_blend`, v2-only; legacy ignores outlook), and positional preferences are a *hard filter* on candidate packages in both paths |
+| `trade_optimizer.py` | new | Tier 3 engine module (flag `trade_engine.v3`): exact per-pair package search + sweetener pass + 3-team cycle clearing (`trade.three_team`). Flag-selectable — off falls back to v2, then legacy |
 | `trade_narrative.py` | ~100 | Deterministic template-based rationale strings for trade cards. No LLM. Used by `trade_service.generate_trades()` to fill `TradeCard.narrative` |
 | `smart_matchup_generator.py` | ~530 | Claude-assisted matchup picker + algorithmic fallback. Includes `community_trio_signal` + `find_qc_trio` for QC checks |
 | `data_loader.py` | ~280 | Pulls DynastyProcess CSV; maps consensus values → seed Elo (KTC curve) |
@@ -80,7 +81,7 @@ flowchart LR
 ### Backend support files
 
 - `backend/tier_config.json` — **single source of truth for Elo tier bands**, keyed by `(scoring_format, position, tier)` with `[min, max]` ranges. Read by `ranking_service.tier_bands_for` + `apply_tiers` on the server; served to the web SPA via `GET /api/tier-config` so the frontend buckets players the same way. Replaces the old `UNIFORM_TIER_ELO_BANDS` / `QB_TE_1QB_TIER_ELO_BANDS` class constants.
-- `backend/scripts/` — one-off maintenance scripts (e.g. `rescale_pick_values.py`).
+- `backend/scripts/` — one-off maintenance + offline validation scripts: `rescale_pick_values.py`, `replay_trade_decisions.py` (legacy-vs-v2 replay of historical decisions), `calibrate_elo_value.py` (Spearman check of `elo_to_value` vs the legacy `dynasty_value` curve).
 - `backend/tests/` — pytest suite for non-trivial pure logic: `test_pick_value_scaling.py`, `test_roster_profile.py`, `test_trade_narrative.py`.
 
 ### Clients
@@ -108,23 +109,25 @@ Both are exercised in `*-workspace/` sibling folders (throwaway eval output).
 6. `record_event('trio_swipe', …)` in `wrapped_collector.py` writes `user_events` and bumps `users.last_active_at` / `last_rank_at` / `events_count`.
 7. Returns updated progress; client repaints the bar.
 
-## Request lifecycle (trade card)
+## Request lifecycle (trade card — v2 engine, flag `trade_engine.v2`)
 
-1. Client `POST /api/trades/generate` for a league.
-2. `trade_service.TradeService` enumerates candidates per opponent (up to `max_candidates=500`), scores them with:
-   - Mismatch (user-Elo gap) and fairness (consensus-value gap), weighted `0.70 / 0.30`.
-   - Outlook multiplier (`team_outlook_multiplier`).
-   - Positional preference multiplier (`positional_preference_multiplier`, capped at `pos_multiplier_cap=2.00`).
-   - Package diminishing returns (`package_value`).
-   - Flag-gated taxes: `qb_tax_adjustment`, `star_tax_adjustment`, `roster_clogger_adjustment`.
-3. Filters by `min_mismatch_score`, `max_value_ratio`, `trade_elo_gap_max`.
-4. For each surviving card, `trade_narrative.build_narrative()` fills `TradeCard.narrative` from signals already computed.
-5. Cards returned via `GET /api/trades`.
+1. Client `POST /api/trades/generate`; `server._run_trade_job` runs in a daemon thread, loads real league-mate rankings (`member_rankings`), the user's per-player comparison counts (`service.comparison_counts()` — Tier 1 confidence threading), outlook + positional prefs.
+2. **Value space:** the user's Elos are shrunk toward consensus seed by comparison count (`w = n/(n+shrink_pseudocount)`), then mapped to dynasty-value units via `elo_to_value` (exponential). Opponents with no real rankings are NOT scored in divergence space (their Elos would be fabricated noise) — they get **consensus-basis** cards instead (`basis="consensus"`, fairness × tier multiplier only).
+3. **Marginal valuation** (`trade.marginal_value`): each asset is valued over the receiving roster's per-position replacement level, plus a `bench_credit_rate` credit; **outlook blend** (`trade.outlook_blend`) tilts the user's values now↔future by age curve and α per outlook. Positional preferences act as a hard filter on packages.
+4. **Mutual-gain gate + harmonic ranking:** packages are valued KTC-style in *each side's own* value space (`package_value_v2`), the side receiving more players pays `waiver_slot_cost` per extra slot, and a trade surfaces only when BOTH sides' surpluses clear `min_side_surplus(_marginal)`. Candidates rank by the harmonic mean of the two surpluses blended with range-overlap consensus fairness, kept in a bounded top-K heap. No QB/star/clogger taxes in this path.
+5. **Likes-you injection** (`trade.likes_you`): cards whose mirror a league-mate already liked are flagged/synthesized and pinned to the top (cap 3).
+6. **Thompson ordering** (`trade.thompson_deck`): per-shape Beta(1+likes, 2+passes) samples reorder the deck within a bounded (0.5, 1.5) multiplier; **diversification** (`trade.deck_diversity`) penalizes league-saturated targets and caps cards per target.
+7. **Impressions logging:** the final served deck is written to `trade_impressions` (one row per card, true positions), once per job.
+8. `trade_narrative.build_narrative()` fills `TradeCard.narrative`; cards served via `GET /api/trades` / job snapshots.
+
+**Tier 3** (`trade_engine.v3`, flag-selectable): `backend/trade_optimizer.py` replaces step 4's enumeration with an exact per-pair package search, adds a sweetener pass for near-miss-fair trades, and (behind `trade.three_team`) 3-team cycle clearing. Off → v2.
+
+**Legacy path** (`trade_engine.v2` off — kill-switch fallback, byte-for-byte unchanged): mismatch (user-Elo gap) and fairness weighted `0.70 / 0.30`, fixed package diminishing weights (`package_value`), flag-gated QB/star/clogger taxes, filters by `min_mismatch_score`, `max_value_ratio`, `trade_elo_gap_max`. Outlook is ignored; positional preferences are the same hard filter.
 
 ## Request lifecycle (trade match)
 
 1. Either user `POST /api/trades/swipe` with `like`.
-2. `server.py` checks for a mirrored existing like from the other side.
+2. `server.py` checks for a mirrored existing like from the other side (`database.check_for_match`). With flag `trade.fuzzy_match`, a near-mirror also matches: Jaccard ≥ `fuzzy_match_tau` (0.8) per side, and only low-value players (`search_rank ≥ 120`) may differ.
 3. If found: insert `trade_matches` row (status `pending`), insert two `notifications` rows, dispatch typed push for both users.
 4. Either user `POST /api/trades/matches/<id>/disposition` with `accept` or `decline`. Updates `user_a_decision` / `user_b_decision`; rolls `status` → `accepted` / `declined` once both have decided (or any user declines).
 5. Counterparties receive `trade_accepted` / `trade_declined` notifications + push.

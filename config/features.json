@@ -29,5 +29,17 @@
   "trade_math.qb_tax":               false,
   "trade_math.star_tax":             true,
   "trade_math.roster_clogger":       false,
-  "trade_math.human_explanations":   true
+  "trade_math.human_explanations":   true,
+
+  "trade_engine.v2":                 true,
+
+  "trade.marginal_value":            true,
+  "trade.outlook_blend":             true,
+  "trade.likes_you":                 true,
+  "trade.fuzzy_match":               true,
+  "trade.thompson_deck":             true,
+  "trade.deck_diversity":            true,
+
+  "trade_engine.v3":                 true,
+  "trade.three_team":                false
 }

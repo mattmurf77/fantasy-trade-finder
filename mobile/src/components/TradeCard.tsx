@@ -28,10 +28,24 @@ function TradeCardComp({
   acting,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
-  // `fairness` may be missing — backend doesn't always expose fairness_score.
-  // Hide the row entirely in that case rather than rendering a bogus 0%.
+  // `fairness` is always serialized by the v2 backend (fairness_score),
+  // so the meter renders on every fresh card. Keep the guard so legacy /
+  // adapter-shaped cards without it hide the row instead of showing a
+  // bogus 0%.
   const hasFairness = typeof data.fairness === 'number';
   const fairPct = hasFairness ? Math.round((data.fairness as number) * 100) : 0;
+  // v2: consensus cards are fair-value ideas vs an opponent who hasn't
+  // ranked yet (no real disagreement signal behind them).
+  const isConsensus = data.basis === 'consensus';
+  // v2: the counterparty already liked the mirror of this trade.
+  const likesYou = data.likesYou === true;
+  // v2 sweetener — resolve the flagged player from whichever side it's
+  // on. Resolution failure (id not in the arrays) just hides the line.
+  const sweetenerSide = data.sweetener?.side;
+  const sweetenerPlayer = data.sweetener
+    ? (sweetenerSide === 'give' ? data.give_players : data.receive_players)
+        ?.find((p) => p.id === data.sweetener!.playerId)
+    : undefined;
   // Defensive: backend or normalizer should always populate these, but
   // never let a missing array crash the card. Empty arrays just render
   // an empty side, which is recoverable visually.
@@ -52,6 +66,15 @@ function TradeCardComp({
 
   return (
     <View style={styles.card}>
+      {/* Likes-you pill — counterparty already liked the mirror of this
+          trade, so lead with it. Server pins these cards to the top of
+          the snapshot; this badge explains why. */}
+      {likesYou && (
+        <View style={styles.likesYouPill}>
+          <Text style={styles.likesYouText}>👀 They're interested</Text>
+        </View>
+      )}
+
       <View style={styles.header}>
         <View>
           <Text style={styles.headerLabel}>Trade with</Text>
@@ -74,6 +97,18 @@ function TradeCardComp({
         </View>
       </View>
 
+      {/* Consensus basis — subtle label so users know this card isn't
+          built on real ranking disagreement. No tooltip pattern in the
+          app, so the hint renders inline as a muted sub-line. */}
+      {isConsensus && (
+        <View style={styles.consensusNote}>
+          <Text style={styles.consensusLabel}>Fair-value idea</Text>
+          <Text style={styles.consensusHint}>
+            This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.
+          </Text>
+        </View>
+      )}
+
       {/* Match strength — gradient bar replacing the prior accent pill. */}
       <StrengthBar value={matchPct} label="Match strength" />
 
@@ -85,6 +120,11 @@ function TradeCardComp({
               <PlayerCard key={p.id} player={p} compact />
             ))}
           </View>
+          {sweetenerSide === 'receive' && sweetenerPlayer && (
+            <Text style={styles.sweetenerLine}>
+              + {sweetenerPlayer.name} added to balance the deal
+            </Text>
+          )}
         </View>
         <Text style={styles.swap}>↔</Text>
         <View style={styles.side}>
@@ -94,6 +134,11 @@ function TradeCardComp({
               <PlayerCard key={p.id} player={p} compact />
             ))}
           </View>
+          {sweetenerSide === 'give' && sweetenerPlayer && (
+            <Text style={styles.sweetenerLine}>
+              + {sweetenerPlayer.name} added to balance the deal
+            </Text>
+          )}
         </View>
       </View>
 
@@ -174,6 +219,44 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   headerName: { color: colors.text, fontSize: fontSize.base, fontWeight: '800' },
+  // Likes-you pill: prominent accent-tinted banner pinned to the top of
+  // the card. Same translucent-accent treatment as the web's .score-pill.
+  likesYouPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(79,124,255,0.15)',
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: radius.pill,
+    paddingVertical: 4,
+    paddingHorizontal: spacing.md,
+  },
+  likesYouText: {
+    color: colors.accent,
+    fontSize: fontSize.xs,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  // Consensus-basis note: deliberately muted — it's a caveat, not a sell.
+  consensusNote: { gap: 2 },
+  consensusLabel: {
+    color: colors.muted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  consensusHint: {
+    color: colors.muted,
+    fontSize: fontSize.xs,
+    lineHeight: 16,
+  },
+  // Sweetener callout under the side that contains the balancing player.
+  sweetenerLine: {
+    color: colors.muted,
+    fontSize: fontSize.xs,
+    fontStyle: 'italic',
+    lineHeight: 16,
+  },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',

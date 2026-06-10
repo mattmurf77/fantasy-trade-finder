@@ -50,6 +50,35 @@ Port conflicts: macOS AirPlay Receiver uses :5000. Free it: `lsof -ti:5000 | xar
 
 ---
 
+## Trade engine flags + kill switch
+
+The trade engine is selected by flags in `config/features.json` (reload via `POST /api/feature-flags/reload`, or override with `FTF_FLAGS`):
+
+- `trade_engine.v3` — Tier 3 optimizer (`backend/trade_optimizer.py`)
+- `trade_engine.v2` — Tier 1/2 scorer in `backend/trade_service.py`
+- Tier 2 features toggle independently within v2: `trade.marginal_value`, `trade.outlook_blend`, `trade.likes_you`, `trade.fuzzy_match`, `trade.thompson_deck`, `trade.deck_diversity`
+- `trade.three_team` — 3-team cycle cards (Tier 3)
+
+**Kill-switch order** (bad cards / latency / errors after a trade-engine change):
+
+1. `trade_engine.v3: false` → falls back to the v2 engine.
+2. Still bad: `trade_engine.v2: false` → falls back to the legacy scorer (kept byte-for-byte unchanged).
+
+No data migration either way; users just get the other engine's decks on next generate. See [ADR-002](adr/adr-002-trade-engine-v2-v3-rebuild.md) and [config-reference.md](config-reference.md).
+
+**Offline validation scripts** (read-only, never write to the DB — run from repo root):
+
+```bash
+python3 -m backend.scripts.replay_trade_decisions   # regenerate historical decks legacy vs v2;
+                                                    # reports precision@5, like recall, match@5,
+                                                    # multi-player share, gen time
+python3 -m backend.scripts.calibrate_elo_value      # Spearman check of elo_to_value(seed) vs
+                                                    # dynasty_value(search_rank); PASS at ≥ 0.98,
+                                                    # plus a grid/level-fit for elo_value_k
+```
+
+---
+
 ## Runtime tuning
 
 `model_config` table is editable live:

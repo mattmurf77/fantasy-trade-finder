@@ -384,9 +384,17 @@ export default function TradesScreen({ navigation }: any) {
   // is exactly that signal: opp_surplus + user_surplus across the swap.
   // When ON, the backend already sorts by composite_score (fairness +
   // mismatch + tier priority) and we leave that order alone.
+  // Likes-you cards are server-pinned to the top of the snapshot (the
+  // counterparty already liked the mirror trade) — never let the client
+  // re-sort bury them. Keep them first in server order; only the rest
+  // get the mismatch re-sort.
   const sortedDeck = useMemo(() => {
     if (fairnessOn) return deck;
-    return [...deck].sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
+    const pinned = deck.filter((c) => c.likesYou);
+    const rest = deck
+      .filter((c) => !c.likesYou)
+      .sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
+    return [...pinned, ...rest];
   }, [deck, fairnessOn]);
 
   const topCard = sortedDeck[deckIdx];

@@ -21,20 +21,33 @@ Domain terms used throughout the codebase. Add a term when new jargon appears.
 
 **Tier band** — Bucket of similar Elo ratings rendered as a labeled, colored badge (Elite gold / Starter green / Solid blue / Depth purple / Bench gray). Cutoffs in client-side `tierBands.ts` and equivalents — keep in sync.
 
-**Team outlook** — User's strategic mode for a league (`league_preferences.team_outlook`):
-- `championship` — boost vets (1.50×), penalize youth
-- `contender` — moderate vet boost (1.25×)
-- `rebuilder` — mirror of championship — boost youth
-- `jets` — extreme youth-only; heavy 0.30× penalty for age ≥`jets_age` (25)
-- `not_sure` — neutral
-
-Age thresholds (`model_config`): `vet_age=27`, `youth_age=26`, `jets_age=25`. Multipliers: `boost_strong=1.50`, `boost_moderate=1.25`, `neutral=1.00`, `penalty_soft=0.75`, `penalty_mod=0.60`, `penalty_heavy=0.30`.
+**Team outlook** — User's strategic mode for a league (`league_preferences.team_outlook`): `championship`, `contender`, `rebuilder`, `jets`, `not_sure`. Since the trade-engine v2 rebuild, outlook feeds the **outlook blend** (see below) — the old post-hoc score multiplier (`team_outlook_multiplier`) is deleted, and the legacy engine path ignores outlook entirely. The historic multiplier keys (`boost_strong`, `vet_age`, …) still exist in `model_config` but are unused.
 
 **Package weights / diminishing returns** — Multi-player trade sides apply diminishing weights so "5 bench guys for an elite WR" doesn't look equal. From `model_config`: `package_weight_1..5 = 1.00, 0.75, 0.55, 0.40, 0.28`.
 
-**Positional preference multipliers** — Bonuses/penalties for trades that match the user's `acquire_positions` / `trade_away_positions`. `pos_acquire_bonus=0.20`, `pos_tradeaway_bonus=0.15`, `pos_conflict_penalty=0.15`, capped at `pos_multiplier_cap=2.00`.
+**Positional preferences** — The user's `acquire_positions` / `trade_away_positions` for a league. Since the v2 rebuild these are a **hard filter** on candidate packages (a card must receive an acquire position / give a trade-away position when set) in both engine paths; the old soft multipliers (`pos_acquire_bonus` etc.) are deleted from code though their `model_config` keys remain.
 
-**Trade scoring** — Composite of mismatch and fairness components. `mismatch_weight=0.70`, `fairness_weight=0.30`. Cards below `min_mismatch_score=40` or above `max_value_ratio=2.5` are filtered. `max_candidates=500` per opponent before sort. Cross-side Elo gap > `trade_elo_gap_max=250` rejects the trade.
+**Value space / `elo_to_value`** — The v2 engine does ALL trade math in dynasty-value units, not Elo. `elo_to_value(elo) = elo_value_base · exp(elo_value_k · (elo − elo_value_ref))` maps each side's (shrunk) Elos onto the same scale as consensus KTC-style values, so surpluses and fairness are commensurable. `backend/trade_service.py:235`.
+
+**Marginal value (over-replacement)** — Tier 2 valuation (`trade.marginal_value`): a player's worth to a *specific roster* is `max(0, value − replacement_level(position))` plus a `bench_credit_rate` (15%) credit, where the replacement level is that roster's best non-starter at the position (waiver baseline if the position is thin). Makes clogger packages collapse and need-fillers keep value.
+
+**Now/future value & outlook blend** — Tier 2 (`trade.outlook_blend`): every player has a win-now and a long-horizon age multiplier (per-position curves `_AGE_NOW_CURVE` / `_AGE_FUTURE_CURVE`); the user's outlook sets α (`outlook_alpha_*`, championship 1.00 → jets 0.10) and the value used is `α·now + (1−α)·future`. An *input* to surplus math, so it composes with the fairness gate — unlike the deleted post-hoc multiplier.
+
+**Range-overlap fairness** — v2 fairness gate: each package's consensus value gets an uncertainty half-width from comparison counts (`range_base/√(1+n)`, value-weighted); a trade passes when the two sides' value intervals overlap OR the point ratio clears `fairness_threshold`. High-uncertainty players (rookies) pass more easily. The serialized `fairness_score` stays the point ratio (0–1).
+
+**Consensus-basis card** — v2 card generated for an opponent with NO real rankings (`basis="consensus"`): divergence math against fabricated Elos is noise, so the engine surfaces simple fair-by-consensus, roster-fit-oriented ideas instead. Clients label them "Fair-value idea". Divergence cards carry `basis="divergence"`.
+
+**Likes-you card** — Tier 2 (`trade.likes_you`): a card whose mirror a league-mate already liked in the last 90 days (and which is still roster-valid). Flagged `likes_you: true`, boosted/pinned to the top of the deck (max 3 injections), rendered with the "👀 They're interested" pill.
+
+**Sweetener** — Tier 3 (`trade_engine.v3`): a low-value asset added to the under-paying side of a *near-miss-fair* trade to bring it into the fairness band. Serialized as `sweetener: {player_id, side}` (the player is already in give/receive); clients render "+ {name} added to balance the deal".
+
+**Thompson deck ordering** — Tier 2 amendment A5 (`trade.thompson_deck`): instead of a learned acceptance model (no training data yet — ~20 labels), the deck order is exploration-randomized by drawing one Beta(1+likes, 2+passes) sample per card *shape* (`1x1`, `2x1`, …) from the user's own decision history and multiplying ordering keys by a bounded (0.5, 1.5) factor. Deterministically seeded per job.
+
+**Deck diversification** — Tier 2 amendment A6 (`trade.deck_diversity`): a player can only be traded once, so one stud saturating every member's deck caps total possible matches. Cards whose top receive asset appeared in ≥ `diversity_user_cap` other members' recent decks get a `diversity_penalty` ordering multiplier, and the served deck keeps ≤ `deck_max_per_target` cards per target (never below 5 cards, never dropping likes-you cards).
+
+**Three-team cycle** — Tier 3 (`trade.three_team`): a kidney-exchange-style cycle A→B→C→A where every team's net marginal surplus clears a bar (`cycle_min_net`); found by clearing a directed gain graph over the league. A distinct card type; all three members must agree.
+
+**Trade scoring** — Composite of mismatch and fairness components, weighted `mismatch_weight=0.70` / `fairness_weight=0.30` (both paths). Legacy path: cards below `min_mismatch_score=40` or above `max_value_ratio=2.5` are filtered; `max_candidates=30` per opponent before sort. v2 path: the mismatch term is the capped harmonic mean of the two sides' surpluses (see *Value space*). Both paths reject cross-side Elo gap > `trade_elo_gap_max=250`.
 
 **Trade-math adjustments (flag-gated)** — Optional penalties enabled via feature flags:
 - `qb_tax_rate=0.075` — penalty for receiving a premium QB without giving one back

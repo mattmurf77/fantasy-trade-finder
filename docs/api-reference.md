@@ -80,6 +80,38 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 | GET | `/api/trades/matches/all` | Mutual matches across all leagues |
 | POST | `/api/trades/matches/<match_id>/disposition` | Accept/decline a match |
 
+### Trade card object
+
+Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/trades/liked` (serialized by `trade_card_to_dict` in `backend/server.py`):
+
+```
+{
+  "trade_id":        "8-char id",
+  "league_id":       "...",
+  "target_username": "...",
+  "give":            [ player, ... ],          // player objects, user's give side
+  "receive":         [ player, ... ],
+  "mismatch_score":  float,                    // v2: harmonic mean of the two sides' surpluses
+  "fairness_score":  float,                    // 0–1, ALWAYS serialized; clients render as a percent meter
+  "composite_score": float,
+  "basis":           "divergence" | "consensus",  // consensus = opponent has no real rankings
+  "decision":        "like" | "pass" | null,
+  "expires_at":      "...",
+  "likes_you":       true,                     // OPTIONAL — present only when true (counterparty
+                                               // pre-liked the mirror trade); absent otherwise
+  "sweetener":       { "player_id": "...",     // OPTIONAL — Tier 3 (trade_engine.v3): low-value
+                       "side": "give"|"receive" }, // asset already in give/receive, added to balance
+  "reasons":         [ "...", ... ],           // optional, flag trade_math.human_explanations
+  "narrative":       "...",                    // optional templated rationale
+  "match_context":   { ... }                   // optional roster-fit context
+}
+```
+
+Notes:
+- `fairness_score` is true consensus fairness in `[0, 1]` (lesser/greater package-value ratio). Mobile and web both multiply by 100 for the fairness meter — see [cross-client-invariants.md](cross-client-invariants.md).
+- `basis: "consensus"` cards are fair-by-consensus ideas generated for opponents with no rankings; clients show the "Fair-value idea" label.
+- The job snapshot additionally sets `real_opponent` (bool) and `outlook` per card.
+
 ## League
 
 | Method | Path | Purpose |

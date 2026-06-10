@@ -399,6 +399,17 @@ class RankingService:
             "percent":           pct,
         }
 
+    def comparison_counts(self) -> dict[str, int]:
+        """Per-player count of unique opponents faced in ranking swipes.
+
+        Consumed by the trade layer (Tier 1 confidence shrinkage) to shrink
+        under-sampled personal Elo toward consensus. Pure read: delegates to
+        the memoized _compute_stats over the full pool — no ranking math is
+        touched and repeat calls at the same _version are O(pool).
+        """
+        stats = self._compute_stats(list(self._players.values()))
+        return {pid: len(s["compared"]) for pid, s in stats.items()}
+
     def replay_from_db(self, swipes: list[dict]) -> int:
         """
         Replay persisted swipe decisions into the in-memory ELO engine.

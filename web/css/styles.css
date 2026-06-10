@@ -855,6 +855,56 @@
       font-weight: 600;
     }
 
+    /* v2 — counterparty already liked the mirror of this trade. Same
+       translucent-accent treatment as .score-pill, but bordered +
+       self-standing so it reads as the card's headline. */
+    .likes-you-pill {
+      align-self: flex-start;
+      background: rgba(79,124,255,0.15);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      padding: 4px 12px;
+      border-radius: 99px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    /* v2 — consensus-basis tag: muted caveat, hint text via title attr. */
+    .consensus-tag {
+      font-size: 10px;
+      color: var(--muted);
+      margin-left: 6px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      cursor: help;
+    }
+
+    /* v2 — fairness meter (0–100%), mirrors mobile TradeCard fairness row. */
+    .trade-fairness {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+    }
+    .trade-fairness-label { color: var(--muted); font-weight: 700; width: 62px; }
+    .trade-fairness-track {
+      flex: 1;
+      height: 6px;
+      background: var(--border);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .trade-fairness-fill { height: 100%; background: var(--green); }
+    .trade-fairness-value { color: var(--text); font-weight: 700; width: 40px; text-align: right; }
+
+    /* v2 — sweetener callout under the side holding the balancing player. */
+    .trade-sweetener {
+      font-size: 12px;
+      color: var(--muted);
+      font-style: italic;
+    }
+
     .trade-sides {
       display: flex;
       align-items: center;

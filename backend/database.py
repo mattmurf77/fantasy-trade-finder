@@ -192,6 +192,37 @@ Index(
 )
 
 
+# Every trade card SHOWN to a user (one row per card per completed generation
+# job) — the implicit-negative side of the acceptance-model training data
+# (Tier 2 work item 2.4). Decisions live in trade_decisions; joining the two
+# on (user_id, league_id, give/receive sets) labels each impression.
+# Written by log_trade_impressions(), called from server._run_trade_job when
+# a finished deck snapshot is stored (once per job, not per poll).
+trade_impressions_table = Table("trade_impressions", metadata,
+    Column("id",                 Integer, primary_key=True, autoincrement=True),
+    Column("user_id",            String,  nullable=False),  # user the deck was generated for
+    Column("league_id",          String,  nullable=False),
+    Column("target_user_id",     String),                   # counterparty on the card
+    Column("give_player_ids",    Text,    nullable=False),  # JSON array (user's give side)
+    Column("receive_player_ids", Text,    nullable=False),  # JSON array (user's receive side)
+    Column("basis",              String),                   # 'divergence' | 'consensus'
+    Column("likes_you",          Integer),                  # 0|1 — counterparty pre-liked mirror
+    Column("mismatch_score",     Float),
+    Column("fairness_score",     Float),
+    Column("composite_score",    Float),
+    Column("position_in_deck",   Integer),                  # 0 = top card
+    Column("shown_at",           String),                   # ISO timestamp
+)
+
+# Training queries scan one user-league at a time; new table so
+# metadata.create_all() creates table + index together on both dialects.
+Index(
+    "ix_trade_impressions_user_league",
+    trade_impressions_table.c.user_id,
+    trade_impressions_table.c.league_id,
+)
+
+
 # ---------------------------------------------------------------------------
 # Canonical player reference table — synced from Sleeper bulk payload.
 # Contains all skill-position players (QB/RB/WR/TE) that are Active or
@@ -564,6 +595,39 @@ _MODEL_CONFIG_DEFAULTS = [
     ("roster_spot_penalty",      0.05,  "Roster clogger: % penalty per extra roster spot used"),
     ("roster_clogger_penalty",   0.10,  "Roster clogger: ADDITIONAL % penalty per player beyond 2 for 3+ one-way trades"),
     ("roster_clogger_threshold", 3.0,   "Roster clogger: minimum one-side player count that triggers the clogger tag"),
+    # ── Trade engine v2 — Tier 1 (flag trade_engine.v2) ──────────────────
+    ("elo_value_k",             0.0050, "v2: steepness of the Elo→value exponential curve"),
+    ("elo_value_ref",         1500.0,   "v2: Elo that maps to the reference value"),
+    ("elo_value_base",        1000.0,   "v2: value at the reference Elo"),
+    ("package_adj_gamma",        1.5,   "v2: KTC-style package adjustment exponent (lesser assets discounted)"),
+    ("min_side_surplus",       150.0,   "v2: min per-side perceived value gain to surface a trade"),
+    ("mutual_gain_cap",       1500.0,   "v2: normalization ceiling for the harmonic-mean mutual gain"),
+    ("waiver_slot_cost",       425.0,   "v2: value cost per extra player received (waiver-drop proxy)"),
+    ("shrink_pseudocount",       4.0,   "v2: n0 in w=n/(n+n0) confidence shrinkage toward seed"),
+    ("range_base",               0.35,  "v2: value half-width fraction at 0 comparisons (range-overlap fairness)"),
+    # ── Trade engine Tier 2 ──────────────────────────────────────────────
+    ("bench_credit_rate",        0.15,  "2.1: fraction of raw value retained by bench depth in marginal valuation"),
+    ("waiver_baseline_value",  250.0,   "2.1: replacement value when a position is too thin to have one"),
+    ("min_side_surplus_marginal", 60.0, "2.1: per-side surplus gate when marginal valuation is on"),
+    ("outlook_alpha_championship", 1.0, "2.2: now-value weight for championship outlook"),
+    ("outlook_alpha_contender",  0.75,  "2.2: now-value weight for contender outlook"),
+    ("outlook_alpha_not_sure",   0.5,   "2.2: now-value weight for not-sure/unknown outlook"),
+    ("outlook_alpha_rebuilder",  0.25,  "2.2: now-value weight for rebuilder outlook"),
+    ("outlook_alpha_jets",       0.1,   "2.2: now-value weight for jets (extreme rebuild) outlook"),
+    ("fuzzy_match_tau",          0.8,   "2.3b: Jaccard threshold per side for fuzzy mirror matching"),
+    ("diversity_window_days",    7.0,   "A6: lookback window for league impression saturation counts"),
+    ("diversity_user_cap",       3.0,   "A6: other-member count at which a target player is 'saturated'"),
+    ("diversity_penalty",        0.6,   "A6: ordering-key multiplier applied to saturated targets"),
+    ("deck_max_per_target",      3.0,   "A6: intra-deck cap on cards sharing the same top receive asset"),
+    # ── Trade engine Tier 3 (flags trade_engine.v3, trade.three_team) ────
+    ("v3_pool_size",            12.0,   "v3: per-side candidate pool size for exact enumeration"),
+    ("sweetener_band",           0.15,  "v3: fairness shortfall band eligible for a sweetener rescue"),
+    ("sweetener_max_cards",      2.0,   "v3: max sweetened cards per opponent pair"),
+    ("cycle_edge_min_gain",    100.0,   "v3: min per-transfer marginal gain for a 3-team cycle edge"),
+    ("cycle_min_net",          200.0,   "v3: min net gain per team for a 3-team cycle"),
+    ("cycle_max_results",        3.0,   "v3: max 3-team cycles returned per league"),
+    ("v3_diversity_max_overlap", 0.4,   "v3: max asset Jaccard between two cards from one opponent pair"),
+    ("consensus_score_scale",    0.3,   "v2: composite multiplier keeping consensus fallback cards below divergence finds"),
 ]
 
 
@@ -1973,6 +2037,195 @@ def load_trade_decisions(
     return result
 
 
+def load_recent_league_likes(
+    league_id: str,
+    exclude_user_id: str,
+    days: int = 90,
+) -> list[dict]:
+    """
+    All 'like' decisions by league-mates (everyone EXCEPT exclude_user_id) in
+    this league within the last `days` days, newest first. Feeds the
+    likes-you queue (Tier 2 work item 2.3a): each row is a trade the
+    counterparty already wants, from THEIR perspective.
+
+    Returns dicts: {user_id, give_player_ids: list, receive_player_ids: list,
+    created_at}. Rows with undecodable JSON are skipped.
+    """
+    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None)
+              - timedelta(days=days)).isoformat()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                trade_decisions_table.c.user_id,
+                trade_decisions_table.c.give_player_ids,
+                trade_decisions_table.c.receive_player_ids,
+                trade_decisions_table.c.created_at,
+            ).where(
+                and_(
+                    trade_decisions_table.c.league_id  == league_id,
+                    trade_decisions_table.c.user_id    != exclude_user_id,
+                    trade_decisions_table.c.decision   == "like",
+                    trade_decisions_table.c.created_at >= cutoff,
+                )
+            ).order_by(trade_decisions_table.c.id.desc())
+        ).fetchall()
+
+    result = []
+    for r in rows:
+        try:
+            give    = json.loads(r.give_player_ids)
+            receive = json.loads(r.receive_player_ids)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        result.append({
+            "user_id":            r.user_id,
+            "give_player_ids":    give,
+            "receive_player_ids": receive,
+            "created_at":         r.created_at,
+        })
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Trade impressions (Tier 2 work item 2.4 — training-data pipeline)
+# ---------------------------------------------------------------------------
+
+def log_trade_impressions(user_id: str, league_id: str, cards: list) -> None:
+    """
+    Batch-insert one trade_impressions row per card in deck order.
+
+    `cards` may be TradeCard dataclass instances or plain dicts carrying the
+    same field names (give_player_ids/receive_player_ids as lists). Called by
+    server._run_trade_job once per completed generation job. Best-effort:
+    any failure is swallowed here (and again at the call site) — impression
+    logging must never break trade generation.
+    """
+    if not cards:
+        return
+
+    def _f(card, name, default=None):
+        if isinstance(card, dict):
+            return card.get(name, default)
+        return getattr(card, name, default)
+
+    shown_at = datetime.now(timezone.utc).isoformat()
+    rows = []
+    try:
+        for pos, card in enumerate(cards):
+            give = _f(card, "give_player_ids") or []
+            recv = _f(card, "receive_player_ids") or []
+            rows.append({
+                "user_id":            user_id,
+                "league_id":          league_id,
+                "target_user_id":     _f(card, "target_user_id"),
+                "give_player_ids":    json.dumps(list(give)),
+                "receive_player_ids": json.dumps(list(recv)),
+                "basis":              _f(card, "basis", "divergence"),
+                "likes_you":          1 if _f(card, "likes_you", False) else 0,
+                "mismatch_score":     _f(card, "mismatch_score"),
+                "fairness_score":     _f(card, "fairness_score"),
+                "composite_score":    _f(card, "composite_score"),
+                "position_in_deck":   pos,
+                "shown_at":           shown_at,
+            })
+        with engine.begin() as conn:
+            conn.execute(insert(trade_impressions_table), rows)
+    except Exception:
+        pass  # training-data logging is strictly best-effort
+
+
+def load_trade_decision_shape_counts(
+    user_id: str,
+    league_id: str,
+    since_days: int | None = None,
+) -> dict[str, tuple[int, int]]:
+    """
+    Read-only — per package-shape like/pass counts for one user in one league.
+
+    Shape is f"{len(give)}x{len(receive)}" ('1x1', '2x1', …), derived purely
+    from the JSON array lengths on each trade_decisions row — the only card
+    feature both decisions and live cards can compute without a fragile join
+    to trade_impressions. Feeds the A5 Thompson-sampling Beta posteriors in
+    server._order_deck.
+
+    Returns {shape: (likes, passes)}. Rows with undecodable JSON or a
+    decision other than like/pass are skipped.
+    """
+    with engine.connect() as conn:
+        q = select(
+            trade_decisions_table.c.give_player_ids,
+            trade_decisions_table.c.receive_player_ids,
+            trade_decisions_table.c.decision,
+        ).where(
+            and_(
+                trade_decisions_table.c.user_id   == user_id,
+                trade_decisions_table.c.league_id == league_id,
+            )
+        )
+        if since_days is not None:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=since_days)).isoformat()
+            q = q.where(trade_decisions_table.c.created_at >= cutoff)
+        rows = conn.execute(q).fetchall()
+
+    counts: dict[str, tuple[int, int]] = {}
+    for r in rows:
+        try:
+            give = json.loads(r.give_player_ids)
+            recv = json.loads(r.receive_player_ids)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if r.decision not in ("like", "pass"):
+            continue
+        shape = f"{len(give)}x{len(recv)}"
+        likes, passes = counts.get(shape, (0, 0))
+        if r.decision == "like":
+            likes += 1
+        else:
+            passes += 1
+        counts[shape] = (likes, passes)
+    return counts
+
+
+def load_recent_impression_target_user_counts(
+    league_id: str,
+    exclude_user_id: str,
+    days: int = 7,
+) -> dict[str, int]:
+    """
+    Read-only — for each player id appearing as a RECEIVE asset in this
+    league's trade_impressions within the last `days` days, the number of
+    DISTINCT users (excluding `exclude_user_id`) whose decks featured him.
+
+    Feeds the A6 diversification penalty in server._order_deck: a player can
+    only be traded once, so saturating every member's deck with him
+    mathematically caps total possible matches.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                trade_impressions_table.c.user_id,
+                trade_impressions_table.c.receive_player_ids,
+            ).where(
+                and_(
+                    trade_impressions_table.c.league_id == league_id,
+                    trade_impressions_table.c.user_id   != exclude_user_id,
+                    trade_impressions_table.c.shown_at  >= cutoff,
+                )
+            )
+        ).fetchall()
+
+    users_by_pid: dict[str, set] = {}
+    for r in rows:
+        try:
+            recv = json.loads(r.receive_player_ids)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for pid in recv:
+            users_by_pid.setdefault(pid, set()).add(r.user_id)
+    return {pid: len(users) for pid, users in users_by_pid.items()}
+
+
 # ---------------------------------------------------------------------------
 # League member operations
 # ---------------------------------------------------------------------------
@@ -2711,12 +2964,48 @@ def get_ranking_coverage(league_id: str, exclude_user_id: str) -> dict:
 # Trade match operations
 # ---------------------------------------------------------------------------
 
+def _jaccard(a: set, b: set) -> float:
+    """Jaccard similarity of two sets — 1.0 when both empty (vacuously equal)."""
+    if not a and not b:
+        return 1.0
+    union = a | b
+    return len(a & b) / len(union) if union else 0.0
+
+
+def _all_low_value_players(player_ids: set, max_search_rank: int) -> bool:
+    """True iff EVERY player in `player_ids` is a low-consensus-value asset.
+
+    Value proxy: players.search_rank — the only consensus value-ish column in
+    the players table (Sleeper's internal rank; LOWER number = MORE valuable;
+    adp is rarely populated). A player counts as "low value" when
+    search_rank >= max_search_rank, i.e. outside startable territory.
+    Missing/NULL search_rank is treated as HIGH value (guard fails) so a
+    hyped prospect with no rank can never slip through a fuzzy match.
+    """
+    if not player_ids:
+        return True
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(players_table.c.player_id, players_table.c.search_rank)
+            .where(players_table.c.player_id.in_(list(player_ids)))
+        ).fetchall()
+    ranks = {r.player_id: r.search_rank for r in rows}
+    for pid in player_ids:
+        rank = ranks.get(pid)
+        if rank is None or rank < max_search_rank:
+            return False
+    return True
+
+
 def check_for_match(
     current_user_id: str,
     league_id: str,
     target_user_id: str,
     give_player_ids: list[str],
     receive_player_ids: list[str],
+    fuzzy: bool = False,
+    fuzzy_tau: float = 0.8,
+    fuzzy_guard_rank: int = 120,
 ) -> bool:
     """
     Check whether target_user_id has already liked a mirrored trade.
@@ -2725,6 +3014,18 @@ def check_for_match(
     and target_user receives what current_user gives.
 
     Uses set comparison so JSON ordering doesn't matter.
+
+    Fuzzy mode (Tier 2 work item 2.3b, flag trade.fuzzy_match — caller passes
+    `fuzzy=True`): when no exact mirror exists, a counterparty like also
+    counts as a mirror when
+        jaccard(their_give, my_receive)    >= fuzzy_tau
+        jaccard(their_receive, my_give)    >= fuzzy_tau
+    AND every asset in the symmetric differences is a low-consensus-value
+    player (players.search_rank >= fuzzy_guard_rank — see
+    _all_low_value_players). The guard prevents a similar-but-lopsided pair
+    (same package ± a star) from auto-matching. `fuzzy_tau` comes from
+    model_config key "fuzzy_match_tau" (default 0.8), resolved by the caller
+    so this module stays config-free.
 
     Returns True if a matching "like" decision exists.
     """
@@ -2747,14 +3048,32 @@ def check_for_match(
             )
         ).fetchall()
 
+    parsed: list[tuple[set, set]] = []
     for r in rows:
         try:
             their_give    = set(json.loads(r.give_player_ids))
             their_receive = set(json.loads(r.receive_player_ids))
         except (json.JSONDecodeError, TypeError):
             continue
+        parsed.append((their_give, their_receive))
+
+    # Exact set-equality mirror — always checked first, behavior unchanged.
+    for their_give, their_receive in parsed:
         # Their give == what current user receives, their receive == what current user gives
         if their_give == receive_set and their_receive == give_set:
+            return True
+
+    if not fuzzy:
+        return False
+
+    # Fuzzy pass — near-mirrors that differ only by low-value pieces.
+    for their_give, their_receive in parsed:
+        if _jaccard(their_give, receive_set) < fuzzy_tau:
+            continue
+        if _jaccard(their_receive, give_set) < fuzzy_tau:
+            continue
+        differing = (their_give ^ receive_set) | (their_receive ^ give_set)
+        if _all_low_value_players(differing, fuzzy_guard_rank):
             return True
 
     return False

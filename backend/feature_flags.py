@@ -75,6 +75,18 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade_math.star_tax",
     "trade_math.roster_clogger",
     "trade_math.human_explanations",
+    # Trade engine v2 — Tier 1 scorer rebuild (docs/plans/trade-engine-tier1-fixes.md)
+    "trade_engine.v2",
+    # Trade engine Tier 2 (docs/plans/trade-engine-tier2-models.md)
+    "trade.marginal_value",   # 2.1 over-replacement valuation (trade_service.py)
+    "trade.outlook_blend",    # 2.2 now/future valuation blend (trade_service.py)
+    "trade.likes_you",        # 2.3a likes-you queue (server.py)
+    "trade.fuzzy_match",      # 2.3b fuzzy mirror matching (database.py)
+    "trade.thompson_deck",    # A5 Thompson-sampled deck ordering (server.py)
+    "trade.deck_diversity",   # A6 league-wide deck diversification (server.py)
+    # Trade engine Tier 3 (docs/plans/trade-engine-tier3-rebuild.md)
+    "trade_engine.v3",        # exact per-pair package construction + sweeteners
+    "trade.three_team",       # 3-team cycle generation (no client surface yet)
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

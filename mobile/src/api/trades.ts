@@ -22,7 +22,8 @@ function asArray<T>(res: any): T[] {
 // ── Trade-card normalizer ────────────────────────────────────────────
 // Backend (server.py:trade_card_to_dict) returns:
 //   { trade_id, league_id, target_username, give[], receive[],
-//     mismatch_score, composite_score, decision, expires_at, reasons? }
+//     mismatch_score, fairness_score, composite_score, basis,
+//     decision, expires_at, likes_you?, sweetener?, reasons? }
 // Frontend (shared/types#TradeCard) wants:
 //   { trade_id, league_id, give_player_ids[], receive_player_ids[],
 //     give_players[], receive_players[], opponent_user_id,
@@ -51,12 +52,23 @@ function normalizeTradeCard(raw: any): TradeCard {
     typeof raw?.match_score    === 'number' ? raw.match_score
   : typeof raw?.mismatch_score === 'number' ? Math.min(100, Math.max(0, (raw.mismatch_score / 300) * 100))
   : 0;
-  // `fairness` may not be present (backend doesn't expose fairness_score
-  // today). Pass through whatever we get; UI hides the row when undefined.
+  // `fairness_score` (0–1) is always serialized by the v2 backend; keep
+  // the defensive fallback so cached/legacy snapshots without it still
+  // render (UI hides the row when undefined).
   const fairness =
     typeof raw?.fairness       === 'number' ? raw.fairness
   : typeof raw?.fairness_score === 'number' ? raw.fairness_score
   : undefined as unknown as number;
+  // v2 sweetener marker — { player_id, side } identifying a low-value
+  // player (already present in give/receive) added to balance the deal.
+  // Strictly validated so a malformed payload degrades to "no callout".
+  const rawSweetener = raw?.sweetener;
+  const sweetener =
+    rawSweetener
+    && typeof rawSweetener.player_id === 'string'
+    && (rawSweetener.side === 'give' || rawSweetener.side === 'receive')
+      ? { playerId: rawSweetener.player_id, side: rawSweetener.side as 'give' | 'receive' }
+      : undefined;
 
   return {
     trade_id:           String(raw?.trade_id ?? ''),
@@ -75,6 +87,15 @@ function normalizeTradeCard(raw: any): TradeCard {
     // the card can distinguish "unknown" from a real "false" in legacy
     // response shapes that don't include the field.
     real_opponent:      typeof raw?.real_opponent === 'boolean' ? raw.real_opponent : undefined,
+    // v2 fields — all defensively defaulted so legacy payloads behave
+    // exactly as before:
+    //   basis     — 'consensus' only when explicitly sent; anything else
+    //               (missing, typo, legacy) is 'divergence'.
+    //   likesYou  — backend serializes `likes_you` only when true.
+    //   sweetener — validated above; undefined when absent/malformed.
+    basis:              raw?.basis === 'consensus' ? 'consensus' : 'divergence',
+    likesYou:           raw?.likes_you === true,
+    sweetener,
   };
 }
 

@@ -33,4 +33,5 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 
 ## Index
 
-_(none yet — add entries here as ADRs land: `- [ADR-0001 Title](0001-title.md)`)_
+- [ADR-001 Query Cache Persistence Storage: AsyncStorage vs MMKV](adr-001-query-cache-persistence.md)
+- [ADR-002 Trade Engine v2/v3 Rebuild](adr-002-trade-engine-v2-v3-rebuild.md)
