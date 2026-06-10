@@ -191,6 +191,7 @@ Triggered by an external scheduler (Render cron). All POST.
 |---|---|---|
 | GET | `/api/admin/config` | Read all `model_config` entries |
 | PUT | `/api/admin/config/<key>` | Update one `model_config` value |
+| GET | `/api/admin/engine-metrics` | Trade-engine telemetry: like/pass rates by basis, likes-you, deck position, shape, league; match conversion (`?days=30&league_id=`) |
 | GET | `/api/debug/log` | Last N debug ring-buffer entries (`?n=100`) |
 
 ## Misc

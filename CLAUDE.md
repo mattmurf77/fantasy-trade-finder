@@ -49,7 +49,7 @@ See [docs/CLAUDE.md](docs/CLAUDE.md) for the full table of update triggers.
 ## Conventions
 
 - Read `context.md` for project orientation; `docs/` is the source of truth for details.
-- DB lives in `data/trade_finder.db` (and a duplicate at root for legacy reasons).
+- DB lives in `data/trade_finder.db` (the stale legacy root copy was archived to `data/archive/` on 2026-06-10).
 - `config/features.json` drives feature flags consumed by both backend and clients.
 - Eval workspaces (`feature-evaluator-workspace/`, `project-reorganizer-workspace/`) are throwaway scaffolds — do not document or commit changes there casually.
 

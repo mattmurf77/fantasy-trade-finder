@@ -71,6 +71,7 @@ from .database import (
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, log_trade_impressions,
     load_trade_decision_shape_counts, load_recent_impression_target_user_counts,
+    load_engine_telemetry,
     upsert_league_members, upsert_member_rankings,
     load_member_rankings, load_league_members, get_ranking_coverage,
     check_for_match, match_already_exists,
@@ -4871,6 +4872,27 @@ def admin_config_update(key: str):
         return jsonify({"error": f"Invalid value: {e}"}), 400
     except Exception as e:
         log.exception("admin_config_update failed for key=%s", key)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/admin/engine-metrics", methods=["GET"])
+def admin_engine_metrics():
+    """
+    GET /api/admin/engine-metrics?days=30&league_id=...
+
+    Read-only aggregate health metrics for the trade engine: impression
+    volume, like/pass rates by card basis / likes-you / deck position /
+    package shape / league, and match conversion. This is the data the
+    fairness_threshold and package_adj_gamma tuning is blocked on.
+    """
+    try:
+        days = max(1, min(int(request.args.get("days", 30)), 365))
+        league_id = request.args.get("league_id") or None
+        return jsonify(load_engine_telemetry(days=days, league_id=league_id))
+    except (TypeError, ValueError):
+        return jsonify({"error": "days must be an integer"}), 400
+    except Exception as e:
+        log.exception("admin_engine_metrics failed")
         return jsonify({"error": str(e)}), 500
 
 

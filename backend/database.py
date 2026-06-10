@@ -2226,6 +2226,169 @@ def load_recent_impression_target_user_counts(
     return {pid: len(users) for pid, users in users_by_pid.items()}
 
 
+def load_engine_telemetry(days: int = 30, league_id: str | None = None) -> dict:
+    """
+    Read-only — aggregate trade-engine health metrics over the last `days`
+    days, optionally scoped to one league. Powers GET /api/admin/engine-metrics.
+
+    Impressions are deduped to unique cards on (user_id, league_id,
+    give-set, receive-set), keeping the latest showing — regenerated decks
+    re-log the same card. Decisions are joined to cards on that same key
+    (the documented labeling join for the acceptance-model training data).
+    Volumes are one row per card shown, so aggregation happens in Python
+    rather than dialect-specific JSON SQL.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    with engine.connect() as conn:
+        imp_q = select(
+            trade_impressions_table.c.user_id,
+            trade_impressions_table.c.league_id,
+            trade_impressions_table.c.give_player_ids,
+            trade_impressions_table.c.receive_player_ids,
+            trade_impressions_table.c.basis,
+            trade_impressions_table.c.likes_you,
+            trade_impressions_table.c.position_in_deck,
+            trade_impressions_table.c.shown_at,
+        ).where(trade_impressions_table.c.shown_at >= cutoff)
+        dec_q = select(
+            trade_decisions_table.c.user_id,
+            trade_decisions_table.c.league_id,
+            trade_decisions_table.c.give_player_ids,
+            trade_decisions_table.c.receive_player_ids,
+            trade_decisions_table.c.decision,
+            trade_decisions_table.c.created_at,
+        ).where(trade_decisions_table.c.created_at >= cutoff)
+        match_q = select(
+            trade_matches_table.c.league_id,
+            trade_matches_table.c.status,
+        ).where(trade_matches_table.c.matched_at >= cutoff)
+        if league_id:
+            imp_q   = imp_q.where(trade_impressions_table.c.league_id == league_id)
+            dec_q   = dec_q.where(trade_decisions_table.c.league_id == league_id)
+            match_q = match_q.where(trade_matches_table.c.league_id == league_id)
+        imp_rows   = conn.execute(imp_q).fetchall()
+        dec_rows   = conn.execute(dec_q).fetchall()
+        match_rows = conn.execute(match_q).fetchall()
+
+    def _key(uid, lid, give_json, recv_json):
+        try:
+            return (uid, lid,
+                    frozenset(json.loads(give_json)),
+                    frozenset(json.loads(recv_json)))
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    # Unique cards, latest showing wins (re-logged decks overwrite).
+    cards: dict[tuple, dict] = {}
+    for r in imp_rows:
+        k = _key(r.user_id, r.league_id, r.give_player_ids, r.receive_player_ids)
+        if k is None:
+            continue
+        prev = cards.get(k)
+        if prev is None or (r.shown_at or "") >= prev["shown_at"]:
+            try:
+                shape = (f"{len(json.loads(r.give_player_ids))}"
+                         f"x{len(json.loads(r.receive_player_ids))}")
+            except (json.JSONDecodeError, TypeError):
+                shape = "?"
+            cards[k] = {
+                "league_id": r.league_id,
+                "basis":     r.basis or "divergence",
+                "likes_you": bool(r.likes_you),
+                "position":  r.position_in_deck,
+                "shown_at":  r.shown_at or "",
+                "shape":     shape,
+            }
+
+    # Latest decision per card key.
+    decisions: dict[tuple, str] = {}
+    dec_seen_at: dict[tuple, str] = {}
+    legacy_decisions = 0   # decisions with no logged impression (pre-telemetry)
+    likes = passes = 0
+    for r in dec_rows:
+        if r.decision not in ("like", "pass"):
+            continue
+        if r.decision == "like":
+            likes += 1
+        else:
+            passes += 1
+        k = _key(r.user_id, r.league_id, r.give_player_ids, r.receive_player_ids)
+        if k is None:
+            continue
+        if k not in cards:
+            legacy_decisions += 1
+            continue
+        if (r.created_at or "") >= dec_seen_at.get(k, ""):
+            decisions[k] = r.decision
+            dec_seen_at[k] = r.created_at or ""
+
+    def _rate_bucket():
+        return {"shown": 0, "liked": 0, "passed": 0}
+
+    def _finalize(b):
+        decided = b["liked"] + b["passed"]
+        b["like_rate"] = round(b["liked"] / decided, 3) if decided else None
+        return b
+
+    by_basis: dict[str, dict] = {}
+    by_likes_you = {"likes_you": _rate_bucket(), "organic": _rate_bucket()}
+    by_position = {"top3": _rate_bucket(), "4-10": _rate_bucket(), "11+": _rate_bucket()}
+    by_shape: dict[str, dict] = {}
+    by_league: dict[str, dict] = {}
+
+    for k, c in cards.items():
+        decision = decisions.get(k)
+        pos = c["position"]
+        pos_bucket = ("top3" if pos is not None and pos < 3
+                      else "4-10" if pos is not None and pos < 10
+                      else "11+")
+        buckets = [
+            by_basis.setdefault(c["basis"], _rate_bucket()),
+            by_likes_you["likes_you" if c["likes_you"] else "organic"],
+            by_position[pos_bucket],
+            by_shape.setdefault(c["shape"], _rate_bucket()),
+        ]
+        league_b = by_league.setdefault(c["league_id"], _rate_bucket())
+        buckets.append(league_b)
+        for b in buckets:
+            b["shown"] += 1
+            if decision == "like":
+                b["liked"] += 1
+            elif decision == "pass":
+                b["passed"] += 1
+
+    match_status: dict[str, int] = {}
+    for r in match_rows:
+        match_status[r.status or "pending"] = match_status.get(r.status or "pending", 0) + 1
+    matches_total = sum(match_status.values())
+
+    return {
+        "window_days":     days,
+        "league_id":       league_id,
+        "impressions":     {
+            "rows":         len(imp_rows),
+            "unique_cards": len(cards),
+        },
+        "decisions": {
+            "likes":  likes,
+            "passes": passes,
+            "like_rate": round(likes / (likes + passes), 3) if (likes + passes) else None,
+            "without_impression": legacy_decisions,
+        },
+        "by_basis":     {k: _finalize(v) for k, v in sorted(by_basis.items())},
+        "by_likes_you": {k: _finalize(v) for k, v in by_likes_you.items()},
+        "by_position":  {k: _finalize(v) for k, v in by_position.items()},
+        "by_shape":     {k: _finalize(v) for k, v in sorted(by_shape.items())},
+        "by_league":    {k: _finalize(v) for k, v in sorted(by_league.items())},
+        "matches": {
+            "total":     matches_total,
+            "by_status": match_status,
+            "per_like":  round(matches_total / likes, 3) if likes else None,
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # League member operations
 # ---------------------------------------------------------------------------

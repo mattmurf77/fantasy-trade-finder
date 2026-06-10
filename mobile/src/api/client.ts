@@ -57,9 +57,11 @@ const _CLIENT_HEADERS: Record<string, string> = (() => {
   return h;
 })();
 
-function getBaseUrl(): string {
+export function getBaseUrl(): string {
   // Expo puts values from app.json's `extra` here at build time; fall back
   // to the Render URL so a raw fetch still works during dev without extras.
+  // Also exported for share/invite links — the backend origin serves the
+  // web app at `/`, so invite URLs reuse it.
   const configured =
     (Constants.expoConfig?.extra as any)?.apiBaseUrl ??
     (Constants.manifest2?.extra as any)?.apiBaseUrl;

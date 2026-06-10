@@ -2539,7 +2539,10 @@
         bar.style.width = pct + '%';
 
         if (ranked === 0) {
-          lbl.innerHTML = `<span class="coverage-none">0 of ${total} leaguemates ranked — trades use estimates</span>`;
+          // Cold start: every card is a consensus-basis estimate. Make the
+          // label actionable — same invite modal as the league screen.
+          lbl.innerHTML = `<span class="coverage-none">0 of ${total} leaguemates ranked — trades use estimates</span>` +
+                          ` <button class="coverage-invite-btn" onclick="openInviteModal()">📨 Invite</button>`;
         } else if (ranked === total) {
           lbl.innerHTML = `<span class="coverage-real">All ${total} leaguemates ranked ✓</span>`;
         } else {
