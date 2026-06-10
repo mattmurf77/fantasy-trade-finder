@@ -74,6 +74,27 @@ Mapping lives in `get_pref_bucket()` in `backend/server.py`. **Add a new kind in
 
 ---
 
+## Trade-card copy strings (v2 engine UI)
+
+Shared user-facing strings rendered by both mobile and web — must stay character-identical:
+
+| String | Shown when |
+|---|---|
+| `👀 They're interested` | card has `likes_you: true` (likes-you pill) |
+| `Fair-value idea` | card has `basis: "consensus"` (consensus label/tag) |
+| `This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.` | consensus-card explainer (mobile body text; web `title` tooltip on the tag) |
+| `+ {player name} added to balance the deal` | card has a `sweetener` (Tier 3) — name interpolated from the referenced player |
+
+**Locations:** `mobile/src/components/TradeCard.tsx`, `web/js/app.js` (search "likes-you-pill" / "consensus-tag" / "trade-sweetener").
+
+## Fairness meter semantics
+
+`fairness_score` is serialized as a float in `[0, 1]` on every trade card (consensus package-value ratio, lesser/greater). Clients render it as a percent: `Math.round(fairness * 100)` driving a 0–100% meter. Do **not** rescale server-side — both clients multiply by 100.
+
+**Locations:** `backend/server.py` (`trade_card_to_dict`), `mobile/src/api/trades.ts` + `mobile/src/components/TradeCard.tsx` (`fairPct`), `web/js/app.js` fairness meter.
+
+---
+
 ## Team outlook modes
 
 Canonical set: `championship`, `contender`, `rebuilder`, `jets`, `not_sure`.

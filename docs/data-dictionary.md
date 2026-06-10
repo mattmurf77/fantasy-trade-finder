@@ -141,6 +141,30 @@ Indexes: `ix_trade_matches_user_a_league`, `ix_trade_matches_user_b_league` for 
 
 ---
 
+## `trade_impressions`
+
+Every trade card **shown** to a user — one row per card per completed generation job (not per `/status` poll). The implicit-negative side of the acceptance-model training data (Tier 2 work item 2.4); explicit decisions live in `trade_decisions`, and joining the two on `(user_id, league_id, give/receive sets)` labels each impression. Written by `log_trade_impressions()` from `server._run_trade_job`, after deck ordering, so `position_in_deck` records true served positions. Demo league excluded.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `user_id` | str | user the deck was generated for |
+| `league_id` | str | |
+| `target_user_id` | str | counterparty on the card |
+| `give_player_ids` | JSON text | array, user's give side |
+| `receive_player_ids` | JSON text | array, user's receive side |
+| `basis` | str | `'divergence'` / `'consensus'` — how the card was generated |
+| `likes_you` | int | 0/1 — counterparty had pre-liked the mirror trade |
+| `mismatch_score` | float | |
+| `fairness_score` | float | |
+| `composite_score` | float | |
+| `position_in_deck` | int | 0 = top card as served |
+| `shown_at` | str | ISO timestamp |
+
+Indexes: `ix_trade_impressions_user_league` on `(user_id, league_id)` — training queries scan one user-league at a time.
+
+---
+
 ## `players`
 
 Canonical player reference, synced from Sleeper bulk payload (skill positions, Active or prospects). Re-synced if empty or `last_synced` > 24h.
