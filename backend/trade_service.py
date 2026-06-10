@@ -151,6 +151,9 @@ _DEFAULT_CFG: dict[str, float] = {
     "cycle_max_results":          3.0,   # max 3-team cycles returned per league
     # Tier 2 (2.3b) — fuzzy mirror matching tolerance (consumed by server)
     "fuzzy_match_tau":            0.8,   # Jaccard threshold per side
+    # Deck composition (verified against real data 2026-06-09)
+    "v3_diversity_max_overlap":   0.4,   # max asset Jaccard between two cards of one pair
+    "consensus_score_scale":      0.3,   # consensus fallback cards rank below divergence finds
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -1183,6 +1186,12 @@ class TradeService:
         # real rankings are NOT compared in divergence space (their
         # elo_ratings are fabricated noise) — they get consensus cards.
         eligible = [m for m in league.members if m.user_id != user_id and m.roster]
+        # Ranked opponents FIRST: divergence cards are the core product
+        # signal and must never be crowded out of the global card budget by
+        # consensus fallback cards (a league with many unranked members would
+        # otherwise hit global_target before any ranked opponent is visited).
+        # Stable sort keeps roster order within each group.
+        eligible.sort(key=lambda m: not (m.has_rankings and m.elo_ratings))
         total = len(eligible)
         global_target = max(30, max_per_opponent * 6)
 
@@ -1633,7 +1642,12 @@ class TradeService:
             if fairness < fairness_threshold:
                 return
             seen.add(key)
-            composite = fairness * self._tier_mult_v2(shrunk_user_elo, give_ids + recv_ids)
+            # consensus_score_scale keeps fallback cards (no divergence
+            # signal, mismatch 0) from outranking genuine divergence finds —
+            # the two composites would otherwise live on different scales
+            # (fairness×tier ≈ 1.6 vs surplus-blend ≈ 0.3–0.7).
+            composite = (fairness * self._tier_mult_v2(shrunk_user_elo, give_ids + recv_ids)
+                         * _c("consensus_score_scale"))
             cards.append(TradeCard(
                 trade_id          = str(uuid.uuid4())[:8],
                 league_id         = league_id,

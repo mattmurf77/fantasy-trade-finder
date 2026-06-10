@@ -433,8 +433,27 @@ def generate_pair_trades_v3(
             basis              = "divergence",
         )
 
+    # Diverse top-K (greedy): exact enumeration surfaces every sibling of a
+    # strong core (same trade ± one bench throw-in), so a plain scored[:K]
+    # returns K near-duplicates. Walk the ranked list and skip combos whose
+    # asset set overlaps an already-picked card by more than
+    # v3_diversity_max_overlap (Jaccard over give ∪ receive). The best
+    # variant of each core survives; the siblings make room for the next
+    # genuinely different trade idea.
+    _MAX_OVERLAP = float(_ts._cfg.get("v3_diversity_max_overlap", 0.4))
+    picked: list = []
+    for entry in scored:
+        if len(picked) >= max_cards:
+            break
+        assets = set(entry[4]) | set(entry[5])
+        if all(
+            len(assets & (set(p[4]) | set(p[5])))
+            / len(assets | (set(p[4]) | set(p[5]))) <= _MAX_OVERLAP
+            for p in picked
+        ):
+            picked.append(entry)
     cards = [_card(comp, hm, fair, g, r)
-             for comp, _o, hm, fair, g, r in scored[:max_cards]]
+             for comp, _o, hm, fair, g, r in picked]
 
     # --- 3.4 sweetener pass -------------------------------------------------
     if len(cards) < max_cards and near_misses and SW_MAX > 0:

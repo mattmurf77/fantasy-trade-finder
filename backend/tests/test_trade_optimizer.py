@@ -252,6 +252,9 @@ def _brute_force_topk(give_pool, recv_pool, user_elo, opp_elo, seed_elo,
 
 def test_v3_returns_exact_brute_force_topk():
     ts._cfg["v3_pool_size"] = 5
+    # Disable the diverse-top-K filter (overlap <= 1.0 is always true) so the
+    # exactness contract under test is plain best-K by composite.
+    ts._cfg["v3_diversity_max_overlap"] = 1.0
     give_pool = [f"g{i}" for i in range(1, 6)]
     recv_pool = [f"r{i}" for i in range(1, 6)]
     pos = {**_bodies("u"), **_bodies("o")}
@@ -538,3 +541,79 @@ def test_engine_selection_flag_routes_to_v3(monkeypatch):
     _set_flags()                       # v2 only
     run()
     assert calls == [], "v3 flag off: optimizer must not be called"
+
+
+def test_diverse_topk_skips_sibling_combos():
+    """Five junk QBs padding the same core trade must collapse to ONE card,
+    freeing slots for genuinely different cores (real-data bug 2026-06-09)."""
+    pos = {**_bodies("u"), **_bodies("o"), "uA": "WR", "oA": "WR", "oB": "RB"}
+    junk = {f"uJ{i}": "QB" for i in range(5)}          # interchangeable filler
+    pos.update(junk)
+    players = _players_of(pos)
+    user_roster = list(_bodies("u")) + ["uA"] + list(junk)
+    opp_roster = list(_bodies("o")) + ["oA", "oB"]
+
+    user_elo = {pid: 1500.0 for pid in pos}
+    opp_elo = {pid: 1500.0 for pid in pos}
+    seed_elo = {pid: 1500.0 for pid in pos}
+    # Core divergence: user over-values oA strongly, opp over-values uA.
+    user_elo["oA"] = 1640.0; opp_elo["oA"] = 1500.0; seed_elo["oA"] = 1560.0
+    user_elo["uA"] = 1500.0; opp_elo["uA"] = 1640.0; seed_elo["uA"] = 1560.0
+    # Secondary, weaker core: oB.
+    user_elo["oB"] = 1580.0; opp_elo["oB"] = 1480.0; seed_elo["oB"] = 1530.0
+    for j in junk:   # junk: worthless to everyone
+        user_elo[j] = opp_elo[j] = seed_elo[j] = 1280.0
+
+    _set_flags()
+    cards = _v3(user_elo=user_elo, user_roster=user_roster,
+                opponent=_member("opp", opp_roster, opp_elo),
+                seed_elo=seed_elo, players=players, max_cards=5)
+    assert cards, "core trade must surface"
+    # No two cards may share most of their assets (the sibling bug).
+    for i, a in enumerate(cards):
+        sa = set(a.give_player_ids) | set(a.receive_player_ids)
+        for b in cards[i + 1:]:
+            sb = set(b.give_player_ids) | set(b.receive_player_ids)
+            j = len(sa & sb) / len(sa | sb)
+            assert j <= 0.5, f"sibling cards survived diversity filter: {sa} vs {sb}"
+
+
+def test_consensus_cards_rank_below_divergence_finds():
+    """Mixed league (one ranked, one unranked opponent): real divergence cards
+    must outrank consensus filler in the merged deck (real-data bug 2026-06-09)."""
+    from backend.trade_service import League
+
+    pos = {**_bodies("u"), **_bodies("o"), **_bodies("c"), "uA": "WR", "oA": "WR"}
+    players = _players_of(pos)
+    user_roster = list(_bodies("u")) + ["uA"]
+    ranked_roster = list(_bodies("o")) + ["oA"]
+    unranked_roster = list(_bodies("c"))
+
+    user_elo = {pid: 1500.0 for pid in pos}
+    opp_elo = {pid: 1500.0 for pid in pos}
+    seed_elo = {pid: 1500.0 for pid in pos}
+    user_elo["oA"] = 1640.0; seed_elo["oA"] = 1560.0
+    opp_elo["uA"] = 1640.0; seed_elo["uA"] = 1560.0
+
+    _set_flags("trade_engine.v3")
+    svc = TradeService(players=players)
+    svc.add_league(League(
+        league_id="L", name="L", platform="sleeper",
+        members=[
+            # Unranked listed FIRST: ranked-first ordering must still win.
+            _member("cold", unranked_roster, {}, has_rankings=False),
+            _member("user", user_roster, user_elo),
+            _member("opp", ranked_roster, opp_elo),
+        ]))
+    cards = svc.generate_trades(user_id="user", user_elo=user_elo,
+                                user_roster=user_roster, league_id="L",
+                                seed_elo=seed_elo)
+    bases = [c.basis for c in cards]
+    assert "divergence" in bases, "ranked opponent must produce divergence cards"
+    if "consensus" in bases:
+        assert bases.index("divergence") < bases.index("consensus"), (
+            "divergence finds must outrank consensus filler")
+        first_div = next(c for c in cards if c.basis == "divergence")
+        for c in cards:
+            if c.basis == "consensus":
+                assert c.composite_score < first_div.composite_score

@@ -626,6 +626,8 @@ _MODEL_CONFIG_DEFAULTS = [
     ("cycle_edge_min_gain",    100.0,   "v3: min per-transfer marginal gain for a 3-team cycle edge"),
     ("cycle_min_net",          200.0,   "v3: min net gain per team for a 3-team cycle"),
     ("cycle_max_results",        3.0,   "v3: max 3-team cycles returned per league"),
+    ("v3_diversity_max_overlap", 0.4,   "v3: max asset Jaccard between two cards from one opponent pair"),
+    ("consensus_score_scale",    0.3,   "v2: composite multiplier keeping consensus fallback cards below divergence finds"),
 ]
 
 
