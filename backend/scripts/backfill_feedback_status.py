@@ -41,7 +41,7 @@ STATUS_MAP: dict[int, str] = {
     16: "shipped",      # select-marking — operator confirmed shipped (2026-06-10)
     17: "shipped",      # batch D (League)
     18: "shipped",      # batch B
-    19: "new",          # "obvious trio" threshold — needs operator number
+    19: "shipped",      # QC-trio throttle — operator set 1/100 (2026-06-10); backend-only, live at backfill time
     20: "shipped",      # batch B
     # ── Probes ───────────────────────────────────────────────────────
     21: "declined",     # Claude probe
@@ -54,7 +54,7 @@ STATUS_MAP: dict[int, str] = {
     27: "shipped",      # tile movement while dragging — operator confirmed (2026-06-10)
     28: "new",          # bottom-nav affordance icon
     29: "shipped",      # full tile shift while dragging — operator confirmed (2026-06-10)
-    30: "new",          # praise/reference: ManualRanks drag is the target UX
+    30: "shipped",      # operator closed (2026-06-10) — reference note, target UX achieved
     31: "shipped",      # trends as rank-place deltas (trends_service rank deltas)
     32: "shipped",      # multi-select rework — operator confirmed (2026-06-10)
     33: "shipped",      # injury tags removed (#83)
@@ -64,7 +64,7 @@ STATUS_MAP: dict[int, str] = {
     37: "planned",      # league tiles → route to trade records (idea, see SEVERITY_MAP)
     38: "planned",      # joined-the-app overlay rework (idea, see SEVERITY_MAP)
     39: "planned",      # leaderboard streak/total toggle
-    40: "new",          # OverallRanks vs ManualRanks duplication question
+    40: "shipped",      # operator closed (2026-06-10) — OverallRanks/ManualRanks question resolved
     41: "shipped",      # league team count (#82)
     42: "planned",      # merge joined-summary into header tile
     43: "shipped",      # drag/multiselect — operator confirmed working (2026-06-10)

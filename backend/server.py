@@ -188,9 +188,10 @@ DEMO_USER_ID     = "user_me"
 # QC ("quality control") trio throttle — at most one QC trio per
 # QC_TRIO_INTERVAL rankings, per (session, position). TestFlight bug #19
 # (was probabilistic 1/15 ≈ 6.7% per trio; users reported QC trios firing
-# too often). Counter lives on the in-memory session dict under
+# too often; 50 was still too chatty). Operator-set 2026-06-10: 1 per 100.
+# Counter lives on the in-memory session dict under
 # sess["_qc_counters"]: { position_str: rankings_since_last_qc }.
-QC_TRIO_INTERVAL = 50
+QC_TRIO_INTERVAL = 100
 
 # ---------------------------------------------------------------------------
 # Mutable session state (replaced when a Sleeper league is loaded)
