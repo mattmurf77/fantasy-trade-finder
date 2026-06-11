@@ -194,6 +194,7 @@ def generate_pair_trades_v3(
     acquire_positions: list[str] | None = None,
     trade_away_positions: list[str] | None = None,
     pinned_give_players: list[str] | None = None,
+    pinned_receive_players: list[str] | None = None,
     players: dict,
 ) -> list[TradeCard]:
     """Exact v3 generation for one (user, opponent) pair.
@@ -225,6 +226,9 @@ def generate_pair_trades_v3(
     """
     opp_elo    = opponent.elo_ratings
     pinned_set = set(pinned_give_players) if pinned_give_players else None
+    # FB-47 — pinned ACQUIRE targets: cards must receive at least one.
+    pinned_recv_set = (set(pinned_receive_players)
+                       if pinned_receive_players else None)
 
     MARGINAL = FLAGS.trade_marginal_value
     MIN_SIDE = (_c("min_side_surplus_marginal") if MARGINAL
@@ -309,6 +313,12 @@ def generate_pair_trades_v3(
                 give_pool.append(pid)
     recv_pool = sorted(known_opp, key=lambda p: _uv(p) - _vo(p),
                        reverse=True)[:POOL_P]
+    # FB-47 — pinned acquire targets always survive the prune, mirroring
+    # the pinned-give rule above.
+    if pinned_recv_set:
+        for pid in known_opp:
+            if pid in pinned_recv_set and pid not in recv_pool:
+                recv_pool.append(pid)
     if not give_pool or not recv_pool:
         return []
 
@@ -389,6 +399,8 @@ def generate_pair_trades_v3(
         if pinned_set and not (set(give_ids) & pinned_set):
             continue
         for recv_ids in recv_subsets:
+            if pinned_recv_set and not (set(recv_ids) & pinned_recv_set):
+                continue
             if abs(len(give_ids) - len(recv_ids)) > 1:
                 continue
             if not _positions_ok(give_ids, recv_ids):

@@ -71,6 +71,8 @@ from .database import (
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, log_trade_impressions,
     load_trade_decision_shape_counts, load_recent_impression_target_user_counts,
+    load_engine_telemetry,
+    set_feedback_status, list_feedback_for_user, FEEDBACK_STATUSES, FEEDBACK_SEVERITIES,
     upsert_league_members, upsert_member_rankings,
     load_member_rankings, load_league_members, get_ranking_coverage,
     check_for_match, match_already_exists,
@@ -186,9 +188,10 @@ DEMO_USER_ID     = "user_me"
 # QC ("quality control") trio throttle — at most one QC trio per
 # QC_TRIO_INTERVAL rankings, per (session, position). TestFlight bug #19
 # (was probabilistic 1/15 ≈ 6.7% per trio; users reported QC trios firing
-# too often). Counter lives on the in-memory session dict under
+# too often; 50 was still too chatty). Operator-set 2026-06-10: 1 per 100.
+# Counter lives on the in-memory session dict under
 # sess["_qc_counters"]: { position_str: rankings_since_last_qc }.
-QC_TRIO_INTERVAL = 50
+QC_TRIO_INTERVAL = 100
 
 # ---------------------------------------------------------------------------
 # Mutable session state (replaced when a Sleeper league is loaded)
@@ -1426,6 +1429,7 @@ def _run_trade_job(
     league_id: str,
     fairness_threshold: float,
     pinned_give: list,
+    pinned_receive: list | None = None,
 ):
     """Daemon-thread entry point. Resolves the session itself (rather than
     capturing closures over per-request state) so the request that kicked
@@ -1519,6 +1523,7 @@ def _run_trade_job(
             acquire_positions    = acquire_positions,
             trade_away_positions = trade_away_positions,
             pinned_give_players  = pinned_give or None,
+            pinned_receive_players = pinned_receive or None,
             scoring_format       = active_format,
             on_opponent_done     = progress_cb,
         )
@@ -1528,7 +1533,8 @@ def _run_trade_job(
         # the served deck includes them. Non-fatal: a failure here serves
         # the organic deck exactly as before. Skipped for pinned-give decks
         # ("what can I get for X?") — unrelated injections would pollute them.
-        if _likes_you_enabled() and league_id != "league_demo" and not pinned_give:
+        if (_likes_you_enabled() and league_id != "league_demo"
+                and not pinned_give and not pinned_receive):
             try:
                 final_cards = _inject_likes_you_cards(
                     cards         = final_cards,
@@ -1649,13 +1655,16 @@ def _kickoff_trade_job(
     scoring_format: str,
     fairness_threshold: float = 0.75,
     pinned_give: list | None = None,
+    pinned_receive: list | None = None,
     opponents_total: int | None = None,
 ) -> str:
     """Register a new job in _trade_jobs and start its worker thread.
     Returns the job_id. Caller is responsible for any pre-existing-job
     deduplication; this always creates a fresh one."""
     job_id = uuid.uuid4().hex
-    is_pinned = bool(pinned_give)
+    # Pinned flows (give OR receive) bypass the shared per-key cache — they
+    # answer a specific question, not the league-wide deck.
+    is_pinned = bool(pinned_give) or bool(pinned_receive)
     job = {
         "job_id":             job_id,
         "key":                _trade_job_key(user_id, league_id, scoring_format),
@@ -1678,7 +1687,8 @@ def _kickoff_trade_job(
 
     threading.Thread(
         target=_run_trade_job,
-        args=(job_id, sess_token, league_id, fairness_threshold, pinned_give or []),
+        args=(job_id, sess_token, league_id, fairness_threshold,
+              pinned_give or [], pinned_receive or []),
         daemon=True,
     ).start()
     return job_id
@@ -2661,6 +2671,56 @@ def list_feedback_route():
     return jsonify({"items": items, "count": len(items), "next_since_id": next_since})
 
 
+@app.route("/api/feedback/admin/<int:feedback_id>/status", methods=["PUT"])
+def set_feedback_status_route(feedback_id: int):
+    """PUT /api/feedback/admin/<id>/status — operator update for one note.
+
+    Auth: X-Cron-Secret (same as the admin readback). Body accepts either
+    or both of:
+      status    ∈ FEEDBACK_STATUSES — what the in-app inbox shows
+      severity  ∈ FEEDBACK_SEVERITIES — reclassify a note's type (e.g. a
+                  'bug' that is really an 'idea')
+    """
+    _require_cron_auth()
+    body = request.get_json(force=True, silent=True) or {}
+    status = body.get("status")
+    severity = body.get("severity")
+    if status is None and severity is None:
+        return jsonify({"error": "missing_fields",
+                        "expected": ["status", "severity"]}), 400
+    if status is not None and status not in FEEDBACK_STATUSES:
+        return jsonify({
+            "error": "invalid_status",
+            "allowed": list(FEEDBACK_STATUSES),
+        }), 400
+    if severity is not None and severity not in FEEDBACK_SEVERITIES:
+        return jsonify({
+            "error": "invalid_severity",
+            "allowed": list(FEEDBACK_SEVERITIES),
+        }), 400
+    result = set_feedback_status(feedback_id, status=status, severity=severity)
+    if result is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(result)
+
+
+@app.route("/api/feedback/mine", methods=["GET"])
+def my_feedback_route():
+    """GET /api/feedback/mine — the caller's own feedback notes with their
+    lifecycle status (newest first). Read side of the in-app feedback
+    widget's status chips. Requires a session; submission (POST
+    /api/feedback) remains anonymous-friendly and is unchanged.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    try:
+        items = list_feedback_for_user(sess["user_id"])
+        return jsonify({"items": items, "count": len(items)})
+    except Exception as e:
+        log.exception("my_feedback_route failed")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/tiers/save", methods=["POST"])
 def save_tiers_route():
     """POST /api/tiers/save {position: 'RB', tiers: {elite: [...ids], ...}, cleared_pids: [...]}
@@ -3140,6 +3200,10 @@ def trade_card_to_dict(card, players: dict) -> dict:
     out = {
         "trade_id":          card.trade_id,
         "league_id":         card.league_id,
+        # FB-46: clients echo this back on /api/trades/swipe so a card can
+        # be reconstructed (and match detection still works) after a server
+        # restart wipes the in-memory deck.
+        "target_user_id":    card.target_user_id,
         "target_username":   card.target_username,
         "give":              [p(pid) for pid in card.give_player_ids],
         "receive":           [p(pid) for pid in card.receive_player_ids],
@@ -3163,6 +3227,10 @@ def trade_card_to_dict(card, players: dict) -> dict:
     sweetener = getattr(card, "sweetener", None)
     if sweetener:
         out["sweetener"] = sweetener
+    # FB-47 — counterparty positional fit, only when targeting stamped it.
+    partner_fit = getattr(card, "partner_fit", None)
+    if partner_fit is not None:
+        out["partner_fit"] = partner_fit
     # Agent A8 — expose human-readable reasons only when the flag is on
     # AND the card actually has some. Keeps legacy JSON identical when off.
     reasons = getattr(card, "reasons", None)
@@ -3216,8 +3284,13 @@ def generate_trades():
     body               = request.get_json(force=True) or {}
     league_id          = body.get("league_id") or g_league.league_id
     pinned_give        = body.get("pinned_give_players") or []
+    # FB-47 — "I want to acquire X". Honored only when trade.finder_targeting
+    # is on so flag-off behavior stays byte-identical for any early client.
+    pinned_receive     = (body.get("pinned_receive_players") or []
+                          if is_enabled("trade.finder_targeting") else [])
+    _any_pinned        = bool(pinned_give) or bool(pinned_receive)
     # Default to 50% when pinned players are selected (wide net), 75% otherwise
-    default_fairness   = 0.50 if pinned_give else 0.75
+    default_fairness   = 0.50 if _any_pinned else 0.75
     fairness_threshold = float(body.get("fairness_threshold", default_fairness))
     fmt                = _active_format(sess)
 
@@ -3243,10 +3316,10 @@ def generate_trades():
         pass
 
     with _trade_jobs_lock:
-        existing_id = _trade_jobs_by_key.get(key) if not pinned_give else None
+        existing_id = _trade_jobs_by_key.get(key) if not _any_pinned else None
         existing    = _trade_jobs.get(existing_id) if existing_id else None
 
-        if existing and not pinned_give:
+        if existing and not _any_pinned:
             # Cache hit: complete + fresh + same params → return instantly.
             if _trade_job_is_fresh(existing, fairness_threshold, outlook_value):
                 return jsonify(_trade_job_public_view(existing))
@@ -3268,6 +3341,7 @@ def generate_trades():
         scoring_format     = fmt,
         fairness_threshold = fairness_threshold,
         pinned_give        = pinned_give or None,
+        pinned_receive     = pinned_receive or None,
         opponents_total    = opponents_total,
     )
     with _trade_jobs_lock:
@@ -3311,9 +3385,50 @@ def get_trades():
     return jsonify([trade_card_to_dict(c, players_dict) for c in cards])
 
 
+def _reconstruct_swipe_card(trade_service, body: dict, user_id: str, league_id: str):
+    """FB-46 — rebuild a TradeCard from the swipe payload's card context.
+
+    Trade decks live in the per-session TradeService's memory; a Render
+    deploy (or session re-init) wipes them while clients may still be
+    displaying the old deck. When record_decision can't find the trade_id,
+    this reconstructs the card from the give/receive ids the client echoes
+    back, registers it, and lets the normal decision flow proceed — Elo
+    signal, persistence, and mutual-match detection all behave identically.
+
+    Returns the registered TradeCard, or None when the payload doesn't
+    carry enough context (legacy clients) — callers should re-raise then.
+    """
+    give_ids = body.get("give_player_ids") or []
+    recv_ids = body.get("receive_player_ids") or []
+    if not (isinstance(give_ids, list) and isinstance(recv_ids, list)
+            and give_ids and recv_ids):
+        return None
+    card = TradeCard(
+        trade_id           = str(body.get("trade_id")),
+        league_id          = str(body.get("league_id") or league_id),
+        proposing_user_id  = user_id,
+        target_user_id     = str(body.get("target_user_id") or ""),
+        target_username    = str(body.get("target_username") or ""),
+        give_player_ids    = [str(x) for x in give_ids],
+        receive_player_ids = [str(x) for x in recv_ids],
+        mismatch_score     = 0.0,
+        fairness_score     = 0.0,
+        composite_score    = 0.0,
+    )
+    trade_service._trade_cards[card.trade_id] = card
+    return card
+
+
 @app.route("/api/trades/swipe", methods=["POST"])
 def swipe_trade():
-    """POST /api/trades/swipe  {trade_id, decision: 'like'|'pass'}"""
+    """POST /api/trades/swipe  {trade_id, decision: 'like'|'pass'}
+
+    Optional card-context fields (give_player_ids, receive_player_ids,
+    target_user_id, target_username, league_id) make the swipe
+    restart-proof: if the in-memory deck was lost since generation, the
+    card is reconstructed from them instead of failing with
+    "Unknown trade_id" (FB-46).
+    """
     sess = _require_session()
     sess["last_active"] = time.time()
     service       = sess["service"]
@@ -3329,7 +3444,19 @@ def swipe_trade():
         return jsonify({"error": "trade_id and decision required"}), 400
 
     try:
-        card = trade_service.record_decision(trade_id=trade_id, decision=decision)
+        try:
+            card = trade_service.record_decision(trade_id=trade_id, decision=decision)
+        except ValueError as ve:
+            # Unknown trade_id → deck predates a restart/re-init. Recover
+            # from the client-echoed card context when present; otherwise
+            # surface the original error (legacy payloads).
+            if "Unknown trade_id" not in str(ve):
+                raise
+            rebuilt = _reconstruct_swipe_card(trade_service, body, g_user_id, g_league.league_id)
+            if rebuilt is None:
+                raise
+            log.info("swipe: reconstructed card %s from payload context (FB-46)", trade_id)
+            card = trade_service.record_decision(trade_id=trade_id, decision=decision)
 
         if decision == "like":
             service.record_trade_signal(
@@ -4055,13 +4182,20 @@ def get_leagues():
 
 @app.route("/api/portfolio")
 def get_portfolio():
-    """GET /api/portfolio → aggregate exposure across every league this user
-    has synced. Returns {players: [...]} sorted by exposure desc."""
+    """GET /api/portfolio?league_ids=a,b,c → aggregate exposure across this
+    user's leagues. Returns {players: [...]} sorted by exposure desc.
+
+    league_ids (optional, FB-48): comma-separated allow-list. Sleeper mints
+    a new league_id per season, so the DB accumulates last season's instance
+    of each league; clients pass their current-season list so carried-over
+    players aren't double-counted. Omitted → all synced leagues (legacy)."""
     sess = _require_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
     try:
-        players = load_user_cross_league_exposure(g_user_id)
+        raw_ids = (request.args.get("league_ids") or "").strip()
+        league_ids = [x for x in (s.strip() for s in raw_ids.split(",")) if x] or None
+        players = load_user_cross_league_exposure(g_user_id, league_ids=league_ids)
         return jsonify({"players": players})
     except Exception as e:
         log.error("get_portfolio error: %s", e)
@@ -4871,6 +5005,27 @@ def admin_config_update(key: str):
         return jsonify({"error": f"Invalid value: {e}"}), 400
     except Exception as e:
         log.exception("admin_config_update failed for key=%s", key)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/admin/engine-metrics", methods=["GET"])
+def admin_engine_metrics():
+    """
+    GET /api/admin/engine-metrics?days=30&league_id=...
+
+    Read-only aggregate health metrics for the trade engine: impression
+    volume, like/pass rates by card basis / likes-you / deck position /
+    package shape / league, and match conversion. This is the data the
+    fairness_threshold and package_adj_gamma tuning is blocked on.
+    """
+    try:
+        days = max(1, min(int(request.args.get("days", 30)), 365))
+        league_id = request.args.get("league_id") or None
+        return jsonify(load_engine_telemetry(days=days, league_id=league_id))
+    except (TypeError, ValueError):
+        return jsonify({"error": "days must be an integer"}), 400
+    except Exception as e:
+        log.exception("admin_engine_metrics failed")
         return jsonify({"error": str(e)}), 500
 
 

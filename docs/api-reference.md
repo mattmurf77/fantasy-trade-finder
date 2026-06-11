@@ -71,10 +71,10 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/trades/generate` | Generate trade cards |
+| POST | `/api/trades/generate` | Generate trade cards. Optional `pinned_give_players` ("what can I get for X") and, behind `trade.finder_targeting`, `pinned_receive_players` ("what does X cost") — pinned jobs bypass the cache. Cards may carry `partner_fit` (0–1 counterparty positional fit) when targeting is active |
 | GET | `/api/trades/status` | Generation job status |
 | GET | `/api/trades` | List current trade cards |
-| POST | `/api/trades/swipe` | Like/pass a trade |
+| POST | `/api/trades/swipe` | Like/pass a trade. Optional card-context fields (`give_player_ids`, `receive_player_ids`, `target_user_id`, `target_username`, `league_id`) let the server reconstruct the card after a restart wiped the in-memory deck (FB-46) |
 | GET | `/api/trades/liked` | Trades the user liked |
 | GET | `/api/trades/matches` | Mutual matches (current league) |
 | GET | `/api/trades/matches/all` | Mutual matches across all leagues |
@@ -164,7 +164,7 @@ Triggered by an external scheduler (Render cron). All POST.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/portfolio` | User's portfolio |
+| GET | `/api/portfolio` | User's cross-league exposure. Optional `?league_ids=a,b,c` (FB-48) scopes to the caller's current-season leagues — Sleeper mints a new league_id per season, so unscoped queries double-count carried-over players |
 | GET | `/u/<username>` | Public profile page |
 | GET | `/api/profile/<username>` | Profile JSON |
 | GET | `/og/tiers/<pos>/<username>.png` | OG image (tiers) |
@@ -191,6 +191,8 @@ Triggered by an external scheduler (Render cron). All POST.
 |---|---|---|
 | GET | `/api/admin/config` | Read all `model_config` entries |
 | PUT | `/api/admin/config/<key>` | Update one `model_config` value |
+| GET | `/api/admin/engine-metrics` | Trade-engine telemetry: like/pass rates by basis, likes-you, deck position, shape, league; match conversion (`?days=30&league_id=`) |
+| PUT | `/api/feedback/admin/<id>/status` | Operator update for a feedback note: `status` (`new\|planned\|in_progress\|fixed\|shipped\|declined`) and/or `severity` (`bug\|polish\|idea`); X-Cron-Secret auth |
 | GET | `/api/debug/log` | Last N debug ring-buffer entries (`?n=100`) |
 
 ## Misc
@@ -206,6 +208,7 @@ Triggered by an external scheduler (Render cron). All POST.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/feedback` | Capture a single feedback note from the mobile FeedbackSheet. Idempotent on `client_id`. |
+| GET | `/api/feedback/mine` | The caller's own notes with operator-set lifecycle status (session auth). Backs the status chips in the mobile feedback inbox. |
 
 **Body** (JSON):
 

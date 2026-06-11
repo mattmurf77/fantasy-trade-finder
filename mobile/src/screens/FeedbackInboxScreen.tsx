@@ -13,12 +13,32 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import { useFeedback, formatFeedbackAsMarkdown, type FeedbackItem } from '../state/useFeedback';
+import type { FeedbackStatus } from '../api/feedback';
 import { relativeTime } from '../utils/relativeTime';
 
 const SEV_LABEL: Record<FeedbackItem['severity'], string> = {
   bug:    '🐞 Bug',
   polish: '✨ Polish',
   idea:   '💡 Idea',
+};
+
+// Operator-set lifecycle status → user-facing chip. Vocabulary mirrors
+// the backend's FEEDBACK_STATUSES (docs/cross-client-invariants.md).
+const STATUS_LABEL: Record<FeedbackStatus, string> = {
+  new:         '📬 Received',
+  planned:     '🗓 Planned',
+  in_progress: '🔧 In progress',
+  fixed:       '✅ Fixed — in next update',
+  shipped:     '🚀 Shipped',
+  declined:    '🚫 Not planned',
+};
+const STATUS_COLOR: Record<FeedbackStatus, string> = {
+  new:         colors.muted,
+  planned:     colors.accent,
+  in_progress: colors.gold,
+  fixed:       colors.green,
+  shipped:     colors.green,
+  declined:    colors.muted,
 };
 
 // Settings → Test feedback → this screen.
@@ -33,13 +53,16 @@ export default function FeedbackInboxScreen() {
   const remove    = useFeedback((s) => s.remove);
   const clear     = useFeedback((s) => s.clear);
   const retrySync = useFeedback((s) => s.retrySync);
+  const refreshStatuses = useFeedback((s) => s.refreshStatuses);
 
   const [retrying, setRetrying] = useState(false);
   const unsyncedCount = items.filter((i) => !i.synced).length;
 
   useEffect(() => {
-    void hydrate();
-  }, [hydrate]);
+    // Hydrate local notes first, then pull operator-set statuses from the
+    // backend (best-effort; merges by server_id/client_id).
+    void hydrate().then(() => refreshStatuses());
+  }, [hydrate, refreshStatuses]);
 
   async function onRetry() {
     if (retrying || unsyncedCount === 0) return;
@@ -175,6 +198,11 @@ export default function FeedbackInboxScreen() {
                 </View>
                 <Text style={styles.cardScreen}>{it.screen}</Text>
                 <Text style={styles.cardText}>{it.text}</Text>
+                {it.status ? (
+                  <Text style={[styles.statusChip, { color: STATUS_COLOR[it.status] }]}>
+                    {STATUS_LABEL[it.status]}
+                  </Text>
+                ) : null}
                 <Text style={[styles.cardBadge, badgeStyle]} numberOfLines={2}>
                   {badgeText}
                 </Text>
@@ -248,4 +276,12 @@ const styles = StyleSheet.create({
   badgeSynced:  { color: colors.muted },
   badgePending: { color: colors.gold },
   badgeFailed:  { color: colors.red },
+  // Operator-set lifecycle status — the "what happened to my note" line.
+  // Sits above the sync badge; color carries the state (see STATUS_COLOR).
+  statusChip: {
+    fontSize: fontSize.xs,
+    marginTop: 8,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
 });

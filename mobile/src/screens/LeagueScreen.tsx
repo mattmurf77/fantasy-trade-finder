@@ -6,8 +6,10 @@ import {
   Pressable,
   ScrollView,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 
 import { colors } from '../theme/colors';
@@ -38,6 +40,10 @@ export default function LeagueScreen() {
   const league   = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  // FB-38/42 — member-roster overlay, opened from the hero's joined chip.
+  const [membersOpen, setMembersOpen] = useState(false);
+  // FB-37 — Matches tiles deep-link to the Matches tab.
+  const navigation = useNavigation<any>();
 
   // `placeholderData: (prev) => prev` keeps the previous value visible
   // across refetches so the screen doesn't blank when re-entered.
@@ -156,7 +162,6 @@ export default function LeagueScreen() {
   const rankedOpps      = num(coverage?.ranked);
 
   const coveragePct = totalOpps > 0 ? Math.round((rankedOpps / totalOpps) * 100) : 0;
-  const joinPct     = totalMates > 0 ? Math.round((joinedMates / totalMates) * 100) : 0;
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -192,79 +197,41 @@ export default function LeagueScreen() {
           <View style={styles.heroChips}>
             <Chip label={fmtScoring(summary?.default_scoring)} tone="accent" />
             <Chip label={summary ? `${num((summary as any)?.leaguemates_total) + 1} teams` : '— teams'} />
+            {/* FB-38/42 — joined summary lives in the hero; tapping it opens
+                the member-roster overlay. Inner Pressable so the tap doesn't
+                bubble to the hero's switch-league handler. The › chevron is
+                the clickability cue the feedback asked for. */}
+            <Pressable
+              onPress={() => setMembersOpen(true)}
+              style={({ pressed }) => [
+                styles.chip, styles.chipAccent, pressed && { opacity: 0.7 },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="View league members and join status"
+            >
+              <Text style={[styles.chipText, styles.chipTextAccent]}>
+                {summaryPending ? '— joined' : `${joinedMates}/${totalMates || '—'} joined`} ›
+              </Text>
+            </Pressable>
           </View>
         </Pressable>
 
-        {/* Matches roll-up */}
+        {/* Matches roll-up — tiles route to the Matches tab (FB-37). */}
         <SectionTitle>Matches</SectionTitle>
         <View style={styles.statRow}>
-          <StatCard label="Pending"  value={summaryPending ? '—' : matchesPending}  emoji="🤝" />
-          <StatCard label="Accepted" value={summaryPending ? '—' : matchesAccepted} emoji="✅" />
+          <StatCard
+            label="Pending"
+            value={summaryPending ? '—' : matchesPending}
+            emoji="🤝"
+            onPress={() => navigation.navigate('Matches')}
+          />
+          <StatCard
+            label="Accepted"
+            value={summaryPending ? '—' : matchesAccepted}
+            emoji="✅"
+            onPress={() => navigation.navigate('Matches')}
+          />
         </View>
-
-        {/* Leaguemate progress */}
-        <SectionTitle>Leaguemates</SectionTitle>
-        <View style={styles.card}>
-          <View style={styles.statBetween}>
-            <Text style={styles.cardLabel}>Joined the app</Text>
-            <Text style={styles.cardValue}>
-              {summaryPending ? '—' : `${joinedMates}/${totalMates || '—'}`}
-            </Text>
-          </View>
-          <ProgressBar pct={summaryPending ? 0 : joinPct} />
-          <View style={[styles.statBetween, { marginTop: spacing.md }]}>
-            <Text style={styles.cardSubLabel}>Unlocked 1QB</Text>
-            <Text style={styles.cardSubValue}>{summaryPending ? '—' : unlocked1qb}</Text>
-          </View>
-          <View style={styles.statBetween}>
-            <Text style={styles.cardSubLabel}>Unlocked SF</Text>
-            <Text style={styles.cardSubValue}>{summaryPending ? '—' : unlockedSf}</Text>
-          </View>
-        </View>
-
-        {/* Leaguemate roster — names + join status. Backend sorts joined
-            first then not-joined. Empty state stays silent (rare in
-            practice; the join-count card above already conveys 0).
-            When `league.unlock_badges_per_member` flag is on, each joined
-            row also gets an unlock-status chip (✓ Unlocked / in progress). */}
-        {membersQuery.data?.members && membersQuery.data.members.length > 0 ? (
-          <View style={styles.card}>
-            {membersQuery.data.members.map((m) => {
-              const unlock = showUnlockBadges ? unlocksById.get(m.user_id) : undefined;
-              return (
-                <View key={m.user_id} style={styles.memberRow}>
-                  <Text style={styles.memberName} numberOfLines={1}>
-                    {m.display_name || m.username || m.user_id}
-                  </Text>
-                  {showUnlockBadges && m.joined ? (
-                    <View style={[
-                      styles.unlockChip,
-                      unlock?.unlocked ? styles.unlockChipOn : styles.unlockChipOff,
-                    ]}>
-                      <Text style={[
-                        styles.unlockChipText,
-                        unlock?.unlocked ? styles.unlockChipTextOn : styles.unlockChipTextOff,
-                      ]}>
-                        {unlock?.unlocked ? '✓ Unlocked' : 'in progress'}
-                      </Text>
-                    </View>
-                  ) : null}
-                  <View style={[
-                    styles.memberBadge,
-                    m.joined ? styles.memberBadgeJoined : styles.memberBadgeNotJoined,
-                  ]}>
-                    <Text style={[
-                      styles.memberBadgeText,
-                      m.joined ? styles.memberBadgeTextJoined : styles.memberBadgeTextNotJoined,
-                    ]}>
-                      {m.joined ? '✓ Joined' : 'Not joined'}
-                    </Text>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        ) : null}
 
         {/* Recent activity — flag-gated. Backend already short-circuits to
             an empty list when the flag is off, but we also gate the section
@@ -326,6 +293,73 @@ export default function LeagueScreen() {
         visible={switcherOpen}
         onClose={() => setSwitcherOpen(false)}
       />
+
+      {/* FB-38 — member-roster overlay: X top-right, join status per
+          member, unlock chips when the per-member flag is on. Replaces
+          the old standalone Leaguemates card + inline roster list. */}
+      <Modal
+        visible={membersOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMembersOpen(false)}
+      >
+        <Pressable style={styles.overlayBackdrop} onPress={() => setMembersOpen(false)} />
+        <View style={styles.overlayCard}>
+          <View style={styles.overlayHead}>
+            <Text style={styles.overlayTitle}>League members</Text>
+            <Pressable
+              onPress={() => setMembersOpen(false)}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Close members overlay"
+              style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+            >
+              <Text style={styles.overlayClose}>✕</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.overlaySub}>
+            {summaryPending
+              ? '…'
+              : `${joinedMates}/${totalMates || '—'} joined · ${unlocked1qb} unlocked 1QB · ${unlockedSf} unlocked SF`}
+          </Text>
+          <ScrollView style={styles.overlayList} contentContainerStyle={{ gap: 2 }}>
+            {(membersQuery.data?.members ?? []).map((m) => {
+              const unlock = showUnlockBadges ? unlocksById.get(m.user_id) : undefined;
+              return (
+                <View key={m.user_id} style={styles.memberRow}>
+                  <Text style={styles.memberName} numberOfLines={1}>
+                    {m.display_name || m.username || m.user_id}
+                  </Text>
+                  {showUnlockBadges && m.joined ? (
+                    <View style={[
+                      styles.unlockChip,
+                      unlock?.unlocked ? styles.unlockChipOn : styles.unlockChipOff,
+                    ]}>
+                      <Text style={[
+                        styles.unlockChipText,
+                        unlock?.unlocked ? styles.unlockChipTextOn : styles.unlockChipTextOff,
+                      ]}>
+                        {unlock?.unlocked ? '✓ Unlocked' : 'in progress'}
+                      </Text>
+                    </View>
+                  ) : null}
+                  <View style={[
+                    styles.memberBadge,
+                    m.joined ? styles.memberBadgeJoined : styles.memberBadgeNotJoined,
+                  ]}>
+                    <Text style={[
+                      styles.memberBadgeText,
+                      m.joined ? styles.memberBadgeTextJoined : styles.memberBadgeTextNotJoined,
+                    ]}>
+                      {m.joined ? '✓ Joined' : 'Not joined'}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -353,13 +387,29 @@ function Chip({ label, tone }: { label: string; tone?: 'accent' }) {
   );
 }
 
-function StatCard({ label, value, emoji }: { label: string; value: number | string; emoji: string }) {
-  return (
-    <View style={styles.statCard}>
+function StatCard({ label, value, emoji, onPress }: {
+  label: string; value: number | string; emoji: string; onPress?: () => void;
+}) {
+  // Pressable when a destination is supplied (FB-37: Matches tiles route
+  // to the Matches tab); plain tile otherwise. The › chevron next to the
+  // label is the clickability cue.
+  const body = (
+    <>
       <Text style={styles.statEmoji}>{emoji}</Text>
       <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
+      <Text style={styles.statLabel}>{onPress ? `${label} ›` : label}</Text>
+    </>
+  );
+  if (!onPress) return <View style={styles.statCard}>{body}</View>;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.statCard, pressed && { opacity: 0.7 }]}
+      accessibilityRole="button"
+      accessibilityLabel={`${label} — open Matches`}
+    >
+      {body}
+    </Pressable>
   );
 }
 
@@ -413,7 +463,32 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   heroName: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '800' },
-  heroChips: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
+  heroChips: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs, flexWrap: 'wrap' },
+
+  // FB-38 — member-roster overlay
+  overlayBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+  overlayCard: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
+    top: '14%',
+    maxHeight: '72%',
+    backgroundColor: colors.bg,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    gap: spacing.sm,
+  },
+  overlayHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  overlayTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
+  overlayClose: { color: colors.muted, fontSize: fontSize.lg, fontWeight: '800' },
+  overlaySub: { color: colors.muted, fontSize: fontSize.xs },
+  overlayList: { marginTop: spacing.xs },
 
   chip: {
     paddingHorizontal: 10,

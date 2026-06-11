@@ -144,10 +144,21 @@ export async function getRecentTrades(leagueId: string): Promise<TradeCard[]> {
 
 // POST /api/trades/swipe  body: { trade_id, decision: 'like' | 'pass' }
 export async function swipeTrade(
-  tradeId: string,
+  card: TradeCard,
   decision: 'like' | 'pass',
 ) {
-  return api.post<any>('/api/trades/swipe', { trade_id: tradeId, decision });
+  // FB-46: echo the card context so the server can reconstruct the card
+  // when its in-memory deck was lost (Render deploy / session re-init)
+  // instead of failing every swipe with "Unknown trade_id".
+  return api.post<any>('/api/trades/swipe', {
+    trade_id:           card.trade_id,
+    decision,
+    league_id:          card.league_id || undefined,
+    give_player_ids:    card.give_player_ids,
+    receive_player_ids: card.receive_player_ids,
+    target_user_id:     card.opponent_user_id || undefined,
+    target_username:    card.opponent_username || undefined,
+  });
 }
 
 // ── Trade-match normalizer ───────────────────────────────────────────

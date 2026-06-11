@@ -14,6 +14,9 @@ Thumbs.db
 
 # Environment
 .env
+# Local credentials store — NEVER commit. Visible (non-dot) filename on
+# purpose so it's easy to find in Finder. See CLAUDE.md "Conventions".
+secrets.local.env
 
 # IDE
 .vscode/

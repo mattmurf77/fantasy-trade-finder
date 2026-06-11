@@ -330,8 +330,15 @@ export interface PortfolioApiRow {
   leagues?: PortfolioApiLeague[];
   league_names?: string[];
 }
-export async function getPortfolio(): Promise<{ players: PortfolioRow[] }> {
-  const raw = await api.get<{ players: PortfolioApiRow[] }>('/api/portfolio');
+export async function getPortfolio(leagueIds?: string[]): Promise<{ players: PortfolioRow[] }> {
+  // FB-48: scope to the current-season league list. Sleeper mints a new
+  // league_id each season, so the backend's league_members table also holds
+  // last season's instance of each league — unscoped, every carried-over
+  // player double-counts.
+  const qs = leagueIds && leagueIds.length > 0
+    ? `?league_ids=${encodeURIComponent(leagueIds.join(','))}`
+    : '';
+  const raw = await api.get<{ players: PortfolioApiRow[] }>(`/api/portfolio${qs}`);
   const players: PortfolioRow[] = (raw?.players || []).map((r) => {
     const exposureSource: PortfolioApiLeague[] = r.leagues && r.leagues.length > 0
       ? r.leagues

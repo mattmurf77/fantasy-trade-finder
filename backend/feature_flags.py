@@ -87,6 +87,8 @@ FLAG_KEYS: tuple[str, ...] = (
     # Trade engine Tier 3 (docs/plans/trade-engine-tier3-rebuild.md)
     "trade_engine.v3",        # exact per-pair package construction + sweeteners
     "trade.three_team",       # 3-team cycle generation (no client surface yet)
+    # FB-47 finder targeting (docs/plans/trade-finder-targeting.md)
+    "trade.finder_targeting", # pinned-receive + counterparty positional fit
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

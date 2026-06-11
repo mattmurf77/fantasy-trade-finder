@@ -41,8 +41,10 @@ import {
   getLeaguePreferences,
   saveLeaguePreferences,
   getNewPartners,
+  getLeagueCoverage,
   type Outlook,
 } from '../api/league';
+import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import { useSession } from '../state/useSession';
 import { useTradeQueue } from '../state/useTradeQueue';
 import { useFlag } from '../state/useFeatureFlags';
@@ -90,6 +92,18 @@ export default function TradesScreen({ navigation }: any) {
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
+  // Cold-start invite banner — when no league-mate has ranked, every card
+  // is a consensus-basis estimate, so nudge the user to invite. Shares the
+  // ['league-coverage', leagueId] key with LeagueScreen's coverage bar.
+  const coverageQuery = useQuery({
+    queryKey: ['league-coverage', leagueId],
+    queryFn:  () => getLeagueCoverage(leagueId!),
+    enabled:  !!leagueId,
+    staleTime: 5 * 60_000,
+  });
+  const coverage = coverageQuery.data;
+  const showInviteBanner =
+    !!coverage && (coverage.total ?? 0) > 0 && (coverage.ranked ?? 0) === 0;
   // Trade-fairness toggle. ON = backend filters to balanced trades and
   // sorts by composite_score (current behavior). OFF = broaden the
   // backend filter to its loosest (0.5) and re-sort the deck client-side
@@ -323,9 +337,10 @@ export default function TradesScreen({ navigation }: any) {
   }, [leagueId]);
 
   const swipeMutation = useMutation({
-    mutationFn: ({ tradeId, decision }: { tradeId: string; decision: 'like' | 'pass' }) =>
-      swipeTrade(tradeId, decision),
-    onMutate: ({ tradeId }) => {
+    mutationFn: ({ card, decision }: { card: TradeCard; decision: 'like' | 'pass' }) =>
+      swipeTrade(card, decision),
+    onMutate: ({ card }) => {
+      const tradeId = card.trade_id;
       // Snapshot the index this card was at when the swipe fired. On
       // error we use this to decide whether to rewind the deck — only
       // safe if the user hasn't already swiped past it. Capturing the
@@ -402,7 +417,7 @@ export default function TradesScreen({ navigation }: any) {
 
   function advance(decision: 'like' | 'pass') {
     if (!topCard) return;
-    swipeMutation.mutate({ tradeId: topCard.trade_id, decision });
+    swipeMutation.mutate({ card: topCard, decision });
     setDeckIdx((i) => i + 1);
     if (decision === 'like') {
       haptics.success();
@@ -511,6 +526,17 @@ export default function TradesScreen({ navigation }: any) {
             partners={newPartnersQuery.data!.partners}
             userId={userId}
             leagueId={leagueId}
+          />
+        ) : null}
+
+        {/* Cold-start invite nudge — no league-mate has ranked yet, so the
+            divergence engine has nothing to work with. */}
+        {showInviteBanner && leagueId ? (
+          <InviteLeaguematesBanner
+            leagueId={leagueId}
+            leagueName={league?.league_name}
+            username={user?.username}
+            total={coverage!.total}
           />
         ) : null}
 

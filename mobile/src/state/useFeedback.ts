@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { submitFeedback } from '../api/feedback';
+import { submitFeedback, getMyFeedback, type FeedbackStatus } from '../api/feedback';
 
 // In-app feedback capture (TestFlight-era helper).
 //
@@ -31,6 +31,12 @@ export interface FeedbackItem {
   server_id?: number;
   last_sync_attempt?: string; // ISO; debug-only visibility for the inbox
   last_sync_error?: string;   // short human string; cleared on success
+
+  // ── Lifecycle status (operator-set, read from /api/feedback/mine) ────
+  // Refreshed by refreshStatuses(); undefined until the first successful
+  // fetch (UI shows nothing rather than a wrong 'new').
+  status?: FeedbackStatus;
+  status_updated_at?: string | null;
 }
 
 const STORAGE_KEY = 'ftf_inapp_feedback_v1';
@@ -43,6 +49,11 @@ interface FeedbackState {
   remove: (id: string) => Promise<void>;
   clear: () => Promise<void>;
   retrySync: () => Promise<void>;
+  /** Fetch operator-set statuses for the user's synced notes and merge
+   *  them into local items (matched by server_id, falling back to
+   *  client_id). Best-effort: failures leave existing statuses in place
+   *  and never affect capture/sync. */
+  refreshStatuses: () => Promise<void>;
 }
 
 async function persist(items: FeedbackItem[]): Promise<void> {
@@ -159,6 +170,40 @@ export const useFeedback = create<FeedbackState>((set, get) => ({
   clear: async () => {
     set({ items: [] });
     await persist([]);
+  },
+
+  refreshStatuses: async () => {
+    try {
+      const res = await getMyFeedback();
+      const byServerId = new Map<number, FeedbackStatus>();
+      const byClientId = new Map<string, FeedbackStatus>();
+      const updatedAtByServerId = new Map<number, string | null>();
+      const updatedAtByClientId = new Map<string, string | null>();
+      for (const it of res.items || []) {
+        byServerId.set(it.server_id, it.status);
+        updatedAtByServerId.set(it.server_id, it.status_updated_at);
+        if (it.client_id) {
+          byClientId.set(it.client_id, it.status);
+          updatedAtByClientId.set(it.client_id, it.status_updated_at);
+        }
+      }
+      const merged = get().items.map((i) => {
+        const status =
+          (i.server_id !== undefined ? byServerId.get(i.server_id) : undefined)
+          ?? byClientId.get(i.id);
+        if (!status) return i;
+        const status_updated_at =
+          (i.server_id !== undefined ? updatedAtByServerId.get(i.server_id) : undefined)
+          ?? updatedAtByClientId.get(i.id)
+          ?? null;
+        return { ...i, status, status_updated_at };
+      });
+      set({ items: merged });
+      await persist(merged);
+    } catch {
+      // Offline / signed out / old backend — keep whatever statuses we
+      // last persisted. Never let this break the inbox.
+    }
   },
 
   retrySync: async () => {
