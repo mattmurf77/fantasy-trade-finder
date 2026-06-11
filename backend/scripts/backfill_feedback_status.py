@@ -52,7 +52,7 @@ STATUS_MAP: dict[int, str] = {
     24: "shipped",      # slow initial load → perf waves + Render Starter dyno
     26: "shipped",      # rookies link removed (#83)
     27: "shipped",      # tile movement while dragging — operator confirmed (2026-06-10)
-    28: "new",          # bottom-nav affordance icon
+    28: "fixed",        # Rank-tab menu cue strengthened (label "Rank ▾" + bigger chevron) — 2026-06-10, next build
     29: "shipped",      # full tile shift while dragging — operator confirmed (2026-06-10)
     30: "shipped",      # operator closed (2026-06-10) — reference note, target UX achieved
     31: "shipped",      # trends as rank-place deltas (trends_service rank deltas)
@@ -61,12 +61,12 @@ STATUS_MAP: dict[int, str] = {
     34: "shipped",      # check/X buttons under trade tile (TradesScreen)
     35: "shipped",      # match accept failure → FB-01 disposition fix
     36: "shipped",
-    37: "planned",      # league tiles → route to trade records (idea, see SEVERITY_MAP)
-    38: "planned",      # joined-the-app overlay rework (idea, see SEVERITY_MAP)
-    39: "planned",      # leaderboard streak/total toggle
+    37: "fixed",        # Matches tiles route to Matches tab — 2026-06-10, next build (idea, see SEVERITY_MAP)
+    38: "fixed",        # joined chip in hero → member overlay w/ X — 2026-06-10, next build (idea, see SEVERITY_MAP)
+    39: "shipped",      # leaderboard already has Streaks/week/month/Season toggle tabs (LeaderboardsSection)
     40: "shipped",      # operator closed (2026-06-10) — OverallRanks/ManualRanks question resolved
     41: "shipped",      # league team count (#82)
-    42: "planned",      # merge joined-summary into header tile
+    42: "fixed",        # joined summary merged into hero tile, standalone tile removed — 2026-06-10, next build
     43: "shipped",      # drag/multiselect — operator confirmed working (2026-06-10)
     44: "shipped",      # multi-select bulk-move fix (#85)
     # ── June 10 batch (ids 45-48) ────────────────────────────────────

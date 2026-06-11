@@ -123,7 +123,10 @@ export default function TabNav() {
         <Tab.Screen
           name="Rank"
           component={RankStackNav}
-          options={{ tabBarIcon: rankTabIcon('🏈') }}
+          // FB-28: the ▾ beside the icon (PR #79) was still read as a
+          // single screen — repeat the cue in the label so "menu here" is
+          // unmissable at a glance.
+          options={{ tabBarIcon: rankTabIcon('🏈'), tabBarLabel: 'Rank ▾' }}
           listeners={() => ({
             // Intercept the tap on the Rank tab — open the action sheet
             // instead of jumping into a sub-screen. We still keep the tab
@@ -296,7 +299,8 @@ const styles = StyleSheet.create({
   // margin pulls the chevron snug to the glyph; nothing extends past the
   // tab's icon box so there's no clipping on the bottom bar.
   rankIconWrap: { flexDirection: 'row', alignItems: 'center' },
-  rankIconChevron: { fontSize: 11, fontWeight: '900', marginLeft: 1, marginTop: 2 },
+  // FB-28: bumped from 11 — the smaller chevron read as decoration.
+  rankIconChevron: { fontSize: 14, fontWeight: '900', marginLeft: 2, marginTop: 2 },
 
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: {
