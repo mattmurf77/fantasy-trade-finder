@@ -61,8 +61,8 @@ STATUS_MAP: dict[int, str] = {
     34: "shipped",      # check/X buttons under trade tile (TradesScreen)
     35: "shipped",      # match accept failure → FB-01 disposition fix
     36: "shipped",
-    37: "planned",      # league tiles → route to trade records
-    38: "planned",      # joined-the-app overlay rework
+    37: "planned",      # league tiles → route to trade records (idea, see SEVERITY_MAP)
+    38: "planned",      # joined-the-app overlay rework (idea, see SEVERITY_MAP)
     39: "planned",      # leaderboard streak/total toggle
     40: "new",          # OverallRanks vs ManualRanks duplication question
     41: "shipped",      # league team count (#82)
@@ -74,6 +74,14 @@ STATUS_MAP: dict[int, str] = {
     46: "fixed",        # swipe didn't save — fixed 2026-06-10
     47: "planned",      # standalone needs-based trade finder (NEXT.md)
     48: "fixed",        # portfolio season double-count — fixed 2026-06-10
+}
+
+# id → severity reclassification (operator decisions, 2026-06-10).
+# Sent in the same PUT as the status when both exist.
+SEVERITY_MAP: dict[int, str] = {
+    37: "idea",         # filed as bug; really a navigation feature request
+    38: "idea",         # filed as bug; really an overlay/UX redesign request
+    47: "idea",         # filed as bug; self-described feature idea
 }
 
 
@@ -101,13 +109,20 @@ def main() -> int:
         return 1
 
     ok = failed = 0
-    for fid, status in sorted(STATUS_MAP.items()):
+    all_ids = sorted(set(STATUS_MAP) | set(SEVERITY_MAP))
+    for fid in all_ids:
+        payload: dict = {}
+        if fid in STATUS_MAP:
+            payload["status"] = STATUS_MAP[fid]
+        if fid in SEVERITY_MAP:
+            payload["severity"] = SEVERITY_MAP[fid]
+        status = payload.get("status", "(unchanged)")
         if args.dry_run:
-            print(f"would set {fid} -> {status}")
+            print(f"would set {fid} -> {payload}")
             continue
         req = urllib.request.Request(
             f"{args.base}/api/feedback/admin/{fid}/status",
-            data=json.dumps({"status": status}).encode(),
+            data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json", "X-Cron-Secret": secret},
             method="PUT",
         )
@@ -121,7 +136,7 @@ def main() -> int:
         except Exception as e:
             print(f"{fid} -> {status}  FAILED {e}")
             failed += 1
-    print(f"\ndone: {ok} ok, {failed} failed, {len(STATUS_MAP)} total")
+    print(f"\ndone: {ok} ok, {failed} failed, {len(all_ids)} total")
     return 0 if failed == 0 else 2
 
 

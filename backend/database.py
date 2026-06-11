@@ -369,6 +369,9 @@ app_feedback_table = Table("app_feedback", metadata,
 # inbox's status chips (mobile/src/screens/FeedbackInboxScreen.tsx) — keep
 # docs/cross-client-invariants.md in sync if this changes.
 FEEDBACK_STATUSES = ("new", "planned", "in_progress", "fixed", "shipped", "declined")
+# Severity vocabulary — mirrors the POST /api/feedback contract (locked;
+# the submit route validates inline and is deliberately untouched).
+FEEDBACK_SEVERITIES = ("bug", "polish", "idea")
 
 # ---------------------------------------------------------------------------
 # Agent 1 additions — user_player_skips
@@ -5438,21 +5441,39 @@ def list_feedback(*, since_id: int = 0, limit: int = 100) -> list[dict]:
     ]
 
 
-def set_feedback_status(feedback_id: int, status: str) -> dict | None:
-    """Set the lifecycle status of one feedback row. Returns the updated
-    {id, status, status_updated_at}, or None when the id doesn't exist.
-    Caller validates `status` against FEEDBACK_STATUSES and enforces auth.
+def set_feedback_status(
+    feedback_id: int,
+    status: str | None = None,
+    severity: str | None = None,
+) -> dict | None:
+    """Operator update for one feedback row: lifecycle status and/or a
+    severity reclassification (e.g. a note filed as 'bug' that is really
+    an 'idea'). Returns the applied changes {id, ...}, or None when the id
+    doesn't exist. status_updated_at only moves when the STATUS changes.
+    Caller validates vocabularies and enforces auth.
     """
-    now_iso = datetime.now(timezone.utc).isoformat()
+    values: dict = {}
+    out: dict = {"id": int(feedback_id)}
+    if status is not None:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        values["status"] = status
+        values["status_updated_at"] = now_iso
+        out["status"] = status
+        out["status_updated_at"] = now_iso
+    if severity is not None:
+        values["severity"] = severity
+        out["severity"] = severity
+    if not values:
+        return None
     with engine.begin() as conn:
         res = conn.execute(
             app_feedback_table.update()
             .where(app_feedback_table.c.id == int(feedback_id))
-            .values(status=status, status_updated_at=now_iso)
+            .values(**values)
         )
         if res.rowcount == 0:
             return None
-    return {"id": int(feedback_id), "status": status, "status_updated_at": now_iso}
+    return out
 
 
 def list_feedback_for_user(user_id: str, limit: int = 200) -> list[dict]:

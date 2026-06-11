@@ -98,6 +98,37 @@ def test_status_set_validate_and_404(harness):
     assert missing.status_code == 404
 
 
+def test_severity_reclassification(harness):
+    client, token = harness
+    sid = _submit(client, token).get_json()["server_id"]   # filed as 'bug'
+
+    # Severity-only update: type flips, status untouched (still 'new').
+    res = client.put(f"/api/feedback/admin/{sid}/status",
+                     data=json.dumps({"severity": "idea"}),
+                     content_type="application/json")
+    assert res.status_code == 200
+    assert res.get_json()["severity"] == "idea"
+    mine = client.get("/api/feedback/mine", headers={"X-Session-Token": token})
+    item = mine.get_json()["items"][0]
+    assert item["severity"] == "idea"
+    assert item["status"] == "new"
+    assert item["status_updated_at"] is None    # status never changed
+
+    # Combined update in one call; invalid severity → 400.
+    both = client.put(f"/api/feedback/admin/{sid}/status",
+                      data=json.dumps({"status": "planned", "severity": "polish"}),
+                      content_type="application/json")
+    assert both.status_code == 200
+    bad = client.put(f"/api/feedback/admin/{sid}/status",
+                     data=json.dumps({"severity": "catastrophe"}),
+                     content_type="application/json")
+    assert bad.status_code == 400
+    empty = client.put(f"/api/feedback/admin/{sid}/status",
+                       data=json.dumps({}),
+                       content_type="application/json")
+    assert empty.status_code == 400
+
+
 def test_mine_scopes_to_caller_and_defaults_new(harness):
     client, token = harness
     mine_id = _submit(client, token, client_id="mine-1").get_json()["server_id"]
