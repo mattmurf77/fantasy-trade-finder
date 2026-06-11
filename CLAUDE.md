@@ -51,6 +51,7 @@ See [docs/CLAUDE.md](docs/CLAUDE.md) for the full table of update triggers.
 - Read `context.md` for project orientation; `docs/` is the source of truth for details.
 - DB lives in `data/trade_finder.db` (the stale legacy root copy was archived to `data/archive/` on 2026-06-10).
 - `config/features.json` drives feature flags consumed by both backend and clients.
+- **Credentials live in `secrets.local.env`** (project root, gitignored, never commit). Read keys from there (`CRON_SECRET` for `/api/feedback/admin` + `/api/cron/*`, optional `DATABASE_URL_PROD`, etc.) instead of asking the operator to paste secrets into chat. If a needed key is blank, ask the operator to fill it in that file.
 - Eval workspaces (`feature-evaluator-workspace/`, `project-reorganizer-workspace/`) are throwaway scaffolds — do not document or commit changes there casually.
 
 ## Common tasks
