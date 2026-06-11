@@ -1429,6 +1429,7 @@ def _run_trade_job(
     league_id: str,
     fairness_threshold: float,
     pinned_give: list,
+    pinned_receive: list | None = None,
 ):
     """Daemon-thread entry point. Resolves the session itself (rather than
     capturing closures over per-request state) so the request that kicked
@@ -1522,6 +1523,7 @@ def _run_trade_job(
             acquire_positions    = acquire_positions,
             trade_away_positions = trade_away_positions,
             pinned_give_players  = pinned_give or None,
+            pinned_receive_players = pinned_receive or None,
             scoring_format       = active_format,
             on_opponent_done     = progress_cb,
         )
@@ -1531,7 +1533,8 @@ def _run_trade_job(
         # the served deck includes them. Non-fatal: a failure here serves
         # the organic deck exactly as before. Skipped for pinned-give decks
         # ("what can I get for X?") — unrelated injections would pollute them.
-        if _likes_you_enabled() and league_id != "league_demo" and not pinned_give:
+        if (_likes_you_enabled() and league_id != "league_demo"
+                and not pinned_give and not pinned_receive):
             try:
                 final_cards = _inject_likes_you_cards(
                     cards         = final_cards,
@@ -1652,13 +1655,16 @@ def _kickoff_trade_job(
     scoring_format: str,
     fairness_threshold: float = 0.75,
     pinned_give: list | None = None,
+    pinned_receive: list | None = None,
     opponents_total: int | None = None,
 ) -> str:
     """Register a new job in _trade_jobs and start its worker thread.
     Returns the job_id. Caller is responsible for any pre-existing-job
     deduplication; this always creates a fresh one."""
     job_id = uuid.uuid4().hex
-    is_pinned = bool(pinned_give)
+    # Pinned flows (give OR receive) bypass the shared per-key cache — they
+    # answer a specific question, not the league-wide deck.
+    is_pinned = bool(pinned_give) or bool(pinned_receive)
     job = {
         "job_id":             job_id,
         "key":                _trade_job_key(user_id, league_id, scoring_format),
@@ -1681,7 +1687,8 @@ def _kickoff_trade_job(
 
     threading.Thread(
         target=_run_trade_job,
-        args=(job_id, sess_token, league_id, fairness_threshold, pinned_give or []),
+        args=(job_id, sess_token, league_id, fairness_threshold,
+              pinned_give or [], pinned_receive or []),
         daemon=True,
     ).start()
     return job_id
@@ -3220,6 +3227,10 @@ def trade_card_to_dict(card, players: dict) -> dict:
     sweetener = getattr(card, "sweetener", None)
     if sweetener:
         out["sweetener"] = sweetener
+    # FB-47 — counterparty positional fit, only when targeting stamped it.
+    partner_fit = getattr(card, "partner_fit", None)
+    if partner_fit is not None:
+        out["partner_fit"] = partner_fit
     # Agent A8 — expose human-readable reasons only when the flag is on
     # AND the card actually has some. Keeps legacy JSON identical when off.
     reasons = getattr(card, "reasons", None)
@@ -3273,8 +3284,13 @@ def generate_trades():
     body               = request.get_json(force=True) or {}
     league_id          = body.get("league_id") or g_league.league_id
     pinned_give        = body.get("pinned_give_players") or []
+    # FB-47 — "I want to acquire X". Honored only when trade.finder_targeting
+    # is on so flag-off behavior stays byte-identical for any early client.
+    pinned_receive     = (body.get("pinned_receive_players") or []
+                          if is_enabled("trade.finder_targeting") else [])
+    _any_pinned        = bool(pinned_give) or bool(pinned_receive)
     # Default to 50% when pinned players are selected (wide net), 75% otherwise
-    default_fairness   = 0.50 if pinned_give else 0.75
+    default_fairness   = 0.50 if _any_pinned else 0.75
     fairness_threshold = float(body.get("fairness_threshold", default_fairness))
     fmt                = _active_format(sess)
 
@@ -3300,10 +3316,10 @@ def generate_trades():
         pass
 
     with _trade_jobs_lock:
-        existing_id = _trade_jobs_by_key.get(key) if not pinned_give else None
+        existing_id = _trade_jobs_by_key.get(key) if not _any_pinned else None
         existing    = _trade_jobs.get(existing_id) if existing_id else None
 
-        if existing and not pinned_give:
+        if existing and not _any_pinned:
             # Cache hit: complete + fresh + same params → return instantly.
             if _trade_job_is_fresh(existing, fairness_threshold, outlook_value):
                 return jsonify(_trade_job_public_view(existing))
@@ -3325,6 +3341,7 @@ def generate_trades():
         scoring_format     = fmt,
         fairness_threshold = fairness_threshold,
         pinned_give        = pinned_give or None,
+        pinned_receive     = pinned_receive or None,
         opponents_total    = opponents_total,
     )
     with _trade_jobs_lock:

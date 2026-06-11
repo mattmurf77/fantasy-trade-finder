@@ -154,6 +154,12 @@ _DEFAULT_CFG: dict[str, float] = {
     # Deck composition (verified against real data 2026-06-09)
     "v3_diversity_max_overlap":   0.4,   # max asset Jaccard between two cards of one pair
     "consensus_score_scale":      0.3,   # consensus fallback cards rank below divergence finds
+    # FB-47 finder targeting (flag trade.finder_targeting) — counterparty
+    # positional-fit blend: composite *= 1 + w * (fit - 0.5), fit ∈ [0,1].
+    # Consensus cards lean on fit hard (no divergence signal to compete
+    # with); divergence cards keep it at tiebreak strength.
+    "fit_consensus_weight":       0.5,
+    "fit_divergence_weight":      0.15,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -406,6 +412,45 @@ def analyze_roster_strengths(
         "position_needs":   needs,
         "position_surplus": surplus,
     }
+
+
+# ---------------------------------------------------------------------------
+# FB-47 — finder targeting (flag: trade.finder_targeting)
+# docs/plans/trade-finder-targeting.md
+# ---------------------------------------------------------------------------
+
+
+def _position_strength(profile: dict, pos: str) -> float:
+    """0..1 — how loaded a roster is at `pos`, from an
+    analyze_roster_strengths profile. 1.0 = at/above the surplus threshold,
+    0.0 = no startable players at the position."""
+    td = profile.get("tier_depth", {}).get(pos, {})
+    starters = td.get("elite", 0) + td.get("starter", 0)
+    return min(1.0, starters / max(_SURPLUS_AT.get(pos, 2), 1))
+
+
+def partner_fit_score(
+    opp_profile: dict,
+    acquire_targets: list[str],
+    sell_targets: list[str],
+) -> Optional[float]:
+    """Counterparty positional fit for the user's stated targets, 0..1.
+
+    Acquiring at P → opponents LOADED at P score high (they can spare one).
+    Selling at P   → opponents THIN at P score high (they want yours).
+    Multiple targets average. None when the user expressed no targets —
+    callers must treat None as "targeting inactive", not as fit 0.
+    """
+    parts: list[float] = []
+    for pos in acquire_targets:
+        if pos in _SURPLUS_AT:
+            parts.append(_position_strength(opp_profile, pos))
+    for pos in sell_targets:
+        if pos in _SURPLUS_AT:
+            parts.append(1.0 - _position_strength(opp_profile, pos))
+    if not parts:
+        return None
+    return round(sum(parts) / len(parts), 3)
 
 
 # ---------------------------------------------------------------------------
@@ -900,6 +945,10 @@ class TradeCard:
     # otherwise-unfair trade: {"player_id": str, "side": "give"|"receive"}.
     # The player is already included in that side's id list. None otherwise.
     sweetener: Optional[dict] = None
+    # FB-47 (flag trade.finder_targeting) — counterparty positional fit for
+    # the user's stated targets, 0..1 (1 = ideal partner). None when the
+    # flag is off or the user expressed no targets. Serialized when set.
+    partner_fit: Optional[float] = None
 
 
 @dataclass
@@ -956,6 +1005,8 @@ class TradeService:
         acquire_positions: list[str] | None = None,    # positions user wants to receive
         trade_away_positions: list[str] | None = None, # positions user wants to give
         pinned_give_players: list[str] | None = None,  # specific players user wants to trade away
+        pinned_receive_players: list[str] | None = None,  # specific players user wants to acquire
+                                                          # (FB-47; v2-only, legacy ignores it)
         scoring_format: str = "1qb_ppr",
         is_dynasty: bool = False,
         on_opponent_done = None,             # callback(idx_done, total, sorted_cards_so_far)
@@ -1002,6 +1053,7 @@ class TradeService:
                 acquire_positions    = acquire_positions,
                 trade_away_positions = trade_away_positions,
                 pinned_give_players  = pinned_give_players,
+                pinned_receive_players = pinned_receive_players,
                 scoring_format       = scoring_format,
                 is_dynasty           = is_dynasty,
                 on_opponent_done     = on_opponent_done,
@@ -1141,10 +1193,11 @@ class TradeService:
         acquire_positions: list[str] | None,
         trade_away_positions: list[str] | None,
         pinned_give_players: list[str] | None,
-        scoring_format: str,
-        is_dynasty: bool,
-        on_opponent_done,
-        confidence: dict[str, int] | None,
+        pinned_receive_players: list[str] | None = None,
+        scoring_format: str = "1qb_ppr",
+        is_dynasty: bool = False,
+        on_opponent_done = None,
+        confidence: dict[str, int] | None = None,
         outlook: str | None = None,
     ) -> list[TradeCard]:
         """v2 orchestration: mirrors the legacy loop structure (profiles,
@@ -1152,6 +1205,23 @@ class TradeService:
         opponent to divergence-based or consensus-based generation."""
         new_cards: list[TradeCard] = []
         user_profile = analyze_roster_strengths(user_roster, self._players, scoring_format)
+
+        # FB-47 finder targeting — derive position targets from explicit
+        # prefs + the positions of pinned players. Player-level acquires
+        # (pinned receive) restrict cards to the rosters holding those
+        # players via the generators; position-level targets drive the
+        # counterparty fit ranking below.
+        _targeting = FLAGS.trade_finder_targeting
+        acquire_targets: list[str] = []
+        sell_targets: list[str] = []
+        if _targeting:
+            acquire_targets = list(acquire_positions or [])
+            sell_targets = list(trade_away_positions or [])
+            for pid in (pinned_give_players or []):
+                p = self._players.get(pid)
+                pos = getattr(p, "position", None) if p else None
+                if pos and pos not in sell_targets:
+                    sell_targets.append(pos)
 
         # Confidence shrinkage BEFORE the value transform (Change 4).
         shrunk_elo = _shrink_user_elo(user_elo, seed_elo, confidence)
@@ -1186,12 +1256,27 @@ class TradeService:
         # real rankings are NOT compared in divergence space (their
         # elo_ratings are fabricated noise) — they get consensus cards.
         eligible = [m for m in league.members if m.user_id != user_id and m.roster]
+        # FB-47 — counterparty fit per opponent (None ⇒ targeting inactive
+        # or no targets expressed). Profiles are recomputed inside the loop
+        # for match_ctx; this pre-pass is cheap (rosters are small) and lets
+        # the visit order put high-fit opponents first within each group.
+        _fit_by_uid: dict[str, float] = {}
+        if _targeting and (acquire_targets or sell_targets):
+            for m in eligible:
+                prof = analyze_roster_strengths(m.roster, self._players, scoring_format)
+                fit = partner_fit_score(prof, acquire_targets, sell_targets)
+                if fit is not None:
+                    _fit_by_uid[m.user_id] = fit
         # Ranked opponents FIRST: divergence cards are the core product
         # signal and must never be crowded out of the global card budget by
         # consensus fallback cards (a league with many unranked members would
         # otherwise hit global_target before any ranked opponent is visited).
-        # Stable sort keeps roster order within each group.
-        eligible.sort(key=lambda m: not (m.has_rankings and m.elo_ratings))
+        # Within each group, best-fit first when targeting is active;
+        # stable sort keeps roster order otherwise.
+        eligible.sort(key=lambda m: (
+            not (m.has_rankings and m.elo_ratings),
+            -_fit_by_uid.get(m.user_id, 0.5),
+        ))
         total = len(eligible)
         global_target = max(30, max_per_opponent * 6)
 
@@ -1222,6 +1307,7 @@ class TradeService:
                         acquire_positions    = acquire_positions or [],
                         trade_away_positions = trade_away_positions or [],
                         pinned_give_players  = pinned_give_players,
+                        pinned_receive_players = pinned_receive_players,
                         players              = self._players,
                     )
                 else:
@@ -1238,6 +1324,7 @@ class TradeService:
                         acquire_positions    = acquire_positions or [],
                         trade_away_positions = trade_away_positions or [],
                         pinned_give_players  = pinned_give_players,
+                        pinned_receive_players = pinned_receive_players,
                         confidence           = confidence,
                         scoring_format       = scoring_format,
                     )
@@ -1256,7 +1343,20 @@ class TradeService:
                     acquire_positions    = acquire_positions or [],
                     trade_away_positions = trade_away_positions or [],
                     pinned_give_players  = pinned_give_players,
+                    pinned_receive_players = pinned_receive_players,
                 )
+            # FB-47 — stamp partner fit and blend it into the composite:
+            # strongly on consensus cards (no divergence signal there),
+            # tiebreak-strength on divergence cards. Flag off / no targets
+            # ⇒ _fit_by_uid is empty and this is a no-op.
+            _fit = _fit_by_uid.get(member.user_id)
+            if _fit is not None:
+                for c in cards:
+                    c.partner_fit = _fit
+                    w = (_c("fit_consensus_weight") if c.basis == "consensus"
+                         else _c("fit_divergence_weight"))
+                    c.composite_score = round(
+                        c.composite_score * (1.0 + w * (_fit - 0.5)), 3)
             for c in cards:
                 c.match_context = match_ctx
                 c.narrative = build_narrative(c, match_ctx, self._players)
@@ -1292,7 +1392,8 @@ class TradeService:
         acquire_positions: list[str],
         trade_away_positions: list[str],
         pinned_give_players: list[str] | None,
-        confidence: dict[str, int] | None,
+        pinned_receive_players: list[str] | None = None,
+        confidence: dict[str, int] | None = None,
         scoring_format: str = "1qb_ppr",
     ) -> list[TradeCard]:
         """Divergence-based v2 generation for one (user, opponent) pair.
@@ -1308,6 +1409,9 @@ class TradeService:
         opp_elo    = opponent.elo_ratings
         players    = self._players
         pinned_set = set(pinned_give_players) if pinned_give_players else None
+        # FB-47 — pinned ACQUIRE targets: cards must receive at least one.
+        pinned_recv_set = (set(pinned_receive_players)
+                           if pinned_receive_players else None)
 
         _deadline    = time.monotonic() + 1.0
         _iter_budget = 200_000
@@ -1437,6 +1541,8 @@ class TradeService:
         def _consider(give_ids: list[str], recv_ids: list[str]) -> None:
             if pinned_set and not (set(give_ids) & pinned_set):
                 return
+            if pinned_recv_set and not (set(recv_ids) & pinned_recv_set):
+                return
             if not _positions_ok(give_ids, recv_ids):
                 return
             if not _gap_ok(give_ids, recv_ids):
@@ -1505,6 +1611,12 @@ class TradeService:
         _recv = [p for p in _known_opp if user_value[p] >= _vo(p) * 0.97]
         give_candidates = _give if len(_give) >= _PRUNE_MIN_SIZE else list(_known_user)
         recv_candidates = _recv if len(_recv) >= _PRUNE_MIN_SIZE else list(_known_opp)
+        # FB-47 — pinned acquire targets must survive the divergence prune,
+        # mirroring how pinned give players are always kept in the optimizer.
+        if pinned_recv_set:
+            for pid in _known_opp:
+                if pid in pinned_recv_set and pid not in recv_candidates:
+                    recv_candidates.append(pid)
         give_candidates.sort(key=lambda p: _vo(p) - user_value[p], reverse=True)
         recv_candidates.sort(key=lambda p: user_value[p] - _vo(p), reverse=True)
 
@@ -1590,6 +1702,7 @@ class TradeService:
         acquire_positions: list[str],
         trade_away_positions: list[str],
         pinned_give_players: list[str] | None,
+        pinned_receive_players: list[str] | None = None,
     ) -> list[TradeCard]:
         """Consensus-basis fallback cards for an opponent with NO rankings.
 
@@ -1613,7 +1726,15 @@ class TradeService:
         shed_positions = list(trade_away_positions) or list(opp_profile.get("position_needs", []))
 
         recv_pool = list(opponent.roster)
-        if need_positions:
+        # FB-47 — player-level acquire targets dominate: restrict the receive
+        # pool to the pinned players this opponent actually rosters. (When
+        # they roster none, no cards — correct: the pin names specific
+        # players, not a position.)
+        pinned_recv_set = (set(pinned_receive_players)
+                           if pinned_receive_players else None)
+        if pinned_recv_set:
+            recv_pool = [p for p in recv_pool if p in pinned_recv_set]
+        elif need_positions:
             recv_pool = [p for p in recv_pool if _pos(p) in need_positions]
         recv_pool.sort(key=seed_value, reverse=True)
 

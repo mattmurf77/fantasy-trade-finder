@@ -71,7 +71,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/trades/generate` | Generate trade cards |
+| POST | `/api/trades/generate` | Generate trade cards. Optional `pinned_give_players` ("what can I get for X") and, behind `trade.finder_targeting`, `pinned_receive_players` ("what does X cost") — pinned jobs bypass the cache. Cards may carry `partner_fit` (0–1 counterparty positional fit) when targeting is active |
 | GET | `/api/trades/status` | Generation job status |
 | GET | `/api/trades` | List current trade cards |
 | POST | `/api/trades/swipe` | Like/pass a trade. Optional card-context fields (`give_player_ids`, `receive_player_ids`, `target_user_id`, `target_username`, `league_id`) let the server reconstruct the card after a restart wiped the in-memory deck (FB-46) |

@@ -628,6 +628,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("outlook_alpha_rebuilder",  0.25,  "2.2: now-value weight for rebuilder outlook"),
     ("outlook_alpha_jets",       0.1,   "2.2: now-value weight for jets (extreme rebuild) outlook"),
     ("fuzzy_match_tau",          0.8,   "2.3b: Jaccard threshold per side for fuzzy mirror matching"),
+    # ── FB-47 finder targeting (flag trade.finder_targeting) ─────────────
+    ("fit_consensus_weight",     0.5,   "FB-47: partner-fit blend weight on consensus-card composites"),
+    ("fit_divergence_weight",    0.15,  "FB-47: partner-fit blend weight on divergence-card composites (tiebreak strength)"),
     ("diversity_window_days",    7.0,   "A6: lookback window for league impression saturation counts"),
     ("diversity_user_cap",       3.0,   "A6: other-member count at which a target player is 'saturated'"),
     ("diversity_penalty",        0.6,   "A6: ordering-key multiplier applied to saturated targets"),

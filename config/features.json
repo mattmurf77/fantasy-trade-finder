@@ -41,5 +41,7 @@
   "trade.deck_diversity":            true,
 
   "trade_engine.v3":                 true,
-  "trade.three_team":                false
+  "trade.three_team":                false,
+
+  "trade.finder_targeting":          false
 }
