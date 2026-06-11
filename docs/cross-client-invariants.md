@@ -156,3 +156,20 @@ See [data-dictionary.md](data-dictionary.md#user_events). When adding a new even
 - `device_tokens.platform`: `ios`, `android`
 - `user_events.device_type`: `iphone`, `ipad`, `macos`, `web`, `extension`
 - `user_events.source`: `mobile`, `web`, `api`, `cron`
+
+---
+
+## Feedback lifecycle statuses
+
+`app_feedback.status` vocabulary, defined in `backend/database.py:FEEDBACK_STATUSES` and mirrored by the mobile inbox chips (`mobile/src/screens/FeedbackInboxScreen.tsx:STATUS_LABEL`):
+
+| Status | User-facing label |
+|---|---|
+| `new` | 📬 Received |
+| `planned` | 🗓 Planned |
+| `in_progress` | 🔧 In progress |
+| `fixed` | ✅ Fixed — in next update |
+| `shipped` | 🚀 Shipped |
+| `declined` | 🚫 Not planned |
+
+NULL in the DB reads as `new` everywhere. If you add a status, update both files and this table.

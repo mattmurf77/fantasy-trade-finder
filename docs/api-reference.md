@@ -192,6 +192,7 @@ Triggered by an external scheduler (Render cron). All POST.
 | GET | `/api/admin/config` | Read all `model_config` entries |
 | PUT | `/api/admin/config/<key>` | Update one `model_config` value |
 | GET | `/api/admin/engine-metrics` | Trade-engine telemetry: like/pass rates by basis, likes-you, deck position, shape, league; match conversion (`?days=30&league_id=`) |
+| PUT | `/api/feedback/admin/<id>/status` | Set feedback lifecycle status (`new\|planned\|in_progress\|fixed\|shipped\|declined`); X-Cron-Secret auth |
 | GET | `/api/debug/log` | Last N debug ring-buffer entries (`?n=100`) |
 
 ## Misc
@@ -207,6 +208,7 @@ Triggered by an external scheduler (Render cron). All POST.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/feedback` | Capture a single feedback note from the mobile FeedbackSheet. Idempotent on `client_id`. |
+| GET | `/api/feedback/mine` | The caller's own notes with operator-set lifecycle status (session auth). Backs the status chips in the mobile feedback inbox. |
 
 **Body** (JSON):
 

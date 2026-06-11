@@ -72,6 +72,7 @@ from .database import (
     load_recent_league_likes, log_trade_impressions,
     load_trade_decision_shape_counts, load_recent_impression_target_user_counts,
     load_engine_telemetry,
+    set_feedback_status, list_feedback_for_user, FEEDBACK_STATUSES,
     upsert_league_members, upsert_member_rankings,
     load_member_rankings, load_league_members, get_ranking_coverage,
     check_for_match, match_already_exists,
@@ -2660,6 +2661,45 @@ def list_feedback_route():
     items = list_feedback(since_id=since_id, limit=limit)
     next_since = items[-1]["id"] if items else since_id
     return jsonify({"items": items, "count": len(items), "next_since_id": next_since})
+
+
+@app.route("/api/feedback/admin/<int:feedback_id>/status", methods=["PUT"])
+def set_feedback_status_route(feedback_id: int):
+    """PUT /api/feedback/admin/<id>/status — operator sets lifecycle status.
+
+    Auth: X-Cron-Secret (same as the admin readback). Body: {"status": s}
+    where s ∈ FEEDBACK_STATUSES. The status is what the in-app feedback
+    inbox shows next to the user's own notes.
+    """
+    _require_cron_auth()
+    body = request.get_json(force=True, silent=True) or {}
+    status = body.get("status")
+    if status not in FEEDBACK_STATUSES:
+        return jsonify({
+            "error": "invalid_status",
+            "allowed": list(FEEDBACK_STATUSES),
+        }), 400
+    result = set_feedback_status(feedback_id, status)
+    if result is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(result)
+
+
+@app.route("/api/feedback/mine", methods=["GET"])
+def my_feedback_route():
+    """GET /api/feedback/mine — the caller's own feedback notes with their
+    lifecycle status (newest first). Read side of the in-app feedback
+    widget's status chips. Requires a session; submission (POST
+    /api/feedback) remains anonymous-friendly and is unchanged.
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    try:
+        items = list_feedback_for_user(sess["user_id"])
+        return jsonify({"items": items, "count": len(items)})
+    except Exception as e:
+        log.exception("my_feedback_route failed")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/tiers/save", methods=["POST"])

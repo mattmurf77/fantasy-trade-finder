@@ -406,5 +406,7 @@ In-app feedback notes captured via the mobile FeedbackSheet and POSTed to `/api/
 | `os_version` | str | from `X-OS-Version` |
 | `client_created_at` | str | ISO timestamp from client (when user tapped Save) |
 | `created_at` | str, not null | ISO timestamp from server (canonical) |
+| `status` | str, nullable | operator-set lifecycle status; NULL reads as `'new'`. Vocabulary `new/planned/in_progress/fixed/shipped/declined` — see cross-client-invariants.md |
+| `status_updated_at` | str, nullable | ISO timestamp of the last status change |
 
 Indexes: `idx_app_feedback_created_at`, `idx_app_feedback_user_id`.

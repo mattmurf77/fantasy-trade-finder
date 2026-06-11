@@ -31,3 +31,30 @@ export async function submitFeedback(
 ): Promise<FeedbackSubmitResponse> {
   return api.post<FeedbackSubmitResponse>('/api/feedback', payload);
 }
+
+// ── Status readback ──────────────────────────────────────────────────
+// GET /api/feedback/mine — the signed-in user's own notes with their
+// operator-set lifecycle status. Vocabulary mirrors the backend's
+// FEEDBACK_STATUSES (docs/cross-client-invariants.md).
+export type FeedbackStatus =
+  | 'new'
+  | 'planned'
+  | 'in_progress'
+  | 'fixed'
+  | 'shipped'
+  | 'declined';
+
+export interface MyFeedbackItem {
+  server_id: number;
+  client_id: string;
+  screen: string;
+  severity: FeedbackSeverity;
+  text: string;
+  created_at: string;
+  status: FeedbackStatus;
+  status_updated_at: string | null;
+}
+
+export async function getMyFeedback(): Promise<{ items: MyFeedbackItem[] }> {
+  return api.get<{ items: MyFeedbackItem[] }>('/api/feedback/mine');
+}

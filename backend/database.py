@@ -356,9 +356,19 @@ app_feedback_table = Table("app_feedback", metadata,
     Column("os_version",        String),
     Column("client_created_at", String),                  # ISO from client
     Column("created_at",        String,  nullable=False), # ISO from server (canonical)
+    # Operator-managed lifecycle status. NULL is read as 'new' so the
+    # submission INSERT never has to mention the column (keeps the locked
+    # POST /api/feedback contract byte-identical — see save_feedback).
+    Column("status",            String),                  # see FEEDBACK_STATUSES
+    Column("status_updated_at", String),                  # ISO, set on status change
     Index("idx_app_feedback_created_at", "created_at"),
     Index("idx_app_feedback_user_id",    "user_id"),
 )
+
+# Lifecycle vocabulary for app_feedback.status. Mirrored by the mobile
+# inbox's status chips (mobile/src/screens/FeedbackInboxScreen.tsx) — keep
+# docs/cross-client-invariants.md in sync if this changes.
+FEEDBACK_STATUSES = ("new", "planned", "in_progress", "fixed", "shipped", "declined")
 
 # ---------------------------------------------------------------------------
 # Agent 1 additions — user_player_skips
@@ -651,6 +661,9 @@ def _migrate_db() -> None:
         ("trade_matches",      "user_b_decided_at",    "VARCHAR"),
         ("league_preferences", "acquire_positions",    "TEXT"),
         ("league_preferences", "trade_away_positions", "TEXT"),
+        # Feedback lifecycle status (operator-managed; NULL reads as 'new')
+        ("app_feedback",       "status",                "VARCHAR"),
+        ("app_feedback",       "status_updated_at",     "VARCHAR"),
         ("users",              "ranking_method",        "VARCHAR"),
         ("users",              "tiers_saved",           "TEXT"),
         ("users",              "tier_overrides",        "TEXT"),
@@ -5396,6 +5409,8 @@ def list_feedback(*, since_id: int = 0, limit: int = 100) -> list[dict]:
                 app_feedback_table.c.os_version,
                 app_feedback_table.c.client_created_at,
                 app_feedback_table.c.created_at,
+                app_feedback_table.c.status,
+                app_feedback_table.c.status_updated_at,
             )
             .where(app_feedback_table.c.id > int(since_id))
             .order_by(app_feedback_table.c.id.asc())
@@ -5416,6 +5431,64 @@ def list_feedback(*, since_id: int = 0, limit: int = 100) -> list[dict]:
             "os_version": r[10],
             "client_created_at": r[11],
             "created_at": r[12],
+            "status": r[13] or "new",
+            "status_updated_at": r[14],
+        }
+        for r in rows
+    ]
+
+
+def set_feedback_status(feedback_id: int, status: str) -> dict | None:
+    """Set the lifecycle status of one feedback row. Returns the updated
+    {id, status, status_updated_at}, or None when the id doesn't exist.
+    Caller validates `status` against FEEDBACK_STATUSES and enforces auth.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with engine.begin() as conn:
+        res = conn.execute(
+            app_feedback_table.update()
+            .where(app_feedback_table.c.id == int(feedback_id))
+            .values(status=status, status_updated_at=now_iso)
+        )
+        if res.rowcount == 0:
+            return None
+    return {"id": int(feedback_id), "status": status, "status_updated_at": now_iso}
+
+
+def list_feedback_for_user(user_id: str, limit: int = 200) -> list[dict]:
+    """Return this user's own feedback notes, newest first — the read side
+    of the in-app feedback widget's status display. Only fields the widget
+    needs; NULL status reads as 'new'.
+    """
+    if not user_id:
+        return []
+    limit = max(1, min(int(limit), 500))
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                app_feedback_table.c.id,
+                app_feedback_table.c.client_id,
+                app_feedback_table.c.screen,
+                app_feedback_table.c.severity,
+                app_feedback_table.c.text,
+                app_feedback_table.c.created_at,
+                app_feedback_table.c.status,
+                app_feedback_table.c.status_updated_at,
+            )
+            .where(app_feedback_table.c.user_id == user_id)
+            .order_by(app_feedback_table.c.id.desc())
+            .limit(limit)
+        ).fetchall()
+    return [
+        {
+            "server_id": int(r[0]),
+            "client_id": r[1],
+            "screen": r[2],
+            "severity": r[3],
+            "text": r[4],
+            "created_at": r[5],
+            "status": r[6] or "new",
+            "status_updated_at": r[7],
         }
         for r in rows
     ]
