@@ -38,7 +38,7 @@ STATUS_MAP: dict[int, str] = {
     13: "shipped",      # batch B (Trios fixes)
     14: "shipped",      # tiers drop-zone visuals (#84 gap-shift)
     15: "shipped",      # long-press multi-select (superseded by #32 rework ask)
-    16: "in_progress",  # select-marking — #32 (June) says still not right
+    16: "shipped",      # select-marking — operator confirmed shipped (2026-06-10)
     17: "shipped",      # batch D (League)
     18: "shipped",      # batch B
     19: "new",          # "obvious trio" threshold — needs operator number
@@ -51,12 +51,12 @@ STATUS_MAP: dict[int, str] = {
     23: "shipped",      # drag coord-space fix
     24: "shipped",      # slow initial load → perf waves + Render Starter dyno
     26: "shipped",      # rookies link removed (#83)
-    27: "planned",      # background-tile movement still too subtle (post-#84)
+    27: "shipped",      # tile movement while dragging — operator confirmed (2026-06-10)
     28: "new",          # bottom-nav affordance icon
-    29: "planned",      # full tile shift while dragging (with #27)
+    29: "shipped",      # full tile shift while dragging — operator confirmed (2026-06-10)
     30: "new",          # praise/reference: ManualRanks drag is the target UX
     31: "shipped",      # trends as rank-place deltas (trends_service rank deltas)
-    32: "planned",      # multi-select rework spec (arrows, no long-press)
+    32: "shipped",      # multi-select rework — operator confirmed (2026-06-10)
     33: "shipped",      # injury tags removed (#83)
     34: "shipped",      # check/X buttons under trade tile (TradesScreen)
     35: "shipped",      # match accept failure → FB-01 disposition fix
@@ -67,7 +67,7 @@ STATUS_MAP: dict[int, str] = {
     40: "new",          # OverallRanks vs ManualRanks duplication question
     41: "shipped",      # league team count (#82)
     42: "planned",      # merge joined-summary into header tile
-    43: "in_progress",  # drag/multiselect re-broken + stray × button (post-#84/#85 verify)
+    43: "shipped",      # drag/multiselect — operator confirmed working (2026-06-10)
     44: "shipped",      # multi-select bulk-move fix (#85)
     # ── June 10 batch (ids 45-48) ────────────────────────────────────
     45: "fixed",        # session resume — fixed 2026-06-10, ships next build
