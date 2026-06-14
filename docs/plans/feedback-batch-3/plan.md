@@ -4,24 +4,29 @@
 
 ## Split
 
-**Bugs → PRD + code now** (this folder, subagent-built, validated in merge):
+**Bugs → PRD + code — ✅ BUILT (commit d161b80, on branch; validated, awaiting on-device QA):**
 
 | # | Screen | One-liner | PRD |
 |---|---|---|---|
-| 49 | Bottom nav | Double ▾ cue (icon + label) — regression from FB-28 | [prd-49-double-arrow.md](prd-49-double-arrow.md) |
-| 51, 52 | Rank stack | Back button on Rank sub-screens redirects to Trios / dead-clicks / greys out | [prd-51-52-rank-back-button.md](prd-51-52-rank-back-button.md) |
-| 55 | Tiers | Reset button "does nothing"; intent (undo vs reset) unclear | [prd-55-tiers-reset.md](prd-55-tiers-reset.md) |
-| 57 | Tiers | Scrolling fights the drag-activation gesture | [prd-57-tiers-scroll.md](prd-57-tiers-scroll.md) |
+| 49 | Bottom nav | Double ▾ cue (icon + label) — regression from FB-28 | [prd-49](prd-49-double-arrow.md) |
+| 51, 52 | Rank stack | Back button redirects to Trios / dead-clicks / greys out | [prd-51-52](prd-51-52-rank-back-button.md) |
+| 55 | Tiers | Reset button "does nothing"; intent unclear | [prd-55](prd-55-tiers-reset.md) |
+| 57 | Tiers | Scrolling fights the drag-activation gesture | [prd-57](prd-57-tiers-scroll.md) |
 
-**Enhancements / polish → PRD only after research** (no code yet):
+**Enhancements / polish → PRD written (research-backed), NO code yet:**
 
-| # | Screen | One-liner |
-|---|---|---|
-| 50 | Trends | Page needs a 1–2 sentence "what am I looking at" explainer |
-| 53 | Overall Ranks | Show positional rank (QB1, RB4) as the prominent value, not Elo |
-| 54 | Overall Ranks | Elo separation feels too tight (~1 pt/rank); doesn't separate elite from depth — possible ranking-engine refinement |
-| 56 | Tiers | Multiselect move is hard to follow; idea: tap-a-tier quick-move with hidden tier buttons in select mode |
-| 58 | Tiers | Tiles too big — operator will share screenshots from a reference app |
+| # | Screen | One-liner | PRD |
+|---|---|---|---|
+| 53 | Overall Ranks | Positional rank (QB1/RB4) prominent, value secondary | [prd-53](prd-53-positional-rank-display.md) |
+| 54 | Overall Ranks | Too-tight separation → display on 0–10k curve + tiers (Ph1); curve/uncertainty tuning (Ph2) | [prd-54](prd-54-value-separation.md) |
+| 50 | Trends | Possessive title + ≤2-sentence explainer + self-describing sections | [prd-50](prd-50-trends-framing.md) |
+| 56 | Tiers | Tap-a-tier bulk move in select mode + follow-the-move feedback | [prd-56](prd-56-tiers-quick-move.md) |
+| 58 | Tiers | Compact one-line rows — **blocked on operator screenshots** | [prd-58](prd-58-tile-density.md) |
+
+Research behind the enhancement PRDs: [research-synthesis.md](research-synthesis.md).
+
+### Key cross-cutting recommendation
+**#53 + #54 (Phase 1) + #58 are one coordinated "player value display" change:** show the **0–10,000 `elo_to_value`** number (not raw Elo) with **positional rank prominent** and **tiers + color**, then reflow the row to compact density. Build #53/#54-Ph1 together (shared display helper), then #58 after the operator's screenshots. #54 Phase 2 (re-tuning the actual rating separation via `ktc_k`/confidence ranges) is a separate model change needing offline validation — operator decision pending.
 
 ## Honest note
 
