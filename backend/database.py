@@ -1842,44 +1842,56 @@ def upsert_league(
     user_player_ids: list[str],
     opponent_rosters: list[dict],
 ) -> None:
-    """Insert or update a league record with the latest roster snapshot."""
+    """Insert or refresh a league record.
+
+    The `leagues` table is keyed on `sleeper_league_id` ALONE, so there is
+    exactly one row per league — owned by the first member to import it (the
+    "importer-owner", recorded in `user_id`). When a *second* member of an
+    already-imported league calls session_init, we must NOT INSERT a fresh
+    row: that violated the PK and raised
+    `UNIQUE constraint failed: leagues.sleeper_league_id`, which the caller
+    swallowed as "DB upsert failed (continuing)". Instead we upsert on the
+    PK and refresh only league-level metadata (`name`, `updated_at`),
+    preserving the importer-owner's row.
+
+    Per-member rosters are NOT stored here — `league_members` is the
+    authoritative per-(league, user) roster store. `roster_data` /
+    `opponent_data` therefore hold only the importer-owner's initial
+    snapshot (kept for provenance; not read back anywhere) and are never
+    overwritten by other members.
+    """
     roster_json   = json.dumps(user_player_ids)
     opponent_json = json.dumps(opponent_rosters)
     now = _now()
 
-    with engine.begin() as conn:
-        existing = conn.execute(
-            select(leagues_table).where(
-                (leagues_table.c.sleeper_league_id == league_id) &
-                (leagues_table.c.user_id == user_id)
-            )
-        ).fetchone()
+    row = {
+        "sleeper_league_id": league_id,
+        "user_id":           user_id,
+        "name":              name,
+        "season":            season,
+        "roster_data":       roster_json,
+        "opponent_data":     opponent_json,
+        "created_at":        now,
+        "updated_at":        now,
+    }
 
-        if existing:
-            conn.execute(
-                update(leagues_table)
-                .where(
-                    (leagues_table.c.sleeper_league_id == league_id) &
-                    (leagues_table.c.user_id == user_id)
-                )
-                .values(
-                    name=name,
-                    roster_data=roster_json,
-                    opponent_data=opponent_json,
-                    updated_at=now,
-                )
-            )
+    with engine.begin() as conn:
+        # Single atomic upsert on the PK — race-safe against two members of
+        # the same league hitting session_init concurrently (both would
+        # otherwise SELECT-miss then INSERT, and the loser would crash).
+        if DATABASE_URL.startswith("sqlite"):
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
         else:
-            conn.execute(insert(leagues_table).values(
-                sleeper_league_id=league_id,
-                user_id=user_id,
-                name=name,
-                season=season,
-                roster_data=roster_json,
-                opponent_data=opponent_json,
-                created_at=now,
-                updated_at=now,
-            ))
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        stmt = dialect_insert(leagues_table).values(row)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["sleeper_league_id"],
+            set_={
+                "name":       stmt.excluded.name,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+        conn.execute(stmt)
     # Agent 6 — wrapped collector hook (non-throwing)
     try:
         from .wrapped_collector import record_event
@@ -2495,8 +2507,8 @@ def set_league_scoring(league_id: str, scoring_format: str) -> None:
     if scoring_format not in SCORING_FORMATS:
         raise ValueError(f"Invalid scoring_format: {scoring_format!r}")
     with engine.begin() as conn:
-        # Update ALL leagues rows for this league (there can be multiple user_id rows
-        # under the same sleeper_league_id since the leagues table keys on the pair).
+        # One row per league (PK = sleeper_league_id), so this matches the
+        # single importer-owner row. See upsert_league for the keying rules.
         conn.execute(
             update(leagues_table)
             .where(leagues_table.c.sleeper_league_id == league_id)

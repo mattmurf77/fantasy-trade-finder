@@ -34,16 +34,22 @@ Sleeper user identities + denormalized hot-read activity columns.
 
 ## `leagues`
 
-A league a user has loaded.
+One row **per league** (PK is `sleeper_league_id` alone), owned by the first
+member to import it. `upsert_league` keys on the PK: the initial import
+INSERTs the owner's row; every later member of that league only refreshes
+`name` / `updated_at` (it does **not** INSERT — doing so raised
+`UNIQUE constraint failed: leagues.sleeper_league_id`). Per-member rosters
+are **not** stored here — see `league_members` for the authoritative
+per-`(league, user)` roster.
 
 | Column | Type | Notes |
 |---|---|---|
 | `sleeper_league_id` | str PK | |
-| `user_id` | str, not null | |
+| `user_id` | str, not null | Importer-owner (first member to import the league); not overwritten by later members |
 | `name` | str | |
 | `season` | str | |
-| `roster_data` | JSON text | User's player IDs |
-| `opponent_data` | JSON text | `[{user_id, username, player_ids}]` |
+| `roster_data` | JSON text | Importer-owner's player IDs at import time; write-once, not read back |
+| `opponent_data` | JSON text | `[{user_id, username, player_ids}]` — importer-owner's snapshot; write-once, not read back |
 | `default_scoring` | str | `'1qb_ppr'` / `'sf_tep'` (null → `'1qb_ppr'`) |
 | `created_at`, `updated_at` | str | |
 
