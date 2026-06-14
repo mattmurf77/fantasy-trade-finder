@@ -33,6 +33,41 @@ const TradesStack = createNativeStackNavigator();
 export type RankRoute = 'Trios' | 'Tiers' | 'ManualRanks' | 'Trends';
 export type TradesRoute = 'TradesHome' | 'Portfolio';
 
+// #51/#52 — Rank sub-screens (Tiers / Overall Ranks / Trends) are siblings
+// reached from the Rank menu, not a linear drill-down. The native back button
+// was unreliable: depending on stack state it greyed out, dead-clicked, or
+// (when it worked) always landed on Trios rather than where the user came
+// from. Replace it with an always-enabled header-left control that resolves
+// to a defined destination every time: go back if there's history, otherwise
+// fall to Trios (the stack root / stable home). Never greyed, never dead.
+function RankHeaderBack({ navigation }: { navigation: any }) {
+  return (
+    <Pressable
+      onPress={() =>
+        navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Trios')
+      }
+      hitSlop={spacing.md}
+      style={({ pressed }) => [styles.headerBack, pressed && { opacity: 0.6 }]}
+    >
+      <Text style={styles.headerBackText}>‹ Back</Text>
+    </Pressable>
+  );
+}
+
+// Shared options for the three pushed Rank sub-screens: dark header + the
+// custom always-on back control. Built from the per-screen options callback so
+// the live `navigation` object for that screen is captured — the native-stack
+// `headerLeft` render prop itself does NOT receive `navigation`, so closing
+// over it here is what makes the control act on the right screen.
+const rankSubScreenOptions = (title: string) =>
+  ({ navigation }: { navigation: any }) => ({
+    headerShown: true,
+    title,
+    headerStyle: { backgroundColor: colors.bg },
+    headerTintColor: colors.text,
+    headerLeft: () => <RankHeaderBack navigation={navigation} />,
+  });
+
 function RankStackNav() {
   return (
     <RankStack.Navigator screenOptions={{ headerShown: false }}>
@@ -40,17 +75,17 @@ function RankStackNav() {
       <RankStack.Screen
         name="Tiers"
         component={TiersScreen}
-        options={{ headerShown: true, title: 'Tiers', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
+        options={rankSubScreenOptions('Tiers')}
       />
       <RankStack.Screen
         name="ManualRanks"
         component={ManualRanksScreen}
-        options={{ headerShown: true, title: 'Overall Ranks', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
+        options={rankSubScreenOptions('Overall Ranks')}
       />
       <RankStack.Screen
         name="Trends"
         component={TrendsScreen}
-        options={{ headerShown: true, title: 'Trends', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }}
+        options={rankSubScreenOptions('Trends')}
       />
     </RankStack.Navigator>
   );
@@ -123,10 +158,10 @@ export default function TabNav() {
         <Tab.Screen
           name="Rank"
           component={RankStackNav}
-          // FB-28: the ▾ beside the icon (PR #79) was still read as a
-          // single screen — repeat the cue in the label so "menu here" is
-          // unmissable at a glance.
-          options={{ tabBarIcon: rankTabIcon('🏈'), tabBarLabel: 'Rank ▾' }}
+          // #49: FB-28 added a ▾ to the label, but the icon already renders a
+          // chevron (PR #79) — the two cues stacked. Keep the icon chevron
+          // (the conventional "fans out" signal) and drop the label arrow.
+          options={{ tabBarIcon: rankTabIcon('🏈'), tabBarLabel: 'Rank' }}
           listeners={() => ({
             // Intercept the tap on the Rank tab — open the action sheet
             // instead of jumping into a sub-screen. We still keep the tab
@@ -301,6 +336,12 @@ const styles = StyleSheet.create({
   rankIconWrap: { flexDirection: 'row', alignItems: 'center' },
   // FB-28: bumped from 11 — the smaller chevron read as decoration.
   rankIconChevron: { fontSize: 14, fontWeight: '900', marginLeft: 2, marginTop: 2 },
+
+  // #51/#52: always-on header back control for Rank sub-screens. Padded for a
+  // comfortable tap target; tinted with the accent so it reads as actionable
+  // (never the greyed/disabled native arrow).
+  headerBack: { paddingVertical: spacing.xs, paddingRight: spacing.md },
+  headerBackText: { color: colors.accent, fontSize: fontSize.base, fontWeight: '700' },
 
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: {

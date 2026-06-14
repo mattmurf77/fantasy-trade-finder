@@ -447,6 +447,56 @@ export default function TiersScreen() {
     );
   }, [copyTargetFormat, otherFormat, copyMutation]);
 
+  // ── Reset to suggested tiers (#55) ─────────────────────────────────
+  // Discard manual tier placements for THIS position and re-apply the
+  // app's auto-bucketing. Destructive (drops manual work) so we confirm
+  // first. The revert is persisted by marking every currently-assigned
+  // pid as cleared: on the next Save those cleared_pids tell the backend
+  // to DELETE the matching tier_overrides rows, so a reload shows the
+  // suggested layout rather than the stale manual placements. We then
+  // re-auto-bucket so the on-screen arrangement matches what a fresh
+  // load would produce.
+  const applyResetToSuggested = useCallback(() => {
+    const data = rankingsQuery.data;
+    if (!data?.rankings) return;
+    const players = (data.rankings as RankedPlayer[]).slice().sort(
+      (a, b) => (b.elo ?? 0) - (a.elo ?? 0),
+    );
+    const fmt: ScoringFormat =
+      (tiersStatusQuery.data?.scoring_format as ScoringFormat) || '1qb_ppr';
+    const bucketed = autoBucket(players, position, fmt);
+    setBuckets({ ...bucketed, unassigned: [] });
+    // Mark every player as cleared so a subsequent Save persists the
+    // revert. The save path filters out any pid that ends up assigned to
+    // a real tier (it re-saves those), so this only deletes overrides for
+    // placements that differ from the auto-bucketed result — i.e. it wipes
+    // the manual divergence without clobbering the suggested layout.
+    setClearedPids(() => {
+      const out = new Set<string>();
+      for (const p of players) out.add(p.id);
+      return out;
+    });
+    setToast({ msg: '✓ Tiers reset to suggested', tone: 'success' });
+    haptics.success();
+  }, [rankingsQuery.data, tiersStatusQuery.data?.scoring_format, position]);
+
+  const onResetToSuggested = useCallback(() => {
+    if (!rankingsQuery.data?.rankings) return;
+    Alert.alert(
+      `Reset ${position} tiers to suggested?`,
+      `Your manual placements for ${position} will be cleared and replaced ` +
+        `with the app's suggested tiers. Save afterward to make this permanent.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: applyResetToSuggested,
+        },
+      ],
+    );
+  }, [rankingsQuery.data, position, applyResetToSuggested]);
+
   // ── Render ──────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -483,22 +533,15 @@ export default function TiersScreen() {
             </Text>
           </Pressable>
           <Pressable
-            onPress={() => {
-              // Reset = re-auto-bucket from current rankings
-              const data = rankingsQuery.data;
-              if (!data?.rankings) return;
-              const players = (data.rankings as RankedPlayer[]).slice().sort(
-                (a, b) => (b.elo ?? 0) - (a.elo ?? 0),
-              );
-              const fmt: ScoringFormat =
-                (tiersStatusQuery.data?.scoring_format as ScoringFormat) || '1qb_ppr';
-              const bucketed = autoBucket(players, position, fmt);
-              setBuckets({ ...bucketed, unassigned: [] });
-              haptics.selection();
-            }}
-            style={({ pressed }) => [styles.resetBtn, pressed && { opacity: 0.6 }]}
+            disabled={!rankingsQuery.data?.rankings}
+            onPress={onResetToSuggested}
+            style={({ pressed }) => [
+              styles.resetBtn,
+              pressed && { opacity: 0.6 },
+              !rankingsQuery.data?.rankings && { opacity: 0.4 },
+            ]}
           >
-            <Text style={styles.resetBtnText}>Reset</Text>
+            <Text style={styles.resetBtnText}>Reset to suggested</Text>
           </Pressable>
         </View>
       </View>
@@ -574,7 +617,13 @@ export default function TiersScreen() {
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           onDragEnd={onDragEnd}
-          activationDistance={5}
+          // #57: drag starts from a long-press (onLongPress={drag}), so a
+          // small activationDistance only let an ordinary vertical scroll
+          // swipe cross the 5px threshold and steal the touch into a drag.
+          // Raised to 18px so normal scrolling stays a scroll; the long-
+          // press still initiates the drag and edge auto-scroll (library
+          // autoscrollThreshold/Speed defaults, untouched) still works.
+          activationDistance={18}
           containerStyle={styles.listContainer}
           contentContainerStyle={styles.scroll}
         />
