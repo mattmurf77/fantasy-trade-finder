@@ -30,3 +30,10 @@ scripts/
 # Plan-review artifacts (interactive feedback HTML + saved JSON)
 notification-plan-review.html
 notification-plan-feedback*.json
+
+# QA harness scratch DBs, logs, and run artifacts (never commit DB copies)
+# Covers scratch/, scratch4/, scratch_int/, scratch_cfg/, scratch_api2/, etc.
+qa/**/scratch*/
+
+# Staged subagent implementations pending 1-by-1 validation (never auto-commit)
+staged-work/

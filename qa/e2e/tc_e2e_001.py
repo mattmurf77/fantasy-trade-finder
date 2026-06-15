@@ -512,7 +512,11 @@ def stage6_integrity(api: Api, baseline: dict) -> None:
     # failed on every second-member session_init) was FIXED — upsert_league now
     # upserts on the sleeper_league_id PK. It is intentionally NOT allowlisted so
     # this gate catches any regression.
-    KNOWN_ISSUES: set[str] = set()
+    # Test-environment artifacts (NOT product bugs): the synthetic test leagues
+    # (test_league_lakeview) are not real Sleeper league IDs, so the background
+    # _fetch_sleeper_league_meta 404s. Expected for fixture data; would not occur
+    # for a real Sleeper league.
+    KNOWN_ISSUES: set[str] = {"Sleeper HTTPError 404"}
     log_text = SERVER_LOG.read_text()
     warn_lines = [ln for ln in log_text.splitlines()
                   if "[WARNING]" in ln or "IntegrityError" in ln or "constraint failed" in ln]
