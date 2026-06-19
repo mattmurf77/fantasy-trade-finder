@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  ViewToken,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DraggableFlatList, {
@@ -20,16 +21,20 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import PlayerCard from '../components/PlayerCard';
+import TileStats, { StatMode } from '../components/TileStats';
+import TierStickyHeader from '../components/TierStickyHeader';
+import TierTargetChips from '../components/TierTargetChips';
 import Toast from '../components/Toast';
 import {
   getRankings,
+  getRisersAndFallers,
   saveTiers,
   getTiersStatus,
 } from '../api/rankings';
 import { copyTiersFromFormat } from '../api/league';
 import { autoBucket, TIERS, TIER_LABEL } from '../utils/tierBands';
 import { useSession } from '../state/useSession';
-import type { Position, RankedPlayer, Tier, ScoringFormat } from '../shared/types';
+import type { Position, RankedPlayer, Tier, ScoringFormat, TrendRow } from '../shared/types';
 
 // Format-key → human label for the copy button + confirm dialog. Mirrors
 // web/positional-tiers.html's FORMAT_LABELS.
@@ -61,6 +66,15 @@ export default function TiersScreen() {
   const activeFormat = useSession((s) => s.activeFormat);
   const [position, setPosition] = useState<Position>('QB');
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
+
+  // FB4-61 — Consensus | You stat-mode toggle. Drives which rank + 30d trend
+  // each tile shows. Local screen state, defaults to consensus, no persistence.
+  const [statMode, setStatMode] = useState<StatMode>('consensus');
+
+  // FB4-63 — zone of the topmost VISIBLE player row, driven by the list's
+  // onViewableItemsChanged. Null until the first viewability callback fires
+  // (or when the list is empty). Used to render the pinned tier banner.
+  const [stickyZone, setStickyZone] = useState<Zone | null>(null);
 
   // tiers[position] = { elite: [player...], starter: [...], ..., unassigned: [...] }
   const [buckets, setBuckets] = useState<Record<Zone, RankedPlayer[]>>(() => emptyBuckets());
@@ -109,6 +123,67 @@ export default function TiersScreen() {
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
+
+  // FB4-61 — 30-day trend source. Reuses the Trends screen's risers/fallers
+  // endpoint (FB-04 rank-delta view) rather than inventing a new one. The
+  // response is the user's OWN ELO-history rank deltas, so it powers the
+  // "You" 30d trend. There is no consensus 30d-trend field on any current
+  // payload (see the consensus branch in tileStatsFor below).
+  const trendsQuery = useQuery({
+    queryKey: ['trends', 'risers-fallers', 30, 50],
+    queryFn: () => getRisersAndFallers({ days: 30, topN: 50 }),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+
+  // player_id → positional 30d rank delta (positive = moved UP). Built from
+  // BOTH risers and fallers across all position buckets so any player on the
+  // current board can be looked up. Missing players → undefined → "—".
+  const trendByPid = useMemo(() => {
+    const map = new Map<string, number>();
+    const d = trendsQuery.data;
+    if (!d) return map;
+    const absorb = (rows?: TrendRow[]) => {
+      for (const r of rows ?? []) {
+        if (r.pos_rank_delta != null) map.set(r.player_id, r.pos_rank_delta);
+      }
+    };
+    // The ALL bucket already spans every position; absorbing it is enough,
+    // but absorb the per-position buckets too in case ALL is trimmed.
+    (['ALL', 'QB', 'RB', 'WR', 'TE'] as const).forEach((k) => {
+      absorb(d.risers?.[k]);
+      absorb(d.fallers?.[k]);
+    });
+    return map;
+  }, [trendsQuery.data]);
+
+  // FB4-61 — resolve the two tile stats (rank label + 30d trend) for a player
+  // in the active mode. DATA NOTES:
+  //  • You rank      → player.rank (the user's positional rank, on payload).
+  //  • You 30d trend → trendByPid (risers/fallers rank-delta source).
+  //  • Consensus rank → player.adp ?? player.search_rank (consensus-ish signals
+  //    already on the rankings payload). FB4-61: a dedicated consensus-rank
+  //    field is not in the payload — needs backend.
+  //  • Consensus 30d trend → not in any payload. FB4-61: consensus 30d trend
+  //    not in payload — needs backend. Renders "—".
+  const tileStatsFor = useCallback(
+    (player: RankedPlayer): { rankLabel: string | null; trendDelta: number | null } => {
+      if (statMode === 'you') {
+        return {
+          rankLabel: player.rank != null ? `#${player.rank}` : null,
+          trendDelta: trendByPid.get(player.id) ?? null,
+        };
+      }
+      // Consensus mode.
+      const adp = player.adp;
+      const searchRank = player.search_rank;
+      let rankLabel: string | null = null;
+      if (adp != null) rankLabel = `ADP ${Math.round(adp)}`;
+      else if (searchRank != null) rankLabel = `#${searchRank}`;
+      return { rankLabel, trendDelta: null };
+    },
+    [statMode, trendByPid],
+  );
 
   const saveMutation = useMutation({
     // Wrap the tier save in a Sentry span — measures end-to-end latency
@@ -274,9 +349,47 @@ export default function TiersScreen() {
     [selectedIds],
   );
 
+  // ── Quick tier-move (multi-select) — FB4-62 ─────────────────────────
+  // Send EVERY selected player straight to `target`, appended to the end of
+  // that tier in their current flattened (top-to-bottom) order. Non-selected
+  // players keep their tier + within-tier order. Selection persists so the
+  // user can fine-tune with ↑/↓. `unassigned` is untouched (mirrors bulkMove).
+  const moveSelectedToTier = useCallback(
+    (target: Tier) => {
+      if (selectedIds.size === 0) return;
+      setBuckets((prev) => {
+        // Gather selected players in current flattened tier order so their
+        // relative order is preserved when appended to the target tier.
+        const movers: RankedPlayer[] = [];
+        for (const t of TIERS) {
+          for (const p of prev[t]) if (selectedIds.has(p.id)) movers.push(p);
+        }
+        if (movers.length === 0) return prev;
+
+        const next = emptyBuckets();
+        next.unassigned = [...prev.unassigned];
+        // Each non-target tier keeps only its non-selected players.
+        for (const t of TIERS) {
+          next[t] = prev[t].filter((p) => !selectedIds.has(p.id));
+        }
+        // Append the movers to the END of the target tier.
+        next[target] = [...next[target], ...movers];
+        return next;
+      });
+      haptics.success();
+    },
+    [selectedIds],
+  );
+
   // ── Render helpers ─────────────────────────────────────────────────
   const saving = saveMutation.isPending;
   const loading = rankingsQuery.isLoading || rankingsQuery.isFetching;
+  // FB4-63 — any players on the board at all? Gates the sticky tier banner
+  // (empty state hides it).
+  const hasRankings = useMemo(
+    () => TIERS.some((t) => buckets[t].length > 0) || buckets.unassigned.length > 0,
+    [buckets],
+  );
 
   // ── Flat list derivation ───────────────────────────────────────────
   // Walk unassigned first, then the five tiers in TIERS order. Every
@@ -304,14 +417,47 @@ export default function TiersScreen() {
     return item.player.id;
   }, []);
 
+  // ── Sticky tier header (FB4-63) ─────────────────────────────────────
+  // Track the zone of the topmost VISIBLE row off the list's viewability
+  // callback — NOT a separate scroll/pan listener (which would fight the
+  // drag gesture). RN requires onViewableItemsChanged + viewabilityConfig
+  // to be referentially stable for the list's lifetime, so both live in
+  // refs. We freeze updates while a drag is active so the banner doesn't
+  // flicker as rows reorder mid-drag.
+  const isDraggingRef = useRef(false);
+  const viewabilityConfigRef = useRef({
+    // A row counts as "viewable" the moment any pixel is on screen, so the
+    // topmost partially-visible row drives the banner.
+    itemVisiblePercentThreshold: 0,
+    minimumViewTime: 0,
+  });
+  const onViewableItemsChangedRef = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      if (isDraggingRef.current) return;
+      if (!viewableItems.length) return;
+      // Prefer the first visible PLAYER row's zone; fall back to the first
+      // visible row's zone (a header when a section boundary is at the top).
+      const firstPlayer = viewableItems.find(
+        (v) => (v.item as Row)?.kind === 'player',
+      );
+      const pick = firstPlayer ?? viewableItems[0];
+      const zone = (pick?.item as Row | undefined)?.zone;
+      if (zone) setStickyZone(zone);
+    },
+  );
+
   // ── Drag handler ───────────────────────────────────────────────────
   // Rebuild buckets by walking the post-drag flat order: each header row
   // re-anchors the "current zone", and every player row that follows
   // lands in that zone. Then reconcile clearedPids — players now in the
   // pool are cleared; players in any tier must drop out of the cleared
   // set (drag-out-then-back-in within one session).
+  const onDragBegin = useCallback(() => {
+    isDraggingRef.current = true;
+  }, []);
   const onDragEnd = useCallback(
     ({ data }: DragEndParams<Row>) => {
+      isDraggingRef.current = false;
       let zone: Zone = 'unassigned';
       const next = emptyBuckets();
       for (const r of data) {
@@ -356,6 +502,10 @@ export default function TiersScreen() {
 
       // ── Player row ──────────────────────────────────────────────────
       const isSelected = selectedIds.has(item.player.id);
+      // FB4-61 — resolve the tile's two stats for the active mode. Rendered
+      // inside the pointerEvents="none" wrapper so it never captures touches
+      // away from the drag / selection Pressable.
+      const stats = tileStatsFor(item.player);
 
       if (multiSelect) {
         return (
@@ -383,6 +533,7 @@ export default function TiersScreen() {
                   ) : undefined
                 }
               />
+              <TileStats rankLabel={stats.rankLabel} trendDelta={stats.trendDelta} />
             </View>
           </Pressable>
         );
@@ -407,11 +558,12 @@ export default function TiersScreen() {
         >
           <View pointerEvents="none">
             <PlayerCard player={item.player} compact />
+            <TileStats rankLabel={stats.rankLabel} trendDelta={stats.trendDelta} />
           </View>
         </Pressable>
       );
     },
-    [buckets, multiSelect, selectedIds, toggleSelected],
+    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor],
   );
 
   // ── Copy-from-format button derivation ─────────────────────────────
@@ -572,6 +724,36 @@ export default function TiersScreen() {
         })}
       </View>
 
+      {/* FB4-61 — Consensus | You stat toggle. Switches the rank + 30d
+          trend each tile shows. Default Consensus; local state only. */}
+      <View style={styles.statToggle}>
+        {([
+          { key: 'consensus' as StatMode, label: 'Consensus' },
+          { key: 'you' as StatMode, label: 'You' },
+        ]).map(({ key, label }) => {
+          const isActive = statMode === key;
+          return (
+            <Pressable
+              key={key}
+              onPress={() => {
+                if (statMode !== key) { setStatMode(key); haptics.selection(); }
+              }}
+              style={({ pressed }) => [
+                styles.statToggleBtn,
+                isActive && styles.statToggleBtnActive,
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Text
+                style={[styles.statToggleText, isActive && styles.statToggleTextActive]}
+              >
+                {label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       {/* Copy tier list from the OTHER scoring format. Mirrors web's
           `copy-tiers-btn` — the from-format reads as a label so the user
           knows EXACTLY which format they're pulling tiers from. Disabled
@@ -600,6 +782,17 @@ export default function TiersScreen() {
           : 'Long-press + drag to re-rank; the others slide to make room. Tap "Select" to move several at once.'}
       </Text>
 
+      {/* FB4-63 — pinned tier banner. Sits between the hint and the list,
+          shows the tier of the topmost VISIBLE player. Hidden in the
+          empty/loading/error states (no rankings → nothing to anchor to). */}
+      {!loading && !rankingsQuery.isError && hasRankings && stickyZone ? (
+        <TierStickyHeader
+          label={stickyZone === 'unassigned' ? 'Unassigned' : TIER_LABEL[stickyZone]}
+          accent={accentFor(stickyZone)}
+          count={buckets[stickyZone].length}
+        />
+      ) : null}
+
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator color={colors.accent} />
@@ -616,7 +809,13 @@ export default function TiersScreen() {
           data={listData}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
+          onDragBegin={onDragBegin}
           onDragEnd={onDragEnd}
+          // FB4-63 — drive the sticky tier banner off viewability (NOT a
+          // competing scroll listener). Both props are referentially stable
+          // refs because RN throws if they change between renders.
+          onViewableItemsChanged={onViewableItemsChangedRef.current}
+          viewabilityConfig={viewabilityConfigRef.current}
           // #57: drag starts from a long-press (onLongPress={drag}), so a
           // small activationDistance only let an ordinary vertical scroll
           // swipe cross the 5px threshold and steal the touch into a drag.
@@ -635,28 +834,40 @@ export default function TiersScreen() {
           mode. "Done" exits select mode without canceling the moves. */}
       {multiSelect && selectedIds.size > 0 ? (
         <View style={styles.actionBar}>
-          <Text style={styles.actionBarCount}>
-            {selectedIds.size} selected
-          </Text>
-          <View style={styles.actionBarBtns}>
-            <Pressable
-              onPress={() => bulkMove('up')}
-              style={({ pressed }) => [styles.actionBarBtn, pressed && { opacity: 0.7 }]}
-            >
-              <Text style={styles.actionBarBtnText}>↑ Up</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => bulkMove('down')}
-              style={({ pressed }) => [styles.actionBarBtn, pressed && { opacity: 0.7 }]}
-            >
-              <Text style={styles.actionBarBtnText}>↓ Down</Text>
-            </Pressable>
-            <Pressable
-              onPress={exitMultiSelect}
-              style={({ pressed }) => [styles.actionBarBtnDone, pressed && { opacity: 0.7 }]}
-            >
-              <Text style={styles.actionBarBtnDoneText}>Done</Text>
-            </Pressable>
+          {/* FB4-62 — quick tier-move: tap a tier chip to send every selected
+              player straight into that tier (appended, order preserved).
+              Selection persists so ↑/↓ can still fine-tune. The SECONDARY
+              "swipe-left reveals tier cards" gesture is deferred — see note. */}
+          {/* FB4-62 deferred: swipe-left-to-reveal-tier-cards. The list is a
+              pan-based react-native-draggable-flatlist; adding a row swipe
+              gesture risks the drag-capture conflict that broke #11/#12. The
+              tier-target chips below already provide "a simpler way to move
+              players between tiers", so the swipe is intentionally skipped. */}
+          <TierTargetChips accentFor={accentFor} onPick={moveSelectedToTier} />
+          <View style={styles.actionBarMain}>
+            <Text style={styles.actionBarCount}>
+              {selectedIds.size} selected
+            </Text>
+            <View style={styles.actionBarBtns}>
+              <Pressable
+                onPress={() => bulkMove('up')}
+                style={({ pressed }) => [styles.actionBarBtn, pressed && { opacity: 0.7 }]}
+              >
+                <Text style={styles.actionBarBtnText}>↑ Up</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => bulkMove('down')}
+                style={({ pressed }) => [styles.actionBarBtn, pressed && { opacity: 0.7 }]}
+              >
+                <Text style={styles.actionBarBtnText}>↓ Down</Text>
+              </Pressable>
+              <Pressable
+                onPress={exitMultiSelect}
+                style={({ pressed }) => [styles.actionBarBtnDone, pressed && { opacity: 0.7 }]}
+              >
+                <Text style={styles.actionBarBtnDoneText}>Done</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       ) : null}
@@ -812,7 +1023,8 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   // Floating action bar — shown above the save bar when 1+ chips are
-  // selected. Up / Down move all selected by one tier; Done exits.
+  // selected. Holds the FB4-62 tier-target chip row on top + the Up/Down/
+  // Done controls row below (so it's a column container now).
   actionBar: {
     position: 'absolute',
     left: 0,
@@ -823,6 +1035,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopColor: colors.border,
     borderTopWidth: 1,
+  },
+  // Up / Down / Done controls row inside the action bar.
+  actionBarMain: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -880,6 +1095,28 @@ const styles = StyleSheet.create({
   switcherBtnActive: { backgroundColor: 'rgba(79,124,255,0.14)' },
   switcherText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
   switcherTextActive: { color: colors.accent },
+  // FB4-61 — Consensus | You segmented toggle. Compact mirror of the
+  // position switcher; sits just below it.
+  statToggle: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: 4,
+  },
+  statToggleBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+  },
+  statToggleBtnActive: { backgroundColor: 'rgba(79,124,255,0.14)' },
+  statToggleText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
+  statToggleTextActive: { color: colors.accent },
   // Copy-tiers-from-other-format pill. Sits between the position switcher
   // and the hint line, full-width with a dashed-ish accent border so it
   // reads as an "action that imports state" rather than a primary CTA.
