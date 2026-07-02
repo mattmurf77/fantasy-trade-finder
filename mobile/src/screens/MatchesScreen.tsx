@@ -14,8 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { haptics } from '../utils/haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, volt, semantic, space, radii, type, fonts } from '../theme/chalkline';
+import { Button, Badge, Icon } from '../components/chalkline';
 import TradeCardComp from '../components/TradeCard';
 import Toast from '../components/Toast';
 import { getAllMatches, getAwaitingTrades, setMatchDisposition } from '../api/trades';
@@ -244,10 +244,11 @@ export default function MatchesScreen() {
             <Pressable
               key={c.id}
               onPress={() => setFilterLeagueId(c.id)}
+              hitSlop={{ top: 6, bottom: 6 }}
               style={({ pressed }) => [
                 styles.chip,
                 isActive && styles.chipActive,
-                pressed && { opacity: 0.7 },
+                pressed && { backgroundColor: ink.ink3 },
               ]}
             >
               <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
@@ -264,7 +265,7 @@ export default function MatchesScreen() {
         ) ? (
         <View style={styles.list}>
           {[0, 1, 2].map((i) => (
-            <View key={i} style={{ gap: spacing.xs, marginBottom: spacing.lg }}>
+            <View key={i} style={{ gap: space.xs, marginBottom: space.lg }}>
               <View style={styles.matchHeader}>
                 <View style={styles.skeletonLabel} />
                 <View style={styles.skeletonTime} />
@@ -291,6 +292,7 @@ export default function MatchesScreen() {
               Head to the Trades tab and swipe on some proposals. When a
               leaguemate likes the same trade, it'll show up here.
             </Text>
+            <Button label="Refresh" variant="secondary" compact onPress={onRefresh} />
           </View>
         ) : (
           <FlatList
@@ -301,22 +303,25 @@ export default function MatchesScreen() {
               <RefreshControl
                 refreshing={isFetching}
                 onRefresh={onRefresh}
-                tintColor={colors.accent}
+                tintColor={volt.base}
               />
             }
             renderItem={({ item }) => (
-              <View style={{ gap: spacing.xs }}>
+              <View style={{ gap: space.xs }}>
                 {/* League badge — only shown in the "All" view; redundant
                     when a single-league filter is active. */}
                 {filterLeagueId === 'all' && item.league_name ? (
                   <View style={styles.leagueBadgeRow}>
-                    <Text style={styles.leagueBadge}>🏈 {item.league_name}</Text>
+                    <Badge label={item.league_name} />
                   </View>
                 ) : null}
                 <View style={styles.matchHeader}>
-                  <Text style={styles.matchLabel}>
-                    🎯 New match with @{item.counterparty_username}
-                  </Text>
+                  <View style={styles.matchLabelRow}>
+                    <Icon name="match" size={16} color={semantic.pos} />
+                    <Text style={styles.matchLabel}>
+                      New match with @{item.counterparty_username}
+                    </Text>
+                  </View>
                   <Text style={styles.matchTime}>{relativeTime(item.created_at)}</Text>
                 </View>
                 <TradeCardComp
@@ -328,7 +333,7 @@ export default function MatchesScreen() {
                 />
               </View>
             )}
-            ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
+            ItemSeparatorComponent={() => <View style={{ height: space.lg }} />}
           />
         )
       ) : (
@@ -339,6 +344,7 @@ export default function MatchesScreen() {
             <Text style={styles.emptyBody}>
               Swipe more in the Trades tab.
             </Text>
+            <Button label="Refresh" variant="secondary" compact onPress={onRefresh} />
           </View>
         ) : (
           <FlatList
@@ -349,19 +355,19 @@ export default function MatchesScreen() {
               <RefreshControl
                 refreshing={isFetching}
                 onRefresh={onRefresh}
-                tintColor={colors.accent}
+                tintColor={volt.base}
               />
             }
             renderItem={({ item }) => (
-              <View style={{ gap: spacing.xs }}>
+              <View style={{ gap: space.xs }}>
                 {filterLeagueId === 'all' && item.league_name ? (
                   <View style={styles.leagueBadgeRow}>
-                    <Text style={styles.leagueBadge}>🏈 {item.league_name}</Text>
+                    <Badge label={item.league_name} />
                   </View>
                 ) : null}
                 <View style={styles.matchHeader}>
                   <Text style={styles.awaitingLabel}>
-                    ⏳ Waiting on @{item.counterparty_username}
+                    Waiting on @{item.counterparty_username}
                   </Text>
                   <Text style={styles.matchTime}>{relativeTime(item.liked_at)}</Text>
                 </View>
@@ -374,7 +380,7 @@ export default function MatchesScreen() {
                 />
               </View>
             )}
-            ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
+            ItemSeparatorComponent={() => <View style={{ height: space.lg }} />}
           />
         )
       )}
@@ -394,10 +400,12 @@ function SegmentBtn({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
       style={({ pressed }) => [
         styles.segmentBtn,
         active && styles.segmentBtnActive,
-        pressed && { opacity: 0.7 },
+        pressed && { backgroundColor: ink.ink3 },
       ]}
     >
       <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
@@ -473,115 +481,128 @@ function awaitingToTradeCardShape(a: AwaitingTrade, fallbackLeague: string | und
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  header: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  title: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '800' },
-  subtitle: { color: colors.muted, fontSize: fontSize.sm, marginTop: 4 },
+  safe: { flex: 1, backgroundColor: ink.ink0 },
+  header: { paddingHorizontal: space.lg, paddingVertical: space.md },
+  title: { ...type.display },
+  subtitle: { ...type.bodySm, marginTop: space.xs },
 
   // flexGrow:0 prevents the horizontal ScrollView from stretching to fill
   // remaining vertical space when the body below is an empty-state View.
   chipScroll: { flexGrow: 0, flexShrink: 0 },
+
+  // Segmented group per PositionTabs spec: 1px hairline group at radii.sm;
+  // active segment = ink3 fill + 2px volt underline (volt use: active state).
   segmentRow: {
     flexDirection: 'row',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-    gap: spacing.xs,
+    marginHorizontal: space.lg,
+    marginBottom: space.sm,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    overflow: 'hidden',
   },
   segmentBtn: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    height: 44,
     alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+    backgroundColor: 'transparent',
   },
   segmentBtnActive: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.10)',
+    backgroundColor: ink.ink3,
+    borderBottomColor: volt.base,
   },
-  segmentText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
-  segmentTextActive: { color: colors.accent },
+  segmentText: { ...type.label },
+  segmentTextActive: { color: chalk.base },
 
   chipRow: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-    gap: spacing.xs,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.sm,
+    gap: space.xs,
     alignItems: 'center',
   },
+  // Chalkline badge construction, sized up for touch: 1px border in the
+  // encode color + chalk text on ink. Active = volt border (active state).
   chip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
     minHeight: 32,
     justifyContent: 'center',
-    borderRadius: radius.pill,
+    borderRadius: radii.xs,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: ink.lineStrong,
+    backgroundColor: 'transparent',
   },
   chipActive: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.10)',
+    borderColor: volt.base,
   },
-  // Explicit lineHeight prevents descenders ("g", "p") clipping at xs.
-  chipText: { color: colors.muted, fontSize: fontSize.xs, lineHeight: 16, fontWeight: '700' },
-  chipTextActive: { color: colors.accent },
+  chipText: { ...type.label },
+  chipTextActive: { color: chalk.base },
 
-  list: { padding: spacing.lg, paddingBottom: 96 },
-  leagueBadgeRow: { flexDirection: 'row', paddingHorizontal: 4 },
-  leagueBadge: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
+  list: { padding: space.lg, paddingBottom: 96 },
+  leagueBadgeRow: { flexDirection: 'row', paddingHorizontal: space.xs },
   matchHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: space.xs,
   },
-  matchLabel: { color: colors.green, fontSize: fontSize.sm, fontWeight: '700' },
-  awaitingLabel: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
-  matchTime: { color: colors.muted, fontSize: fontSize.xs },
+  matchLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    flexShrink: 1,
+  },
+  matchLabel: {
+    ...type.bodySm,
+    fontFamily: fonts.uiSemi,
+    color: semantic.pos,
+    flexShrink: 1,
+  },
+  awaitingLabel: {
+    ...type.bodySm,
+    fontFamily: fonts.uiSemi,
+    flexShrink: 1,
+  },
+  // Timestamps are data — Plex Mono, chalk-faint (ActivityRow convention).
+  matchTime: { ...type.data, color: chalk.faint },
   centered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.xl,
-    gap: spacing.sm,
+    padding: space.xl,
+    gap: space.md,
   },
-  errorText: { color: colors.red, fontSize: fontSize.sm },
+  errorText: { ...type.bodySm, color: semantic.neg },
 
   // Skeleton tiles — same outer dimensions as a real TradeCard match
-  // tile (radius.xl, border, surface bg) so the page shape is stable on
-  // first paint. Static — no shimmer/animation library introduced.
+  // tile (ink-1 surface, hairline, radii.md) so the page shape is stable
+  // on first paint. Static — no shimmer/animation library introduced.
   skeletonCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: ink.ink1,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.xl,
+    borderColor: ink.line,
+    borderRadius: radii.md,
     height: 220,
   },
   skeletonLabel: {
     width: 180,
     height: 12,
-    borderRadius: radius.sm,
-    backgroundColor: colors.border,
+    borderRadius: radii.xs,
+    backgroundColor: ink.ink3,
   },
   skeletonTime: {
     width: 48,
     height: 10,
-    borderRadius: radius.sm,
-    backgroundColor: colors.border,
+    borderRadius: radii.xs,
+    backgroundColor: ink.ink3,
   },
-  emptyTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800', textAlign: 'center' },
+  emptyTitle: { ...type.heading, textAlign: 'center' },
   emptyBody: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
+    ...type.bodySm,
     textAlign: 'center',
-    lineHeight: 22,
     maxWidth: 340,
   },
 });

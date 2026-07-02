@@ -52,7 +52,8 @@
           "organization": "dynasty-trade-finder",
           "project": "react-native"
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "apiBaseUrl": "https://fantasy-trade-finder.onrender.com",

@@ -2,14 +2,17 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, volt, space, radii, type } from '../theme/chalkline';
+import { Icon } from './chalkline';
 import type { NewPartnerEntry } from '../shared/types';
 
 // Dismissible banner shown at the top of TradesScreen when a leaguemate
 // has newly unlocked. Each unique "latest partner" id only shows the
 // banner once per (user, league) — dismissal key encodes the latest
 // partner's user_id so a *new* unlock re-surfaces the banner.
+//
+// Chalkline banner construction: ink-2 surface, hairline border, volt tick,
+// body-sm copy, ghost dismiss.
 
 interface Props {
   partners: NewPartnerEntry[];
@@ -56,17 +59,18 @@ export default function NewPartnersBanner({ partners, userId, leagueId }: Props)
 
   return (
     <View style={styles.banner}>
+      <View style={styles.tick} />
       <Text style={styles.text}>
-        🎯 {n} new trade partner{n === 1 ? '' : 's'} unlocked — refresh to find trades
+        {n} new trade partner{n === 1 ? '' : 's'} unlocked — refresh to find trades
       </Text>
       <Pressable
         onPress={handleDismiss}
-        style={({ pressed }) => [styles.close, pressed && { opacity: 0.6 }]}
+        style={({ pressed }) => [styles.close, pressed && styles.closePressed]}
         hitSlop={10}
         accessibilityRole="button"
         accessibilityLabel="Dismiss new partners banner"
       >
-        <Text style={styles.closeText}>✕</Text>
+        <Icon name="x" size={16} color={chalk.dim} />
       </Pressable>
     </View>
   );
@@ -76,27 +80,30 @@ const styles = StyleSheet.create({
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: 'rgba(34,197,94,0.10)',
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radii.md,
+    backgroundColor: ink.ink2,
     borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.45)',
+    borderColor: ink.line,
+  },
+  tick: {
+    width: 3,
+    height: 14,
+    backgroundColor: volt.base,
   },
   text: {
     flex: 1,
-    color: colors.green,
-    fontSize: fontSize.sm,
-    fontWeight: '700',
+    ...type.bodySm,
+    color: chalk.base,
   },
   close: {
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 2,
+    width: 28,
+    height: 28,
+    borderRadius: radii.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  closeText: {
-    color: colors.green,
-    fontSize: fontSize.base,
-    fontWeight: '800',
-  },
+  closePressed: { backgroundColor: ink.ink3 },
 });

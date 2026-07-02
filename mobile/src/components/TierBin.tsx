@@ -1,7 +1,7 @@
 import React, { forwardRef } from 'react';
 import { View, Text, StyleSheet, LayoutChangeEvent } from 'react-native';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, radii, space, type, tier as tierColors } from '../theme/chalkline';
+import { TickLabel } from './chalkline';
 import { TIER_LABEL } from '../utils/tierBands';
 import type { Tier } from '../shared/types';
 
@@ -14,15 +14,18 @@ interface Props {
   active?: boolean;
 }
 
-// Droppable tier container. Measured via onLayout so the drag gesture
-// handler knows its screen bounds and can snap a dropped card into this
-// bin. All bins in a TiersScreen share a common layout so measurements
-// stay comparable even when content heights differ.
+// Droppable tier container (docs/design/components.md → Tier bins & boards):
+// ink-0 well, 1px DASHED line-strong border; header = tick in the tier color
+// + label + mono count. Drag-over flips the border to the tier color, solid.
+// Measured via onLayout so the drag gesture handler knows its screen bounds
+// and can snap a dropped card into this bin. All bins in a TiersScreen share
+// a common layout so measurements stay comparable even when content heights
+// differ.
 const TierBin = forwardRef<View, Props>(function TierBin(
   { tier, count, children, onLayout, active },
   ref,
 ) {
-  const accent = accentFor(tier);
+  const tickColor = tier === 'unassigned' ? chalk.faint : tierColors[tier];
   const label = tier === 'unassigned' ? 'Unassigned' : TIER_LABEL[tier];
   return (
     <View
@@ -30,11 +33,11 @@ const TierBin = forwardRef<View, Props>(function TierBin(
       onLayout={onLayout}
       style={[
         styles.bin,
-        active && { borderColor: accent.border, backgroundColor: accent.bgActive },
+        active && { borderColor: tickColor, borderStyle: 'solid' },
       ]}
     >
-      <View style={[styles.header, { borderLeftColor: accent.fg }]}>
-        <Text style={[styles.label, { color: accent.fg }]}>{label}</Text>
+      <View style={styles.header}>
+        <TickLabel color={tickColor}>{label}</TickLabel>
         <Text style={styles.count}>{count}</Text>
       </View>
       <View style={styles.body}>{children}</View>
@@ -44,37 +47,23 @@ const TierBin = forwardRef<View, Props>(function TierBin(
 
 export default TierBin;
 
-function accentFor(tier: Tier | 'unassigned') {
-  switch (tier) {
-    case 'elite':   return { fg: colors.tier.elite,   border: 'rgba(245,158,11,0.45)', bgActive: 'rgba(245,158,11,0.08)' };
-    case 'starter': return { fg: colors.tier.starter, border: 'rgba(34,197,94,0.45)',  bgActive: 'rgba(34,197,94,0.08)' };
-    case 'solid':   return { fg: colors.tier.solid,   border: 'rgba(59,130,246,0.45)', bgActive: 'rgba(59,130,246,0.08)' };
-    case 'depth':   return { fg: colors.tier.depth,   border: 'rgba(249,115,22,0.45)', bgActive: 'rgba(249,115,22,0.08)' };
-    case 'bench':   return { fg: colors.tier.bench,   border: 'rgba(148,163,184,0.45)', bgActive: 'rgba(148,163,184,0.08)' };
-    default:        return { fg: colors.muted,        border: colors.border,           bgActive: 'rgba(255,255,255,0.04)' };
-  }
-}
-
 const styles = StyleSheet.create({
   bin: {
-    borderColor: colors.border,
+    borderColor: ink.lineStrong,
     borderWidth: 1,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    marginBottom: spacing.sm,
+    borderStyle: 'dashed',
+    borderRadius: radii.md,
+    backgroundColor: ink.ink0,
+    marginBottom: space.sm,
     overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderLeftWidth: 3,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
   },
-  label: { fontSize: fontSize.sm, fontWeight: '800', letterSpacing: 0.4 },
-  count: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  body: { padding: spacing.sm, gap: spacing.xs, minHeight: 50 },
+  count: { ...type.data, color: chalk.dim },
+  body: { padding: space.sm, gap: space.xs, minHeight: 50 },
 });

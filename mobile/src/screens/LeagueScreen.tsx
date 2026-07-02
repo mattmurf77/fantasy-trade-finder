@@ -12,8 +12,26 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import {
+  ink,
+  chalk,
+  volt,
+  semantic,
+  space,
+  radii,
+  type,
+  shadowSheet,
+  scrim,
+} from '../theme/chalkline';
+import {
+  TickLabel,
+  Badge,
+  Button,
+  Card,
+  Meter,
+  Icon,
+  IconName,
+} from '../components/chalkline';
 import {
   getLeagueSummary,
   getLeagueCoverage,
@@ -63,7 +81,7 @@ export default function LeagueScreen() {
     placeholderData: (prev) => prev,
   });
 
-  // Leaguemate roster (joined ✓ / not-joined ✗). Mirrors the web
+  // Leaguemate roster (joined / not-joined). Mirrors the web
   // client's section in the League Summary page (PR #13, agent #15).
   // The summary stat card shows the count; this list shows the names.
   const membersQuery = useQuery({
@@ -132,8 +150,8 @@ export default function LeagueScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={['bottom']}>
         <View style={styles.center}>
-          <Text style={styles.emptyTitle}>No league selected</Text>
-          <Text style={styles.emptyBody}>
+          <Text style={type.heading}>No league selected</Text>
+          <Text style={[type.bodySm, styles.emptyBody]}>
             Pick a league from the league switcher to see this tab populated.
           </Text>
         </View>
@@ -171,64 +189,68 @@ export default function LeagueScreen() {
           <RefreshControl
             refreshing={summaryQuery.isFetching || coverageQuery.isFetching}
             onRefresh={refetchAll}
-            tintColor={colors.accent}
+            tintColor={volt.base}
           />
         }
       >
         {/* League name + scoring. The whole hero card is now a Pressable
             that opens the LeagueSwitcherSheet — matching the web feedback
             ("Let me navigate/update my league directly from the page
-            itself"). The small ⇅ chevron in the top-right communicates
-            the affordance; the existing "Switch league →" button at the
+            itself"). The small chevron in the top-right communicates
+            the affordance; the existing "Switch league" button at the
             bottom remains for users who scroll past the hero. */}
         <Pressable
           onPress={() => setSwitcherOpen(true)}
-          style={({ pressed }) => [styles.heroCard, pressed && { opacity: 0.85 }]}
           accessibilityRole="button"
           accessibilityLabel="Switch league"
         >
-          <View style={styles.heroHead}>
-            <Text style={styles.heroLabel}>League</Text>
-            <Text style={styles.heroChevron}>⇅</Text>
-          </View>
-          <Text style={styles.heroName} numberOfLines={2}>
-            {summary?.league_name || league?.league_name || 'Loading…'}
-          </Text>
-          <View style={styles.heroChips}>
-            <Chip label={fmtScoring(summary?.default_scoring)} tone="accent" />
-            <Chip label={summary ? `${num((summary as any)?.leaguemates_total) + 1} teams` : '— teams'} />
-            {/* FB-38/42 — joined summary lives in the hero; tapping it opens
-                the member-roster overlay. Inner Pressable so the tap doesn't
-                bubble to the hero's switch-league handler. The › chevron is
-                the clickability cue the feedback asked for. */}
-            <Pressable
-              onPress={() => setMembersOpen(true)}
-              style={({ pressed }) => [
-                styles.chip, styles.chipAccent, pressed && { opacity: 0.7 },
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="View league members and join status"
-            >
-              <Text style={[styles.chipText, styles.chipTextAccent]}>
-                {summaryPending ? '— joined' : `${joinedMates}/${totalMates || '—'} joined`} ›
+          {({ pressed }) => (
+            <Card style={pressed ? styles.cardPressed : undefined}>
+              <View style={styles.heroHead}>
+                <Text style={type.label}>League</Text>
+                <Icon name="chevron-down" size={16} color={chalk.dim} />
+              </View>
+              <Text style={[type.heading, styles.heroName]} numberOfLines={2}>
+                {summary?.league_name || league?.league_name || 'Loading…'}
               </Text>
-            </Pressable>
-          </View>
+              <View style={styles.heroChips}>
+                <Badge label={fmtScoring(summary?.default_scoring)} />
+                <Badge label={summary ? `${num((summary as any)?.leaguemates_total) + 1} teams` : '— teams'} />
+                {/* FB-38/42 — joined summary lives in the hero; tapping it opens
+                    the member-roster overlay. Inner Pressable so the tap doesn't
+                    bubble to the hero's switch-league handler. The chevron icon
+                    is the clickability cue the feedback asked for. */}
+                <Pressable
+                  onPress={() => setMembersOpen(true)}
+                  hitSlop={12}
+                  style={({ pressed: p }) => [styles.joinedChip, p && styles.joinedChipPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="View league members and join status"
+                >
+                  <Text style={type.data}>
+                    {summaryPending ? '—' : `${joinedMates}/${totalMates || '—'}`}
+                  </Text>
+                  <Text style={type.label}>joined</Text>
+                  <Icon name="chevron-right" size={12} color={chalk.dim} />
+                </Pressable>
+              </View>
+            </Card>
+          )}
         </Pressable>
 
         {/* Matches roll-up — tiles route to the Matches tab (FB-37). */}
-        <SectionTitle>Matches</SectionTitle>
+        <TickLabel>Matches</TickLabel>
         <View style={styles.statRow}>
           <StatCard
             label="Pending"
             value={summaryPending ? '—' : matchesPending}
-            emoji="🤝"
+            icon="match"
             onPress={() => navigation.navigate('Matches')}
           />
           <StatCard
             label="Accepted"
             value={summaryPending ? '—' : matchesAccepted}
-            emoji="✅"
+            icon="check"
             onPress={() => navigation.navigate('Matches')}
           />
         </View>
@@ -239,14 +261,15 @@ export default function LeagueScreen() {
         {showActivity ? (
           <>
             <View style={styles.divider} />
-            <SectionTitle>Recent activity</SectionTitle>
+            <TickLabel>Recent activity</TickLabel>
             <ActivityFeed events={activityQuery.data?.events ?? []} limit={10} />
           </>
         ) : null}
 
         {/* Contrarian ranks — always shown; renders an invite-prompt empty
             state when the league has too few ranking-takers for a baseline. */}
-        <SectionTitle>Contrarian ranks</SectionTitle>
+        <View style={styles.divider} />
+        <TickLabel>Contrarian ranks</TickLabel>
         <ContrarianLeaderboard
           rows={contrarianQuery.data?.rows ?? []}
           insufficientData={!!contrarianQuery.data?.insufficient_data}
@@ -254,39 +277,41 @@ export default function LeagueScreen() {
         />
 
         {/* Ranking coverage */}
-        <SectionTitle>Coverage</SectionTitle>
-        <View style={styles.card}>
+        <View style={styles.divider} />
+        <TickLabel>Coverage</TickLabel>
+        <Card>
           <View style={styles.statBetween}>
-            <Text style={styles.cardLabel}>Opponents you've ranked vs</Text>
-            <Text style={styles.cardValue}>
+            <Text style={type.body}>Opponents you've ranked vs</Text>
+            <Text style={type.data}>
               {coveragePending ? '—' : `${rankedOpps}/${totalOpps || '—'}`}
             </Text>
           </View>
-          <ProgressBar pct={coveragePending ? 0 : coveragePct} />
+          <Meter
+            value={coveragePending ? 0 : coveragePct / 100}
+            color={coveragePct >= 100 ? semantic.pos : volt.base}
+          />
           {coveragePending ? null : (
-            <Text style={styles.cardHint}>
+            <Text style={[type.bodySm, styles.coverageHint]}>
               {coveragePct === 100
                 ? "You're matched up against every leaguemate. Nice."
                 : `Rank more players to widen the trade pool — ${100 - coveragePct}% to go.`}
             </Text>
           )}
-        </View>
+        </Card>
 
         {/* Leaderboards — League-specific + Universal sections inline. */}
-        <SectionTitle>Leaderboards</SectionTitle>
+        <View style={styles.divider} />
+        <TickLabel>Leaderboards</TickLabel>
         <LeaderboardsSection leagueId={leagueId} />
 
         {/* Switch league — opens an in-app sheet rather than nuking the
             session and bouncing back to the LeaguePicker stack. */}
-        <Pressable
+        <Button
+          label="Switch league"
+          variant="secondary"
           onPress={() => setSwitcherOpen(true)}
-          style={({ pressed }) => [
-            styles.switchBtn,
-            pressed && { opacity: 0.7 },
-          ]}
-        >
-          <Text style={styles.switchBtnText}>Switch league →</Text>
-        </Pressable>
+          style={styles.switchBtn}
+        />
       </ScrollView>
 
       <LeagueSwitcherSheet
@@ -306,18 +331,18 @@ export default function LeagueScreen() {
         <Pressable style={styles.overlayBackdrop} onPress={() => setMembersOpen(false)} />
         <View style={styles.overlayCard}>
           <View style={styles.overlayHead}>
-            <Text style={styles.overlayTitle}>League members</Text>
+            <Text style={type.heading}>League members</Text>
             <Pressable
               onPress={() => setMembersOpen(false)}
               hitSlop={12}
               accessibilityRole="button"
               accessibilityLabel="Close members overlay"
-              style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+              style={({ pressed }) => [styles.overlayClose, pressed && styles.overlayClosePressed]}
             >
-              <Text style={styles.overlayClose}>✕</Text>
+              <Icon name="x" size={20} color={chalk.dim} />
             </Pressable>
           </View>
-          <Text style={styles.overlaySub}>
+          <Text style={[type.data, styles.overlaySub]}>
             {summaryPending
               ? '…'
               : `${joinedMates}/${totalMates || '—'} joined · ${unlocked1qb} unlocked 1QB · ${unlockedSf} unlocked SF`}
@@ -327,33 +352,23 @@ export default function LeagueScreen() {
               const unlock = showUnlockBadges ? unlocksById.get(m.user_id) : undefined;
               return (
                 <View key={m.user_id} style={styles.memberRow}>
-                  <Text style={styles.memberName} numberOfLines={1}>
+                  <Text style={[type.title, styles.memberName]} numberOfLines={1}>
                     {m.display_name || m.username || m.user_id}
                   </Text>
                   {showUnlockBadges && m.joined ? (
-                    <View style={[
-                      styles.unlockChip,
-                      unlock?.unlocked ? styles.unlockChipOn : styles.unlockChipOff,
-                    ]}>
-                      <Text style={[
-                        styles.unlockChipText,
-                        unlock?.unlocked ? styles.unlockChipTextOn : styles.unlockChipTextOff,
-                      ]}>
-                        {unlock?.unlocked ? '✓ Unlocked' : 'in progress'}
-                      </Text>
-                    </View>
+                    <StatusChip
+                      label={unlock?.unlocked ? 'Unlocked' : 'in progress'}
+                      color={unlock?.unlocked ? semantic.pos : ink.lineStrong}
+                      icon={unlock?.unlocked ? 'check' : undefined}
+                      dim={!unlock?.unlocked}
+                    />
                   ) : null}
-                  <View style={[
-                    styles.memberBadge,
-                    m.joined ? styles.memberBadgeJoined : styles.memberBadgeNotJoined,
-                  ]}>
-                    <Text style={[
-                      styles.memberBadgeText,
-                      m.joined ? styles.memberBadgeTextJoined : styles.memberBadgeTextNotJoined,
-                    ]}>
-                      {m.joined ? '✓ Joined' : 'Not joined'}
-                    </Text>
-                  </View>
+                  <StatusChip
+                    label={m.joined ? 'Joined' : 'Not joined'}
+                    color={m.joined ? semantic.pos : ink.lineStrong}
+                    icon={m.joined ? 'check' : undefined}
+                    dim={!m.joined}
+                  />
                 </View>
               );
             })}
@@ -373,75 +388,56 @@ function fmtScoring(s?: string | null) {
   return map[s] || s.toUpperCase();
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <Text style={styles.sectionTitle}>{children}</Text>;
-}
-
-function Chip({ label, tone }: { label: string; tone?: 'accent' }) {
+// Chalkline badge construction (1px encode-color border + label type on ink)
+// with an optional leading check icon — the shared Badge primitive doesn't
+// take an icon, so this composes the same tokens inline.
+function StatusChip({ label, color, icon, dim }: {
+  label: string; color: string; icon?: IconName; dim?: boolean;
+}) {
   return (
-    <View style={[styles.chip, tone === 'accent' && styles.chipAccent]}>
-      <Text style={[styles.chipText, tone === 'accent' && styles.chipTextAccent]}>
-        {label}
-      </Text>
+    <View style={[styles.statusChip, { borderColor: color }]}>
+      {icon ? <Icon name={icon} size={12} color={color} /> : null}
+      <Text style={[type.label, !dim && styles.statusChipText]}>{label}</Text>
     </View>
   );
 }
 
-function StatCard({ label, value, emoji, onPress }: {
-  label: string; value: number | string; emoji: string; onPress?: () => void;
+function StatCard({ label, value, icon, onPress }: {
+  label: string; value: number | string; icon: IconName; onPress?: () => void;
 }) {
   // Pressable when a destination is supplied (FB-37: Matches tiles route
-  // to the Matches tab); plain tile otherwise. The › chevron next to the
-  // label is the clickability cue.
-  const body = (
-    <>
-      <Text style={styles.statEmoji}>{emoji}</Text>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{onPress ? `${label} ›` : label}</Text>
-    </>
+  // to the Matches tab); plain tile otherwise. The chevron icon next to
+  // the label is the clickability cue.
+  const body = (pressed: boolean) => (
+    <Card style={pressed ? styles.statCardPressed : styles.statCard}>
+      <Icon name={icon} size={20} color={chalk.dim} />
+      <Text style={type.dataLg}>{value}</Text>
+      <View style={styles.statLabelRow}>
+        <Text style={type.label}>{label}</Text>
+        {onPress ? <Icon name="chevron-right" size={12} color={chalk.dim} /> : null}
+      </View>
+    </Card>
   );
-  if (!onPress) return <View style={styles.statCard}>{body}</View>;
+  if (!onPress) return <View style={styles.statFlex}>{body(false)}</View>;
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.statCard, pressed && { opacity: 0.7 }]}
+      style={styles.statFlex}
       accessibilityRole="button"
       accessibilityLabel={`${label} — open Matches`}
     >
-      {body}
+      {({ pressed }) => body(pressed)}
     </Pressable>
   );
 }
 
-function ProgressBar({ pct }: { pct: number }) {
-  const safe = Math.max(0, Math.min(100, pct));
-  return (
-    <View style={styles.progressTrack}>
-      <View
-        style={[
-          styles.progressFill,
-          {
-            width: `${safe}%`,
-            backgroundColor: safe >= 100 ? colors.green : colors.accent,
-          },
-        ]}
-      />
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
+  safe: { flex: 1, backgroundColor: ink.ink0 },
+  scroll: { padding: space.lg, paddingBottom: space.xxl, gap: space.md },
 
-  heroCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    gap: spacing.sm,
-  },
+  // Pressed state = surface-color change only (no scale/translate).
+  cardPressed: { backgroundColor: ink.ink3 },
+
   // Header row inside the hero card — label on the left, switch chevron
   // on the right. The chevron communicates that the whole card is
   // pressable to open the league switcher.
@@ -450,185 +446,113 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  heroChevron: {
-    color: colors.muted,
-    fontSize: 16,
-    fontWeight: '700',
+  heroName: { marginTop: space.sm },
+  heroChips: {
+    flexDirection: 'row',
+    gap: space.sm,
+    marginTop: space.md,
+    flexWrap: 'wrap',
+    alignItems: 'center',
   },
-  heroLabel: {
-    color: colors.muted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  heroName: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '800' },
-  heroChips: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs, flexWrap: 'wrap' },
 
   // FB-38 — member-roster overlay
-  overlayBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+  overlayBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: scrim },
   overlayCard: {
     position: 'absolute',
-    left: spacing.lg,
-    right: spacing.lg,
+    left: space.lg,
+    right: space.lg,
     top: '14%',
     maxHeight: '72%',
-    backgroundColor: colors.bg,
-    borderColor: colors.border,
+    backgroundColor: ink.ink2,
+    borderColor: ink.line,
     borderWidth: 1,
-    borderRadius: radius.xl,
-    padding: spacing.lg,
-    gap: spacing.sm,
+    borderRadius: radii.md,
+    padding: space.lg,
+    gap: space.sm,
+    ...shadowSheet,
   },
   overlayHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  overlayTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
-  overlayClose: { color: colors.muted, fontSize: fontSize.lg, fontWeight: '800' },
-  overlaySub: { color: colors.muted, fontSize: fontSize.xs },
-  overlayList: { marginTop: spacing.xs },
-
-  chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.bg,
-  },
-  chipAccent: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.10)',
-  },
-  chipText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  chipTextAccent: { color: colors.accent },
-
-  sectionTitle: {
-    color: colors.muted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginTop: spacing.md,
-    marginLeft: 4,
-  },
-
-  statRow: { flexDirection: 'row', gap: spacing.md },
-  statCard: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
+  overlayClose: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.sm,
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
   },
-  statEmoji: { fontSize: 24 },
-  statValue: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '800' },
-  statLabel: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
+  overlayClosePressed: { backgroundColor: ink.ink3 },
+  overlaySub: { color: chalk.dim },
+  overlayList: { marginTop: space.xs },
 
-  card: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
+  joinedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.xs,
     borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    gap: spacing.sm,
+    borderColor: ink.lineStrong,
   },
+  joinedChipPressed: { backgroundColor: ink.ink3 },
+
+  statRow: { flexDirection: 'row', gap: space.md },
+  statFlex: { flex: 1 },
+  statCard: { flex: 1 },
+  statCardPressed: { flex: 1, backgroundColor: ink.ink3 },
+  statLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+  },
+
   statBetween: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: space.sm,
   },
-  cardLabel:    { color: colors.text,  fontSize: fontSize.sm,  fontWeight: '700' },
-  cardValue:    { color: colors.text,  fontSize: fontSize.lg,  fontWeight: '800' },
-  cardSubLabel: { color: colors.muted, fontSize: fontSize.xs },
-  cardSubValue: { color: colors.text,  fontSize: fontSize.sm,  fontWeight: '700' },
-  cardHint:     { color: colors.muted, fontSize: fontSize.xs,  marginTop: spacing.xs, lineHeight: 18 },
+  coverageHint: { marginTop: space.sm },
 
   memberRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: spacing.sm,
+    gap: space.sm,
+    paddingVertical: space.sm,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: ink.line,
   },
-  memberName: {
-    flex: 1,
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '700',
-    marginRight: spacing.sm,
-  },
-  memberBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-  },
-  memberBadgeJoined: {
-    backgroundColor: 'rgba(34,197,94,0.12)',
-    borderColor: 'rgba(34,197,94,0.45)',
-  },
-  memberBadgeNotJoined: {
-    backgroundColor: 'transparent',
-    borderColor: colors.border,
-    borderStyle: 'dashed',
-  },
-  memberBadgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
-  memberBadgeTextJoined: { color: colors.green },
-  memberBadgeTextNotJoined: { color: colors.muted },
+  memberName: { flex: 1 },
 
-  unlockChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radius.pill,
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.xs,
     borderWidth: 1,
-    marginRight: spacing.xs,
   },
-  unlockChipOn: {
-    backgroundColor: 'rgba(34,197,94,0.10)',
-    borderColor: 'rgba(34,197,94,0.40)',
-  },
-  unlockChipOff: {
-    backgroundColor: 'transparent',
-    borderColor: colors.border,
-  },
-  unlockChipText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
-  unlockChipTextOn: { color: colors.green },
-  unlockChipTextOff: { color: colors.muted },
+  statusChipText: { color: chalk.base },
 
   divider: {
     height: 1,
-    backgroundColor: colors.border,
-    marginTop: spacing.md,
+    backgroundColor: ink.line,
+    marginTop: space.md,
   },
 
-  progressTrack: {
-    height: 6,
-    backgroundColor: colors.border,
-    borderRadius: radius.pill,
-    overflow: 'hidden',
-    marginTop: 4,
-  },
-  progressFill: { height: '100%', borderRadius: radius.pill },
+  switchBtn: { marginTop: space.lg },
 
-  switchBtn: {
-    marginTop: spacing.lg,
-    paddingVertical: 14,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+  center: {
+    flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
+    padding: space.xl,
+    gap: space.sm,
   },
-  switchBtnText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
-
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.sm },
-  emptyTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
-  emptyBody:  { color: colors.muted, fontSize: fontSize.sm, textAlign: 'center', lineHeight: 22 },
+  emptyBody: { textAlign: 'center' },
 });

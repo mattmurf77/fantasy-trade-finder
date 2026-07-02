@@ -1,13 +1,12 @@
 import React, { useEffect } from 'react';
-import { StyleSheet, Text, Pressable } from 'react-native';
+import { StyleSheet, Text, Pressable, View } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
   runOnJS,
 } from 'react-native-reanimated';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, volt, semantic, space, radii, type, shadowSheet } from '../theme/chalkline';
 
 interface Props {
   visible: boolean;
@@ -21,6 +20,9 @@ interface Props {
 // Animated toast banner. Fades in/out, optionally auto-dismisses. Used
 // by RankScreen for the QC "Nice call!" compliment (flag swipe.qc_compliments)
 // and by other screens for lightweight status feedback.
+//
+// Chalkline: ink-2 surface, hairline border, sheet shadow, 3px left rail in
+// the tone color (volt info / pos success / warn / neg error).
 export default function Toast({
   visible,
   message,
@@ -62,41 +64,51 @@ export default function Toast({
       pointerEvents="box-none"
       style={[styles.wrap, animatedStyle]}
     >
-      <Pressable onPress={onDismiss} style={[styles.bubble, toneStyle(tone)]}>
+      <Pressable onPress={onDismiss} style={styles.bubble}>
+        <View style={[styles.rail, { backgroundColor: railColor(tone) }]} />
         <Text style={styles.text}>{message}</Text>
       </Pressable>
     </Animated.View>
   );
 }
 
-function toneStyle(tone: NonNullable<Props['tone']>) {
+function railColor(tone: NonNullable<Props['tone']>): string {
   switch (tone) {
     case 'success':
-      return { backgroundColor: 'rgba(34,197,94,0.14)', borderColor: 'rgba(34,197,94,0.45)' };
+      return semantic.pos;
     case 'warn':
-      return { backgroundColor: 'rgba(245,158,11,0.14)', borderColor: 'rgba(245,158,11,0.45)' };
+      return semantic.warn;
     case 'error':
-      return { backgroundColor: 'rgba(239,68,68,0.14)', borderColor: 'rgba(239,68,68,0.45)' };
+      return semantic.neg;
     default:
-      return { backgroundColor: colors.surface, borderColor: colors.border };
+      return volt.base;
   }
 }
 
 const styles = StyleSheet.create({
   wrap: {
     position: 'absolute',
-    top: spacing.xxl,
+    top: space.xxl,
     left: 0,
     right: 0,
     alignItems: 'center',
     zIndex: 50,
   },
   bubble: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radius.pill,
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    backgroundColor: ink.ink2,
+    borderRadius: radii.sm,
     borderWidth: 1,
+    borderColor: ink.line,
     maxWidth: '88%',
+    overflow: 'hidden',
+    ...shadowSheet,
   },
-  text: { color: colors.text, fontSize: fontSize.sm, fontWeight: '600', textAlign: 'center' },
+  rail: { width: 3 },
+  text: {
+    ...type.body,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm + 2,
+  },
 });

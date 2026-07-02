@@ -4,8 +4,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainerRefContext, CommonActions } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, volt, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
+import { Icon, Button, type IconName } from '../components/chalkline';
 import { getNextTrio, getRankings, getTiersStatus } from '../api/rankings';
 import { getLikedTrades, getAllMatches } from '../api/trades';
 import { useSession } from '../state/useSession';
@@ -15,6 +15,7 @@ import ManualRanksScreen from '../screens/ManualRanksScreen';
 import TrendsScreen from '../screens/TrendsScreen';
 import TradesScreen from '../screens/TradesScreen';
 import PortfolioScreen from '../screens/PortfolioScreen';
+import TradeCalculatorScreen from '../screens/TradeCalculatorScreen';
 import MatchesScreen from '../screens/MatchesScreen';
 import LeagueScreen from '../screens/LeagueScreen';
 import TopBar from '../components/TopBar';
@@ -31,7 +32,7 @@ const RankStack = createNativeStackNavigator();
 const TradesStack = createNativeStackNavigator();
 
 export type RankRoute = 'Trios' | 'Tiers' | 'ManualRanks' | 'Trends';
-export type TradesRoute = 'TradesHome' | 'Portfolio';
+export type TradesRoute = 'TradesHome' | 'Portfolio' | 'TradeCalculator';
 
 // #51/#52 — Rank sub-screens (Tiers / Overall Ranks / Trends) are siblings
 // reached from the Rank menu, not a linear drill-down. The native back button
@@ -46,25 +47,44 @@ function RankHeaderBack({ navigation }: { navigation: any }) {
       onPress={() =>
         navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Trios')
       }
-      hitSlop={spacing.md}
+      hitSlop={space.md}
       style={({ pressed }) => [styles.headerBack, pressed && { opacity: 0.6 }]}
     >
-      <Text style={styles.headerBackText}>‹ Back</Text>
+      <Icon name="chevron-left" size={16} color={chalk.base} />
+      <Text style={styles.headerBackText}>Back</Text>
     </Pressable>
   );
 }
 
-// Shared options for the three pushed Rank sub-screens: dark header + the
+// Chalkline stack-header title — Barlow Condensed caps on the ink-0 bar.
+// Native-stack headerTitleStyle can't express letterSpacing/textTransform,
+// so we render the title ourselves.
+function HeaderTitle({ children }: { children: string }) {
+  return (
+    <Text numberOfLines={1} style={styles.headerTitle}>
+      {children}
+    </Text>
+  );
+}
+
+// Shared Chalkline header options for pushed sub-screens: ink-0 bar, chalk
+// tint, condensed-caps title.
+const chalklineHeader = (title: string) => ({
+  headerShown: true,
+  title,
+  headerTitle: () => <HeaderTitle>{title}</HeaderTitle>,
+  headerStyle: { backgroundColor: ink.ink0 },
+  headerTintColor: chalk.base,
+});
+
+// Shared options for the three pushed Rank sub-screens: Chalkline header + the
 // custom always-on back control. Built from the per-screen options callback so
 // the live `navigation` object for that screen is captured — the native-stack
 // `headerLeft` render prop itself does NOT receive `navigation`, so closing
 // over it here is what makes the control act on the right screen.
 const rankSubScreenOptions = (title: string) =>
   ({ navigation }: { navigation: any }) => ({
-    headerShown: true,
-    title,
-    headerStyle: { backgroundColor: colors.bg },
-    headerTintColor: colors.text,
+    ...chalklineHeader(title),
     headerLeft: () => <RankHeaderBack navigation={navigation} />,
   });
 
@@ -98,35 +118,35 @@ function TradesStackNav() {
       <TradesStack.Screen
         name="Portfolio"
         component={PortfolioScreen}
-        options={{
-          headerShown: true,
-          title: 'Portfolio',
-          headerStyle: { backgroundColor: colors.bg },
-          headerTintColor: colors.text,
-        }}
+        options={chalklineHeader('Portfolio')}
+      />
+      <TradesStack.Screen
+        name="TradeCalculator"
+        component={TradeCalculatorScreen}
+        options={chalklineHeader('Calculator')}
       />
     </TradesStack.Navigator>
   );
 }
 
-// Simple text-emoji icon renderer — gets replaced with react-native-vector-icons
-// or a custom SVG set in Phase 6 when the real design assets drop.
-const tabIcon = (emoji: string) =>
-  ({ focused }: { focused: boolean }) =>
-    <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.55 }}>{emoji}</Text>;
+// Chalkline tab icons — stroke SVG set from src/components/chalkline. The
+// navigator passes the active/inactive tint (volt / chalk-dim) as `color`.
+const tabIcon = (name: IconName) =>
+  ({ color }: { color: string }) =>
+    <Icon name={name} size={22} color={color} />;
 
-// Rank tab icon — same emoji glyph as the others, but with a small chevron
-// (▾) beside it to signal that tapping fans out a MENU of rank modes (Trios,
-// Tiers, Overall Ranks, Trends) rather than opening a single screen. The
-// chevron inherits the tab's active/inactive tint so it stays consistent with
-// the rest of the bar. Laid out in a tight row so nothing clips on the
+// Rank tab icon — same glyph treatment as the others, but with a small
+// chevron beside it to signal that tapping fans out a MENU of rank modes
+// (Trios, Tiers, Overall Ranks, Trends) rather than opening a single screen.
+// The chevron inherits the tab's active/inactive tint so it stays consistent
+// with the rest of the bar. Laid out in a tight row so nothing clips on the
 // fixed-height tab bar.
-const rankTabIcon = (emoji: string) =>
-  ({ focused, color }: { focused: boolean; color: string }) =>
+const rankTabIcon = (name: IconName) =>
+  ({ color }: { color: string }) =>
     (
       <View style={styles.rankIconWrap}>
-        <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.55 }}>{emoji}</Text>
-        <Text style={[styles.rankIconChevron, { color, opacity: focused ? 1 : 0.55 }]}>▾</Text>
+        <Icon name={name} size={22} color={color} />
+        <Icon name="chevron-down" size={12} color={color} />
       </View>
     );
 
@@ -135,7 +155,7 @@ export default function TabNav() {
   const queryClient = useQueryClient();
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: ink.ink0 }}>
       {/* Global top bar — sits above the tab navigator on every authed
           screen, owns the top safe-area inset, and renders the floating
           notifications bell on the right. Screens below intentionally
@@ -146,22 +166,22 @@ export default function TabNav() {
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
-            backgroundColor: colors.surface,
-            borderTopColor: colors.border,
+            backgroundColor: ink.ink0,
+            borderTopColor: ink.line,
             borderTopWidth: 1,
           },
-          tabBarActiveTintColor: colors.accent,
-          tabBarInactiveTintColor: colors.muted,
-          tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+          tabBarActiveTintColor: volt.base,
+          tabBarInactiveTintColor: chalk.dim,
+          tabBarLabelStyle: { fontFamily: fonts.uiSemi, fontSize: 11 },
         }}
       >
         <Tab.Screen
           name="Rank"
           component={RankStackNav}
-          // #49: FB-28 added a ▾ to the label, but the icon already renders a
-          // chevron (PR #79) — the two cues stacked. Keep the icon chevron
+          // #49: FB-28 added a chevron to the label, but the icon already
+          // renders one (PR #79) — the two cues stacked. Keep the icon chevron
           // (the conventional "fans out" signal) and drop the label arrow.
-          options={{ tabBarIcon: rankTabIcon('🏈'), tabBarLabel: 'Rank' }}
+          options={{ tabBarIcon: rankTabIcon('rank'), tabBarLabel: 'Rank' }}
           listeners={() => ({
             // Intercept the tap on the Rank tab — open the action sheet
             // instead of jumping into a sub-screen. We still keep the tab
@@ -175,7 +195,7 @@ export default function TabNav() {
         <Tab.Screen
           name="Trades"
           component={TradesStackNav}
-          options={{ tabBarIcon: tabIcon('⚡') }}
+          options={{ tabBarIcon: tabIcon('trade') }}
           listeners={() => ({
             // Warm the liked-trades cache during the tab transition so
             // TradesScreen's `useQuery(['liked-trades', leagueId])` adopts
@@ -198,7 +218,7 @@ export default function TabNav() {
         <Tab.Screen
           name="Matches"
           component={MatchesScreen}
-          options={{ tabBarIcon: tabIcon('🤝') }}
+          options={{ tabBarIcon: tabIcon('match') }}
           listeners={() => ({
             // Warm the cross-league matches cache during the tab transition
             // so MatchesScreen's `useQuery(['matches', 'all'])` adopts the
@@ -216,7 +236,7 @@ export default function TabNav() {
         <Tab.Screen
           name="League"
           component={LeagueScreen}
-          options={{ tabBarIcon: tabIcon('🏆') }}
+          options={{ tabBarIcon: tabIcon('crown') }}
         />
       </Tab.Navigator>
 
@@ -290,11 +310,11 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
     );
   };
 
-  const items: { route: RankRoute; emoji: string; label: string; sub: string }[] = [
-    { route: 'Trios',         emoji: '🏈', label: 'Trios',         sub: '3-at-a-time swipe ranking' },
-    { route: 'Tiers',         emoji: '📋', label: 'Tiers',         sub: 'Drag players into Elite / Starter / Solid / Depth / Bench' },
-    { route: 'ManualRanks',   emoji: '🏅', label: 'Overall Ranks', sub: 'Drag rows or tap a rank number to re-order your board by hand' },
-    { route: 'Trends',        emoji: '📈', label: 'Trends',        sub: 'See your biggest movers and how you differ from consensus' },
+  const items: { route: RankRoute; label: string; sub: string }[] = [
+    { route: 'Trios',         label: 'Trios',         sub: '3-at-a-time swipe ranking' },
+    { route: 'Tiers',         label: 'Tiers',         sub: 'Drag players into Elite / Starter / Solid / Depth / Bench' },
+    { route: 'ManualRanks',   label: 'Overall Ranks', sub: 'Drag rows or tap a rank number to re-order your board by hand' },
+    { route: 'Trends',        label: 'Trends',        sub: 'See your biggest movers and how you differ from consensus' },
   ];
 
   return (
@@ -302,7 +322,7 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
       <Pressable style={styles.backdrop} onPress={onClose} />
       <View style={styles.sheet}>
         <View style={styles.handle} />
-        <Text style={styles.sheetTitle}>Rank</Text>
+        <Text style={type.heading}>Rank</Text>
         <Text style={styles.sheetSub}>Pick how you want to rank players.</Text>
         {items.map((it) => (
           <Pressable
@@ -310,78 +330,80 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
             onPress={() => go(it.route)}
             style={({ pressed }) => [
               styles.item,
-              pressed && { opacity: 0.7 },
+              pressed && { backgroundColor: ink.ink3 },
             ]}
           >
-            <Text style={styles.itemEmoji}>{it.emoji}</Text>
             <View style={{ flex: 1 }}>
               <Text style={styles.itemLabel}>{it.label}</Text>
               <Text style={styles.itemSub}>{it.sub}</Text>
             </View>
-            <Text style={styles.itemChevron}>›</Text>
+            <Icon name="chevron-right" size={16} color={chalk.dim} />
           </Pressable>
         ))}
-        <Pressable onPress={onClose} style={({ pressed }) => [styles.cancel, pressed && { opacity: 0.7 }]}>
-          <Text style={styles.cancelText}>Cancel</Text>
-        </Pressable>
+        <Button label="Cancel" variant="ghost" onPress={onClose} style={styles.cancel} />
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  // Rank tab icon: emoji + menu chevron in a tight row. The negative left
-  // margin pulls the chevron snug to the glyph; nothing extends past the
-  // tab's icon box so there's no clipping on the bottom bar.
-  rankIconWrap: { flexDirection: 'row', alignItems: 'center' },
-  // FB-28: bumped from 11 — the smaller chevron read as decoration.
-  rankIconChevron: { fontSize: 14, fontWeight: '900', marginLeft: 2, marginTop: 2 },
+  // Rank tab icon: glyph + menu chevron in a tight row. Nothing extends past
+  // the tab's icon box so there's no clipping on the bottom bar.
+  rankIconWrap: { flexDirection: 'row', alignItems: 'center', gap: 2 },
 
   // #51/#52: always-on header back control for Rank sub-screens. Padded for a
-  // comfortable tap target; tinted with the accent so it reads as actionable
+  // comfortable tap target; chevron + label in chalk so it reads as actionable
   // (never the greyed/disabled native arrow).
-  headerBack: { paddingVertical: spacing.xs, paddingRight: spacing.md },
-  headerBackText: { color: colors.accent, fontSize: fontSize.base, fontWeight: '700' },
+  headerBack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingVertical: space.xs,
+    paddingRight: space.md,
+  },
+  headerBackText: { color: chalk.base, fontFamily: fonts.uiSemi, fontSize: 14 },
+  // type.heading scaled to fit the native header bar.
+  headerTitle: {
+    fontFamily: fonts.displaySemi,
+    fontSize: 18,
+    letterSpacing: 0.54,
+    textTransform: 'uppercase',
+    color: chalk.base,
+  },
 
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: scrim },
   sheet: {
     position: 'absolute',
     left: 0, right: 0, bottom: 0,
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl,
-    gap: spacing.sm,
+    backgroundColor: ink.ink2,
+    borderTopLeftRadius: radii.md,
+    borderTopRightRadius: radii.md,
+    borderWidth: 1,
+    borderColor: ink.line,
+    padding: space.lg,
+    paddingBottom: space.xxl,
+    gap: space.sm,
+    ...shadowSheet,
   },
   handle: {
     alignSelf: 'center',
-    width: 44,
+    width: 32,
     height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.border,
-    marginBottom: spacing.sm,
+    borderRadius: radii.xs,
+    backgroundColor: ink.lineStrong,
+    marginBottom: space.sm,
   },
-  sheetTitle: { color: colors.text, fontSize: fontSize.xl, fontWeight: '800' },
-  sheetSub: { color: colors.muted, fontSize: fontSize.sm, marginBottom: spacing.sm },
+  sheetSub: { ...type.bodySm, marginBottom: space.sm },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.lg,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    gap: space.md,
+    padding: space.lg,
+    borderRadius: radii.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
   },
-  itemEmoji: { fontSize: 26 },
-  itemLabel: { color: colors.text, fontSize: fontSize.base, fontWeight: '800' },
-  itemSub: { color: colors.muted, fontSize: fontSize.xs, marginTop: 2, lineHeight: 18 },
-  itemChevron: { color: colors.muted, fontSize: 26 },
-  cancel: {
-    marginTop: spacing.md,
-    padding: spacing.md,
-    alignItems: 'center',
-  },
-  cancelText: { color: colors.muted, fontWeight: '700', fontSize: fontSize.sm },
+  itemLabel: type.title,
+  itemSub: { ...type.bodySm, marginTop: 2 },
+  cancel: { marginTop: space.md },
 });

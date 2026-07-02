@@ -11,8 +11,8 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, volt, semantic, space, radii, type, fonts } from '../theme/chalkline';
+import { TickLabel } from '../components/chalkline';
 import { resolveSmartStart, signIn } from '../api/auth';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
@@ -43,6 +43,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
   const [busy, setBusy] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  const [focused, setFocused] = useState(false);
   const setUser = useSession((s) => s.setUser);
   const setLeagues = useSession((s) => s.setLeagues);
   const startDemoSession = useSession((s) => s.startDemoSession);
@@ -158,6 +159,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
     }
   }
 
+  const submitDisabled = busy || demoBusy || !username.trim();
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
@@ -166,17 +169,9 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
       >
         <View style={styles.body}>
           <View style={styles.hero}>
-            <Text style={styles.eyebrow}>
-              <Text style={styles.eyebrowDot}>●  </Text>
-              Dynasty Fantasy Football
-            </Text>
+            <TickLabel>Dynasty Fantasy Football</TickLabel>
             <Text style={styles.headline}>
-              Your Rankings{' '}
-              <Text style={styles.operator}>+</Text>
-              {'\n'}Their Rankings{' '}
-              <Text style={styles.operator}>=</Text>
-              {'\n'}
-              <Text style={styles.highlight}>Trades That Actually Work</Text>
+              Rank your league.{'\n'}Find the trades both sides want.
             </Text>
             <Text style={styles.sub}>
               Compare your rankings to your leaguemates' and find trades where
@@ -188,8 +183,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
             {hint ? (
               <Pressable
                 style={({ pressed }) => [
-                  styles.hintPill,
-                  pressed && { opacity: 0.7 },
+                  styles.hintRow,
+                  pressed && styles.hintRowPressed,
                 ]}
                 onPress={() => {
                   setUsername(hint);
@@ -202,11 +197,13 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
               </Pressable>
             ) : null}
             <TextInput
-              style={styles.input}
+              style={[styles.input, focused && styles.inputFocused]}
               placeholder={smartStartEnabled ? 'Sleeper username or league URL' : 'Sleeper username'}
-              placeholderTextColor="#3e4258"
+              placeholderTextColor={chalk.faint}
               value={username}
               onChangeText={setUsername}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
               autoCapitalize="none"
               autoCorrect={false}
               autoComplete="off"
@@ -222,16 +219,17 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
             ) : null}
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <Pressable
+              accessibilityRole="button"
               style={({ pressed }) => [
                 styles.button,
-                (busy || demoBusy || !username.trim()) && styles.buttonDisabled,
-                pressed && styles.buttonPressed,
+                pressed && !submitDisabled && styles.buttonPressed,
+                submitDisabled && styles.buttonDisabled,
               ]}
               onPress={() => handleSubmit()}
-              disabled={busy || demoBusy || !username.trim()}
+              disabled={submitDisabled}
             >
               {busy ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={volt.on} />
               ) : (
                 <Text style={styles.buttonText}>Connect →</Text>
               )}
@@ -241,29 +239,22 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
               <Pressable
                 onPress={handleTryDemo}
                 disabled={busy || demoBusy}
-                style={({ pressed }) => [
-                  styles.tryDemoBtn,
-                  pressed && { opacity: 0.6 },
-                ]}
+                style={styles.tryDemoBtn}
                 hitSlop={8}
               >
-                {demoBusy ? (
-                  <ActivityIndicator color={colors.muted} />
-                ) : (
-                  <Text style={styles.tryDemoText}>
-                    Try the app on a sample league →
-                  </Text>
-                )}
+                {({ pressed }) =>
+                  demoBusy ? (
+                    <ActivityIndicator color={chalk.dim} />
+                  ) : (
+                    <Text
+                      style={[styles.tryDemoText, pressed && styles.tryDemoTextPressed]}
+                    >
+                      Try the app on a sample league →
+                    </Text>
+                  )
+                }
               </Pressable>
             ) : null}
-
-            <View style={styles.taglines}>
-              <Text style={styles.tagline}>📈 Rank</Text>
-              <Text style={styles.taglineSep}>·</Text>
-              <Text style={styles.tagline}>🔗 Match</Text>
-              <Text style={styles.taglineSep}>·</Text>
-              <Text style={styles.tagline}>🤝 Trade</Text>
-            </View>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -272,108 +263,91 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1, backgroundColor: ink.ink0 },
   flex: { flex: 1 },
   body: {
     flex: 1,
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: space.xl,
     justifyContent: 'center',
+    alignItems: 'flex-start',
   },
-  hero: { marginBottom: spacing.xxl },
-  eyebrow: {
-    color: colors.green,
-    fontSize: fontSize.sm,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    marginBottom: spacing.sm,
+  hero: {
+    marginBottom: space.xxl,
+    alignItems: 'flex-start',
   },
-  eyebrowDot: { color: colors.green, fontSize: 10 },
   headline: {
-    color: colors.text,
-    fontSize: fontSize.xxl,
-    fontWeight: '800',
-    lineHeight: 36,
-    marginBottom: spacing.md,
+    ...type.display,
+    marginTop: space.md,
+    marginBottom: space.md,
   },
-  operator: { color: colors.accent, fontWeight: '900' },
-  highlight: { color: colors.accent },
   sub: {
-    color: colors.muted,
-    fontSize: fontSize.base,
-    lineHeight: 22,
+    ...type.body,
+    color: chalk.dim,
   },
-  form: {},
-  input: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+  form: { alignSelf: 'stretch' },
+  hintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    minHeight: 44,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    color: colors.text,
-    fontSize: fontSize.base,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    marginBottom: spacing.sm,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.lg,
+    marginBottom: space.md,
   },
+  hintRowPressed: { backgroundColor: ink.ink3 },
+  hintLabel: { ...type.bodySm },
+  hintName: { ...type.title },
+  input: {
+    height: 44,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    color: chalk.base,
+    fontFamily: fonts.ui,
+    fontSize: 14,
+    paddingHorizontal: space.lg,
+    marginBottom: space.sm,
+  },
+  inputFocused: { borderColor: volt.base },
   error: {
-    color: colors.red,
-    fontSize: fontSize.sm,
-    marginBottom: spacing.sm,
+    ...type.bodySm,
+    color: semantic.neg,
+    marginBottom: space.sm,
   },
   button: {
-    backgroundColor: colors.accent,
-    borderRadius: radius.md,
-    paddingVertical: 14,
+    height: 44,
+    backgroundColor: volt.base,
+    borderRadius: radii.sm,
     alignItems: 'center',
-    marginTop: spacing.sm,
+    justifyContent: 'center',
+    marginTop: space.sm,
   },
-  buttonPressed: { opacity: 0.85 },
-  buttonDisabled: { opacity: 0.5 },
+  buttonPressed: { backgroundColor: volt.press },
+  buttonDisabled: { opacity: 0.45 },
   buttonText: {
-    color: '#fff',
-    fontSize: fontSize.base,
-    fontWeight: '700',
+    color: volt.on,
+    fontFamily: fonts.uiSemi,
+    fontSize: 14,
   },
-  taglines: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: spacing.xl,
-    gap: spacing.md,
-  },
-  tagline: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '600',
-  },
-  taglineSep: { color: colors.border },
-  hintPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
-    marginBottom: spacing.md,
-  },
-  hintLabel: { color: colors.muted, fontSize: fontSize.sm },
-  hintName: { color: colors.accent, fontSize: fontSize.base, fontWeight: '700' },
   fieldHint: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
-    marginTop: -spacing.xs,
-    marginBottom: spacing.sm,
+    ...type.bodySm,
+    marginTop: -space.xs,
+    marginBottom: space.sm,
   },
   tryDemoBtn: {
+    alignSelf: 'stretch',
     alignItems: 'center',
-    paddingVertical: spacing.md,
-    marginTop: spacing.sm,
+    justifyContent: 'center',
+    minHeight: 44,
+    marginTop: space.sm,
   },
   tryDemoText: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
-    fontWeight: '600',
+    ...type.bodySm,
+    fontFamily: fonts.uiSemi,
   },
+  tryDemoTextPressed: { color: chalk.base },
 });

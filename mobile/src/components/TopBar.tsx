@@ -8,8 +8,8 @@ import {
   ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, volt, semantic, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
+import { Icon, Button } from './chalkline';
 import { useNotifications } from '../state/useNotifications';
 import { relativeTime } from '../utils/relativeTime';
 // Circular at module-load (TopBar ← TabNav ← RootNav), but `navigationRef`
@@ -18,9 +18,10 @@ import { relativeTime } from '../utils/relativeTime';
 // component body, this circular import will break silently.
 import { navigationRef } from '../navigation/RootNav';
 
-// Global top bar that sits above the tab navigator. The only widget today
-// is the floating notifications bell on the right — it shows an unread
-// dot when new pushes have arrived since the user last opened the sheet.
+// Global top bar that sits above the tab navigator. Chalkline TopNav:
+// wordmark (volt tick + condensed caps) on the left, settings + bell icon
+// buttons on the right. The bell shows an unread count when new pushes have
+// arrived since the user last opened the sheet.
 //
 // Sized at 44pt + the system top inset so it sits flush under the status
 // bar without overlapping screen content. Screens below this should opt
@@ -62,46 +63,52 @@ export default function TopBar() {
         ]}
       >
         <View style={styles.row}>
-          <Pressable
-            onPress={() => {
-              if (navigationRef.isReady()) {
-                navigationRef.navigate('Settings');
+          <View style={styles.wordmark}>
+            <View style={styles.wordmarkTick} />
+            <Text style={styles.wordmarkText}>Trade Finder</Text>
+          </View>
+          <View style={styles.actions}>
+            <Pressable
+              onPress={() => {
+                if (navigationRef.isReady()) {
+                  navigationRef.navigate('Settings');
+                }
+              }}
+              hitSlop={12}
+              style={({ pressed }) => [
+                styles.iconBtn,
+                { marginRight: space.sm },
+                pressed && styles.iconBtnPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Settings"
+            >
+              <Icon name="settings" color={chalk.dim} />
+            </Pressable>
+            <Pressable
+              onPress={openSheet}
+              hitSlop={12}
+              style={({ pressed }) => [
+                styles.iconBtn,
+                pressed && styles.iconBtnPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={
+                unreadCount > 0
+                  ? `Notifications, ${unreadCount} unread`
+                  : 'Notifications'
               }
-            }}
-            hitSlop={12}
-            style={({ pressed }) => [
-              styles.bellBtn,
-              { marginRight: spacing.sm },
-              pressed && { opacity: 0.7 },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Settings"
-          >
-            <Text style={styles.bellEmoji}>⚙️</Text>
-          </Pressable>
-          <Pressable
-            onPress={openSheet}
-            hitSlop={12}
-            style={({ pressed }) => [
-              styles.bellBtn,
-              pressed && { opacity: 0.7 },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel={
-              unreadCount > 0
-                ? `Notifications, ${unreadCount} unread`
-                : 'Notifications'
-            }
-          >
-            <Text style={styles.bellEmoji}>🔔</Text>
-            {unreadCount > 0 && (
-              <View style={styles.dot}>
-                <Text style={styles.dotText}>
-                  {unreadCount > 9 ? '9+' : String(unreadCount)}
-                </Text>
-              </View>
-            )}
-          </Pressable>
+            >
+              <Icon name="bell" color={chalk.dim} />
+              {unreadCount > 0 && (
+                <View style={styles.dot}>
+                  <Text style={styles.dotText}>
+                    {unreadCount > 9 ? '9+' : String(unreadCount)}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          </View>
         </View>
       </View>
 
@@ -115,23 +122,23 @@ export default function TopBar() {
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <View style={styles.sheetHead}>
-            <Text style={styles.sheetTitle}>Notifications</Text>
+            <Text style={type.heading}>Notifications</Text>
             {items.length > 0 && (
-              <Pressable
+              <Button
+                label="Clear all"
+                variant="ghost"
+                compact
                 onPress={() => {
                   clearAll();
                   setOpen(false);
                 }}
-                hitSlop={8}
-              >
-                <Text style={styles.clearText}>Clear all</Text>
-              </Pressable>
+              />
             )}
           </View>
 
           {items.length === 0 ? (
             <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>🛎️</Text>
+              <Icon name="bell" size={32} color={chalk.faint} />
               <Text style={styles.emptyTitle}>You're all caught up</Text>
               <Text style={styles.emptyBody}>
                 Trade matches and other alerts will appear here.
@@ -161,98 +168,104 @@ export default function TopBar() {
 const styles = StyleSheet.create({
   bar: {
     width: '100%',
-    backgroundColor: colors.bg,
-    borderBottomColor: colors.border,
+    backgroundColor: ink.ink0,
+    borderBottomColor: ink.line,
     borderBottomWidth: 1,
   },
   row: {
     flex: 1,
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: space.md,
   },
-  bellBtn: {
+  wordmark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
+  wordmarkTick: { width: 3, height: 14, backgroundColor: volt.base },
+  wordmarkText: {
+    fontFamily: fonts.displaySemi,
+    fontSize: 16,
+    letterSpacing: 0.48,
+    textTransform: 'uppercase',
+    color: chalk.base,
+  },
+  actions: { flexDirection: 'row', alignItems: 'center' },
+  iconBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
-  bellEmoji: { fontSize: 18 },
+  iconBtnPressed: { backgroundColor: ink.ink3 },
   dot: {
     position: 'absolute',
     top: -2,
     right: -2,
     minWidth: 18,
     height: 18,
-    borderRadius: 9,
-    backgroundColor: colors.red,
+    borderRadius: radii.pill,
+    backgroundColor: semantic.neg,
     paddingHorizontal: 4,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: colors.bg,
+    borderColor: ink.ink0,
   },
-  dotText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  dotText: { color: chalk.base, fontFamily: fonts.data, fontSize: 10 },
 
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: scrim,
   },
   sheet: {
     position: 'absolute',
     left: 0, right: 0, bottom: 0,
     maxHeight: '80%',
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl,
-    gap: spacing.sm,
+    backgroundColor: ink.ink2,
+    borderTopLeftRadius: radii.md,
+    borderTopRightRadius: radii.md,
+    borderWidth: 1,
+    borderColor: ink.line,
+    padding: space.lg,
+    paddingBottom: space.xxl,
+    gap: space.sm,
+    ...shadowSheet,
   },
   handle: {
     alignSelf: 'center',
-    width: 44, height: 4, borderRadius: 2,
-    backgroundColor: colors.border,
-    marginBottom: spacing.sm,
+    width: 32, height: 4, borderRadius: radii.xs,
+    backgroundColor: ink.lineStrong,
+    marginBottom: space.sm,
   },
   sheetHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  sheetTitle: { color: colors.text, fontSize: fontSize.xl, fontWeight: '800' },
-  clearText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
   list: { maxHeight: 480 },
   item: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
+    paddingVertical: space.md,
     gap: 4,
   },
-  itemTitle: { color: colors.text,  fontSize: fontSize.base, fontWeight: '800' },
-  itemBody:  { color: colors.muted, fontSize: fontSize.sm,   lineHeight: 20 },
-  itemTime:  { color: colors.muted, fontSize: fontSize.xs,   marginTop: 4 },
+  itemTitle: type.title,
+  itemBody:  type.bodySm,
+  itemTime:  { fontFamily: fonts.data, fontSize: 11, fontVariant: ['tabular-nums'], color: chalk.faint, marginTop: 4 },
 
   empty: {
-    paddingVertical: spacing.xxl,
+    paddingVertical: space.xxl,
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: space.sm,
   },
-  emptyEmoji: { fontSize: 36 },
-  emptyTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
+  emptyTitle: type.heading,
   emptyBody: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
+    ...type.bodySm,
     textAlign: 'center',
-    lineHeight: 22,
   },
 });

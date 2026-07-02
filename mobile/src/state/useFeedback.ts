@@ -245,9 +245,9 @@ export function formatFeedbackAsMarkdown(items: FeedbackItem[]): string {
     for (const it of list) {
       const stamp = it.created_at.slice(11, 16); // HH:MM (UTC; rough is fine)
       const sev =
-        it.severity === 'bug'    ? '🐞 Bug'    :
-        it.severity === 'polish' ? '✨ Polish' :
-                                   '💡 Idea';
+        it.severity === 'bug'    ? 'Bug'    :
+        it.severity === 'polish' ? 'Polish' :
+                                   'Idea';
       out += `- **${sev}** _(${stamp})_\n  ${it.text.replace(/\n/g, '\n  ')}\n\n`;
     }
   }

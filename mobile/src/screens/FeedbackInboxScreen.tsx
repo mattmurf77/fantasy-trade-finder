@@ -10,35 +10,35 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, volt, semantic, space, type, fonts } from '../theme/chalkline';
+import { Button, Icon } from '../components/chalkline';
 import { useFeedback, formatFeedbackAsMarkdown, type FeedbackItem } from '../state/useFeedback';
 import type { FeedbackStatus } from '../api/feedback';
 import { relativeTime } from '../utils/relativeTime';
 
 const SEV_LABEL: Record<FeedbackItem['severity'], string> = {
-  bug:    '🐞 Bug',
-  polish: '✨ Polish',
-  idea:   '💡 Idea',
+  bug:    'Bug',
+  polish: 'Polish',
+  idea:   'Idea',
 };
 
 // Operator-set lifecycle status → user-facing chip. Vocabulary mirrors
 // the backend's FEEDBACK_STATUSES (docs/cross-client-invariants.md).
 const STATUS_LABEL: Record<FeedbackStatus, string> = {
-  new:         '📬 Received',
-  planned:     '🗓 Planned',
-  in_progress: '🔧 In progress',
-  fixed:       '✅ Fixed — in next update',
-  shipped:     '🚀 Shipped',
-  declined:    '🚫 Not planned',
+  new:         'Received',
+  planned:     'Planned',
+  in_progress: 'In progress',
+  fixed:       'Fixed — in next update',
+  shipped:     'Shipped',
+  declined:    'Not planned',
 };
 const STATUS_COLOR: Record<FeedbackStatus, string> = {
-  new:         colors.muted,
-  planned:     colors.accent,
-  in_progress: colors.gold,
-  fixed:       colors.green,
-  shipped:     colors.green,
-  declined:    colors.muted,
+  new:         chalk.dim,
+  planned:     chalk.base,
+  in_progress: semantic.warn,
+  fixed:       semantic.pos,
+  shipped:     semantic.pos,
+  declined:    chalk.faint,
 };
 
 // Settings → Test feedback → this screen.
@@ -112,65 +112,41 @@ export default function FeedbackInboxScreen() {
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Test feedback</Text>
           <Text style={styles.sub}>
-            {items.length} note{items.length === 1 ? '' : 's'} saved on this device
+            <Text style={styles.subCount}>{items.length}</Text>
+            {` note${items.length === 1 ? '' : 's'} saved on this device`}
           </Text>
         </View>
-        {unsyncedCount > 0 && (
-          <Pressable
-            onPress={onRetry}
-            disabled={retrying}
-            style={({ pressed }) => [
-              styles.btn,
-              styles.btnGhost,
-              retrying && styles.btnDisabled,
-              pressed && !retrying && { opacity: 0.85 },
-            ]}
-          >
-            {retrying ? (
-              <ActivityIndicator size="small" color={colors.muted} />
-            ) : (
-              <Text style={styles.btnGhostText}>Retry sync</Text>
-            )}
-          </Pressable>
-        )}
-        <Pressable
+        {unsyncedCount > 0 &&
+          (retrying ? (
+            <View style={styles.retrySpinner}>
+              <ActivityIndicator size="small" color={chalk.dim} />
+            </View>
+          ) : (
+            <Button label="Retry sync" variant="ghost" onPress={onRetry} />
+          ))}
+        <Button
+          label="Share"
+          variant="primary"
           onPress={onShare}
           disabled={items.length === 0}
-          style={({ pressed }) => [
-            styles.btn,
-            styles.btnPrimary,
-            items.length === 0 && styles.btnDisabled,
-            pressed && items.length > 0 && { opacity: 0.85 },
-          ]}
-        >
-          <Text style={styles.btnPrimaryText}>Share</Text>
-        </Pressable>
-        <Pressable
+        />
+        <Button
+          label="Clear"
+          variant="ghost"
           onPress={onClear}
           disabled={items.length === 0}
-          style={({ pressed }) => [
-            styles.btn,
-            styles.btnGhost,
-            items.length === 0 && styles.btnDisabled,
-            pressed && items.length > 0 && { opacity: 0.85 },
-          ]}
-        >
-          <Text style={styles.btnGhostText}>Clear</Text>
-        </Pressable>
+        />
       </View>
 
       {items.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyEmoji}>📝</Text>
           <Text style={styles.emptyTitle}>No feedback yet</Text>
           <Text style={styles.emptySub}>
-            Tap the floating <Text style={{ fontWeight: '800' }}>📝</Text> button on any screen to capture a note.
+            Tap the floating button on any screen to capture a note.
           </Text>
         </View>
       ) : (
-        <ScrollView
-          contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}
-        >
+        <ScrollView>
           {items.map((it) => {
             // Three visual states for the sync badge. Failed = there was
             // a sync attempt that errored; Pending = never attempted yet
@@ -178,34 +154,46 @@ export default function FeedbackInboxScreen() {
             // those two from state alone, so we lean on last_sync_error
             // as the proxy for "we tried and it didn't work".
             const failed = !it.synced && !!it.last_sync_error;
-            const badgeStyle =
-              it.synced ? styles.badgeSynced :
-              failed    ? styles.badgeFailed :
-                          styles.badgePending;
-            const badgeText =
-              it.synced ? '✓ Synced' :
-              failed    ? `⚠ Sync failed: ${it.last_sync_error}` :
-                          '↻ Pending sync';
+            const syncStyle =
+              it.synced ? styles.syncSynced :
+              failed    ? styles.syncFailed :
+                          styles.syncPending;
+            const syncText =
+              it.synced ? 'Synced' :
+              failed    ? `Sync failed: ${it.last_sync_error}` :
+                          'Pending sync';
+            // "Unread" analog for this inbox: the operator responded —
+            // a lifecycle status beyond the automatic "new" receipt.
+            const responded = !!it.status && it.status !== 'new';
             return (
               <Pressable
                 key={it.id}
                 onLongPress={() => onDelete(it)}
-                style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
+                style={({ pressed }) => [
+                  styles.row,
+                  responded && styles.rowUnread,
+                  pressed && styles.rowPressed,
+                ]}
               >
-                <View style={styles.cardHeader}>
-                  <Text style={styles.cardSev}>{SEV_LABEL[it.severity]}</Text>
-                  <Text style={styles.cardWhen}>{relativeTime(it.created_at)}</Text>
+                <View style={styles.rowHeader}>
+                  {responded && <View style={styles.unreadDot} />}
+                  <Text style={styles.rowSev}>{SEV_LABEL[it.severity]}</Text>
+                  <View style={{ flex: 1 }} />
+                  <Text style={styles.rowWhen}>{relativeTime(it.created_at)}</Text>
                 </View>
-                <Text style={styles.cardScreen}>{it.screen}</Text>
-                <Text style={styles.cardText}>{it.text}</Text>
+                <Text style={styles.rowScreen}>{it.screen}</Text>
+                <Text style={styles.rowText}>{it.text}</Text>
                 {it.status ? (
-                  <Text style={[styles.statusChip, { color: STATUS_COLOR[it.status] }]}>
+                  <Text style={[styles.statusLine, { color: STATUS_COLOR[it.status] }]}>
                     {STATUS_LABEL[it.status]}
                   </Text>
                 ) : null}
-                <Text style={[styles.cardBadge, badgeStyle]} numberOfLines={2}>
-                  {badgeText}
-                </Text>
+                <View style={styles.syncRow}>
+                  {it.synced && <Icon name="check" size={16} color={chalk.faint} />}
+                  <Text style={[styles.syncText, syncStyle]} numberOfLines={2}>
+                    {syncText}
+                  </Text>
+                </View>
               </Pressable>
             );
           })}
@@ -216,72 +204,75 @@ export default function FeedbackInboxScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1, backgroundColor: ink.ink0 },
 
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    gap: spacing.sm,
-    borderBottomColor: colors.border,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    gap: space.sm,
+    borderBottomColor: ink.line,
     borderBottomWidth: 1,
   },
-  title: { color: colors.text,  fontSize: fontSize.xl, fontWeight: '800' },
-  sub:   { color: colors.muted, fontSize: fontSize.xs },
-
-  btn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-  },
-  btnPrimary: { backgroundColor: colors.accent },
-  btnGhost:   { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border },
-  btnDisabled: { opacity: 0.4 },
-  btnPrimaryText: { color: '#fff',        fontSize: fontSize.sm, fontWeight: '800' },
-  btnGhostText:   { color: colors.muted,  fontSize: fontSize.sm, fontWeight: '700' },
-
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-  emptyEmoji: { fontSize: 48, marginBottom: spacing.md },
-  emptyTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '700', marginBottom: 6 },
-  emptySub:   { color: colors.muted, fontSize: fontSize.sm, textAlign: 'center', lineHeight: 20 },
-
-  card: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  title: { ...type.heading },
+  sub:   { ...type.bodySm },
+  subCount: { fontFamily: fonts.data, fontVariant: ['tabular-nums'], color: chalk.dim },
+  retrySpinner: {
+    height: 44,
+    minWidth: 44,
+    paddingHorizontal: space.lg,
     alignItems: 'center',
-    marginBottom: 6,
+    justifyContent: 'center',
   },
-  cardSev:    { color: colors.accent, fontSize: fontSize.sm, fontWeight: '800' },
-  cardWhen:   { color: colors.muted,  fontSize: fontSize.xs },
-  cardScreen: { color: colors.muted,  fontSize: fontSize.xs, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: '700' },
-  cardText:   { color: colors.text,   fontSize: fontSize.sm, lineHeight: 20 },
-  // Per-card sync badge. Three visual states; colors are chosen so a
-  // glance at the inbox tells the tester at-a-glance which notes already
-  // made it to the backend.
-  cardBadge: {
-    fontSize: 10,
-    marginTop: 8,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-    lineHeight: 14,
+
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.xl },
+  emptyTitle: { ...type.heading, marginBottom: space.sm },
+  emptySub:   { ...type.bodySm, textAlign: 'center' },
+
+  // NotificationRow pattern (docs/design/components.md → Feedback & status):
+  // hairline-separated rows on ink-0; a row with an operator response gets
+  // the ink-2 fill + volt 6px square dot. Pressed = ink-3 fill, color only.
+  row: {
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    borderBottomColor: ink.line,
+    borderBottomWidth: 1,
   },
-  badgeSynced:  { color: colors.muted },
-  badgePending: { color: colors.gold },
-  badgeFailed:  { color: colors.red },
+  rowUnread:  { backgroundColor: ink.ink2 },
+  rowPressed: { backgroundColor: ink.ink3 },
+  unreadDot: {
+    width: 6,
+    height: 6,
+    backgroundColor: volt.base, // square — no radius (NotificationRow spec)
+  },
+  rowHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    marginBottom: space.xs,
+  },
+  rowSev:    { ...type.label, color: chalk.base },
+  rowWhen:   { ...type.data, color: chalk.faint },
+  rowScreen: { ...type.label, marginBottom: space.xs },
+  rowText:   { ...type.body },
   // Operator-set lifecycle status — the "what happened to my note" line.
   // Sits above the sync badge; color carries the state (see STATUS_COLOR).
-  statusChip: {
-    fontSize: fontSize.xs,
-    marginTop: 8,
-    fontWeight: '800',
-    letterSpacing: 0.3,
+  statusLine: {
+    ...type.label,
+    marginTop: space.sm,
   },
+  // Per-row sync state. Three visual states; colors are chosen so a
+  // glance at the inbox tells the tester at-a-glance which notes already
+  // made it to the backend.
+  syncRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    marginTop: space.sm,
+  },
+  syncText: { ...type.bodySm },
+  syncSynced:  { color: chalk.faint },
+  syncPending: { color: semantic.warn },
+  syncFailed:  { color: semantic.neg },
 });

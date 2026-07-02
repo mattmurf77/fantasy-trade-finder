@@ -6,7 +6,6 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DraggableFlatList, {
@@ -17,8 +16,19 @@ import { haptics } from '../utils/haptics';
 import { startSpan } from '../observability/sentry';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import {
+  ink,
+  chalk,
+  volt,
+  semantic,
+  tier as tierColors,
+  position as positionColors,
+  space,
+  radii,
+  type,
+  fonts,
+} from '../theme/chalkline';
+import { TickLabel, Button, Icon } from '../components/chalkline';
 import PlayerCard from '../components/PlayerCard';
 import Toast from '../components/Toast';
 import {
@@ -34,8 +44,8 @@ import type { Position, RankedPlayer, Tier, ScoringFormat } from '../shared/type
 // Format-key → human label for the copy button + confirm dialog. Mirrors
 // web/positional-tiers.html's FORMAT_LABELS.
 const FORMAT_LABELS: Record<ScoringFormat, string> = {
-  '1qb_ppr': '🏈 1QB PPR',
-  sf_tep:    '🏟 SF TEP',
+  '1qb_ppr': '1QB PPR',
+  sf_tep:    'SF TEP',
 };
 const FORMAT_KEYS: ScoringFormat[] = ['1qb_ppr', 'sf_tep'];
 
@@ -131,7 +141,7 @@ export default function TiersScreen() {
         return saveTiers(position, payload, cleared);
       }),
     onSuccess: () => {
-      setToast({ msg: '✓ Tiers saved', tone: 'success' });
+      setToast({ msg: 'Tiers saved', tone: 'success' });
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
       queryClient.invalidateQueries({ queryKey: ['progress'] });
       // Tier saves rewrite per-position ELO overrides on the backend,
@@ -164,7 +174,7 @@ export default function TiersScreen() {
         return;
       }
       const n = data.total ?? 0;
-      setToast({ msg: `✓ Copied ${n} tier placements`, tone: 'success' });
+      setToast({ msg: `Copied ${n} tier placements`, tone: 'success' });
       // Invalidate rankings/tier caches so the per-position load picks up
       // the new override ELOs. Same pattern as saveMutation.onSuccess.
       // A format copy affects all positions; use the broad prefix so the
@@ -337,8 +347,8 @@ export default function TiersScreen() {
         const label = item.zone === 'unassigned' ? 'Unassigned' : TIER_LABEL[item.zone];
         const count = buckets[item.zone].length;
         return (
-          <View style={[styles.tierHeader, { borderLeftColor: accent }]}>
-            <Text style={[styles.tierHeaderLabel, { color: accent }]}>{label}</Text>
+          <View style={styles.tierHeader}>
+            <TickLabel color={accent}>{label}</TickLabel>
             <Text style={styles.tierHeaderCount}>{count}</Text>
           </View>
         );
@@ -361,11 +371,7 @@ export default function TiersScreen() {
         return (
           <Pressable
             onPress={() => toggleSelected(item.player.id)}
-            style={({ pressed }) => [
-              styles.chipSelectableWrap,
-              isSelected && styles.chipSelected,
-              pressed && { opacity: 0.85 },
-            ]}
+            style={[styles.chipSelectableWrap, isSelected && styles.chipSelected]}
           >
             {/* pointerEvents="none" so PlayerCard's own inner Pressable
                 can't become the touch responder — without this the inner
@@ -377,9 +383,7 @@ export default function TiersScreen() {
                 compact
                 rightSlot={
                   isSelected ? (
-                    <View style={styles.chipCheckBadge}>
-                      <Text style={styles.chipCheckBadgeText}>✓</Text>
-                    </View>
+                    <Icon name="check" size={16} color={volt.base} />
                   ) : undefined
                 }
               />
@@ -399,11 +403,7 @@ export default function TiersScreen() {
           onLongPress={drag}
           delayLongPress={DRAG_ACTIVATION_MS}
           disabled={isActive}
-          style={({ pressed }) => [
-            styles.playerRow,
-            isActive && styles.playerRowActive,
-            pressed && !isActive && { opacity: 0.9 },
-          ]}
+          style={[styles.playerRow, isActive && styles.playerRowActive]}
         >
           <View pointerEvents="none">
             <PlayerCard player={item.player} compact />
@@ -476,7 +476,7 @@ export default function TiersScreen() {
       for (const p of players) out.add(p.id);
       return out;
     });
-    setToast({ msg: '✓ Tiers reset to suggested', tone: 'success' });
+    setToast({ msg: 'Tiers reset to suggested', tone: 'success' });
     haptics.success();
   }, [rankingsQuery.data, tiersStatusQuery.data?.scoring_format, position]);
 
@@ -513,40 +513,36 @@ export default function TiersScreen() {
           {/* Multi-select toggle. While ON, chip tap toggles selection
               (drag is suppressed); tapping again here cancels and clears
               the set. The bottom action bar handles the actual moves. */}
-          <Pressable
+          <Button
+            variant="secondary"
+            compact
+            label={
+              multiSelect
+                ? selectedIds.size > 0
+                  ? `Selected: ${selectedIds.size}`
+                  : 'Cancel'
+                : 'Select'
+            }
             onPress={() => {
               if (multiSelect) exitMultiSelect();
               else { setMultiSelect(true); haptics.selection(); }
             }}
-            style={({ pressed }) => [
-              styles.selectBtn,
-              multiSelect && styles.selectBtnActive,
-              pressed && { opacity: 0.6 },
-            ]}
-          >
-            <Text style={[styles.selectBtnText, multiSelect && styles.selectBtnTextActive]}>
-              {multiSelect
-                ? selectedIds.size > 0
-                  ? `Selected: ${selectedIds.size}`
-                  : 'Cancel'
-                : 'Select'}
-            </Text>
-          </Pressable>
-          <Pressable
+            style={multiSelect ? styles.selectBtnActive : styles.headerBtn}
+          />
+          <Button
+            variant="ghost"
+            compact
+            label="Reset to suggested"
             disabled={!rankingsQuery.data?.rankings}
             onPress={onResetToSuggested}
-            style={({ pressed }) => [
-              styles.resetBtn,
-              pressed && { opacity: 0.6 },
-              !rankingsQuery.data?.rankings && { opacity: 0.4 },
-            ]}
-          >
-            <Text style={styles.resetBtnText}>Reset to suggested</Text>
-          </Pressable>
+            style={styles.headerBtn}
+          />
         </View>
       </View>
 
-      {/* Position switcher */}
+      {/* Position switcher — PositionTabs spec: segmented group, active
+          segment gets an ink-3 fill + 2px underline in that position's
+          color (position hexes are cross-client invariants). */}
       <View style={styles.switcher}>
         {POSITIONS.map((p) => {
           const isActive = p === position;
@@ -559,7 +555,11 @@ export default function TiersScreen() {
               style={({ pressed }) => [
                 styles.switcherBtn,
                 isActive && styles.switcherBtnActive,
-                pressed && { opacity: 0.7 },
+                isActive && {
+                  borderBottomColor:
+                    positionColors[p.toLowerCase() as keyof typeof positionColors],
+                },
+                pressed && !isActive && { backgroundColor: ink.ink3 },
               ]}
             >
               <Text
@@ -575,22 +575,26 @@ export default function TiersScreen() {
       {/* Copy tier list from the OTHER scoring format. Mirrors web's
           `copy-tiers-btn` — the from-format reads as a label so the user
           knows EXACTLY which format they're pulling tiers from. Disabled
-          while the copy is in flight. */}
+          while the copy is in flight. Composed inline (secondary-button
+          tokens) because the Button primitive has no icon/spinner slot. */}
       <Pressable
         disabled={copyMutation.isPending}
         onPress={onCopyFromOtherFormat}
         style={({ pressed }) => [
           styles.copyBtn,
-          pressed && { opacity: 0.7 },
-          copyMutation.isPending && { opacity: 0.5 },
+          pressed && { backgroundColor: ink.ink3 },
+          copyMutation.isPending && { opacity: 0.45 },
         ]}
       >
         {copyMutation.isPending ? (
-          <ActivityIndicator color={colors.accent} size="small" />
+          <ActivityIndicator color={chalk.dim} size="small" />
         ) : (
-          <Text style={styles.copyBtnText}>
-            ⇆ Copy tier list from {FORMAT_LABELS[otherFormat]}
-          </Text>
+          <>
+            <Icon name="swap" size={16} color={chalk.dim} />
+            <Text style={styles.copyBtnText}>
+              Copy tier list from {FORMAT_LABELS[otherFormat]}
+            </Text>
+          </>
         )}
       </Pressable>
 
@@ -602,14 +606,17 @@ export default function TiersScreen() {
 
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator color={colors.accent} />
+          <ActivityIndicator color={chalk.dim} />
         </View>
       ) : rankingsQuery.isError ? (
         <View style={styles.centered}>
           <Text style={styles.errorText}>Could not load rankings.</Text>
-          <Pressable onPress={() => rankingsQuery.refetch()}>
-            <Text style={styles.retryText}>Try again</Text>
-          </Pressable>
+          <Button
+            variant="ghost"
+            compact
+            label="Try again"
+            onPress={() => rankingsQuery.refetch()}
+          />
         </View>
       ) : (
         <DraggableFlatList
@@ -636,44 +643,46 @@ export default function TiersScreen() {
       {multiSelect && selectedIds.size > 0 ? (
         <View style={styles.actionBar}>
           <Text style={styles.actionBarCount}>
-            {selectedIds.size} selected
+            <Text style={styles.actionBarCountNum}>{selectedIds.size}</Text>
+            {' selected'}
           </Text>
           <View style={styles.actionBarBtns}>
-            <Pressable
+            <Button
+              variant="secondary"
+              compact
+              label="Up"
               onPress={() => bulkMove('up')}
-              style={({ pressed }) => [styles.actionBarBtn, pressed && { opacity: 0.7 }]}
-            >
-              <Text style={styles.actionBarBtnText}>↑ Up</Text>
-            </Pressable>
-            <Pressable
+            />
+            <Button
+              variant="secondary"
+              compact
+              label="Down"
               onPress={() => bulkMove('down')}
-              style={({ pressed }) => [styles.actionBarBtn, pressed && { opacity: 0.7 }]}
-            >
-              <Text style={styles.actionBarBtnText}>↓ Down</Text>
-            </Pressable>
-            <Pressable
+            />
+            <Button
+              variant="ghost"
+              compact
+              label="Done"
               onPress={exitMultiSelect}
-              style={({ pressed }) => [styles.actionBarBtnDone, pressed && { opacity: 0.7 }]}
-            >
-              <Text style={styles.actionBarBtnDoneText}>Done</Text>
-            </Pressable>
+            />
           </View>
         </View>
       ) : null}
 
-      {/* Save button pinned to the bottom */}
+      {/* Save button pinned to the bottom. Composed inline (primary-button
+          tokens) because the Button primitive has no in-flight spinner. */}
       <View style={styles.saveBar}>
         <Pressable
           disabled={saving || loading}
           onPress={() => saveMutation.mutate()}
           style={({ pressed }) => [
             styles.saveBtn,
-            pressed && { opacity: 0.85 },
-            (saving || loading) && { opacity: 0.5 },
+            pressed && { backgroundColor: volt.press },
+            (saving || loading) && { opacity: 0.45 },
           ]}
         >
           {saving ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={volt.on} />
           ) : (
             <Text style={styles.saveBtnText}>Save {position} tiers</Text>
           )}
@@ -696,120 +705,80 @@ function emptyBuckets(): Record<Zone, RankedPlayer[]> {
   };
 }
 
-// Accent foreground color for a zone's header — mirrors TierBin's accentFor.
+// Accent (tick) color for a zone's header — mirrors TierBin's tickColor.
 function accentFor(zone: Zone): string {
   switch (zone) {
-    case 'elite':   return colors.tier.elite;
-    case 'starter': return colors.tier.starter;
-    case 'solid':   return colors.tier.solid;
-    case 'depth':   return colors.tier.depth;
-    case 'bench':   return colors.tier.bench;
-    default:        return colors.muted;
+    case 'elite':   return tierColors.elite;
+    case 'starter': return tierColors.starter;
+    case 'solid':   return tierColors.solid;
+    case 'depth':   return tierColors.depth;
+    case 'bench':   return tierColors.bench;
+    default:        return chalk.faint;
   }
 }
 
 // ── Styles ──────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1, backgroundColor: ink.ink0 },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
   },
-  title: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
+  title: { ...type.heading, flexShrink: 1 },
   headerActions: {
     flexDirection: 'row',
-    gap: spacing.xs,
+    alignItems: 'center',
+    gap: space.xs,
   },
-  resetBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  resetBtnText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  selectBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
+  // Tighter horizontal padding than the Button default so both header
+  // actions fit beside the condensed title on narrow screens.
+  headerBtn: { paddingHorizontal: space.md },
+  // Active state for the Select toggle: pressed-well fill (color change
+  // only — no transforms), border stays line-strong via the variant.
   selectBtnActive: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.10)',
+    paddingHorizontal: space.md,
+    backgroundColor: ink.ink3,
   },
-  selectBtnText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  selectBtnTextActive: { color: colors.accent },
   // Standalone tier-header row inside the flat list. Mirrors TierBin's
-  // header look (accent left-border + accent label + muted count).
+  // header (tier-colored tick label + mono count) over the ink-0 scaffold.
   tierHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
-    borderLeftWidth: 3,
+    paddingVertical: space.sm,
+    marginTop: space.sm,
+    marginBottom: space.xs,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.md,
-    borderTopRightRadius: radius.md,
+    borderBottomColor: ink.line,
   },
-  tierHeaderLabel: { fontSize: fontSize.sm, fontWeight: '800', letterSpacing: 0.4 },
-  tierHeaderCount: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  // Player row wrapper in normal (drag) mode. Active row gets a subtle
-  // lift to read as "picked up", matching ManualRanks' rowActive.
+  tierHeaderCount: { ...type.data, color: chalk.dim },
+  // Player row wrapper in normal (drag) mode. Active (picked-up) row gets
+  // a volt ring — border color change only, no shadow/transform lift.
   playerRow: {
-    marginBottom: spacing.xs,
+    marginBottom: space.xs,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   playerRowActive: {
-    borderRadius: radius.md,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.35,
-        shadowRadius: 8,
-      },
-      android: { elevation: 6 },
-    }),
+    borderColor: volt.base,
   },
   // Wrapper around each chip in multi-select mode. Always present so
   // toggling selection doesn't shift the layout.
   chipSelectableWrap: {
-    marginBottom: spacing.xs,
-    borderRadius: radius.md,
-    borderWidth: 2,
+    marginBottom: space.xs,
+    borderRadius: radii.md,
+    borderWidth: 1,
     borderColor: 'transparent',
   },
-  // Selected-chip state (multi-select mode, issue #16). Accent ring +
-  // tinted background + checkmark badge — three signals so selection
+  // Selected-chip state (multi-select mode, issue #16). Volt ring + check
+  // icon in the right slot — two signals (color + shape) so selection
   // reads clearly including for color-vision-impaired users.
   chipSelected: {
-    // Clear lighter-blue fill across the whole tile (#32 — the old 0.14
-    // alpha read as a faint border-only state).
-    backgroundColor: 'rgba(79,124,255,0.30)',
-    borderColor: colors.accent,
-  },
-  chipCheckBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chipCheckBadgeText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '800',
-    lineHeight: 16,
+    borderColor: volt.base,
   },
   // Floating action bar — shown above the save bar when 1+ chips are
   // selected. Up / Down move all selected by one tier; Done exits.
@@ -818,133 +787,107 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 76,                       // sits just above the save bar
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.surface,
-    borderTopColor: colors.border,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    backgroundColor: ink.ink1,
+    borderTopColor: ink.line,
     borderTopWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  actionBarCount: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '700',
-  },
+  actionBarCount: { ...type.bodySm },
+  actionBarCountNum: { ...type.data },
   actionBarBtns: {
     flexDirection: 'row',
-    gap: spacing.xs,
-  },
-  actionBarBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(79,124,255,0.45)',
-    backgroundColor: 'rgba(79,124,255,0.10)',
-  },
-  actionBarBtnText: {
-    color: colors.accent,
-    fontSize: fontSize.xs,
-    fontWeight: '800',
-  },
-  actionBarBtnDone: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  actionBarBtnDoneText: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
+    alignItems: 'center',
+    gap: space.xs,
   },
   switcher: {
     flexDirection: 'row',
-    gap: spacing.xs,
-    marginHorizontal: spacing.lg,
-    backgroundColor: colors.surface,
+    marginHorizontal: space.lg,
+    backgroundColor: ink.ink1,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: 4,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    overflow: 'hidden',
   },
   switcherBtn: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.sm,
+    justifyContent: 'center',
+    minHeight: 44,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  switcherBtnActive: { backgroundColor: 'rgba(79,124,255,0.14)' },
-  switcherText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
-  switcherTextActive: { color: colors.accent },
-  // Copy-tiers-from-other-format pill. Sits between the position switcher
-  // and the hint line, full-width with a dashed-ish accent border so it
-  // reads as an "action that imports state" rather than a primary CTA.
+  switcherBtnActive: { backgroundColor: ink.ink3 },
+  switcherText: { ...type.label },
+  switcherTextActive: { color: chalk.base },
+  // Copy-tiers-from-other-format action. Sits between the position
+  // switcher and the hint line; secondary-button construction (hairline
+  // line-strong border, chalk text) with the swap icon.
   copyBtn: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radius.md,
+    marginHorizontal: space.lg,
+    marginTop: space.sm,
+    paddingHorizontal: space.lg,
+    minHeight: 44,
+    borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: 'rgba(79,124,255,0.45)',
-    backgroundColor: 'rgba(79,124,255,0.08)',
+    borderColor: ink.lineStrong,
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: spacing.xs,
-    minHeight: 36,
+    gap: space.sm,
   },
   copyBtnText: {
-    color: colors.accent,
-    fontSize: fontSize.xs,
-    fontWeight: '800',
+    fontFamily: fonts.uiSemi,
+    fontSize: 14,
+    color: chalk.base,
   },
   hint: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
+    ...type.bodySm,
     textAlign: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
   },
   centered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.sm,
+    gap: space.sm,
   },
-  errorText: { color: colors.red, fontSize: fontSize.sm },
-  retryText: { color: colors.accent, fontSize: fontSize.sm, fontWeight: '700' },
+  errorText: { ...type.body, color: semantic.neg },
   listContainer: { flex: 1 },
   scroll: {
-    padding: spacing.lg,
+    padding: space.lg,
     paddingBottom: 96, // room for the Save bar
   },
   emptyBin: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
+    ...type.bodySm,
+    color: chalk.faint,
     textAlign: 'center',
-    paddingVertical: spacing.sm,
-    fontStyle: 'italic',
+    paddingVertical: space.sm,
   },
   saveBar: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    padding: spacing.md,
-    backgroundColor: colors.bg,
-    borderTopColor: colors.border,
+    padding: space.md,
+    backgroundColor: ink.ink0,
+    borderTopColor: ink.line,
     borderTopWidth: 1,
   },
   saveBtn: {
-    backgroundColor: colors.accent,
-    borderRadius: radius.md,
-    paddingVertical: 14,
+    backgroundColor: volt.base,
+    borderRadius: radii.sm,
+    height: 48,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  saveBtnText: { color: '#fff', fontSize: fontSize.base, fontWeight: '800' },
+  saveBtnText: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 14,
+    color: volt.on,
+  },
 });

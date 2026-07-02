@@ -11,5 +11,6 @@ One file per top-level route.
 | `TiersScreen` | Tiered roster view |
 | `ManualRanksScreen` | Editable drag/tap rank board — labeled "Overall Ranks" in the UI |
 | `TradesScreen` | Trade card browser |
+| `TradeCalculatorScreen` | Manual trade builder vs mock leaguemate boards (demo data) — "Calculator" pill in Trades |
 | `MatchesScreen` | Mutual trade matches inbox |
 | `PlaceholderScreen` | Stub for unfinished routes |

@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { View, Text, StyleSheet } from 'react-native';
+import { ink, chalk, volt, semantic, space, radii, type } from '../theme/chalkline';
+import { TickLabel, Button, Meter, fairnessColor, Icon } from './chalkline';
 import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
 import { useFlag } from '../state/useFeatureFlags';
@@ -33,7 +33,6 @@ function TradeCardComp({
   // adapter-shaped cards without it hide the row instead of showing a
   // bogus 0%.
   const hasFairness = typeof data.fairness === 'number';
-  const fairPct = hasFairness ? Math.round((data.fairness as number) * 100) : 0;
   // v2: consensus cards are fair-value ideas vs an opponent who hasn't
   // ranked yet (no real disagreement signal behind them).
   const isConsensus = data.basis === 'consensus';
@@ -68,28 +67,30 @@ function TradeCardComp({
     <View style={styles.card}>
       {/* Likes-you pill — counterparty already liked the mirror of this
           trade, so lead with it. Server pins these cards to the top of
-          the snapshot; this badge explains why. */}
+          the snapshot; this badge explains why. Cross-client copy: the
+          old emoji pill migrated to eye icon + verbatim text. */}
       {likesYou && (
         <View style={styles.likesYouPill}>
-          <Text style={styles.likesYouText}>👀 They're interested</Text>
+          <Icon name="eye" size={16} color={volt.base} />
+          <Text style={[type.label, styles.likesYouText]}>They're interested</Text>
         </View>
       )}
 
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerLabel}>Trade with</Text>
+          <Text style={type.label}>Trade with</Text>
           <View style={styles.nameRow}>
-            <Text style={styles.headerName}>@{data.opponent_username}</Text>
+            <Text style={type.title}>@{data.opponent_username}</Text>
             {hasOpponentConfidence && (
               data.real_opponent ? (
                 <View style={styles.opBadge}>
-                  <Text style={styles.opBadgeDotReal}>●</Text>
-                  <Text style={styles.opBadgeTextReal}>real</Text>
+                  <View style={styles.opDotReal} />
+                  <Text style={[type.label, styles.opTextReal]}>real</Text>
                 </View>
               ) : (
                 <View style={styles.opBadge}>
-                  <Text style={styles.opBadgeDotEst}>○</Text>
-                  <Text style={styles.opBadgeTextEst}>est.</Text>
+                  <View style={styles.opDotEst} />
+                  <Text style={type.label}>est.</Text>
                 </View>
               )
             )}
@@ -102,40 +103,39 @@ function TradeCardComp({
           app, so the hint renders inline as a muted sub-line. */}
       {isConsensus && (
         <View style={styles.consensusNote}>
-          <Text style={styles.consensusLabel}>Fair-value idea</Text>
-          <Text style={styles.consensusHint}>
+          <Text style={type.label}>Fair-value idea</Text>
+          <Text style={type.bodySm}>
             This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.
           </Text>
         </View>
       )}
 
-      {/* Match strength — gradient bar replacing the prior accent pill. */}
       <StrengthBar value={matchPct} label="Match strength" />
 
       <View style={styles.split}>
         <View style={styles.side}>
-          <Text style={styles.sideLabel}>YOU GET</Text>
-          <View style={styles.sideStack}>
-            {receivePlayers.map((p) => (
-              <PlayerCard key={p.id} player={p} compact />
-            ))}
-          </View>
-          {sweetenerSide === 'receive' && sweetenerPlayer && (
-            <Text style={styles.sweetenerLine}>
-              + {sweetenerPlayer.name} added to balance the deal
-            </Text>
-          )}
-        </View>
-        <Text style={styles.swap}>↔</Text>
-        <View style={styles.side}>
-          <Text style={styles.sideLabel}>YOU GIVE</Text>
+          <TickLabel>YOU SEND</TickLabel>
           <View style={styles.sideStack}>
             {givePlayers.map((p) => (
               <PlayerCard key={p.id} player={p} compact />
             ))}
           </View>
           {sweetenerSide === 'give' && sweetenerPlayer && (
-            <Text style={styles.sweetenerLine}>
+            <Text style={type.bodySm}>
+              + {sweetenerPlayer.name} added to balance the deal
+            </Text>
+          )}
+        </View>
+        <View style={styles.divider} />
+        <View style={styles.side}>
+          <TickLabel>YOU GET</TickLabel>
+          <View style={styles.sideStack}>
+            {receivePlayers.map((p) => (
+              <PlayerCard key={p.id} player={p} compact />
+            ))}
+          </View>
+          {sweetenerSide === 'receive' && sweetenerPlayer && (
+            <Text style={type.bodySm}>
               + {sweetenerPlayer.name} added to balance the deal
             </Text>
           )}
@@ -143,13 +143,12 @@ function TradeCardComp({
       </View>
 
       {hasFairness && (
-        <View style={styles.fairnessRow}>
-          <Text style={styles.fairnessLabel}>Fairness</Text>
-          <View style={styles.fairnessTrack}>
-            <View style={[styles.fairnessFill, { width: `${fairPct}%` }]} />
-          </View>
-          <Text style={styles.fairnessValue}>{fairPct}%</Text>
-        </View>
+        <Meter
+          value={data.fairness as number}
+          color={fairnessColor(data.fairness as number)}
+          label="Fairness"
+          showPercent
+        />
       )}
 
       {/* Human-readable reasons (flag trade_math.human_explanations is ON).
@@ -158,37 +157,27 @@ function TradeCardComp({
       {showReasons && (
         <View style={styles.reasons}>
           {data.reasons!.map((r, i) => (
-            <Text key={`${i}:${r}`} style={styles.reasonLine}>• {r}</Text>
+            <Text key={`${i}:${r}`} style={type.bodySm}>• {r}</Text>
           ))}
         </View>
       )}
 
       {variant === 'match' && (
         <View style={styles.actions}>
-          <Pressable
-            disabled={acting}
+          <Button
+            variant="pass"
+            label="Decline"
             onPress={onDecline}
-            style={({ pressed }) => [
-              styles.btn,
-              styles.decline,
-              pressed && { opacity: 0.7 },
-              acting && { opacity: 0.5 },
-            ]}
-          >
-            <Text style={styles.declineText}>Decline</Text>
-          </Pressable>
-          <Pressable
             disabled={acting}
+            style={styles.actionBtn}
+          />
+          <Button
+            variant="like"
+            label="Accept"
             onPress={onAccept}
-            style={({ pressed }) => [
-              styles.btn,
-              styles.accept,
-              pressed && { opacity: 0.85 },
-              acting && { opacity: 0.5 },
-            ]}
-          >
-            <Text style={styles.acceptText}>Accept →</Text>
-          </Pressable>
+            disabled={acting}
+            style={styles.actionBtn}
+          />
         </View>
       )}
     </View>
@@ -199,175 +188,85 @@ export default React.memo(TradeCardComp);
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: ink.ink1,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.xl,
-    padding: spacing.lg,
-    gap: spacing.md,
+    borderColor: ink.line,
+    borderRadius: radii.md,
+    padding: space.lg,
+    gap: space.md,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  headerLabel: {
-    color: colors.muted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  headerName: { color: colors.text, fontSize: fontSize.base, fontWeight: '800' },
-  // Likes-you pill: prominent accent-tinted banner pinned to the top of
-  // the card. Same translucent-accent treatment as the web's .score-pill.
+  // Likes-you pill: volt-bordered pill (the one sanctioned pill shape)
+  // with the Chalkline eye icon replacing the old emoji.
   likesYouPill: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(79,124,255,0.15)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
     borderWidth: 1,
-    borderColor: colors.accent,
-    borderRadius: radius.pill,
-    paddingVertical: 4,
-    paddingHorizontal: spacing.md,
+    borderColor: volt.base,
+    borderRadius: radii.pill,
+    paddingVertical: space.xs,
+    paddingHorizontal: space.md,
   },
-  likesYouText: {
-    color: colors.accent,
-    fontSize: fontSize.xs,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
+  likesYouText: { color: chalk.base },
   // Consensus-basis note: deliberately muted — it's a caveat, not a sell.
-  consensusNote: { gap: 2 },
-  consensusLabel: {
-    color: colors.muted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  consensusHint: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    lineHeight: 16,
-  },
-  // Sweetener callout under the side that contains the balancing player.
-  sweetenerLine: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    fontStyle: 'italic',
-    lineHeight: 16,
-  },
+  consensusNote: { gap: space.xs },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: space.sm,
   },
-  // Opponent-confidence chip: small dot + 4-letter label next to @handle.
-  // Green/filled = real (their actual saved rankings); muted/outlined =
-  // estimated (noise-randomized off consensus seed). Mirrors web's
-  // app.js:3198-3200 styling.
+  // Opponent-confidence chip: 6px square dot + micro label next to @handle.
+  // Filled pos-green square = real (their actual saved rankings); hollow
+  // dim square = estimated (noise-randomized off consensus seed).
   opBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: space.xs,
   },
-  opBadgeDotReal: {
-    color: colors.green,
-    fontSize: 10,
-    lineHeight: 12,
+  opDotReal: {
+    width: 6,
+    height: 6,
+    backgroundColor: semantic.pos,
   },
-  opBadgeTextReal: {
-    color: colors.green,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.3,
+  opDotEst: {
+    width: 6,
+    height: 6,
+    borderWidth: 1,
+    borderColor: chalk.dim,
   },
-  opBadgeDotEst: {
-    color: colors.muted,
-    fontSize: 10,
-    lineHeight: 12,
-  },
-  opBadgeTextEst: {
-    color: colors.muted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
+  opTextReal: { color: semantic.pos },
   split: {
     flexDirection: 'row',
-    gap: spacing.md,
+    gap: space.md,
     alignItems: 'stretch',
   },
-  side: { flex: 1, gap: spacing.xs },
-  sideLabel: {
-    color: colors.muted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  sideStack: { gap: spacing.xs },
-  swap: {
-    color: colors.accent,
-    fontSize: 24,
-    alignSelf: 'center',
-    paddingHorizontal: 4,
-  },
-  fairnessRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  fairnessLabel: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-    width: 62,
-  },
-  fairnessTrack: {
-    flex: 1,
-    height: 6,
-    backgroundColor: colors.border,
-    borderRadius: radius.pill,
-    overflow: 'hidden',
-  },
-  fairnessFill: {
-    height: '100%',
-    backgroundColor: colors.green,
-  },
-  fairnessValue: {
-    color: colors.text,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-    width: 40,
-    textAlign: 'right',
+  side: { flex: 1, gap: space.sm },
+  sideStack: { gap: space.xs },
+  divider: {
+    width: 1,
+    backgroundColor: ink.line,
+    alignSelf: 'stretch',
   },
   reasons: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: ink.ink0,
+    borderWidth: 1,
+    borderColor: ink.line,
     borderLeftWidth: 3,
-    borderLeftColor: colors.accent,
-    padding: spacing.sm,
-    paddingLeft: spacing.md,
-    borderRadius: radius.sm,
-    gap: 2,
+    borderLeftColor: ink.lineStrong,
+    padding: space.sm,
+    paddingLeft: space.md,
+    borderRadius: radii.sm,
+    gap: space.xs,
   },
-  reasonLine: { color: colors.muted, fontSize: fontSize.xs, lineHeight: 18 },
   actions: {
     flexDirection: 'row',
-    gap: spacing.sm,
+    gap: space.sm,
   },
-  btn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  decline: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  accept: { backgroundColor: colors.green },
-  declineText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
-  acceptText: { color: '#0a1510', fontSize: fontSize.sm, fontWeight: '800' },
+  actionBtn: { flex: 1 },
 });

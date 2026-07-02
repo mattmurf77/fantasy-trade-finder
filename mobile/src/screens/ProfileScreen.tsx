@@ -10,9 +10,22 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 
-import { colors, posColor, tierColor } from '../theme/colors';
-import type { Position, Tier } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import {
+  ink,
+  chalk,
+  volt,
+  semantic,
+  tier,
+  space,
+  type,
+} from '../theme/chalkline';
+import {
+  TickLabel,
+  Badge,
+  PositionBadge,
+  TierChalkBadge,
+  Card,
+} from '../components/chalkline';
 import { getPublicProfile } from '../api/auth';
 import { useFlag } from '../state/useFeatureFlags';
 import type {
@@ -34,6 +47,9 @@ interface Props {
   // react-navigation route prop; we only need params.username
   route: { params?: { username?: string } };
 }
+
+type Position = 'QB' | 'RB' | 'WR' | 'TE';
+type Tier = keyof typeof tier;
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
 const TIER_ORDER: Tier[] = ['elite', 'starter', 'solid', 'depth', 'bench'];
@@ -67,8 +83,8 @@ export default function ProfileScreen({ route }: Props) {
       const bucket = snap[pos.toLowerCase()];
       if (!bucket) continue;
       let n = 0;
-      for (const tier of TIER_ORDER) {
-        const arr = bucket[tier];
+      for (const t of TIER_ORDER) {
+        const arr = bucket[t];
         if (Array.isArray(arr)) n += arr.length;
       }
       out[pos] = n;
@@ -104,7 +120,7 @@ export default function ProfileScreen({ route }: Props) {
     return (
       <SafeAreaView style={styles.root} edges={['bottom']}>
         <View style={styles.loading}>
-          <ActivityIndicator color={colors.accent} />
+          <ActivityIndicator color={volt.base} />
         </View>
       </SafeAreaView>
     );
@@ -135,7 +151,7 @@ export default function ProfileScreen({ route }: Props) {
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.body}>
-        {/* ── Hero ──────────────────────────────────────────────── */}
+        {/* ── Hero / identity block ─────────────────────────────── */}
         <View style={styles.hero}>
           {profile.avatar_url ? (
             <Image
@@ -154,59 +170,54 @@ export default function ProfileScreen({ route }: Props) {
           <Text style={styles.displayName}>{profile.display_name}</Text>
           <Text style={styles.username}>@{profile.username}</Text>
           <View style={styles.metaRow}>
-            <View style={styles.metaChip}>
-              <Text style={styles.metaChipText}>
-                {profile.leagues_count} {profile.leagues_count === 1 ? 'league' : 'leagues'}
-              </Text>
-            </View>
-            <View style={styles.metaChip}>
-              <Text style={styles.metaChipText}>
-                {profile.scoring_format === 'sf_tep' ? 'SF · TEP' : '1QB · PPR'}
-              </Text>
-            </View>
+            <Badge
+              label={`${profile.leagues_count} ${profile.leagues_count === 1 ? 'league' : 'leagues'}`}
+            />
+            <Badge
+              label={profile.scoring_format === 'sf_tep' ? 'SF · TEP' : '1QB · PPR'}
+            />
           </View>
         </View>
 
         {/* ── Ranks by position ────────────────────────────────── */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Ranks</Text>
-          <View style={styles.posGrid}>
-            {POSITIONS.map((pos) => (
-              <View key={pos} style={styles.posCell}>
-                <View style={[styles.posDot, { backgroundColor: posColor(pos) }]} />
-                <Text style={styles.posCount}>{rankCountByPos[pos]}</Text>
-                <Text style={styles.posLabel}>{pos}</Text>
+          <View style={styles.sectionTitle}>
+            <TickLabel>Ranks</TickLabel>
+          </View>
+          <Card>
+            {POSITIONS.map((pos, i) => (
+              <View
+                key={pos}
+                style={[styles.kvRow, i > 0 && styles.kvRowBorder]}
+              >
+                <PositionBadge pos={pos} />
+                <Text style={styles.kvValue}>{rankCountByPos[pos]}</Text>
               </View>
             ))}
-          </View>
+          </Card>
         </View>
 
         {/* ── Tiers snapshot ───────────────────────────────────── */}
         {Object.keys(profile.tiers_snapshot || {}).length > 0 ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Tiers</Text>
+            <View style={styles.sectionTitle}>
+              <TickLabel>Tiers</TickLabel>
+            </View>
             {POSITIONS.map((pos) => {
               const bucket = profile.tiers_snapshot[pos.toLowerCase()];
               if (!bucket) return null;
               return (
                 <View key={pos} style={styles.tierGroup}>
-                  <Text style={[styles.tierGroupTitle, { color: posColor(pos) }]}>
-                    {pos}
-                  </Text>
-                  {TIER_ORDER.map((tier) => {
-                    const entries = bucket[tier];
+                  <View style={styles.tierGroupTitle}>
+                    <PositionBadge pos={pos} />
+                  </View>
+                  {TIER_ORDER.map((t) => {
+                    const entries = bucket[t];
                     if (!entries || entries.length === 0) return null;
                     return (
-                      <View key={tier} style={styles.tierRow}>
-                        <View
-                          style={[
-                            styles.tierBadge,
-                            { backgroundColor: tierColor(tier) },
-                          ]}
-                        >
-                          <Text style={styles.tierBadgeText}>
-                            {tier.toUpperCase()}
-                          </Text>
+                      <View key={t} style={styles.tierRow}>
+                        <View style={styles.tierBadgeCol}>
+                          <TierChalkBadge t={t} />
                         </View>
                         <Text style={styles.tierNames} numberOfLines={2}>
                           {entries.map((e) => e.name).join(', ')}
@@ -223,7 +234,9 @@ export default function ProfileScreen({ route }: Props) {
         {/* ── Contrarian takes ─────────────────────────────────── */}
         {profile.contrarian_takes ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Contrarian takes</Text>
+            <View style={styles.sectionTitle}>
+              <TickLabel>Contrarian takes</TickLabel>
+            </View>
             {POSITIONS.map((pos) => {
               const lane = profile.contrarian_takes[pos.toLowerCase()];
               if (!lane) return null;
@@ -232,14 +245,14 @@ export default function ProfileScreen({ route }: Props) {
               if (!above.length && !below.length) return null;
               return (
                 <View key={pos} style={styles.tierGroup}>
-                  <Text style={[styles.tierGroupTitle, { color: posColor(pos) }]}>
-                    {pos}
-                  </Text>
+                  <View style={styles.tierGroupTitle}>
+                    <PositionBadge pos={pos} />
+                  </View>
                   {above.length ? (
-                    <ContrarianRow label="Higher" entries={above} tint={colors.green} />
+                    <ContrarianRow label="Higher" entries={above} tint={semantic.pos} />
                   ) : null}
                   {below.length ? (
-                    <ContrarianRow label="Lower" entries={below} tint={colors.red} />
+                    <ContrarianRow label="Lower" entries={below} tint={semantic.neg} />
                   ) : null}
                 </View>
               );
@@ -248,7 +261,8 @@ export default function ProfileScreen({ route }: Props) {
         ) : null}
 
         <Text style={styles.footer}>
-          Built from @{profile.username}'s rankings across {profile.leagues_count}{' '}
+          Built from @{profile.username}'s rankings across{' '}
+          <Text style={styles.footerCount}>{profile.leagues_count}</Text>{' '}
           {profile.leagues_count === 1 ? 'league' : 'leagues'}.
         </Text>
       </ScrollView>
@@ -269,9 +283,16 @@ function ContrarianRow({
     <View style={styles.contrRow}>
       <Text style={[styles.contrLabel, { color: tint }]}>{label}</Text>
       <Text style={styles.contrNames} numberOfLines={2}>
-        {entries
-          .map((e) => `${e.name} (${e.delta > 0 ? '+' : ''}${e.delta.toFixed(0)})`)
-          .join(', ')}
+        {entries.map((e, i) => (
+          <Text key={e.player_id || i}>
+            {i > 0 ? ', ' : ''}
+            {e.name} (
+            <Text style={type.data}>
+              {`${e.delta > 0 ? '+' : ''}${e.delta.toFixed(0)}`}
+            </Text>
+            )
+          </Text>
+        ))}
       </Text>
     </View>
   );
@@ -280,11 +301,11 @@ function ContrarianRow({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: ink.ink0,
   },
   body: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl,
+    padding: space.lg,
+    paddingBottom: space.xxl,
   },
   loading: {
     flex: 1,
@@ -295,163 +316,111 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: space.xl,
   },
   emptyTitle: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: '700',
-    marginBottom: spacing.xs,
+    ...type.heading,
+    textAlign: 'center',
+    marginBottom: space.xs,
   },
   emptyBody: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
+    ...type.bodySm,
     textAlign: 'center',
   },
   hero: {
     alignItems: 'center',
-    paddingVertical: spacing.lg,
+    paddingVertical: space.lg,
   },
   avatar: {
     width: 96,
     height: 96,
-    borderRadius: 48,
-    backgroundColor: colors.surface,
-    marginBottom: spacing.md,
+    borderRadius: 48, // avatar image may stay round (screen-specific exception)
+    backgroundColor: ink.ink1,
+    marginBottom: space.md,
   },
   avatarFallback: {
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: ink.line,
   },
   avatarInitial: {
-    color: colors.text,
-    fontSize: fontSize.xxl,
-    fontWeight: '800',
+    ...type.display,
   },
   displayName: {
-    color: colors.text,
-    fontSize: fontSize.xl,
-    fontWeight: '700',
+    ...type.title,
   },
   username: {
-    color: colors.muted,
-    fontSize: fontSize.base,
-    marginTop: spacing.xs,
+    ...type.bodySm,
+    marginTop: space.xs,
   },
   metaRow: {
     flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  metaChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-  },
-  metaChipText: {
-    color: colors.text,
-    fontSize: fontSize.xs,
-    fontWeight: '600',
+    gap: space.sm,
+    marginTop: space.md,
   },
   section: {
-    marginTop: spacing.xl,
+    marginTop: space.xl,
   },
   sectionTitle: {
-    color: colors.text,
-    fontSize: fontSize.base,
-    fontWeight: '700',
-    marginBottom: spacing.md,
+    marginBottom: space.md,
   },
-  posGrid: {
+  kvRow: {
     flexDirection: 'row',
-    gap: spacing.md,
-  },
-  posCell: {
-    flex: 1,
     alignItems: 'center',
-    paddingVertical: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    justifyContent: 'space-between',
+    paddingVertical: space.md,
   },
-  posDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginBottom: spacing.xs,
+  kvRowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
   },
-  posCount: {
-    color: colors.text,
-    fontSize: fontSize.xl,
-    fontWeight: '800',
-  },
-  posLabel: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    fontWeight: '600',
-    letterSpacing: 0.5,
+  kvValue: {
+    ...type.data,
   },
   tierGroup: {
-    marginBottom: spacing.md,
+    marginBottom: space.md,
   },
   tierGroupTitle: {
-    fontSize: fontSize.sm,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    marginBottom: spacing.xs,
+    marginBottom: space.xs,
   },
   tierRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.xs,
+    gap: space.sm,
+    marginBottom: space.xs,
   },
-  tierBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    minWidth: 64,
-    alignItems: 'center',
-  },
-  tierBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
+  tierBadgeCol: {
+    minWidth: 72,
   },
   tierNames: {
     flex: 1,
-    color: colors.text,
-    fontSize: fontSize.sm,
+    ...type.bodySm,
+    color: chalk.base,
   },
   contrRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: spacing.sm,
-    marginBottom: spacing.xs,
+    gap: space.sm,
+    marginBottom: space.xs,
   },
   contrLabel: {
-    width: 64,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-    letterSpacing: 0.5,
+    ...type.label,
+    width: 72,
     paddingTop: 2,
   },
   contrNames: {
     flex: 1,
-    color: colors.text,
-    fontSize: fontSize.sm,
+    ...type.bodySm,
+    color: chalk.base,
   },
   footer: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
+    ...type.bodySm,
     textAlign: 'center',
-    marginTop: spacing.xl,
+    marginTop: space.xl,
+  },
+  footerCount: {
+    ...type.data,
+    color: chalk.dim,
   },
 });

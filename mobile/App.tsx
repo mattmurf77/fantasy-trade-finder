@@ -8,6 +8,21 @@ import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
+import { useFonts } from 'expo-font';
+import {
+  BarlowCondensed_600SemiBold,
+  BarlowCondensed_700Bold,
+} from '@expo-google-fonts/barlow-condensed';
+import {
+  Archivo_400Regular,
+  Archivo_500Medium,
+  Archivo_600SemiBold,
+  Archivo_700Bold,
+} from '@expo-google-fonts/archivo';
+import {
+  IBMPlexMono_500Medium,
+  IBMPlexMono_600SemiBold,
+} from '@expo-google-fonts/ibm-plex-mono';
 import RootNav from './src/navigation/RootNav';
 import { useSession } from './src/state/useSession';
 import { useFeatureFlags } from './src/state/useFeatureFlags';
@@ -34,6 +49,20 @@ const PERSIST_KEYS = new Set(['rankings', 'progress', 'matches', 'tiers-status',
 
 function App() {
   const [booted, setBooted] = useState(false);
+  // Chalkline fonts (docs/design/design-system.md → Typography). Gated on
+  // (fontsLoaded || fontError): a font failure falls back to platform fonts
+  // instead of bricking boot.
+  const [fontsLoaded, fontError] = useFonts({
+    BarlowCondensed_600SemiBold,
+    BarlowCondensed_700Bold,
+    Archivo_400Regular,
+    Archivo_500Medium,
+    Archivo_600SemiBold,
+    Archivo_700Bold,
+    IBMPlexMono_500Medium,
+    IBMPlexMono_600SemiBold,
+  });
+  const fontsSettled = fontsLoaded || !!fontError;
   const bootstrap = useSession((s) => s.bootstrap);
   const loadCachedFlags = useFeatureFlags((s) => s.loadCachedFlags);
   const revalidateFlags = useFeatureFlags((s) => s.revalidateFlags);
@@ -152,7 +181,9 @@ function App() {
             },
           }}
         >
-          <RootNav booted={booted} />
+          {/* booted logic is unchanged; the render gate just ANDs in font
+              readiness so first paint uses the Chalkline families. */}
+          <RootNav booted={booted && fontsSettled} />
           <StatusBar style="light" />
         </PersistQueryClientProvider>
       </SafeAreaProvider>

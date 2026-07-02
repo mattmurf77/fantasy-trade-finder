@@ -8,7 +8,6 @@ import {
   ScrollView,
   Dimensions,
   Modal,
-  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -23,8 +22,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { haptics } from '../utils/haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import {
+  ink,
+  chalk,
+  volt,
+  semantic,
+  space,
+  radii,
+  type,
+  fonts,
+  shadowSheet,
+  scrim,
+} from '../theme/chalkline';
+import { TickLabel, Button, Meter, Icon, Card } from '../components/chalkline';
 import TradeCardComp from '../components/TradeCard';
 import Toast from '../components/Toast';
 import OutlookSheet from '../components/OutlookSheet';
@@ -421,7 +431,7 @@ export default function TradesScreen({ navigation }: any) {
     setDeckIdx((i) => i + 1);
     if (decision === 'like') {
       haptics.success();
-      setToast({ msg: 'Liked ✓', tone: 'success' });
+      setToast({ msg: 'Liked', tone: 'success' });
     } else {
       haptics.swipe();
     }
@@ -475,6 +485,8 @@ export default function TradesScreen({ navigation }: any) {
     setToast({ msg: 'Outlook saved', tone: 'success' });
   }
 
+  const topCardQueued = topCard ? isQueued(topCard.trade_id) : false;
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <Toast
@@ -504,7 +516,7 @@ export default function TradesScreen({ navigation }: any) {
           still tap controls and trigger requests against the wrong league. */}
       {switching ? (
         <View style={styles.switchingOverlay} pointerEvents="auto">
-          <ActivityIndicator color={colors.accent} size="large" />
+          <ActivityIndicator color={volt.base} size="large" />
           <Text style={styles.switchingText}>
             {slowSwitch
               ? 'Waking up server — first request after a quiet period can take 30s.'
@@ -541,26 +553,37 @@ export default function TradesScreen({ navigation }: any) {
         ) : null}
 
         {/* B3 — Sub-route pills. Trades is the active screen here;
-            Portfolio is a sibling in the Trades stack and only shows
-            when the user has 2+ connected leagues. */}
-        {showPortfolioPill ? (
-          <View style={styles.subnavRow}>
-            <View style={[styles.subnavPill, styles.subnavPillActive]}>
-              <Text style={[styles.subnavPillText, styles.subnavPillTextActive]}>
-                Trades
-              </Text>
-            </View>
+            Portfolio only shows when the user has 2+ connected leagues.
+            Calculator (manual trade builder, demo data) is always
+            reachable — it needs no league. Chalkline chip construction:
+            1px border + label type on ink; active = ink-3 well + chalk. */}
+        <View style={styles.subnavRow}>
+          <View style={[styles.subnavPill, styles.subnavPillActive]}>
+            <Text style={[styles.subnavPillText, styles.subnavPillTextActive]}>
+              Trades
+            </Text>
+          </View>
+          {showPortfolioPill ? (
             <Pressable
               onPress={() => navigation?.navigate?.('Portfolio')}
               style={({ pressed }) => [
                 styles.subnavPill,
-                pressed && { opacity: 0.7 },
+                pressed && styles.subnavPillPressed,
               ]}
             >
               <Text style={styles.subnavPillText}>Portfolio</Text>
             </Pressable>
-          </View>
-        ) : null}
+          ) : null}
+          <Pressable
+            onPress={() => navigation?.navigate?.('TradeCalculator')}
+            style={({ pressed }) => [
+              styles.subnavPill,
+              pressed && styles.subnavPillPressed,
+            ]}
+          >
+            <Text style={styles.subnavPillText}>Calculator</Text>
+          </Pressable>
+        </View>
 
         {/* League selector pill — opens LeagueSwitcherSheet on tap. */}
         <LeaguePill
@@ -568,100 +591,115 @@ export default function TradesScreen({ navigation }: any) {
           onPress={() => setSwitcherOpen(true)}
         />
 
-        <View style={styles.controlCard}>
+        <Card>
+          <View style={styles.controlInner}>
           <View style={styles.controlRow}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.controlLabel}>Outlook</Text>
+              <TickLabel>Outlook</TickLabel>
               <Text style={styles.controlValue}>
                 {prefsQuery.data?.team_outlook
                   ? cap(prefsQuery.data.team_outlook)
                   : 'Not set'}
               </Text>
             </View>
-            <Pressable
-              style={({ pressed }) => [styles.editBtn, pressed && { opacity: 0.7 }]}
+            <Button
+              variant="secondary"
+              compact
+              label="Edit"
               onPress={() => setOutlookOpen(true)}
-            >
-              <Text style={styles.editBtnText}>Edit</Text>
-            </Pressable>
+            />
           </View>
 
           {/* Trade-fairness toggle. ON: backend filters to balanced
               trades and sorts by composite_score (fairness-weighted).
               OFF: broaden the backend filter to its loosest and re-sort
               the deck client-side by ranking mismatch (the ELO gap
-              between owners on the swapped players). */}
+              between owners on the swapped players). Rendered as the
+              Chalkline slider construction: 4px ink-3 track, 16px square
+              volt thumb — same boolean semantics as before. */}
           <View style={styles.fairnessRow}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.fairnessLabel}>Trade fairness</Text>
+              <TickLabel>Trade fairness</TickLabel>
               <Text style={styles.fairnessHint}>
                 {fairnessOn
                   ? 'Recommend balanced trades'
                   : 'Rank by ranking mismatch only'}
               </Text>
             </View>
-            <Switch
-              value={fairnessOn}
-              onValueChange={handleToggleFairness}
-              trackColor={{ false: colors.border, true: colors.accent }}
-              thumbColor="#fff"
-              ios_backgroundColor={colors.border}
-            />
+            <Pressable
+              onPress={() => handleToggleFairness(!fairnessOn)}
+              accessibilityRole="switch"
+              accessibilityLabel="Trade fairness"
+              accessibilityState={{ checked: fairnessOn }}
+              style={styles.fairnessSliderTap}
+              hitSlop={8}
+            >
+              <View style={styles.fairnessTrack}>
+                <View
+                  style={[
+                    styles.fairnessThumb,
+                    fairnessOn ? styles.fairnessThumbOn : styles.fairnessThumbOff,
+                  ]}
+                />
+              </View>
+            </Pressable>
           </View>
 
           {/* Find-a-Trade button. While a job is running, the button is
               disabled — the progress strip below acts as the live signal.
               `generateMutation.isPending` is only true during the brief
               POST round-trip; after that, status flows through `job`. */}
-          <Pressable
+          <Button
+            variant="primary"
+            label={deck.length > 0 && job?.status === 'complete' ? 'Find more trades' : 'Find a Trade'}
             disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
             onPress={() => generateMutation.mutate()}
-            style={({ pressed }) => [
-              styles.findBtn,
-              pressed && { opacity: 0.85 },
-              (!leagueId || generateMutation.isPending || job?.status === 'running') && { opacity: 0.5 },
-            ]}
-          >
-            {generateMutation.isPending ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.findBtnText}>
-                {deck.length > 0 && job?.status === 'complete' ? '✨ Find more trades' : '✨ Find a Trade'}
-              </Text>
-            )}
-          </Pressable>
+            style={styles.findBtn}
+          />
 
           {/* Progress strip — visible only during a running job. Cards are
-              streaming into the deck above; this just narrates the work. */}
+              streaming into the deck above; this just narrates the work.
+              Opponent coverage renders as a volt Meter with mono counts. */}
           {job?.status === 'running' && (
             <View style={styles.progressStrip}>
               <View style={styles.progressInfo}>
-                <ActivityIndicator color={colors.accent} size="small" />
+                <ActivityIndicator color={chalk.dim} size="small" />
                 <Text style={styles.progressText}>
-                  Searching… {job.opponents_done}/{job.opponents_total || '?'} opponents
-                  {job.cards.length > 0 ? `  ·  ${job.cards.length} trade${job.cards.length === 1 ? '' : 's'}` : ''}
+                  {'Searching… '}
+                  <Text style={type.data}>
+                    {`${job.opponents_done}/${job.opponents_total || '?'}`}
+                  </Text>
+                  {' opponents'}
+                  {job.cards.length > 0 ? '  ·  ' : ''}
+                  {job.cards.length > 0 ? (
+                    <Text style={type.data}>{job.cards.length}</Text>
+                  ) : null}
+                  {job.cards.length > 0 ? ` trade${job.cards.length === 1 ? '' : 's'}` : ''}
                 </Text>
+                {/* "Hide", not "Stop": the server-side worker keeps running
+                    so its results land in the warm cache for the next tap.
+                    We just dismiss the in-progress UI on the client. */}
+                <Button
+                  variant="ghost"
+                  compact
+                  label="Hide"
+                  onPress={() => setJob(null)}
+                />
               </View>
-              {/* "Hide", not "Stop": the server-side worker keeps running
-                  so its results land in the warm cache for the next tap.
-                  We just dismiss the in-progress UI on the client. */}
-              <Pressable
-                onPress={() => setJob(null)}
-                style={({ pressed }) => [styles.stopBtn, pressed && { opacity: 0.6 }]}
-                hitSlop={8}
-              >
-                <Text style={styles.stopBtnText}>Hide</Text>
-              </Pressable>
+              <Meter
+                value={(job.opponents_done ?? 0) / Math.max(job.opponents_total || 0, 1)}
+              />
             </View>
           )}
 
           {likedQuery.data && likedQuery.data.liked_count > 0 && (
             <Text style={styles.likedCount}>
-              ❤ {likedQuery.data.liked_count} liked trade
-              {likedQuery.data.liked_count === 1 ? '' : 's'} awaiting their swipe
+              <Text style={type.data}>{likedQuery.data.liked_count}</Text>
+              {` liked trade${likedQuery.data.liked_count === 1 ? '' : 's'} awaiting their swipe`}
             </Text>
           )}
-        </View>
+          </View>
+        </Card>
 
         <View style={styles.deckWrap}>
           {topCard ? (
@@ -687,24 +725,29 @@ export default function TradesScreen({ navigation }: any) {
                   onPress={() => handleQueue(topCard)}
                   style={({ pressed }) => [
                     styles.queueBtn,
-                    isQueued(topCard.trade_id) && styles.queueBtnQueued,
-                    pressed && { opacity: 0.7 },
+                    topCardQueued && styles.queueBtnQueued,
+                    pressed && styles.queueBtnPressed,
                   ]}
                 >
+                  <Icon
+                    name={topCardQueued ? 'check' : 'plus'}
+                    size={16}
+                    color={topCardQueued ? chalk.base : chalk.dim}
+                  />
                   <Text
                     style={[
                       styles.queueBtnText,
-                      isQueued(topCard.trade_id) && styles.queueBtnTextQueued,
+                      topCardQueued && styles.queueBtnTextQueued,
                     ]}
                   >
-                    {isQueued(topCard.trade_id) ? '✓ Queued' : '+ Queue'}
+                    {topCardQueued ? 'Queued' : 'Queue'}
                   </Text>
                 </Pressable>
               ) : null}
-              {/* ✓ / ✗ disposition buttons — same outcome as swiping right/left.
-                  Both wire to advance() so deck-advance, haptics, and the API
-                  call are identical to the swipe path. Disabled while a swipe
-                  mutation is in flight to prevent double-firing. */}
+              {/* Check / X disposition buttons — same outcome as swiping
+                  right/left. Both wire to advance() so deck-advance, haptics,
+                  and the API call are identical to the swipe path. Disabled
+                  while a swipe mutation is in flight to prevent double-firing. */}
               <View style={styles.dispositionRow}>
                 <Pressable
                   onPress={() => advance('pass')}
@@ -712,13 +755,15 @@ export default function TradesScreen({ navigation }: any) {
                   style={({ pressed }) => [
                     styles.dispositionBtn,
                     styles.dispositionBtnPass,
-                    pressed && { opacity: 0.7 },
-                    swipeMutation.isPending && { opacity: 0.4 },
+                    pressed && styles.dispositionBtnPassPressed,
+                    swipeMutation.isPending && styles.dispositionDisabled,
                   ]}
                   accessibilityLabel="Pass on this trade"
                   accessibilityRole="button"
                 >
-                  <Text style={[styles.dispositionBtnText, styles.dispositionBtnTextPass]}>✗</Text>
+                  {({ pressed }) => (
+                    <Icon name="x" color={pressed ? ink.ink0 : semantic.neg} />
+                  )}
                 </Pressable>
                 <Pressable
                   onPress={() => advance('like')}
@@ -726,13 +771,15 @@ export default function TradesScreen({ navigation }: any) {
                   style={({ pressed }) => [
                     styles.dispositionBtn,
                     styles.dispositionBtnLike,
-                    pressed && { opacity: 0.7 },
-                    swipeMutation.isPending && { opacity: 0.4 },
+                    pressed && styles.dispositionBtnLikePressed,
+                    swipeMutation.isPending && styles.dispositionDisabled,
                   ]}
                   accessibilityLabel="Accept this trade"
                   accessibilityRole="button"
                 >
-                  <Text style={[styles.dispositionBtnText, styles.dispositionBtnTextLike]}>✓</Text>
+                  {({ pressed }) => (
+                    <Icon name="check" color={pressed ? ink.ink0 : semantic.pos} />
+                  )}
                 </Pressable>
               </View>
               <Text style={styles.deckHint}>
@@ -743,30 +790,36 @@ export default function TradesScreen({ navigation }: any) {
             // Job is running but no cards have arrived yet (first ~3s of
             // the first opponent). Show a placeholder so the deck doesn't
             // look broken — the progress strip above narrates state.
-            <View style={styles.emptyCard}>
-              <ActivityIndicator color={colors.accent} />
-              <Text style={[styles.emptyTitle, { marginTop: spacing.sm }]}>
-                Looking for trades…
-              </Text>
-              <Text style={styles.emptyBody}>
-                Cards will appear here as they're found. First few should land within a few seconds.
-              </Text>
-            </View>
+            <Card>
+              <View style={styles.emptyInner}>
+                <ActivityIndicator color={volt.base} />
+                <Text style={[styles.emptyTitle, { marginTop: space.sm }]}>
+                  Looking for trades…
+                </Text>
+                <Text style={styles.emptyBody}>
+                  Cards will appear here as they're found. First few should land within a few seconds.
+                </Text>
+              </View>
+            </Card>
           ) : deck.length > 0 ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>That's all for now ✓</Text>
-              <Text style={styles.emptyBody}>
-                You've swiped on every generated trade. Rank more players or
-                invite leaguemates to unlock more.
-              </Text>
-            </View>
+            <Card>
+              <View style={styles.emptyInner}>
+                <Text style={styles.emptyTitle}>That's all for now</Text>
+                <Text style={styles.emptyBody}>
+                  You've swiped on every generated trade. Rank more players or
+                  invite leaguemates to unlock more.
+                </Text>
+              </View>
+            </Card>
           ) : (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>Hit "Find a Trade" to start</Text>
-              <Text style={styles.emptyBody}>
-                We'll pull trade ideas from your league and show them one at a time.
-              </Text>
-            </View>
+            <Card>
+              <View style={styles.emptyInner}>
+                <Text style={styles.emptyTitle}>Hit "Find a Trade" to start</Text>
+                <Text style={styles.emptyBody}>
+                  We'll pull trade ideas from your league and show them one at a time.
+                </Text>
+              </View>
+            </Card>
           )}
         </View>
       </ScrollView>
@@ -778,23 +831,26 @@ export default function TradesScreen({ navigation }: any) {
         <View style={styles.queueFooter}>
           <Pressable
             onPress={() => setQueueSheetOpen(true)}
-            style={({ pressed }) => [styles.queueFooterTap, pressed && { opacity: 0.7 }]}
+            style={({ pressed }) => [
+              styles.queueFooterTap,
+              pressed && styles.queueFooterTapPressed,
+            ]}
           >
             <Text style={styles.queueFooterCount}>{queuedTrades.length}</Text>
             <Text style={styles.queueFooterLabel}>
               queued · tap to review
             </Text>
           </Pressable>
-          <Pressable
+          <Button
+            variant="primary"
+            compact
+            label="Send All"
             onPress={handleSendAll}
-            style={({ pressed }) => [styles.queueSendBtn, pressed && { opacity: 0.85 }]}
-          >
-            <Text style={styles.queueSendText}>Send All →</Text>
-          </Pressable>
+          />
         </View>
       ) : null}
 
-      {/* Queue bottom-sheet — lists each queued trade with × dequeue. */}
+      {/* Queue bottom-sheet — lists each queued trade with dequeue. */}
       <Modal
         visible={queueSheetOpen}
         transparent
@@ -810,11 +866,12 @@ export default function TradesScreen({ navigation }: any) {
           <View style={styles.queueSheetHeader}>
             <Text style={styles.queueSheetTitle}>Trade queue</Text>
             <Text style={styles.queueSheetSub}>
-              {queuedTrades.length} queued · "Send All" opens each on Sleeper
+              <Text style={type.data}>{queuedTrades.length}</Text>
+              {' queued · "Send All" opens each on Sleeper'}
             </Text>
           </View>
 
-          <ScrollView style={styles.queueSheetScroll} contentContainerStyle={{ gap: spacing.sm }}>
+          <ScrollView style={styles.queueSheetScroll} contentContainerStyle={{ gap: space.sm }}>
             {queuedTrades.length === 0 ? (
               <Text style={styles.queueEmpty}>
                 Queue is empty. Tap "+ Queue" on any trade card to stack it here.
@@ -831,23 +888,19 @@ export default function TradesScreen({ navigation }: any) {
           </ScrollView>
 
           <View style={styles.queueSheetActions}>
-            <Pressable
+            <Button
+              variant="secondary"
+              label="Close"
               onPress={() => setQueueSheetOpen(false)}
-              style={({ pressed }) => [styles.queueSheetCancel, pressed && { opacity: 0.6 }]}
-            >
-              <Text style={styles.queueSheetCancelText}>Close</Text>
-            </Pressable>
-            <Pressable
+              style={styles.queueSheetCancel}
+            />
+            <Button
+              variant="primary"
+              label="Send All"
               disabled={queuedTrades.length === 0}
               onPress={handleSendAll}
-              style={({ pressed }) => [
-                styles.queueSheetSend,
-                pressed && { opacity: 0.85 },
-                queuedTrades.length === 0 && { opacity: 0.4 },
-              ]}
-            >
-              <Text style={styles.queueSheetSendText}>Send All →</Text>
-            </Pressable>
+              style={styles.queueSheetSend}
+            />
           </View>
         </View>
       </Modal>
@@ -943,147 +996,124 @@ function cap(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// ── Styles ──────────────────────────────────────────────────────────
+// ── Styles — Chalkline (docs/design/design-system.md) ───────────────
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: spacing.lg, gap: spacing.lg, paddingBottom: 96 },
-  // B3 — sub-route pill row (Trades / Portfolio)
+  safe: { flex: 1, backgroundColor: ink.ink0 },
+  scroll: { padding: space.lg, gap: space.lg, paddingBottom: 96 },
+  // B3 — sub-route pill row (Trades / Portfolio / Calculator).
+  // Chalkline chip construction: 1px hairline + label type on ink-1;
+  // active = ink-3 well + line-strong border + chalk text.
   subnavRow: {
     flexDirection: 'row',
-    gap: spacing.sm,
+    gap: space.sm,
   },
   subnavPill: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.pill,
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radii.xs,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: ink.line,
+    backgroundColor: ink.ink1,
   },
   subnavPillActive: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.12)',
+    borderColor: ink.lineStrong,
+    backgroundColor: ink.ink3,
+  },
+  subnavPillPressed: {
+    backgroundColor: ink.ink3,
   },
   subnavPillText: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
-    fontWeight: '700',
+    ...type.label,
   },
   subnavPillTextActive: {
-    color: colors.accent,
+    color: chalk.base,
   },
   switchingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15,17,23,0.85)',
+    backgroundColor: scrim,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.md,
+    gap: space.md,
     zIndex: 50,
   },
   switchingText: {
-    color: colors.text,
-    fontSize: fontSize.base,
-    fontWeight: '700',
+    ...type.title,
     textAlign: 'center',
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: space.xl,
   },
-  controlCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    gap: spacing.sm,
-  },
+  controlInner: { gap: space.sm },
   controlRow: { flexDirection: 'row', alignItems: 'center' },
-  controlLabel: {
-    color: colors.muted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+  controlValue: {
+    ...type.title,
+    marginTop: space.xs,
   },
-  controlValue: { color: colors.text, fontSize: fontSize.base, fontWeight: '800' },
-  editBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  editBtnText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
   fairnessRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  fairnessLabel: {
-    color: colors.muted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    gap: space.sm,
+    paddingVertical: space.xs,
   },
   fairnessHint: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '700',
-    marginTop: 2,
+    ...type.bodySm,
+    marginTop: space.xs,
+  },
+  // Chalkline slider construction (components.md → Forms): 4px ink-3
+  // track, 16px square volt thumb at radius xs. Binary here — the thumb
+  // sits at either end of the track.
+  fairnessSliderTap: {
+    width: 56,
+    height: 44,
+    justifyContent: 'center',
+  },
+  fairnessTrack: {
+    height: 4,
+    backgroundColor: ink.ink3,
+  },
+  fairnessThumb: {
+    position: 'absolute',
+    top: -6,
+    width: 16,
+    height: 16,
+    borderRadius: radii.xs,
+  },
+  fairnessThumbOn: {
+    right: 0,
+    backgroundColor: volt.base,
+  },
+  fairnessThumbOff: {
+    left: 0,
+    backgroundColor: ink.lineStrong,
   },
   findBtn: {
-    backgroundColor: colors.accent,
-    paddingVertical: 14,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    marginTop: spacing.sm,
+    marginTop: space.sm,
   },
-  findBtnText: { color: '#fff', fontSize: fontSize.base, fontWeight: '800' },
   progressStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: 'rgba(79,124,255,0.08)',
+    marginTop: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radii.sm,
+    backgroundColor: ink.ink2,
     borderWidth: 1,
-    borderColor: 'rgba(79,124,255,0.25)',
+    borderColor: ink.line,
+    gap: space.sm,
   },
   progressInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    flex: 1,
+    gap: space.sm,
     minWidth: 0,
   },
   progressText: {
-    color: colors.accent,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
+    ...type.bodySm,
+    flex: 1,
     flexShrink: 1,
   },
-  stopBtn: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  stopBtnText: {
-    color: colors.muted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
   likedCount: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
+    ...type.bodySm,
     textAlign: 'center',
-    marginTop: 4,
+    marginTop: space.xs,
   },
   deckWrap: {
     minHeight: 360,
@@ -1101,112 +1131,105 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.97 }],
   },
   deckHint: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
+    ...type.bodySm,
     textAlign: 'center',
-    marginTop: spacing.md,
+    marginTop: space.md,
   },
-  emptyCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.xl,
+  emptyInner: {
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: space.sm,
+    paddingVertical: space.sm,
   },
-  emptyTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
-  emptyBody: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
+  emptyTitle: {
+    ...type.heading,
     textAlign: 'center',
-    lineHeight: 22,
+  },
+  emptyBody: {
+    ...type.bodySm,
+    textAlign: 'center',
   },
 
   // Queue button — appears below the swipable card under the queue flag.
+  // Chip construction: hairline border on ink-1; queued = volt border +
+  // chalk text (active state).
   queueBtn: {
     alignSelf: 'center',
-    marginTop: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
+    marginTop: space.md,
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingHorizontal: space.lg,
+    borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: ink.lineStrong,
+    backgroundColor: ink.ink1,
   },
   queueBtnQueued: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.12)',
+    borderColor: volt.base,
+  },
+  queueBtnPressed: {
+    backgroundColor: ink.ink3,
   },
   queueBtnText: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
-    fontWeight: '800',
-    letterSpacing: 0.3,
+    ...type.label,
   },
-  queueBtnTextQueued: { color: colors.accent },
+  queueBtnTextQueued: { color: chalk.base },
 
   // Queue footer — anchored above the tab bar (the SafeAreaView already
   // reserves the bottom inset). Visible only when queue has ≥ 1 item.
+  // Floating bar → ink-2 + hairline + sheet shadow (toast-tier surface).
   queueFooter: {
     position: 'absolute',
-    left: spacing.md,
-    right: spacing.md,
-    bottom: spacing.md,
+    left: space.md,
+    right: space.md,
+    bottom: space.md,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    padding: spacing.sm,
-    borderRadius: radius.lg,
+    gap: space.sm,
+    padding: space.sm,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    // Drop-shadow for elevation over the deck below.
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    borderColor: ink.line,
+    backgroundColor: ink.ink2,
+    ...shadowSheet,
   },
   queueFooterTap: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.sm,
+    gap: space.sm,
+    paddingHorizontal: space.sm,
     paddingVertical: 6,
+    borderRadius: radii.sm,
+  },
+  queueFooterTapPressed: {
+    backgroundColor: ink.ink3,
   },
   queueFooterCount: {
     minWidth: 28,
     height: 28,
-    paddingHorizontal: 8,
+    paddingHorizontal: space.sm,
     textAlign: 'center',
     lineHeight: 28,
-    borderRadius: 14,
-    backgroundColor: colors.accent,
-    color: '#fff',
-    fontWeight: '800',
-    fontSize: fontSize.sm,
+    borderRadius: radii.pill,
+    backgroundColor: ink.ink3,
+    color: chalk.base,
+    fontFamily: fonts.dataSemi,
+    fontSize: 13,
+    fontVariant: ['tabular-nums'],
     overflow: 'hidden',
   },
   queueFooterLabel: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '700',
+    ...type.bodySm,
+    color: chalk.base,
     flex: 1,
   },
-  queueSendBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
-  },
-  queueSendText: { color: '#fff', fontWeight: '800', fontSize: fontSize.sm },
 
-  // Queue bottom-sheet modal
+  // Queue bottom-sheet modal — ink-2, hairline, sheet shadow, grabber.
   queueBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: scrim,
   },
   queueSheet: {
     position: 'absolute',
@@ -1214,82 +1237,77 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     maxHeight: '80%',
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl,
-    gap: spacing.sm,
+    backgroundColor: ink.ink2,
+    borderTopLeftRadius: radii.md,
+    borderTopRightRadius: radii.md,
+    borderWidth: 1,
+    borderColor: ink.line,
+    padding: space.lg,
+    paddingBottom: space.xxl,
+    gap: space.sm,
+    ...shadowSheet,
   },
   queueHandle: {
     alignSelf: 'center',
-    width: 44,
+    width: 32,
     height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.border,
-    marginBottom: spacing.sm,
+    borderRadius: radii.xs,
+    backgroundColor: ink.lineStrong,
+    marginBottom: space.sm,
   },
-  queueSheetHeader: { gap: 2 },
-  queueSheetTitle: { color: colors.text, fontSize: fontSize.xl, fontWeight: '800' },
-  queueSheetSub: { color: colors.muted, fontSize: fontSize.sm },
-  queueSheetScroll: { maxHeight: 420, marginTop: spacing.sm },
+  queueSheetHeader: { gap: space.xs },
+  queueSheetTitle: {
+    ...type.heading,
+  },
+  queueSheetSub: {
+    ...type.bodySm,
+  },
+  queueSheetScroll: { maxHeight: 420, marginTop: space.sm },
   queueEmpty: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
+    ...type.bodySm,
     textAlign: 'center',
-    padding: spacing.xl,
+    padding: space.xl,
   },
   queueSheetActions: {
     flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
+    gap: space.sm,
+    marginTop: space.md,
   },
-  queueSheetCancel: {
-    flex: 1,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-  },
-  queueSheetCancelText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
-  queueSheetSend: {
-    flex: 2,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-  },
-  queueSheetSendText: { color: '#fff', fontSize: fontSize.sm, fontWeight: '800' },
+  queueSheetCancel: { flex: 1 },
+  queueSheetSend: { flex: 2 },
 
-  // FB-05 — ✓ / ✗ disposition button row beneath the top trade card.
-  // Placed between SwipableTopCard (and optional Queue button) and deckHint.
+  // FB-05 — check / x disposition button row beneath the top trade card.
+  // Icon-button construction (components.md → Buttons): square radius,
+  // 1px semantic border; pressed = semantic fill + ink icon (color-only
+  // state change, no transforms). 56px keeps the touch floor.
   dispositionRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: spacing.xl,
-    marginTop: spacing.lg,
+    gap: space.xl,
+    marginTop: space.lg,
   },
   dispositionBtn: {
     width: 56,
     height: 56,
-    borderRadius: radius.pill,
-    borderWidth: 2,
+    borderRadius: radii.sm,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'transparent',
   },
   dispositionBtnPass: {
-    borderColor: colors.red,
-    backgroundColor: 'rgba(239,68,68,0.10)',
+    borderColor: semantic.neg,
+  },
+  dispositionBtnPassPressed: {
+    backgroundColor: semantic.neg,
   },
   dispositionBtnLike: {
-    borderColor: colors.green,
-    backgroundColor: 'rgba(34,197,94,0.10)',
+    borderColor: semantic.pos,
   },
-  dispositionBtnText: {
-    fontSize: fontSize.xl,
-    fontWeight: '800',
+  dispositionBtnLikePressed: {
+    backgroundColor: semantic.pos,
   },
-  dispositionBtnTextPass: { color: colors.red },
-  dispositionBtnTextLike: { color: colors.green },
+  dispositionDisabled: {
+    opacity: 0.45,
+  },
 });

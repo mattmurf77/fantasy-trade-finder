@@ -1,9 +1,17 @@
 import React, { forwardRef } from 'react';
-import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
-import PositionChip from './PositionChip';
-import TierBadge from './TierBadge';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import {
+  ink,
+  chalk,
+  volt,
+  semantic,
+  tier as tierColors,
+  position as positionColors,
+  space,
+  radii,
+  type,
+} from '../theme/chalkline';
+import { Badge, PositionBadge, TierChalkBadge, RookieBadge, InjuryBadge } from './chalkline';
 import type { Player, Tier } from '../shared/types';
 
 export interface PlayerCardProps {
@@ -22,9 +30,23 @@ export interface PlayerCardProps {
   showInjury?: boolean;            // render the injury-status tag (default true). Off for Trios tiles (feedback #33).
 }
 
+// Normalize Sleeper injury strings to the Chalkline InjuryBadge codes.
+// Unknown statuses fall back to a generic neg-bordered badge below.
+function injuryCode(status: string): 'Q' | 'D' | 'Out' | 'IR' | null {
+  const s = status.trim().toLowerCase();
+  if (s === 'q' || s.startsWith('questionable')) return 'Q';
+  if (s === 'd' || s.startsWith('doubtful')) return 'D';
+  if (s === 'out') return 'Out';
+  if (s === 'ir') return 'IR';
+  return null;
+}
+
 // Shared player-card primitive. Consumed by RankScreen (Trios) today and
 // by TiersScreen + TradesScreen + MatchesScreen in Phases 3-4. Keeping
 // visual variants here so every screen renders players identically.
+// Chalkline: replicates the Card primitive pattern (ink-1 surface, hairline,
+// 3px position rail) because the trio loop needs Pressable + ref + rank
+// accents that Card doesn't model.
 const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
   {
     player,
@@ -48,12 +70,26 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     player.years_experience != null
       ? `${player.years_experience} yr${player.years_experience === 1 ? '' : 's'}`
       : null;
+  const isRookie = player.years_experience === 0;
 
-  // Per-rank accents pulled out so the styles prop below stays well-typed.
-  const rankBgStyle =
-    rank === 1 ? styles.rankBg1 :
-    rank === 2 ? styles.rankBg2 :
-    rank === 3 ? styles.rankBg3 : null;
+  // Position rail + badge — position hexes are cross-client invariants,
+  // rendered only via the chalkline re-export.
+  const posKey = String(player.position).toLowerCase() as keyof typeof positionColors;
+  const railColor: string | undefined = positionColors[posKey];
+  const isStdPos =
+    player.position === 'QB' ||
+    player.position === 'RB' ||
+    player.position === 'WR' ||
+    player.position === 'TE';
+
+  const injury = showInjury && player.injury_status ? player.injury_status : null;
+  const injCode = injury ? injuryCode(injury) : null;
+
+  // Per-rank border accents echoing the web's .ranked-1 / .ranked-2 / .ranked-3.
+  const rankBorderStyle =
+    rank === 1 ? styles.rankBorder1 :
+    rank === 2 ? styles.rankBorder2 :
+    rank === 3 ? styles.rankBorder3 : null;
   const rankFgStyle =
     rank === 1 ? styles.rankFg1 :
     rank === 2 ? styles.rankFg2 :
@@ -70,11 +106,14 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
         styles.card,
         compact && styles.cardCompact,
         selected && styles.cardSelected,
-        rankBgStyle,
+        rankBorderStyle,
         pressed && !disabled && styles.cardPressed,
         disabled && styles.cardDisabled,
       ]}
     >
+      {/* 3px position-color left rail (Card primitive pattern) */}
+      {railColor ? <View style={[styles.rail, { backgroundColor: railColor }]} /> : null}
+
       {/* Rank badge floating in top-right */}
       {ranked && (
         <View style={[styles.rankBadge, rankFgStyle]}>
@@ -83,36 +122,41 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
       )}
 
       <View style={styles.header}>
-        <PositionChip position={player.position} size={compact ? 'sm' : 'md'} />
-        {tier && <TierBadge tier={tier} posRank={posRank} size="sm" />}
+        {isStdPos ? (
+          <PositionBadge pos={player.position as 'QB' | 'RB' | 'WR' | 'TE'} />
+        ) : (
+          <Badge label={String(player.position)} />
+        )}
+        {tier && <TierChalkBadge t={tier} />}
+        {posRank ? <Badge label={posRank} /> : null}
+        {isRookie && <RookieBadge />}
+        {injury ? (
+          injCode ? (
+            <InjuryBadge status={injCode} />
+          ) : (
+            <Badge label={injury} color={semantic.neg} colorText />
+          )
+        ) : null}
       </View>
 
-      <Text style={[styles.name, compact && styles.nameCompact]} numberOfLines={1}>
+      <Text style={[type.title, styles.name]} numberOfLines={1}>
         {player.name}
       </Text>
 
       <View style={styles.meta}>
-        <Text style={styles.metaText}>{teamStr}</Text>
+        <Text style={type.bodySm}>{teamStr}</Text>
         {ageStr && (
           <>
             <Text style={styles.metaDot}>·</Text>
-            <Text style={styles.metaText}>{ageStr}</Text>
+            <Text style={type.bodySm}>{ageStr}</Text>
           </>
         )}
         {expStr && !compact && (
           <>
             <Text style={styles.metaDot}>·</Text>
-            <Text style={styles.metaText}>{expStr}</Text>
+            <Text style={type.bodySm}>{expStr}</Text>
           </>
         )}
-        {showInjury && player.injury_status ? (
-          <>
-            <Text style={styles.metaDot}>·</Text>
-            <Text style={[styles.metaText, styles.injuryText]}>
-              {player.injury_status}
-            </Text>
-          </>
-        ) : null}
       </View>
 
       {rightSlot ? <View style={styles.rightSlot}>{rightSlot}</View> : null}
@@ -124,88 +168,70 @@ export default React.memo(PlayerCard);
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
+    backgroundColor: ink.ink1,
+    borderColor: ink.line,
     borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
+    borderRadius: radii.md,
+    padding: space.lg,
     position: 'relative',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 6,
-      },
-      android: { elevation: 2 },
-    }),
+    overflow: 'hidden',
   },
   cardCompact: {
-    padding: spacing.md,
-    borderRadius: radius.md,
+    padding: space.md,
   },
   cardPressed: {
-    borderColor: '#3a3d4a',
-    transform: [{ scale: 0.995 }],
+    backgroundColor: ink.ink3,
   },
-  cardDisabled: { opacity: 0.55 },
+  cardDisabled: { opacity: 0.45 },
   cardSelected: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.06)',
+    borderColor: volt.base,
   },
-  // Subtle accent top border by rank to echo the web's .ranked-1 / .ranked-2 / .ranked-3
-  rankBg1: {
-    borderColor: colors.tier.elite,
-    borderTopWidth: 3,
-    backgroundColor: 'rgba(245,158,11,0.06)',
+  rail: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
   },
-  rankBg2: {
-    borderColor: colors.tier.starter,
-    borderTopWidth: 3,
-    backgroundColor: 'rgba(34,197,94,0.06)',
-  },
-  rankBg3: {
-    borderColor: colors.tier.solid,
-    borderTopWidth: 3,
-    backgroundColor: 'rgba(59,130,246,0.06)',
-  },
+  // Rank accent border by assigned rank (1 gold / 2 green / 3 blue).
+  // Tier hexes are data encodings (cross-client invariants) via re-export.
+  rankBorder1: { borderColor: tierColors.elite },
+  rankBorder2: { borderColor: tierColors.starter },
+  rankBorder3: { borderColor: tierColors.solid },
 
   rankBadge: {
     position: 'absolute',
-    top: 10,
-    right: 10,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    top: space.sm,
+    right: space.sm,
+    width: 24,
+    height: 24,
+    borderRadius: radii.xs,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rankFg1: { backgroundColor: colors.tier.elite },
-  rankFg2: { backgroundColor: colors.tier.starter },
-  rankFg3: { backgroundColor: colors.tier.solid },
-  rankBadgeText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  rankFg1: { backgroundColor: tierColors.elite },
+  rankFg2: { backgroundColor: tierColors.starter },
+  rankFg3: { backgroundColor: tierColors.solid },
+  rankBadgeText: {
+    ...type.data,
+    color: ink.ink0,
+  },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
+    flexWrap: 'wrap',
+    gap: space.xs,
+    marginBottom: space.sm,
   },
   name: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: '800',
-    letterSpacing: -0.3,
-    marginBottom: 6,
+    marginBottom: space.xs,
   },
-  nameCompact: { fontSize: fontSize.base },
   meta: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
   },
-  metaText: { color: colors.muted, fontSize: fontSize.sm },
-  metaDot: { color: colors.border, marginHorizontal: 6 },
-  injuryText: { color: colors.red },
-  rightSlot: { position: 'absolute', right: 14, top: 14 },
+  metaDot: { color: chalk.faint, marginHorizontal: space.xs },
+  rightSlot: { position: 'absolute', right: space.md, top: space.md },
 });

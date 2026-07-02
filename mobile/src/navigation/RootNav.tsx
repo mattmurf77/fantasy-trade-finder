@@ -5,10 +5,10 @@ import {
   createNavigationContainerRef,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
-import { colors } from '../theme/colors';
+import { ink, chalk, volt, fonts } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
 import SignInScreen from '../screens/SignInScreen';
 import LeaguePickerScreen from '../screens/LeaguePickerScreen';
@@ -33,6 +33,17 @@ type AuthStack = {
 
 const Stack = createNativeStackNavigator<AuthStack>();
 export const navigationRef = createNavigationContainerRef<AuthStack>();
+
+// Chalkline stack-header title — Barlow Condensed caps on the ink-0 bar.
+// Native-stack headerTitleStyle can't express letterSpacing/textTransform,
+// so we render the title ourselves.
+function HeaderTitle({ children }: { children: string }) {
+  return (
+    <Text numberOfLines={1} style={styles.headerTitle}>
+      {children}
+    </Text>
+  );
+}
 
 export default function RootNav({ booted }: { booted: boolean }) {
   const user = useSession((s) => s.user);
@@ -98,7 +109,7 @@ export default function RootNav({ booted }: { booted: boolean }) {
   if (!booted) {
     return (
       <View style={styles.splash}>
-        <ActivityIndicator color={colors.accent} />
+        <ActivityIndicator color={volt.base} />
       </View>
     );
   }
@@ -151,11 +162,11 @@ export default function RootNav({ booted }: { booted: boolean }) {
         ...DarkTheme,
         colors: {
           ...DarkTheme.colors,
-          background: colors.bg,
-          card: colors.surface,
-          text: colors.text,
-          border: colors.border,
-          primary: colors.accent,
+          background: ink.ink0,
+          card: ink.ink0,
+          text: chalk.base,
+          border: ink.line,
+          primary: volt.base,
         },
       }}
     >
@@ -205,8 +216,9 @@ export default function RootNav({ booted }: { booted: boolean }) {
             presentation: 'modal',
             headerShown: true,
             title: 'Settings',
-            headerStyle: { backgroundColor: colors.bg },
-            headerTintColor: colors.text,
+            headerTitle: () => <HeaderTitle>Settings</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
           }}
         />
         <Stack.Screen
@@ -217,8 +229,13 @@ export default function RootNav({ booted }: { booted: boolean }) {
             // route.params is typed via AuthStack; cast to a known shape
             // so we can read username without unsafe `any`.
             title: `@${(route.params as { username?: string })?.username || 'profile'}`,
-            headerStyle: { backgroundColor: colors.bg },
-            headerTintColor: colors.text,
+            headerTitle: () => (
+              <HeaderTitle>
+                {`@${(route.params as { username?: string })?.username || 'profile'}`}
+              </HeaderTitle>
+            ),
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
           })}
         />
         <Stack.Screen
@@ -228,8 +245,9 @@ export default function RootNav({ booted }: { booted: boolean }) {
             presentation: 'modal',
             headerShown: true,
             title: 'Test feedback',
-            headerStyle: { backgroundColor: colors.bg },
-            headerTintColor: colors.text,
+            headerTitle: () => <HeaderTitle>Test feedback</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
           }}
         />
       </Stack.Navigator>
@@ -240,8 +258,16 @@ export default function RootNav({ booted }: { booted: boolean }) {
 const styles = StyleSheet.create({
   splash: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: ink.ink0,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // type.heading scaled to fit the native header bar.
+  headerTitle: {
+    fontFamily: fonts.displaySemi,
+    fontSize: 18,
+    letterSpacing: 0.54,
+    textTransform: 'uppercase',
+    color: chalk.base,
   },
 });

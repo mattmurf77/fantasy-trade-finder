@@ -8,8 +8,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, volt, semantic, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
 import type { Outlook } from '../api/league';
 
 interface Props {
@@ -21,36 +20,32 @@ interface Props {
 
 // First-time outlook bottom-sheet. Closely mirrors the web's
 // outlook-overlay modal but simpler: one pick for outlook, optional
-// multi-pick for position prefs.
+// multi-pick for position prefs. Chalkline sheet construction: ink-2
+// surface, hairline border, sheet shadow, line-strong grabber, solid scrim.
 const OUTLOOKS: {
   key: NonNullable<Outlook>;
   title: string;
   blurb: string;
-  emoji: string;
 }[] = [
   {
     key: 'championship',
     title: 'Go for the championship',
     blurb: 'Push for every win this year. Lean into vets, shed future picks.',
-    emoji: '🏆',
   },
   {
     key: 'contender',
     title: 'Contender',
     blurb: "We're in the race but not all-in. Balanced moves only.",
-    emoji: '⚡',
   },
   {
     key: 'rebuilder',
     title: 'Rebuilding',
     blurb: 'Prioritize youth + picks. Happy to move vets for future value.',
-    emoji: '🌱',
   },
   {
     key: 'jets',
     title: 'Tanking (Jets mode)',
     blurb: 'Lose early, draft high. Young-at-all-costs.',
-    emoji: '✈️',
   },
 ];
 
@@ -86,9 +81,9 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <View style={styles.sheet}>
-        <View style={styles.handle} />
-        <Text style={styles.title}>What's your team outlook?</Text>
-        <Text style={styles.sub}>
+        <View style={styles.grabber} />
+        <Text style={type.heading}>What's your team outlook?</Text>
+        <Text style={type.bodySm}>
           We'll use this to bias trade suggestions toward what you actually want.
         </Text>
 
@@ -102,21 +97,18 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
                 style={({ pressed }) => [
                   styles.outlookRow,
                   selected && styles.outlookRowSel,
-                  pressed && { opacity: 0.7 },
+                  pressed && styles.outlookRowPressed,
                 ]}
               >
-                <Text style={styles.outlookEmoji}>{o.emoji}</Text>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.outlookTitle, selected && { color: colors.accent }]}>
-                    {o.title}
-                  </Text>
-                  <Text style={styles.outlookBlurb}>{o.blurb}</Text>
+                  <Text style={type.title}>{o.title}</Text>
+                  <Text style={[type.bodySm, styles.outlookBlurb]}>{o.blurb}</Text>
                 </View>
               </Pressable>
             );
           })}
 
-          <Text style={styles.posHeader}>Positions you want to acquire</Text>
+          <Text style={[type.label, styles.posHeader]}>Positions you want to acquire</Text>
           <View style={styles.posRow}>
             {POSITIONS.map((p) => {
               const selected = acquire.includes(p);
@@ -124,17 +116,18 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
                 <Pressable
                   key={p}
                   onPress={() => toggle(acquire, setAcquire, p)}
-                  style={[styles.posChip, selected && styles.posChipSel]}
+                  style={({ pressed }) => [
+                    styles.posChip,
+                    (selected || pressed) && styles.posChipSel,
+                  ]}
                 >
-                  <Text style={[styles.posText, selected && { color: colors.accent }]}>
-                    {p}
-                  </Text>
+                  <Text style={[type.label, selected && styles.posTextSel]}>{p}</Text>
                 </Pressable>
               );
             })}
           </View>
 
-          <Text style={styles.posHeader}>Positions you're willing to trade away</Text>
+          <Text style={[type.label, styles.posHeader]}>Positions you're willing to trade away</Text>
           <View style={styles.posRow}>
             {POSITIONS.map((p) => {
               const selected = away.includes(p);
@@ -142,11 +135,12 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
                 <Pressable
                   key={p}
                   onPress={() => toggle(away, setAway, p)}
-                  style={[styles.posChip, selected && styles.posChipSel]}
+                  style={({ pressed }) => [
+                    styles.posChip,
+                    (selected || pressed) && styles.posChipSel,
+                  ]}
                 >
-                  <Text style={[styles.posText, selected && { color: colors.accent }]}>
-                    {p}
-                  </Text>
+                  <Text style={[type.label, selected && styles.posTextSel]}>{p}</Text>
                 </Pressable>
               );
             })}
@@ -155,17 +149,19 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
+        {/* Composed primary button: the chalkline Button has no loading/spinner
+            state, and we keep the in-flight spinner behavior. */}
         <Pressable
           disabled={submitting}
           onPress={handleSubmit}
           style={({ pressed }) => [
             styles.submit,
-            (pressed || submitting) && { opacity: 0.85 },
-            submitting && { opacity: 0.5 },
+            pressed && styles.submitPressed,
+            submitting && styles.submitDisabled,
           ]}
         >
           {submitting ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={volt.on} />
           ) : (
             <Text style={styles.submitText}>Save outlook</Text>
           )}
@@ -178,7 +174,7 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: scrim,
   },
   sheet: {
     position: 'absolute',
@@ -186,71 +182,72 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     maxHeight: '90%',
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing.lg,
-    gap: spacing.md,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderTopLeftRadius: radii.md,
+    borderTopRightRadius: radii.md,
+    padding: space.lg,
+    gap: space.md,
+    ...shadowSheet,
   },
-  handle: {
+  grabber: {
     alignSelf: 'center',
-    width: 44,
+    width: 32,
     height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.border,
-    marginBottom: spacing.xs,
+    backgroundColor: ink.lineStrong,
+    marginBottom: space.xs,
   },
-  title: { color: colors.text, fontSize: fontSize.xl, fontWeight: '800' },
-  sub: { color: colors.muted, fontSize: fontSize.sm },
   scroll: { maxHeight: 420 },
   outlookRow: {
     flexDirection: 'row',
-    gap: spacing.md,
-    padding: spacing.md,
-    borderRadius: radius.lg,
+    gap: space.md,
+    padding: space.md,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.sm,
+    borderColor: ink.line,
+    backgroundColor: ink.ink1,
+    marginBottom: space.sm,
     alignItems: 'center',
+    minHeight: 44,
   },
-  outlookRowSel: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.06)',
-  },
-  outlookEmoji: { fontSize: 28 },
-  outlookTitle: { color: colors.text, fontSize: fontSize.base, fontWeight: '800' },
-  outlookBlurb: { color: colors.muted, fontSize: fontSize.xs, marginTop: 2, lineHeight: 18 },
+  outlookRowSel: { borderColor: volt.base },
+  outlookRowPressed: { backgroundColor: ink.ink3 },
+  outlookBlurb: { marginTop: 2 },
   posHeader: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
+    marginTop: space.lg,
+    marginBottom: space.sm,
   },
-  posRow: { flexDirection: 'row', gap: spacing.sm },
+  posRow: { flexDirection: 'row', gap: space.sm },
   posChip: {
     flex: 1,
-    paddingVertical: spacing.sm,
+    minHeight: 44,
     alignItems: 'center',
-    borderRadius: radius.md,
+    justifyContent: 'center',
+    borderRadius: radii.xs,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: ink.line,
+    backgroundColor: ink.ink1,
   },
   posChipSel: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.06)',
+    borderColor: ink.lineStrong,
+    backgroundColor: ink.ink3,
   },
-  posText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
-  error: { color: colors.red, fontSize: fontSize.xs },
+  posTextSel: { color: chalk.base },
+  error: { ...type.bodySm, color: semantic.neg },
   submit: {
-    backgroundColor: colors.accent,
-    borderRadius: radius.md,
-    paddingVertical: 14,
+    backgroundColor: volt.base,
+    borderRadius: radii.sm,
+    height: 44,
     alignItems: 'center',
-    marginTop: spacing.md,
+    justifyContent: 'center',
+    marginTop: space.md,
   },
-  submitText: { color: '#fff', fontSize: fontSize.base, fontWeight: '800' },
+  submitPressed: { backgroundColor: volt.press },
+  submitDisabled: { opacity: 0.45 },
+  submitText: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 14,
+    color: volt.on,
+  },
 });

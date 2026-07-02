@@ -1,7 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { colors } from '../theme/colors';
-import { radius, fontSize } from '../theme/spacing';
+import { ink, chalk, radii, type, position } from '../theme/chalkline';
 import type { Position } from '../shared/types';
 
 interface Props {
@@ -9,58 +8,43 @@ interface Props {
   size?: 'sm' | 'md';
 }
 
-// Small colored chip that labels a player by position. Matches the
-// web app's .ca-mock-pos style (subtle tinted bg + solid colored text).
-// Shared with TiersScreen, TradesScreen, and MatchesScreen later.
-export default function PositionChip({ position, size = 'md' }: Props) {
-  const pos = (position || '').toUpperCase() as Position;
-  const tint = colorFor(pos);
+// Chalkline badge construction (docs/design/components.md → Badges & chips):
+// transparent bg, 1px border in the position color, chalk text, radius xs.
+// Shared with TiersScreen, TradesScreen, and MatchesScreen.
+export default function PositionChip({ position: positionProp, size = 'md' }: Props) {
+  const pos = (positionProp || '').toUpperCase() as Position;
+  const borderColor = colorFor(pos);
   const isSm = size === 'sm';
   return (
-    <View
-      style={[
-        styles.chip,
-        isSm && styles.chipSm,
-        { backgroundColor: tint.bg, borderColor: tint.border },
-      ]}
-    >
-      <Text
-        style={[styles.text, isSm && styles.textSm, { color: tint.fg }]}
-      >
-        {pos}
-      </Text>
+    <View style={[styles.chip, isSm && styles.chipSm, { borderColor }]}>
+      <Text style={[type.label, styles.text]}>{pos}</Text>
     </View>
   );
 }
 
-function colorFor(pos: Position) {
+function colorFor(pos: Position): string {
   switch (pos) {
     case 'QB':
-      return { fg: colors.position.qb, bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.35)' };
+      return position.qb;
     case 'RB':
-      return { fg: colors.position.rb, bg: 'rgba(34,197,94,0.15)',  border: 'rgba(34,197,94,0.35)' };
+      return position.rb;
     case 'WR':
-      return { fg: colors.position.wr, bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.35)' };
+      return position.wr;
     case 'TE':
-      return { fg: colors.position.te, bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.35)' };
+      return position.te;
     default:
-      return { fg: colors.muted, bg: 'rgba(122,127,150,0.15)', border: colors.border };
+      return ink.lineStrong;
   }
 }
 
 const styles = StyleSheet.create({
   chip: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radius.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.xs,
     borderWidth: 1,
     alignSelf: 'flex-start',
   },
-  chipSm: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  text: {
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  textSm: { fontSize: 10 },
+  chipSm: { paddingHorizontal: 4, paddingVertical: 1 },
+  text: { color: chalk.base },
 });

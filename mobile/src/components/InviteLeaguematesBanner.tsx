@@ -1,8 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, Share, StyleSheet } from 'react-native';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, volt, space, radii, type, fonts } from '../theme/chalkline';
 import { getBaseUrl } from '../api/client';
 
 // Cold-start banner shown at the top of TradesScreen when NO league-mate
@@ -12,6 +11,9 @@ import { getBaseUrl } from '../api/client';
 // with the same referral URL format the web client builds
 // (`/?league=<id>&ref=<username>` — captured by captureReferralFromUrl and
 // utils/deepLinks on the receiving end).
+//
+// Chalkline banner construction: ink-2 surface, hairline border, volt tick,
+// body-sm copy.
 
 interface Props {
   leagueId: string;
@@ -41,18 +43,21 @@ export default function InviteLeaguematesBanner({ leagueId, leagueName, username
 
   return (
     <View style={styles.banner}>
+      <View style={styles.tick} />
       <View style={styles.textCol}>
         <Text style={styles.title}>
           0 of {total} league-mates have ranked
         </Text>
-        <Text style={styles.body}>
+        <Text style={type.bodySm}>
           Ideas below are fair-value estimates. Real trade matches unlock when
           league-mates rank their players.
         </Text>
       </View>
+      {/* Composed secondary button: the chalkline Button has no
+          accessibilityLabel passthrough. */}
       <Pressable
         onPress={handleInvite}
-        style={({ pressed }) => [styles.inviteBtn, pressed && { opacity: 0.7 }]}
+        style={({ pressed }) => [styles.inviteBtn, pressed && styles.inviteBtnPressed]}
         accessibilityRole="button"
         accessibilityLabel="Invite league-mates"
       >
@@ -66,36 +71,44 @@ const styles = StyleSheet.create({
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: 'rgba(79,124,255,0.10)',   // colors.accent @ 10%
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radii.md,
+    backgroundColor: ink.ink2,
     borderWidth: 1,
-    borderColor: 'rgba(79,124,255,0.45)',       // colors.accent @ 45%
+    borderColor: ink.line,
+  },
+  tick: {
+    width: 3,
+    height: 14,
+    backgroundColor: volt.base,
+    alignSelf: 'flex-start',
+    marginTop: 2,
   },
   textCol: {
     flex: 1,
     gap: 2,
   },
   title: {
-    color: colors.accent,
-    fontSize: fontSize.sm,
-    fontWeight: '700',
-  },
-  body: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
+    ...type.bodySm,
+    fontFamily: fonts.uiSemi,
+    color: chalk.base,
   },
   inviteBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
+    minHeight: 36,
+    minWidth: 44,
+    paddingHorizontal: space.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
   },
+  inviteBtnPressed: { backgroundColor: ink.ink3 },
   inviteText: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '800',
+    fontFamily: fonts.uiSemi,
+    fontSize: 14,
+    color: chalk.base,
   },
 });
