@@ -80,7 +80,7 @@ Shared user-facing strings rendered by both mobile and web — must stay charact
 
 | String | Shown when |
 |---|---|
-| `👀 They're interested` | card has `likes_you: true` (likes-you pill) |
+| `They're interested` (preceded by the Chalkline `eye` icon, not an emoji — changed from `👀 They're interested` 2026-07-02, ADR-004) | card has `likes_you: true` (likes-you pill) |
 | `Fair-value idea` | card has `basis: "consensus"` (consensus label/tag) |
 | `This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.` | consensus-card explainer (mobile body text; web `title` tooltip on the tag) |
 | `+ {player name} added to balance the deal` | card has a `sweetener` (Tier 3) — name interpolated from the referenced player |
