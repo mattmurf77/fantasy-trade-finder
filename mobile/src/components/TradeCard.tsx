@@ -4,6 +4,7 @@ import { ink, chalk, flare, semantic, space, radii, type } from '../theme/chalkl
 import { TickLabel, Button, Meter, fairnessColor, Icon } from './chalkline';
 import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
+import SendInSleeperButton from './SendInSleeperButton';
 import { useFlag } from '../state/useFeatureFlags';
 import type { TradeCard as TradeCardData } from '../shared/types';
 
@@ -14,6 +15,9 @@ interface Props {
   onAccept?: () => void;
   onDecline?: () => void;
   acting?: boolean;
+  // "Send in Sleeper" — flagged beta. When true, render the direct-propose
+  // button (itself flag-gated, so it's a no-op when the flag is off).
+  showSend?: boolean;
 }
 
 // Shared rendering for generated trades (TradesScreen swipe deck) and
@@ -26,6 +30,7 @@ function TradeCardComp({
   onAccept,
   onDecline,
   acting,
+  showSend = false,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
   // `fairness` is always serialized by the v2 backend (fairness_score),
@@ -180,6 +185,17 @@ function TradeCardComp({
           />
         </View>
       )}
+
+      {showSend && (
+        <View style={styles.sendRow}>
+          <SendInSleeperButton
+            leagueId={data.league_id}
+            theirUserId={data.opponent_user_id}
+            givePlayerIds={data.give_player_ids}
+            receivePlayerIds={data.receive_player_ids}
+          />
+        </View>
+      )}
     </View>
   );
 }
@@ -270,4 +286,5 @@ const styles = StyleSheet.create({
     gap: space.sm,
   },
   actionBtn: { flex: 1 },
+  sendRow: { marginTop: space.sm },
 });

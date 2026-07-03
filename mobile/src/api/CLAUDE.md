@@ -12,3 +12,4 @@ HTTP clients only. No React, no state, no side effects beyond fetch.
 | `trades.ts` | Trade card fetch + decisions |
 | `flags.ts` | Feature flags (`/api/flags`) |
 | `notifications.ts` | Notifications inbox |
+| `sendInSleeper.ts` | Link Sleeper account + propose trades directly (flagged beta) |

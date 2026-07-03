@@ -13,4 +13,5 @@ One file per top-level route.
 | `TradesScreen` | Trade card browser |
 | `TradeCalculatorScreen` | Manual trade builder vs mock leaguemate boards (demo data) — "Calculator" pill in Trades |
 | `MatchesScreen` | Mutual trade matches inbox |
+| `SleeperConnectScreen` | WebView login to Sleeper → captures the JWT for "Send in Sleeper" (flagged beta) |
 | `PlaceholderScreen` | Stub for unfinished routes |

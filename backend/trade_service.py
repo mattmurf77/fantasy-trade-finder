@@ -56,11 +56,20 @@ _DEFAULT_CFG: dict[str, float] = {
     "package_weight_3":      0.55,
     "package_weight_4":      0.40,
     "package_weight_5":      0.28,
+    # Backlog #10 — crown-asset consolidation premium (flag: trade.crown_asset).
+    # The top asset of the SMALLER-count side gains value ramping from 0 at
+    # share<=floor to crown_rate at share=1.0. See package_value_v2.
+    "crown_rate":            0.12,
+    "crown_share_floor":     0.50,
     # Positional preference multipliers
     "pos_acquire_bonus":     0.20,
     "pos_tradeaway_bonus":   0.15,
     "pos_conflict_penalty":  0.15,
     "pos_multiplier_cap":    2.00,
+    # Backlog #2 — per-player target multiplier (flag: trade.preference_lists).
+    # +N per received TARGET player, capped by pos_multiplier_cap. Mirrors the
+    # (dormant) pos_acquire_bonus pattern at player granularity.
+    "target_acquire_bonus":  0.20,
     # TradeService scoring thresholds
     "min_mismatch_score":   40.0,
     "max_value_ratio":       2.5,
@@ -132,6 +141,14 @@ _DEFAULT_CFG: dict[str, float] = {
     "outlook_alpha_not_sure":     0.50,   # also used for outlook=None/unknown
     "outlook_alpha_rebuilder":    0.25,
     "outlook_alpha_jets":         0.10,
+    # Backlog #1 — opponent outlook inference (flag: trade.outlook_infer).
+    # Weights on the three contend↔rebuild signals + the score cutoffs that
+    # bucket into contender / not_sure / rebuilder. See infer_team_outlook.
+    "infer_w_vet_share":          1.00,
+    "infer_w_youth_share":        1.00,
+    "infer_w_pick_share":         2.00,
+    "infer_contender_cut":        0.08,
+    "infer_rebuilder_cut":       -0.08,
     # ------------------------------------------------------------------
     # Tier 2 amendment A6 — league-wide deck diversification
     # (flag: trade.deck_diversity — consumed by server._order_deck)
@@ -198,8 +215,14 @@ def dynasty_value(player, rank_override: int | None = None) -> float:
     """
     KTC-style exponential dynasty value for a single player/pick.
 
-    For draft picks (position == "PICK"):  uses player.pick_value directly
-    (already on a 0-10000 scale from pick_value formula in database.py).
+    For draft picks (position == "PICK"): player.pick_value is on the
+    0-100 round-tier scale (compute_pick_value in database.py; mid-1st =
+    67.5 — NOT 0-10000). Bridge it into the shared value space via the
+    same calibration the universal pool's generic picks use, where
+    pick_value = (seed_elo - 1200) / 6 (see build_universal_pool in
+    server.py): elo = 1200 + 6*pick_value, then elo_to_value(elo). A
+    league mid-1st therefore prices identically to its generic-pick twin
+    instead of at ~67 (near-zero next to players in the thousands).
 
     For regular players: uses player.search_rank (1-based, lower = better).
     Falls back to ktc_fallback_rank config if no rank is stored.
@@ -215,7 +238,12 @@ def dynasty_value(player, rank_override: int | None = None) -> float:
         return round(ktc_max * math.exp(-ktc_k * (rank - 1)), 1)
 
     if getattr(player, "position", None) == "PICK":
-        return float(getattr(player, "pick_value", 1000) or 1000)
+        pv = getattr(player, "pick_value", None)
+        if not pv:
+            # Unknown pick value → neutral mid-asset value, same number the
+            # old fallback returned (= elo_to_value at the reference Elo).
+            return 1000.0
+        return round(elo_to_value(1200.0 + 6.0 * float(pv)), 1)
 
     fallback = int(_c("ktc_fallback_rank"))
     rank = getattr(player, "search_rank", None) or fallback
@@ -269,7 +297,8 @@ def elo_to_value(elo: float) -> float:
     )
 
 
-def package_value_v2(values: list[float], v_max: float) -> float:
+def package_value_v2(values: list[float], v_max: float,
+                     n_other: int | None = None) -> float:
     """
     KTC-style package value for the v2 engine (amendment A2).
 
@@ -287,12 +316,34 @@ def package_value_v2(values: list[float], v_max: float) -> float:
     config-tunable. The best asset contributes 100% of its value; lesser
     assets bottom out at 15%. The legacy `package_value` (fixed diminishing
     weights) is retained untouched for the legacy path.
+
+    Backlog #10 — crown-asset premium (flag trade.crown_asset). When
+    ``n_other`` (the OTHER side's asset count) is supplied AND this side has
+    fewer assets than the other side, the top asset gets a consolidation
+    premium scaled by its share of this side's raw total — the market's
+    "don't split a dollar into 100 pennies" adjustment (FPTrack Crown Asset /
+    Dynasty Daddy Value Adjustment). The cross-side count guard makes the
+    premium exactly 0 on equal-count trades (1-for-1, 2-for-2), so flag-off
+    and symmetric trades are byte-identical. Callers that omit ``n_other``
+    (legacy/unmigrated) are likewise unaffected.
     """
     if not values:
         return 0.0
     v_max = max(v_max, 1e-9)
     gamma = _c("package_adj_gamma")
     total = sum(v * (0.15 + 0.85 * (v / v_max) ** gamma) for v in values)
+
+    if (FLAGS.trade_crown_asset and n_other is not None
+            and len(values) < n_other):
+        side_sum = sum(values)
+        if side_sum > 0:
+            v_top = max(values)
+            share = v_top / side_sum
+            floor = _c("crown_share_floor")
+            if share > floor:
+                premium = _c("crown_rate") * (share - floor) / max(1.0 - floor, 1e-9)
+                top_contrib = v_top * (0.15 + 0.85 * (v_top / v_max) ** gamma)
+                total += premium * top_contrib
     return round(total, 1)
 
 
@@ -608,6 +659,75 @@ def outlook_blend_mult(pos: str | None, age, alpha: float) -> float:
     Players with no age data get exactly 1.0 from both curves."""
     return (alpha * age_now_mult(pos, age)
             + (1.0 - alpha) * age_future_mult(pos, age))
+
+
+def infer_team_outlook(
+    roster_ids: list[str],
+    players: dict,
+    pick_share: float = 0.0,
+    num_teams: int = 12,
+) -> tuple[str, float, dict]:
+    """Infer a team's contend↔rebuild window from observable roster shape
+    (backlog #1). Pure function: no DB, no I/O — feeds the same
+    `outlook_alpha` blend the user side already uses.
+
+    Signals (all consensus-based via `dynasty_value`, so stable across users):
+      • vet value share   — fraction of roster value held by players aged ≥ vet_age
+      • youth value share — fraction held by players aged ≤ youth_age
+      • pick capital share — this team's draft-pick value / league total, centred
+                             on an equal split (1/num_teams) so an average pick
+                             holder contributes 0
+
+    Score (higher = more contending) = w_vet·vet − w_youth·youth − w_pick·(pick − equal).
+    Buckets into contender / not_sure / rebuilder. The extreme labels
+    (championship / jets) are deliberately NOT inferred — inference confidence
+    rarely justifies α = 1.00 / 0.10; those stay reserved for self-declaration.
+
+    Returns (outlook, score, signals).
+    """
+    vet_age   = _c("vet_age")
+    youth_age = _c("youth_age")
+    total = 0.0
+    vet_val = 0.0
+    youth_val = 0.0
+    for pid in roster_ids:
+        p = players.get(pid)
+        if p is None:
+            continue
+        v = dynasty_value(p)
+        total += v
+        age = getattr(p, "age", None)
+        if age is None:
+            continue
+        if age >= vet_age:
+            vet_val += v
+        elif age <= youth_age:
+            youth_val += v
+
+    signals = {"vet_share": 0.0, "youth_share": 0.0, "pick_share": pick_share}
+    # No roster value to read ⇒ no opinion. Guard before the pick-centering
+    # term, which would otherwise read "owns zero picks" as a contend signal.
+    if total <= 0:
+        signals["score"] = 0.0
+        return "not_sure", 0.0, signals
+    signals["vet_share"]   = vet_val / total
+    signals["youth_share"] = youth_val / total
+
+    equal_share = 1.0 / max(num_teams, 1)
+    score = (
+        _c("infer_w_vet_share")   * signals["vet_share"]
+        - _c("infer_w_youth_share") * signals["youth_share"]
+        - _c("infer_w_pick_share")  * (pick_share - equal_share)
+    )
+    signals["score"] = score
+
+    if score >= _c("infer_contender_cut"):
+        outlook = "contender"
+    elif score <= _c("infer_rebuilder_cut"):
+        outlook = "rebuilder"
+    else:
+        outlook = "not_sure"
+    return outlook, score, signals
 
 
 def build_match_context(
@@ -1015,6 +1135,10 @@ class TradeService:
         outlook: str | None = None,          # championship | contender | not_sure |
                                              # rebuilder | jets | None — Tier 2 (2.2)
                                              # now/future blend; v2-only, legacy ignores it
+        opponent_outlooks: dict[str, str] | None = None,    # uid → declared outlook (#1)
+        opponent_pick_shares: dict[str, float] | None = None,  # uid → pick-capital share (#1)
+        untouchable_ids: set | None = None,    # never trade these away (#2)
+        target_ids: set | None = None,         # bias toward acquiring these (#2)
     ) -> list[TradeCard]:
         """
         Generate trade cards for the user against all league members
@@ -1059,6 +1183,10 @@ class TradeService:
                 on_opponent_done     = on_opponent_done,
                 confidence           = confidence,
                 outlook              = outlook,
+                opponent_outlooks    = opponent_outlooks,
+                opponent_pick_shares = opponent_pick_shares,
+                untouchable_ids      = untouchable_ids,
+                target_ids           = target_ids,
             )
 
         new_cards: list[TradeCard] = []
@@ -1199,6 +1327,10 @@ class TradeService:
         on_opponent_done = None,
         confidence: dict[str, int] | None = None,
         outlook: str | None = None,
+        opponent_outlooks: dict[str, str] | None = None,
+        opponent_pick_shares: dict[str, float] | None = None,
+        untouchable_ids: set | None = None,
+        target_ids: set | None = None,
     ) -> list[TradeCard]:
         """v2 orchestration: mirrors the legacy loop structure (profiles,
         narrative, streaming callback, global target, dedup) but routes each
@@ -1280,9 +1412,32 @@ class TradeService:
         total = len(eligible)
         global_target = max(30, max_per_opponent * 6)
 
+        # Backlog #1 — opponent outlook resolution. Active only when BOTH the
+        # infer flag and the blend machinery are on (the blend supplies the
+        # multiplier; without it the user side is unblended too and a one-sided
+        # opponent blend would be inconsistent). Resolution order per opponent:
+        # declared league preference → inferred from roster shape → not_sure.
+        _infer_outlook = FLAGS.trade_outlook_infer and FLAGS.trade_outlook_blend
+        _declared = opponent_outlooks or {}
+        _pick_shares = opponent_pick_shares or {}
+        _num_teams = len(league.members)
+
         for idx, member in enumerate(eligible):
             opp_profile = analyze_roster_strengths(member.roster, self._players, scoring_format)
             match_ctx = build_match_context(user_profile, opp_profile, scoring_format, is_dynasty)
+
+            alpha_opp = None
+            if _infer_outlook:
+                declared = _declared.get(member.user_id)
+                if declared:
+                    resolved, source = declared, "declared"
+                else:
+                    resolved, _, _ = infer_team_outlook(
+                        member.roster, self._players,
+                        _pick_shares.get(member.user_id, 0.0), _num_teams)
+                    source = "inferred"
+                alpha_opp = outlook_alpha(resolved)
+                match_ctx["opponent_outlook"] = {"value": resolved, "source": source}
 
             if member.has_rankings and member.elo_ratings:
                 if FLAGS.trade_engine_v3:
@@ -1309,6 +1464,9 @@ class TradeService:
                         pinned_give_players  = pinned_give_players,
                         pinned_receive_players = pinned_receive_players,
                         players              = self._players,
+                        alpha_opp            = alpha_opp,
+                        untouchable_ids      = untouchable_ids,
+                        target_ids           = target_ids,
                     )
                 else:
                     cards = self._generate_for_pair_v2(
@@ -1327,6 +1485,9 @@ class TradeService:
                         pinned_receive_players = pinned_receive_players,
                         confidence           = confidence,
                         scoring_format       = scoring_format,
+                        alpha_opp            = alpha_opp,
+                        untouchable_ids      = untouchable_ids,
+                        target_ids           = target_ids,
                     )
             else:
                 cards = self._generate_consensus_for_pair(
@@ -1344,6 +1505,8 @@ class TradeService:
                     trade_away_positions = trade_away_positions or [],
                     pinned_give_players  = pinned_give_players,
                     pinned_receive_players = pinned_receive_players,
+                    untouchable_ids      = untouchable_ids,
+                    target_ids           = target_ids,
                 )
             # FB-47 — stamp partner fit and blend it into the composite:
             # strongly on consensus cards (no divergence signal there),
@@ -1395,6 +1558,9 @@ class TradeService:
         pinned_receive_players: list[str] | None = None,
         confidence: dict[str, int] | None = None,
         scoring_format: str = "1qb_ppr",
+        alpha_opp: float | None = None,
+        untouchable_ids: set | None = None,
+        target_ids: set | None = None,
     ) -> list[TradeCard]:
         """Divergence-based v2 generation for one (user, opponent) pair.
 
@@ -1429,12 +1595,25 @@ class TradeService:
         MAX_GAP  = _c("trade_elo_gap_max")
         W_MIS    = _c("mismatch_weight")
         W_FAIR   = _c("fairness_weight")
+        TARGET_BONUS = _c("target_acquire_bonus")   # #2 per-target composite reward
+        MULT_CAP     = _c("pos_multiplier_cap")
 
         _vo_cache: dict[str, float] = {}
         def _vo(pid: str) -> float:
             v = _vo_cache.get(pid)
             if v is None:
                 v = elo_to_value(opp_elo.get(pid, 1500.0))
+                # Backlog #1 — opponent outlook blend (mirrors the user-side
+                # blend on user_value). alpha_opp None ⇒ flag off ⇒ raw value
+                # (byte-identical to pre-change). Blending here propagates to
+                # _mo / opp_repl too, since both read through _vo.
+                if alpha_opp is not None:
+                    p = players.get(pid)
+                    v *= outlook_blend_mult(
+                        getattr(p, "position", None) if p else None,
+                        getattr(p, "age", None) if p else None,
+                        alpha_opp,
+                    )
                 _vo_cache[pid] = v
             return v
 
@@ -1509,8 +1688,8 @@ class TradeService:
             gvals = [seed_value(p) for p in give_ids]
             rvals = [seed_value(p) for p in recv_ids]
             v_max = max(gvals + rvals)
-            gv = package_value_v2(gvals, v_max)
-            rv = package_value_v2(rvals, v_max)
+            gv = package_value_v2(gvals, v_max, n_other=len(recv_ids))
+            rv = package_value_v2(rvals, v_max, n_other=len(give_ids))
             if gv <= 0 or rv <= 0:
                 return 1.0
             fairness = min(gv, rv) / max(gv, rv)
@@ -1560,8 +1739,8 @@ class TradeService:
                 uvals_give = [user_value[p] for p in give_ids]
                 uvals_recv = [user_value[p] for p in recv_ids]
             u_max = max(uvals_give + uvals_recv)
-            give_val_user = package_value_v2(uvals_give, u_max)
-            recv_val_user = package_value_v2(uvals_recv, u_max)
+            give_val_user = package_value_v2(uvals_give, u_max, n_other=len(recv_ids))
+            recv_val_user = package_value_v2(uvals_recv, u_max, n_other=len(give_ids))
 
             if MARGINAL:
                 ovals_give = [_mo(p) for p in give_ids]
@@ -1570,8 +1749,8 @@ class TradeService:
                 ovals_give = [_vo(p) for p in give_ids]
                 ovals_recv = [_vo(p) for p in recv_ids]
             o_max = max(ovals_give + ovals_recv)
-            give_val_opp = package_value_v2(ovals_give, o_max)  # opp receives
-            recv_val_opp = package_value_v2(ovals_recv, o_max)  # opp gives
+            give_val_opp = package_value_v2(ovals_give, o_max, n_other=len(recv_ids))  # opp receives
+            recv_val_opp = package_value_v2(ovals_recv, o_max, n_other=len(give_ids))  # opp gives
 
             # Waiver-slot cost (A3): the side receiving MORE players drops a
             # waiver-level player per extra slot — subtract from that side's
@@ -1596,6 +1775,13 @@ class TradeService:
             composite = (W_MIS * min(hm, GAIN_CAP) / GAIN_CAP
                          + W_FAIR * fairness)
             composite *= self._tier_mult_v2(shrunk_user_elo, give_ids + recv_ids)
+            # Backlog #2 — reward cards that LAND a target on the receive side.
+            # Applied after the mutual-gain gates (a target never rescues a
+            # non-mutual-gain trade), capped by pos_multiplier_cap.
+            if target_ids:
+                n_t = len(set(recv_ids) & target_ids)
+                if n_t:
+                    composite *= min(1.0 + TARGET_BONUS * n_t, MULT_CAP)
             _offer(composite, hm, fairness, give_ids, recv_ids)
 
         # ------------------------------------------------------------------
@@ -1604,7 +1790,12 @@ class TradeService:
         # user over-values. Anchor-first pre-sort (Change 5) visits the
         # highest-divergence players first so the deadline loses little.
         # ------------------------------------------------------------------
-        _known_user = [p for p in user_roster if p in shrunk_user_elo and p in opp_elo]
+        # Backlog #2 — untouchables never leave the user's roster: drop them
+        # from the give pool at the source, so they can't appear in any single
+        # or multi-give combo.
+        _known_user = [p for p in user_roster
+                       if p in shrunk_user_elo and p in opp_elo
+                       and not (untouchable_ids and p in untouchable_ids)]
         _known_opp  = [p for p in opponent.roster if p in shrunk_user_elo and p in opp_elo]
         _PRUNE_MIN_SIZE = 5
         _give = [p for p in _known_user if _vo(p) >= user_value[p] * 0.97]
@@ -1616,6 +1807,12 @@ class TradeService:
         if pinned_recv_set:
             for pid in _known_opp:
                 if pid in pinned_recv_set and pid not in recv_candidates:
+                    recv_candidates.append(pid)
+        # Backlog #2 — targets the opponent rosters survive the prune too, so a
+        # coveted player is always offered when this opponent holds him.
+        if target_ids:
+            for pid in _known_opp:
+                if pid in target_ids and pid not in recv_candidates:
                     recv_candidates.append(pid)
         give_candidates.sort(key=lambda p: _vo(p) - user_value[p], reverse=True)
         recv_candidates.sort(key=lambda p: user_value[p] - _vo(p), reverse=True)
@@ -1703,6 +1900,8 @@ class TradeService:
         trade_away_positions: list[str],
         pinned_give_players: list[str] | None,
         pinned_receive_players: list[str] | None = None,
+        untouchable_ids: set | None = None,
+        target_ids: set | None = None,
     ) -> list[TradeCard]:
         """Consensus-basis fallback cards for an opponent with NO rankings.
 
@@ -1736,9 +1935,18 @@ class TradeService:
             recv_pool = [p for p in recv_pool if p in pinned_recv_set]
         elif need_positions:
             recv_pool = [p for p in recv_pool if _pos(p) in need_positions]
+        # Backlog #2 — targets the opponent rosters survive the need-position
+        # filter, so a coveted player is offered even off-need.
+        if target_ids:
+            for pid in opponent.roster:
+                if pid in target_ids and pid not in recv_pool:
+                    recv_pool.append(pid)
         recv_pool.sort(key=seed_value, reverse=True)
 
         give_pool = list(user_roster)
+        # Backlog #2 — untouchables are never given away, consensus path too.
+        if untouchable_ids:
+            give_pool = [p for p in give_pool if p not in untouchable_ids]
         if pinned_set:
             give_pool = [p for p in give_pool if p in pinned_set]
         # "Where possible": positions the opponent needs first, best value first.
@@ -1755,8 +1963,8 @@ class TradeService:
             gvals = [seed_value(p) for p in give_ids]
             rvals = [seed_value(p) for p in recv_ids]
             v_max = max(gvals + rvals)
-            gv = package_value_v2(gvals, v_max)
-            rv = package_value_v2(rvals, v_max)
+            gv = package_value_v2(gvals, v_max, n_other=len(recv_ids))
+            rv = package_value_v2(rvals, v_max, n_other=len(give_ids))
             if gv <= 0 or rv <= 0:
                 return
             fairness = min(gv, rv) / max(gv, rv)

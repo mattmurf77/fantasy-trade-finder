@@ -14,5 +14,6 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `SuggestionCard` | Calculator: tappable fair-package suggestion |
 | `PlayerPickerModal` | Calculator: search + position-filter player picker |
 | `OutlookSheet` | Bottom sheet for team outlook selection |
+| `SendInSleeperButton` | Flagged-beta ("Send in Sleeper"): propose a trade to Sleeper directly; routes to connect / deep-link fallback |
 | `Toast` | Transient notification |
 | `TopBar` | Screen header |

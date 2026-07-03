@@ -330,6 +330,7 @@ export default function MatchesScreen() {
                   onAccept={() => handleAccept(item)}
                   onDecline={() => handleDecline(item)}
                   acting={dispMutation.isPending}
+                  showSend
                 />
               </View>
             )}
@@ -377,6 +378,7 @@ export default function MatchesScreen() {
                 <TradeCardComp
                   variant="swipe"
                   data={awaitingToTradeCardShape(item, activeLeague?.league_id)}
+                  showSend
                 />
               </View>
             )}

@@ -36,6 +36,7 @@ import {
 } from '../theme/chalkline';
 import { TickLabel, Button, Meter, Icon, Card } from '../components/chalkline';
 import TradeCardComp from '../components/TradeCard';
+import SendInSleeperButton from '../components/SendInSleeperButton';
 import Toast from '../components/Toast';
 import OutlookSheet from '../components/OutlookSheet';
 import LeaguePill from '../components/LeaguePill';
@@ -744,6 +745,17 @@ export default function TradesScreen({ navigation }: any) {
                   </Text>
                 </Pressable>
               ) : null}
+              {/* Send in Sleeper — flagged beta. Directly proposes THIS found
+                  trade to the opponent (skips the mutual-match wait). Hides
+                  itself when trade.send_in_sleeper is off. */}
+              <SendInSleeperButton
+                leagueId={topCard.league_id}
+                theirUserId={topCard.opponent_user_id}
+                givePlayerIds={topCard.give_player_ids}
+                receivePlayerIds={topCard.receive_player_ids}
+                compact
+                style={styles.sendInSleeper}
+              />
               {/* Check / X disposition buttons — same outcome as swiping
                   right/left. Both wire to advance() so deck-advance, haptics,
                   and the API call are identical to the swipe path. Disabled
@@ -1152,6 +1164,10 @@ const styles = StyleSheet.create({
   // Queue button — appears below the swipable card under the queue flag.
   // Chip construction: hairline border on ink-1; queued = ice border +
   // chalk text (active state).
+  sendInSleeper: {
+    alignSelf: 'center',
+    marginTop: space.sm,
+  },
   queueBtn: {
     alignSelf: 'center',
     marginTop: space.md,

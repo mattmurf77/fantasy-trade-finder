@@ -33,9 +33,19 @@ Domain terms used throughout the codebase. Add a term when new jargon appears.
 
 **Now/future value & outlook blend** — Tier 2 (`trade.outlook_blend`): every player has a win-now and a long-horizon age multiplier (per-position curves `_AGE_NOW_CURVE` / `_AGE_FUTURE_CURVE`); the user's outlook sets α (`outlook_alpha_*`, championship 1.00 → jets 0.10) and the value used is `α·now + (1−α)·future`. An *input* to surplus math, so it composes with the fairness gate — unlike the deleted post-hoc multiplier.
 
+**Inferred outlook** — Backlog #1 (`trade.outlook_infer`): the opponent equivalent of the above. Where the user's α comes from their declared outlook, each *opponent's* α is resolved per trade as declared (`league_preferences`) → **inferred** → `not_sure`. `infer_team_outlook` classifies a team's contend/rebuild window from roster shape — veteran value share, youth value share, and draft-pick-capital share — bucketing into contender / not_sure / rebuilder (the extremes championship/jets are reserved for self-declaration). The opponent's side of every candidate trade is then priced through their α, so the engine stops offering aging vets to rebuilders. Cards carry `match_context.opponent_outlook = {value, source}`.
+
 **Range-overlap fairness** — v2 fairness gate: each package's consensus value gets an uncertainty half-width from comparison counts (`range_base/√(1+n)`, value-weighted); a trade passes when the two sides' value intervals overlap OR the point ratio clears `fairness_threshold`. High-uncertainty players (rookies) pass more easily. The serialized `fairness_score` stays the point ratio (0–1).
 
 **Consensus-basis card** — v2 card generated for an opponent with NO real rankings (`basis="consensus"`): divergence math against fabricated Elos is noise, so the engine surfaces simple fair-by-consensus, roster-fit-oriented ideas instead. Clients label them "Fair-value idea". Divergence cards carry `basis="divergence"`.
+
+**Consensus basis (scoring)** — Pricing a trade purely on market-wide DynastyProcess consensus values (`elo_to_value` over the universal-pool seed), with NO personal Elo, NO league, and NO outlook blend. The bottom layer shared by every value surface; the open trade calculator (#27) scores entirely on this basis, while the logged-in engine layers personal Elo and league awareness on top.
+
+**Open trade calculator** — Backlog #27: the public, no-login `web/calculator.html` page + its `POST /api/calc/score` / `GET /api/calc/values` endpoints (flag `calc.open_calculator`). Scores any two asset lists on the consensus basis and renders a #6 verdict, ending on a "connect Sleeper" conversion CTA. The acquisition/SEO front door (the category head term "dynasty trade calculator"); the consensus-only sibling of the session-authed rescore endpoint.
+
+**Manual Trade Calculator (mobile demo)** — `TradeCalculatorScreen` in the mobile Trades stack (reached via the Calculator pill on the Trades tab). Hand-build a trade against a mock leaguemate and see a live dual-**board** fairness verdict + fair-offer suggestions. Runs entirely on seeded demo data (`mobile/src/data/tradeCalcMock.ts` + `utils/tradeCalcMath.ts`) — no league, no network; the server-authoritative replacement is planned in `docs/plans/manual-trade-calculator-plan.md`. Distinct from the **Open trade calculator** (consensus-only web tool).
+
+**Board** — In the calculator UI, one owner's personal ranking set: their value for every player ("Your board" vs "Their board"). A trade reads as agreeable only when both boards like it — the same mutual-gain rule the finder uses.
 
 **Likes-you card** — Tier 2 (`trade.likes_you`): a card whose mirror a league-mate already liked in the last 90 days (and which is still roster-valid). Flagged `likes_you: true`, boosted/pinned to the top of the deck (max 3 injections), rendered with the "👀 They're interested" pill.
 

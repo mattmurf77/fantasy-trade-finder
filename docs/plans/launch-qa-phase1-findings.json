@@ -1,0 +1,783 @@
+{
+  "summary": {
+    "raw": 50,
+    "deduped": 42,
+    "confirmed": 40,
+    "refuted": 2,
+    "unverified_passthrough": 0,
+    "by_severity": {
+      "P0": 1,
+      "P1": 3,
+      "P2": 12,
+      "P3": 24
+    }
+  },
+  "confirmed": [
+    {
+      "file": "backend/server.py",
+      "line": 4981,
+      "severity": "P0",
+      "category": "missing-auth / debug-toggle-shipping",
+      "title": "PUT /api/admin/config/<key> is completely unauthenticated",
+      "description": "admin_config_update() has no auth check of any kind \u2014 no CRON_SECRET header check, no session requirement, and the only @app.before_request hook (line 1031, _stash_device_and_touch_activity) does not guard /api/admin/*. In production on Render, anyone who discovers the URL can rewrite any model_config value (elo_k, trade K-factors, fairness weights, min_mismatch_score, etc.). The change is persisted to the database via set_config() and hot-reloaded into trade_service and ranking_service immediately (lines 4997-4998), silently corrupting Elo math and trade generation for every user. GET /api/admin/config (line 4966) likewise exposes the full tuning surface to anyone. The repo already has the protection pattern: /api/feedback/admin and /api/cron/* require X-Cron-Secret (see _CRON_SECRET at line 6116).",
+      "suggested_fix": "Apply the same X-Cron-Secret check used by /api/cron/* (the helper around backend/server.py:6132) to all three /api/admin/* routes, or add a before_request guard for the /api/admin/ prefix that returns 401 unless the header matches CRON_SECRET.",
+      "auditor": "hardcoded",
+      "auditors": [
+        "hardcoded",
+        "contract",
+        "security"
+      ],
+      "duplicates": [
+        "[contract] PUT /api/admin/config/<key> is completely unauthenticated and mutates live ranking/trade math",
+        "[security] PUT /api/admin/config/<key> mutates model config with no authentication"
+      ],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified backend/server.py: both /api/admin/config routes (lines 4966, 4981) are registered unconditionally with zero auth; the sole before_request hook (line 1031) never aborts; _require_cron_auth (line 6130) is used by cron/feedback-admin routes only. PUT persists via set_config and hot-reloads trade/ranking services, so anyone can silently corrupt live Elo/trade math in the Render production deployment exactly as claimed."
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 4951,
+      "severity": "P1",
+      "category": "debug-endpoint-shipping",
+      "title": "/api/debug/log is unauthenticated and dumps server logs to anyone",
+      "description": "debug_log() returns the last 200 in-memory log entries with no auth. The ring buffer captures log.info lines that include raw usernames and resolved Sleeper user_ids on every login (lines 4835, 4874-4881), league IDs, session-init parameters (line 5157), config-change records ('Config updated: key = value', line 5000), and full tracebacks from log.error calls. In production this gives any anonymous caller a live window into who is using the app and internal state. Because other endpoints key access off user_id values, leaking them materially helps impersonation.",
+      "suggested_fix": "Require the X-Cron-Secret header (same pattern as /api/cron/*) or disable the route when running against a non-SQLite DATABASE_URL.",
+      "auditor": "hardcoded",
+      "auditors": [
+        "hardcoded",
+        "contract",
+        "security"
+      ],
+      "duplicates": [
+        "[contract] GET /api/debug/log is unauthenticated and leaks server logs in production",
+        "[security] GET /api/debug/log exposes the in-memory log buffer with no auth"
+      ],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified /api/debug/log (backend/server.py:4951) has no auth, no env gating, and is registered unconditionally in code that deploys to Render; the _BufferHandler (lines 54-64) feeds it every trade_finder log line, including usernames/user_ids on login (4835, 4874-4881), session-init params (5157), and tracebacks. The impersonation angle is mildly overstated (session/init already trusts client-supplied user_id, and Sleeper IDs are publicly resolvable), but anonymous production log disclosure with user activity and internal state stands as a P1."
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 1967,
+      "severity": "P1",
+      "category": "API contract / unhandled error path",
+      "title": "Routes KeyError-500 on partially-built sessions hit during mobile's normal sign-in window (INIT-08 optimistic navigation)",
+      "description": "Mobile sign-in mints a session via POST /api/extension/auth whose payload has NO 'league', 'players', or 'trade_svcs' keys (backend/server.py:6921-6934). The INIT-08 two-phase flow then navigates to Main BEFORE /api/session/init completes (mobile/src/screens/LeaguePickerScreen.tsx:86-99, a 5-10s window on Render free tier, indefinite if init fails). Screens fire immediately: RankScreen's trio query has no session-ready gate (mobile/src/screens/RankScreen.tsx:76-78), TradesScreen/LeagueScreen queries gate only on local leagueId which is already set (TradesScreen.tsx:101). During this window: POST /api/rank3 hits sess[\"league\"] at server.py:1967 OUTSIDE its try block -> KeyError -> unhandled 500 and the user's ranking is dropped; GET /api/trades hits sess[\"trade_svc\"] at 3376; GET /api/league/summary sess[\"league\"] at 4359; GET /api/trades/matches at 3681; /api/trends/* at 6410/6460/6509-6511; /api/tiers/save at 2737; /api/tiers/copy-from-format at 2406; /api/rankings/reorder at 3017; /api/league/picks at 3177. These 500s carry Flask's default HTML body (only _SessionExpired has a JSON errorhandler, server.py:900), so mobile's ApiError parsing (mobile/src/api/client.ts:302) surfaces a bare 'HTTP 500'. The LeaguePickerScreen comment claims clients 'will see a 401 or session-not-initialized' \u2014 neither is true; the token is valid so no 401 fires. The disposition route was already null-guarded for exactly this failure class after a live bug (server.py:3925-3932, FB-01/'Action failed'), but the other routes were not.",
+      "suggested_fix": "Replace direct sess[\"league\"]/sess[\"players\"]/sess[\"trade_svc\"] indexing with .get() guards in every session-backed route and return a structured 409/400 JSON like {\"error\": \"session_not_initialized\", \"message\": ...} (the pattern already used at server.py:3943-3944); optionally add a generic Exception errorhandler that returns JSON so no route ever emits an HTML 500.",
+      "auditor": "contract",
+      "auditors": [
+        "contract"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified every load-bearing claim: /api/extension/auth (mobile signIn) builds a session without league/players/trade_svcs (server.py:6921-6938), _require_session only aliases trade_svc when trade_svcs exists (935-941) and raises only on missing token, rank3/trades/league-summary use bare sess[\"league\"]/sess[\"trade_svc\"] indexing outside try blocks (1967, 3376, 4359), the sole errorhandler is _SessionExpired (900) so KeyError yields an HTML 500, and LeaguePickerScreen navigates before the detached sessionInit completes with a comment that falsely promises a 401/\"not initialized\" path. The disposition route's own null-guard comment (3925-3932) confirms this exact failure class bit in production before; /api/trio succeeds during the window (sess[\"service\"] exists), so a submitted ranking really is dropped by the rank3 KeyError."
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 5748,
+      "severity": "P1",
+      "category": "auth / param validation",
+      "title": "Notifications endpoints trust client-supplied user_id \u2014 any authed user can read or mark-read another user's notifications",
+      "description": "GET /api/notifications docstring says user_id is 'cross-checked against the current session user' but the code never checks: uid = request.args.get(\"user_id\") or g_user_id (server.py:5748) and the rows for that uid are returned, leaking trade-match titles/bodies and metadata (partner names, players, league names) for any user_id. POST /api/notifications/read (5771) and /read-all (5794) likewise take uid from the body, letting any authenticated user mark another user's notifications read (write IDOR). Clients do send their own id \u2014 web/js/app.js:4287 (fetchNotifications), 4371 (read-all), 4406 (read); mobile/src/api/notifications.ts:7 \u2014 so enforcing the session user breaks nothing.",
+      "suggested_fix": "Ignore the client-supplied user_id (always use sess[\"user_id\"]), or return 403 when it differs from the session user, in list_notifications, read_notifications, and read_all_notifications.",
+      "auditor": "contract",
+      "auditors": [
+        "contract"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified server.py:5734-5800 \u2014 all three notification handlers use `uid = <client value> or g_user_id` with no comparison to sess[\"user_id\"], despite the docstring claiming a cross-check; _require_session (line 906) only validates the token, and the DB helpers in database.py:4331/4377 filter purely by the passed user_id. Sleeper user IDs are publicly enumerable, so read IDOR (notification titles/bodies/metadata) and write IDOR (mark-read) are both exploitable by any authenticated user; P1 stands."
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 4844,
+      "severity": "P2",
+      "category": "test-identifier-in-shipping-code",
+      "title": "Test-user login bypass (username prefix 'test_user_fp_') reachable in production",
+      "description": "/api/sleeper/user/<username> short-circuits the Sleeper API for any username starting with 'test_user_fp_' and returns a synthetic valid user object (lines 4844-4852). This is the literal prefix created by the dev-only scripts scripts/seed_test_user.py (TEST_USER_ID='test_user_fp_1') and scripts/seed_test_user_2.py ('test_user_fp_2'). There is no environment gate, so in the production deployment anyone can 'log in' as test_user_fp_1/test_user_fp_2 (or any new test_user_fp_* name), reaching the seeded accounts and their swipe/ranking data, and can mint unlimited phantom accounts that never existed on Sleeper \u2014 polluting users, rankings, and league data.",
+      "suggested_fix": "Gate the bypass behind a non-production check (e.g. only when DATABASE_URL is unset/sqlite, mirroring the _IS_PROD_ENV logic at line 6119-6125), or remove it and have seed scripts insert sessions directly.",
+      "auditor": "hardcoded",
+      "auditors": [
+        "hardcoded",
+        "security"
+      ],
+      "duplicates": [
+        "[security] test_user_fp_* login bypass ships in the production /api/sleeper/user route"
+      ],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified: backend/server.py:4844 unconditionally short-circuits for usernames starting with 'test_user_fp_' and returns a synthetic valid user \u2014 no env gate (the _IS_PROD_ENV check at 6121 only guards cron auth), and scripts/seed_test_user.py:32 / seed_test_user_2.py:36 use exactly those IDs, with /api/sleeper/leagues appending local DB leagues so the seeded accounts are fully reachable through the normal login UI in prod. Severity is overstated though: /api/session/init (line 5127) already accepts any client-supplied user_id with zero verification against Sleeper, so an attacker never needed this bypass to impersonate users or mint phantom accounts via direct API calls \u2014 the bypass only makes it possible through the shipped UI, making this a real but incremental hygiene/data-pollution issue rather than the sole auth barrier.",
+        "adjusted_severity": "P2"
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 5032,
+      "severity": "P2",
+      "category": "bug / misplaced-decorator",
+      "title": "/api/sleeper/players route decorator is attached to the wrong function \u2014 JSON error handler is dead code",
+      "description": "The @app.route(\"/api/sleeper/players\") decorator at line 5032 sits directly above the helper _ensure_sleeper_cache_populated() (line 5033), not above sleeper_players() (line 5088), which has no decorator and is never registered. The route only works on success because Flask auto-jsonifies the returned dict. On a cold instance (no disk cache) when the Sleeper bulk-players fetch fails (network error, Sleeper outage, unexpected payload shape causing raw.items() to fail), the exception propagates uncaught and Flask returns a generic HTML 500 instead of the intended jsonify({\"error\": ...}), 500 written in the now-dead sleeper_players() (lines 5088-5103). This is the first request every web client makes when picking a league after a Render cold start, so a Sleeper blip during cold start breaks the documented JSON error contract for the highest-traffic bootstrap endpoint.",
+      "suggested_fix": "Move the @app.route(\"/api/sleeper/players\") decorator from _ensure_sleeper_cache_populated down to sleeper_players() so the existing try/except returning JSON 500 is actually used; keep _ensure_sleeper_cache_populated as the undecorated shared helper.",
+      "auditor": "hardcoded",
+      "auditors": [
+        "hardcoded",
+        "errors"
+      ],
+      "duplicates": [
+        "[errors] /api/sleeper/players route decorator is attached to the wrong function \u2014 JSON error handler is dead code"
+      ],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Confirmed in backend/server.py: the route decorator at line 5032 decorates _ensure_sleeper_cache_populated, sleeper_players (line 5088) is never registered (no add_url_rule, no other decorator), and the only app.errorhandler is for _SessionExpired \u2014 so a cold-start fetch failure does return Flask's generic HTML 500 instead of the intended JSON error. Downgrading severity: every client caller (web app.js x3, mobile via /warm) only checks HTTP status and never parses the error JSON body, so user-visible behavior is unchanged; the real impact is a broken JSON error contract, lost error detail, and dead code.",
+        "adjusted_severity": "P2"
+      }
+    },
+    {
+      "file": "web/js/app.js",
+      "line": 1977,
+      "severity": "P2",
+      "category": "cross-client-invariant: tier Elo cutoffs",
+      "title": "Web rankings-table tier cutoffs hardcoded 20 points below backend tier_config.json",
+      "description": "_eloToTierLabel (web/js/app.js:1968-1985) hardcodes tier thresholds {elite:1580, starter:1460, solid:1350, depth:1190} for QB/TE 1QB and {elite:1700, starter:1580, solid:1460, depth:1350} for all other cases. The source of truth backend/tier_config.json (and the live /api/tier-config consumed by mobile/src/utils/tierBands.ts and web/positional-tiers.html:1557-1571, whose fallbacks match the JSON) uses mins {1600,1480,1370,1200} and {1720,1600,1480,1370} respectively. Every cutoff is 10-20 Elo lower on the web rankings table, so a player at e.g. Elo 1700-1719 is labeled 'Elite' in the web Rankings tab but 'Starter' on mobile, the positional-tiers page, and the extension (which gets tier from the API). The function's comment even claims it mirrors 'UNIFORM_ELO_TIER_THRESHOLDS / QB_TE_1QB_ELO_TIER_THRESHOLDS' - constants the tier_config.json header says were removed.",
+      "suggested_fix": "Make _eloToTierLabel read the live config (fetch /api/tier-config once and cache, like positional-tiers.html refreshTierConfig), or at minimum update the hardcoded fallbacks to match backend/tier_config.json mins (uniform 1720/1600/1480/1370; QB/TE 1QB 1600/1480/1370/1200) and fix the stale comment.",
+      "auditor": "crossclient",
+      "auditors": [
+        "crossclient"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified web/js/app.js:1968-1985 hardcodes thresholds 10-20 Elo below backend/tier_config.json mins, is live code (called from renderRankingsTable at line 2003, rendered at 2019), and the comment references removed constants; mobile and positional-tiers.html match the config, so the cross-client label divergence occurs. However it is display-only (tier label on the Rankings tab) with no effect on trade logic or stored data, so P2 fits better than P1.",
+        "adjusted_severity": "P2"
+      }
+    },
+    {
+      "file": "extension/content.css",
+      "line": 53,
+      "severity": "P2",
+      "category": "cross-client-invariant: tier colors",
+      "title": "Depth tier color: extension renders purple, web and mobile render orange",
+      "description": "extension/content.css:53-56 styles .ftf-tier-depth purple (background rgba(168,85,247,0.15), border #c084fc) which matches docs/cross-client-invariants.md:14 ('Depth | purple'). But mobile/src/theme/colors.ts:26 has tier depth = '#f97316' (orange, also used by TierBadge.tsx:50 rgba(249,115,22,...)) and web/positional-tiers.html:235-236 + 578 + 629 use #fb923c (orange). Users see the Depth tier as purple in the browser extension badge but orange in the web tiers page and the mobile app - and the depth orange also collides with the QB position color (#f97316 in colors.ts:18 / --qb in web/css/styles.css:19). Either web+mobile drifted from the documented purple, or the extension and the invariants doc were never updated to orange.",
+      "suggested_fix": "Pick one color for Depth. If orange is the current intent, update extension/content.css:53-56 to the orange family and change the Depth row in docs/cross-client-invariants.md from purple to orange (and consider differentiating it from the QB position orange); otherwise change mobile/src/theme/colors.ts:26 and web/positional-tiers.html:235-236/578/629 back to purple.",
+      "auditor": "crossclient",
+      "auditors": [
+        "crossclient"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified all cited locations: extension renders Depth purple (content.css:53-56, applied via content.js:219), while mobile (colors.ts:26 + TierBadge.tsx:50) and web positional-tiers.html (235/578/629) render it orange, contradicting the documented invariant (docs/cross-client-invariants.md says Depth=purple); the QB-orange collision (#f97316) is also confirmed. No theming/config layer reconciles them. Real drift, but the impact is cosmetic visual inconsistency only, so P2 rather than P1.",
+        "adjusted_severity": "P2"
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 5011,
+      "severity": "P2",
+      "category": "missing-auth",
+      "title": "/api/admin/engine-metrics exposes engine telemetry without auth",
+      "description": "admin_engine_metrics() returns aggregate trade-engine telemetry (impression volume, like/pass rates by league, match conversion) for any caller, including per-league breakdowns via ?league_id=. Read-only, so lower blast radius than the config PUT, but it is an /api/admin/* surface shipping with no guard and leaks usage data about real leagues.",
+      "suggested_fix": "Protect with the same CRON_SECRET header check as the other operator endpoints.",
+      "auditor": "hardcoded",
+      "auditors": [
+        "hardcoded",
+        "security"
+      ],
+      "duplicates": [
+        "[security] GET /api/admin/engine-metrics returns aggregate telemetry with no auth"
+      ],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified backend/server.py:5011-5029 has no auth call, the lone before_request hook (line 1031) only logs device/activity and explicitly skips auth, and sibling operator endpoints all use _require_cron_auth() (fails closed in prod) \u2014 so this /api/admin/* GET is uniquely unguarded. load_engine_telemetry (backend/database.py:2248) confirms per-league telemetry exposure via ?league_id=. Read-only aggregates with no PII keep it at P2 as filed."
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 4884,
+      "severity": "P2",
+      "category": "error-handling",
+      "title": "Sleeper 5xx during login is reported to the user as 'User not found'",
+      "description": "In sleeper_user(), the except urllib.error.HTTPError handler (lines 4884-4886) returns 404 {\"error\": \"User not found\"} for ANY HTTPError code, including 500/502/503 from Sleeper. When Sleeper has an outage, every login attempt tells the user their username does not exist (web shows the inline 'Username not found on Sleeper. Check spelling' message from app.js line 448/457), sending real users down a dead end of retyping a correct username instead of telling them to retry later.",
+      "suggested_fix": "Check e.code in the HTTPError handler: return 404 'User not found' only for 4xx codes; for 5xx return 502/503 with a message like 'Sleeper is unavailable \u2014 try again shortly' so the client can show an accurate error.",
+      "auditor": "errors",
+      "auditors": [
+        "errors"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified: _sleeper_get re-raises HTTPError for any 4xx/5xx, and sleeper_user's handler at server.py:4884-4886 returns 404 \"User not found\" with no e.code check, so Sleeper outages (5xx) present as a wrong-username error; web/js/app.js displays data.error inline with error styling on the username field. Minor inaccuracy in the finding (the exact client message comes from the data.error branch ~line 448, not the null-body line 457 message), but the consequence is the same misleading dead end. P2 is appropriate."
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 4897,
+      "severity": "P2",
+      "category": "error-handling",
+      "title": "League list fetch swallows Sleeper failures and returns [], shown to the user as 'No leagues found'",
+      "description": "sleeper_leagues() (lines 4897-4901) catches every exception from the Sleeper leagues call and silently substitutes an empty list, then returns 200 with []. The web client (app.js showLeagueScreen, line 524-527) renders 'No 2024 NFL leagues found for this account. Make sure you're using your Sleeper username (not email).' \u2014 a misleading dead end when the real cause is a Sleeper outage or transient network failure. Mobile's LeaguePickerScreen gets the same indistinguishable empty array. The user has no signal to retry and may conclude their account is wrong.",
+      "suggested_fix": "Distinguish failure from genuinely-empty: on exception return an error payload (e.g. 502 {\"error\": \"sleeper_unavailable\"}) or include a flag like {leagues: [], sleeper_error: true}, and update the web/mobile empty states to show a 'Couldn't reach Sleeper \u2014 retry' message when the flag is set.",
+      "auditor": "errors",
+      "auditors": [
+        "errors"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified backend/server.py:4897-4901 catches all exceptions from _sleeper_get (which raises on URLError/HTTPError/timeout) and returns 200 with []; web/js/app.js:524-526 and mobile LeaguePickerScreen.tsx:137 both render the misleading 'no leagues found / check username' empty state on that payload, and the web catch branch for real fetch errors never fires since the backend returns 200. Only mitigation is locally-stored leagues appended afterward, which doesn't help Sleeper-only users."
+      }
+    },
+    {
+      "file": "web/js/app.js",
+      "line": 668,
+      "severity": "P2",
+      "category": "frontend-crash",
+      "title": "selectLeague error paths dereference `el` without a null check \u2014 invited-league auto-select crashes to a blank screen on fetch failure",
+      "description": "selectLeague(idx, el) is invoked with el=null from the invited-league auto-select path (app.js line 542: setTimeout(() => selectLeague(idx, null), 200)). The happy path guards with `if (el)` (line 646), but every error path dereferences el unconditionally: lines 668-669 (player cache failure), 691-692 (roster fetch failure), 713-714 (roster not found), 745-746 (initSession failure) call el.classList.remove('loading') and el.querySelector('.league-item-arrow'). For a referred user whose league auto-selects, any of these failures throws TypeError inside the async function AFTER hideLeagueScreen()/hideInitOverlay() have run and BEFORE showLeagueScreen(user) re-renders \u2014 leaving the user on a blank page with only a toast, with the rejection unhandled.",
+      "suggested_fix": "Guard each error-path deref with `if (el)` (or extract a resetLeagueItem(el) helper that null-checks), matching the guard already used on line 646.",
+      "auditor": "errors",
+      "auditors": [
+        "errors"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified all four error paths in selectLeague (web/js/app.js lines 668-669, 691-692, 713-714, 745-746) dereference el without the null guard used on line 646, while the invited-league auto-select path (line 542, fed by the referral flow at line 1161) passes el=null. The TypeError fires after hideLeagueScreen/hideInitOverlay and before showLeagueScreen, and there is no global error/unhandledrejection handler in app.js or index.html, so the blank-screen consequence is real in shipping code."
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 5246,
+      "severity": "P2",
+      "category": "data-correctness",
+      "title": "Real leagues with no populated opponent rosters get fabricated demo opponents presented as trade partners",
+      "description": "In session_init, when the members list ends up empty (lines 5246-5263) \u2014 which happens for any REAL league where no opponent roster has players overlapping the value pool (pre-draft leagues, brand-new leagues, startup leagues before rosters fill) \u2014 the code injects four simulated opponents ('DynastyKing', 'RookieDrafter', 'VetHeavy', 'WRCorner') built from random chunks of the universal player pool, marked has_rankings=True. A normal user who connects a pre-draft dynasty league will see trade suggestions against fake managers holding players nobody in their league owns, with no indication these are simulated. This silent wrong-data path is indistinguishable from real output.",
+      "suggested_fix": "Restrict the simulated-opponent fallback to the demo league (league_id == 'league_demo' or the demo session path); for real leagues with zero eligible opponents, return a session with an empty members list and have the trade endpoints surface an explicit 'no opponents with rosters yet' state.",
+      "auditor": "errors",
+      "auditors": [
+        "errors"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified the `if not members:` fallback in session_init has no demo/league_id guard (the adjacent comment claiming it is \"demo-only\" is false \u2014 the actual demo uses /api/session/demo + _build_demo_league), that pre-draft real leagues reach it because both clients filter empty rosters and DB members are empty for new leagues, and that the injected has_rankings=True members are consumed by _run_trade_job/trade_service.generate_trades as first-priority ranked opponents with no simulated marker. The consequence \u2014 fake trade partners shown to real users \u2014 is real; P2 is appropriate given the edge-case trigger."
+      }
+    },
+    {
+      "file": "config/features.json",
+      "line": 30,
+      "severity": "P2",
+      "category": "feature-flags",
+      "title": "trade_math.star_tax=true is a silent no-op while trade_engine.v2/v3 are enabled",
+      "description": "qb_tax_adjustment/star_tax_adjustment/roster_clogger_adjustment are only invoked in the legacy generation path (backend/trade_service.py:2243-2249). With trade_engine.v2=true (trade_service.py:1043) the v2 path runs instead and explicitly skips all three taxes (NOTE at trade_service.py:1668: 'no qb_tax / star_tax / roster_clogger in the v2 path'), and the v3 optimizer (backend/trade_optimizer.py) never calls them either. star_tax was deliberately enabled in commit efb033a when the legacy engine was live; the v2/v3 rebuild silently disabled it while features.json and docs/config-reference.md still imply it is active. Operator-visible consequence: a flag flagged 'true' does nothing, and flipping trade_math.qb_tax or trade_math.roster_clogger to true would also do nothing \u2014 misleading config surface during launch tuning.",
+      "suggested_fix": "Either port the star-tax (and other trade_math) adjustments into the v2/v3 composite scoring, or set trade_math.star_tax to false in config/features.json with a comment that trade_math.* taxes apply only to the legacy engine, and note the supersession in docs/config-reference.md.",
+      "auditor": "flags",
+      "auditors": [
+        "flags"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified all three tax adjustments are called only at trade_service.py:2243-2249 inside legacy _generate_for_pair, which is unreachable because generate_trades early-returns into _generate_trades_v2 when trade_engine.v2=true (it is, in config/features.json); the v2 path's NOTE at line 1668 explicitly skips them and trade_optimizer.py (v3) has zero references. With trade_math.star_tax=true in features.json and docs/config-reference.md:23 calling trade_math.* flags self-describing, the flag is a confirmed silent no-op with a misleading operator-facing config surface, matching the finding's stated consequence."
+      }
+    },
+    {
+      "file": "mobile/src/components/OutlookSheet.tsx",
+      "line": 30,
+      "severity": "P2",
+      "category": "cross-client-invariant: team outlook modes",
+      "title": "Mobile outlook picker missing 'not_sure' - only 4 of the 5 canonical modes",
+      "description": "The canonical outlook set is championship/contender/rebuilder/jets/not_sure (docs/cross-client-invariants.md:100, backend/database.py:3776 _VALID_OUTLOOKS, backend/server.py:4309). The web picker has all 5 (web/js/app.js:4021-4025, not_sure labeled 'No Adj.'). The mobile OUTLOOKS array (mobile/src/components/OutlookSheet.tsx:25-55) offers only championship, contender, rebuilder, jets - there is no not_sure option, and the sheet defaults to 'contender' (line 61). A mobile user can never select the neutral 50/50 blend (outlook_alpha_not_sure) and, once they set an outlook, cannot return to it; web users in not_sure who edit on mobile silently lose it.",
+      "suggested_fix": "Add a fifth entry { key: 'not_sure', ... } to OUTLOOKS in OutlookSheet.tsx matching the web's 'Not Sure / No Adj.' option, and consider defaulting the initial selection to 'not_sure' instead of 'contender' to match the backend's neutral fallback.",
+      "auditor": "crossclient",
+      "auditors": [
+        "crossclient"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified OutlookSheet.tsx OUTLOOKS has only 4 modes while the canonical 5-mode set (incl. not_sure) is enforced in backend/database.py:3776, server.py:4309, offered in web/js/app.js OUTLOOK_META, and even present in mobile's own Outlook type (api/league.ts:24). OutlookSheet is the sole mobile outlook picker (used in TradesScreen.tsx with an Edit button), so a mobile user genuinely cannot select or return to not_sure. Only nit: the silent-loss scenario requires the user to tap another option (initial='not_sure' is preserved on a no-touch save), and the consumer is TradesScreen not LeagueScreen \u2014 neither changes the verdict; P2 stands."
+      }
+    },
+    {
+      "file": "docs/cross-client-invariants.md",
+      "line": 55,
+      "severity": "P2",
+      "category": "docs drift: enum vocabulary",
+      "title": "swipe_decisions.decision_type has a third value 'disposition' not in the invariants doc or data dictionary",
+      "description": "docs/cross-client-invariants.md:55 and docs/data-dictionary.md:62-67 document decision_type as only 'rank' | 'trade' ('Hard-coded - search both before renaming'). The backend now also writes decision_type='disposition' rows from the match-disposition Elo signals (backend/database.py:3648 and 3732-3758; replayed generically by ranking_service.py:434-441 and save_trade_swipes' docstring at database.py:1949 acknowledges it). Anyone following the invariants doc when renaming/filtering decision types (or writing analytics against swipe_decisions) will miss the disposition rows - this is exactly the kind of enum the doc claims to be the source of truth for.",
+      "suggested_fix": "Add 'disposition' to the Decision type strings section of docs/cross-client-invariants.md and to the swipe_decisions section of docs/data-dictionary.md (noting it carries trade_k_accept / trade_k_decline_correction k-factors), and update the inline comment at backend/database.py:110.",
+      "auditor": "crossclient",
+      "auditors": [
+        "crossclient"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified the third enum value ships: the match-disposition endpoint in backend/server.py (~line 3953 calls record_match_disposition, ~line 4049 persists each elo_signal via save_trade_swipes with decision_type='disposition'), and database.py's save_trade_swipes docstring (line 1949) explicitly documents 'trade' | 'disposition'. Meanwhile docs/cross-client-invariants.md line 55 lists only 'rank', 'trade' (\"Hard-coded \u2014 search both before renaming\"), docs/data-dictionary.md documents only the two values, and the schema comment at database.py:110 still says # 'rank' | 'trade' \u2014 so anyone renaming/filtering by the documented enum would miss disposition rows that ranking_service.py replays generically. P2 docs-drift severity is appropriate."
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 3161,
+      "severity": "P3",
+      "category": "response field mismatch",
+      "title": "/api/rookies returns raw DB columns (player_id/full_name) but both clients read id/name \u2014 every rookie renders as '?'",
+      "description": "GET /api/rookies serializes load_rookies() rows untouched (backend/server.py:3154-3161; database.py:4103 returns dict(r._mapping) with players_table columns player_id, full_name \u2014 see database.py:234-235). The web rookie board reads r.name (web/js/app.js:2275 rookieRowHTML \u2014 escapeHtml(r.name || '?')) and mobile reads r.id as the React key and r.name for display (mobile/src/components/RookieDraftBoardSheet.tsx:129-133). Neither field exists, so every row would render '?' with undefined keys. Mitigating: both consumers are currently unreachable \u2014 nothing in web/*.html or app.js calls openRookieBoard(), and RookieDraftBoardSheet is not imported by any screen \u2014 so this is latent until the rookie board ships. Contrast: web/positional-tiers.html:2671 correctly maps p.full_name -> name when consuming the sibling /api/players route.",
+      "suggested_fix": "In get_rookies_route, map rows to the client shape ({id: player_id, name: full_name, ...}) before grouping, or update both consumers to read full_name/player_id; also either wire up or remove the dead rookie-board entry points.",
+      "auditor": "contract",
+      "auditors": [
+        "contract"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified every claim: /api/rookies returns raw player_id/full_name rows (server.py get_rookies_route + database.py load_rookies dict(r._mapping)), while web rookieRowHTML reads r.name and RookieDraftBoardSheet reads r.id/r.name with no mapping layer \u2014 the mismatch is real. However, both consumers are confirmed unreachable (no caller of openRookieBoard in any HTML/JS; RookieDraftBoardSheet imported nowhere), so the '?' rendering cannot occur today; it's a latent break that fires the moment the rookie board is wired up, warranting P3 not P2.",
+        "adjusted_severity": "P3"
+      }
+    },
+    {
+      "file": "web/js/app.js",
+      "line": 1212,
+      "severity": "P3",
+      "category": "client/route wiring",
+      "title": "Web demo flow stores the demo session token under a key apiFetch never reads \u2014 demo session is orphaned",
+      "description": "startDemoMode stores the /api/session/demo token in sessionStorage['ftf_session_token'] (web/js/app.js:1212), but apiFetch only ever attaches sessionToken read from localStorage['fumble_session_token'] (app.js:270-272, 205). The only other reference to ftf_session_token is its removal (app.js:1241) \u2014 it is never read back. After the forced reload (app.js:1231), boot() runs initSession() against league_id 'league_demo', which fetches /api/sleeper/rosters/league_demo; the backend treats non-digit ids as local leagues (server.py:4922-4925) and returns an empty list, so the carefully seeded demo session (server.py:7505+, with demo players/services bound to the unused token) is abandoned and the demo experience breaks. Latent today because landing.try_before_sync is false in config/features.json (route 404s, link hidden), but it will break the moment the flag flips. Mobile's flow is correct by contrast (auth.ts:341 saves the token via setSessionToken).",
+      "suggested_fix": "In startDemoMode, store the token where apiFetch reads it (sessionToken = body.token; localStorage.setItem(LS_TOKEN, body.token)) and have boot() skip initSession when demo mode is active, trusting the seeded session.",
+      "auditor": "contract",
+      "auditors": [
+        "contract"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified the token is written to sessionStorage['ftf_session_token'] (app.js:1212) and never read \u2014 apiFetch only uses localStorage['fumble_session_token'] \u2014 and that boot() has no demo branch, so the post-reload initSession fetches rosters for 'league_demo', which server.py:4922 serves from the DB where the demo league (in-memory only, server.py:7549-7550) does not exist, causing initSession to fail and the seeded session to be abandoned. The bug is real but entirely gated behind landing.try_before_sync=false (link hidden, endpoint 404s), so it cannot affect any user until the flag flips \u2014 latent defect, P3 not P2.",
+        "adjusted_severity": "P3"
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 7206,
+      "severity": "P3",
+      "category": "auth",
+      "title": "POST /api/feature-flags/reload has no authentication",
+      "description": "feature_flags_reload_route() force-reloads feature flags from config/features.json + FTF_FLAGS env on any anonymous POST. The docstring explicitly says 'No auth check for v1'. While it only re-reads files the server already has, an unauthenticated state-changing endpoint lets any visitor trigger a flag reload at will (e.g. to race a flag flip, or as a cheap repeated side-effect). Privileged toggles should not be world-callable.",
+      "suggested_fix": "Add _require_cron_auth() to feature_flags_reload_route so only the operator (holding CRON_SECRET) can force a reload.",
+      "auditor": "security",
+      "auditors": [
+        "security",
+        "flags"
+      ],
+      "duplicates": [
+        "[flags] POST /api/feature-flags/reload is unauthenticated"
+      ],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified the route at server.py:7206 has no auth and no before_request middleware covers it, and it ships in the production Flask app \u2014 the factual claim stands. However, reload() only re-reads operator-controlled config/features.json + FTF_FLAGS env under a lock (attacker cannot set values, and the flag map is already public via GET /api/feature-flags), so the worst case is forcing a no-op cache refresh; real but a hardening nit, not a P2 auth hole.",
+        "adjusted_severity": "P3"
+      }
+    },
+    {
+      "file": "tmp_check_db.py",
+      "line": 0,
+      "severity": "P3",
+      "category": "scratch-file-cleanup",
+      "title": "Root-level scratch scripts ship in the deploy image (tmp_check_db.py, tmp_check_db2.py, dump_mismatches.py, reorganize_project.py)",
+      "description": "Four one-off scripts live at the repo root: tmp_check_db.py, tmp_check_db2.py, dump_mismatches.py, reorganize_project.py. Nothing in backend/, web/, mobile/src/, extension/, or run.py imports them (verified by grep), so they are inert, but the Render deploy (push main \u2192 buildCommand builds the whole repo) includes them. tmp_check_db2.py also hardcodes two real Sleeper league IDs ('1101407304802574336', '1312076055586050048') and dumps member rosters; dump_mismatches.py performs network fetches if ever executed. Cleanup/cosmetic risk only since nothing imports them.",
+      "suggested_fix": "Delete them or move them into scripts/ (the established dev-only tools dir) so the deploy image and repo root stay clean.",
+      "auditor": "hardcoded",
+      "auditors": [
+        "hardcoded"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "All four scripts exist at the repo root and are git-tracked, so they ship in the Render deploy (render.yaml/build.sh do not prune the tree); grep confirms nothing in backend/, web/, mobile/src/, extension/, run.py, or scripts/ imports them; tmp_check_db2.py line 8 hardcodes the two stated Sleeper league IDs and dump_mismatches.py fetches from GitHub if run. The finding's claims and its self-assessed cleanup-only consequence are accurate, and P3 is the right severity."
+      }
+    },
+    {
+      "file": "docs/api-reference.md",
+      "line": 81,
+      "severity": "P3",
+      "category": "docs drift",
+      "title": "api-reference.md missing three implemented routes: GET /api/trades/awaiting, POST /api/tiers/copy-from-format, GET /api/feedback/admin",
+      "description": "Route-by-route diff of docs/api-reference.md against the 88 @app.route declarations in backend/server.py shows three shipped, client-consumed routes absent from the doc: GET /api/trades/awaiting (server.py:3821, consumed by mobile/src/api/trades.ts:266), POST /api/tiers/copy-from-format (server.py:2372, consumed by mobile/src/api/league.ts:139 and web/positional-tiers.html:2759), and GET /api/feedback/admin (server.py:2640 \u2014 only the PUT \u2026/status sibling is documented at docs line 195). Everything else in the doc maps to a live route; no documented-but-missing routes found.",
+      "suggested_fix": "Add the three routes to docs/api-reference.md (trades section, tiers section, and ops/admin section respectively) per the repo's docs-sync convention in CLAUDE.md.",
+      "auditor": "contract",
+      "auditors": [
+        "contract"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified all three routes exist at the cited lines in backend/server.py (2372, 2640, 3821) with live client callers (mobile/src/api/trades.ts:270, mobile/src/api/league.ts:139, web/positional-tiers.html:2759), and grep confirms none appear in docs/api-reference.md \u2014 only the PUT feedback/admin/<id>/status sibling at doc line 195. CLAUDE.md mandates keeping api-reference.md in sync with server.py routes, so this is real docs drift; P3 is correct."
+      }
+    },
+    {
+      "file": "mobile/src/api/CLAUDE.md",
+      "line": 12,
+      "severity": "P3",
+      "category": "docs drift",
+      "title": "mobile/src/api/CLAUDE.md says flags.ts wraps '/api/flags' \u2014 actual endpoint is /api/feature-flags",
+      "description": "The module table in mobile/src/api/CLAUDE.md lists flags.ts as wrapping '/api/flags', but flags.ts calls GET /api/feature-flags (mobile/src/api/flags.ts:19), matching the backend route at backend/server.py:7193. No /api/flags route exists, so a developer following the doc would look up a 404 path.",
+      "suggested_fix": "Change the flags.ts row in mobile/src/api/CLAUDE.md to reference /api/feature-flags.",
+      "auditor": "contract",
+      "auditors": [
+        "contract"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified all three legs: mobile/src/api/CLAUDE.md's flags.ts row cites '/api/flags', but flags.ts:19 fetches '/api/feature-flags', and backend/server.py only registers /api/feature-flags (line 7193) and /api/feature-flags/reload (7206) \u2014 no /api/flags route exists. Genuine docs drift; the only inaccuracy in the finding is the line number (13, not 12). P3 is appropriate."
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 5050,
+      "severity": "P3",
+      "category": "error-handling",
+      "title": "Cold-start bulk player fetch bypasses the shared SSL context fallback",
+      "description": "_ensure_sleeper_cache_populated calls urllib.request.urlopen(req, timeout=45) at line 5050 WITHOUT context=_SSL_CTX, unlike every other Sleeper call which goes through _sleeper_get and its SSL-verification fallback (lines 392-425). On hosts where _make_ssl_context had to fall back to an unverified context (the macOS python.org case the code explicitly handles), the cold ~5MB player fetch will always raise SSLCertVerificationError, making the player DB impossible to populate even though all other Sleeper calls work.",
+      "suggested_fix": "Pass context=_SSL_CTX to the urlopen call at line 5050, or route the bulk fetch through _sleeper_get with timeout=45.",
+      "auditor": "errors",
+      "auditors": [
+        "errors"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified line 5050 of backend/server.py calls urlopen without context=_SSL_CTX while _sleeper_get (lines 392-425) uses the shared context plus an SSLCertVerificationError retry fallback; all callers of _ensure_sleeper_cache_populated only have generic except-Exception handlers with no SSL retry. On a broken-cert host (the macOS case _make_ssl_context explicitly handles), the cold bulk fetch deterministically fails while other Sleeper calls succeed, so the stated consequence is real. P3 is appropriate since production Linux hosts have working cert stores and the issue only hits cold starts on broken-cert machines."
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 3294,
+      "severity": "P3",
+      "category": "input-validation",
+      "title": "Unvalidated float() cast of fairness_threshold in /api/trades/generate can 500 on malformed body",
+      "description": "Line 3294 does float(body.get(\"fairness_threshold\", default_fairness)) with no try/except. A body containing fairness_threshold: null or a non-numeric string raises TypeError/ValueError, producing an unhandled 500 (HTML) instead of a 400 JSON error. Shipping clients always send a number, so blast radius is low, but it breaks the route's JSON error contract for any third-party or future caller.",
+      "suggested_fix": "Wrap the cast in try/except (TypeError, ValueError) and return jsonify({\"error\": \"fairness_threshold must be a number\"}), 400, mirroring the pattern used at lines 2662-2668.",
+      "auditor": "errors",
+      "auditors": [
+        "errors"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified line 3294 in backend/server.py performs an unguarded float() on the request body value; fairness_threshold: null yields float(None) -> TypeError and a non-numeric string yields ValueError. The only registered Flask error handler is for _SessionExpired (401), so the exception surfaces as a default HTML 500, violating the route's JSON contract, and lines 2661-2668 confirm the repo's own try/except cast convention that this line skips. P3 is appropriate given shipping clients always send a number."
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 392,
+      "severity": "P3",
+      "category": "resilience",
+      "title": "No retry/backoff on any Sleeper proxy call \u2014 a single transient blip fails the user request",
+      "description": "_sleeper_get (line 392) performs exactly one attempt; there is no retry for transient URLError/timeout. Downstream consequences compound with the misleading error mapping: a one-off blip during login becomes 'User not found' (line 4884), during league listing becomes an empty league list (line 4898), and during roster fetch becomes a 500 the web client toasts as 'Failed to fetch roster data'. The mobile client only retries backend 502/503/504, not the 500s these handlers return, so transient Sleeper failures are never absorbed anywhere in the stack. Note the ADP endpoint and DynastyProcess fetch already degrade gracefully \u2014 the interactive-path calls (user, leagues, rosters, league_users) do not.",
+      "suggested_fix": "Add a small retry loop in _sleeper_get (e.g. 2 retries with 300ms/900ms backoff) for URLError, timeout, and 5xx HTTPError on idempotent GETs, keeping the existing logging.",
+      "auditor": "errors",
+      "auditors": [
+        "errors"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified every link of the chain: _sleeper_get (backend/server.py:392) makes exactly one attempt \u2014 its only retry is an SSL-verification fallback, not for URLError/timeout/5xx; the login handler (line 4884) maps any HTTPError including Sleeper 5xx to 404 \"User not found\"; sleeper_leagues (4898) swallows all exceptions into an empty 200 list; rosters/league_users return 500 on failure. Mobile routes through these backend proxies (mobile/src/api/sleeper.ts) and its retry whitelist is exactly {502, 503, 504} (mobile/src/api/client.ts:147), so the backend's 500/404/200-empty responses are never retried, and the web toast at web/js/app.js:690 matches the claim. P3 resilience severity is appropriate."
+      }
+    },
+    {
+      "file": "backend/server.py",
+      "line": 6148,
+      "severity": "P3",
+      "category": "auth",
+      "title": "CRON_SECRET compared with != instead of constant-time hmac.compare_digest",
+      "description": "_require_cron_auth() validates the X-Cron-Secret header with `if sent != _CRON_SECRET: abort(401)`. A plain != string comparison short-circuits on the first differing byte, leaking timing information that can theoretically be used to recover the secret byte-by-byte. This guard protects all /api/cron/* and /api/feedback/admin* routes, so it is the single auth check for every privileged endpoint.",
+      "suggested_fix": "Replace the comparison with hmac.compare_digest(sent, _CRON_SECRET) (import hmac at module top) for constant-time comparison.",
+      "auditor": "security",
+      "auditors": [
+        "security"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified line 6148 uses plain `!=` for the X-Cron-Secret check with no hmac/compare_digest anywhere in server.py, and _require_cron_auth() is the only auth on all /api/cron/* and /api/feedback/admin* routes in production (Render). The timing-leak consequence is theoretical over a jittery network but the code defect and best-practice fix are real; P3 is the right severity."
+      }
+    },
+    {
+      "file": "extension/manifest.json",
+      "line": 29,
+      "severity": "P3",
+      "category": "extension",
+      "title": "Shipped extension manifest includes localhost http host_permissions",
+      "description": "host_permissions lists http://localhost:5000/* and http://127.0.0.1:5000/* alongside the production https origins. These are dev-only targets baked into the distributable MV3 manifest. They broaden the extension's declared host access (and, since background.js only ever talks to the https onrender.com API_BASE, are unused in prod), which is an unnecessary permission expansion users must approve and a reviewer red flag.",
+      "suggested_fix": "Remove the two http://localhost / http://127.0.0.1 entries from host_permissions before packaging the production build; keep them only in a local dev manifest variant.",
+      "auditor": "security",
+      "auditors": [
+        "security"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified manifest.json lines 33-34 declare http://localhost:5000/* and http://127.0.0.1:5000/* while background.js/popup.js hardcode the https onrender.com API_BASE (localhost only in comments), and no build step strips the entries \u2014 build.sh never touches the extension. The extension is only distributed unpacked today (v0.1.0, README documents Load-unpacked only), so impact is prospective, which fits the already-minimal P3 severity."
+      }
+    },
+    {
+      "file": "extension/manifest.json",
+      "line": 24,
+      "severity": "P3",
+      "category": "extension",
+      "title": "Extension requests 'tabs' permission broader than its actual use",
+      "description": "The manifest requests the 'tabs' permission. background.js uses chrome.tabs.query with explicit sleeper.com/sleeper.app URL filters and chrome.tabs.sendMessage to broadcast to those tabs \u2014 messaging content scripts in already-matched hosts does not require the sensitive 'tabs' permission (which grants access to tab URL/title/favicon across all tabs). Requesting 'tabs' exposes browsing data the extension does not need and triggers a broader consent prompt.",
+      "suggested_fix": "Verify whether any code reads tab.url/title outside the host-matched content-script context; if not, drop 'tabs' from permissions (sendMessage/query against already-granted host_permissions works without it) to follow least privilege.",
+      "auditor": "security",
+      "auditors": [
+        "security"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Confirmed in extension/manifest.json:27 that 'tabs' is requested, while all chrome.tabs usage (background.js:74-98, popup.js:93-96) only needs tab.url for sleeper.com/sleeper.app tabs already covered by host_permissions, which populate tab.url and enable url-filtered tabs.query without the 'tabs' permission. popup.js reads tab.url on the unfiltered active tab but already handles undefined gracefully and only acts on sleeper URLs, so dropping 'tabs' is safe and the over-broad permission is a genuine least-privilege issue. P3 is appropriate."
+      }
+    },
+    {
+      "file": "config/features.json",
+      "line": 32,
+      "severity": "P3",
+      "category": "feature-flags",
+      "title": "trade_math.human_explanations=true produces no 'reasons' on v2/v3 trade cards",
+      "description": "The 'reasons' list is only populated by the legacy-path tax adjustment functions (backend/trade_service.py:2241-2269). v2/v3 cards are constructed without reasons (trade_service.py:1674-1686, trade_optimizer.py _card), so the flag gate at backend/server.py:3236-3243 ('if reasons:') never fires under the enabled v2/v3 engines. Web (web/js/app.js:3250) and mobile (mobile/src/components/TradeCard.tsx:58) check this flag to render explanations that the active engine never emits \u2014 the flag is effectively inert, with explanation duty silently moved to the ungated 'narrative' field.",
+      "suggested_fix": "Document that trade_math.human_explanations only affects legacy-path reasons (v2/v3 use the ungated narrative field), or have v2/v3 populate reasons (e.g. waiver-slot cost, sweetener rationale) behind the flag; otherwise flip it to false alongside the other legacy trade_math flags.",
+      "auditor": "flags",
+      "auditors": [
+        "flags"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified end-to-end: with trade_engine.v2=true the legacy path that populates reasons (trade_service.py:2241-2269) is unreachable (early return at line 1043), v2/v3 card constructors never set reasons (trade_optimizer.py has zero references), so the server gate at server.py:3236 ('if reasons:') and both client flag checks can never fire \u2014 trade_math.human_explanations is inert exactly as described. P3 is appropriate since the ungated narrative field covers explanations and there is no user-facing breakage."
+      }
+    },
+    {
+      "file": "backend/feature_flags.py",
+      "line": 89,
+      "severity": "P3",
+      "category": "feature-flags",
+      "title": "trade.three_team flag is dead \u2014 declared and documented but checked nowhere",
+      "description": "FLAG_KEYS declares trade.three_team and docs/config-reference.md says it gates '3-team cycle trades ... in trade_optimizer.py', but no code anywhere (backend/, web/, mobile/src/, extension/) checks FLAGS.trade_three_team or is_enabled('trade.three_team'), and trade_optimizer.find_three_team_cycles (trade_optimizer.py:555) is exported but never called by shipping code. Flipping the flag to true in features.json would do nothing \u2014 not even backend generation \u2014 despite the doc implying it enables the feature. The inline comment only concedes 'no client surface yet', understating that there is no backend wiring either.",
+      "suggested_fix": "Either wire find_three_team_cycles into generate_trades behind the flag, or update backend/feature_flags.py:89 and docs/config-reference.md to state the flag is reserved/unwired so an operator doesn't enable it expecting cycles to appear.",
+      "auditor": "flags",
+      "auditors": [
+        "flags"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Grepped all shipping code (backend/, web/, mobile/src/, extension/): trade.three_team is never checked via FLAGS or is_enabled \u2014 only the declaration and two comments reference it \u2014 and find_three_team_cycles (trade_optimizer.py:555) is called only from tests; trade_service.py imports only generate_pair_trades_v3. The consequence is real: docs/config-reference.md:42 and even living-memory/NEXT.md:41 (\"Backend is live behind trade.three_team=false\") claim the backend is wired, so an operator flipping the flag would expect cycles that cannot appear."
+      }
+    },
+    {
+      "file": "docs/config-reference.md",
+      "line": 37,
+      "severity": "P3",
+      "category": "documentation",
+      "title": "config-reference.md is stale on three points: Tier-3 flag state, model_config seeding, and missing keys",
+      "description": "Three contradictions with current code/config: (1) lines 37 and 95 say Tier-3 flags are 'landing imminently, default **false**', but trade_engine.v3 has been true in config/features.json (line 43) since the d1d1bea/d1318cc Tier-3 commits \u2014 the doc misstates which engine is live in production. (2) Line 52 claims the v2/Tier-2 keys are 'not yet seeded into the model_config table' and untunable via the admin API, but backend/database.py:612-647 (_MODEL_CONFIG_DEFAULTS) seeds every one of them, including fuzzy_match_tau (database.py:630). (3) The Tier-3 key table omits v3_diversity_max_overlap, consensus_score_scale, fit_consensus_weight, and fit_divergence_weight, all present in trade_service._DEFAULT_CFG (trade_service.py:155-162) and DB-seeded. CLAUDE.md designates this doc as the config source of truth, so an operator tuning prod via it gets wrong answers.",
+      "suggested_fix": "Update docs/config-reference.md: mark trade_engine.v3 as enabled/landed, delete or rewrite the 'not yet seeded' paragraph (all keys are now in _MODEL_CONFIG_DEFAULTS and admin-tunable), and add the four missing model_config keys to the tables.",
+      "auditor": "flags",
+      "auditors": [
+        "flags"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified all three contradictions directly: config/features.json sets trade_engine.v3 to true while the doc says Tier-3 defaults false; database.py's _MODEL_CONFIG_DEFAULTS (lines 554-648) seeds every v2/Tier-2 key including fuzzy_match_tau, contradicting the doc's 'not yet seeded' paragraph; and v3_diversity_max_overlap, consensus_score_scale, fit_consensus_weight, fit_divergence_weight exist in both _DEFAULT_CFG and the DB seed list but are absent from the doc's tables. P3 documentation severity is correct."
+      }
+    },
+    {
+      "file": "mobile/src/state/CLAUDE.md",
+      "line": 6,
+      "severity": "P3",
+      "category": "documentation",
+      "title": "mobile/src/state/CLAUDE.md names a nonexistent /api/flags endpoint and denies the zustand dependency",
+      "description": "Line 6 says flags are 'fetched from /api/flags' \u2014 the real endpoint is GET /api/feature-flags (backend/server.py:7193, mobile/src/api/flags.ts:19); /api/flags does not exist. Line 9 says 'No Redux/Zustand \u2014 keep it Context until pain demands more', but useFeatureFlags.ts:1 imports create from 'zustand'. Future contributors following this doc would target a 404 endpoint or re-implement state in Context.",
+      "suggested_fix": "Correct the endpoint to /api/feature-flags and update the state-management note to reflect the zustand store in useFeatureFlags.ts.",
+      "auditor": "flags",
+      "auditors": [
+        "flags"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified both claims: mobile/src/state/CLAUDE.md line 6 references /api/flags, but the only backend route is /api/feature-flags (backend/server.py:7193) and the client (mobile/src/api/flags.ts:19) calls /api/feature-flags; no /api/flags alias exists. Line 9 denies Zustand use, yet useFeatureFlags.ts:1 imports create from 'zustand' and builds a zustand store. Doc-only inaccuracy with plausible contributor-misleading consequence; P3 severity is appropriate."
+      }
+    },
+    {
+      "file": "mobile/src/theme/colors.ts",
+      "line": 27,
+      "severity": "P3",
+      "category": "cross-client-invariant: tier colors",
+      "title": "Bench tier color drift: mobile silver #94a3b8 vs web/extension gray #7a7f96",
+      "description": "Mobile renders the Bench tier with '#94a3b8' (slate-400, the theme's 'silver') at mobile/src/theme/colors.ts:27, while the extension uses gray #7a7f96 (extension/content.css:58-61) and the web tiers page uses #7a7f96 / #6b7280 (web/positional-tiers.html:579, 630). The invariants doc says Bench = gray. Visibly lighter chip on mobile than web/extension; low blast radius but it is a listed invariant.",
+      "suggested_fix": "Change mobile colors.tier.bench to '#7a7f96' (the shared muted gray already defined as colors.muted) to match web and extension.",
+      "auditor": "crossclient",
+      "auditors": [
+        "crossclient"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified mobile colors.ts:27 ships bench='#94a3b8' (used in TiersScreen, TierBin, ProfileScreen), while extension/content.css:58-61 and web/positional-tiers.html:579/630 use #7a7f96/#6b7280, and docs/cross-client-invariants.md lists Bench=gray with colors.ts as a must-sync location. Drift is real and visible; P3 is appropriate. Note the suggested fix should also update the hardcoded rgba(148,163,184,...) bench border/bg in mobile/src/components/TierBin.tsx:53."
+      }
+    },
+    {
+      "file": "docs/cross-client-invariants.md",
+      "line": 73,
+      "severity": "P3",
+      "category": "docs drift: stale code pointer",
+      "title": "Invariants doc points to nonexistent get_pref_bucket() in backend/server.py for the kind-to-bucket mapping",
+      "description": "docs/cross-client-invariants.md:73 says 'Mapping lives in get_pref_bucket() in backend/server.py'. No such function exists anywhere in the repo; the actual mapping is the NOTIF_KIND_TO_BUCKET dict in backend/database.py:4978-4995 (consumed by the push dispatcher at backend/server.py:5974). The code comment at backend/database.py:518 repeats the same stale reference. Someone adding a new push kind per the doc's 'add a new kind in two places' instruction would grep for a function that does not exist.",
+      "suggested_fix": "Update docs/cross-client-invariants.md:73 (and the comment at backend/database.py:518) to point at NOTIF_KIND_TO_BUCKET in backend/database.py.",
+      "auditor": "crossclient",
+      "auditors": [
+        "crossclient"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified docs/cross-client-invariants.md:73 references get_pref_bucket() in backend/server.py, but no such function is defined anywhere in the repo; the real mapping is the NOTIF_KIND_TO_BUCKET dict at backend/database.py:4978, consumed at backend/server.py:5974, and the stale comment at backend/database.py:518 also exists. Same stale reference additionally appears in docs/architecture.md:139, docs/data-dictionary.md:343, and docs/glossary.md:86, so the fix should cover those files too."
+      }
+    },
+    {
+      "file": "docs/cross-client-invariants.md",
+      "line": 61,
+      "severity": "P3",
+      "category": "docs drift: enum vocabulary",
+      "title": "notifications.type also includes 'referral_joined', missing from invariants doc and data dictionary",
+      "description": "docs/cross-client-invariants.md:61 and docs/data-dictionary.md:226 list notifications.type as trade_match / trade_accepted / trade_declined only, as does the schema comment at backend/database.py:319. The backend also inserts type='referral_joined' inbox notifications from session init (backend/server.py:5542 via push_notification, backend/database.py:4639-4653). Clients degrade gracefully (web falls back to a generic bell icon at web/js/app.js:4281; mobile types are permissive), so this is doc-only drift.",
+      "suggested_fix": "Add 'referral_joined' to the notification type lists in docs/cross-client-invariants.md, docs/data-dictionary.md (notifications section), and the comment at backend/database.py:319.",
+      "auditor": "crossclient",
+      "auditors": [
+        "crossclient"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified backend/server.py:5542 inserts type='referral_joined' into the notifications table via push_notification/create_notification (backend/database.py:4639+), unconditionally and not flag-gated, while docs/cross-client-invariants.md:61, docs/data-dictionary.md:226, and the schema comment at backend/database.py:319 list only the three trade_* types. Doc-only enum drift; P3 stands."
+      }
+    },
+    {
+      "file": "docs/data-dictionary.md",
+      "line": 7,
+      "severity": "P3",
+      "category": "docs drift: schema",
+      "title": "users table streak columns undocumented in data dictionary",
+      "description": "backend/database.py:84-87 adds four users columns - current_streak, longest_streak, last_rank_local_date, last_rank_tz (rank-streak tracking in the user's local-day frame, read by /api/me/streak) - that are absent from the users section of docs/data-dictionary.md (lines 7-31). All 21 other tables' columns are fully documented; this is the only gap found in a full table/column diff.",
+      "suggested_fix": "Add the four streak columns to the users table in docs/data-dictionary.md with a note that last_rank_local_date is a YYYY-MM-DD string interpreted in last_rank_tz.",
+      "auditor": "crossclient",
+      "auditors": [
+        "crossclient"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified backend/database.py defines current_streak, longest_streak, last_rank_local_date, last_rank_tz on the users table (with a comment confirming the YYYY-MM-DD-in-last_rank_tz local-day semantics) and that docs/data-dictionary.md's users section ends at last_device_type/last_os_version/last_app_version with zero mentions of the streak columns anywhere in the file; /api/me/streak exists at backend/server.py:1948 and reads them. The project's CLAUDE.md explicitly mandates keeping data-dictionary.md in sync with database.py, so this is genuine docs drift; P3 severity is appropriate."
+      }
+    },
+    {
+      "file": "docs/api-reference.md",
+      "line": 1,
+      "severity": "P3",
+      "category": "docs drift: API reference",
+      "title": "Three routes missing from api-reference.md: GET /api/feedback/admin, GET /api/trades/awaiting, POST /api/tiers/copy-from-format",
+      "description": "A full diff of @app.route declarations in backend/server.py against the route tables in docs/api-reference.md shows 3 of 89 method+path pairs undocumented: GET /api/feedback/admin (server.py:2640, CRON_SECRET-protected operator readback - its sibling PUT /api/feedback/admin/<id>/status IS documented at api-reference.md:195), GET /api/trades/awaiting (server.py:3821), and POST /api/tiers/copy-from-format (server.py:2372). No doc-only (removed) routes were found; the recently added finder-targeting, disposition, feedback status, and engine-telemetry routes are otherwise documented.",
+      "suggested_fix": "Add the three missing rows to the appropriate sections of docs/api-reference.md (Feedback, Trades, Tiers).",
+      "auditor": "crossclient",
+      "auditors": [
+        "crossclient"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Confirmed all three routes exist as unconditional @app.route declarations in backend/server.py (lines 2372, 2640, 3821) and grepped docs/api-reference.md for the paths plus alternate wordings \u2014 none are documented (only the PUT /api/feedback/admin/<id>/status sibling appears, at line 195). CLAUDE.md mandates keeping api-reference.md in sync with server.py routes, so this is real docs drift; P3 is appropriate since there is no runtime consequence."
+      }
+    },
+    {
+      "file": "docs/glossary.md",
+      "line": 1,
+      "severity": "P3",
+      "category": "docs drift: glossary",
+      "title": "Glossary missing entries for 'fuzzy match' and 'finder targeting'",
+      "description": "Spot-check of new-feature domain terms: outlook blend (glossary.md:34), likes-you (line 40), Thompson deck (line 44), and deck diversification (line 46) are defined, but there is no entry for fuzzy (mirror) matching (flag trade.fuzzy_match, Jaccard >= fuzzy_match_tau in database.check_for_match) or for finder targeting (FB-47, flag trade.finder_targeting: pinned_receive_players, partner_fit / partner-fit score in backend/trade_service.py:432). Both terms appear in shipped code and config-reference.md.",
+      "suggested_fix": "Add glossary entries for 'Fuzzy mirror match' and 'Finder targeting / partner fit' alongside the other Tier 2/FB-47 terms.",
+      "auditor": "crossclient",
+      "auditors": [
+        "crossclient"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified docs/glossary.md contains no entry for fuzzy mirror matching or finder targeting/partner fit, while both terms exist in shipped code (database.check_for_match fuzzy mode with _jaccard/fuzzy_match_tau; trade_service.partner_fit_score:432 with pinned_receive_players) and are documented in config-reference.md:33/43/93; trade.fuzzy_match is even enabled (true) in config/features.json. CLAUDE.md mandates glossary entries for new domain terms, so this is genuine docs drift; P3 is appropriate."
+      }
+    },
+    {
+      "file": "mobile/src/screens/TrendsScreen.tsx",
+      "line": 388,
+      "severity": "P3",
+      "category": "cross-client drift not covered by invariants doc",
+      "title": "Consensus-gap value formatted with 1 decimal on mobile but 0 decimals on web",
+      "description": "The same trends consensus-gap metric (easiest buys/sells row.gap from /api/trends/consensus-gap) renders as +N (toFixed(0)) on web (web/js/app.js:5720 and 5733) but +N.N (toFixed(1)) on mobile (mobile/src/screens/TrendsScreen.tsx:388). Users comparing surfaces see e.g. '+12' vs '+12.3' for the same player. This duplicated formatting rule is not listed in docs/cross-client-invariants.md.",
+      "suggested_fix": "Standardize on one precision (web's whole-number display is the more common pattern in both apps) and consider adding a 'value formatting' row to docs/cross-client-invariants.md.",
+      "auditor": "crossclient",
+      "auditors": [
+        "crossclient"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Verified mobile TrendsScreen.tsx:388 uses toFixed(1) while web app.js renderSell/renderBuy use toFixed(0) on the same row.gap field from /api/trends/consensus-gap, which the backend returns as round(gap, 1) (fractional Elo deltas), so '+12.3' vs '+12' is a real shipping discrepancy; the mobile screen is registered in TabNav and the rule is absent from docs/cross-client-invariants.md. Minor mitigant: mobile only shows the gap in its fallback branch (when rank_gap is null/<=0), so the divergence is less frequent than implied \u2014 consistent with keeping P3."
+      }
+    },
+    {
+      "file": "docs/config-reference.md",
+      "line": 43,
+      "severity": "P3",
+      "category": "docs drift: config keys",
+      "title": "FB-47 model_config keys fit_consensus_weight / fit_divergence_weight missing from the keys tables",
+      "description": "backend/trade_service.py:161-162 defines _DEFAULT_CFG keys fit_consensus_weight = 0.5 and fit_divergence_weight = 0.15 (the composite-blend weights applied at trade_service.py:1356-1357 when trade.finder_targeting is on). docs/config-reference.md mentions both names in passing inside the trade.finder_targeting flag row (line 43) but they appear in none of the model_config key tables (Tier 1/Tier 2/Tier 3 sections, lines 56-104), so their defaults and tunability status are undocumented.",
+      "suggested_fix": "Add a small FB-47 / finder-targeting table to the model_config keys section of docs/config-reference.md listing fit_consensus_weight (0.5) and fit_divergence_weight (0.15) with the same code-default caveat as the other _DEFAULT_CFG keys.",
+      "auditor": "crossclient",
+      "auditors": [
+        "crossclient"
+      ],
+      "duplicates": [],
+      "verdict": {
+        "isReal": true,
+        "reasoning": "Confirmed fit_consensus_weight (0.5) and fit_divergence_weight (0.15) exist in _DEFAULT_CFG at trade_service.py:161-162 and are read at 1356-1357, while docs/config-reference.md only name-drops them in the flag row (line 43) and omits them from all model_config key tables (lines 56-104) that document every other _DEFAULT_CFG key with its default and tunability caveat. P3 docs drift is accurate."
+      }
+    }
+  ],
+  "passthrough": [],
+  "rejected": [
+    {
+      "file": "extension/manifest.json",
+      "line": 33,
+      "title": "Dev host_permissions (http://localhost:5000, http://127.0.0.1:5000) ship in the store manifest",
+      "severity": "P2",
+      "why_refuted": "The manifest entries exist as described, but the extension is not on the Chrome Web Store and has no packaging/publish pipeline \u2014 extension/README.md and docs/runbook.md document Load-unpacked developer install as the only distribution path, so \"store review rejection\" and \"install prompt shown to every user\" cannot occur. The localhost permissions deliberately support the README-documented local-dev workflow (swap API_BASE, reload), so removing them would break the only supported dev loop while mitigating nothing in the current shipping reality."
+    },
+    {
+      "file": "backend/database.py",
+      "line": 43,
+      "title": "Comment claims WAL mode is enabled for SQLite, but no PRAGMA is ever issued \u2014 concurrent writes can hit 'database is locked'",
+      "severity": "P2",
+      "why_refuted": "The comment at backend/database.py:42 is genuinely misleading (check_same_thread does not enable WAL, and no PRAGMA is issued anywhere), but the SQLite path is dev-only: render.yaml injects a Postgres DATABASE_URL (fromDatabase: fantasy-trade-finder-db) and docs/runbook.md confirms prod runs Postgres, so the cited contention scenario (Render cron + threaded handlers on trade_finder.db) cannot occur in shipping deployments. At most this warrants a one-line comment fix / optional dev-hardening, not a P2 database defect."
+    }
+  ]
+}

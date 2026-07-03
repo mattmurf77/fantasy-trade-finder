@@ -270,6 +270,30 @@ league_preferences_table = Table("league_preferences", metadata,
 
 
 # ---------------------------------------------------------------------------
+# asset_preferences — per-player trade preferences (backlog #2)
+# ---------------------------------------------------------------------------
+# Where league_preferences expresses intent at POSITION granularity, this
+# table expresses it at PLAYER granularity, per league:
+#   list_type='untouchable' → never suggest trading this player AWAY
+#                             (hard filter on the give side, all gen paths)
+#   list_type='target'      → bias suggestions toward ACQUIRING this player
+#                             (survives the prune + composite multiplier)
+# A player can't be on both lists in the same league (the unique constraint
+# is on the player; the route enforces single membership). Add/remove history
+# for the #65 label stream is captured via record_event (user_events), not here.
+# ---------------------------------------------------------------------------
+asset_preferences_table = Table("asset_preferences", metadata,
+    Column("id",         Integer, primary_key=True, autoincrement=True),
+    Column("user_id",    String,  nullable=False),
+    Column("league_id",  String,  nullable=False),
+    Column("player_id",  String,  nullable=False),
+    Column("list_type",  String,  nullable=False),   # 'untouchable' | 'target'
+    Column("created_at", String),
+    UniqueConstraint("user_id", "league_id", "player_id", name="uq_asset_pref"),
+)
+
+
+# ---------------------------------------------------------------------------
 # Draft pick assets
 # ---------------------------------------------------------------------------
 # Every dynasty draft pick (traded or original) across all upcoming seasons.
@@ -413,6 +437,33 @@ elo_history_table = Table("elo_history", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# player_value_history — daily CONSENSUS value snapshots (backlog #57 / #17)
+# ---------------------------------------------------------------------------
+# elo_history above logs each USER's personal Elo. This table logs the
+# market/consensus side: one row per universal-pool player per scoring
+# format per day, written by POST /api/cron/value-snapshot. The
+# DynastyProcess-seeded universal pool is rebuilt from the live CSV on every
+# boot, so yesterday's consensus numbers are otherwise lost forever — this is
+# pure data retention, started before the profile UI (#17) so value-history
+# charts, the movers digest (#33), and Wrapped (#46) have history to draw on.
+#
+# consensus_value is stored denormalised alongside consensus_elo so a later
+# elo_value_* config change does not silently rewrite recorded history.
+# ---------------------------------------------------------------------------
+player_value_history_table = Table("player_value_history", metadata,
+    Column("id",              Integer, primary_key=True, autoincrement=True),
+    Column("player_id",       String,  nullable=False),
+    Column("scoring_format",  String,  nullable=False),    # '1qb_ppr' | 'sf_tep'
+    Column("consensus_elo",   Float,   nullable=False),    # seed Elo at snapshot time
+    Column("consensus_value", Float),                      # elo_to_value(consensus_elo)
+    Column("search_rank",     Integer),                    # Sleeper rank proxy, if known
+    Column("adp",             Float),                       # ADP, if known
+    Column("snapshot_date",   String,  nullable=False),    # "YYYY-MM-DD" UTC
+    UniqueConstraint("player_id", "scoring_format", "snapshot_date",
+                     name="uq_value_snapshot"),
+)
+
+# ---------------------------------------------------------------------------
 # model_config — runtime-tunable multiplier constants
 # ---------------------------------------------------------------------------
 # Stores every hardcoded constant used by the trade/ranking engine so they
@@ -549,6 +600,32 @@ notification_queue_table = Table("notification_queue", metadata,
     Column("deliver_after",String,  nullable=False),  # ISO UTC timestamp when eligible
 )
 
+# ---------------------------------------------------------------------------
+# sleeper_credentials_table — encrypted Sleeper write tokens ("Send in Sleeper")
+# ---------------------------------------------------------------------------
+#
+# ⚠️ FLAGGED-BETA / ToS-adverse. Backs the `trade.send_in_sleeper` feature
+# (default OFF). One row per FTF user_id who has linked their Sleeper account
+# via the webview capture (docs/plans/sleeper-write-capture-runbook.md §C1).
+#
+# token_encrypted: Fernet ciphertext of the user's Sleeper JWT — a FULL-ACCOUNT
+#   credential. NEVER stored in plaintext, NEVER logged. Encrypt/decrypt live in
+#   backend/sleeper_write.py; the key is the SLEEPER_TOKEN_KEY env var.
+# sleeper_user_id / expires_at: read from the (unverified) JWT claims at link
+#   time — used to resolve the proposing roster and to prompt reconnect before
+#   the 365-day token lapses. This is an interim home; folds into the auth
+#   epic's `linked_sources` when that lands (docs/plans/auth-multiplatform-*).
+# ---------------------------------------------------------------------------
+
+sleeper_credentials_table = Table("sleeper_credentials", metadata,
+    Column("user_id",         String,  primary_key=True),   # FTF user_id (one link per user)
+    Column("sleeper_user_id", String),                      # linked Sleeper account (from JWT)
+    Column("token_encrypted", Text,    nullable=False),     # Fernet ciphertext — never plaintext
+    Column("expires_at",      String),                      # ISO UTC of JWT exp (reconnect hint)
+    Column("created_at",      String,  nullable=False),
+    Column("updated_at",      String,  nullable=False),
+)
+
 # Default values seeded on first run.  Only inserted if the key doesn't
 # already exist (INSERT OR IGNORE) so manual overrides survive re-deploys.
 _MODEL_CONFIG_DEFAULTS = [
@@ -644,6 +721,17 @@ _MODEL_CONFIG_DEFAULTS = [
     ("cycle_max_results",        3.0,   "v3: max 3-team cycles returned per league"),
     ("v3_diversity_max_overlap", 0.4,   "v3: max asset Jaccard between two cards from one opponent pair"),
     ("consensus_score_scale",    0.3,   "v2: composite multiplier keeping consensus fallback cards below divergence finds"),
+    # ── Backlog #1 opponent outlook inference (flag trade.outlook_infer) ──
+    ("infer_w_vet_share",        1.0,   "#1: weight on vet (age≥vet_age) value share in outlook inference"),
+    ("infer_w_youth_share",      1.0,   "#1: weight on youth (age≤youth_age) value share in outlook inference"),
+    ("infer_w_pick_share",       2.0,   "#1: weight on pick-capital share (centred on equal split) in outlook inference"),
+    ("infer_contender_cut",      0.08,  "#1: inferred-outlook score at/above which a team is a contender"),
+    ("infer_rebuilder_cut",     -0.08,  "#1: inferred-outlook score at/below which a team is a rebuilder"),
+    # ── Backlog #2 asset preference lists (flag trade.preference_lists) ──
+    ("target_acquire_bonus",     0.20,  "#2: +N composite per received TARGET player, capped by pos_multiplier_cap"),
+    # ── Backlog #10 crown-asset premium (flag trade.crown_asset) ──
+    ("crown_rate",               0.12,  "#10: max consolidation premium on a smaller-count side's top asset (at 100% share)"),
+    ("crown_share_floor",        0.50,  "#10: top-asset share below which the crown premium is zero"),
 ]
 
 
@@ -3890,6 +3978,68 @@ def load_league_preference(user_id: str, league_id: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Asset preferences — untouchables + targets (backlog #2)
+# ---------------------------------------------------------------------------
+
+ASSET_PREF_LISTS = ("untouchable", "target")
+
+
+def load_asset_preferences(user_id: str, league_id: str) -> dict:
+    """Return {"untouchables": [player_id, ...], "targets": [player_id, ...]}
+    for (user_id, league_id). Empty lists when none saved."""
+    out = {"untouchables": [], "targets": []}
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(asset_preferences_table).where(
+                and_(
+                    asset_preferences_table.c.user_id   == user_id,
+                    asset_preferences_table.c.league_id == league_id,
+                )
+            )
+        ).fetchall()
+    for r in rows:
+        if r.list_type == "untouchable":
+            out["untouchables"].append(r.player_id)
+        elif r.list_type == "target":
+            out["targets"].append(r.player_id)
+    return out
+
+
+def set_asset_preference(
+    user_id: str, league_id: str, player_id: str, list_type: str | None,
+) -> dict:
+    """Add/move/remove a player's tag for a league, returning the refreshed
+    lists. `list_type` ∈ {'untouchable','target'} adds (replacing any prior
+    tag for that player — single membership), None removes. Idempotent.
+    Raises ValueError on an unknown list_type."""
+    if list_type is not None and list_type not in ASSET_PREF_LISTS:
+        raise ValueError(f"list_type must be one of {ASSET_PREF_LISTS} or None")
+    pid = str(player_id)
+    now = _now()
+    with engine.begin() as conn:
+        # Remove any existing tag for this player first (enforces single
+        # membership and makes 'none' a plain delete) ...
+        conn.execute(
+            asset_preferences_table.delete().where(
+                and_(
+                    asset_preferences_table.c.user_id   == user_id,
+                    asset_preferences_table.c.league_id == league_id,
+                    asset_preferences_table.c.player_id == pid,
+                )
+            )
+        )
+        if list_type is not None:
+            conn.execute(insert(asset_preferences_table), [{
+                "user_id":    user_id,
+                "league_id":  league_id,
+                "player_id":  pid,
+                "list_type":  list_type,
+                "created_at": now,
+            }])
+    return load_asset_preferences(user_id, league_id)
+
+
+# ---------------------------------------------------------------------------
 # Player sync operations
 # ---------------------------------------------------------------------------
 
@@ -4753,6 +4903,104 @@ def load_elo_history(
     return [dict(r._mapping) for r in rows]
 
 
+# ---------------------------------------------------------------------------
+# player_value_history accessors (backlog #57 / #17)
+# ---------------------------------------------------------------------------
+
+def record_value_snapshots(rows: list[dict]) -> int:
+    """
+    Idempotent daily upsert of consensus value snapshots. Each row must carry
+    player_id, scoring_format, consensus_elo, consensus_value, search_rank,
+    adp, snapshot_date. Re-running for the same (player, format, date)
+    overwrites rather than duplicating, so a same-day cron retry is safe.
+
+    Returns the number of rows written.
+
+    Dialect-aware upsert mirroring upsert_league_members: INSERT OR REPLACE
+    on SQLite, ON CONFLICT DO UPDATE on PostgreSQL, both keyed on the
+    uq_value_snapshot constraint.
+    """
+    if not rows:
+        return 0
+    with engine.begin() as conn:
+        if DATABASE_URL.startswith("sqlite"):
+            conn.execute(text(
+                "INSERT OR REPLACE INTO player_value_history "
+                "(player_id, scoring_format, consensus_elo, consensus_value, "
+                " search_rank, adp, snapshot_date) "
+                "VALUES (:player_id, :scoring_format, :consensus_elo, "
+                ":consensus_value, :search_rank, :adp, :snapshot_date)"
+            ), rows)
+        else:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            stmt = pg_insert(player_value_history_table).values(rows)
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_value_snapshot",
+                set_={
+                    "consensus_elo":   stmt.excluded.consensus_elo,
+                    "consensus_value": stmt.excluded.consensus_value,
+                    "search_rank":     stmt.excluded.search_rank,
+                    "adp":             stmt.excluded.adp,
+                },
+            )
+            conn.execute(stmt)
+    return len(rows)
+
+
+def load_value_history(
+    player_id: str,
+    scoring_format: str = DEFAULT_SCORING,
+    since_days: int = 90,
+) -> list[dict]:
+    """
+    Return one player's consensus snapshots for `scoring_format` within the
+    last `since_days` days, OLDEST first (matches load_elo_history ordering so
+    callers can zip the two series for the value chart).
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=since_days)
+              ).strftime("%Y-%m-%d")
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(player_value_history_table)
+            .where(player_value_history_table.c.player_id      == str(player_id))
+            .where(player_value_history_table.c.scoring_format == scoring_format)
+            .where(player_value_history_table.c.snapshot_date  >= cutoff)
+            .order_by(player_value_history_table.c.snapshot_date.asc())
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+def load_value_extremes(
+    player_id: str,
+    scoring_format: str = DEFAULT_SCORING,
+) -> dict | None:
+    """
+    All-time (since tracking began) high/low consensus value for a player,
+    with the dates they occurred and the earliest snapshot date
+    (`tracking_since`). Returns None if no snapshots exist yet.
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                player_value_history_table.c.consensus_value,
+                player_value_history_table.c.snapshot_date,
+            )
+            .where(player_value_history_table.c.player_id      == str(player_id))
+            .where(player_value_history_table.c.scoring_format == scoring_format)
+            .where(player_value_history_table.c.consensus_value.isnot(None))
+            .order_by(player_value_history_table.c.snapshot_date.asc())
+        ).fetchall()
+    if not rows:
+        return None
+    hi = max(rows, key=lambda r: r.consensus_value)
+    lo = min(rows, key=lambda r: r.consensus_value)
+    return {
+        "high":           {"value": hi.consensus_value, "date": hi.snapshot_date},
+        "low":            {"value": lo.consensus_value, "date": lo.snapshot_date},
+        "tracking_since": rows[0].snapshot_date,
+    }
+
+
 # In-process cache for load_community_elo_for_league.
 # Keyed on (league_id, scoring_format) — exclude_user_id is NOT part of the key
 # because the same leaguemate snapshot is shared across callers in the same
@@ -4968,6 +5216,94 @@ def load_device_tokens_for_users(user_ids: list) -> list:
     except Exception as e:
         print(f"[load_device_tokens_for_users] failed: {e}")
         return []
+
+
+# ---------------------------------------------------------------------------
+# Sleeper write credentials ("Send in Sleeper") — see sleeper_credentials_table
+# ---------------------------------------------------------------------------
+#
+# These store/read the Fernet-encrypted Sleeper JWT. They take the ciphertext
+# already produced by backend/sleeper_write.encrypt_token — this module never
+# sees the plaintext token. Unlike save_device_token, write failures RAISE so
+# the caller can surface a real error (a silently-dropped credential would look
+# "linked" but never work).
+
+def upsert_sleeper_credential(user_id: str, sleeper_user_id: str | None,
+                              token_encrypted: str, expires_at: str | None) -> None:
+    """Insert or replace the Sleeper link for a user (one row per user_id)."""
+    if not user_id or not token_encrypted:
+        raise ValueError("user_id and token_encrypted are required")
+    now = _now()
+    payload = {
+        "user_id":         user_id,
+        "sleeper_user_id": sleeper_user_id,
+        "token_encrypted": token_encrypted,
+        "expires_at":      expires_at,
+        "created_at":      now,
+        "updated_at":      now,
+    }
+    with engine.begin() as conn:
+        # keep created_at stable across re-links
+        existing = conn.execute(
+            select(sleeper_credentials_table.c.created_at)
+            .where(sleeper_credentials_table.c.user_id == user_id)
+        ).fetchone()
+        if existing and existing[0]:
+            payload["created_at"] = existing[0]
+        if DATABASE_URL.startswith("sqlite"):
+            conn.execute(text(
+                "INSERT OR REPLACE INTO sleeper_credentials "
+                "(user_id, sleeper_user_id, token_encrypted, expires_at, created_at, updated_at) "
+                "VALUES (:user_id, :sleeper_user_id, :token_encrypted, :expires_at, :created_at, :updated_at)"
+            ), payload)
+        else:
+            conn.execute(text(
+                "INSERT INTO sleeper_credentials "
+                "(user_id, sleeper_user_id, token_encrypted, expires_at, created_at, updated_at) "
+                "VALUES (:user_id, :sleeper_user_id, :token_encrypted, :expires_at, :created_at, :updated_at) "
+                "ON CONFLICT (user_id) DO UPDATE SET "
+                "sleeper_user_id = EXCLUDED.sleeper_user_id, "
+                "token_encrypted = EXCLUDED.token_encrypted, "
+                "expires_at = EXCLUDED.expires_at, "
+                "updated_at = EXCLUDED.updated_at"
+            ), payload)
+
+
+def get_sleeper_credential(user_id: str) -> dict | None:
+    """Return {sleeper_user_id, token_encrypted, expires_at, created_at,
+    updated_at} for a user, or None if they haven't linked Sleeper."""
+    if not user_id:
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(
+                sleeper_credentials_table.c.sleeper_user_id,
+                sleeper_credentials_table.c.token_encrypted,
+                sleeper_credentials_table.c.expires_at,
+                sleeper_credentials_table.c.created_at,
+                sleeper_credentials_table.c.updated_at,
+            ).where(sleeper_credentials_table.c.user_id == user_id)
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "sleeper_user_id": row.sleeper_user_id,
+        "token_encrypted": row.token_encrypted,
+        "expires_at":      row.expires_at,
+        "created_at":      row.created_at,
+        "updated_at":      row.updated_at,
+    }
+
+
+def delete_sleeper_credential(user_id: str) -> None:
+    """Remove a user's stored Sleeper token (disconnect / dead-token cleanup)."""
+    if not user_id:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            delete(sleeper_credentials_table)
+            .where(sleeper_credentials_table.c.user_id == user_id)
+        )
 
 
 # ---------------------------------------------------------------------------

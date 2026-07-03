@@ -81,21 +81,27 @@ python3 -m backend.scripts.calibrate_elo_value      # Spearman check of elo_to_v
 
 ## Runtime tuning
 
-`model_config` table is editable live:
+`model_config` table is editable live (requires `X-Cron-Secret: $CRON_SECRET`):
 ```
-GET /api/admin/config           # read all
-PUT /api/admin/config/<key>     # update one
+curl -H "X-Cron-Secret: $CRON_SECRET" .../api/admin/config              # read all
+curl -H "X-Cron-Secret: $CRON_SECRET" -X PUT .../api/admin/config/<key> # update one
 ```
-See [config-reference.md](config-reference.md) for keys.
+See [config-reference.md](config-reference.md) for keys. All `/api/admin/*`
+endpoints, `/api/debug/log`, and `/api/feature-flags/reload` share this auth.
 
 ---
 
 ## Debug log
 
-In-memory ring buffer (last ~200 entries):
+In-memory ring buffer (last ~200 entries; requires `X-Cron-Secret` — it leaks
+usernames/user_ids/tracebacks, so it's operator-only):
 ```
-GET /api/debug/log?n=100
+curl -H "X-Cron-Secret: $CRON_SECRET" .../api/debug/log?n=100
 ```
+
+> **Test users:** the `test_user_fp_*` username login bypass (`/api/sleeper/user`)
+> is disabled in any non-SQLite (prod) environment. Seed test users only work
+> against the local SQLite dev DB.
 
 ---
 
@@ -106,6 +112,7 @@ GET /api/debug/log?n=100
 | Smart matchup returns boring pairs | `ANTHROPIC_API_KEY` not set, or `smart_matchup_enabled=0` | Set the env var; flip the config |
 | Tier colors disagree across clients | Drift in tier color tokens | See [cross-client-invariants](cross-client-invariants.md) |
 | Trade Finder still locked after many ranks | Per-position threshold not met (10 each) | Rank more of the missing position |
+| Empty deck only when `trade_engine.v3` is on (v2 returns cards) | v3 enforces lineup feasibility (`_STARTER_NEED` QB1/RB2/WR2/TE1) all-or-nothing: a roster that can't field a full lineup at every position makes *every* trade infeasible → zero v3 cards | Confirm the roster covers all four positions; a thin/incomplete roster (or a player-pool sync gap dropping a position) yields no v3 trades by design (TC-ENG-002) |
 | Mobile can't reach backend | Not on tunnel; backend on different network | Run Expo with `--tunnel` |
 | Push notifications not arriving | No `device_tokens` row, or pref bucket off, or quiet hours active | Check `notification_prefs`, `device_tokens`, and `notification_queue` for the user |
 | Queued pushes never deliver | Cron ticks not firing | Verify Render cron schedule hits `/api/cron/*-tick` |
@@ -122,8 +129,11 @@ External scheduler (Render cron) must hit:
 | `POST /api/cron/realtime-tick` | every 1–5 min |
 | `POST /api/cron/hourly-tick` | hourly (top of hour) |
 | `POST /api/cron/daily-tick` | once daily |
+| `POST /api/cron/value-snapshot` | once daily |
 
 If these stop firing, queued pushes pile up in `notification_queue` and digests/re-engagement go silent.
+
+**`value-snapshot` monitoring (#57):** the daily job upserts ~1,369 rows (≈684 `1qb_ppr` + 685 `sf_tep`); the response is `{"ok": true, "snapshot_date": "...", "1qb_ppr": N, "sf_tep": N}`. A day with no row written is value-history permanently lost (the universal pool is rebuilt from the live DP CSV each boot, so there is no backfill). If the job misses a day, that gap stays a gap — accept it; do **not** fabricate history. Verify it's firing by checking `player_value_history` has rows for today's UTC date. Idempotent, so re-running same-day is safe.
 
 ---
 

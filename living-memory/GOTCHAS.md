@@ -1,0 +1,93 @@
+# Gotchas — Fantasy Trade Finder
+
+> **Purpose:** known traps in *this* codebase. Symptoms, root causes, workarounds. Different from [`MISTAKES.md`](MISTAKES.md): mistakes are *approaches that failed*; gotchas are *bugs and quirks that bite*.
+>
+> **Read at:** before debugging anything that smells weird. **Write at:** the moment you waste >30 minutes on a non-obvious quirk.
+>
+> Companion files: [`../docs/runbook.md`](../docs/runbook.md) for operational runbook (longer-form).
+
+---
+
+## Table of Contents
+- [2026-05-21](#2026-05-21)
+- [Gotcha Template](#gotcha-template)
+
+---
+
+## 2026-05-21
+
+### G-001 — macOS AirPlay Receiver hogs port 5000
+- **Symptom:** `python3 run.py` hangs or errors cryptically. Flask doesn't say "port in use" clearly.
+- **Cause:** macOS Monterey+ has AirPlay Receiver enabled by default, which uses port 5000.
+- **Fix:** `lsof -ti:5000 | xargs kill -9` to free the port. Or disable AirPlay Receiver in System Settings → General → AirDrop & Handoff.
+- **Prevention:** add a port-check at start of `run.py`? Or document prominently. Currently documented in [`../context.md`](../context.md) and [`DEPENDENCIES.md`](DEPENDENCIES.md).
+
+### G-002 — Duplicate SQLite DB (root AND `data/`)
+- **Symptom:** changes to the DB via CLI (`sqlite3 trade_finder.db`) don't appear in the app — or worse, the app's writes appear nowhere obvious.
+- **Cause:** legacy duplicate. `trade_finder.db` exists at both `./` (legacy) and `data/trade_finder.db` (canonical). Code reads from `data/`.
+- **Fix:** always open `data/trade_finder.db`. Cleanup pending — see [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) §Q-001.
+- **Prevention:** archive or delete the root file. Add to `.gitignore`.
+
+### G-003 — DynastyProcess CSV player names don't match Sleeper
+- **Symptom:** a player has default Elo (1500) instead of consensus-value-derived seed.
+- **Cause:** name string mismatch between DynastyProcess CSV and Sleeper player database. Apostrophes, abbreviated initials, edge cases.
+- **Fix:** run `dump_mismatches.py` to identify; manual reconciliation in `data_loader.py` or via lookup table.
+- **Prevention:** automate fuzzy matching — see [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) §Q-004.
+- **History:** see [`MISTAKES.md`](MISTAKES.md) §M-004.
+
+### G-004 — Sleeper `roster.players` can contain nulls
+- **Symptom:** code that iterates `roster.players` and accesses player data hits `None` errors.
+- **Cause:** Sleeper API returns null entries for empty roster slots.
+- **Fix:** filter `roster.players` to non-null entries before processing.
+- **Prevention:** wrap roster-iteration code in a small utility that filters.
+
+### G-005 — Player IDs from Sleeper are strings, not integers
+- **Symptom:** `KeyError` or type-error when joining player data.
+- **Cause:** Sleeper player IDs are returned as strings. Database columns may have been defined as integers somewhere.
+- **Fix:** keep player IDs as strings throughout. If DB column is int, change it.
+- **Prevention:** annotate `database.py` schema documentation explicitly.
+
+### G-006 — Sleeper username case-sensitivity
+- **Symptom:** user types "AlexSmith" but downstream code does case-insensitive lookups, eventually displaying "alexsmith" — confusing the user.
+- **Cause:** Sleeper's `/v1/user/<username>` is case-insensitive but returns its canonical (often lowercased) username. Code may treat the response as the truth.
+- **Fix:** preserve the user-typed username for display; use the Sleeper-returned ID for lookups.
+- **Prevention:** distinguish `display_name` (user-facing) from `user_id` (joins).
+
+### G-007 — `config/features.json` must stay in sync across clients
+- **Symptom:** a feature flag works in web but mobile shows the old behavior.
+- **Cause:** mobile or extension didn't pick up the latest `features.json`. Each client reads it differently (some at build time, some at runtime).
+- **Fix:** confirm the feature flag is served via API (`GET /api/admin/config`) and all clients fetch fresh on session init.
+- **Prevention:** centralize feature-flag access via the backend. Document the per-client mechanism in [`../docs/cross-client-invariants.md`](../docs/cross-client-invariants.md).
+
+### G-008 — `.sleeper_players_cache.json` staleness
+- **Symptom:** a recently-traded rookie or new arrival isn't in the player picker.
+- **Cause:** the player cache refreshes only when empty or >24h old. Mid-week roster moves don't trigger a refresh.
+- **Fix:** manually delete `.sleeper_players_cache.json` to force refresh.
+- **Prevention:** consider event-triggered refresh (e.g. on user roster import) for the affected user's league.
+
+### G-009 — In-memory ring buffer lost on server restart
+- **Symptom:** after `kill -9` or crash, `GET /api/debug/log` returns empty.
+- **Cause:** by design — the ring buffer is in-memory only (D-008).
+- **Fix:** capture log output to a file when running long sessions: `python3 run.py 2>&1 | tee /tmp/ftf-$(date +%F).log`.
+- **Prevention:** see [`DECISIONS.md`](DECISIONS.md) §D-008. If production needs persistent logs, this needs revisiting.
+
+### G-010 — Extension content-script breakage on Sleeper DOM changes
+- **Symptom:** browser extension features that scrape the Sleeper UI suddenly stop working.
+- **Cause:** Sleeper updated their DOM. No API contract for content scripts.
+- **Fix:** inspect Sleeper's current DOM, update selectors in `extension/`.
+- **Prevention:** minimize content-script reliance on DOM structure; prefer Sleeper API calls where possible.
+
+---
+
+## Gotcha Template
+
+```markdown
+### G-NNN — <Short title>
+- **Symptom:** <what you'll see if you don't know>
+- **Cause:** <why it happens>
+- **Fix:** <how to recover>
+- **Prevention:** <how to keep it from happening again>
+- **History (optional):** <prior instances and links to MISTAKES.md>
+```
+
+Number sequentially. Don't delete entries even if "obviously fixed by now" — future-you will appreciate the history.

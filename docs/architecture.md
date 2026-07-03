@@ -143,13 +143,14 @@ Both are exercised in `*-workspace/` sibling folders (throwaway eval output).
 
 ## Cron ticks
 
-External scheduler (Render cron) hits three endpoints:
+External scheduler (Render cron) hits four endpoints:
 
 | Endpoint | Cadence | What it does |
 |---|---|---|
 | `POST /api/cron/realtime-tick` | every 1–5 min | Drain `notification_queue` rows whose `deliver_after` has passed |
 | `POST /api/cron/hourly-tick` | hourly | Bundle drain + quiet-hours summary push at user's local 8am |
 | `POST /api/cron/daily-tick` | once daily | Weekly digests + re-engagement scans (`winback_dormant`-style kinds) |
+| `POST /api/cron/value-snapshot` | once daily | Upsert consensus value of every universal-pool player into `player_value_history` (#57). Kept separate from `daily-tick` so a push-scan failure can't stop history collection. |
 
 ## Event recording
 

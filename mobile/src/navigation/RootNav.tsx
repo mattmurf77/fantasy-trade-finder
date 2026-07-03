@@ -16,6 +16,7 @@ import TabNav from './TabNav';
 import SettingsScreen from '../screens/SettingsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import FeedbackInboxScreen from '../screens/FeedbackInboxScreen';
+import SleeperConnectScreen from '../screens/SleeperConnectScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import { usePushNotifications } from '../hooks/usePushNotifications';
@@ -29,6 +30,7 @@ type AuthStack = {
   Settings: undefined;
   Profile: { username: string };
   FeedbackInbox: undefined;
+  SleeperConnect: undefined;
 };
 
 const Stack = createNativeStackNavigator<AuthStack>();
@@ -246,6 +248,18 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerShown: true,
             title: 'Test feedback',
             headerTitle: () => <HeaderTitle>Test feedback</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+          }}
+        />
+        <Stack.Screen
+          name="SleeperConnect"
+          component={SleeperConnectScreen}
+          options={{
+            presentation: 'modal',
+            headerShown: true,
+            title: 'Connect Sleeper',
+            headerTitle: () => <HeaderTitle>Connect Sleeper</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
           }}

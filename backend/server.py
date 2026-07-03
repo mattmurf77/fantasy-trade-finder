@@ -17,6 +17,7 @@ data is fetched from the Sleeper public API (no OAuth required).
 import collections
 import concurrent.futures
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -80,6 +81,7 @@ from .database import (
     load_awaiting_trades,
     record_match_disposition,
     upsert_league_preference, load_league_preference,
+    load_asset_preferences, set_asset_preference, ASSET_PREF_LISTS,
     sync_players, needs_player_sync,
     load_players, load_player, load_players_by_ids,
     load_rookies,
@@ -106,6 +108,8 @@ from .database import (
     # Trends tab (Agent 2)
     record_elo_snapshot, load_elo_history, load_community_elo_for_league,
     load_user_cross_league_exposure,
+    # Player value history (#57 / #17)
+    record_value_snapshots, load_value_history, load_value_extremes,
     # Agent 1 additions — user_player_skips helpers
     add_skip as _skip_add,
     load_skips as _skip_load,
@@ -127,7 +131,10 @@ from .database import (
     save_feedback,
     # GET /api/feedback/admin — operator readback, CRON_SECRET-protected
     list_feedback,
+    # "Send in Sleeper" — encrypted Sleeper write-token storage (flagged beta)
+    upsert_sleeper_credential, get_sleeper_credential, delete_sleeper_credential,
 )
+from . import sleeper_write as _sleeper_write
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
 from . import trends_service as _trends_service_mod
@@ -903,6 +910,27 @@ def handle_session_expired(e):
                     "message": "Session expired — please reload the page."}), 401
 
 
+class _SessionNotInitialized(Exception):
+    pass
+
+
+@app.errorhandler(_SessionNotInitialized)
+def handle_session_not_initialized(e):
+    return jsonify({"error": "session_not_initialized",
+                    "message": "League data is still loading — "
+                               "try again in a moment."}), 409
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(e):
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    log.exception("Unhandled error on %s %s", request.method, request.path)
+    return jsonify({"error": "internal_error",
+                    "message": "Unexpected server error."}), 500
+
+
 def _require_session() -> dict:
     """Return the active session dict, or raise _SessionExpired (→ 401).
 
@@ -940,6 +968,24 @@ def _require_session() -> dict:
         sess["trade_svc"] = trade_svcs[effective_format]
     sess["_effective_format"] = effective_format
 
+    return sess
+
+
+def _require_initialized_session() -> dict:
+    """Like _require_session, but also requires /api/session/init to have
+    completed for this token (league / players / trade services present).
+
+    Mobile sign-in (INIT-08) mints a session via /api/extension/auth and
+    navigates to Main BEFORE /api/session/init finishes, so any league-backed
+    route can be hit with a valid-but-bare session. Routes that index
+    sess["league"] / sess["players"] / sess["trade_svc"] must use this helper
+    so that window returns a structured 409 instead of KeyError → 500.
+    (Same failure class as the FB-01 disposition bug.)
+    """
+    sess = _require_session()
+    if ("league" not in sess or "players" not in sess
+            or not (sess.get("trade_svcs") or sess.get("trade_svc"))):
+        raise _SessionNotInitialized()
     return sess
 
 
@@ -1423,6 +1469,43 @@ def _order_deck(
     return ordered
 
 
+def _user_pick_share(user_id: str, league_id: str) -> float:
+    """The user's share of total draft-pick value in a league (0.0 when no
+    picks synced). Feeds the #8 outlook seed and #1's classifier."""
+    try:
+        picks = load_draft_picks(league_id=league_id)
+    except Exception:
+        return 0.0
+    grand = sum((pk.get("pick_value") or 0.0) for pk in picks)
+    if grand <= 0:
+        return 0.0
+    mine = sum((pk.get("pick_value") or 0.0) for pk in picks
+               if pk.get("owner_user_id") == user_id)
+    return mine / grand
+
+
+def _infer_user_outlook(user_id: str, league_id: str, sess: dict, league):
+    """Backlog #8 — infer the USER's own contend/rebuild window from their
+    roster, for leagues with no declared outlook. Returns (outlook, signals)
+    or (None, None) when the seed flag is off or roster/player data is absent.
+
+    Called from BOTH the generate-route cache pre-read and the worker so the
+    cache-freshness key resolves identically on both sides.
+    """
+    if not FLAGS.trade_outlook_seed:
+        return None, None
+    roster  = (sess or {}).get("user_roster") or []
+    players = (sess or {}).get("players") or []
+    if not roster or not players:
+        return None, None
+    from .trade_service import infer_team_outlook
+    pdict = {p.id: p for p in players}
+    num_teams = len(league.members) if league and getattr(league, "members", None) else 12
+    outlook, _score, signals = infer_team_outlook(
+        roster, pdict, _user_pick_share(user_id, league_id), num_teams)
+    return outlook, signals
+
+
 def _run_trade_job(
     job_id: str,
     sess_token: str,
@@ -1450,10 +1533,11 @@ def _run_trade_job(
         service        = services.get(active_format) or sess.get("service")
         trade_service  = trade_svcs.get(active_format) or sess.get("trade_svc")
         g_user_id      = sess["user_id"]
-        g_league       = sess["league"]
-        g_user_roster  = sess["user_roster"]
-        g_players      = sess["players"]
-        if not (service and trade_service and g_league):
+        g_league       = sess.get("league")
+        g_user_roster  = sess.get("user_roster")
+        g_players      = sess.get("players")
+        if not (service and trade_service and g_league
+                and g_user_roster and g_players):
             raise RuntimeError("session missing required state for trade gen")
 
         user_elo   = service.get_rankings(position=None)
@@ -1497,11 +1581,61 @@ def _run_trade_job(
         except Exception as pref_err:
             log.warning("trade-job: could not load league preference: %s", pref_err)
 
+        # Backlog #8 — no declared outlook ⇒ seed from the user's own roster
+        # (flag-gated). Must mirror the generate-route pre-read exactly so the
+        # job-cache freshness key agrees.
+        if not outlook_value:
+            seeded, _sig = _infer_user_outlook(g_user_id, league_id, sess, g_league)
+            if seeded:
+                outlook_value = seeded
+
         # Update outlook on the job for cache freshness checks
         with _trade_jobs_lock:
             j = _trade_jobs.get(job_id)
             if j is not None:
                 j["outlook_value"] = outlook_value
+
+        # Backlog #1 — opponent outlook inputs. Only assembled when the flag
+        # is on (avoids per-member DB reads on the default path). Declared
+        # outlooks come from each member's stored league preference; pick
+        # shares come from draft_picks. The engine fills any gap by inferring
+        # from roster shape.
+        opponent_outlooks: dict[str, str] = {}
+        opponent_pick_shares: dict[str, float] = {}
+        if FLAGS.trade_outlook_infer:
+            try:
+                for m in g_league.members:
+                    if m.user_id == g_user_id:
+                        continue
+                    mp = load_league_preference(user_id=m.user_id, league_id=league_id)
+                    if mp and mp.get("team_outlook"):
+                        opponent_outlooks[m.user_id] = mp["team_outlook"]
+                picks = load_draft_picks(league_id=league_id)
+                totals: dict[str, float] = {}
+                grand = 0.0
+                for pk in picks:
+                    owner = pk.get("owner_user_id")
+                    pv = pk.get("pick_value") or 0.0
+                    if owner:
+                        totals[owner] = totals.get(owner, 0.0) + pv
+                    grand += pv
+                if grand > 0:
+                    opponent_pick_shares = {u: t / grand for u, t in totals.items()}
+            except Exception as outlook_err:
+                log.warning("trade-job: opponent outlook assembly failed: %s", outlook_err)
+
+        # Backlog #2 — asset preference lists (untouchables + targets). Loaded
+        # only when the flag is on. Sets flow into the engine as a give-side
+        # hard filter (untouchables) + a receive-side reward (targets).
+        untouchable_ids: set = set()
+        target_ids: set = set()
+        if FLAGS.trade_preference_lists:
+            try:
+                ap = load_asset_preferences(user_id=g_user_id, league_id=league_id)
+                untouchable_ids = set(ap.get("untouchables", []))
+                target_ids = set(ap.get("targets", []))
+            except Exception as ap_err:
+                log.warning("trade-job: asset prefs load failed: %s", ap_err)
 
         players_dict = {p.id: p for p in g_players}
         progress_cb  = _make_progress_cb(job_id, players_dict, real_user_ids, outlook_value)
@@ -1526,6 +1660,10 @@ def _run_trade_job(
             pinned_receive_players = pinned_receive or None,
             scoring_format       = active_format,
             on_opponent_done     = progress_cb,
+            opponent_outlooks    = opponent_outlooks or None,
+            opponent_pick_shares = opponent_pick_shares or None,
+            untouchable_ids      = untouchable_ids or None,
+            target_ids           = target_ids or None,
         )
 
         # Tier 2 (2.3a) — likes-you queue. Inject/boost cards league-mates
@@ -1828,7 +1966,8 @@ def get_trio():
 
         return jsonify(resp)
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        log.exception("get_trio failed")
+        return jsonify({"error": "bad_request"}), 400
 
 
 # ── Leaderboard cache ─────────────────────────────────────────────────────
@@ -1960,7 +2099,7 @@ def get_me_streak():
 @app.route("/api/rank3", methods=["POST"])
 def post_rank3():
     """POST /api/rank3  {ranked: [id1, id2, id3]}  →  updated progress"""
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     service      = sess["service"]
     g_user_id    = sess["user_id"]
@@ -2086,7 +2225,8 @@ def post_rank3():
             "streak":            streak,
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        log.exception("post_rank3 failed")
+        return jsonify({"error": "bad_request"}), 400
 
 
 @app.route("/api/rankings")
@@ -2107,7 +2247,8 @@ def get_rankings():
             "version":           rank_set.version,
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        log.exception("get_rankings failed")
+        return jsonify({"error": "bad_request"}), 400
 
 
 @app.route("/api/progress")
@@ -2120,7 +2261,8 @@ def get_progress():
     try:
         return jsonify(service.get_progress(position=position))
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        log.exception("get_progress failed")
+        return jsonify({"error": "bad_request"}), 400
 
 
 @app.route("/api/rankings/progress")
@@ -2311,7 +2453,7 @@ def set_ranking_method_route():
         return jsonify({"ok": True, "method": method})
     except Exception as e:
         log.error("set ranking-method error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/scoring/switch", methods=["POST"])
@@ -2401,7 +2543,7 @@ def copy_tiers_from_format_route():
       { ok: true, from_format, to_format, position_counts: {QB: N, ...},
         total: N }
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
     body      = request.get_json(force=True) or {}
@@ -2718,7 +2860,7 @@ def my_feedback_route():
         return jsonify({"items": items, "count": len(items)})
     except Exception as e:
         log.exception("my_feedback_route failed")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/tiers/save", methods=["POST"])
@@ -2731,7 +2873,7 @@ def save_tiers_route():
     from all tiers (× button → back to pool). Their override is deleted
     so they don't snap back to a previous tier on the next refresh.
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     service   = sess["service"]
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
@@ -2809,7 +2951,7 @@ def save_tiers_route():
         })
     except Exception as e:
         log.error("tiers/save error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/tiers/status")
@@ -2825,7 +2967,8 @@ def tiers_status_route():
             "all_done": all(p in saved for p in ("QB", "RB", "WR", "TE")),
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        log.exception("tiers_status_route failed")
+        return jsonify({"error": "internal_error"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -2874,7 +3017,8 @@ def tiers_community_diff_route():
         # + replayed swipes).
         rank_set = service.get_rankings(position=position)
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        log.exception("tiers_community_diff_route failed")
+        return jsonify({"error": "bad_request"}), 400
 
     # Community ELO is the universal seed for this format — the consensus
     # "starting point" before the user touched anything.
@@ -2928,7 +3072,7 @@ def tiers_stability_route():
             "disabled":       True,
         })
 
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
@@ -3011,7 +3155,7 @@ def reorder_rankings():
     represents the user's desired ranking from best (index 0) to worst.
     ELO values are overridden to match the desired order.
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     service    = sess["service"]
     g_user_id  = sess["user_id"]
     g_league   = sess["league"]
@@ -3059,7 +3203,7 @@ def reorder_rankings():
         return jsonify({"ok": True, "count": len(ordered_ids), "scoring_format": fmt})
     except Exception as e:
         log.error("reorder_rankings error: %s", e)
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": "bad_request"}), 400
 
 
 @app.route("/")
@@ -3121,7 +3265,7 @@ def get_players_route():
         return resp
     except Exception as e:
         log.error("get_players error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/players/<player_id>")
@@ -3137,7 +3281,161 @@ def get_player_route(player_id):
         return jsonify(player)
     except Exception as e:
         log.error("get_player error (%s): %s", player_id, e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
+
+
+def _delta_since(history: list[dict], current: float, days: int) -> float | None:
+    """Consensus-value delta vs the oldest snapshot within `days`.
+
+    `history` is oldest-first (load_value_history). Returns None when there is
+    no snapshot old enough to compare against (chart started too recently).
+    """
+    if not history:
+        return None
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    prior = [h for h in history if h["snapshot_date"] <= cutoff
+             and h.get("consensus_value") is not None]
+    base = prior[-1] if prior else None
+    if base is None:
+        return None
+    return round(current - base["consensus_value"], 1)
+
+
+def _user_player_elo(user_id: str, player_id: str, scoring_format: str) -> tuple[float | None, int]:
+    """The session user's personal Elo for one player, averaged across the
+    leagues they've ranked in this format, with the number of ranking sets it
+    came from. (None, 0) when the user has never ranked this player."""
+    from .database import member_rankings_table, engine as _engine
+    from sqlalchemy import select as _select
+    with _engine.connect() as conn:
+        rows = conn.execute(
+            _select(member_rankings_table.c.elo).where(
+                (member_rankings_table.c.user_id   == user_id) &
+                (member_rankings_table.c.player_id == str(player_id)) &
+                ((member_rankings_table.c.scoring_format == scoring_format) |
+                 (member_rankings_table.c.scoring_format.is_(None)))
+            )
+        ).fetchall()
+    elos = [r.elo for r in rows if r.elo is not None]
+    if not elos:
+        return None, 0
+    return sum(elos) / len(elos), len(elos)
+
+
+@app.route("/api/players/<player_id>/profile")
+def get_player_profile_route(player_id):
+    """GET /api/players/<id>/profile — the player-profile aggregate (#17).
+
+    Identity + consensus value with trend deltas/extremes + the caller's
+    you-vs-market diff + zipped value history + recent appearances in the
+    caller's own suggestions. Gated by the players.profile_pages flag.
+    """
+    if not is_enabled("players.profile_pages"):
+        return jsonify({"error": "not_enabled"}), 404
+    try:
+        sess = _require_session()
+    except _SessionExpired:
+        return jsonify({"error": "session_expired"}), 401
+
+    player = load_player(player_id)
+    if player is None:
+        return jsonify({"error": "Player not found"}), 404
+
+    fmt     = sess.get("_effective_format", DEFAULT_SCORING)
+    user_id = sess["user_id"]
+    from .trade_service import elo_to_value
+
+    # ── consensus: current value from the live pool, history/extremes from the
+    #    snapshot table (#57). Current may lead the last snapshot by <1 day. ──
+    _ensure_universal_pools()
+    pool = g_universal_by_format.get(fmt) or {}
+    seed = pool.get("seed") or {}
+    cur_elo = seed.get(str(player_id))
+    cur_val = round(elo_to_value(float(cur_elo)), 1) if cur_elo is not None else None
+    history = load_value_history(player_id, fmt, since_days=120)
+    extremes = load_value_extremes(player_id, fmt)
+    consensus = {
+        "value":          cur_val,
+        "elo":            round(float(cur_elo), 1) if cur_elo is not None else None,
+        "delta_7d":       _delta_since(history, cur_val, 7)  if cur_val is not None else None,
+        "delta_30d":      _delta_since(history, cur_val, 30) if cur_val is not None else None,
+        "delta_90d":      _delta_since(history, cur_val, 90) if cur_val is not None else None,
+        "high":           (extremes or {}).get("high"),
+        "low":            (extremes or {}).get("low"),
+        "tracking_since": (extremes or {}).get("tracking_since"),
+    }
+
+    # ── you vs market ──
+    your_elo, comparisons = _user_player_elo(user_id, player_id, fmt)
+    you_vs_market = None
+    if your_elo is not None and cur_val:
+        your_val = round(elo_to_value(your_elo), 1)
+        diff_pct = round((your_val - cur_val) / cur_val, 3) if cur_val else 0.0
+        you_vs_market = {
+            "your_value":   your_val,
+            "market_value": cur_val,
+            "diff_pct":     diff_pct,
+            "state":        "higher" if diff_pct > 0.05 else
+                            "lower"  if diff_pct < -0.05 else "aligned",
+            "comparisons":  comparisons,
+        }
+
+    # ── zipped history series (consensus + the user's personal Elo) ──
+    your_hist = {
+        h["player_id"] and h["snapshot_at"][:10]: h["elo"]
+        for h in load_elo_history(user_id, fmt, since_days=120)
+        if str(h["player_id"]) == str(player_id)
+    }
+    series = [
+        {"date": h["snapshot_date"],
+         "consensus_value": h.get("consensus_value"),
+         "your_value": round(elo_to_value(your_hist[h["snapshot_date"]]), 1)
+                       if h["snapshot_date"] in your_hist else None}
+        for h in history
+    ]
+
+    # ── recent appearances in THIS user's suggestions (LIKE scan, fine at
+    #    current impression volume; see #17 LLD open question) ──
+    from .database import trade_impressions_table, engine as _engine
+    from sqlalchemy import select as _select, desc as _desc
+    pid_token = f'%"{player_id}"%'
+    with _engine.connect() as conn:
+        imp_rows = conn.execute(
+            _select(trade_impressions_table).where(
+                (trade_impressions_table.c.user_id == user_id) &
+                (trade_impressions_table.c.give_player_ids.like(pid_token) |
+                 trade_impressions_table.c.receive_player_ids.like(pid_token))
+            ).order_by(_desc(trade_impressions_table.c.shown_at)).limit(5)
+        ).fetchall()
+    recent = []
+    for r in imp_rows:
+        try:
+            give = json.loads(r.give_player_ids or "[]")
+        except Exception:
+            give = []
+        recent.append({
+            "league_id":    r.league_id,
+            "counterparty": r.target_user_id,
+            "side":         "give" if str(player_id) in [str(x) for x in give] else "receive",
+            "basis":        r.basis,
+            "shown_at":     r.shown_at,
+        })
+
+    return jsonify({
+        "player": {
+            "player_id":     player["player_id"],
+            "full_name":     player.get("full_name"),
+            "position":      player.get("position"),
+            "team":          player.get("team"),
+            "age":           player.get("age"),
+            "years_exp":     player.get("years_exp"),
+            "injury_status": player.get("injury_status"),
+        },
+        "consensus":          consensus,
+        "you_vs_market":      you_vs_market,
+        "history":            series,
+        "recent_suggestions": recent,
+    })
 
 
 @app.route("/api/rookies")
@@ -3161,7 +3459,7 @@ def get_rookies_route():
         return jsonify({"grouped": grouped, "total": len(rookies)})
     except Exception as e:
         log.error("get_rookies error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/league/picks")
@@ -3172,7 +3470,7 @@ def get_league_picks():
     the specified league, along with the full league pick state so the
     frontend can show which picks opponents hold.
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     g_league  = sess["league"]
     g_user_id = sess["user_id"]
@@ -3185,7 +3483,7 @@ def get_league_picks():
         return jsonify({"my_picks": my_picks, "all_picks": all_picks})
     except Exception as e:
         log.error("get_league_picks error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -3274,7 +3572,7 @@ def generate_trades():
         gets the same job_id and the current snapshot.
       - Pinned-give jobs always create a fresh, uncached job.
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
@@ -3295,10 +3593,16 @@ def generate_trades():
     fmt                = _active_format(sess)
 
     # Read current outlook for cache-freshness comparison. The actual job
-    # worker reads it again; this is just for the cache hit decision.
+    # worker reads it again; this is just for the cache hit decision. Must
+    # resolve declared-else-seeded identically to the worker (#8) or every
+    # seeded-league cache check would miss.
     try:
         prefs = load_league_preference(user_id=g_user_id, league_id=league_id)
         outlook_value = (prefs or {}).get("team_outlook")
+        if not outlook_value:
+            seeded, _sig = _infer_user_outlook(g_user_id, league_id, sess, g_league)
+            if seeded:
+                outlook_value = seeded
     except Exception:
         outlook_value = None
 
@@ -3371,7 +3675,7 @@ def trade_job_status():
 @app.route("/api/trades")
 def get_trades():
     """GET /api/trades?league_id=...  →  pending trade cards"""
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     trade_service = sess["trade_svc"]
     g_user_id     = sess["user_id"]
@@ -3429,7 +3733,7 @@ def swipe_trade():
     card is reconstructed from them instead of failing with
     "Unknown trade_id" (FB-46).
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     service       = sess["service"]
     trade_service = sess["trade_svc"]
@@ -3651,14 +3955,181 @@ def swipe_trade():
         else:
             resp["matched"] = False
         return jsonify(resp)
+    except ValueError as ve:
+        # Client-actionable validation feedback (e.g. unknown/stale trade_id).
+        return jsonify({"error": str(ve)}), 400
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        log.exception("swipe_trade failed")
+        return jsonify({"error": "bad_request"}), 400
+
+
+# ---------------------------------------------------------------------------
+# "Send in Sleeper" — link a Sleeper account + propose trades directly.
+# ⚠️ FLAGGED-BETA / ToS-adverse. Gated by `trade.send_in_sleeper` (default OFF).
+# See docs/plans/sleeper-write-capture-runbook.md. The stored token is a
+# full-account credential — encrypted at rest, never logged.
+# ---------------------------------------------------------------------------
+
+def _fetch_league_rosters(league_id: str):
+    """Public rosters array for a league, or None on failure."""
+    try:
+        rosters = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/rosters")
+    except Exception:
+        return None
+    return rosters if isinstance(rosters, list) else None
+
+
+def _roster_id_for_owner(rosters, owner_id) -> int | None:
+    """Server-authoritative roster resolution: the roster_id owned by owner_id
+    (a Sleeper user_id). Clients never assert roster_ids directly."""
+    if not owner_id or not rosters:
+        return None
+    for r in rosters:
+        if isinstance(r, dict) and str(r.get("owner_id")) == str(owner_id):
+            try:
+                return int(r.get("roster_id"))
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+@app.route("/api/sleeper/link", methods=["GET", "POST", "DELETE"])
+def sleeper_link():
+    """Manage the caller's stored Sleeper write token.
+
+    POST   {token}  → validate the JWT + store it encrypted (link/re-link).
+    GET             → {connected, sleeper_user_id, expires_at, expired}. No token.
+    DELETE          → drop the stored token (disconnect).
+    """
+    if not is_enabled("trade.send_in_sleeper"):
+        return jsonify({"error": "feature_disabled"}), 404
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    if request.method == "DELETE":
+        delete_sleeper_credential(user_id)
+        return jsonify({"connected": False})
+
+    if request.method == "GET":
+        cred = get_sleeper_credential(user_id)
+        if not cred:
+            return jsonify({"connected": False})
+        expired = False
+        if cred.get("expires_at"):
+            try:
+                expired = datetime.fromisoformat(cred["expires_at"]) <= datetime.now(timezone.utc)
+            except Exception:
+                expired = False
+        return jsonify({
+            "connected": True,
+            "sleeper_user_id": cred.get("sleeper_user_id"),
+            "expires_at": cred.get("expires_at"),
+            "expired": expired,
+        })
+
+    # POST — store a freshly captured token
+    if not _sleeper_write.token_encryption_available():
+        return jsonify({"error": "sleeper_unconfigured"}), 503
+    body = request.get_json(force=True) or {}
+    token = (body.get("token") or "").strip()
+    if not token or token.count(".") != 2:
+        return jsonify({"error": "invalid_token"}), 400
+    if _sleeper_write.is_expired(token):
+        return jsonify({"error": "token_expired"}), 400
+    sleeper_user_id = _sleeper_write.token_sleeper_user_id(token)
+    exp = _sleeper_write.token_expiry(token)
+    expires_at = datetime.fromtimestamp(exp, tz=timezone.utc).isoformat() if exp else None
+    try:
+        ciphertext = _sleeper_write.encrypt_token(token)
+        upsert_sleeper_credential(user_id, sleeper_user_id, ciphertext, expires_at)
+    except _sleeper_write.SleeperWriteError:
+        return jsonify({"error": "sleeper_unconfigured"}), 503
+    except Exception:
+        log.exception("sleeper_link store failed")
+        return jsonify({"error": "store_failed"}), 500
+    return jsonify({"connected": True, "sleeper_user_id": sleeper_user_id, "expires_at": expires_at})
+
+
+@app.route("/api/trades/propose", methods=["POST"])
+def propose_trade_to_sleeper():
+    """Send a built trade to Sleeper as a real proposal.
+
+    Body: {league_id, their_user_id (or their_roster_id), give_player_ids[],
+           receive_player_ids[], draft_picks?[]}  (players-only v1; picks pre-encoded).
+    Success → {status:"proposed", transaction_id}. Structured errors the client
+    maps to the deep-link fallback / reconnect prompt:
+      404 feature_disabled | 409 sleeper_not_linked | 409 sleeper_expired
+      503 sleeper_unconfigured | 502 sleeper_write_failed | 400 bad_request
+    """
+    if not is_enabled("trade.send_in_sleeper"):
+        return jsonify({"error": "feature_disabled"}), 404
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    body = request.get_json(force=True) or {}
+    league_id = str(body.get("league_id") or "").strip()
+    their_user_id = body.get("their_user_id")
+    their_roster_id_in = body.get("their_roster_id")
+    give = [str(p) for p in (body.get("give_player_ids") or [])]
+    receive = [str(p) for p in (body.get("receive_player_ids") or [])]
+    picks = [str(p) for p in (body.get("draft_picks") or [])]
+    if not league_id.isdigit() or (their_user_id is None and their_roster_id_in is None):
+        return jsonify({"error": "bad_request"}), 400
+
+    cred = get_sleeper_credential(user_id)
+    if not cred:
+        return jsonify({"error": "sleeper_not_linked"}), 409
+    try:
+        token = _sleeper_write.decrypt_token(cred["token_encrypted"])
+    except _sleeper_write.SleeperWriteError:
+        return jsonify({"error": "sleeper_unconfigured"}), 503
+    if _sleeper_write.is_expired(token):
+        delete_sleeper_credential(user_id)
+        return jsonify({"error": "sleeper_expired"}), 409
+
+    # Resolve BOTH rosters server-authoritatively from one public rosters fetch:
+    # mine from the linked Sleeper account, the counterparty's from their user_id
+    # (FTF user_id == Sleeper user_id). A client-supplied their_roster_id wins.
+    rosters = _fetch_league_rosters(league_id)
+    my_roster_id = _roster_id_for_owner(rosters, cred.get("sleeper_user_id"))
+    if my_roster_id is None:
+        return jsonify({"error": "roster_not_found"}), 400
+    if their_roster_id_in is not None:
+        try:
+            their_rid = int(their_roster_id_in)
+        except (TypeError, ValueError):
+            return jsonify({"error": "bad_request"}), 400
+    else:
+        their_rid = _roster_id_for_owner(rosters, their_user_id)
+        if their_rid is None:
+            return jsonify({"error": "opponent_roster_not_found"}), 400
+
+    req = _sleeper_write.ProposeTradeRequest(
+        league_id=league_id, my_roster_id=my_roster_id, their_roster_id=their_rid,
+        give_player_ids=give, receive_player_ids=receive,
+        draft_picks=picks or None,
+    )
+    try:
+        result = _sleeper_write.propose_trade(token, req)
+    except _sleeper_write.SleeperAuthError:
+        delete_sleeper_credential(user_id)      # token dead → force reconnect
+        return jsonify({"error": "sleeper_expired"}), 409
+    except _sleeper_write.SleeperWriteError as e:
+        return jsonify({"error": "sleeper_write_failed", "kind": e.kind}), 502
+    return jsonify({
+        "status": result.get("status") or "proposed",
+        "transaction_id": result.get("transaction_id"),
+    })
 
 
 @app.route("/api/trades/liked")
 def get_liked_trades():
     """GET /api/trades/liked  →  trades the user has liked"""
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     trade_service = sess["trade_svc"]
     g_user_id     = sess["user_id"]
@@ -3675,7 +4146,7 @@ def get_trade_matches():
     (all statuses: pending, accepted, declined), enriched with player names
     and disposition state from the caller's perspective.
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
@@ -4165,7 +4636,7 @@ def disposition_trade_match(match_id):
 @app.route("/api/leagues")
 def get_leagues():
     """GET /api/leagues  →  current active league"""
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     g_league = sess["league"]
     return jsonify([{
@@ -4199,7 +4670,7 @@ def get_portfolio():
         return jsonify({"players": players})
     except Exception as e:
         log.error("get_portfolio error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/rankings/submit", methods=["POST"])
@@ -4218,7 +4689,7 @@ def submit_rankings():
     Called automatically after every swipe via post_rank3(), but can also
     be triggered manually (e.g. on tab switch).
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     service   = sess["service"]
     g_user_id = sess["user_id"]
@@ -4245,7 +4716,7 @@ def submit_rankings():
         return jsonify({"ok": True, "submitted": len(payload)})
     except Exception as e:
         log.error("rankings/submit error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/league/preferences", methods=["GET"])
@@ -4261,7 +4732,7 @@ def get_league_preferences():
           "trade_away_positions":  ["QB"]
         }
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
@@ -4269,16 +4740,25 @@ def get_league_preferences():
     user_id   = request.args.get("user_id")   or g_user_id
     try:
         prefs = load_league_preference(user_id=user_id, league_id=league_id)
-        if prefs is None:
-            return jsonify({
-                "team_outlook":          None,
-                "acquire_positions":     [],
-                "trade_away_positions":  [],
-            })
-        return jsonify(prefs)
+        declared = (prefs or {}).get("team_outlook")
+        payload = prefs if prefs is not None else {
+            "team_outlook":          None,
+            "acquire_positions":     [],
+            "trade_away_positions":  [],
+        }
+        # Backlog #8 — when no outlook is declared, surface the inferred one
+        # (+ signals) so the client can render a one-tap confirm. Additive and
+        # flag-gated; absent when trade.outlook_seed is off.
+        if not declared and user_id == g_user_id:
+            inferred, signals = _infer_user_outlook(g_user_id, league_id, sess, g_league)
+            if inferred:
+                payload = {**payload,
+                           "inferred_outlook": inferred,
+                           "inferred_signals": signals}
+        return jsonify(payload)
     except Exception as e:
         log.error("get_league_preferences error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/league/preferences", methods=["POST"])
@@ -4295,7 +4775,7 @@ def set_league_preferences():
     Sets the user's team outlook and optional positional preferences for the
     given league. Persisted in DB.
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
@@ -4342,7 +4822,76 @@ def set_league_preferences():
         })
     except Exception as e:
         log.error("set_league_preferences error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
+
+
+@app.route("/api/league/asset-prefs", methods=["GET"])
+def get_asset_prefs():
+    """GET /api/league/asset-prefs?league_id=... — the caller's untouchables +
+    targets for a league (backlog #2).
+
+    Response: {"untouchables": [player_id, ...], "targets": [player_id, ...]}
+    """
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    league_id = request.args.get("league_id") or g_league.league_id
+    try:
+        return jsonify(load_asset_preferences(user_id=g_user_id, league_id=league_id))
+    except Exception as e:
+        log.error("get_asset_prefs error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+
+
+@app.route("/api/league/asset-prefs", methods=["POST"])
+def set_asset_prefs():
+    """POST /api/league/asset-prefs — tag/untag one player for a league (#2).
+
+    Body: {"league_id": "...", "player_id": "4046",
+           "list": "untouchable" | "target" | "none"}
+    "none" removes any tag. A player can hold only one tag per league (setting
+    a new one replaces the old). Returns the refreshed lists.
+    """
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    body      = request.get_json(force=True) or {}
+    league_id = body.get("league_id") or g_league.league_id
+    player_id = body.get("player_id")
+    list_arg  = body.get("list")
+    if not player_id:
+        return jsonify({"error": "player_id required"}), 400
+    list_type = None if list_arg in (None, "none") else list_arg
+    if list_type is not None and list_type not in ASSET_PREF_LISTS:
+        return jsonify({"error": f"list must be one of {sorted(ASSET_PREF_LISTS)} or 'none'"}), 400
+    try:
+        lists = set_asset_preference(
+            user_id=g_user_id, league_id=league_id,
+            player_id=str(player_id), list_type=list_type,
+        )
+        # Label stream for the deferred acceptance model (#65) — non-fatal.
+        try:
+            record_event(
+                g_user_id,
+                "asset_pref_removed" if list_type is None else "asset_pref_added",
+                league_id=league_id,
+                props={"player_id": str(player_id), "list_type": list_type},
+            )
+        except Exception:
+            pass
+        # Tags change candidate generation — drop this league's cached deck.
+        try:
+            _invalidate_trade_jobs(user_id=g_user_id, league_id=league_id)
+        except Exception as inv_err:
+            log.warning("asset-prefs: trade-cache invalidation failed: %s", inv_err)
+        return jsonify({"ok": True, **lists})
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+    except Exception as e:
+        log.error("set_asset_prefs error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/league/summary")
@@ -4354,7 +4903,7 @@ def league_summary_route():
       - leaguemates_total / _joined / _unlocked_1qb / _unlocked_sf
       - default_scoring, league_name
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
     league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
@@ -4365,7 +4914,7 @@ def league_summary_route():
         return jsonify(summary)
     except Exception as e:
         log.error("league/summary error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/league/scoring", methods=["POST"])
@@ -4390,7 +4939,7 @@ def league_scoring_route():
         return jsonify({"ok": True, "league_id": league_id, "default_scoring": fmt})
     except Exception as e:
         log.error("league/scoring error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/league/coverage")
@@ -4408,7 +4957,7 @@ def league_coverage():
       ]
     }
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
@@ -4423,7 +4972,7 @@ def league_coverage():
         return jsonify(coverage)
     except Exception as e:
         log.error("league/coverage error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -4479,7 +5028,7 @@ def league_member_unlock_states_route():
         return jsonify({"members": members})
     except Exception as e:
         log.error("league/member-unlock-states error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/league/members")
@@ -4544,7 +5093,7 @@ def league_members_route():
         return jsonify({"members": members})
     except Exception as e:
         log.error("league/members error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/league/activity")
@@ -4585,7 +5134,7 @@ def league_activity_route():
         return jsonify({"events": events})
     except Exception as e:
         log.error("league/activity error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -4690,7 +5239,7 @@ def league_contrarian_route():
         "te": { ... }
     }
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
@@ -4749,7 +5298,7 @@ def league_contrarian_route():
         return jsonify(out)
     except Exception as e:
         log.error("league/contrarian error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/league/format-stats")
@@ -4772,7 +5321,7 @@ def league_format_stats_route():
       }
     }
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
@@ -4815,7 +5364,7 @@ def league_format_stats_route():
         })
     except Exception as e:
         log.error("league/format-stats error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -4841,7 +5390,12 @@ def sleeper_user(username):
     # ── Local test user bypass ──────────────────────────────────────────
     # Usernames matching "test_user_fp_*" skip the Sleeper API and return
     # a synthetic user object so test accounts can log in locally.
+    # Disabled in production (non-SQLite DATABASE_URL): otherwise anyone
+    # could mint phantom accounts or log in as the seeded test users.
     if username.startswith("test_user_fp_"):
+        if _IS_PROD_ENV:
+            log.warning("  test user bypass rejected in production for %r", username)
+            return jsonify({"error": "User not found"}), 404
         log.info("  🧪 test user bypass for %r", username)
         return jsonify({
             "user_id": username,
@@ -4882,11 +5436,23 @@ def sleeper_user(username):
         return jsonify(data)
 
     except urllib.error.HTTPError as e:
+        # Only a 4xx means the user genuinely doesn't exist. A 5xx is a
+        # Sleeper outage — telling the user "User not found" sends them down
+        # a dead end of retyping a correct username. Surface it as 503 so the
+        # client can show a "try again shortly" message instead.
+        if e.code >= 500:
+            log.warning("  Sleeper HTTPError %s — upstream unavailable", e.code)
+            return jsonify({"error": "sleeper_unavailable",
+                            "message": "Sleeper is unavailable — try again shortly."}), 503
         log.warning("  HTTPError %s — user not found", e.code)
         return jsonify({"error": "User not found"}), 404
+    except urllib.error.URLError as e:
+        log.warning("  Sleeper URLError — upstream unreachable: %s", e)
+        return jsonify({"error": "sleeper_unavailable",
+                        "message": "Sleeper is unavailable — try again shortly."}), 503
     except Exception as e:
         log.error("  exception: %s\n%s", e, traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/sleeper/leagues/<user_id>")
@@ -4894,11 +5460,13 @@ def sleeper_leagues(user_id):
     """Fetch NFL leagues for a Sleeper user (2026 season) + local DB leagues."""
     url = f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/2026"
     log.info("=== /api/sleeper/leagues  user_id=%r", user_id)
+    sleeper_failed = False
     try:
         sleeper_data = _sleeper_get(url) or []
     except Exception as e:
         log.error("  leagues error: %s", e)
         sleeper_data = []
+        sleeper_failed = True
 
     # Append any locally-stored leagues where this user is a member
     try:
@@ -4908,6 +5476,14 @@ def sleeper_leagues(user_id):
         sleeper_data = list(sleeper_data) + local
     except Exception as e:
         log.warning("  local leagues load failed: %s", e)
+
+    # Distinguish "Sleeper is down" from "this user genuinely has no leagues".
+    # An empty list after a Sleeper failure would otherwise render as the
+    # misleading "No leagues found — check your username" dead end.
+    if sleeper_failed and not sleeper_data:
+        log.error("  sleeper unavailable and no local leagues for user %s", user_id)
+        return jsonify({"error": "sleeper_unavailable",
+                        "message": "Couldn't reach Sleeper — try again shortly."}), 503
 
     if not sleeper_data:
         log.error("  no leagues found for user %s", user_id)
@@ -4926,9 +5502,22 @@ def sleeper_rosters(league_id):
         data = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/rosters")
         log.info("  returned %s rosters", len(data) if isinstance(data, list) else "non-list")
         return jsonify(data or [])
+    except urllib.error.HTTPError as e:
+        # 4xx → the league doesn't exist on Sleeper; 5xx → Sleeper outage.
+        # Don't leak the raw upstream error string to the client.
+        if e.code >= 500:
+            log.warning("  rosters: Sleeper %s — upstream unavailable", e.code)
+            return jsonify({"error": "sleeper_unavailable",
+                            "message": "Sleeper is unavailable — try again shortly."}), 503
+        log.warning("  rosters: Sleeper %s — league not found", e.code)
+        return jsonify({"error": "league_not_found"}), 404
+    except urllib.error.URLError as e:
+        log.warning("  rosters: Sleeper unreachable: %s", e)
+        return jsonify({"error": "sleeper_unavailable",
+                        "message": "Sleeper is unavailable — try again shortly."}), 503
     except Exception as e:
         log.error("  rosters error: %s\n%s", e, traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/sleeper/league_users/<league_id>")
@@ -4945,18 +5534,27 @@ def sleeper_league_users(league_id):
         return jsonify(data or [])
     except Exception as e:
         log.error("  league_users error: %s\n%s", e, traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/debug/log")
 def debug_log():
-    """GET /api/debug/log?n=100  →  last N log entries as JSON"""
+    """GET /api/debug/log?n=100  →  last N log entries as JSON
+
+    Operator-only: the log buffer contains usernames, Sleeper user_ids and
+    tracebacks, so this requires the same X-Cron-Secret as /api/cron/*.
+    """
+    _require_cron_auth()
     try:
-        n    = min(int(request.args.get("n", 100)), 200)
+        n = min(int(request.args.get("n", 100)), 200)
+    except (TypeError, ValueError):
+        return jsonify({"error": "n must be an integer"}), 400
+    try:
         entries = list(_LOG_BUFFER)[-n:]
         return jsonify({"entries": entries, "total_buffered": len(_LOG_BUFFER)})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        log.exception("debug_log failed")
+        return jsonify({"error": "internal_error"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -4969,13 +5567,16 @@ def admin_config_list():
     GET /api/admin/config
     Returns all model_config rows: [{key, value, description}, ...]
     sorted alphabetically by key.
+
+    Operator-only (X-Cron-Secret, same as /api/cron/*).
     """
+    _require_cron_auth()
     try:
         rows = list_config()
         return jsonify(rows)
     except Exception as e:
         log.exception("admin_config_list failed")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/admin/config/<key>", methods=["PUT"])
@@ -4984,7 +5585,11 @@ def admin_config_update(key: str):
     PUT /api/admin/config/<key>
     Body: {"value": <float>}
     Updates the config value, reloads both service modules, returns {key, value}.
+
+    Operator-only (X-Cron-Secret, same as /api/cron/*): this mutates live
+    ranking/trade math for every user, so it must never be world-callable.
     """
+    _require_cron_auth()
     try:
         body = request.get_json(force=True) or {}
         if "value" not in body:
@@ -5005,7 +5610,7 @@ def admin_config_update(key: str):
         return jsonify({"error": f"Invalid value: {e}"}), 400
     except Exception as e:
         log.exception("admin_config_update failed for key=%s", key)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/admin/engine-metrics", methods=["GET"])
@@ -5017,7 +5622,10 @@ def admin_engine_metrics():
     volume, like/pass rates by card basis / likes-you / deck position /
     package shape / league, and match conversion. This is the data the
     fairness_threshold and package_adj_gamma tuning is blocked on.
+
+    Operator-only (X-Cron-Secret, same as /api/cron/*).
     """
+    _require_cron_auth()
     try:
         days = max(1, min(int(request.args.get("days", 30)), 365))
         league_id = request.args.get("league_id") or None
@@ -5026,10 +5634,9 @@ def admin_engine_metrics():
         return jsonify({"error": "days must be an integer"}), 400
     except Exception as e:
         log.exception("admin_engine_metrics failed")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
-@app.route("/api/sleeper/players")
 def _ensure_sleeper_cache_populated() -> dict:
     """Populate the Sleeper player cache if it's missing.
 
@@ -5085,6 +5692,7 @@ def _ensure_sleeper_cache_populated() -> dict:
     return relevant
 
 
+@app.route("/api/sleeper/players")
 def sleeper_players():
     """
     Return cached Sleeper bulk player data (QB/RB/WR/TE only).
@@ -5100,7 +5708,7 @@ def sleeper_players():
         return jsonify(_ensure_sleeper_cache_populated())
     except Exception as e:
         log.error("  sleeper_players fetch error: %s\n%s", e, traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 # Mobile callers only want the side-effect (server-side cache hydration);
@@ -5737,15 +6345,19 @@ def list_notifications():
     """
     GET /api/notifications?user_id=<uid>
 
-    Returns unread + the last 20 read notifications for the given user,
-    sorted newest-first.  The user_id is accepted as a query param (and
-    cross-checked against the current session user) so the frontend can
-    pass it without extra auth plumbing.
+    Returns unread + the last 20 read notifications for the session user,
+    sorted newest-first.  A user_id query param is accepted for backwards
+    compatibility but must match the session user — anything else is 403
+    (notifications are private to their owner).
     """
     sess = _require_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
-    uid = request.args.get("user_id") or g_user_id
+    req_uid = request.args.get("user_id")
+    if req_uid and req_uid != g_user_id:
+        return jsonify({"error": "forbidden",
+                        "message": "user_id does not match session user"}), 403
+    uid = g_user_id
     if not uid:
         return jsonify({"notifications": [], "unread_count": 0})
     try:
@@ -5762,22 +6374,36 @@ def read_notifications():
     """
     POST /api/notifications/read  { "user_id": "...", "ids": [1, 2, 3] }
 
-    Marks the specified notification IDs as read for the given user.
+    Marks the specified notification IDs as read for the session user.
+    A body user_id is accepted for backwards compatibility but must match
+    the session user — anything else is 403.
     """
     sess = _require_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
     body    = request.get_json(force=True) or {}
-    uid     = body.get("user_id") or g_user_id
+    req_uid = body.get("user_id")
+    if req_uid and req_uid != g_user_id:
+        return jsonify({"error": "forbidden",
+                        "message": "user_id does not match session user"}), 403
+    uid     = g_user_id
     ids     = body.get("ids") or []
     if not uid:
         return jsonify({"error": "user_id required"}), 400
+    # Validate ids before touching the DB — a non-list (or non-int members)
+    # otherwise reaches SQLAlchemy and 500s with leaked SQL internals.
+    if not isinstance(ids, list):
+        return jsonify({"error": "ids must be a list of integers"}), 400
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return jsonify({"error": "ids must be a list of integers"}), 400
     try:
         updated = mark_notifications_read(uid, notification_ids=ids if ids else None)
         return jsonify({"ok": True, "updated": updated})
     except Exception as e:
         log.error("read_notifications error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/notifications/read-all", methods=["POST"])
@@ -5785,13 +6411,19 @@ def read_all_notifications():
     """
     POST /api/notifications/read-all  { "user_id": "..." }
 
-    Marks ALL unread notifications as read for the given user.
+    Marks ALL unread notifications as read for the session user.
+    A body user_id is accepted for backwards compatibility but must match
+    the session user — anything else is 403.
     """
     sess = _require_session()
     sess["last_active"] = time.time()
     g_user_id = sess["user_id"]
     body = request.get_json(force=True) or {}
-    uid  = body.get("user_id") or g_user_id
+    req_uid = body.get("user_id")
+    if req_uid and req_uid != g_user_id:
+        return jsonify({"error": "forbidden",
+                        "message": "user_id does not match session user"}), 403
+    uid  = g_user_id
     if not uid:
         return jsonify({"error": "user_id required"}), 400
     try:
@@ -5799,7 +6431,7 @@ def read_all_notifications():
         return jsonify({"ok": True, "updated": updated})
     except Exception as e:
         log.error("read_all_notifications error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -6145,7 +6777,7 @@ def _require_cron_auth() -> None:
     if not _CRON_SECRET:
         return
     sent = request.headers.get("X-Cron-Secret", "")
-    if sent != _CRON_SECRET:
+    if not hmac.compare_digest(sent, _CRON_SECRET):
         abort(401)
 
 
@@ -6375,6 +7007,48 @@ def cron_daily_tick():
     return jsonify({"ok": True, **counters})
 
 
+@app.route("/api/cron/value-snapshot", methods=["POST"])
+def cron_value_snapshot():
+    """Once per day. Persist the CONSENSUS value of every universal-pool
+    player, per scoring format, into player_value_history (backlog #57 / #17).
+
+    Deliberately a DEDICATED endpoint, not folded into daily-tick: this is
+    data retention, and a bug in daily-tick's push-notification scan must not
+    be able to silently stop history collection (every un-logged day is chart
+    history lost forever — the universal pool is rebuilt from the live DP CSV
+    on each boot, so yesterday's numbers are otherwise unrecoverable).
+
+    Idempotent: re-running on the same UTC day upserts rather than
+    duplicating (uq_value_snapshot). Auth: X-Cron-Secret, same as /api/cron/*.
+    """
+    _require_cron_auth()
+    from .trade_service import elo_to_value
+    _ensure_universal_pools()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    counters: dict[str, int] = {}
+    for fmt in SCORING_FORMATS:
+        pool = g_universal_by_format.get(fmt) or {}
+        seed: dict[str, float] = pool.get("seed") or {}
+        players_by_id = {p.id: p for p in pool.get("players", [])}
+        rows = []
+        for pid, elo in seed.items():
+            p = players_by_id.get(pid)
+            rows.append({
+                "player_id":       str(pid),
+                "scoring_format":  fmt,
+                "consensus_elo":   float(elo),
+                "consensus_value": round(elo_to_value(float(elo)), 1),
+                "search_rank":     getattr(p, "search_rank", None) if p else None,
+                "adp":             getattr(p, "adp", None) if p else None,
+                "snapshot_date":   today,
+            })
+        counters[fmt] = record_value_snapshots(rows)
+
+    log.info("value-snapshot: %s (%s)", counters, today)
+    return jsonify({"ok": True, "snapshot_date": today, **counters})
+
+
 # ---------------------------------------------------------------------------
 # Trends tab routes (Agent 2)
 # ---------------------------------------------------------------------------
@@ -6403,7 +7077,7 @@ def trends_risers_fallers_route():
     grouped by position.  Computed from the `elo_history` table written on
     every ranking submit.
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     service       = sess["service"]
     g_user_id     = sess["user_id"]
@@ -6453,7 +7127,7 @@ def trends_contrarian_route():
     plus Top-5-above / Top-5-below splits.  Falls back to
     {has_baseline: false} when fewer than 3 other users have rankings.
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     service       = sess["service"]
     g_user_id     = sess["user_id"]
@@ -6502,7 +7176,7 @@ def trends_consensus_gap_route():
     "easiest_sells" (own roster, over-valued vs market) and
     "easiest_buys" (not on roster, over-valued vs owner).
     """
-    sess = _require_session()
+    sess = _require_initialized_session()
     sess["last_active"] = time.time()
     service       = sess["service"]
     g_user_id     = sess["user_id"]
@@ -7208,9 +7882,10 @@ def feature_flags_reload_route():
     """Force-reload flags from config/features.json + FTF_FLAGS env.
 
     Useful when flipping a flag in prod without a full server restart.
-    No auth check for v1 — this just re-reads files/env the server
-    already has access to, so there's no privileged data exposed.
+    Operator-only (X-Cron-Secret, same as /api/cron/*) — flag state gates
+    user-facing behavior, so reloads shouldn't be world-triggerable.
     """
+    _require_cron_auth()
     flags = reload_flags()
     return jsonify({"ok": True, "flags": flags})
 
@@ -7564,7 +8239,7 @@ def session_demo():
         })
     except Exception as e:
         log.error("session/demo failed: %s\n%s", e, traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500
 
 
 if __name__ == "__main__":
