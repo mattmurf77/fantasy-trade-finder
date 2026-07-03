@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Color Lab 2 — Cyan &amp; Pink secondary options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:#0A0B09; color:#EFEDE3; font:400 14px/21px 'Archivo',sans-serif; padding:40px 24px 80px; }
+  h1 { font:700 30px/32px 'Barlow Condensed'; text-transform:uppercase; letter-spacing:.02em; display:flex; align-items:center; gap:10px; }
+  h1::before { content:""; width:3px; height:18px; background:#56D9EC; }
+  .sub { color:#A3A896; font-size:13px; margin:10px 0 8px; max-width:760px; }
+  h2 { font:600 20px/24px 'Barlow Condensed'; text-transform:uppercase; letter-spacing:.04em; margin:36px 0 14px; display:flex; align-items:center; gap:9px; }
+  h2 i { width:14px; height:14px; border-radius:2px; display:inline-block; }
+  .lab { display:flex; gap:28px; overflow-x:auto; padding-bottom:8px; align-items:flex-start; }
+
+  .option { flex:none; width:320px; }
+  .opt-name { font:600 17px/21px 'Barlow Condensed'; text-transform:uppercase; letter-spacing:.04em; }
+  .opt-desc { font-size:12px; line-height:17px; color:#A3A896; margin-top:3px; min-height:36px; }
+  .chips { display:flex; gap:10px; margin:6px 0 12px; }
+  .chip { display:flex; align-items:center; gap:5px; font:500 10px 'IBM Plex Mono'; color:#A3A896; }
+  .chip i { width:14px; height:14px; border-radius:2px; display:inline-block; }
+
+  .phone { width:320px; border-radius:24px; border:1px solid #3a3d36; overflow:hidden; background:var(--bg); color:var(--text); }
+  .topbar { height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 16px; border-bottom:1px solid var(--line); }
+  .wordmark { display:flex; align-items:center; gap:7px; font:700 17px 'Barlow Condensed'; text-transform:uppercase; letter-spacing:.04em; }
+  .wordmark::before { content:""; width:3px; height:14px; background:var(--primary); }
+  .bell { width:20px; height:20px; color:var(--dim); }
+  .body { padding:16px 16px 20px; }
+  .title { font:700 26px/28px 'Barlow Condensed'; text-transform:uppercase; letter-spacing:.02em; }
+  .tick-label { display:flex; align-items:center; gap:7px; margin:16px 0 8px; font:600 10px/13px 'Archivo'; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
+  .tick-label::before { content:""; width:3px; height:12px; background:var(--primary); }
+  .seg { display:flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; margin-top:12px; }
+  .seg span { flex:1; text-align:center; font:600 11px/1 'Archivo'; letter-spacing:.06em; color:var(--dim); padding:9px 0 7px; border-bottom:2px solid transparent; }
+  .seg .on { background:var(--raised2); color:var(--text); border-color:#22C55E; }
+  .unlock-row { display:flex; align-items:center; gap:8px; margin-top:14px; }
+  .unlock { flex:1; display:flex; gap:1px; height:4px; }
+  .unlock i { flex:1; background:var(--raised2); position:relative; overflow:hidden; display:block; }
+  .unlock i b { position:absolute; inset:0 auto 0 0; display:block; }
+  .count { font:600 11px 'IBM Plex Mono'; color:var(--dim); font-variant-numeric:tabular-nums; }
+  .count strong { color:var(--secondary); font-weight:600; }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:8px; margin-top:10px; position:relative; padding:12px 12px 12px 15px; overflow:hidden; }
+  .card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--rail); }
+  .card.sel { border-color:var(--primary); }
+  .card.sel::after { content:""; position:absolute; top:8px; right:8px; width:3px; height:12px; background:var(--primary); }
+  .pname { font:600 15px/20px 'Archivo'; }
+  .prow { display:flex; align-items:center; gap:6px; margin-top:7px; }
+  .badge { font:600 9px/12px 'Archivo'; text-transform:uppercase; letter-spacing:.08em; padding:2px 5px; border:1px solid var(--lineStrong); border-radius:2px; }
+  .elo { margin-left:auto; font:500 12px 'IBM Plex Mono'; font-variant-numeric:tabular-nums; }
+  .elo em { font-style:normal; color:var(--secondary); }
+  .actions { display:flex; gap:10px; margin-top:16px; }
+  .btn { flex:1; height:40px; border-radius:4px; border:1px solid transparent; font:600 13px 'Archivo'; display:flex; align-items:center; justify-content:center; }
+  .btn-primary { background:var(--primary); color:var(--onPrimary); }
+  .btn-ghost { border-color:var(--lineStrong); color:var(--text); }
+  .info-pill { display:inline-flex; align-items:center; gap:6px; margin-top:14px; padding:4px 10px; border:1px solid var(--secondary); color:var(--secondary); border-radius:999px; font:600 10px/13px 'Archivo'; text-transform:uppercase; letter-spacing:.06em; }
+</style>
+</head>
+<body>
+  <h1>Color Lab 2 — secondary options</h1>
+  <p class="sub">Primary is locked per row (B's ice cyan / D's hot pink, each on its own ink). Only the <strong>secondary</strong> changes: it drives the Elo delta, the streak pill, and the progress count. First option in each row uses the other row's primary as the secondary.</p>
+  <div id="lab"></div>
+
+<script>
+const INK_B = { bg:'#0C0E11', surface:'#13161B', raised2:'#232833', line:'#262C35', lineStrong:'#3D4654', text:'#ECEFF4', dim:'#97A1AE' };
+const INK_D = { bg:'#100D12', surface:'#181419', raised2:'#2B2430', line:'#322B36', lineStrong:'#4C4252', text:'#F1ECF2', dim:'#A79FAB' };
+const CYAN = '#56D9EC', PINK = '#F0508C', VOLT = '#D6F14E';
+
+const GROUPS = [
+  {
+    title: 'Cyan primary (from B)', swatch: CYAN,
+    variants: [
+      { key:'B1', name:'B1 · Cyan / Pink', desc:"Crossover: D's pink as secondary. Two loud poles — brand vs data.", ink:INK_B, primary:CYAN, onPrimary:'#071013', secondary:PINK },
+      { key:'B2', name:'B2 · Cyan / Volt', desc:'Electric pairing — cyan brand, lime data highlights. High energy, zero position-color collisions.', ink:INK_B, primary:CYAN, onPrimary:'#071013', secondary:VOLT },
+      { key:'B3', name:'B3 · Cyan / Chalk', desc:'Quiet secondary: data highlights are just brighter chalk. Cyan owns the screen alone.', ink:INK_B, primary:CYAN, onPrimary:'#071013', secondary:'#F2F5F9' },
+    ],
+  },
+  {
+    title: 'Pink primary (from D)', swatch: PINK,
+    variants: [
+      { key:'D1', name:'D1 · Pink / Cyan', desc:"Crossover: B's ice cyan as secondary (close to D's original, now exactly B's hue).", ink:INK_D, primary:PINK, onPrimary:'#17060D', secondary:CYAN },
+      { key:'D2', name:'D2 · Pink / Volt', desc:'Loudest option on the board — pink brand, lime data. Arcade energy.', ink:INK_D, primary:PINK, onPrimary:'#17060D', secondary:VOLT },
+      { key:'D3', name:'D3 · Pink / Brass', desc:'Warm gold data highlights — prime-time award-show feel. Note: sits near Elite tier gold.', ink:INK_D, primary:PINK, onPrimary:'#17060D', secondary:'#F6C453' },
+    ],
+  },
+];
+
+const POS = { QB:'#F97316', RB:'#22C55E', WR:'#3B82F6', TE:'#A855F7' };
+const TIER = { elite:'#F59E0B', starter:'#22C55E' };
+const PLAYERS = [
+  { name:'Jahmyr Gibbs', pos:'RB', dc:'RB1', elo:'1571', delta:'+14', tier:'starter', tierLabel:'Starter', sel:true },
+  { name:'Bijan Robinson', pos:'RB', dc:'RB2', elo:'1608', delta:'', tier:'elite', tierLabel:'Elite', sel:false },
+  { name:'Breece Hall', pos:'RB', dc:'RB1', elo:'1489', delta:'-6', tier:'starter', tierLabel:'Starter', sel:false },
+];
+
+function frame(v) {
+  const t = { ...v.ink, primary:v.primary, onPrimary:v.onPrimary, secondary:v.secondary };
+  const vars = Object.entries(t).map(([k, val]) => `--${k}:${val}`).join(';');
+  const cards = PLAYERS.map(p => `
+    <div class="card ${p.sel ? 'sel' : ''}" style="--rail:${POS[p.pos]}">
+      <div class="pname">${p.name}</div>
+      <div class="prow">
+        <span class="badge" style="border-color:${POS[p.pos]}">${p.pos}</span>
+        <span class="badge">${p.dc}</span>
+        <span class="badge" style="border-color:${TIER[p.tier]}">${p.tierLabel}</span>
+        <span class="elo">${p.elo}${p.delta ? ` <em>${p.delta}</em>` : ''}</span>
+      </div>
+    </div>`).join('');
+  return `
+  <div class="option">
+    <div class="opt-name">${v.name}</div>
+    <div class="opt-desc">${v.desc}</div>
+    <div class="chips">
+      <span class="chip"><i style="background:${v.primary}"></i>primary ${v.primary}</span>
+      <span class="chip"><i style="background:${v.secondary}"></i>secondary ${v.secondary}</span>
+    </div>
+    <div class="phone" style="${vars}">
+      <div class="topbar">
+        <div class="wordmark">Trade Finder</div>
+        <svg class="bell" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+      </div>
+      <div class="body">
+        <div class="title">Rank</div>
+        <div class="seg"><span>QB</span><span class="on">RB</span><span>WR</span><span>TE</span></div>
+        <div class="unlock-row">
+          <div class="unlock">
+            <i><b style="width:80%;background:${POS.QB}"></b></i>
+            <i><b style="width:55%;background:${POS.RB}"></b></i>
+            <i><b style="width:70%;background:${POS.WR}"></b></i>
+            <i><b style="width:30%;background:${POS.TE}"></b></i>
+          </div>
+          <span class="count"><strong>38</strong> / 60</span>
+        </div>
+        <div class="tick-label">Pick the player you'd rather build around</div>
+        ${cards}
+        <div class="actions">
+          <div class="btn btn-primary">Confirm pick</div>
+          <div class="btn btn-ghost">Skip trio</div>
+        </div>
+        <span class="info-pill">
+          <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square"><path d="M3 14l4-5 3 3 4-6 3 4"/></svg>
+          12-pick streak
+        </span>
+      </div>
+    </div>
+  </div>`;
+}
+
+document.getElementById('lab').innerHTML = GROUPS.map(g => `
+  <h2><i style="background:${g.swatch}"></i>${g.title}</h2>
+  <div class="lab">${g.variants.map(frame).join('')}</div>
+`).join('');
+</script>
+</body>
+</html>

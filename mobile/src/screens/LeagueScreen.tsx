@@ -15,7 +15,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   ink,
   chalk,
-  volt,
+  ice,
   semantic,
   space,
   radii,
@@ -189,7 +189,7 @@ export default function LeagueScreen() {
           <RefreshControl
             refreshing={summaryQuery.isFetching || coverageQuery.isFetching}
             onRefresh={refetchAll}
-            tintColor={volt.base}
+            tintColor={ice.base}
           />
         }
       >
@@ -288,7 +288,7 @@ export default function LeagueScreen() {
           </View>
           <Meter
             value={coveragePending ? 0 : coveragePct / 100}
-            color={coveragePct >= 100 ? semantic.pos : volt.base}
+            color={coveragePct >= 100 ? semantic.pos : ice.base}
           />
           {coveragePending ? null : (
             <Text style={[type.bodySm, styles.coverageHint]}>

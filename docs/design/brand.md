@@ -11,7 +11,7 @@ Companion files: [`design-system.md`](design-system.md) (tokens), [`components.m
 
 Fantasy Trade Finder is a **front office tool**. The user is a GM working a trade desk, not a fan being entertained. The visual language should read like the tools GMs respect: broadcast graphics packages, betting boards, terminal screens — dense, dark, confident, numeric.
 
-Design language name: **Chalkline** — chalk on turf under stadium lights. Warm off-white text ("chalk") on a dark surface with a faint turf undertone ("ink"), one sharp lime-yellow signature ("volt"), and yard-line hairlines for structure.
+Design language name: **Chalkline** — chalk lines under stadium lights. Cool off-white text ("chalk") on a dark graphite surface ("ink"), one sharp ice-cyan signature for actions ("ice"), one hot pink signal for what's worth noticing ("flare"), and yard-line hairlines for structure. (Palette v2, ADR-005 — v1 used a turf-green ink and a volt-lime single accent.)
 
 ## Why this exists
 
@@ -23,15 +23,15 @@ Research on AI-generated design tells (3.2M-post Reddit analysis; Anthropic's fr
 |---|---|
 | **Numbers are the product** | Elo, fairness %, value deltas set in mono type, always legible, never decorative |
 | **Broadcast, not SaaS** | Condensed uppercase display type, scoreboard density, sharp corners |
-| **One loud color** | Volt appears only where action or brand lives; everything else is chalk on ink |
-| **Chalk on turf** | Warm neutrals, hairline rules (yard lines) for structure instead of shadows and blur |
+| **Two rationed accents** | Ice appears only where action or brand lives; flare only on informational highlights; everything else is chalk on ink |
+| **Chalk on graphite** | Cool neutrals, hairline rules (yard lines) for structure instead of shadows and blur |
 | **Peer, not tutor** | Copy stays terse and dynasty-fluent per the voice charter |
 
 ## Signature moves
 
 These are the recognizable, ownable details. Use them; don't invent parallel ones.
 
-1. **Volt tick** — a 3px × 14px volt rectangle preceding section labels (the "yard marker"). This is the brand's smallest unit.
+1. **Ice tick** — a 3px × 14px ice rectangle preceding section labels (the "yard marker"). This is the brand's smallest unit.
 2. **Chalk rule** — 1px `--line` hairlines separate list rows and sections. Depth comes from surface steps + hairlines, never blur or heavy shadow.
 3. **Scoreboard numerals** — every number that matters (Elo, fairness %, value, rank) is IBM Plex Mono, tabular.
 4. **Position rail** — player cards carry a 3px full-height left rail in the position color (replaces the old top bar).
@@ -39,7 +39,7 @@ These are the recognizable, ownable details. Use them; don't invent parallel one
 
 ## Logo / wordmark direction
 
-- Wordmark: `TRADE FINDER` in Barlow Condensed Bold caps, chalk, with a volt tick before the T. Short form `FTF` for the extension popup and favicons.
+- Wordmark: `TRADE FINDER` in Barlow Condensed Bold caps, chalk, with an ice tick before the T. Short form `FTF` for the extension popup and favicons.
 - No gradient, no glow, no icon-in-rounded-square app-store cliché for the web header.
 - Mascot (fumbling RB, name pending Q-009 — Tommy Tumble vs Ricky Rumble) is an **illustration asset, not UI chrome**: allowed in empty states, celebration moments, and the auth page. Never inline with data.
 
@@ -47,7 +47,8 @@ These are the recognizable, ownable details. Use them; don't invent parallel one
 
 - Dominant: ink surfaces (~90% of any screen).
 - Chalk text carries hierarchy through weight and size, not color.
-- Volt is rationed: primary CTA, active states, focus, the tick. If a screen has volt in more than ~3 places, remove some.
+- Ice is rationed: primary CTA, active states, focus, the tick. If a screen has ice in more than ~3 places, remove some.
+- Flare is rarer still: likes-you pill, rookie badge, streaks, unread markers. It marks information, never actions — if flare appears on something tappable-as-primary-affordance, that's a bug.
 - Position colors (QB orange, RB green, WR blue, TE purple) and tier colors (gold/green/blue/purple/gray) are **preserved cross-client invariants** — see [`docs/cross-client-invariants.md`](../cross-client-invariants.md). They are data encodings, not brand colors, and the neutral ink field is what keeps them legible.
 
 ## Never list (brand level)

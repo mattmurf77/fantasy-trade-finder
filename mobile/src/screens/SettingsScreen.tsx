@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { ink, chalk, volt, semantic, space, radii, type } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, space, radii, type } from '../theme/chalkline';
 import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
@@ -123,7 +123,7 @@ export default function SettingsScreen({ navigation }: any) {
     return (
       <SafeAreaView style={styles.root} edges={['bottom']}>
         <View style={styles.loading}>
-          <ActivityIndicator color={volt.base} />
+          <ActivityIndicator color={ice.base} />
         </View>
       </SafeAreaView>
     );
@@ -167,7 +167,7 @@ export default function SettingsScreen({ navigation }: any) {
                   {isBusy ? (
                     <ActivityIndicator color={chalk.dim} />
                   ) : isActive ? (
-                    <Icon name="check" color={volt.base} />
+                    <Icon name="check" color={ice.base} />
                   ) : null}
                 </Pressable>
               );
@@ -289,7 +289,7 @@ function Row({
       <Switch
         value={value}
         onValueChange={onChange}
-        trackColor={{ false: ink.ink3, true: volt.base }}
+        trackColor={{ false: ink.ink3, true: ice.base }}
         thumbColor={chalk.base}
       />
     </View>

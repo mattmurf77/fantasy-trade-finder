@@ -8,7 +8,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
-import { ink, chalk, volt, semantic, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
 import type { Outlook } from '../api/league';
 
 interface Props {
@@ -161,7 +161,7 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
           ]}
         >
           {submitting ? (
-            <ActivityIndicator color={volt.on} />
+            <ActivityIndicator color={ice.on} />
           ) : (
             <Text style={styles.submitText}>Save outlook</Text>
           )}
@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 44,
   },
-  outlookRowSel: { borderColor: volt.base },
+  outlookRowSel: { borderColor: ice.base },
   outlookRowPressed: { backgroundColor: ink.ink3 },
   outlookBlurb: { marginTop: 2 },
   posHeader: {
@@ -236,18 +236,18 @@ const styles = StyleSheet.create({
   posTextSel: { color: chalk.base },
   error: { ...type.bodySm, color: semantic.neg },
   submit: {
-    backgroundColor: volt.base,
+    backgroundColor: ice.base,
     borderRadius: radii.sm,
     height: 44,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: space.md,
   },
-  submitPressed: { backgroundColor: volt.press },
+  submitPressed: { backgroundColor: ice.press },
   submitDisabled: { opacity: 0.45 },
   submitText: {
     fontFamily: fonts.uiSemi,
     fontSize: 14,
-    color: volt.on,
+    color: ice.on,
   },
 });

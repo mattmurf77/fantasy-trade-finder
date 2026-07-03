@@ -14,7 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   ink,
   chalk,
-  volt,
+  ice,
   semantic,
   position,
   space,
@@ -93,7 +93,7 @@ export default function TrendsScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       {/* PositionTabs spec: segmented hairline group; active segment = ink3
-          fill + 2px underline in that position's color (ALL = volt). */}
+          fill + 2px underline in that position's color (ALL = ice). */}
       <View style={styles.filterRow}>
         {FILTERS.map((f) => {
           const active = f === filter;
@@ -124,7 +124,7 @@ export default function TrendsScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={volt.base}
+            tintColor={ice.base}
           />
         }
       >
@@ -205,14 +205,14 @@ function maxAbsDelta(rows: TrendRow[]): number {
   return rows.reduce((m, r) => Math.max(m, Math.abs(r.delta || 0)), 0);
 }
 
-// Active-tab underline per PositionTabs spec: position color, volt for ALL.
+// Active-tab underline per PositionTabs spec: position color, ice for ALL.
 function underlineColor(f: PositionFilter): string {
   switch (f) {
     case 'QB': return position.qb;
     case 'RB': return position.rb;
     case 'WR': return position.wr;
     case 'TE': return position.te;
-    default:   return volt.base;
+    default:   return ice.base;
   }
 }
 
@@ -260,7 +260,7 @@ function SectionBody({ loading, error, retry, empty, children }: SectionBodyProp
   if (loading) {
     return (
       <View style={[styles.sectionCard, styles.sectionCenter]}>
-        <ActivityIndicator color={volt.base} />
+        <ActivityIndicator color={ice.base} />
       </View>
     );
   }
@@ -429,7 +429,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
 
   // Segmented group per PositionTabs spec: 1px hairline group at radii.sm;
-  // active segment = ink3 fill + 2px underline (position color / volt for ALL).
+  // active segment = ink3 fill + 2px underline (position color / ice for ALL).
   filterRow: {
     flexDirection: 'row',
     marginHorizontal: space.lg,

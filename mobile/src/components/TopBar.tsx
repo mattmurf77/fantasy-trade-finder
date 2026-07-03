@@ -8,7 +8,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ink, chalk, volt, semantic, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
 import { Icon, Button } from './chalkline';
 import { useNotifications } from '../state/useNotifications';
 import { relativeTime } from '../utils/relativeTime';
@@ -19,7 +19,7 @@ import { relativeTime } from '../utils/relativeTime';
 import { navigationRef } from '../navigation/RootNav';
 
 // Global top bar that sits above the tab navigator. Chalkline TopNav:
-// wordmark (volt tick + condensed caps) on the left, settings + bell icon
+// wordmark (ice tick + condensed caps) on the left, settings + bell icon
 // buttons on the right. The bell shows an unread count when new pushes have
 // arrived since the user last opened the sheet.
 //
@@ -184,7 +184,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.sm,
   },
-  wordmarkTick: { width: 3, height: 14, backgroundColor: volt.base },
+  wordmarkTick: { width: 3, height: 14, backgroundColor: ice.base },
   wordmarkText: {
     fontFamily: fonts.displaySemi,
     fontSize: 16,

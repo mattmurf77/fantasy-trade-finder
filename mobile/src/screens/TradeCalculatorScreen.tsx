@@ -17,7 +17,7 @@ import SuggestionCard from '../components/SuggestionCard';
 import PlayerPickerModal from '../components/PlayerPickerModal';
 import { Button, Card, Icon, TickLabel } from '../components/chalkline';
 import { haptics } from '../utils/haptics';
-import { chalk, fonts, ink, semantic, space, radii, type, volt } from '../theme/chalkline';
+import { chalk, fonts, ink, semantic, space, radii, type, ice } from '../theme/chalkline';
 
 // Manual Trade Calculator (demo) — hand-build a trade against a mock
 // leaguemate and see a live dual-board fairness verdict + fair-offer
@@ -241,7 +241,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     paddingHorizontal: space.md,
   },
-  partnerChipActive: { borderColor: volt.base },
+  partnerChipActive: { borderColor: ice.base },
   partnerChipPressed: { backgroundColor: ink.ink3 },
   partnerText: { fontFamily: fonts.uiSemi, fontSize: 13, lineHeight: 18, color: chalk.dim },
   partnerTextActive: { color: chalk.base },

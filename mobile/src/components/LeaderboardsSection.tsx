@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 
-import { ink, chalk, volt, space, type, fonts } from '../theme/chalkline';
+import { ink, chalk, ice, space, type, fonts } from '../theme/chalkline';
 import { Card, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
 import {
@@ -24,7 +24,7 @@ import {
 // self-row when the user is out of top.
 //
 // Chalkline: TickLabel section headers, FilterTabs-style pickers (ghost
-// label text, active = chalk + volt underline), hairline rows in a Card
+// label text, active = chalk + ice underline), hairline rows in a Card
 // with rank/value numerals in Plex Mono. Self row = ink-2 fill.
 
 interface Props {
@@ -80,7 +80,7 @@ function Board({
     <View style={styles.section}>
       <TickLabel>{title}</TickLabel>
 
-      {/* Metric / window tabs — FilterTabs: ghost label, volt underline on active */}
+      {/* Metric / window tabs — FilterTabs: ghost label, ice underline on active */}
       <View style={styles.tabsRow}>
         {TABS.map((t) => {
           const isActive = t.key === tabKey;
@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
   },
-  tabActive: { borderBottomColor: volt.base },
+  tabActive: { borderBottomColor: ice.base },
   // Pressed = color change only (no transforms).
   tabPressed: { backgroundColor: ink.ink3 },
   tabText: { ...type.label },

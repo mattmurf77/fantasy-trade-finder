@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   ink,
   chalk,
-  volt,
+  ice,
   semantic,
   tier,
   space,
@@ -120,7 +120,7 @@ export default function ProfileScreen({ route }: Props) {
     return (
       <SafeAreaView style={styles.root} edges={['bottom']}>
         <View style={styles.loading}>
-          <ActivityIndicator color={volt.base} />
+          <ActivityIndicator color={ice.base} />
         </View>
       </SafeAreaView>
     );

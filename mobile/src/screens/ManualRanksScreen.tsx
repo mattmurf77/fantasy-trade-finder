@@ -15,7 +15,7 @@ import DraggableFlatList, {
 } from 'react-native-draggable-flatlist';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { ink, chalk, volt, semantic, position, space, radii, type } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, position, space, radii, type } from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
 import PositionChip from '../components/PositionChip';
 import { getRankings, reorderRankings } from '../api/rankings';
@@ -42,9 +42,9 @@ const SAVE_DEBOUNCE_MS = 600;
 const DRAG_ACTIVATION_MS = 220;
 
 // PositionTabs underline: active segment underlines in that position's
-// color; the Overall ("ALL") tab underlines in volt.
+// color; the Overall ("ALL") tab underlines in ice.
 const FILTER_UNDERLINE: Record<Position | 'ALL', string> = {
-  ALL: volt.base,
+  ALL: ice.base,
   QB: position.qb,
   RB: position.rb,
   WR: position.wr,
@@ -380,7 +380,7 @@ export default function ManualRanksScreen() {
 
       {ranksQuery.isLoading ? (
         <View style={styles.center}>
-          <ActivityIndicator color={volt.base} />
+          <ActivityIndicator color={ice.base} />
         </View>
       ) : ranksQuery.isError ? (
         <View style={styles.center}>
@@ -538,7 +538,7 @@ const styles = StyleSheet.create({
     height: 44,
     textAlign: 'center',
     backgroundColor: ink.ink2,
-    borderColor: volt.base,
+    borderColor: ice.base,
     borderWidth: 1,
     borderRadius: radii.sm,
     paddingVertical: 4,

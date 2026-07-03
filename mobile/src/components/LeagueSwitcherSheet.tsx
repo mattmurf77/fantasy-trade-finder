@@ -8,7 +8,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
-import { ink, chalk, volt, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
 import { Button, Icon } from './chalkline';
 import { useSession } from '../state/useSession';
 
@@ -106,7 +106,7 @@ export default function LeagueSwitcherSheet({ visible, onClose, onSwitched }: Pr
                   {isBusy ? (
                     <ActivityIndicator color={chalk.dim} />
                   ) : isActive ? (
-                    <Icon name="check" size={20} color={volt.base} />
+                    <Icon name="check" size={20} color={ice.base} />
                   ) : (
                     <Icon name="chevron-right" size={20} color={chalk.dim} />
                   )}

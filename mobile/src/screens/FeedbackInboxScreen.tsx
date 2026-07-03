@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ink, chalk, volt, semantic, space, type, fonts } from '../theme/chalkline';
+import { ink, chalk, ice, flare, semantic, space, type, fonts } from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
 import { useFeedback, formatFeedbackAsMarkdown, type FeedbackItem } from '../state/useFeedback';
 import type { FeedbackStatus } from '../api/feedback';
@@ -232,7 +232,7 @@ const styles = StyleSheet.create({
 
   // NotificationRow pattern (docs/design/components.md → Feedback & status):
   // hairline-separated rows on ink-0; a row with an operator response gets
-  // the ink-2 fill + volt 6px square dot. Pressed = ink-3 fill, color only.
+  // the ink-2 fill + ice 6px square dot. Pressed = ink-3 fill, color only.
   row: {
     paddingHorizontal: space.lg,
     paddingVertical: space.md,
@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
   unreadDot: {
     width: 6,
     height: 6,
-    backgroundColor: volt.base, // square — no radius (NotificationRow spec)
+    backgroundColor: flare.base, // square — no radius (NotificationRow spec; flare = informational accent)
   },
   rowHeader: {
     flexDirection: 'row',

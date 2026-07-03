@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, Share, StyleSheet } from 'react-native';
 
-import { ink, chalk, volt, space, radii, type, fonts } from '../theme/chalkline';
+import { ink, chalk, ice, space, radii, type, fonts } from '../theme/chalkline';
 import { getBaseUrl } from '../api/client';
 
 // Cold-start banner shown at the top of TradesScreen when NO league-mate
@@ -12,7 +12,7 @@ import { getBaseUrl } from '../api/client';
 // (`/?league=<id>&ref=<username>` — captured by captureReferralFromUrl and
 // utils/deepLinks on the receiving end).
 //
-// Chalkline banner construction: ink-2 surface, hairline border, volt tick,
+// Chalkline banner construction: ink-2 surface, hairline border, ice tick,
 // body-sm copy.
 
 interface Props {
@@ -82,7 +82,7 @@ const styles = StyleSheet.create({
   tick: {
     width: 3,
     height: 14,
-    backgroundColor: volt.base,
+    backgroundColor: ice.base,
     alignSelf: 'flex-start',
     marginTop: 2,
   },

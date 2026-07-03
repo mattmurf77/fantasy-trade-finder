@@ -19,7 +19,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ink,
   chalk,
-  volt,
+  ice,
   semantic,
   tier as tierColors,
   position as positionColors,
@@ -383,7 +383,7 @@ export default function TiersScreen() {
                 compact
                 rightSlot={
                   isSelected ? (
-                    <Icon name="check" size={16} color={volt.base} />
+                    <Icon name="check" size={16} color={ice.base} />
                   ) : undefined
                 }
               />
@@ -677,12 +677,12 @@ export default function TiersScreen() {
           onPress={() => saveMutation.mutate()}
           style={({ pressed }) => [
             styles.saveBtn,
-            pressed && { backgroundColor: volt.press },
+            pressed && { backgroundColor: ice.press },
             (saving || loading) && { opacity: 0.45 },
           ]}
         >
           {saving ? (
-            <ActivityIndicator color={volt.on} />
+            <ActivityIndicator color={ice.on} />
           ) : (
             <Text style={styles.saveBtnText}>Save {position} tiers</Text>
           )}
@@ -756,7 +756,7 @@ const styles = StyleSheet.create({
   },
   tierHeaderCount: { ...type.data, color: chalk.dim },
   // Player row wrapper in normal (drag) mode. Active (picked-up) row gets
-  // a volt ring — border color change only, no shadow/transform lift.
+  // a ice ring — border color change only, no shadow/transform lift.
   playerRow: {
     marginBottom: space.xs,
     borderRadius: radii.md,
@@ -764,7 +764,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   playerRowActive: {
-    borderColor: volt.base,
+    borderColor: ice.base,
   },
   // Wrapper around each chip in multi-select mode. Always present so
   // toggling selection doesn't shift the layout.
@@ -778,7 +778,7 @@ const styles = StyleSheet.create({
   // icon in the right slot — two signals (color + shape) so selection
   // reads clearly including for color-vision-impaired users.
   chipSelected: {
-    borderColor: volt.base,
+    borderColor: ice.base,
   },
   // Floating action bar — shown above the save bar when 1+ chips are
   // selected. Up / Down move all selected by one tier; Done exits.
@@ -879,7 +879,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   saveBtn: {
-    backgroundColor: volt.base,
+    backgroundColor: ice.base,
     borderRadius: radii.sm,
     height: 48,
     alignItems: 'center',
@@ -888,6 +888,6 @@ const styles = StyleSheet.create({
   saveBtnText: {
     fontFamily: fonts.uiSemi,
     fontSize: 14,
-    color: volt.on,
+    color: ice.on,
   },
 });

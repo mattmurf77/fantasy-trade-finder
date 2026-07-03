@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { ink, chalk, volt, semantic, space, radii, type } from '../theme/chalkline';
+import { ink, chalk, flare, semantic, space, radii, type } from '../theme/chalkline';
 import { TickLabel, Button, Meter, fairnessColor, Icon } from './chalkline';
 import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
@@ -71,7 +71,7 @@ function TradeCardComp({
           old emoji pill migrated to eye icon + verbatim text. */}
       {likesYou && (
         <View style={styles.likesYouPill}>
-          <Icon name="eye" size={16} color={volt.base} />
+          <Icon name="eye" size={16} color={flare.base} />
           <Text style={[type.label, styles.likesYouText]}>They're interested</Text>
         </View>
       )}
@@ -200,15 +200,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  // Likes-you pill: volt-bordered pill (the one sanctioned pill shape)
-  // with the Chalkline eye icon replacing the old emoji.
+  // Likes-you pill: flare-bordered pill (the one sanctioned pill shape)
+  // with the Chalkline eye icon replacing the old emoji. Flare = informational
+  // accent (ADR-005); ice stays reserved for actions.
   likesYouPill: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
     borderWidth: 1,
-    borderColor: volt.base,
+    borderColor: flare.base,
     borderRadius: radii.pill,
     paddingVertical: space.xs,
     paddingHorizontal: space.md,

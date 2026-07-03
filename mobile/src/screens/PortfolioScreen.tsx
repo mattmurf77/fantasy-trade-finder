@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 
-import { ink, chalk, volt, space, radii, type } from '../theme/chalkline';
+import { ink, chalk, ice, space, radii, type } from '../theme/chalkline';
 import { TickLabel } from '../components/chalkline';
 import PositionChip from '../components/PositionChip';
 import TierBadge from '../components/TierBadge';
@@ -62,7 +62,7 @@ export default function PortfolioScreen() {
     return (
       <SafeAreaView style={styles.root} edges={['bottom']}>
         <View style={styles.loading}>
-          <ActivityIndicator color={volt.base} />
+          <ActivityIndicator color={ice.base} />
           <Text style={styles.loadingText}>Loading portfolio…</Text>
         </View>
       </SafeAreaView>
@@ -94,7 +94,7 @@ export default function PortfolioScreen() {
             <RefreshControl
               refreshing={query.isFetching}
               onRefresh={() => query.refetch()}
-              tintColor={volt.base}
+              tintColor={ice.base}
             />
           }
           ListEmptyComponent={
@@ -135,7 +135,7 @@ export default function PortfolioScreen() {
           <RefreshControl
             refreshing={query.isFetching}
             onRefresh={() => query.refetch()}
-            tintColor={volt.base}
+            tintColor={ice.base}
           />
         }
         ItemSeparatorComponent={() => <View style={styles.hairline} />}

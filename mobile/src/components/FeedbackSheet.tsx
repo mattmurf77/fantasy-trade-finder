@@ -14,7 +14,7 @@ import Constants from 'expo-constants';
 import {
   ink,
   chalk,
-  volt,
+  ice,
   space,
   radii,
   type,
@@ -202,12 +202,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sevChipActive: {
-    borderColor: volt.base,
+    borderColor: ice.base,
   },
   // Pressed state = surface color change only (no opacity/scale).
   sevChipPressed: { backgroundColor: ink.ink3 },
   sevText:       { fontFamily: fonts.uiSemi, fontSize: 14, color: chalk.dim },
-  sevTextActive: { color: volt.base },
+  sevTextActive: { color: ice.base },
 
   screenInput: {
     backgroundColor: ink.ink2,

@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, ViewStyle } from 'react-native';
-import { ink, volt, radii, space } from '../../theme/chalkline';
+import { ink, ice, radii, space } from '../../theme/chalkline';
 
 interface Props {
   children: React.ReactNode;
@@ -36,7 +36,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     overflow: 'hidden',
   },
-  selected: { borderColor: volt.base },
+  selected: { borderColor: ice.base },
   rail: { width: 3 },
   body: { flex: 1, padding: space.lg },
   bodyWithRail: { paddingLeft: space.lg - 3 },

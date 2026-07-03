@@ -11,7 +11,7 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ink, chalk, volt, semantic, space, radii, type, fonts } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { TickLabel } from '../components/chalkline';
 import { resolveSmartStart, signIn } from '../api/auth';
 import { useSession } from '../state/useSession';
@@ -229,7 +229,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
               disabled={submitDisabled}
             >
               {busy ? (
-                <ActivityIndicator color={volt.on} />
+                <ActivityIndicator color={ice.on} />
               ) : (
                 <Text style={styles.buttonText}>Connect →</Text>
               )}
@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     marginBottom: space.sm,
   },
-  inputFocused: { borderColor: volt.base },
+  inputFocused: { borderColor: ice.base },
   error: {
     ...type.bodySm,
     color: semantic.neg,
@@ -320,16 +320,16 @@ const styles = StyleSheet.create({
   },
   button: {
     height: 44,
-    backgroundColor: volt.base,
+    backgroundColor: ice.base,
     borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: space.sm,
   },
-  buttonPressed: { backgroundColor: volt.press },
+  buttonPressed: { backgroundColor: ice.press },
   buttonDisabled: { opacity: 0.45 },
   buttonText: {
-    color: volt.on,
+    color: ice.on,
     fontFamily: fonts.uiSemi,
     fontSize: 14,
   },

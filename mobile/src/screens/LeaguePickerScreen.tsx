@@ -9,7 +9,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ink, chalk, volt, semantic, space, type } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, space, type } from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
 import { useSession } from '../state/useSession';
 import { getLeagues } from '../api/sleeper';
@@ -115,7 +115,7 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
 
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator color={volt.base} />
+          <ActivityIndicator color={ice.base} />
           <Text style={styles.loadingText}>
             {slowLoad
               ? 'Waking up server — first request after a quiet period can take 30s.'
@@ -139,7 +139,7 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
           keyExtractor={(lg) => lg.league_id}
           contentContainerStyle={styles.list}
           refreshControl={
-            <RefreshControl refreshing={false} onRefresh={refresh} tintColor={volt.base} />
+            <RefreshControl refreshing={false} onRefresh={refresh} tintColor={ice.base} />
           }
           renderItem={({ item }) => {
             const isBusy = selectingId === item.league_id;

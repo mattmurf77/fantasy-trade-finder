@@ -1,11 +1,11 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { ink, volt, semantic, type, space } from '../../theme/chalkline';
+import { ink, ice, semantic, type, space } from '../../theme/chalkline';
 
 interface Props {
   /** 0–1 fill fraction. Fairness meters receive fairness_score directly (invariant: ×100 for display only). */
   value: number;
-  /** Fill color; defaults to volt (coverage). */
+  /** Fill color; defaults to ice (coverage). */
   color?: string;
   /** Optional left label (rendered as Chalkline label type). */
   label?: string;
@@ -14,7 +14,7 @@ interface Props {
 }
 
 // Chalkline meter: 4px track, square ends (chalk lines, not pills).
-export default function Meter({ value, color = volt.base, label, showPercent = false }: Props) {
+export default function Meter({ value, color = ice.base, label, showPercent = false }: Props) {
   const clamped = Math.max(0, Math.min(1, value));
   return (
     <View style={styles.row}>

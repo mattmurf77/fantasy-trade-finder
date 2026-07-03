@@ -4,7 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainerRefContext, CommonActions } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
-import { ink, chalk, volt, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
+import { ink, chalk, ice, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
 import { Icon, Button, type IconName } from '../components/chalkline';
 import { getNextTrio, getRankings, getTiersStatus } from '../api/rankings';
 import { getLikedTrades, getAllMatches } from '../api/trades';
@@ -130,7 +130,7 @@ function TradesStackNav() {
 }
 
 // Chalkline tab icons — stroke SVG set from src/components/chalkline. The
-// navigator passes the active/inactive tint (volt / chalk-dim) as `color`.
+// navigator passes the active/inactive tint (ice / chalk-dim) as `color`.
 const tabIcon = (name: IconName) =>
   ({ color }: { color: string }) =>
     <Icon name={name} size={22} color={color} />;
@@ -170,7 +170,7 @@ export default function TabNav() {
             borderTopColor: ink.line,
             borderTopWidth: 1,
           },
-          tabBarActiveTintColor: volt.base,
+          tabBarActiveTintColor: ice.base,
           tabBarInactiveTintColor: chalk.dim,
           tabBarLabelStyle: { fontFamily: fonts.uiSemi, fontSize: 11 },
         }}

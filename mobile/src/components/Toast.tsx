@@ -6,7 +6,7 @@ import Animated, {
   withTiming,
   runOnJS,
 } from 'react-native-reanimated';
-import { ink, volt, semantic, space, radii, type, shadowSheet } from '../theme/chalkline';
+import { ink, ice, semantic, space, radii, type, shadowSheet } from '../theme/chalkline';
 
 interface Props {
   visible: boolean;
@@ -22,7 +22,7 @@ interface Props {
 // and by other screens for lightweight status feedback.
 //
 // Chalkline: ink-2 surface, hairline border, sheet shadow, 3px left rail in
-// the tone color (volt info / pos success / warn / neg error).
+// the tone color (ice info / pos success / warn / neg error).
 export default function Toast({
   visible,
   message,
@@ -81,7 +81,7 @@ function railColor(tone: NonNullable<Props['tone']>): string {
     case 'error':
       return semantic.neg;
     default:
-      return volt.base;
+      return ice.base;
   }
 }
 

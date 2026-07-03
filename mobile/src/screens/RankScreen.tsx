@@ -26,7 +26,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ink,
   chalk,
-  volt,
+  ice,
+  flare,
   semantic,
   position as positionColors,
   space,
@@ -331,7 +332,7 @@ export default function RankScreen() {
                 pressed && { backgroundColor: ink.ink3 },
               ]}
             >
-              <Icon name="trends" size={16} color={semantic.warn} />
+              <Icon name="trends" size={16} color={flare.base} />
               <Text style={styles.streakNum}>{streakQuery.data!.current}</Text>
               <Text style={styles.streakLabel}>day streak</Text>
               <Icon name="chevron-right" size={14} color={chalk.dim} />
@@ -498,7 +499,7 @@ export default function RankScreen() {
           ]}
         >
           <View style={styles.speedTileTitleRow}>
-            <Icon name="trends" size={14} color={speedMode ? volt.base : chalk.dim} />
+            <Icon name="trends" size={14} color={speedMode ? ice.base : chalk.dim} />
             <Text style={[styles.speedTileText, speedMode && styles.speedTileTextOn]}>
               {speedMode ? 'I AM SPEED — ON' : 'I AM SPEED — OFF'}
             </Text>
@@ -797,7 +798,7 @@ const styles = StyleSheet.create({
     gap: space.xs,
   },
   speedTileOn: {
-    borderColor: volt.base,
+    borderColor: ice.base,
   },
   speedTileTitleRow: {
     flexDirection: 'row',
@@ -805,7 +806,7 @@ const styles = StyleSheet.create({
     gap: space.sm - 2,
   },
   speedTileText: { ...type.label, color: chalk.base },
-  speedTileTextOn: { color: volt.base },
+  speedTileTextOn: { color: ice.base },
   speedTileCaption: {
     ...type.bodySm,
     color: chalk.dim,
@@ -819,7 +820,7 @@ const styles = StyleSheet.create({
     marginTop: space.lg,
   },
 
-  // Banner spec: ink2 surface, hairline, volt tick + body-sm.
+  // Banner spec: ink2 surface, hairline, ice tick + body-sm.
   unlockedBanner: {
     marginTop: space.lg,
     padding: space.md,
@@ -832,7 +833,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: space.sm,
   },
-  bannerTick: { width: 3, height: 14, backgroundColor: volt.base },
+  bannerTick: { width: 3, height: 14, backgroundColor: ice.base },
   unlockedText: { ...type.bodySm, color: chalk.base },
 
   infoOverlay: {

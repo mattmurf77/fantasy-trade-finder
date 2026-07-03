@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { ink, chalk, volt, space, radii, type } from '../theme/chalkline';
+import { ink, chalk, ice, space, radii, type } from '../theme/chalkline';
 import { Icon } from './chalkline';
 import type { NewPartnerEntry } from '../shared/types';
 
@@ -11,7 +11,7 @@ import type { NewPartnerEntry } from '../shared/types';
 // banner once per (user, league) — dismissal key encodes the latest
 // partner's user_id so a *new* unlock re-surfaces the banner.
 //
-// Chalkline banner construction: ink-2 surface, hairline border, volt tick,
+// Chalkline banner construction: ink-2 surface, hairline border, ice tick,
 // body-sm copy, ghost dismiss.
 
 interface Props {
@@ -91,7 +91,7 @@ const styles = StyleSheet.create({
   tick: {
     width: 3,
     height: 14,
-    backgroundColor: volt.base,
+    backgroundColor: ice.base,
   },
   text: {
     flex: 1,

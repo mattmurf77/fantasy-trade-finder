@@ -25,7 +25,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ink,
   chalk,
-  volt,
+  ice,
   semantic,
   space,
   radii,
@@ -516,7 +516,7 @@ export default function TradesScreen({ navigation }: any) {
           still tap controls and trigger requests against the wrong league. */}
       {switching ? (
         <View style={styles.switchingOverlay} pointerEvents="auto">
-          <ActivityIndicator color={volt.base} size="large" />
+          <ActivityIndicator color={ice.base} size="large" />
           <Text style={styles.switchingText}>
             {slowSwitch
               ? 'Waking up server — first request after a quiet period can take 30s.'
@@ -616,7 +616,7 @@ export default function TradesScreen({ navigation }: any) {
               the deck client-side by ranking mismatch (the ELO gap
               between owners on the swapped players). Rendered as the
               Chalkline slider construction: 4px ink-3 track, 16px square
-              volt thumb — same boolean semantics as before. */}
+              ice thumb — same boolean semantics as before. */}
           <View style={styles.fairnessRow}>
             <View style={{ flex: 1 }}>
               <TickLabel>Trade fairness</TickLabel>
@@ -659,7 +659,7 @@ export default function TradesScreen({ navigation }: any) {
 
           {/* Progress strip — visible only during a running job. Cards are
               streaming into the deck above; this just narrates the work.
-              Opponent coverage renders as a volt Meter with mono counts. */}
+              Opponent coverage renders as a ice Meter with mono counts. */}
           {job?.status === 'running' && (
             <View style={styles.progressStrip}>
               <View style={styles.progressInfo}>
@@ -792,7 +792,7 @@ export default function TradesScreen({ navigation }: any) {
             // look broken — the progress strip above narrates state.
             <Card>
               <View style={styles.emptyInner}>
-                <ActivityIndicator color={volt.base} />
+                <ActivityIndicator color={ice.base} />
                 <Text style={[styles.emptyTitle, { marginTop: space.sm }]}>
                   Looking for trades…
                 </Text>
@@ -1060,7 +1060,7 @@ const styles = StyleSheet.create({
     marginTop: space.xs,
   },
   // Chalkline slider construction (components.md → Forms): 4px ink-3
-  // track, 16px square volt thumb at radius xs. Binary here — the thumb
+  // track, 16px square ice thumb at radius xs. Binary here — the thumb
   // sits at either end of the track.
   fairnessSliderTap: {
     width: 56,
@@ -1080,7 +1080,7 @@ const styles = StyleSheet.create({
   },
   fairnessThumbOn: {
     right: 0,
-    backgroundColor: volt.base,
+    backgroundColor: ice.base,
   },
   fairnessThumbOff: {
     left: 0,
@@ -1150,7 +1150,7 @@ const styles = StyleSheet.create({
   },
 
   // Queue button — appears below the swipable card under the queue flag.
-  // Chip construction: hairline border on ink-1; queued = volt border +
+  // Chip construction: hairline border on ink-1; queued = ice border +
   // chalk text (active state).
   queueBtn: {
     alignSelf: 'center',
@@ -1166,7 +1166,7 @@ const styles = StyleSheet.create({
     backgroundColor: ink.ink1,
   },
   queueBtnQueued: {
-    borderColor: volt.base,
+    borderColor: ice.base,
   },
   queueBtnPressed: {
     backgroundColor: ink.ink3,

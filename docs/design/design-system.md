@@ -17,7 +17,7 @@ These override any default tendency. If generated UI contains one of these, it i
 3. No `backdrop-filter` / glassmorphism / translucent `rgba(255,255,255,x)` surfaces. Surfaces are solid ink steps.
 4. No Inter, Roboto, or bare system font stack. Fonts are Barlow Condensed / Archivo / IBM Plex Mono only.
 5. No border-radius above 8px except true pills (`999px` on count badges and chips explicitly specced as pills).
-6. No purple/indigo/blue accent for brand or CTAs. The accent is volt. (`#a855f7` and `#3b82f6` remain **only** as TE-position and WR-position/Solid-tier data colors.)
+6. No purple/indigo accent for brand or CTAs. The primary accent is ice; the secondary is flare, and flare appears ONLY on informational highlights, never on actions. (`#a855f7` and `#3b82f6` remain **only** as TE-position and WR-position/Solid-tier data colors; ice is distinguishable from WR blue by brightness.)
 7. No hover `translateY` lift on cards. State changes use border and surface color.
 8. No box-shadow except `--shadow-sheet` on sheets/menus/toasts.
 9. No new hues. If a color isn't in this file or `cross-client-invariants.md`, don't ship it.
@@ -26,32 +26,44 @@ These override any default tendency. If generated UI contains one of these, it i
 
 Dark-only (unchanged). All values hex; define as CSS variables in `web/css/styles.css`, mirror in `mobile/src/theme/colors.ts` and `extension/*.css`.
 
+Palette v2 ("ice/flare", ADR-005) — graphite ink, ice-cyan primary, flare-pink secondary. Replaced v1's turf ink + volt lime after operator color review (`web/color-lab-2.html`, option B1).
+
 ### Ink (surfaces)
 
 | Token | Hex | Use |
 |---|---|---|
-| `--ink-0` | `#0D0F0B` | Page background |
-| `--ink-1` | `#151812` | Cards, panels |
-| `--ink-2` | `#1D211A` | Raised: sheets, menus, popovers, input fill |
-| `--ink-3` | `#262B22` | Hover fill, wells, pressed |
-| `--line` | `#31382C` | Hairline rules, default borders |
-| `--line-strong` | `#49523F` | Interactive borders (inputs, secondary buttons) |
+| `--ink-0` | `#0C0E11` | Page background |
+| `--ink-1` | `#13161B` | Cards, panels |
+| `--ink-2` | `#1A1E25` | Raised: sheets, menus, popovers, input fill |
+| `--ink-3` | `#232833` | Hover fill, wells, pressed |
+| `--line` | `#262C35` | Hairline rules, default borders |
+| `--line-strong` | `#3D4654` | Interactive borders (inputs, secondary buttons) |
 
 ### Chalk (text)
 
 | Token | Hex | Use |
 |---|---|---|
-| `--chalk` | `#EFEDE3` | Primary text |
-| `--chalk-dim` | `#A3A896` | Secondary text, labels |
-| `--chalk-faint` | `#6C7261` | Disabled, placeholders |
+| `--chalk` | `#ECEFF4` | Primary text |
+| `--chalk-dim` | `#97A1AE` | Secondary text, labels |
+| `--chalk-faint` | `#626C79` | Disabled, placeholders |
 
-### Volt (brand accent — rationed)
+### Ice (primary accent — rationed, actions only)
 
 | Token | Hex | Use |
 |---|---|---|
-| `--volt` | `#D6F14E` | Primary CTA fill, active tab, focus ring, volt tick, progress fill |
-| `--volt-press` | `#BFD93F` | Primary CTA hover/pressed |
-| `--on-volt` | `#12140D` | Text/icons on volt fill |
+| `--ice` | `#56D9EC` | Primary CTA fill, active tab, focus ring, ice tick, progress fill |
+| `--ice-press` | `#3FC2D6` | Primary CTA hover/pressed |
+| `--on-ice` | `#071013` | Text/icons on ice fill |
+
+### Flare (secondary accent — informational highlights only)
+
+| Token | Hex | Use |
+|---|---|---|
+| `--flare` | `#F0508C` | Likes-you pill, rookie badge, streak/heat chips, unread markers, count emphasis |
+| `--flare-press` | `#D8437B` | Pressed state of flare-bordered interactive chips |
+| `--on-flare` | `#170610` | Text/icons on flare fill (rare) |
+
+Division of labor: **ice = what you can do** (CTAs, active states, focus, ticks, selection); **flare = what's worth noticing** (data callouts). Flare never appears on a button or actionable control's primary affordance.
 
 ### Semantic
 
@@ -75,7 +87,7 @@ Web: load via Google Fonts (`Barlow Condensed:600,700`, `Archivo:400,500,600,700
 |---|---|---|---|---|
 | `display` | Barlow Condensed 700 | 32/34 | UPPER, +0.02em | Screen titles, auth headline |
 | `heading` | Barlow Condensed 600 | 22/26 | UPPER, +0.03em | Section headers, sheet titles |
-| `label` | Archivo 600 | 11/14 | UPPER, +0.08em | Section labels (with volt tick), badge text |
+| `label` | Archivo 600 | 11/14 | UPPER, +0.08em | Section labels (with ice tick), badge text |
 | `title` | Archivo 600 | 16/22 | Sentence | Card titles, player names |
 | `body` | Archivo 400 | 14/21 | Sentence | Default copy |
 | `body-sm` | Archivo 400 | 13/18 | Sentence | Secondary copy, help text |
@@ -100,7 +112,7 @@ Rules: numerals that represent data are always Plex Mono with `font-variant-nume
 
 ## Depth
 
-One shadow token: `--shadow-sheet: 0 12px 32px rgba(0,0,0,0.55)` — sheets, menus, toasts only. Everything else: surface step + hairline. Overlay scrim: solid `rgba(9,10,8,0.78)`, no blur.
+One shadow token: `--shadow-sheet: 0 12px 32px rgba(0,0,0,0.55)` — sheets, menus, toasts only. Everything else: surface step + hairline. Overlay scrim: solid `rgba(7,9,12,0.78)`, no blur.
 
 ## Motion
 
@@ -120,6 +132,6 @@ Exception: the `👀 They're interested` pill copy is a verbatim cross-client st
 ## Accessibility floors
 
 - Text contrast ≥ 4.5:1 on its surface (chalk on ink-0 ≈ 13:1; chalk-dim on ink-1 ≈ 5.5:1 — don't put chalk-faint on ink-3).
-- Focus: 2px volt ring, 2px offset, on every interactive element.
+- Focus: 2px ice ring, 2px offset, on every interactive element.
 - Hit targets ≥ 44px on touch clients.
 - Position/tier color is never the only encoding — always paired with the text label (QB/RB/WR/TE, tier name).

@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { ink, chalk, volt, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
 import { Button, Icon } from './chalkline';
 import PositionChip from './PositionChip';
 import { getRookies, type RookiePlayer } from '../api/rankings';
@@ -25,7 +25,7 @@ const FILTERS: Filter[] = ['ALL', 'QB', 'RB', 'WR', 'TE'];
 
 // Bottom-sheet rookie draft board (Chalkline sheet construction: ink-2
 // surface, hairline border, sheet shadow, line-strong grabber, solid scrim;
-// ghost filter tabs with volt underline; hairline table rows with mono rank
+// ghost filter tabs with ice underline; hairline table rows with mono rank
 // numerals). Mirrors the web app's rookie overlay (openRookieBoard /
 // renderRookieList in web/js/app.js): filterable list of rookie / first-year
 // / pre-draft prospect players sorted by Sleeper search_rank. Read-only —
@@ -84,7 +84,7 @@ export default function RookieDraftBoardSheet({ visible, onClose }: Props) {
           </Pressable>
         </View>
 
-        {/* Position filter tabs: ghost label text, active = chalk + volt underline */}
+        {/* Position filter tabs: ghost label text, active = chalk + ice underline */}
         <View style={styles.filterRow}>
           {FILTERS.map((f) => {
             const isActive = f === filter;
@@ -109,7 +109,7 @@ export default function RookieDraftBoardSheet({ visible, onClose }: Props) {
         {/* List */}
         {query.isLoading ? (
           <View style={styles.centered}>
-            <ActivityIndicator color={volt.base} />
+            <ActivityIndicator color={ice.base} />
           </View>
         ) : query.isError ? (
           <View style={styles.centered}>
@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
     height: 2,
     backgroundColor: 'transparent',
   },
-  filterUnderlineActive: { backgroundColor: volt.base },
+  filterUnderlineActive: { backgroundColor: ice.base },
 
   list: { flexGrow: 0 },
   listContent: { paddingBottom: space.lg },

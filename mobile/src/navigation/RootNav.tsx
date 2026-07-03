@@ -8,7 +8,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
-import { ink, chalk, volt, fonts } from '../theme/chalkline';
+import { ink, chalk, ice, fonts } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
 import SignInScreen from '../screens/SignInScreen';
 import LeaguePickerScreen from '../screens/LeaguePickerScreen';
@@ -109,7 +109,7 @@ export default function RootNav({ booted }: { booted: boolean }) {
   if (!booted) {
     return (
       <View style={styles.splash}>
-        <ActivityIndicator color={volt.base} />
+        <ActivityIndicator color={ice.base} />
       </View>
     );
   }
@@ -166,7 +166,7 @@ export default function RootNav({ booted }: { booted: boolean }) {
           card: ink.ink0,
           text: chalk.base,
           border: ink.line,
-          primary: volt.base,
+          primary: ice.base,
         },
       }}
     >

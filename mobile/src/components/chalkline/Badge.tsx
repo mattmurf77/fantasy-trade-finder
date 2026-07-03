@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { ink, chalk, volt, semantic, radii, type, position, tier } from '../../theme/chalkline';
+import { ink, chalk, flare, semantic, radii, type, position, tier } from '../../theme/chalkline';
 
 interface Props {
   label: string;
@@ -29,7 +29,7 @@ export function TierChalkBadge({ t }: { t: keyof typeof tier }) {
 }
 
 export function RookieBadge() {
-  return <Badge label="RK" color={volt.base} colorText />;
+  return <Badge label="RK" color={flare.base} colorText />;
 }
 
 export function InjuryBadge({ status }: { status: 'Q' | 'D' | 'Out' | 'IR' }) {

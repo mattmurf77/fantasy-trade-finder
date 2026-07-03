@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Pressable } from 'react-native';
 import {
   ink,
   chalk,
-  volt,
+  ice,
   semantic,
   tier as tierColors,
   position as positionColors,
@@ -184,7 +184,7 @@ const styles = StyleSheet.create({
   },
   cardDisabled: { opacity: 0.45 },
   cardSelected: {
-    borderColor: volt.base,
+    borderColor: ice.base,
   },
   rail: {
     position: 'absolute',

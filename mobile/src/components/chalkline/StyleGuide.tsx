@@ -1,6 +1,6 @@
 import React from 'react';
 import { ScrollView, View, Text, StyleSheet } from 'react-native';
-import { ink, chalk, volt, semantic, type, space, position } from '../../theme/chalkline';
+import { ink, chalk, ice, semantic, type, space, position } from '../../theme/chalkline';
 import TickLabel from './TickLabel';
 import Button from './Button';
 import { PositionBadge, TierChalkBadge, RookieBadge, InjuryBadge } from './Badge';

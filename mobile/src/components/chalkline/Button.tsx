@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, Text, StyleSheet, ViewStyle } from 'react-native';
-import { ink, chalk, volt, semantic, radii, space, fonts } from '../../theme/chalkline';
+import { ink, chalk, ice, semantic, radii, space, fonts } from '../../theme/chalkline';
 
 type Variant = 'primary' | 'secondary' | 'like' | 'pass' | 'ghost';
 
@@ -51,11 +51,11 @@ export default function Button({
 
 const VARIANTS = {
   primary: {
-    bg: volt.base,
-    bgPressed: volt.press,
+    bg: ice.base,
+    bgPressed: ice.press,
     border: 'transparent',
-    text: volt.on,
-    textPressed: volt.on,
+    text: ice.on,
+    textPressed: ice.on,
   },
   secondary: {
     bg: 'transparent',

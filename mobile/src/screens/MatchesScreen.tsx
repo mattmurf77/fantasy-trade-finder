@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { haptics } from '../utils/haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { ink, chalk, volt, semantic, space, radii, type, fonts } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { Button, Badge, Icon } from '../components/chalkline';
 import TradeCardComp from '../components/TradeCard';
 import Toast from '../components/Toast';
@@ -303,7 +303,7 @@ export default function MatchesScreen() {
               <RefreshControl
                 refreshing={isFetching}
                 onRefresh={onRefresh}
-                tintColor={volt.base}
+                tintColor={ice.base}
               />
             }
             renderItem={({ item }) => (
@@ -355,7 +355,7 @@ export default function MatchesScreen() {
               <RefreshControl
                 refreshing={isFetching}
                 onRefresh={onRefresh}
-                tintColor={volt.base}
+                tintColor={ice.base}
               />
             }
             renderItem={({ item }) => (
@@ -491,7 +491,7 @@ const styles = StyleSheet.create({
   chipScroll: { flexGrow: 0, flexShrink: 0 },
 
   // Segmented group per PositionTabs spec: 1px hairline group at radii.sm;
-  // active segment = ink3 fill + 2px volt underline (volt use: active state).
+  // active segment = ink3 fill + 2px ice underline (ice use: active state).
   segmentRow: {
     flexDirection: 'row',
     marginHorizontal: space.lg,
@@ -512,7 +512,7 @@ const styles = StyleSheet.create({
   },
   segmentBtnActive: {
     backgroundColor: ink.ink3,
-    borderBottomColor: volt.base,
+    borderBottomColor: ice.base,
   },
   segmentText: { ...type.label },
   segmentTextActive: { color: chalk.base },
@@ -524,7 +524,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   // Chalkline badge construction, sized up for touch: 1px border in the
-  // encode color + chalk text on ink. Active = volt border (active state).
+  // encode color + chalk text on ink. Active = ice border (active state).
   chip: {
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
@@ -536,7 +536,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   chipActive: {
-    borderColor: volt.base,
+    borderColor: ice.base,
   },
   chipText: { ...type.label },
   chipTextActive: { color: chalk.base },

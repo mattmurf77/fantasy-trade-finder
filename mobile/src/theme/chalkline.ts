@@ -14,25 +14,36 @@
 import type { TextStyle } from 'react-native';
 import { colors } from './colors';
 
+// Palette v2 ("ice/flare", ADR-005): graphite ink + ice-cyan primary +
+// flare-pink secondary. Replaced v1's turf ink + volt lime after operator
+// color review (web/color-lab-2.html, option B1).
 export const ink = {
-  ink0: '#0D0F0B', // screen background
-  ink1: '#151812', // cards, panels
-  ink2: '#1D211A', // sheets, menus, input fill
-  ink3: '#262B22', // pressed, wells
-  line: '#31382C', // hairlines, default borders
-  lineStrong: '#49523F', // interactive borders
+  ink0: '#0C0E11', // screen background
+  ink1: '#13161B', // cards, panels
+  ink2: '#1A1E25', // sheets, menus, input fill
+  ink3: '#232833', // pressed, wells
+  line: '#262C35', // hairlines, default borders
+  lineStrong: '#3D4654', // interactive borders
 } as const;
 
 export const chalk = {
-  base: '#EFEDE3', // primary text
-  dim: '#A3A896', // secondary text, labels
-  faint: '#6C7261', // disabled, placeholders
+  base: '#ECEFF4', // primary text
+  dim: '#97A1AE', // secondary text, labels
+  faint: '#626C79', // disabled, placeholders
 } as const;
 
-export const volt = {
-  base: '#D6F14E', // primary CTA, active, focus, tick — ration to ≤3 per screen
-  press: '#BFD93F',
-  on: '#12140D', // text/icons on volt fill
+export const ice = {
+  base: '#56D9EC', // primary CTA, active, focus, tick — ration to ≤3 per screen
+  press: '#3FC2D6',
+  on: '#071013', // text/icons on ice fill
+} as const;
+
+// Secondary accent — informational highlights ONLY (likes-you pill, rookie
+// badge, streaks, unread markers, count emphasis). Never on actions.
+export const flare = {
+  base: '#F0508C',
+  press: '#D8437B',
+  on: '#170610',
 } as const;
 
 export const semantic = {
@@ -151,4 +162,4 @@ export const duration = {
 } as const;
 
 // Solid scrim — no blur (prohibition #3).
-export const scrim = 'rgba(9,10,8,0.78)';
+export const scrim = 'rgba(7,9,12,0.78)';
