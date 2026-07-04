@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { submitFeedback, getMyFeedback, type FeedbackStatus } from '../api/feedback';
+import { submitFeedback, getMyFeedback, CLOSED_FEEDBACK_STATUSES, type FeedbackStatus } from '../api/feedback';
 
 // In-app feedback capture (TestFlight-era helper).
 //
@@ -37,6 +37,13 @@ export interface FeedbackItem {
   // fetch (UI shows nothing rather than a wrong 'new').
   status?: FeedbackStatus;
   status_updated_at?: string | null;
+  // Derived on every refreshStatuses() pass — true when the note should be
+  // hidden from the inbox: its status is terminal (CLOSED_FEEDBACK_STATUSES)
+  // OR it synced but /api/feedback/mine no longer returns it (closed
+  // server-side, or it belongs to a different signed-in account — either
+  // way this account shouldn't see it). Recomputed symmetrically, so
+  // switching back to the owning account un-hides.
+  closed?: boolean;
 }
 
 const STORAGE_KEY = 'ftf_inapp_feedback_v1';
@@ -191,12 +198,24 @@ export const useFeedback = create<FeedbackState>((set, get) => ({
         const status =
           (i.server_id !== undefined ? byServerId.get(i.server_id) : undefined)
           ?? byClientId.get(i.id);
-        if (!status) return i;
+        // Closed derivation (recomputed EVERY pass, both directions):
+        //  • merged status is terminal → hidden;
+        //  • synced but absent from /mine → the server no longer serves it
+        //    to this account (closed server-side, or another account's
+        //    note on a shared device) → hidden;
+        //  • unsynced notes are never hidden (they can't have been closed).
+        const present =
+          (i.server_id !== undefined && byServerId.has(i.server_id)) ||
+          byClientId.has(i.id);
+        const closed =
+          (!!status && (CLOSED_FEEDBACK_STATUSES as readonly string[]).includes(status)) ||
+          (i.synced && !present);
+        if (!status) return { ...i, closed };
         const status_updated_at =
           (i.server_id !== undefined ? updatedAtByServerId.get(i.server_id) : undefined)
           ?? updatedAtByClientId.get(i.id)
           ?? null;
-        return { ...i, status, status_updated_at };
+        return { ...i, status, status_updated_at, closed };
       });
       set({ items: merged });
       await persist(merged);

@@ -57,6 +57,10 @@ export default function FeedbackInboxScreen() {
 
   const [retrying, setRetrying] = useState(false);
   const unsyncedCount = items.filter((i) => !i.synced).length;
+  // Closed notes (shipped/declined, or no longer served to this account)
+  // are hidden from the inbox entirely — the local copy stays in storage
+  // for sync bookkeeping, it just doesn't render.
+  const visibleItems = items.filter((i) => !i.closed);
 
   useEffect(() => {
     // Hydrate local notes first, then pull operator-set statuses from the
@@ -75,7 +79,7 @@ export default function FeedbackInboxScreen() {
   }
 
   async function onShare() {
-    const md = formatFeedbackAsMarkdown(items);
+    const md = formatFeedbackAsMarkdown(visibleItems);
     try {
       await Share.share({ message: md });
     } catch {
@@ -112,8 +116,8 @@ export default function FeedbackInboxScreen() {
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Test feedback</Text>
           <Text style={styles.sub}>
-            <Text style={styles.subCount}>{items.length}</Text>
-            {` note${items.length === 1 ? '' : 's'} saved on this device`}
+            <Text style={styles.subCount}>{visibleItems.length}</Text>
+            {` note${visibleItems.length === 1 ? '' : 's'} saved on this device`}
           </Text>
         </View>
         {unsyncedCount > 0 &&
@@ -128,7 +132,7 @@ export default function FeedbackInboxScreen() {
           label="Share"
           variant="primary"
           onPress={onShare}
-          disabled={items.length === 0}
+          disabled={visibleItems.length === 0}
         />
         <Button
           label="Clear"
@@ -138,7 +142,7 @@ export default function FeedbackInboxScreen() {
         />
       </View>
 
-      {items.length === 0 ? (
+      {visibleItems.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>No feedback yet</Text>
           <Text style={styles.emptySub}>
@@ -147,7 +151,7 @@ export default function FeedbackInboxScreen() {
         </View>
       ) : (
         <ScrollView>
-          {items.map((it) => {
+          {visibleItems.map((it) => {
             // Three visual states for the sync badge. Failed = there was
             // a sync attempt that errored; Pending = never attempted yet
             // OR the previous attempt is in flight. We can't distinguish
