@@ -202,10 +202,16 @@ export default function TiersScreen() {
       (a, b) => (b.elo ?? 0) - (a.elo ?? 0),
     );
 
-    // Best-effort scoring_format resolution. TiersStatus returns it;
-    // otherwise fall back to 1qb_ppr (the default on the server).
+    // Scoring-format resolution (FB-76). The session's activeFormat is
+    // authoritative — it's what the server's _active_format(sess) applies
+    // when stamping tier-band ELOs on save. The old primary source
+    // (tiersStatusQuery.data?.scoring_format) NEVER existed in the
+    // response, so SF leagues silently re-bucketed QB/TE saves with
+    // 1qb_ppr thresholds and every Solid save displayed as Starter.
     const fmt: ScoringFormat =
-      (tiersStatusQuery.data?.scoring_format as ScoringFormat) || '1qb_ppr';
+      activeFormat ||
+      (tiersStatusQuery.data?.scoring_format as ScoringFormat) ||
+      '1qb_ppr';
 
     const bucketed = autoBucket(players, position, fmt);
     setBuckets({ ...bucketed, unassigned: [] });
@@ -214,7 +220,7 @@ export default function TiersScreen() {
     // position's pending clears.
     setClearedPids(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rankingsQuery.data, position, tiersStatusQuery.data?.scoring_format]);
+  }, [rankingsQuery.data, position, activeFormat, tiersStatusQuery.data?.scoring_format]);
 
   // ── Bulk move (multi-select) ────────────────────────────────────────
   // Collapse the selected chips into a CONTIGUOUS BLOCK and move the whole
@@ -277,6 +283,56 @@ export default function TiersScreen() {
         const next = emptyBuckets();
         next.unassigned = [...prev.unassigned];
         for (const e of merged) next[e.tier].push(e.p);
+        return next;
+      });
+      haptics.success();
+    },
+    [selectedIds],
+  );
+
+  // ── Bulk TIER move (multi-select, FB-73) ────────────────────────────
+  // Move every selected player one whole tier in `direction`, independent
+  // of rank position. Complements bulkMove (one RANK at a time). Placement
+  // inside the target tier: moving up appends to the BOTTOM of the higher
+  // tier (they're its newest/weakest members); moving down inserts at the
+  // TOP of the lower tier (its strongest). Relative order among the moved
+  // players is preserved. Clamps at elite / bench.
+  const bulkTierMove = useCallback(
+    (direction: 'up' | 'down') => {
+      if (selectedIds.size === 0) return;
+      setBuckets((prev) => {
+        const next = emptyBuckets();
+        next.unassigned = [...prev.unassigned];
+        // Split each tier into keepers and movers, preserving order.
+        const movers: Record<Tier, RankedPlayer[]> = {
+          elite: [], starter: [], solid: [], depth: [], bench: [],
+        };
+        for (const t of TIERS) {
+          for (const p of prev[t]) {
+            if (selectedIds.has(p.id)) movers[t].push(p);
+            else next[t].push(p);
+          }
+        }
+        let changed = false;
+        for (let ti = 0; ti < TIERS.length; ti++) {
+          const from = TIERS[ti];
+          if (movers[from].length === 0) continue;
+          const targetIdx =
+            direction === 'up'
+              ? Math.max(0, ti - 1)
+              : Math.min(TIERS.length - 1, ti + 1);
+          const to = TIERS[targetIdx];
+          if (to === from) {
+            next[from] = direction === 'up'
+              ? [...movers[from], ...next[from]]
+              : [...next[from], ...movers[from]];
+            continue; // clamped at the boundary tier
+          }
+          changed = true;
+          if (direction === 'up') next[to] = [...next[to], ...movers[from]];
+          else next[to] = [...movers[from], ...next[to]];
+        }
+        if (!changed) return prev;
         return next;
       });
       haptics.success();
@@ -447,55 +503,54 @@ export default function TiersScreen() {
     );
   }, [copyTargetFormat, otherFormat, copyMutation]);
 
-  // ── Reset to suggested tiers (#55) ─────────────────────────────────
-  // Discard manual tier placements for THIS position and re-apply the
-  // app's auto-bucketing. Destructive (drops manual work) so we confirm
-  // first. The revert is persisted by marking every currently-assigned
-  // pid as cleared: on the next Save those cleared_pids tell the backend
-  // to DELETE the matching tier_overrides rows, so a reload shows the
-  // suggested layout rather than the stale manual placements. We then
-  // re-auto-bucket so the on-screen arrangement matches what a fresh
-  // load would produce.
-  const applyResetToSuggested = useCallback(() => {
-    const data = rankingsQuery.data;
-    if (!data?.rankings) return;
-    const players = (data.rankings as RankedPlayer[]).slice().sort(
-      (a, b) => (b.elo ?? 0) - (a.elo ?? 0),
-    );
-    const fmt: ScoringFormat =
-      (tiersStatusQuery.data?.scoring_format as ScoringFormat) || '1qb_ppr';
-    const bucketed = autoBucket(players, position, fmt);
-    setBuckets({ ...bucketed, unassigned: [] });
-    // Mark every player as cleared so a subsequent Save persists the
-    // revert. The save path filters out any pid that ends up assigned to
-    // a real tier (it re-saves those), so this only deletes overrides for
-    // placements that differ from the auto-bucketed result — i.e. it wipes
-    // the manual divergence without clobbering the suggested layout.
-    setClearedPids(() => {
-      const out = new Set<string>();
-      for (const p of players) out.add(p.id);
-      return out;
-    });
-    setToast({ msg: 'Tiers reset to suggested', tone: 'success' });
-    haptics.success();
-  }, [rankingsQuery.data, tiersStatusQuery.data?.scoring_format, position]);
+  // ── Reset to suggested tiers (#55, reworked for FB-74) ─────────────
+  // The old client-side revert re-auto-bucketed from the CURRENT served
+  // ELOs — but manual tier saves are baked into those ELOs as overrides,
+  // so "reset" reproduced the manual layout verbatim and looked like a
+  // no-op (FB-74, and FB-55 before it). Real reset = tell the backend to
+  // DELETE this position's overrides (a clear-only save: empty tiers +
+  // every pid in cleared_pids is a valid payload per the locked
+  // /api/tiers/save contract), then refetch; the rankings come back with
+  // natural ELOs and the auto-bucket effect rebuilds the true suggested
+  // layout.
+  const resetMutation = useMutation({
+    mutationFn: () => {
+      const data = rankingsQuery.data;
+      const pids = data?.rankings
+        ? (data.rankings as RankedPlayer[]).map((p) => p.id)
+        : [];
+      return saveTiers(position, {}, pids);
+    },
+    onSuccess: () => {
+      setToast({ msg: 'Tiers reset to suggested', tone: 'success' });
+      setClearedPids(new Set());
+      queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
+      queryClient.invalidateQueries({ queryKey: ['progress'] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, position] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, 'all'] });
+      haptics.success();
+    },
+    onError: (e: Error) => {
+      setToast({ msg: e.message || 'Reset failed', tone: 'warn' });
+    },
+  });
 
   const onResetToSuggested = useCallback(() => {
     if (!rankingsQuery.data?.rankings) return;
     Alert.alert(
       `Reset ${position} tiers to suggested?`,
       `Your manual placements for ${position} will be cleared and replaced ` +
-        `with the app's suggested tiers. Save afterward to make this permanent.`,
+        `with the app's suggested tiers. This takes effect immediately.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Reset',
           style: 'destructive',
-          onPress: applyResetToSuggested,
+          onPress: () => resetMutation.mutate(),
         },
       ],
     );
-  }, [rankingsQuery.data, position, applyResetToSuggested]);
+  }, [rankingsQuery.data, position, resetMutation]);
 
   // ── Render ──────────────────────────────────────────────────────────
   return (
@@ -660,6 +715,18 @@ export default function TiersScreen() {
               onPress={() => bulkMove('down')}
             />
             <Button
+              variant="secondary"
+              compact
+              label="Tier up"
+              onPress={() => bulkTierMove('up')}
+            />
+            <Button
+              variant="secondary"
+              compact
+              label="Tier down"
+              onPress={() => bulkTierMove('down')}
+            />
+            <Button
               variant="ghost"
               compact
               label="Done"
@@ -802,6 +869,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs,
+    // Five compact buttons (Up/Down/Tier up/Tier down/Done) overflow a
+    // 375pt screen on one line — let them wrap (FB-73).
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    flexShrink: 1,
   },
   switcher: {
     flexDirection: 'row',

@@ -1,23 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
   ScrollView,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  withSequence,
-  runOnJS,
-  Easing,
-} from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useNavigation } from '@react-navigation/native';
 import { haptics } from '../utils/haptics';
 import { startSpan } from '../observability/sentry';
@@ -471,18 +461,13 @@ export default function RankScreen() {
         ) : (
           <View style={styles.cards}>
             {(['a', 'b', 'c'] as const).map((side) => (
-              <SwipePlayerCard
+              <TrioPlayerCard
                 key={`${trio.player_a.id}-${side}`}
                 trio={trio}
                 side={side}
                 rank={rankOf(side)}
                 onTap={() => rankSide(side)}
                 onLongPress={() => showInfoSheet(side)}
-                onSwipeSkip={handleSkipEntireTrio}
-                onSwipeRankFirst={() => {
-                  setSelectionOrder(() => [side]);
-                  haptics.selection();
-                }}
                 disabled={submitMutation.isPending || isRefetchingTrio}
               />
             ))}
@@ -569,93 +554,38 @@ export default function RankScreen() {
   );
 }
 
-// ── SwipePlayerCard — Reanimated wrapper around PlayerCard ─────────
-interface SwipeProps {
+// ── TrioPlayerCard — plain PlayerCard wrapper for the trio arena ────
+// FB-72: the swipe-left-to-skip / swipe-right-to-rank gesture was removed
+// at operator request — it collided with scrolling and caused accidental
+// skips. Tap-to-rank + the Skip button are the only interactions now.
+interface TrioCardProps {
   trio: Trio;
   side: 'a' | 'b' | 'c';
   rank: 1 | 2 | 3 | null;
   onTap: () => void;
   onLongPress?: () => void;
-  onSwipeSkip: () => void;
-  onSwipeRankFirst: () => void;
   disabled?: boolean;
 }
 
-const SCREEN_W = Dimensions.get('window').width;
-const SWIPE_THRESHOLD = 120;
-
-function SwipePlayerCard({
+function TrioPlayerCard({
   trio,
   side,
   rank,
   onTap,
   onLongPress,
-  onSwipeSkip,
-  onSwipeRankFirst,
   disabled,
-}: SwipeProps) {
-  const translateX = useSharedValue(0);
+}: TrioCardProps) {
   const player = side === 'a' ? trio.player_a : side === 'b' ? trio.player_b : trio.player_c;
-
-  // Swipe gesture: horizontal pan with threshold dismisses in one of two
-  // directions. Vertical motion aborts the swipe (so the ScrollView keeps
-  // its normal scroll feel).
-  const pan = useMemo(
-    () =>
-      Gesture.Pan()
-        .minDistance(10)
-        .activeOffsetX([-20, 20])
-        .failOffsetY([-30, 30])
-        .enabled(!disabled)
-        .onUpdate((e) => {
-          translateX.value = e.translationX;
-        })
-        .onEnd((e) => {
-          const dx = e.translationX;
-          if (dx < -SWIPE_THRESHOLD) {
-            // Swipe-left = skip the trio
-            translateX.value = withTiming(-SCREEN_W, { duration: 180 }, (finished) => {
-              if (finished) runOnJS(onSwipeSkip)();
-              translateX.value = 0;
-            });
-          } else if (dx > SWIPE_THRESHOLD) {
-            // Swipe-right = rank as #1
-            translateX.value = withSequence(
-              withTiming(SCREEN_W * 0.35, {
-                duration: 140,
-                easing: Easing.out(Easing.cubic),
-              }),
-              withTiming(0, { duration: 180 }),
-            );
-            runOnJS(onSwipeRankFirst)();
-          } else {
-            translateX.value = withTiming(0, { duration: 160 });
-          }
-        }),
-    [disabled, onSwipeSkip, onSwipeRankFirst, translateX],
-  );
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX.value },
-      { rotate: `${translateX.value / 30}deg` },
-    ],
-  }));
-
   return (
-    <GestureDetector gesture={pan}>
-      <Animated.View style={animatedStyle}>
-        <PlayerCard
-          player={player}
-          rank={rank}
-          selected={rank !== null}
-          onPress={onTap}
-          onLongPress={onLongPress}
-          disabled={disabled}
-          showInjury={false}
-        />
-      </Animated.View>
-    </GestureDetector>
+    <PlayerCard
+      player={player}
+      rank={rank}
+      selected={rank !== null}
+      onPress={onTap}
+      onLongPress={onLongPress}
+      disabled={disabled}
+      showInjury={false}
+    />
   );
 }
 
