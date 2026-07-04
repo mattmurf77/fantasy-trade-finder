@@ -2965,6 +2965,12 @@ def tiers_status_route():
         return jsonify({
             "saved":    saved,
             "all_done": all(p in saved for p in ("QB", "RB", "WR", "TE")),
+            # FB-76: the mobile Tiers screen re-buckets by ELO thresholds
+            # and needs the session's active format. It always read this
+            # field; the route never sent it, so SF leagues fell back to
+            # 1qb_ppr thresholds and QB/TE tier saves displayed one tier
+            # high after the round-trip.
+            "scoring_format": fmt,
         })
     except Exception as e:
         log.exception("tiers_status_route failed")
@@ -3281,6 +3287,140 @@ def get_player_route(player_id):
         return jsonify(player)
     except Exception as e:
         log.error("get_player error (%s): %s", player_id, e)
+        return jsonify({"error": "internal_error"}), 500
+
+
+# ---------------------------------------------------------------------------
+# Manual Trade Calculator (docs/plans/manual-trade-calculator-plan.md)
+# Open, consensus-basis endpoints — no session, no league. Values come from
+# the same universal pool + elo_to_value transform the finder trades on, and
+# fairness reuses trade_optimizer._fairness_v3, so the calculator's numbers
+# cannot disagree with generated trades.
+# ---------------------------------------------------------------------------
+
+_CALC_MAX_SIDE = 6   # assets per side — matches the engine's practical bounds
+
+
+def _calc_scoring_format(raw) -> str:
+    fmt = raw.strip() if isinstance(raw, str) else ""
+    return fmt if fmt in SCORING_FORMATS else DEFAULT_SCORING
+
+
+@app.route("/api/trade/values")
+def trade_calc_values_route():
+    """
+    GET /api/trade/values?scoring_format=1qb_ppr|sf_tep
+
+    Consensus value list for the manual trade calculator: every universal-
+    pool player (id, name, position, team, age) plus their consensus value —
+    elo_to_value over the pool's seed Elo, the exact per-player numbers the
+    trade engine prices with. Open endpoint; ETag/Cache-Control like
+    /api/players (values change at most daily).
+    """
+    fmt = _calc_scoring_format(request.args.get("scoring_format"))
+    try:
+        pool_players, seed = _get_universal_pool(fmt)
+        e2v = _trade_service_mod.elo_to_value
+        rows = [{
+            "id":       p.id,
+            "name":     p.name,
+            "position": p.position,
+            "team":     getattr(p, "team", None),
+            "age":      getattr(p, "age", None),
+            "value":    round(e2v(seed.get(p.id, 1500.0)), 1),
+        } for p in pool_players]
+        rows.sort(key=lambda r: r["value"], reverse=True)
+        payload = json.dumps({"scoring_format": fmt, "players": rows})
+        etag = '"' + hashlib.md5(payload.encode()).hexdigest()[:16] + '"'
+        if request.headers.get("If-None-Match") == etag:
+            return "", 304
+        resp = make_response(payload, 200)
+        resp.headers["Content-Type"]  = "application/json"
+        resp.headers["ETag"]          = etag
+        resp.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=3600"
+        return resp
+    except Exception as e:
+        log.error("trade_calc_values error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+
+
+@app.route("/api/trade/evaluate", methods=["POST"])
+def trade_evaluate_route():
+    """
+    POST /api/trade/evaluate
+    Body: {give_player_ids: [...], receive_player_ids: [...],
+           scoring_format?: '1qb_ppr'|'sf_tep', fairness_threshold?: float}
+
+    Consensus values + fairness verdict for a hand-built trade. Reuses
+    trade_optimizer._consensus_packages/_fairness_v3 over the universal pool
+    so the numbers match the finder's. No auth, no league; confidence=None
+    degrades the range-overlap gate to the point-ratio gate (documented in
+    trade_service._value_uncertainty). Unvalued ids are dropped and reported
+    (the engine's graceful-drop rule).
+    """
+    from .trade_optimizer import _consensus_packages, _fairness_v3
+
+    body = request.get_json(silent=True) or {}
+    give_raw = body.get("give_player_ids") or []
+    recv_raw = body.get("receive_player_ids") or []
+    if not isinstance(give_raw, list) or not isinstance(recv_raw, list):
+        return jsonify({"error": "give_player_ids / receive_player_ids must be lists"}), 400
+    give_raw = [str(x) for x in give_raw if x][:_CALC_MAX_SIDE]
+    recv_raw = [str(x) for x in recv_raw if x][:_CALC_MAX_SIDE]
+    if not give_raw and not recv_raw:
+        return jsonify({"error": "at least one player id required"}), 400
+
+    fmt = _calc_scoring_format(body.get("scoring_format"))
+    try:
+        thr = float(body.get("fairness_threshold", 0.75))
+    except (TypeError, ValueError):
+        thr = 0.75
+    thr = min(max(thr, 0.5), 1.0)
+
+    try:
+        _pool_players, seed = _get_universal_pool(fmt)
+        e2v = _trade_service_mod.elo_to_value
+
+        def seed_value(pid: str) -> float:
+            return e2v(seed.get(pid, 1500.0))
+
+        give    = [p for p in give_raw if p in seed]
+        recv    = [p for p in recv_raw if p in seed]
+        dropped = [p for p in give_raw + recv_raw if p not in seed]
+
+        per_player = [
+            {"player_id": pid, "side": side, "value": round(seed_value(pid), 1)}
+            for side, ids in (("give", give), ("receive", recv))
+            for pid in ids
+        ]
+
+        give_value = receive_value = 0.0
+        point_ratio = fairness = verdict = favors = None
+        if give or recv:
+            gv, rv = _consensus_packages(give, recv, seed_value)
+            give_value, receive_value = round(gv, 1), round(rv, 1)
+        if give and recv:
+            fairness, point_ratio, _gv, _rv = _fairness_v3(
+                give, recv, seed_value, None, thr)
+            if point_ratio >= 0.95:
+                verdict, favors = "even", "even"
+            else:
+                verdict = "fair" if fairness is not None else "unfair"
+                favors = "receive" if receive_value > give_value else "give"
+
+        return jsonify({
+            "scoring_format":     fmt,
+            "give_value":         give_value,
+            "receive_value":      receive_value,
+            "point_ratio":        point_ratio,
+            "fairness":           fairness,
+            "verdict":            verdict,
+            "favors":             favors,
+            "per_player":         per_player,
+            "dropped_player_ids": dropped,
+        })
+    except Exception as e:
+        log.error("trade_evaluate error: %s", e)
         return jsonify({"error": "internal_error"}), 500
 
 

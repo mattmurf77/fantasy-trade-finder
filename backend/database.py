@@ -393,6 +393,12 @@ app_feedback_table = Table("app_feedback", metadata,
 # inbox's status chips (mobile/src/screens/FeedbackInboxScreen.tsx) — keep
 # docs/cross-client-invariants.md in sync if this changes.
 FEEDBACK_STATUSES = ("new", "planned", "in_progress", "fixed", "shipped", "declined")
+# Terminal statuses hidden from the user's in-app inbox (FB privacy/cleanup,
+# 2026-07-04). "fixed" stays VISIBLE — its chip ("Fixed — in next update")
+# is the notification that a fix is coming; it flips to "shipped" (hidden)
+# when the build ships. Mirrored client-side in mobile/src/api/feedback.ts
+# (CLOSED_FEEDBACK_STATUSES) — keep the two in sync.
+FEEDBACK_CLOSED_STATUSES = ("shipped", "declined")
 # Severity vocabulary — mirrors the POST /api/feedback contract (locked;
 # the submit route validates inline and is deliberately untouched).
 FEEDBACK_SEVERITIES = ("bug", "polish", "idea")
@@ -5831,6 +5837,13 @@ def list_feedback_for_user(user_id: str, limit: int = 200) -> list[dict]:
     """Return this user's own feedback notes, newest first — the read side
     of the in-app feedback widget's status display. Only fields the widget
     needs; NULL status reads as 'new'.
+
+    Scope guarantees (2026-07-04):
+      • strictly `user_id == user_id` — never returns another user's notes
+        or anonymous (NULL-user) notes; falsy user_id short-circuits to [].
+      • closed notes (FEEDBACK_CLOSED_STATUSES: shipped/declined) are
+        excluded — once the operator closes a note it disappears from the
+        user's inbox. The admin readback (list_feedback) is unaffected.
     """
     if not user_id:
         return []
@@ -5848,6 +5861,12 @@ def list_feedback_for_user(user_id: str, limit: int = 200) -> list[dict]:
                 app_feedback_table.c.status_updated_at,
             )
             .where(app_feedback_table.c.user_id == user_id)
+            .where(
+                or_(
+                    app_feedback_table.c.status.is_(None),
+                    app_feedback_table.c.status.not_in(FEEDBACK_CLOSED_STATUSES),
+                )
+            )
             .order_by(app_feedback_table.c.id.desc())
             .limit(limit)
         ).fetchall()

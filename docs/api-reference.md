@@ -62,7 +62,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/tiers/save` | Persist tiered roster |
-| GET | `/api/tiers/status` | Tier completion status |
+| GET | `/api/tiers/status` | Tier completion status; returns `{saved, all_done, scoring_format}` (`scoring_format` added 2026-07-03, FB-76 — mobile re-buckets by it) |
 | GET | `/api/tiers/community-diff` | Compare against community |
 | GET | `/api/tiers/stability` | Tier stability indicator |
 | POST | `/api/tiers/dismiss` | Dismiss a tier suggestion (writes `user_player_skips`) |
@@ -125,6 +125,15 @@ Backlog #27. The consensus-only sibling of the (session-authed) trade engine: it
 |---|---|---|
 | POST | `/api/calc/score` | **Public.** Score two asset lists on consensus values for one format. Returns give/receive package values + a backlog #6 `verdict`. |
 | GET | `/api/calc/values` | **Public.** Consensus value map `{player_id: value}` for `?format=` so the picker can show a value per row before scoring. ETag + `Cache-Control: public, max-age=300`. |
+
+## Manual trade calculator (public — no auth) — LIVE
+
+The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-plan.md](plans/manual-trade-calculator-plan.md)). Same consensus basis as backlog #27 above but implemented and unflagged; when the staged #27 web routes land, consolidate the two surfaces onto one contract (they price identically — both are `elo_to_value` over the universal-pool seed).
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/trade/evaluate` | **Public.** Consensus values + fairness verdict for a hand-built trade. Body `{give_player_ids, receive_player_ids, scoring_format?, fairness_threshold?}` (≤6 ids/side; unknown ids dropped and reported in `dropped_player_ids`). Reuses `trade_optimizer._consensus_packages`/`_fairness_v3` (confidence=None → point-ratio gate). Returns `{give_value, receive_value, point_ratio, fairness, verdict: even\|fair\|unfair, favors, per_player, ...}`. One-sided requests return package values with `verdict: null`. |
+| GET | `/api/trade/values` | **Public.** Universal-pool player list with consensus values for `?scoring_format=` — `{players: [{id, name, position, team, age, value}]}` sorted value-desc, for pickers + client-side suggestion search. ETag + `Cache-Control: public, max-age=300`. |
 
 ## Send in Sleeper (flagged beta)
 
@@ -267,7 +276,7 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/feedback` | Capture a single feedback note from the mobile FeedbackSheet. Idempotent on `client_id`. |
-| GET | `/api/feedback/mine` | The caller's own notes with operator-set lifecycle status (session auth). Backs the status chips in the mobile feedback inbox. |
+| GET | `/api/feedback/mine` | The caller's own notes with operator-set lifecycle status (session auth). Backs the status chips in the mobile feedback inbox. Strictly scoped to the session's `user_id` (anonymous/NULL-user notes never returned). Closed notes (`shipped`/`declined` — `FEEDBACK_CLOSED_STATUSES`) are excluded as of 2026-07-04; `fixed` stays visible until it ships. Admin readback is unaffected. |
 
 **Body** (JSON):
 

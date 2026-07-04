@@ -163,13 +163,13 @@ See [data-dictionary.md](data-dictionary.md#user_events). When adding a new even
 
 `app_feedback.status` vocabulary, defined in `backend/database.py:FEEDBACK_STATUSES` and mirrored by the mobile inbox chips (`mobile/src/screens/FeedbackInboxScreen.tsx:STATUS_LABEL`):
 
-| Status | User-facing label |
-|---|---|
-| `new` | 📬 Received |
-| `planned` | 🗓 Planned |
-| `in_progress` | 🔧 In progress |
-| `fixed` | ✅ Fixed — in next update |
-| `shipped` | 🚀 Shipped |
-| `declined` | 🚫 Not planned |
+| Status | User-facing label | Visible in user inbox? |
+|---|---|---|
+| `new` | Received | yes |
+| `planned` | Planned | yes |
+| `in_progress` | In progress | yes |
+| `fixed` | Fixed — in next update | yes (the notification that a fix is coming) |
+| `shipped` | Shipped | **no — closed** |
+| `declined` | Not planned | **no — closed** |
 
-NULL in the DB reads as `new` everywhere. If you add a status, update both files and this table.
+NULL in the DB reads as `new` everywhere. Labels are emoji-free as of the Chalkline re-skin (ADR-004). Closed statuses (2026-07-04) are defined in `backend/database.py:FEEDBACK_CLOSED_STATUSES` and mirrored in `mobile/src/api/feedback.ts:CLOSED_FEEDBACK_STATUSES` — `/api/feedback/mine` excludes them server-side AND the mobile inbox hides locally-persisted notes whose merged status is closed (or that no longer come back from `/mine` for the signed-in account). If you add or reclassify a status, update both constants and this table.
