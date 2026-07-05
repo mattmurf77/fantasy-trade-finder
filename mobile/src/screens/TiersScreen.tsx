@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -152,6 +152,8 @@ export default function TiersScreen() {
       queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, 'all'] });
       // Reset the clearedPids set — the backend just absorbed them.
       setClearedPids(new Set());
+      // Local edits are now server truth — let the refetch rebuild buckets.
+      bucketsDirtyRef.current = false;
     },
     onError: (e: Error) => {
       setToast({ msg: e.message || 'Save failed', tone: 'warn' });
@@ -185,11 +187,22 @@ export default function TiersScreen() {
       // Reset clearedPids — the cleared set is per-position-load and
       // we're about to reload anyway.
       setClearedPids(new Set());
+      // Copy replaces local state wholesale — let the refetch rebuild.
+      bucketsDirtyRef.current = false;
     },
     onError: (e: Error) => {
       setToast({ msg: e.message || 'Copy failed', tone: 'warn' });
     },
   });
+
+  // Unsaved-local-edits guard (HANDOFF follow-up #1). Any drag / bulk move
+  // marks the buckets dirty; while dirty, a background refetch of the SAME
+  // position+format must NOT rebuild buckets from server data (it would wipe
+  // the user's unsaved placements — e.g. refetchOnWindowFocus mid-edit).
+  // Position/format switches and post-save/copy/reset refetches still rebuild:
+  // the key changes for the former, the mutations clear the flag for the latter.
+  const bucketsDirtyRef = useRef(false);
+  const bucketKeyRef = useRef('');
 
   // Re-auto-bucket whenever the rankings response changes OR position switches.
   useEffect(() => {
@@ -213,6 +226,13 @@ export default function TiersScreen() {
       (tiersStatusQuery.data?.scoring_format as ScoringFormat) ||
       '1qb_ppr';
 
+    const bucketKey = `${position}:${fmt}`;
+    if (bucketKey === bucketKeyRef.current && bucketsDirtyRef.current) {
+      return; // background refetch mid-edit — keep the user's unsaved layout
+    }
+    bucketKeyRef.current = bucketKey;
+    bucketsDirtyRef.current = false;
+
     const bucketed = autoBucket(players, position, fmt);
     setBuckets({ ...bucketed, unassigned: [] });
     // The clearedPids set is per-position (the saved snapshot is too).
@@ -230,6 +250,7 @@ export default function TiersScreen() {
   const bulkMove = useCallback(
     (direction: 'up' | 'down') => {
       if (selectedIds.size === 0) return;
+      bucketsDirtyRef.current = true;
       setBuckets((prev) => {
         // 1. Flatten the five real tiers into one ordered list.
         const flat: { p: RankedPlayer; tier: Tier }[] = [];
@@ -300,6 +321,7 @@ export default function TiersScreen() {
   const bulkTierMove = useCallback(
     (direction: 'up' | 'down') => {
       if (selectedIds.size === 0) return;
+      bucketsDirtyRef.current = true;
       setBuckets((prev) => {
         const next = emptyBuckets();
         next.unassigned = [...prev.unassigned];
@@ -342,7 +364,9 @@ export default function TiersScreen() {
 
   // ── Render helpers ─────────────────────────────────────────────────
   const saving = saveMutation.isPending;
-  const loading = rankingsQuery.isLoading || rankingsQuery.isFetching;
+  // Initial load ONLY (HANDOFF follow-up #1) — `isFetching` here swapped the
+  // whole list for a full-screen spinner on every background refetch.
+  const loading = rankingsQuery.isLoading;
 
   // ── Flat list derivation ───────────────────────────────────────────
   // Walk unassigned first, then the five tiers in TIERS order. Every
@@ -378,6 +402,7 @@ export default function TiersScreen() {
   // set (drag-out-then-back-in within one session).
   const onDragEnd = useCallback(
     ({ data }: DragEndParams<Row>) => {
+      bucketsDirtyRef.current = true;
       let zone: Zone = 'unassigned';
       const next = emptyBuckets();
       for (const r of data) {
@@ -524,6 +549,8 @@ export default function TiersScreen() {
     onSuccess: () => {
       setToast({ msg: 'Tiers reset to suggested', tone: 'success' });
       setClearedPids(new Set());
+      // Reset discards local edits by design — let the refetch rebuild.
+      bucketsDirtyRef.current = false;
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
       queryClient.invalidateQueries({ queryKey: ['progress'] });
       queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, position] });

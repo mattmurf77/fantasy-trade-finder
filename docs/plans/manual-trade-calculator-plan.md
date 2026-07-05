@@ -1,5 +1,7 @@
 # Manual Trade Calculator — Plan (2026-07-02)
 
+> **Status 2026-07-04: IMPLEMENTED.** Backend: `POST /api/trade/evaluate` + `GET /api/trade/values` (open, consensus-basis; `backend/server.py`, tests in `backend/tests/test_trade_evaluate.py`). Mobile: `TradeCalculatorScreen` "Real values" mode (server-authoritative verdicts, format toggle, debounced evaluate) with the mock dual-board league kept as "Demo league" mode. Deviations from this plan: a values-list endpoint was added for the picker (this plan assumed `/api/players`, which carries no values); picks remain demo-mode-only (v2 here as planned). Consolidate route contracts with the staged backlog-#27 web calculator when it lands (see api-reference.md).
+
 *A standalone, **local** trade-value calculator: the user hand-assembles a trade (players on each side) and instantly sees each side's consensus value + a fairness verdict. No league required, no counterparty, no Sleeper send. Planning doc — no code yet. Grounded in `trade-engine-v2`. Companion: [auth-multiplatform-plan-2026-06-11.md](auth-multiplatform-plan-2026-06-11.md) (this is the "manually created trade" surface referenced there as the 4th home for a future Send-in-Sleeper button).*
 
 ---

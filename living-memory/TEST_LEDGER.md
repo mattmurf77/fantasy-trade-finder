@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-07-04](#2026-07-04)
 - [2026-06-11](#2026-06-11)
 - [2026-05-21](#2026-05-21)
 - [Manual Verification History](#manual-verification-history)
@@ -18,6 +19,14 @@
 - [Verification Discipline](#verification-discipline)
 
 ---
+
+## 2026-07-04
+
+### TC-API-001 — Manual Trade Calculator endpoints (/api/trade/evaluate, /api/trade/values)
+- **Test:** 8 pytest cases over an injected universal pool ([backend/tests/test_trade_evaluate.py](../backend/tests/test_trade_evaluate.py)): symmetric→even, lopsided→unfair+favors, per-player values match `elo_to_value` exactly, unknown-id graceful drop, one-sided packages (no verdict), empty→400, bogus format→default, values-endpoint shape + ETag 304.
+- **Result:** **PASS 8/8**; full suite **252 green**. Real-pool smoke (local Flask, live DP data): 671 valued players; top-vs-mid → `unfair/favors: give/ratio 0.008`; mirror trade → `even/1.0`.
+- **Also verified:** mobile live mode end-to-end in Expo web with a contract-shaped fetch stub (backend has no CORS, so browser-origin calls can't hit it — native is unaffected); demo mode unchanged (Bijan parity scenario byte-identical since 07-02: 2,536/2,874, +9%/+12%).
+- **Not yet run:** live mode against prod from a real device (needs deploy).
 
 ## 2026-06-11
 

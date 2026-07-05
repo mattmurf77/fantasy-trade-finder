@@ -13,14 +13,21 @@
 
 import type { Position } from '../shared/types';
 
+/** Tradable-asset position: the four player positions plus draft picks. */
+export type CalcPos = Position | 'PICK';
+
 export interface CalcPlayer {
   id: string;
   name: string;
-  pos: Position;
+  pos: CalcPos;
   nflTeam: string;
   age: number;
   /** Consensus dynasty value on an Elo-like scale (~900–2600). */
   base: number;
+  /** Draft pick rather than a player. Picks carry age 21 so the existing
+   *  youth/vet board biases price them naturally (youth-lovers pay up,
+   *  win-now owners fade) with zero extra valuation math. */
+  pick?: true;
 }
 
 export interface CalcOwner {
@@ -29,14 +36,18 @@ export interface CalcOwner {
   ownerName: string;
   /** One-line scouting report on how their board leans. */
   tendency: string;
-  posLean: Partial<Record<Position, number>>;
+  posLean: Partial<Record<CalcPos, number>>;
   /** -1..1 — positive means they pay up for youth, negative for proven vets. */
   youthBias: number;
   rosterIds: string[];
 }
 
-const P = (id: string, name: string, pos: Position, nflTeam: string, age: number, base: number): CalcPlayer => ({
+const P = (id: string, name: string, pos: CalcPos, nflTeam: string, age: number, base: number): CalcPlayer => ({
   id, name, pos, nflTeam, age, base,
+});
+
+const PICK = (id: string, name: string, base: number): CalcPlayer => ({
+  id, name, pos: 'PICK', nflTeam: '—', age: 21, base, pick: true,
 });
 
 export const CALC_PLAYERS: CalcPlayer[] = [
@@ -95,6 +106,21 @@ export const CALC_PLAYERS: CalcPlayer[] = [
   P('dadams', 'Davante Adams', 'WR', 'LAR', 33, 1150),
   P('gkittle', 'George Kittle', 'TE', 'SF', 33, 1300),
   P('tkelce', 'Travis Kelce', 'TE', 'KC', 37, 900),
+
+  // Draft capital — one 2027 1st/2nd/3rd per team. Same consensus base per
+  // round; per-owner jitter + youth bias make each board price them apart.
+  PICK('mt27_1', '2027 1st Round', 1750),
+  PICK('mt27_2', '2027 2nd Round', 950),
+  PICK('mt27_3', '2027 3rd Round', 450),
+  PICK('gg27_1', '2027 1st Round', 1750),
+  PICK('gg27_2', '2027 2nd Round', 950),
+  PICK('gg27_3', '2027 3rd Round', 450),
+  PICK('ym27_1', '2027 1st Round', 1750),
+  PICK('ym27_2', '2027 2nd Round', 950),
+  PICK('ym27_3', '2027 3rd Round', 450),
+  PICK('ww27_1', '2027 1st Round', 1750),
+  PICK('ww27_2', '2027 2nd Round', 950),
+  PICK('ww27_3', '2027 3rd Round', 450),
 ];
 
 export const CALC_PLAYER_BY_ID: Record<string, CalcPlayer> = Object.fromEntries(
@@ -111,6 +137,7 @@ export const CALC_MY_TEAM: CalcOwner = {
   rosterIds: [
     'jdaniels', 'jgoff', 'brobinson', 'kwilliams', 'rwhite', 'tspears',
     'jchase', 'dmetcalf', 'jaddison', 'rodunze', 'slaporta', 'hhenry',
+    'mt27_1', 'mt27_2', 'mt27_3',
   ],
 };
 
@@ -125,6 +152,7 @@ export const CALC_PARTNERS: CalcOwner[] = [
     rosterIds: [
       'jallen', 'bnix', 'jgibbs', 'dachane', 'jcook', 'ipacheco',
       'jjefferson', 'thiggins', 'colave', 'jwaddle', 'mandrews', 'dkincaid',
+      'gg27_1', 'gg27_2', 'gg27_3',
     ],
   },
   {
@@ -137,6 +165,7 @@ export const CALC_PARTNERS: CalcOwner[] = [
     rosterIds: [
       'cwilliams', 'dmaye', 'ajeanty', 'ohampton', 'thenderson', 'ballen',
       'mnabers', 'bthomas', 'mharrison', 'tmcmillan', 'bbowers', 'cloveland',
+      'ym27_1', 'ym27_2', 'ym27_3',
     ],
   },
   {
@@ -149,6 +178,7 @@ export const CALC_PARTNERS: CalcOwner[] = [
     rosterIds: [
       'pmahomes', 'bmayfield', 'sbarkley', 'jjacobs', 'dhenry', 'ajones',
       'cdlamb', 'arsb', 'ajbrown', 'dadams', 'gkittle', 'tkelce',
+      'ww27_1', 'ww27_2', 'ww27_3',
     ],
   },
 ];

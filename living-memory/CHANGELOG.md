@@ -10,12 +10,20 @@
 ---
 
 ## Table of Contents
+- [2026-07-04 (manual trade calculator: live consensus mode)](#2026-07-04-manual-trade-calculator-live-consensus-mode)
 - [2026-06-10 (post-ship follow-ups)](#2026-06-10-post-ship-follow-ups)
 - [2026-05-21](#2026-05-21)
 - [Earlier (pre-changelog)](#earlier-pre-changelog)
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
 
 ---
+
+## 2026-07-04 (manual trade calculator: live consensus mode)
+
+- **Manual Trade Calculator arc completed (07-02 → 07-04):** standalone Expo mockup (`mockups/trade-calc/`) → ported into the app as `TradeCalculatorScreen` (Calculator pill, Trades stack) → improvement wave (balance-the-trade add-ons, draft picks, arbitrage badges, draft persistence, share) → **live mode**: public `POST /api/trade/evaluate` + `GET /api/trade/values` reuse `_consensus_packages`/`_fairness_v3` over the universal pool (calculator numbers provably match the finder), mobile defaults to "Real values" (format toggle, debounced server verdicts via `ConsensusVerdictCard`), mock league preserved as "Demo league" mode. Per [`../docs/plans/manual-trade-calculator-plan.md`](../docs/plans/manual-trade-calculator-plan.md) (status note added). 8 endpoint tests; suite 252 green; real-pool smoke: 671 valued players.
+- **Tiers refetch clobber fixed (HANDOFF 06-16 follow-up #1):** `loading` no longer includes `isFetching` (no more full-screen spinner on background refetch) and a dirty-guard keeps unsaved drag/bulk edits from being wiped by a same-position refetch (save/copy/reset clear the guard so server truth still rebuilds).
+- **Route-consolidation watch item:** the staged backlog-#27 web calculator (`/api/calc/*` in `staged-work/`) overlaps the new `/api/trade/*` surface — consolidate contracts when #27 lands (noted in api-reference).
+- **Known gaps:** Send in Sleeper "slice 4" (calculator surface) deliberately deferred — needs an in-league calculator mode; backend has no CORS (irrelevant to native, blocks browser-origin API use); CRON_SECRET rotation still pending (operator). Stale root `.handoff.md` (May 21, superseded 06-10 but re-committed 07-03) now deleted.
 
 ## 2026-06-11 (TestFlight ship: v1.2.0)
 

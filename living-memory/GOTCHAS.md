@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [2026-05-21](#2026-05-21)
+- [2026-07-04](#2026-07-04)
 - [Gotcha Template](#gotcha-template)
 
 ---
@@ -76,6 +77,15 @@
 - **Cause:** Sleeper updated their DOM. No API contract for content scripts.
 - **Fix:** inspect Sleeper's current DOM, update selectors in `extension/`.
 - **Prevention:** minimize content-script reliance on DOM structure; prefer Sleeper API calls where possible.
+
+## 2026-07-04
+
+### G-011 — PlayerCard's inner Pressable swallows outer gestures
+- **Symptom:** a tap/long-press handler on a wrapper around `PlayerCard` never fires (multi-select taps dead, drag long-press never lifts a row) — the row only scrolls.
+- **Cause:** `mobile/src/components/PlayerCard.tsx` renders its OWN inner `<Pressable>`, which becomes the touch responder and eats the gesture before the outer Pressable/gesture-detector sees it.
+- **Fix:** wrap the PlayerCard in `<View pointerEvents="none">` inside the outer Pressable (see TiersScreen for both call sites, with comments).
+- **Prevention:** any new screen composing PlayerCard under its own touchable must use the `pointerEvents="none"` wrapper; ManualRanks avoids it by building rows inline.
+- **History:** silently killed Tiers multi-select AND drag (June 2026); promoted here from the 2026-06-16 HANDOFF.
 
 ---
 

@@ -11,7 +11,13 @@
       "Bash(python3 scripts/seed_test_user_2.py --dry-run)",
       "Bash(python3 scripts/seed_test_user_2.py --clear)",
       "Bash(python3 -)",
-      "Bash(python3 -c ':*)"
+      "Bash(python3 -c ':*)",
+      "Bash(sed 's/=.*/=<set-or-empty>/' secrets.local.env)",
+      "Bash(awk -F= '{print $1 \"=\" \\(length\\($2\\) ? \"<non-empty:\" length\\($2\\) \" chars>\" : \"<EMPTY>\"\\)}' secrets.local.env)",
+      "Bash(python3 -c ' *)",
+      "Bash(git add *)",
+      "Bash(git commit --quiet -m 'feedback: hide closed notes from the user inbox; verify per-user scoping *)",
+      "Bash(git commit --quiet -m 'backend+docs: feedback closed-status filter and tiers scoring_format field *)"
     ]
   }
 }

@@ -7,7 +7,7 @@
 // Swap path: replaced by `/api/trade/evaluate` when the server-authoritative
 // version ships (docs/plans/manual-trade-calculator-plan.md).
 
-import { CalcPlayer, CALC_PLAYER_BY_ID } from '../data/tradeCalcMock';
+import { CalcPlayer } from '../data/tradeCalcMock';
 
 /**
  * Consolidation premium: the best player counts full, extra pieces are
@@ -76,13 +76,15 @@ export interface CalcSuggestion {
   score: number;
 }
 
-/** All combos of size 1..3 from a candidate pool. */
-function combos(ids: string[]): string[][] {
+/** All combos of size 1..maxSize (≤3) from a candidate pool. */
+function combos(ids: string[], maxSize = 3): string[][] {
   const out: string[][] = [];
   for (let i = 0; i < ids.length; i++) {
     out.push([ids[i]]);
+    if (maxSize < 2) continue;
     for (let j = i + 1; j < ids.length; j++) {
       out.push([ids[i], ids[j]]);
+      if (maxSize < 3) continue;
       for (let k = j + 1; k < ids.length; k++) {
         out.push([ids[i], ids[j], ids[k]]);
       }
@@ -90,6 +92,15 @@ function combos(ids: string[]): string[][] {
   }
   return out;
 }
+
+/** Shared scoring: maximize the worse side's gain, penalize lopsidedness. */
+function scoreSuggestion(evaluation: CalcTradeEval): number {
+  const worse = Math.min(evaluation.myDeltaPct, evaluation.theirDeltaPct);
+  const gap = Math.abs(evaluation.myDeltaPct - evaluation.theirDeltaPct);
+  return worse - gap * 0.5;
+}
+
+const AGREEABLE: CalcVerdict[] = ['WIN_WIN', 'FAIR'];
 
 /**
  * Suggest fair packages for the open side of the trade.
@@ -104,6 +115,7 @@ export function suggestPackages(
   theirRosterIds: string[],
   myBoard: Record<string, number>,
   theirBoard: Record<string, number>,
+  playerById: Record<string, CalcPlayer>,
   limit = 4,
 ): { forSide: 'receive' | 'send'; suggestions: CalcSuggestion[] } | null {
   const forSide: 'receive' | 'send' | null =
@@ -117,15 +129,60 @@ export function suggestPackages(
         forSide === 'receive'
           ? evaluateTrade(sendIds, combo, myBoard, theirBoard)
           : evaluateTrade(combo, receiveIds, myBoard, theirBoard);
-      const worse = Math.min(evaluation.myDeltaPct, evaluation.theirDeltaPct);
-      const gap = Math.abs(evaluation.myDeltaPct - evaluation.theirDeltaPct);
       return {
-        players: combo.map((id) => CALC_PLAYER_BY_ID[id]),
+        players: combo.map((id) => playerById[id]).filter(Boolean),
         evaluation,
-        score: worse - gap * 0.5,
+        score: scoreSuggestion(evaluation),
       };
     })
-    .filter((s) => s.evaluation.verdict === 'WIN_WIN' || s.evaluation.verdict === 'FAIR')
+    .filter((s) => AGREEABLE.includes(s.evaluation.verdict))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  return { forSide, suggestions };
+}
+
+/**
+ * Balance an already-built trade that neither board likes yet: propose 1–2
+ * asset add-ons appended to the under-paying side (drawn from that side's
+ * owner roster) that pull the whole trade into Fair / Win–win territory.
+ * Returns null when the trade is incomplete or already agreeable.
+ */
+export function suggestAddOns(
+  sendIds: string[],
+  receiveIds: string[],
+  myRosterIds: string[],
+  theirRosterIds: string[],
+  myBoard: Record<string, number>,
+  theirBoard: Record<string, number>,
+  playerById: Record<string, CalcPlayer>,
+  limit = 3,
+): { forSide: 'send' | 'receive'; suggestions: CalcSuggestion[] } | null {
+  if (sendIds.length === 0 || receiveIds.length === 0) return null;
+  const current = evaluateTrade(sendIds, receiveIds, myBoard, theirBoard);
+  if (AGREEABLE.includes(current.verdict)) return null;
+
+  // Whoever is worse off on their own board needs more coming their way:
+  // they're down → sweeten what I send; I'm down → they add to what I receive.
+  const forSide: 'send' | 'receive' =
+    current.theirDeltaPct < current.myDeltaPct ? 'send' : 'receive';
+  const pool = (forSide === 'send' ? myRosterIds : theirRosterIds).filter(
+    (id) => !sendIds.includes(id) && !receiveIds.includes(id),
+  );
+
+  const suggestions = combos(pool, 2)
+    .map((combo) => {
+      const evaluation =
+        forSide === 'send'
+          ? evaluateTrade([...sendIds, ...combo], receiveIds, myBoard, theirBoard)
+          : evaluateTrade(sendIds, [...receiveIds, ...combo], myBoard, theirBoard);
+      return {
+        players: combo.map((id) => playerById[id]).filter(Boolean),
+        evaluation,
+        score: scoreSuggestion(evaluation),
+      };
+    })
+    .filter((s) => AGREEABLE.includes(s.evaluation.verdict))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 

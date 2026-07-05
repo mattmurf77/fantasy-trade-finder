@@ -10,9 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import PositionChip from './PositionChip';
-import { Button } from './chalkline';
-import { CalcPlayer } from '../data/tradeCalcMock';
-import type { Position } from '../shared/types';
+import { Badge, Button } from './chalkline';
+import { CalcPlayer, CalcPos } from '../data/tradeCalcMock';
 import {
   ink,
   chalk,
@@ -24,7 +23,7 @@ import {
   scrim,
 } from '../theme/chalkline';
 
-const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
+const POSITIONS: CalcPos[] = ['QB', 'RB', 'WR', 'TE', 'PICK'];
 
 interface Props {
   visible: boolean;
@@ -33,8 +32,12 @@ interface Props {
   selectedIds: string[];
   /** Value on the roster owner's board (what it costs them / what they'd demand). */
   ownerBoardValue: (p: CalcPlayer) => number;
-  /** Value on your board (what it's worth to you). Omitted when picking from your own roster. */
-  yourBoardValue?: (p: CalcPlayer) => number;
+  /** Second board's value shown under the primary (e.g. what it's worth to you). */
+  secondaryValue?: (p: CalcPlayer) => number;
+  /** Prefix for the secondary value line, e.g. "you" or "them". */
+  secondaryPrefix?: string;
+  /** Optional arbitrage badge per row (e.g. TARGET / SELL HIGH). */
+  badgeFor?: (p: CalcPlayer) => { label: string; color: string } | null;
   onPick: (p: CalcPlayer) => void;
   onClose: () => void;
 }
@@ -48,12 +51,14 @@ export default function PlayerPickerModal({
   players,
   selectedIds,
   ownerBoardValue,
-  yourBoardValue,
+  secondaryValue,
+  secondaryPrefix = 'you',
+  badgeFor,
   onPick,
   onClose,
 }: Props) {
   const [query, setQuery] = useState('');
-  const [posFilter, setPosFilter] = useState<Position | null>(null);
+  const [posFilter, setPosFilter] = useState<CalcPos | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -87,7 +92,8 @@ export default function PlayerPickerModal({
             <View style={styles.filters}>
               {POSITIONS.map((pos) => {
                 const active = posFilter === pos;
-                const tint = positionColor[pos.toLowerCase() as keyof typeof positionColor];
+                const tint =
+                  positionColor[pos.toLowerCase() as keyof typeof positionColor] ?? chalk.dim;
                 return (
                   <Pressable
                     key={pos}
@@ -117,16 +123,25 @@ export default function PlayerPickerModal({
                 >
                   <PositionChip position={item.pos} size="sm" />
                   <View style={styles.info}>
-                    <Text style={type.title}>{item.name}</Text>
+                    <View style={styles.nameRow}>
+                      <Text style={type.title}>{item.name}</Text>
+                      {badgeFor?.(item) ? (
+                        <Badge
+                          label={badgeFor(item)!.label}
+                          color={badgeFor(item)!.color}
+                          colorText
+                        />
+                      ) : null}
+                    </View>
                     <Text style={type.bodySm}>
-                      {item.nflTeam} · {item.age} yrs
+                      {item.pick ? 'Draft capital' : `${item.nflTeam} · ${item.age} yrs`}
                     </Text>
                   </View>
                   <View style={styles.values}>
                     <Text style={type.data}>{ownerBoardValue(item).toLocaleString()}</Text>
-                    {yourBoardValue ? (
+                    {secondaryValue ? (
                       <Text style={styles.yourValue}>
-                        you: {yourBoardValue(item).toLocaleString()}
+                        {secondaryPrefix}: {secondaryValue(item).toLocaleString()}
                       </Text>
                     ) : null}
                   </View>
@@ -196,6 +211,7 @@ const styles = StyleSheet.create({
   },
   rowPressed: { backgroundColor: ink.ink3 },
   info: { flex: 1 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   values: { alignItems: 'flex-end' },
   yourValue: { ...type.data, color: chalk.dim },
 });

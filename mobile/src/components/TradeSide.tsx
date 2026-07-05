@@ -36,7 +36,7 @@ export default function TradeSide({ title, teamName, players, valueOf, accent, o
               <View style={styles.info}>
                 <Text style={type.title}>{p.name}</Text>
                 <Text style={type.bodySm}>
-                  {p.nflTeam} · {p.age} yrs
+                  {p.pick ? 'Draft capital' : `${p.nflTeam} · ${p.age} yrs`}
                 </Text>
               </View>
               <Text style={type.data}>{valueOf(p).toLocaleString()}</Text>
