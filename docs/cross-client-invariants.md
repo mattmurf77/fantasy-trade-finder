@@ -6,15 +6,19 @@ Things that **must** stay in sync across backend, web, mobile, and the extension
 
 ## Tier color tokens
 
-| Tier | Color |
-|---|---|
-| Elite | gold |
-| Starter | green |
-| Solid | blue |
-| Depth | purple |
-| Bench | gray |
+Canonical hex per tier (unified 2026-07-04; the extension's base hues are canon). Lighter same-hue accents (e.g. Tailwind 300/400-level borders and text on tinted dark backgrounds, as in the extension badge and web tier legend) are allowed per client, but the base identity color and rgba() tint bases must be these values.
 
-**Locations:** `mobile/src/theme/colors.ts`, `web/css/styles.css`, `extension/content.css`, `extension/popup.css`.
+| Tier | Color | Canonical hex |
+|---|---|---|
+| Elite | gold | `#f59e0b` |
+| Starter | green | `#22c55e` |
+| Solid | blue | `#3b82f6` |
+| Depth | purple | `#a855f7` |
+| Bench | gray | `#7a7f96` |
+
+**Locations:** `mobile/src/theme/colors.ts` (`colors.tier`), `web/positional-tiers.html` (inline CSS: tier-row accents, tier-assign buttons, legend swatches), `web/profile.html` (inline `:root` vars `--elite`…`--bench`), `extension/content.css` (`.ftf-badge.ftf-tier-*`).
+
+Note: `web/css/styles.css` has a separate 4-level *dynasty value* badge set (`.tier-elite/.tier-high/.tier-mid/.tier-depth`) — a different taxonomy, not these tokens. `extension/popup.css` contains no tier colors.
 
 ---
 

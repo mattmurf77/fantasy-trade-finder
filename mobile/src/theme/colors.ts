@@ -23,8 +23,8 @@ export const colors = {
     elite: '#f59e0b',
     starter: '#22c55e',
     solid: '#3b82f6',
-    depth: '#f97316',
-    bench: '#94a3b8',
+    depth: '#a855f7',
+    bench: '#7a7f96',
   },
 } as const;
 
