@@ -8,6 +8,7 @@ import {
   ScrollView,
   Dimensions,
   Modal,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -53,14 +54,17 @@ import {
   saveLeaguePreferences,
   getNewPartners,
   getLeagueCoverage,
+  copyTiersFromFormat,
   type Outlook,
 } from '../api/league';
+import { getProgress } from '../api/rankings';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
+import FormatGate, { formatLabel } from '../components/FormatGate';
 import { useSession } from '../state/useSession';
 import { useTradeQueue } from '../state/useTradeQueue';
 import { useFlag } from '../state/useFeatureFlags';
 import NewPartnersBanner from '../components/NewPartnersBanner';
-import type { Player, TradeCard, TradeJobSnapshot } from '../shared/types';
+import type { Player, TradeCard, TradeJobSnapshot, ScoringFormat } from '../shared/types';
 
 const SCREEN_W = Dimensions.get('window').width;
 const SWIPE_THRESHOLD = 120;
@@ -85,6 +89,10 @@ export default function TradesScreen({ navigation }: any) {
   const league = useSession((s) => s.league);
   const switching = useSession((s) => s.switching);
   const user = useSession((s) => s.user);
+  // FB4-59 — the format this league resolves to. Used to key the progress
+  // query (shared with RootNav/RankScreen) and to detect the single-format
+  // gate state below.
+  const activeFormat = useSession((s) => s.activeFormat);
   // B3 — Portfolio is only meaningful when the user has 2+ leagues. The
   // sub-route pill at the top of this screen hides itself otherwise.
   const leagues = useSession((s) => s.leagues);
@@ -212,6 +220,100 @@ export default function TradesScreen({ navigation }: any) {
       setOutlookOpen(true);
     }
   }, [prefsQuery.data]);
+
+  // ── FB4-59: single-format gate ───────────────────────────────────────
+  // Trading requires the user to have established rankings for THIS league's
+  // scoring format. /api/rankings/progress returns `scoring_format` (the
+  // format this league resolves to) and `unlocked_formats` (every format the
+  // user has actually set up). Shares the ['progress', leagueId, activeFormat]
+  // key with RootNav/RankScreen so it adopts any in-flight fetch and reuses
+  // the cache. We only surface the gate when we're CONFIDENT a format is
+  // unset — never on a loading/error/placeholder state.
+  const progressQuery = useQuery({
+    queryKey: ['progress', leagueId, activeFormat],
+    queryFn: getProgress,
+    enabled: !!leagueId,
+    staleTime: 15_000,
+    placeholderData: (prev) => prev,
+  });
+
+  // Detect "only the OTHER format is established". Conditions, all required:
+  //  • progress data has loaded (not loading/fetching with no data),
+  //  • the query isn't in an error state,
+  //  • the league's format is known and NOT in unlocked_formats,
+  //  • the OTHER format IS in unlocked_formats.
+  // The last clause is what makes this specifically the single-format case:
+  // a brand-new user with neither format set falls through to the normal
+  // cold-start empty state, not this gate.
+  const gateState = useMemo<{ needed: ScoringFormat; set: ScoringFormat } | null>(() => {
+    const data = progressQuery.data;
+    if (!data || progressQuery.isError) return null;
+    const needed = data.scoring_format as ScoringFormat | undefined;
+    if (needed !== '1qb_ppr' && needed !== 'sf_tep') return null;
+    const unlocked = data.unlocked_formats ?? [];
+    if (unlocked.includes(needed)) return null;               // needed format is set — no gate
+    const other: ScoringFormat = needed === '1qb_ppr' ? 'sf_tep' : '1qb_ppr';
+    if (!unlocked.includes(other)) return null;               // neither set — cold start, not this gate
+    return { needed, set: other };
+  }, [progressQuery.data, progressQuery.isError]);
+
+  // Copy the established format's tiers into the league's format. Mirrors
+  // TiersScreen's copyMutation: destructive confirm Alert → copyTiersFromFormat
+  // → invalidate the rankings/tiers/progress caches so the gate clears and
+  // Trades content unlocks on the next progress fetch.
+  const copyFormatMutation = useMutation({
+    mutationFn: ({ from, to }: { from: ScoringFormat; to: ScoringFormat }) =>
+      copyTiersFromFormat(from, to),
+    onSuccess: (data, vars) => {
+      if (!data?.ok) {
+        setToast({ msg: data?.error || 'Copy failed', tone: 'warn' });
+        return;
+      }
+      const n = data.total ?? 0;
+      setToast({ msg: `✓ Copied ${n} tier placements`, tone: 'success' });
+      // A format copy establishes the target format — invalidate the caches
+      // that gate Trades so the gate re-evaluates and clears. Progress is the
+      // direct signal this screen reads; rankings/tiers-status keep the Rank
+      // surfaces consistent (same set TiersScreen invalidates on copy).
+      queryClient.invalidateQueries({ queryKey: ['progress', leagueId, vars.to] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', vars.to] });
+      queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
+    },
+    onError: (e: Error) => {
+      setToast({ msg: e.message || 'Copy failed', tone: 'warn' });
+    },
+  });
+
+  function onGateCopy(gate: { needed: ScoringFormat; set: ScoringFormat }) {
+    // Destructive on the target format's existing overrides (there are none
+    // when it's unset, but the copy endpoint replaces wholesale) — confirm
+    // first, matching TiersScreen's pattern.
+    Alert.alert(
+      `Copy tiers from ${formatLabel(gate.set)}?`,
+      `This sets up your ${formatLabel(gate.needed)} rankings using your ` +
+        `${formatLabel(gate.set)} tiers. Each player keeps their tier and ` +
+        `within-tier rank; only the underlying values change to fit ` +
+        `${formatLabel(gate.needed)}'s bands.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Copy',
+          onPress: () => {
+            haptics.warning();
+            copyFormatMutation.mutate({ from: gate.set, to: gate.needed });
+          },
+        },
+      ],
+    );
+  }
+
+  function onGateSetUpManually() {
+    // Route to the Rank tab's Tiers entry. activeFormat already resolves to
+    // the league's (needed) format, so Tiers opens on the right format. Sibling
+    // tab navigation: the Trades stack's navigation prop reaches the parent
+    // Tab navigator (mirrors TabNav's RankMenu dispatch).
+    navigation?.navigate?.('Rank', { screen: 'Tiers' });
+  }
 
   // ── Find-a-Trade: streaming job snapshot ─────────────────────────────
   // The backend runs generation in a background thread and we poll for
@@ -592,6 +694,19 @@ export default function TradesScreen({ navigation }: any) {
           onPress={() => setSwitcherOpen(true)}
         />
 
+        {/* FB4-59 — single-format gate. When the league resolves to only the
+            OTHER scoring format, show the gate in place of the trade UI;
+            otherwise the normal Chalkline controls + deck render. */}
+        {gateState ? (
+          <FormatGate
+            neededFormat={gateState.needed}
+            setFormat={gateState.set}
+            copying={copyFormatMutation.isPending}
+            onCopy={() => onGateCopy(gateState)}
+            onSetUpManually={onGateSetUpManually}
+          />
+        ) : (
+        <>
         <Card>
           <View style={styles.controlInner}>
           <View style={styles.controlRow}>
@@ -834,6 +949,8 @@ export default function TradesScreen({ navigation }: any) {
             </Card>
           )}
         </View>
+        </>
+        )}
       </ScrollView>
 
       {/* Queue footer bar — anchored above the bottom tab nav. Tap the

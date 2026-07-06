@@ -5545,6 +5545,23 @@ def sleeper_user(username):
             "is_bot": False,
         })
 
+    # ── Seeded test-league logins (User1..User5) ────────────────────────
+    # Hardcoded so the synthetic "Lakeview League (Test)" owners are loginable
+    # (these shadow the real Sleeper user1..user5 names). Resolved against the
+    # DB case-insensitively so ONLY actually-seeded test owners bypass Sleeper;
+    # if a name in the set isn't seeded, fall through to the real lookup below.
+    if username in {"user1", "user2", "user3", "user4", "user5"}:
+        _seeded = get_user_by_username(username)
+        if _seeded:
+            log.info("  🧪 seeded test-league login for %r", username)
+            return jsonify({
+                "user_id":      _seeded["sleeper_user_id"],
+                "display_name": _seeded.get("display_name") or _seeded.get("username") or username,
+                "username":     _seeded.get("username") or username,
+                "avatar":       _seeded.get("avatar"),
+                "is_bot":       False,
+            })
+
     url = f"https://api.sleeper.app/v1/user/{urllib.parse.quote(username)}"
     log.info("  calling Sleeper: %s", url)
 
