@@ -41,25 +41,6 @@ const STATUS_COLOR: Record<FeedbackStatus, string> = {
   declined:    chalk.faint,
 };
 
-// Operator-set lifecycle status → user-facing chip. Vocabulary mirrors
-// the backend's FEEDBACK_STATUSES (docs/cross-client-invariants.md).
-const STATUS_LABEL: Record<FeedbackStatus, string> = {
-  new:         '📬 Received',
-  planned:     '🗓 Planned',
-  in_progress: '🔧 In progress',
-  fixed:       '✅ Fixed — in next update',
-  shipped:     '🚀 Shipped',
-  declined:    '🚫 Not planned',
-};
-const STATUS_COLOR: Record<FeedbackStatus, string> = {
-  new:         colors.muted,
-  planned:     colors.accent,
-  in_progress: colors.gold,
-  fixed:       colors.green,
-  shipped:     colors.green,
-  declined:    colors.muted,
-};
-
 // Settings → Test feedback → this screen.
 // Lists every captured feedback note in newest-first order. The header
 // has two destructive-ish actions:
