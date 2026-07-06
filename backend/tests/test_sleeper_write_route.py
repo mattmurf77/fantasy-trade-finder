@@ -169,3 +169,89 @@ def test_feature_off_returns_404(client):
             "league_id": LEAGUE, "their_roster_id": 2,
             "give_player_ids": ["1"], "receive_player_ids": ["2"]}))
         assert r.status_code == 404
+
+
+# ── Error-contract coverage ──────────────────────────────────────────────
+# Each branch below maps to a specific client behavior in SendInSleeperButton
+# (reconnect prompt / deep-link fallback / "unavailable" alert). Locking them
+# so a route refactor can't silently break the mobile handling.
+
+def test_link_post_without_key_returns_503(client):
+    """No SLEEPER_TOKEN_KEY → POST link fails closed (client shows 'unavailable',
+    never stores a plaintext token)."""
+    c, token = client
+    with patch.object(server._sleeper_write, "token_encryption_available", lambda: False):
+        r = c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
+    assert r.status_code == 503 and r.get_json()["error"] == "sleeper_unconfigured"
+
+
+def test_propose_bad_request(client):
+    """Non-numeric league_id, or neither their_user_id nor their_roster_id → 400
+    bad_request (checked before the linked-credential gate)."""
+    c, token = client
+    r = c.post("/api/trades/propose", headers=_h(token), data=json.dumps({
+        "league_id": "not-a-number", "their_roster_id": 2,
+        "give_player_ids": ["1"], "receive_player_ids": ["2"]}))
+    assert r.status_code == 400 and r.get_json()["error"] == "bad_request"
+
+    r = c.post("/api/trades/propose", headers=_h(token), data=json.dumps({
+        "league_id": LEAGUE,   # no their_user_id AND no their_roster_id
+        "give_player_ids": ["1"], "receive_player_ids": ["2"]}))
+    assert r.status_code == 400 and r.get_json()["error"] == "bad_request"
+
+
+def test_propose_expired_stored_token_returns_409_and_clears(client):
+    """The common real case: token aged out between sessions. Pre-flight
+    is_expired catches it → 409 sleeper_expired (client → reconnect) and the
+    dead credential is dropped."""
+    c, token = client
+    c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
+    # Overwrite the stored credential with an already-expired token (can't link
+    # one directly — the POST route rejects expired tokens up front).
+    expired_ct = server._sleeper_write.encrypt_token(_token(-10))
+    server.upsert_sleeper_credential(USER, SLEEPER_UID, expired_ct, None)
+
+    r = c.post("/api/trades/propose", headers=_h(token), data=json.dumps({
+        "league_id": LEAGUE, "their_roster_id": 2,
+        "give_player_ids": ["1"], "receive_player_ids": ["2"]}))
+    assert r.status_code == 409 and r.get_json()["error"] == "sleeper_expired"
+    assert c.get("/api/sleeper/link", headers=_h(token)).get_json()["connected"] is False
+
+
+def test_propose_write_failure_returns_502(client):
+    """A non-auth Sleeper failure (network / GraphQL error) → 502
+    sleeper_write_failed, which the client maps to the deep-link fallback."""
+    from backend.sleeper_write import SleeperWriteError
+    c, token = client
+    c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
+    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1}, {"owner_id": "opp", "roster_id": 2}]
+    with patch.object(server, "_sleeper_get", return_value=rosters), \
+         patch.object(server._sleeper_write, "propose_trade",
+                      MagicMock(side_effect=SleeperWriteError("boom", kind="network"))):
+        r = c.post("/api/trades/propose", headers=_h(token), data=json.dumps({
+            "league_id": LEAGUE, "their_roster_id": 2,
+            "give_player_ids": ["1"], "receive_player_ids": ["2"]}))
+    assert r.status_code == 502 and r.get_json()["error"] == "sleeper_write_failed"
+
+
+def test_propose_roster_fetch_failure_degrades_gracefully(client):
+    """A transient rosters-fetch failure must not 500 — it degrades to a
+    structured 400 (client → deep-link fallback), never an unhandled crash."""
+    c, token = client
+    c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
+    with patch.object(server, "_sleeper_get", side_effect=Exception("network")):
+        r = c.post("/api/trades/propose", headers=_h(token), data=json.dumps({
+            "league_id": LEAGUE, "their_roster_id": 2,
+            "give_player_ids": ["1"], "receive_player_ids": ["2"]}))
+    assert r.status_code == 400 and r.get_json()["error"] == "roster_not_found"
+
+
+def test_link_get_reports_expired_flag(client):
+    """GET surfaces an expired-but-still-stored credential as expired:true so the
+    client can prompt a proactive reconnect before the user even taps Send."""
+    c, token = client
+    c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
+    ct = server._sleeper_write.encrypt_token(_token())
+    server.upsert_sleeper_credential(USER, SLEEPER_UID, ct, "2000-01-01T00:00:00+00:00")
+    body = c.get("/api/sleeper/link", headers=_h(token)).get_json()
+    assert body["connected"] is True and body["expired"] is True
