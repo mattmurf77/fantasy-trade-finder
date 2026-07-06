@@ -19,6 +19,12 @@
 
 ---
 
+## 2026-07-06 (Matches CTAs: Dismiss + Send in Sleeper)
+
+- **Reworked mutual-match CTAs** (operator request): the Accept/Decline pair on the Matches tab is replaced by **Dismiss** + **Send in Sleeper**. Accept used to POST a disposition (ELO) and deep-link to Sleeper — it was erroring ("Action failed") for matches the disposition endpoint 404/409'd. Send in Sleeper (`/api/trades/propose`) is now the real "execute" action and doesn't depend on the match row; Dismiss just archives.
+- **New "archive" path:** `POST /api/trades/matches/<id>/dismiss` + `dismiss_match()` set a per-user `user_{a,b}_dismissed` flag on `trade_matches` (new columns, migrated); `load_matches` filters the caller's dismissed matches out for good. **ELO-neutral** and per-user (counterparty unaffected) — deliberately NOT a decline. 4 tests (`test_dismiss_match.py`); suite 262 green; migration verified idempotent on a legacy schema; both CTAs verified rendering in web preview.
+- **Note on the missing button:** `SendInSleeperButton` is flag-gated (`trade.send_in_sleeper`, now ON in prod) and only un-hides after a **cold launch** refetches flags — a resume keeps the stale map. Needs a new TestFlight build to ship the CTA layout change regardless.
+
 ## 2026-07-06 (TestFlight build 21 — v1.3.0)
 
 - **Send in Sleeper hardened + iOS build shipped to TestFlight.** Added 6 route tests locking the `/api/sleeper/link` + `/api/trades/propose` error contract (TC-API-002; suite 258 green); flag `trade.send_in_sleeper` stays OFF. `SLEEPER_TOKEN_KEY` set in Render + local (operator).

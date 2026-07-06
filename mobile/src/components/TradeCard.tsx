@@ -11,9 +11,9 @@ import type { TradeCard as TradeCardData } from '../shared/types';
 interface Props {
   data: TradeCardData;
   variant?: 'swipe' | 'match';
-  // Match-variant actions
-  onAccept?: () => void;
-  onDecline?: () => void;
+  // Match-variant action: archive the match from the inbox (ELO-neutral).
+  // The "do the trade" action is the Send-in-Sleeper button below.
+  onDismiss?: () => void;
   acting?: boolean;
   // "Send in Sleeper" — flagged beta. When true, render the direct-propose
   // button (itself flag-gated, so it's a no-op when the flag is off).
@@ -27,8 +27,7 @@ interface Props {
 function TradeCardComp({
   data,
   variant = 'swipe',
-  onAccept,
-  onDecline,
+  onDismiss,
   acting,
   showSend = false,
 }: Props) {
@@ -167,34 +166,39 @@ function TradeCardComp({
         </View>
       )}
 
-      {variant === 'match' && (
+      {/* Mutual-match CTAs: Dismiss (archive, ELO-neutral) + Send in Sleeper
+          (the real "execute the trade" action — flag-gated, renders null when
+          the beta flag is off, so a flag-off build shows Dismiss alone). */}
+      {variant === 'match' ? (
         <View style={styles.actions}>
           <Button
             variant="pass"
-            label="Decline"
-            onPress={onDecline}
+            label="Dismiss"
+            onPress={onDismiss}
             disabled={acting}
             style={styles.actionBtn}
           />
-          <Button
-            variant="like"
-            label="Accept"
-            onPress={onAccept}
-            disabled={acting}
-            style={styles.actionBtn}
-          />
+          {showSend && (
+            <SendInSleeperButton
+              leagueId={data.league_id}
+              theirUserId={data.opponent_user_id}
+              givePlayerIds={data.give_player_ids}
+              receivePlayerIds={data.receive_player_ids}
+              style={styles.actionBtn}
+            />
+          )}
         </View>
-      )}
-
-      {showSend && (
-        <View style={styles.sendRow}>
-          <SendInSleeperButton
-            leagueId={data.league_id}
-            theirUserId={data.opponent_user_id}
-            givePlayerIds={data.give_player_ids}
-            receivePlayerIds={data.receive_player_ids}
-          />
-        </View>
+      ) : (
+        showSend && (
+          <View style={styles.sendRow}>
+            <SendInSleeperButton
+              leagueId={data.league_id}
+              theirUserId={data.opponent_user_id}
+              givePlayerIds={data.give_player_ids}
+              receivePlayerIds={data.receive_player_ids}
+            />
+          </View>
+        )
       )}
     </View>
   );

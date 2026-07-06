@@ -232,6 +232,13 @@ export async function setMatchDisposition(
   });
 }
 
+// POST /api/trades/matches/:id/dismiss
+// Archives a mutual match from the caller's inbox — persisted, per-user, and
+// ELO-neutral (NOT a decline). Powers the "Dismiss" CTA on the Matches tab.
+export async function dismissMatch(matchId: string) {
+  return api.post<any>(`/api/trades/matches/${matchId}/dismiss`, {});
+}
+
 // GET /api/trades/liked — liked trades. Backend returns a bare array of
 // trade dicts; we expose both the count (what badges care about) and the
 // raw list (so a future inbox screen can render them).

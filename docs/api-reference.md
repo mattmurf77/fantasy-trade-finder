@@ -80,7 +80,8 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 | GET | `/api/trades/matches` | Mutual matches (current league) |
 | GET | `/api/trades/matches/all` | Mutual matches across all leagues |
 | GET | `/api/trades/awaiting` | Cross-league trades the user liked that haven't matured into a mutual match yet ("Awaiting them"); bare array, mirrors `/api/trades/matches/all` shape |
-| POST | `/api/trades/matches/<match_id>/disposition` | Accept/decline a match |
+| POST | `/api/trades/matches/<match_id>/disposition` | Accept/decline a match (records an ELO signal) |
+| POST | `/api/trades/matches/<match_id>/dismiss` | Archive a match from the caller's inbox only — persisted, per-user, **ELO-neutral** (not a decline). Powers the mobile "Dismiss" CTA. 404 if the caller isn't a participant. |
 | POST | `/api/trades/propose` | **Flagged beta** (`trade.send_in_sleeper`, default off). Send a built trade to Sleeper as a real proposal — see [Send in Sleeper](#send-in-sleeper-flagged-beta) |
 
 **Deck order is not strictly score-sorted.** With `trade.thompson_deck` on (prod default), the returned card order is Thompson-sampled (bounded 0.5–1.5× multiplier on `composite_score`) and `trade.deck_diversity` can demote league-saturated targets — so order is intentionally stochastic and varies run-to-run. Clients must not assume `cards[0]` is the strict `composite_score` max. With both flags off the deck is composite-sorted descending (TC-ENG-001 / TC-E2E-001).

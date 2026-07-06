@@ -5,8 +5,6 @@ import {
   StyleSheet,
   FlatList,
   RefreshControl,
-  Linking,
-  Alert,
   Pressable,
   ScrollView,
 } from 'react-native';
@@ -18,7 +16,7 @@ import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/c
 import { Button, Badge, Icon } from '../components/chalkline';
 import TradeCardComp from '../components/TradeCard';
 import Toast from '../components/Toast';
-import { getAllMatches, getAwaitingTrades, setMatchDisposition } from '../api/trades';
+import { getAllMatches, getAwaitingTrades, dismissMatch } from '../api/trades';
 import { useSession } from '../state/useSession';
 import { relativeTime } from '../utils/relativeTime';
 import type { TradeMatch, AwaitingTrade, Player } from '../shared/types';
@@ -67,13 +65,15 @@ export default function MatchesScreen() {
     enabled:  segment === 'awaiting',
   });
 
-  const dispMutation = useMutation({
-    mutationFn: ({ id, d }: { id: string; d: 'accepted' | 'declined' }) =>
-      setMatchDisposition(id, d),
-    onMutate: async ({ id }) => {
+  // Dismiss = archive the match from THIS user's inbox. Persisted + per-user
+  // + ELO-neutral (see /api/trades/matches/:id/dismiss). Replaces the old
+  // accept/decline dispositions on mutual matches — the real "do the trade"
+  // action is now the Send-in-Sleeper button, so the only inbox verb left is
+  // "clear it."
+  const dismissMutation = useMutation({
+    mutationFn: (id: string) => dismissMatch(id),
+    onMutate: async (id) => {
       // Optimistic — drop the match from the list so the UI feels instant.
-      // Same query key as above; using a different key here was the bug
-      // before this refactor.
       const prev = queryClient.getQueryData<TradeMatch[]>(['matches', 'all']);
       if (prev) {
         queryClient.setQueryData(
@@ -83,59 +83,20 @@ export default function MatchesScreen() {
       }
       return { prev };
     },
-    onError: (_err, _vars, ctx) => {
+    onError: (_err, _id, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(['matches', 'all'], ctx.prev);
-      setToast({ msg: 'Action failed — try again', tone: 'warn' });
+      setToast({ msg: 'Could not dismiss — try again', tone: 'warn' });
     },
-    onSuccess: (_res, vars) => {
-      if (vars.d === 'accepted') {
-        haptics.success();
-      }
-      // An accept/decline shouldn't just disappear the match from the
-      // Mutual segment — the same match can sit in the "Awaiting them"
-      // bucket (when only the counterparty has yet to swipe) and in the
-      // user's liked-trades list. Invalidate both so the inbox is
-      // consistent across segments without a manual refresh. The match
-      // inbox is cross-league, so we invalidate every league's
-      // liked-trades cache via the partial-key match (TanStack matches
-      // any queryKey that starts with the supplied array).
-      // Mirrors api-layer review #A2 + silent-bugs review bug #5.
-      queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
-      queryClient.invalidateQueries({ queryKey: ['liked-trades'] });
+    onSuccess: () => {
+      // Dismissed matches are gone server-side, so refetch to reconcile
+      // (the optimistic removal already hid it locally).
+      queryClient.invalidateQueries({ queryKey: ['matches', 'all'] });
     },
   });
 
-  async function handleAccept(m: TradeMatch) {
-    // Wait for the disposition POST to settle BEFORE deep-linking. The
-    // previous fire-and-forget pattern would optimistically remove the
-    // match from the list and then leave the user on Sleeper.com if the
-    // backend later 500'd — the rollback toast would only render after
-    // they switched back to the app, which is confusing.
-    //
-    // mutateAsync re-throws on failure (onError still fires for the
-    // optimistic rollback), so the catch keeps the user inside the app
-    // and the existing onError toast surfaces a real failure. On
-    // success: deep-link.
-    try {
-      await dispMutation.mutateAsync({ id: m.match_id, d: 'accepted' });
-    } catch {
-      // onError already toasts + rolls back the optimistic removal.
-      return;
-    }
-    // Deep-link to Sleeper. Sleeper's trade-propose deep link format:
-    //   https://sleeper.com/leagues/<league_id>/trade
-    const url = `https://sleeper.com/leagues/${m.league_id}/trade`;
-    try {
-      const can = await Linking.canOpenURL(url);
-      if (can) await Linking.openURL(url);
-      else Alert.alert('Accepted — open Sleeper to propose the trade.', url);
-    } catch {
-      Alert.alert('Accepted', 'Open Sleeper manually to propose the trade.');
-    }
-  }
-
-  function handleDecline(m: TradeMatch) {
-    dispMutation.mutate({ id: m.match_id, d: 'declined' });
+  function handleDismiss(m: TradeMatch) {
+    haptics.selection();
+    dismissMutation.mutate(m.match_id);
   }
 
   const allMatches: TradeMatch[] = matchesQuery.data || [];
@@ -327,9 +288,8 @@ export default function MatchesScreen() {
                 <TradeCardComp
                   variant="match"
                   data={matchToTradeCardShape(item, activeLeague?.league_id)}
-                  onAccept={() => handleAccept(item)}
-                  onDecline={() => handleDecline(item)}
-                  acting={dispMutation.isPending}
+                  onDismiss={() => handleDismiss(item)}
+                  acting={dismissMutation.isPending}
                   showSend
                 />
               </View>

@@ -141,6 +141,7 @@ Created when both users like mirrored trades. Lifecycle: `pending → accepted |
 | `status` | str | `pending` / `accepted` / `declined` (default `pending`). Pre-2026-05 rows could be `active`; `_migrate_db()` flips any remaining `active` → `pending` once. |
 | `user_a_decision`, `user_b_decision` | str | `accept` / `decline` / null |
 | `user_a_decided_at`, `user_b_decided_at` | str | |
+| `user_a_dismissed`, `user_b_dismissed` | int | 0/1/null — per-user inbox archive. Set by `dismiss_match`; `load_matches` hides the match from that user only. ELO-neutral (distinct from a decline). |
 | `matched_at` | str | |
 
 Indexes: `ix_trade_matches_user_a_league`, `ix_trade_matches_user_b_league` for cross-league `/api/trades/matches/all` scans.
