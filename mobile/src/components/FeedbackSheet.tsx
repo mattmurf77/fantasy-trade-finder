@@ -11,8 +11,18 @@ import {
   ScrollView,
 } from 'react-native';
 import Constants from 'expo-constants';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import {
+  ink,
+  chalk,
+  ice,
+  space,
+  radii,
+  type,
+  fonts,
+  scrim,
+  shadowSheet,
+} from '../theme/chalkline';
+import { Button } from './chalkline';
 import { useFeedback, type FeedbackSeverity } from '../state/useFeedback';
 
 interface Props {
@@ -23,10 +33,10 @@ interface Props {
   defaultScreen: string;
 }
 
-const SEVERITY_OPTIONS: { value: FeedbackSeverity; label: string; emoji: string }[] = [
-  { value: 'bug',    label: 'Bug',    emoji: '🐞' },
-  { value: 'polish', label: 'Polish', emoji: '✨' },
-  { value: 'idea',   label: 'Idea',   emoji: '💡' },
+const SEVERITY_OPTIONS: { value: FeedbackSeverity; label: string }[] = [
+  { value: 'bug',    label: 'Bug'    },
+  { value: 'polish', label: 'Polish' },
+  { value: 'idea',   label: 'Idea'   },
 ];
 
 // Modal-based bottom sheet for capturing a single feedback note. Keyboard-
@@ -82,7 +92,7 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
         style={styles.kav}
       >
         <View style={styles.sheet}>
-          <View style={styles.handle} />
+          <View style={styles.grabber} />
           <Text style={styles.title}>Capture feedback</Text>
           <Text style={styles.sub}>Saved on this device. Share or export from Settings.</Text>
 
@@ -98,11 +108,11 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
                     style={({ pressed }) => [
                       styles.sevChip,
                       active && styles.sevChipActive,
-                      pressed && { opacity: 0.7 },
+                      pressed && styles.sevChipPressed,
                     ]}
                   >
                     <Text style={[styles.sevText, active && styles.sevTextActive]}>
-                      {opt.emoji}  {opt.label}
+                      {opt.label}
                     </Text>
                   </Pressable>
                 );
@@ -115,7 +125,7 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
               onChangeText={setScreen}
               style={styles.screenInput}
               placeholder="e.g. Trades / Tiers / Rank-Trios"
-              placeholderTextColor={colors.muted}
+              placeholderTextColor={chalk.faint}
               autoCorrect={false}
               autoCapitalize="none"
             />
@@ -127,30 +137,26 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
               onChangeText={setText}
               style={styles.noteInput}
               placeholder="What did you notice?"
-              placeholderTextColor={colors.muted}
+              placeholderTextColor={chalk.faint}
               multiline
               textAlignVertical="top"
             />
           </ScrollView>
 
           <View style={styles.actions}>
-            <Pressable
+            <Button
+              variant="secondary"
+              label="Cancel"
               onPress={onClose}
-              style={({ pressed }) => [styles.cancel, pressed && { opacity: 0.7 }]}
-            >
-              <Text style={styles.cancelText}>Cancel</Text>
-            </Pressable>
-            <Pressable
+              style={styles.actionBtn}
+            />
+            <Button
+              variant="primary"
+              label="Save"
               onPress={onSave}
               disabled={!text.trim()}
-              style={({ pressed }) => [
-                styles.save,
-                !text.trim() && styles.saveDisabled,
-                pressed && text.trim() && { opacity: 0.85 },
-              ]}
-            >
-              <Text style={styles.saveText}>Save</Text>
-            </Pressable>
+              style={styles.actionBtn}
+            />
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -159,88 +165,77 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
 }
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: scrim },
   kav: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xxl,
+    backgroundColor: ink.ink2,
+    borderTopLeftRadius: radii.md,
+    borderTopRightRadius: radii.md,
+    borderWidth: 1,
+    borderColor: ink.line,
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
+    paddingBottom: space.xxl,
     maxHeight: '88%',
+    ...shadowSheet,
   },
-  handle: {
+  grabber: {
     alignSelf: 'center',
-    width: 44,
+    width: 32,
     height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.border,
-    marginBottom: spacing.sm,
+    backgroundColor: ink.lineStrong,
+    marginBottom: space.sm,
   },
-  title:    { color: colors.text,  fontSize: fontSize.xl, fontWeight: '800' },
-  sub:      { color: colors.muted, fontSize: fontSize.sm, marginBottom: spacing.md },
-  label:    { color: colors.muted, fontSize: fontSize.xs, marginTop: spacing.md, marginBottom: 6, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase' },
+  title: { ...type.heading },
+  sub:   { ...type.bodySm, marginBottom: space.md },
+  label: { ...type.label, marginTop: space.md, marginBottom: 6 },
 
-  sevRow: { flexDirection: 'row', gap: spacing.sm },
+  sevRow: { flexDirection: 'row', gap: space.sm },
   sevChip: {
     flex: 1,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.lg,
+    minHeight: 44,
+    justifyContent: 'center',
+    borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: ink.lineStrong,
+    backgroundColor: 'transparent',
     alignItems: 'center',
   },
   sevChipActive: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.18)',
+    borderColor: ice.base,
   },
-  sevText:       { color: colors.text, fontSize: fontSize.sm, fontWeight: '700' },
-  sevTextActive: { color: colors.accent },
+  // Pressed state = surface color change only (no opacity/scale).
+  sevChipPressed: { backgroundColor: ink.ink3 },
+  sevText:       { fontFamily: fonts.uiSemi, fontSize: 14, color: chalk.dim },
+  sevTextActive: { color: ice.base },
 
   screenInput: {
-    backgroundColor: colors.surface,
+    backgroundColor: ink.ink2,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    color: colors.text,
-    fontSize: fontSize.base,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    minHeight: 44,
+    padding: space.md,
+    color: chalk.base,
+    fontFamily: fonts.ui,
+    fontSize: 14,
   },
   noteInput: {
-    backgroundColor: colors.surface,
+    backgroundColor: ink.ink2,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    color: colors.text,
-    fontSize: fontSize.base,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    padding: space.md,
+    color: chalk.base,
+    fontFamily: fonts.ui,
+    fontSize: 14,
     minHeight: 120,
   },
 
   actions: {
     flexDirection: 'row',
-    gap: spacing.md,
-    marginTop: spacing.lg,
+    gap: space.md,
+    marginTop: space.lg,
   },
-  cancel: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  cancelText: { color: colors.muted, fontWeight: '700' },
-  save: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
-  },
-  saveDisabled: { opacity: 0.4 },
-  saveText: { color: '#fff', fontWeight: '800' },
+  actionBtn: { flex: 1 },
 });

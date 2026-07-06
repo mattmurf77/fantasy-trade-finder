@@ -5,7 +5,7 @@ __pycache__/
 *.egg-info/
 
 # Data / runtime artifacts
-data/
+/data/
 *.db
 
 # OS
@@ -16,7 +16,8 @@ Thumbs.db
 .env
 # Local credentials store — NEVER commit. Visible (non-dot) filename on
 # purpose so it's easy to find in Finder. See CLAUDE.md "Conventions".
-secrets.local.env
+# Glob covers backups (secrets.local.env.bak) so a recovery copy never leaks.
+secrets.local.env*
 
 # IDE
 .vscode/
@@ -30,3 +31,10 @@ scripts/
 # Plan-review artifacts (interactive feedback HTML + saved JSON)
 notification-plan-review.html
 notification-plan-feedback*.json
+
+# QA harness scratch DBs, logs, and run artifacts (never commit DB copies)
+# Covers scratch/, scratch4/, scratch_int/, scratch_cfg/, scratch_api2/, etc.
+qa/**/scratch*/
+
+# Staged subagent implementations pending 1-by-1 validation (never auto-commit)
+staged-work/

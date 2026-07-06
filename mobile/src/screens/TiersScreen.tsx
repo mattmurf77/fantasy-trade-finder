@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  ViewToken,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DraggableFlatList, {
@@ -17,25 +18,45 @@ import { haptics } from '../utils/haptics';
 import { startSpan } from '../observability/sentry';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
+import {
+  ink,
+  chalk,
+  ice,
+  semantic,
+  tier as tierColors,
+  position as positionColors,
+  space,
+  radii,
+  type,
+  fonts,
+} from '../theme/chalkline';
+// Old-theme tokens — used only by the FB4 statToggle styles merged from the
+// batch-4 branch (which predates the Chalkline re-skin). Kept until those
+// styles are Chalkline-ified. See the statToggle block in the StyleSheet.
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
+import { TickLabel, Button, Icon } from '../components/chalkline';
 import PlayerCard from '../components/PlayerCard';
+import TileStats, { StatMode } from '../components/TileStats';
+import TierStickyHeader from '../components/TierStickyHeader';
+import TierTargetChips from '../components/TierTargetChips';
 import Toast from '../components/Toast';
 import {
   getRankings,
+  getRisersAndFallers,
   saveTiers,
   getTiersStatus,
 } from '../api/rankings';
 import { copyTiersFromFormat } from '../api/league';
 import { autoBucket, TIERS, TIER_LABEL } from '../utils/tierBands';
 import { useSession } from '../state/useSession';
-import type { Position, RankedPlayer, Tier, ScoringFormat } from '../shared/types';
+import type { Position, RankedPlayer, Tier, ScoringFormat, TrendRow } from '../shared/types';
 
 // Format-key → human label for the copy button + confirm dialog. Mirrors
 // web/positional-tiers.html's FORMAT_LABELS.
 const FORMAT_LABELS: Record<ScoringFormat, string> = {
-  '1qb_ppr': '🏈 1QB PPR',
-  sf_tep:    '🏟 SF TEP',
+  '1qb_ppr': '1QB PPR',
+  sf_tep:    'SF TEP',
 };
 const FORMAT_KEYS: ScoringFormat[] = ['1qb_ppr', 'sf_tep'];
 
@@ -61,6 +82,15 @@ export default function TiersScreen() {
   const activeFormat = useSession((s) => s.activeFormat);
   const [position, setPosition] = useState<Position>('QB');
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
+
+  // FB4-61 — Consensus | You stat-mode toggle. Drives which rank + 30d trend
+  // each tile shows. Local screen state, defaults to consensus, no persistence.
+  const [statMode, setStatMode] = useState<StatMode>('consensus');
+
+  // FB4-63 — zone of the topmost VISIBLE player row, driven by the list's
+  // onViewableItemsChanged. Null until the first viewability callback fires
+  // (or when the list is empty). Used to render the pinned tier banner.
+  const [stickyZone, setStickyZone] = useState<Zone | null>(null);
 
   // tiers[position] = { elite: [player...], starter: [...], ..., unassigned: [...] }
   const [buckets, setBuckets] = useState<Record<Zone, RankedPlayer[]>>(() => emptyBuckets());
@@ -110,6 +140,67 @@ export default function TiersScreen() {
     placeholderData: (prev) => prev,
   });
 
+  // FB4-61 — 30-day trend source. Reuses the Trends screen's risers/fallers
+  // endpoint (FB-04 rank-delta view) rather than inventing a new one. The
+  // response is the user's OWN ELO-history rank deltas, so it powers the
+  // "You" 30d trend. There is no consensus 30d-trend field on any current
+  // payload (see the consensus branch in tileStatsFor below).
+  const trendsQuery = useQuery({
+    queryKey: ['trends', 'risers-fallers', 30, 50],
+    queryFn: () => getRisersAndFallers({ days: 30, topN: 50 }),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+
+  // player_id → positional 30d rank delta (positive = moved UP). Built from
+  // BOTH risers and fallers across all position buckets so any player on the
+  // current board can be looked up. Missing players → undefined → "—".
+  const trendByPid = useMemo(() => {
+    const map = new Map<string, number>();
+    const d = trendsQuery.data;
+    if (!d) return map;
+    const absorb = (rows?: TrendRow[]) => {
+      for (const r of rows ?? []) {
+        if (r.pos_rank_delta != null) map.set(r.player_id, r.pos_rank_delta);
+      }
+    };
+    // The ALL bucket already spans every position; absorbing it is enough,
+    // but absorb the per-position buckets too in case ALL is trimmed.
+    (['ALL', 'QB', 'RB', 'WR', 'TE'] as const).forEach((k) => {
+      absorb(d.risers?.[k]);
+      absorb(d.fallers?.[k]);
+    });
+    return map;
+  }, [trendsQuery.data]);
+
+  // FB4-61 — resolve the two tile stats (rank label + 30d trend) for a player
+  // in the active mode. DATA NOTES:
+  //  • You rank      → player.rank (the user's positional rank, on payload).
+  //  • You 30d trend → trendByPid (risers/fallers rank-delta source).
+  //  • Consensus rank → player.adp ?? player.search_rank (consensus-ish signals
+  //    already on the rankings payload). FB4-61: a dedicated consensus-rank
+  //    field is not in the payload — needs backend.
+  //  • Consensus 30d trend → not in any payload. FB4-61: consensus 30d trend
+  //    not in payload — needs backend. Renders "—".
+  const tileStatsFor = useCallback(
+    (player: RankedPlayer): { rankLabel: string | null; trendDelta: number | null } => {
+      if (statMode === 'you') {
+        return {
+          rankLabel: player.rank != null ? `#${player.rank}` : null,
+          trendDelta: trendByPid.get(player.id) ?? null,
+        };
+      }
+      // Consensus mode.
+      const adp = player.adp;
+      const searchRank = player.search_rank;
+      let rankLabel: string | null = null;
+      if (adp != null) rankLabel = `ADP ${Math.round(adp)}`;
+      else if (searchRank != null) rankLabel = `#${searchRank}`;
+      return { rankLabel, trendDelta: null };
+    },
+    [statMode, trendByPid],
+  );
+
   const saveMutation = useMutation({
     // Wrap the tier save in a Sentry span — measures end-to-end latency
     // including the per-position payload build + the network round-trip.
@@ -131,7 +222,7 @@ export default function TiersScreen() {
         return saveTiers(position, payload, cleared);
       }),
     onSuccess: () => {
-      setToast({ msg: '✓ Tiers saved', tone: 'success' });
+      setToast({ msg: 'Tiers saved', tone: 'success' });
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
       queryClient.invalidateQueries({ queryKey: ['progress'] });
       // Tier saves rewrite per-position ELO overrides on the backend,
@@ -142,6 +233,8 @@ export default function TiersScreen() {
       queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, 'all'] });
       // Reset the clearedPids set — the backend just absorbed them.
       setClearedPids(new Set());
+      // Local edits are now server truth — let the refetch rebuild buckets.
+      bucketsDirtyRef.current = false;
     },
     onError: (e: Error) => {
       setToast({ msg: e.message || 'Save failed', tone: 'warn' });
@@ -164,7 +257,7 @@ export default function TiersScreen() {
         return;
       }
       const n = data.total ?? 0;
-      setToast({ msg: `✓ Copied ${n} tier placements`, tone: 'success' });
+      setToast({ msg: `Copied ${n} tier placements`, tone: 'success' });
       // Invalidate rankings/tier caches so the per-position load picks up
       // the new override ELOs. Same pattern as saveMutation.onSuccess.
       // A format copy affects all positions; use the broad prefix so the
@@ -175,11 +268,22 @@ export default function TiersScreen() {
       // Reset clearedPids — the cleared set is per-position-load and
       // we're about to reload anyway.
       setClearedPids(new Set());
+      // Copy replaces local state wholesale — let the refetch rebuild.
+      bucketsDirtyRef.current = false;
     },
     onError: (e: Error) => {
       setToast({ msg: e.message || 'Copy failed', tone: 'warn' });
     },
   });
+
+  // Unsaved-local-edits guard (HANDOFF follow-up #1). Any drag / bulk move
+  // marks the buckets dirty; while dirty, a background refetch of the SAME
+  // position+format must NOT rebuild buckets from server data (it would wipe
+  // the user's unsaved placements — e.g. refetchOnWindowFocus mid-edit).
+  // Position/format switches and post-save/copy/reset refetches still rebuild:
+  // the key changes for the former, the mutations clear the flag for the latter.
+  const bucketsDirtyRef = useRef(false);
+  const bucketKeyRef = useRef('');
 
   // Re-auto-bucket whenever the rankings response changes OR position switches.
   useEffect(() => {
@@ -192,10 +296,23 @@ export default function TiersScreen() {
       (a, b) => (b.elo ?? 0) - (a.elo ?? 0),
     );
 
-    // Best-effort scoring_format resolution. TiersStatus returns it;
-    // otherwise fall back to 1qb_ppr (the default on the server).
+    // Scoring-format resolution (FB-76). The session's activeFormat is
+    // authoritative — it's what the server's _active_format(sess) applies
+    // when stamping tier-band ELOs on save. The old primary source
+    // (tiersStatusQuery.data?.scoring_format) NEVER existed in the
+    // response, so SF leagues silently re-bucketed QB/TE saves with
+    // 1qb_ppr thresholds and every Solid save displayed as Starter.
     const fmt: ScoringFormat =
-      (tiersStatusQuery.data?.scoring_format as ScoringFormat) || '1qb_ppr';
+      activeFormat ||
+      (tiersStatusQuery.data?.scoring_format as ScoringFormat) ||
+      '1qb_ppr';
+
+    const bucketKey = `${position}:${fmt}`;
+    if (bucketKey === bucketKeyRef.current && bucketsDirtyRef.current) {
+      return; // background refetch mid-edit — keep the user's unsaved layout
+    }
+    bucketKeyRef.current = bucketKey;
+    bucketsDirtyRef.current = false;
 
     const bucketed = autoBucket(players, position, fmt);
     setBuckets({ ...bucketed, unassigned: [] });
@@ -204,7 +321,7 @@ export default function TiersScreen() {
     // position's pending clears.
     setClearedPids(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rankingsQuery.data, position, tiersStatusQuery.data?.scoring_format]);
+  }, [rankingsQuery.data, position, activeFormat, tiersStatusQuery.data?.scoring_format]);
 
   // ── Bulk move (multi-select) ────────────────────────────────────────
   // Collapse the selected chips into a CONTIGUOUS BLOCK and move the whole
@@ -214,6 +331,7 @@ export default function TiersScreen() {
   const bulkMove = useCallback(
     (direction: 'up' | 'down') => {
       if (selectedIds.size === 0) return;
+      bucketsDirtyRef.current = true;
       setBuckets((prev) => {
         // 1. Flatten the five real tiers into one ordered list.
         const flat: { p: RankedPlayer; tier: Tier }[] = [];
@@ -274,9 +392,101 @@ export default function TiersScreen() {
     [selectedIds],
   );
 
+  // ── Bulk TIER move (multi-select, FB-73) ────────────────────────────
+  // Move every selected player one whole tier in `direction`, independent
+  // of rank position. Complements bulkMove (one RANK at a time). Placement
+  // inside the target tier: moving up appends to the BOTTOM of the higher
+  // tier (they're its newest/weakest members); moving down inserts at the
+  // TOP of the lower tier (its strongest). Relative order among the moved
+  // players is preserved. Clamps at elite / bench.
+  const bulkTierMove = useCallback(
+    (direction: 'up' | 'down') => {
+      if (selectedIds.size === 0) return;
+      bucketsDirtyRef.current = true;
+      setBuckets((prev) => {
+        const next = emptyBuckets();
+        next.unassigned = [...prev.unassigned];
+        // Split each tier into keepers and movers, preserving order.
+        const movers: Record<Tier, RankedPlayer[]> = {
+          elite: [], starter: [], solid: [], depth: [], bench: [],
+        };
+        for (const t of TIERS) {
+          for (const p of prev[t]) {
+            if (selectedIds.has(p.id)) movers[t].push(p);
+            else next[t].push(p);
+          }
+        }
+        let changed = false;
+        for (let ti = 0; ti < TIERS.length; ti++) {
+          const from = TIERS[ti];
+          if (movers[from].length === 0) continue;
+          const targetIdx =
+            direction === 'up'
+              ? Math.max(0, ti - 1)
+              : Math.min(TIERS.length - 1, ti + 1);
+          const to = TIERS[targetIdx];
+          if (to === from) {
+            next[from] = direction === 'up'
+              ? [...movers[from], ...next[from]]
+              : [...next[from], ...movers[from]];
+            continue; // clamped at the boundary tier
+          }
+          changed = true;
+          if (direction === 'up') next[to] = [...next[to], ...movers[from]];
+          else next[to] = [...movers[from], ...next[to]];
+        }
+        if (!changed) return prev;
+        return next;
+      });
+      haptics.success();
+    },
+    [selectedIds],
+  );
+
+  // ── Quick tier-move (multi-select) — FB4-62 ─────────────────────────
+  // Send EVERY selected player straight to `target`, appended to the end of
+  // that tier in their current flattened (top-to-bottom) order. Non-selected
+  // players keep their tier + within-tier order. Selection persists so the
+  // user can fine-tune with ↑/↓. `unassigned` is untouched (mirrors bulkMove).
+  const moveSelectedToTier = useCallback(
+    (target: Tier) => {
+      if (selectedIds.size === 0) return;
+      bucketsDirtyRef.current = true;
+      setBuckets((prev) => {
+        // Gather selected players in current flattened tier order so their
+        // relative order is preserved when appended to the target tier.
+        const movers: RankedPlayer[] = [];
+        for (const t of TIERS) {
+          for (const p of prev[t]) if (selectedIds.has(p.id)) movers.push(p);
+        }
+        if (movers.length === 0) return prev;
+
+        const next = emptyBuckets();
+        next.unassigned = [...prev.unassigned];
+        // Each non-target tier keeps only its non-selected players.
+        for (const t of TIERS) {
+          next[t] = prev[t].filter((p) => !selectedIds.has(p.id));
+        }
+        // Append the movers to the END of the target tier.
+        next[target] = [...next[target], ...movers];
+        return next;
+      });
+      haptics.success();
+    },
+    [selectedIds],
+  );
+
   // ── Render helpers ─────────────────────────────────────────────────
   const saving = saveMutation.isPending;
-  const loading = rankingsQuery.isLoading || rankingsQuery.isFetching;
+  // Initial load ONLY (HANDOFF follow-up #1) — `isFetching` here swapped the
+  // whole list for a full-screen spinner on every background refetch.
+  const loading = rankingsQuery.isLoading;
+  // FB4-63 — any players on the board at all? Gates the sticky tier banner
+  // (empty state hides it).
+  const hasRankings = useMemo(
+    () => TIERS.some((t) => buckets[t].length > 0) || buckets.unassigned.length > 0,
+    [buckets],
+  );
 
   // ── Flat list derivation ───────────────────────────────────────────
   // Walk unassigned first, then the five tiers in TIERS order. Every
@@ -304,14 +514,48 @@ export default function TiersScreen() {
     return item.player.id;
   }, []);
 
+  // ── Sticky tier header (FB4-63) ─────────────────────────────────────
+  // Track the zone of the topmost VISIBLE row off the list's viewability
+  // callback — NOT a separate scroll/pan listener (which would fight the
+  // drag gesture). RN requires onViewableItemsChanged + viewabilityConfig
+  // to be referentially stable for the list's lifetime, so both live in
+  // refs. We freeze updates while a drag is active so the banner doesn't
+  // flicker as rows reorder mid-drag.
+  const isDraggingRef = useRef(false);
+  const viewabilityConfigRef = useRef({
+    // A row counts as "viewable" the moment any pixel is on screen, so the
+    // topmost partially-visible row drives the banner.
+    itemVisiblePercentThreshold: 0,
+    minimumViewTime: 0,
+  });
+  const onViewableItemsChangedRef = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      if (isDraggingRef.current) return;
+      if (!viewableItems.length) return;
+      // Prefer the first visible PLAYER row's zone; fall back to the first
+      // visible row's zone (a header when a section boundary is at the top).
+      const firstPlayer = viewableItems.find(
+        (v) => (v.item as Row)?.kind === 'player',
+      );
+      const pick = firstPlayer ?? viewableItems[0];
+      const zone = (pick?.item as Row | undefined)?.zone;
+      if (zone) setStickyZone(zone);
+    },
+  );
+
   // ── Drag handler ───────────────────────────────────────────────────
   // Rebuild buckets by walking the post-drag flat order: each header row
   // re-anchors the "current zone", and every player row that follows
   // lands in that zone. Then reconcile clearedPids — players now in the
   // pool are cleared; players in any tier must drop out of the cleared
   // set (drag-out-then-back-in within one session).
+  const onDragBegin = useCallback(() => {
+    isDraggingRef.current = true;
+  }, []);
   const onDragEnd = useCallback(
     ({ data }: DragEndParams<Row>) => {
+      bucketsDirtyRef.current = true;
+      isDraggingRef.current = false;
       let zone: Zone = 'unassigned';
       const next = emptyBuckets();
       for (const r of data) {
@@ -337,8 +581,8 @@ export default function TiersScreen() {
         const label = item.zone === 'unassigned' ? 'Unassigned' : TIER_LABEL[item.zone];
         const count = buckets[item.zone].length;
         return (
-          <View style={[styles.tierHeader, { borderLeftColor: accent }]}>
-            <Text style={[styles.tierHeaderLabel, { color: accent }]}>{label}</Text>
+          <View style={styles.tierHeader}>
+            <TickLabel color={accent}>{label}</TickLabel>
             <Text style={styles.tierHeaderCount}>{count}</Text>
           </View>
         );
@@ -356,16 +600,16 @@ export default function TiersScreen() {
 
       // ── Player row ──────────────────────────────────────────────────
       const isSelected = selectedIds.has(item.player.id);
+      // FB4-61 — resolve the tile's two stats for the active mode. Rendered
+      // inside the pointerEvents="none" wrapper so it never captures touches
+      // away from the drag / selection Pressable.
+      const stats = tileStatsFor(item.player);
 
       if (multiSelect) {
         return (
           <Pressable
             onPress={() => toggleSelected(item.player.id)}
-            style={({ pressed }) => [
-              styles.chipSelectableWrap,
-              isSelected && styles.chipSelected,
-              pressed && { opacity: 0.85 },
-            ]}
+            style={[styles.chipSelectableWrap, isSelected && styles.chipSelected]}
           >
             {/* pointerEvents="none" so PlayerCard's own inner Pressable
                 can't become the touch responder — without this the inner
@@ -377,12 +621,11 @@ export default function TiersScreen() {
                 compact
                 rightSlot={
                   isSelected ? (
-                    <View style={styles.chipCheckBadge}>
-                      <Text style={styles.chipCheckBadgeText}>✓</Text>
-                    </View>
+                    <Icon name="check" size={16} color={ice.base} />
                   ) : undefined
                 }
               />
+              <TileStats rankLabel={stats.rankLabel} trendDelta={stats.trendDelta} />
             </View>
           </Pressable>
         );
@@ -399,19 +642,16 @@ export default function TiersScreen() {
           onLongPress={drag}
           delayLongPress={DRAG_ACTIVATION_MS}
           disabled={isActive}
-          style={({ pressed }) => [
-            styles.playerRow,
-            isActive && styles.playerRowActive,
-            pressed && !isActive && { opacity: 0.9 },
-          ]}
+          style={[styles.playerRow, isActive && styles.playerRowActive]}
         >
           <View pointerEvents="none">
             <PlayerCard player={item.player} compact />
+            <TileStats rankLabel={stats.rankLabel} trendDelta={stats.trendDelta} />
           </View>
         </Pressable>
       );
     },
-    [buckets, multiSelect, selectedIds, toggleSelected],
+    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor],
   );
 
   // ── Copy-from-format button derivation ─────────────────────────────
@@ -447,6 +687,57 @@ export default function TiersScreen() {
     );
   }, [copyTargetFormat, otherFormat, copyMutation]);
 
+  // ── Reset to suggested tiers (#55, reworked for FB-74) ─────────────
+  // The old client-side revert re-auto-bucketed from the CURRENT served
+  // ELOs — but manual tier saves are baked into those ELOs as overrides,
+  // so "reset" reproduced the manual layout verbatim and looked like a
+  // no-op (FB-74, and FB-55 before it). Real reset = tell the backend to
+  // DELETE this position's overrides (a clear-only save: empty tiers +
+  // every pid in cleared_pids is a valid payload per the locked
+  // /api/tiers/save contract), then refetch; the rankings come back with
+  // natural ELOs and the auto-bucket effect rebuilds the true suggested
+  // layout.
+  const resetMutation = useMutation({
+    mutationFn: () => {
+      const data = rankingsQuery.data;
+      const pids = data?.rankings
+        ? (data.rankings as RankedPlayer[]).map((p) => p.id)
+        : [];
+      return saveTiers(position, {}, pids);
+    },
+    onSuccess: () => {
+      setToast({ msg: 'Tiers reset to suggested', tone: 'success' });
+      setClearedPids(new Set());
+      // Reset discards local edits by design — let the refetch rebuild.
+      bucketsDirtyRef.current = false;
+      queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
+      queryClient.invalidateQueries({ queryKey: ['progress'] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, position] });
+      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, 'all'] });
+      haptics.success();
+    },
+    onError: (e: Error) => {
+      setToast({ msg: e.message || 'Reset failed', tone: 'warn' });
+    },
+  });
+
+  const onResetToSuggested = useCallback(() => {
+    if (!rankingsQuery.data?.rankings) return;
+    Alert.alert(
+      `Reset ${position} tiers to suggested?`,
+      `Your manual placements for ${position} will be cleared and replaced ` +
+        `with the app's suggested tiers. This takes effect immediately.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => resetMutation.mutate(),
+        },
+      ],
+    );
+  }, [rankingsQuery.data, position, resetMutation]);
+
   // ── Render ──────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -463,47 +754,36 @@ export default function TiersScreen() {
           {/* Multi-select toggle. While ON, chip tap toggles selection
               (drag is suppressed); tapping again here cancels and clears
               the set. The bottom action bar handles the actual moves. */}
-          <Pressable
+          <Button
+            variant="secondary"
+            compact
+            label={
+              multiSelect
+                ? selectedIds.size > 0
+                  ? `Selected: ${selectedIds.size}`
+                  : 'Cancel'
+                : 'Select'
+            }
             onPress={() => {
               if (multiSelect) exitMultiSelect();
               else { setMultiSelect(true); haptics.selection(); }
             }}
-            style={({ pressed }) => [
-              styles.selectBtn,
-              multiSelect && styles.selectBtnActive,
-              pressed && { opacity: 0.6 },
-            ]}
-          >
-            <Text style={[styles.selectBtnText, multiSelect && styles.selectBtnTextActive]}>
-              {multiSelect
-                ? selectedIds.size > 0
-                  ? `Selected: ${selectedIds.size}`
-                  : 'Cancel'
-                : 'Select'}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              // Reset = re-auto-bucket from current rankings
-              const data = rankingsQuery.data;
-              if (!data?.rankings) return;
-              const players = (data.rankings as RankedPlayer[]).slice().sort(
-                (a, b) => (b.elo ?? 0) - (a.elo ?? 0),
-              );
-              const fmt: ScoringFormat =
-                (tiersStatusQuery.data?.scoring_format as ScoringFormat) || '1qb_ppr';
-              const bucketed = autoBucket(players, position, fmt);
-              setBuckets({ ...bucketed, unassigned: [] });
-              haptics.selection();
-            }}
-            style={({ pressed }) => [styles.resetBtn, pressed && { opacity: 0.6 }]}
-          >
-            <Text style={styles.resetBtnText}>Reset</Text>
-          </Pressable>
+            style={multiSelect ? styles.selectBtnActive : styles.headerBtn}
+          />
+          <Button
+            variant="ghost"
+            compact
+            label="Reset to suggested"
+            disabled={!rankingsQuery.data?.rankings}
+            onPress={onResetToSuggested}
+            style={styles.headerBtn}
+          />
         </View>
       </View>
 
-      {/* Position switcher */}
+      {/* Position switcher — PositionTabs spec: segmented group, active
+          segment gets an ink-3 fill + 2px underline in that position's
+          color (position hexes are cross-client invariants). */}
       <View style={styles.switcher}>
         {POSITIONS.map((p) => {
           const isActive = p === position;
@@ -516,7 +796,11 @@ export default function TiersScreen() {
               style={({ pressed }) => [
                 styles.switcherBtn,
                 isActive && styles.switcherBtnActive,
-                pressed && { opacity: 0.7 },
+                isActive && {
+                  borderBottomColor:
+                    positionColors[p.toLowerCase() as keyof typeof positionColors],
+                },
+                pressed && !isActive && { backgroundColor: ink.ink3 },
               ]}
             >
               <Text
@@ -529,25 +813,59 @@ export default function TiersScreen() {
         })}
       </View>
 
+      {/* FB4-61 — Consensus | You stat toggle. Switches the rank + 30d
+          trend each tile shows. Default Consensus; local state only. */}
+      <View style={styles.statToggle}>
+        {([
+          { key: 'consensus' as StatMode, label: 'Consensus' },
+          { key: 'you' as StatMode, label: 'You' },
+        ]).map(({ key, label }) => {
+          const isActive = statMode === key;
+          return (
+            <Pressable
+              key={key}
+              onPress={() => {
+                if (statMode !== key) { setStatMode(key); haptics.selection(); }
+              }}
+              style={({ pressed }) => [
+                styles.statToggleBtn,
+                isActive && styles.statToggleBtnActive,
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Text
+                style={[styles.statToggleText, isActive && styles.statToggleTextActive]}
+              >
+                {label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       {/* Copy tier list from the OTHER scoring format. Mirrors web's
           `copy-tiers-btn` — the from-format reads as a label so the user
           knows EXACTLY which format they're pulling tiers from. Disabled
-          while the copy is in flight. */}
+          while the copy is in flight. Composed inline (secondary-button
+          tokens) because the Button primitive has no icon/spinner slot. */}
       <Pressable
         disabled={copyMutation.isPending}
         onPress={onCopyFromOtherFormat}
         style={({ pressed }) => [
           styles.copyBtn,
-          pressed && { opacity: 0.7 },
-          copyMutation.isPending && { opacity: 0.5 },
+          pressed && { backgroundColor: ink.ink3 },
+          copyMutation.isPending && { opacity: 0.45 },
         ]}
       >
         {copyMutation.isPending ? (
-          <ActivityIndicator color={colors.accent} size="small" />
+          <ActivityIndicator color={chalk.dim} size="small" />
         ) : (
-          <Text style={styles.copyBtnText}>
-            ⇆ Copy tier list from {FORMAT_LABELS[otherFormat]}
-          </Text>
+          <>
+            <Icon name="swap" size={16} color={chalk.dim} />
+            <Text style={styles.copyBtnText}>
+              Copy tier list from {FORMAT_LABELS[otherFormat]}
+            </Text>
+          </>
         )}
       </Pressable>
 
@@ -557,24 +875,50 @@ export default function TiersScreen() {
           : 'Long-press + drag to re-rank; the others slide to make room. Tap "Select" to move several at once.'}
       </Text>
 
+      {/* FB4-63 — pinned tier banner. Sits between the hint and the list,
+          shows the tier of the topmost VISIBLE player. Hidden in the
+          empty/loading/error states (no rankings → nothing to anchor to). */}
+      {!loading && !rankingsQuery.isError && hasRankings && stickyZone ? (
+        <TierStickyHeader
+          label={stickyZone === 'unassigned' ? 'Unassigned' : TIER_LABEL[stickyZone]}
+          accent={accentFor(stickyZone)}
+          count={buckets[stickyZone].length}
+        />
+      ) : null}
+
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator color={colors.accent} />
+          <ActivityIndicator color={chalk.dim} />
         </View>
       ) : rankingsQuery.isError ? (
         <View style={styles.centered}>
           <Text style={styles.errorText}>Could not load rankings.</Text>
-          <Pressable onPress={() => rankingsQuery.refetch()}>
-            <Text style={styles.retryText}>Try again</Text>
-          </Pressable>
+          <Button
+            variant="ghost"
+            compact
+            label="Try again"
+            onPress={() => rankingsQuery.refetch()}
+          />
         </View>
       ) : (
         <DraggableFlatList
           data={listData}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
+          onDragBegin={onDragBegin}
           onDragEnd={onDragEnd}
-          activationDistance={5}
+          // FB4-63 — drive the sticky tier banner off viewability (NOT a
+          // competing scroll listener). Both props are referentially stable
+          // refs because RN throws if they change between renders.
+          onViewableItemsChanged={onViewableItemsChangedRef.current}
+          viewabilityConfig={viewabilityConfigRef.current}
+          // #57: drag starts from a long-press (onLongPress={drag}), so a
+          // small activationDistance only let an ordinary vertical scroll
+          // swipe cross the 5px threshold and steal the touch into a drag.
+          // Raised to 18px so normal scrolling stays a scroll; the long-
+          // press still initiates the drag and edge auto-scroll (library
+          // autoscrollThreshold/Speed defaults, untouched) still works.
+          activationDistance={18}
           containerStyle={styles.listContainer}
           contentContainerStyle={styles.scroll}
         />
@@ -586,45 +930,65 @@ export default function TiersScreen() {
           mode. "Done" exits select mode without canceling the moves. */}
       {multiSelect && selectedIds.size > 0 ? (
         <View style={styles.actionBar}>
+          {/* FB4-62 — quick tier-move: tap a tier chip to send every selected
+              player straight into that tier (appended, order preserved).
+              Selection persists so the ↑/↓ / Tier up/down controls can still
+              fine-tune. The secondary swipe-to-reveal gesture stays deferred
+              (drag-capture conflict risk with the draggable list). */}
+          <TierTargetChips accentFor={accentFor} onPick={moveSelectedToTier} />
           <Text style={styles.actionBarCount}>
-            {selectedIds.size} selected
+            <Text style={styles.actionBarCountNum}>{selectedIds.size}</Text>
+            {' selected'}
           </Text>
           <View style={styles.actionBarBtns}>
-            <Pressable
+            <Button
+              variant="secondary"
+              compact
+              label="Up"
               onPress={() => bulkMove('up')}
-              style={({ pressed }) => [styles.actionBarBtn, pressed && { opacity: 0.7 }]}
-            >
-              <Text style={styles.actionBarBtnText}>↑ Up</Text>
-            </Pressable>
-            <Pressable
+            />
+            <Button
+              variant="secondary"
+              compact
+              label="Down"
               onPress={() => bulkMove('down')}
-              style={({ pressed }) => [styles.actionBarBtn, pressed && { opacity: 0.7 }]}
-            >
-              <Text style={styles.actionBarBtnText}>↓ Down</Text>
-            </Pressable>
-            <Pressable
+            />
+            <Button
+              variant="secondary"
+              compact
+              label="Tier up"
+              onPress={() => bulkTierMove('up')}
+            />
+            <Button
+              variant="secondary"
+              compact
+              label="Tier down"
+              onPress={() => bulkTierMove('down')}
+            />
+            <Button
+              variant="ghost"
+              compact
+              label="Done"
               onPress={exitMultiSelect}
-              style={({ pressed }) => [styles.actionBarBtnDone, pressed && { opacity: 0.7 }]}
-            >
-              <Text style={styles.actionBarBtnDoneText}>Done</Text>
-            </Pressable>
+            />
           </View>
         </View>
       ) : null}
 
-      {/* Save button pinned to the bottom */}
+      {/* Save button pinned to the bottom. Composed inline (primary-button
+          tokens) because the Button primitive has no in-flight spinner. */}
       <View style={styles.saveBar}>
         <Pressable
           disabled={saving || loading}
           onPress={() => saveMutation.mutate()}
           style={({ pressed }) => [
             styles.saveBtn,
-            pressed && { opacity: 0.85 },
-            (saving || loading) && { opacity: 0.5 },
+            pressed && { backgroundColor: ice.press },
+            (saving || loading) && { opacity: 0.45 },
           ]}
         >
           {saving ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={ice.on} />
           ) : (
             <Text style={styles.saveBtnText}>Save {position} tiers</Text>
           )}
@@ -647,255 +1011,220 @@ function emptyBuckets(): Record<Zone, RankedPlayer[]> {
   };
 }
 
-// Accent foreground color for a zone's header — mirrors TierBin's accentFor.
+// Accent (tick) color for a zone's header — mirrors TierBin's tickColor.
 function accentFor(zone: Zone): string {
   switch (zone) {
-    case 'elite':   return colors.tier.elite;
-    case 'starter': return colors.tier.starter;
-    case 'solid':   return colors.tier.solid;
-    case 'depth':   return colors.tier.depth;
-    case 'bench':   return colors.tier.bench;
-    default:        return colors.muted;
+    case 'elite':   return tierColors.elite;
+    case 'starter': return tierColors.starter;
+    case 'solid':   return tierColors.solid;
+    case 'depth':   return tierColors.depth;
+    case 'bench':   return tierColors.bench;
+    default:        return chalk.faint;
   }
 }
 
 // ── Styles ──────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1, backgroundColor: ink.ink0 },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
   },
-  title: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
+  title: { ...type.heading, flexShrink: 1 },
   headerActions: {
     flexDirection: 'row',
-    gap: spacing.xs,
+    alignItems: 'center',
+    gap: space.xs,
   },
-  resetBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  resetBtnText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  selectBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
+  // Tighter horizontal padding than the Button default so both header
+  // actions fit beside the condensed title on narrow screens.
+  headerBtn: { paddingHorizontal: space.md },
+  // Active state for the Select toggle: pressed-well fill (color change
+  // only — no transforms), border stays line-strong via the variant.
   selectBtnActive: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.10)',
+    paddingHorizontal: space.md,
+    backgroundColor: ink.ink3,
   },
-  selectBtnText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  selectBtnTextActive: { color: colors.accent },
   // Standalone tier-header row inside the flat list. Mirrors TierBin's
-  // header look (accent left-border + accent label + muted count).
+  // header (tier-colored tick label + mono count) over the ink-0 scaffold.
   tierHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
-    borderLeftWidth: 3,
+    paddingVertical: space.sm,
+    marginTop: space.sm,
+    marginBottom: space.xs,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.md,
-    borderTopRightRadius: radius.md,
+    borderBottomColor: ink.line,
   },
-  tierHeaderLabel: { fontSize: fontSize.sm, fontWeight: '800', letterSpacing: 0.4 },
-  tierHeaderCount: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  // Player row wrapper in normal (drag) mode. Active row gets a subtle
-  // lift to read as "picked up", matching ManualRanks' rowActive.
+  tierHeaderCount: { ...type.data, color: chalk.dim },
+  // Player row wrapper in normal (drag) mode. Active (picked-up) row gets
+  // a ice ring — border color change only, no shadow/transform lift.
   playerRow: {
-    marginBottom: spacing.xs,
+    marginBottom: space.xs,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   playerRowActive: {
-    borderRadius: radius.md,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.35,
-        shadowRadius: 8,
-      },
-      android: { elevation: 6 },
-    }),
+    borderColor: ice.base,
   },
   // Wrapper around each chip in multi-select mode. Always present so
   // toggling selection doesn't shift the layout.
   chipSelectableWrap: {
-    marginBottom: spacing.xs,
-    borderRadius: radius.md,
-    borderWidth: 2,
+    marginBottom: space.xs,
+    borderRadius: radii.md,
+    borderWidth: 1,
     borderColor: 'transparent',
   },
-  // Selected-chip state (multi-select mode, issue #16). Accent ring +
-  // tinted background + checkmark badge — three signals so selection
+  // Selected-chip state (multi-select mode, issue #16). Volt ring + check
+  // icon in the right slot — two signals (color + shape) so selection
   // reads clearly including for color-vision-impaired users.
   chipSelected: {
-    // Clear lighter-blue fill across the whole tile (#32 — the old 0.14
-    // alpha read as a faint border-only state).
-    backgroundColor: 'rgba(79,124,255,0.30)',
-    borderColor: colors.accent,
-  },
-  chipCheckBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chipCheckBadgeText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '800',
-    lineHeight: 16,
+    borderColor: ice.base,
   },
   // Floating action bar — shown above the save bar when 1+ chips are
-  // selected. Up / Down move all selected by one tier; Done exits.
+  // selected. Holds the FB4-62 tier-target chip row on top + the Up/Down/
+  // Done controls row below (so it's a column container now).
   actionBar: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 76,                       // sits just above the save bar
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.surface,
-    borderTopColor: colors.border,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    backgroundColor: ink.ink1,
+    borderTopColor: ink.line,
     borderTopWidth: 1,
+  },
+  // Up / Down / Done controls row inside the action bar.
+  actionBarMain: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  actionBarCount: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '700',
-  },
+  actionBarCount: { ...type.bodySm },
+  actionBarCountNum: { ...type.data },
   actionBarBtns: {
     flexDirection: 'row',
-    gap: spacing.xs,
-  },
-  actionBarBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(79,124,255,0.45)',
-    backgroundColor: 'rgba(79,124,255,0.10)',
-  },
-  actionBarBtnText: {
-    color: colors.accent,
-    fontSize: fontSize.xs,
-    fontWeight: '800',
-  },
-  actionBarBtnDone: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  actionBarBtnDoneText: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
+    alignItems: 'center',
+    gap: space.xs,
+    // Five compact buttons (Up/Down/Tier up/Tier down/Done) overflow a
+    // 375pt screen on one line — let them wrap (FB-73).
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    flexShrink: 1,
   },
   switcher: {
     flexDirection: 'row',
+    marginHorizontal: space.lg,
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    overflow: 'hidden',
+  },
+  switcherBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  switcherBtnActive: { backgroundColor: ink.ink3 },
+  switcherText: { ...type.label },
+  switcherTextActive: { color: chalk.base },
+  // FB4-61 — Consensus | You segmented toggle. Compact mirror of the position
+  // switcher; sits just below it. (Old-theme tokens; Chalkline-ify as a
+  // visual follow-up, matching the FB4 components merged in the same batch.)
+  statToggle: {
+    flexDirection: 'row',
     gap: spacing.xs,
     marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
     padding: 4,
   },
-  switcherBtn: {
+  statToggleBtn: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: spacing.xs + 2,
+    paddingVertical: spacing.xs,
     borderRadius: radius.sm,
   },
-  switcherBtnActive: { backgroundColor: 'rgba(79,124,255,0.14)' },
-  switcherText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
-  switcherTextActive: { color: colors.accent },
-  // Copy-tiers-from-other-format pill. Sits between the position switcher
-  // and the hint line, full-width with a dashed-ish accent border so it
-  // reads as an "action that imports state" rather than a primary CTA.
+  statToggleBtnActive: { backgroundColor: 'rgba(79,124,255,0.14)' },
+  statToggleText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
+  statToggleTextActive: { color: colors.accent },
+  // Copy-tiers-from-other-format action. Secondary-button construction
+  // (hairline line-strong border, chalk text) with the swap icon.
   copyBtn: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radius.md,
+    marginHorizontal: space.lg,
+    marginTop: space.sm,
+    paddingHorizontal: space.lg,
+    minHeight: 44,
+    borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: 'rgba(79,124,255,0.45)',
-    backgroundColor: 'rgba(79,124,255,0.08)',
+    borderColor: ink.lineStrong,
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: spacing.xs,
-    minHeight: 36,
+    gap: space.sm,
   },
   copyBtnText: {
-    color: colors.accent,
-    fontSize: fontSize.xs,
-    fontWeight: '800',
+    fontFamily: fonts.uiSemi,
+    fontSize: 14,
+    color: chalk.base,
   },
   hint: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
+    ...type.bodySm,
     textAlign: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
   },
   centered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.sm,
+    gap: space.sm,
   },
-  errorText: { color: colors.red, fontSize: fontSize.sm },
-  retryText: { color: colors.accent, fontSize: fontSize.sm, fontWeight: '700' },
+  errorText: { ...type.body, color: semantic.neg },
   listContainer: { flex: 1 },
   scroll: {
-    padding: spacing.lg,
+    padding: space.lg,
     paddingBottom: 96, // room for the Save bar
   },
   emptyBin: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
+    ...type.bodySm,
+    color: chalk.faint,
     textAlign: 'center',
-    paddingVertical: spacing.sm,
-    fontStyle: 'italic',
+    paddingVertical: space.sm,
   },
   saveBar: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    padding: spacing.md,
-    backgroundColor: colors.bg,
-    borderTopColor: colors.border,
+    padding: space.md,
+    backgroundColor: ink.ink0,
+    borderTopColor: ink.line,
     borderTopWidth: 1,
   },
   saveBtn: {
-    backgroundColor: colors.accent,
-    borderRadius: radius.md,
-    paddingVertical: 14,
+    backgroundColor: ice.base,
+    borderRadius: radii.sm,
+    height: 48,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  saveBtnText: { color: '#fff', fontSize: fontSize.base, fontWeight: '800' },
+  saveBtnText: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 14,
+    color: ice.on,
+  },
 });

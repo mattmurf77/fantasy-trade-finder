@@ -11,8 +11,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, ice, space, radii, type } from '../theme/chalkline';
+import { TickLabel } from '../components/chalkline';
 import PositionChip from '../components/PositionChip';
 import TierBadge from '../components/TierBadge';
 import { getPortfolio } from '../api/league';
@@ -62,7 +62,7 @@ export default function PortfolioScreen() {
     return (
       <SafeAreaView style={styles.root} edges={['bottom']}>
         <View style={styles.loading}>
-          <ActivityIndicator color={colors.accent} />
+          <ActivityIndicator color={ice.base} />
           <Text style={styles.loadingText}>Loading portfolio…</Text>
         </View>
       </SafeAreaView>
@@ -94,7 +94,7 @@ export default function PortfolioScreen() {
             <RefreshControl
               refreshing={query.isFetching}
               onRefresh={() => query.refetch()}
-              tintColor={colors.accent}
+              tintColor={ice.base}
             />
           }
           ListEmptyComponent={
@@ -123,6 +123,7 @@ export default function PortfolioScreen() {
         contentContainerStyle={styles.list}
         ListHeaderComponent={
           <View style={styles.summary}>
+            <TickLabel>Exposure</TickLabel>
             <Text style={styles.summaryText}>
               <Text style={styles.summaryStrong}>{players.length}</Text> distinct players across{' '}
               <Text style={styles.summaryStrong}>{total}</Text> leagues
@@ -134,10 +135,10 @@ export default function PortfolioScreen() {
           <RefreshControl
             refreshing={query.isFetching}
             onRefresh={() => query.refetch()}
-            tintColor={colors.accent}
+            tintColor={ice.base}
           />
         }
-        ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
+        ItemSeparatorComponent={() => <View style={styles.hairline} />}
       />
     </SafeAreaView>
   );
@@ -162,11 +163,9 @@ function PortfolioRowItem({ row, total }: { row: PortfolioRow; total: number }) 
           {row.player.name}
         </Text>
         <PositionChip position={row.player.position} size="sm" />
-        <View style={styles.exposureBadge}>
-          <Text style={styles.exposureText}>
-            Own in {own} / {total}
-          </Text>
-        </View>
+        <Text style={styles.exposureText}>
+          Own in {own} / {total}
+        </Text>
       </View>
       <ScrollView
         horizontal
@@ -226,100 +225,69 @@ function LeagueTierChip({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
-  loadingText: { color: colors.muted, fontSize: fontSize.sm },
+  root: { flex: 1, backgroundColor: ink.ink0 },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.sm },
+  loadingText: { ...type.bodySm },
   emptyCentered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.xl,
-    gap: spacing.sm,
+    paddingHorizontal: space.xl,
+    gap: space.sm,
   },
-  emptyTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
-  emptySub: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  list: { padding: spacing.lg },
+  emptyTitle: { ...type.heading, textAlign: 'center' },
+  emptySub: { ...type.bodySm, textAlign: 'center' },
+  list: { padding: space.lg },
   summary: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
+    gap: space.sm,
+    paddingBottom: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
   },
-  summaryText: { color: colors.muted, fontSize: fontSize.sm },
-  summaryStrong: { color: colors.text, fontWeight: '800' },
+  summaryText: { ...type.bodySm },
+  summaryStrong: { ...type.data },
+  hairline: { height: 1, backgroundColor: ink.line },
   row: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    gap: spacing.sm,
+    paddingVertical: space.md,
+    gap: space.sm,
   },
   rowTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: space.sm,
   },
   playerName: {
+    ...type.title,
     flex: 1,
-    color: colors.text,
-    fontSize: fontSize.base,
-    fontWeight: '700',
   },
-  exposureBadge: {
-    backgroundColor: 'rgba(79,124,255,0.12)',
-    borderColor: 'rgba(79,124,255,0.35)',
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radius.pill,
-  },
-  exposureText: {
-    color: colors.accent,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-  },
+  exposureText: { ...type.data, color: chalk.dim },
   tierStrip: {
-    gap: spacing.xs,
-    paddingRight: spacing.sm,
+    gap: space.xs,
+    paddingRight: space.sm,
   },
   poolChip: {
-    backgroundColor: 'rgba(122,127,150,0.10)',
-    borderColor: colors.border,
+    borderColor: ink.line,
     borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: radius.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.xs,
     maxWidth: 180,
   },
-  poolChipText: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    fontWeight: '600',
-  },
+  poolChipText: { ...type.bodySm },
   tieredChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(122,127,150,0.08)',
-    borderColor: colors.border,
+    gap: space.xs,
+    borderColor: ink.line,
     borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: radius.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.xs,
     maxWidth: 220,
   },
   tieredChipLeague: {
-    color: colors.text,
-    fontSize: fontSize.xs,
-    fontWeight: '600',
+    ...type.bodySm,
+    color: chalk.base,
     maxWidth: 120,
   },
 });

@@ -23,6 +23,7 @@
   "mobile.rankings_card_view":       false,
 
   "profiles.public_pages":           false,
+  "players.profile_pages":           false,
   "landing.smart_start_cta":         false,
   "landing.try_before_sync":         false,
 
@@ -43,5 +44,10 @@
   "trade_engine.v3":                 true,
   "trade.three_team":                false,
 
-  "trade.finder_targeting":          false
+  "trade.finder_targeting":          false,
+  "trade.outlook_infer":             false,
+  "trade.preference_lists":          false,
+  "trade.outlook_seed":             false,
+  "trade.crown_asset":              false,
+  "trade.send_in_sleeper":          true
 }

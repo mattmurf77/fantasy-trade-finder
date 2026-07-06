@@ -43,6 +43,7 @@ Anyone — human or Claude — making changes is expected to keep `docs/` in syn
 | New domain term in code or UI | [docs/glossary.md](docs/glossary.md) |
 | Operational issue worth recording | [docs/runbook.md](docs/runbook.md) |
 | Non-obvious architectural decision | new ADR in [docs/adr/](docs/adr/) |
+| Any UI in `web/`, `mobile/`, `extension/` | follow [docs/design/design-system.md](docs/design/design-system.md) + [docs/design/components.md](docs/design/components.md) |
 
 See [docs/CLAUDE.md](docs/CLAUDE.md) for the full table of update triggers.
 
@@ -51,6 +52,7 @@ See [docs/CLAUDE.md](docs/CLAUDE.md) for the full table of update triggers.
 - Read `context.md` for project orientation; `docs/` is the source of truth for details.
 - DB lives in `data/trade_finder.db` (the stale legacy root copy was archived to `data/archive/` on 2026-06-10).
 - `config/features.json` drives feature flags consumed by both backend and clients.
+- **UI rules (Chalkline design system, ADR-004 + ADR-005):** all UI work uses the tokens in `docs/design/design-system.md` and the specs in `docs/design/components.md`; live reference at `web/style-guide.html`. Never: emoji as icons, gradients, glassmorphism/blur, Inter/Roboto/system font stacks, radius >8px (except specced pills), accents other than ice (actions) and flare (informational highlights only). Position/tier hexes are data encodings governed by `docs/cross-client-invariants.md`.
 - **Credentials live in `secrets.local.env`** (project root, gitignored, never commit). Read keys from there (`CRON_SECRET` for `/api/feedback/admin` + `/api/cron/*`, optional `DATABASE_URL_PROD`, etc.) instead of asking the operator to paste secrets into chat. If a needed key is blank, ask the operator to fill it in that file.
 - Eval workspaces (`feature-evaluator-workspace/`, `project-reorganizer-workspace/`) are throwaway scaffolds — do not document or commit changes there casually.
 

@@ -1,0 +1,14 @@
+{
+  "cli": {
+    "version": ">= 19.0.5",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal"
+    },
+    "production": {
+      "autoIncrement": true
+    }
+  }
+}

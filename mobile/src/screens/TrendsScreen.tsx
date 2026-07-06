@@ -11,8 +11,17 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import {
+  ink,
+  chalk,
+  ice,
+  semantic,
+  position,
+  space,
+  radii,
+  type,
+} from '../theme/chalkline';
+import { TickLabel, Button } from '../components/chalkline';
 import PositionChip from '../components/PositionChip';
 import TrendBar from '../components/TrendBar';
 import { getRisersAndFallers, getContrarianGap } from '../api/rankings';
@@ -83,6 +92,8 @@ export default function TrendsScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      {/* PositionTabs spec: segmented hairline group; active segment = ink3
+          fill + 2px underline in that position's color (ALL = ice). */}
       <View style={styles.filterRow}>
         {FILTERS.map((f) => {
           const active = f === filter;
@@ -91,9 +102,12 @@ export default function TrendsScreen() {
               key={f}
               onPress={() => setFilter(f)}
               style={({ pressed }) => [
-                styles.filterChip,
-                active && styles.filterChipActive,
-                pressed && { opacity: 0.7 },
+                styles.filterSegment,
+                active && [
+                  styles.filterSegmentActive,
+                  { borderBottomColor: underlineColor(f) },
+                ],
+                pressed && { backgroundColor: ink.ink3 },
               ]}
             >
               <Text style={[styles.filterText, active && styles.filterTextActive]}>
@@ -110,7 +124,7 @@ export default function TrendsScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={colors.accent}
+            tintColor={ice.base}
           />
         }
       >
@@ -191,12 +205,24 @@ function maxAbsDelta(rows: TrendRow[]): number {
   return rows.reduce((m, r) => Math.max(m, Math.abs(r.delta || 0)), 0);
 }
 
-// Format a rank delta with an up/down arrow. Returns null when the delta can't
-// be derived (insufficient history) so callers can degrade to "—".
+// Active-tab underline per PositionTabs spec: position color, ice for ALL.
+function underlineColor(f: PositionFilter): string {
+  switch (f) {
+    case 'QB': return position.qb;
+    case 'RB': return position.rb;
+    case 'WR': return position.wr;
+    case 'TE': return position.te;
+    default:   return ice.base;
+  }
+}
+
+// Format a rank delta with an explicit +/- sign (Chalkline: no dingbat
+// arrows). Returns null when the delta can't be derived (insufficient
+// history) so callers can degrade to "—".
 function formatRankDelta(delta?: number | null): string | null {
   if (delta == null) return null;
-  if (delta > 0) return `▲${delta}`;
-  if (delta < 0) return `▼${Math.abs(delta)}`;
+  if (delta > 0) return `+${delta}`;
+  if (delta < 0) return `-${Math.abs(delta)}`;
   return '–0';
 }
 
@@ -216,7 +242,11 @@ function filterGap(rows: ContrarianGapEntry[] | undefined, f: PositionFilter): C
 // ── Sub-components ──────────────────────────────────────────────────────
 
 function SectionHeader({ title }: { title: string }) {
-  return <Text style={styles.sectionHeader}>{title}</Text>;
+  return (
+    <View style={styles.sectionHeader}>
+      <TickLabel>{title}</TickLabel>
+    </View>
+  );
 }
 
 interface SectionBodyProps {
@@ -230,7 +260,7 @@ function SectionBody({ loading, error, retry, empty, children }: SectionBodyProp
   if (loading) {
     return (
       <View style={[styles.sectionCard, styles.sectionCenter]}>
-        <ActivityIndicator color={colors.accent} />
+        <ActivityIndicator color={ice.base} />
       </View>
     );
   }
@@ -238,9 +268,7 @@ function SectionBody({ loading, error, retry, empty, children }: SectionBodyProp
     return (
       <View style={[styles.sectionCard, styles.sectionCenter]}>
         <Text style={styles.errorText}>Couldn't load.</Text>
-        <Pressable onPress={retry}>
-          <Text style={styles.retry}>Try again</Text>
-        </Pressable>
+        <Button label="Try again" variant="ghost" compact onPress={retry} />
       </View>
     );
   }
@@ -262,7 +290,7 @@ interface MoveRowProps {
 function MoveRow({ row, max, kind }: MoveRowProps) {
   const delta = row.delta || 0;
   const sign  = delta > 0 ? '+' : '';
-  const deltaColor = kind === 'up' ? colors.green : colors.red;
+  const deltaColor = kind === 'up' ? semantic.pos : semantic.neg;
 
   // Rank deltas are the primary, more-intuitive signal (FB-04). ELO delta stays
   // as a clearly-labeled secondary number on the right.
@@ -271,7 +299,7 @@ function MoveRow({ row, max, kind }: MoveRowProps) {
   const posRankDelta     = formatRankDelta(row.pos_rank_delta);
   const posLabel         = posRankLabel(row.pos_rank, row.position as string);
 
-  // Compose the rank line, e.g. "Overall #12 ▲3 · RB7 ▲1". Degrades to "—".
+  // Compose the rank line, e.g. "Overall #12 +3 · RB7 +1". Degrades to "—".
   const rankParts: string[] = [];
   if (overallRank != null) {
     rankParts.push(
@@ -377,14 +405,14 @@ function GapRow({ row, mode }: { row: ContrarianGapEntry; mode: 'sell' | 'buy' }
       <View style={styles.deltaWrap}>
         {rankGap != null && rankGap > 0 ? (
           <>
-            <Text style={[styles.deltaNum, { color: colors.green }]}>
-              ▲{rankGap}
+            <Text style={[styles.deltaNum, { color: semantic.pos }]}>
+              +{rankGap}
             </Text>
             <Text style={styles.deltaLabel}>RANK</Text>
           </>
         ) : (
           <>
-            <Text style={[styles.deltaNum, { color: colors.green }]}>
+            <Text style={[styles.deltaNum, { color: semantic.pos }]}>
               +{(row.gap || 0).toFixed(1)}
             </Text>
             <Text style={styles.deltaLabel}>GAP</Text>
@@ -398,109 +426,96 @@ function GapRow({ row, mode }: { row: ContrarianGapEntry; mode: 'sell' | 'buy' }
 // ── Styles ──────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1, backgroundColor: ink.ink0 },
+
+  // Segmented group per PositionTabs spec: 1px hairline group at radii.sm;
+  // active segment = ink3 fill + 2px underline (position color / ice for ALL).
   filterRow: {
     flexDirection: 'row',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
-  },
-  filterChip: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
+    marginHorizontal: space.lg,
+    marginTop: space.md,
+    marginBottom: space.sm,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    overflow: 'hidden',
+  },
+  filterSegment: {
+    flex: 1,
+    height: 44,
     alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+    backgroundColor: 'transparent',
   },
-  filterChipActive: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.10)',
+  filterSegmentActive: {
+    backgroundColor: ink.ink3,
   },
-  filterText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  filterTextActive: { color: colors.accent },
+  filterText: { ...type.label },
+  filterTextActive: { color: chalk.base },
 
   scroll: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xxl,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.xxl,
   },
 
   sectionHeader: {
-    color: colors.text,
-    fontSize: fontSize.base,
-    fontWeight: '800',
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
+    marginTop: space.lg,
+    marginBottom: space.sm,
   },
   sectionCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
+    backgroundColor: ink.ink1,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    borderColor: ink.line,
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs,
   },
   sectionCenter: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.xl,
-    gap: spacing.sm,
+    paddingVertical: space.xl,
+    gap: space.sm,
   },
 
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomColor: colors.border,
+    gap: space.md,
+    paddingVertical: space.md,
+    borderBottomColor: ink.line,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   rowTopLine: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: space.sm,
   },
   name: {
-    color: colors.text,
-    fontSize: fontSize.base,
-    fontWeight: '700',
+    ...type.title,
     flexShrink: 1,
   },
-  rankLine: { fontSize: fontSize.sm, fontWeight: '700', marginTop: 2 },
-  meta: { color: colors.muted, fontSize: fontSize.xs, marginTop: 2 },
-  barWrap: { marginTop: spacing.sm },
+  rankLine: { ...type.data, marginTop: 2 },
+  meta: { ...type.data, color: chalk.dim, marginTop: 2 },
+  barWrap: { marginTop: space.sm },
 
   deltaWrap: { alignItems: 'flex-end', minWidth: 72 },
-  deltaNum: { fontSize: fontSize.base, fontWeight: '800' },
-  deltaLabel: {
-    color: colors.muted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
+  deltaNum: { ...type.dataLg },
+  deltaLabel: { ...type.label },
 
   subHeader: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginTop: spacing.md,
-    marginBottom: spacing.xs,
+    ...type.label,
+    marginTop: space.md,
+    marginBottom: space.xs,
   },
   emptyInline: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
-    paddingVertical: spacing.md,
+    ...type.bodySm,
+    paddingVertical: space.md,
   },
   emptyBody: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
+    ...type.bodySm,
     textAlign: 'center',
-    lineHeight: 22,
   },
-  errorText: { color: colors.red },
-  retry: { color: colors.accent, fontWeight: '700' },
+  errorText: { ...type.bodySm, color: semantic.neg },
 });

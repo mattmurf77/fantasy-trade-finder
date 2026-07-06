@@ -936,6 +936,9 @@
       gap: 3px;
     }
     .trade-player-name { font-size: 15px; font-weight: 600; }
+    /* Player-profile linkification (#17) — inherits color, hints on hover */
+    a.player-link { color: inherit; text-decoration: none; }
+    a.player-link:hover { text-decoration: underline; text-decoration-color: var(--accent); }
     .trade-player-meta { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 
     /* Agent A8 — human-readable trade-math explanations (flag-gated). */

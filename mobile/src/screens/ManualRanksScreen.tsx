@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   TextInput,
   Keyboard,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DraggableFlatList, {
@@ -16,8 +15,8 @@ import DraggableFlatList, {
 } from 'react-native-draggable-flatlist';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, ice, semantic, position, space, radii, type } from '../theme/chalkline';
+import { Button, Icon } from '../components/chalkline';
 import PositionChip from '../components/PositionChip';
 import { getRankings, reorderRankings } from '../api/rankings';
 import { haptics } from '../utils/haptics';
@@ -41,6 +40,16 @@ import type { Position, RankedPlayer } from '../shared/types';
 const FILTERS: (Position | 'ALL')[] = ['ALL', 'QB', 'RB', 'WR', 'TE'];
 const SAVE_DEBOUNCE_MS = 600;
 const DRAG_ACTIVATION_MS = 220;
+
+// PositionTabs underline: active segment underlines in that position's
+// color; the Overall ("ALL") tab underlines in ice.
+const FILTER_UNDERLINE: Record<Position | 'ALL', string> = {
+  ALL: ice.base,
+  QB: position.qb,
+  RB: position.rb,
+  WR: position.wr,
+  TE: position.te,
+};
 
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
@@ -277,7 +286,7 @@ export default function ManualRanksScreen() {
           style={({ pressed }) => [
             styles.row,
             isActive && styles.rowActive,
-            pressed && !isActive && { backgroundColor: 'rgba(79,124,255,0.06)' },
+            pressed && !isActive && { backgroundColor: ink.ink3 },
           ]}
         >
           {isEditing ? (
@@ -291,7 +300,7 @@ export default function ManualRanksScreen() {
                 setEditingPid(item.id);
                 haptics.selection();
               }}
-              hitSlop={8}
+              hitSlop={{ top: 13, bottom: 13, left: 8, right: 8 }}
               style={styles.rankNumWrap}
             >
               <Text style={styles.rankNum}>{rankNum}</Text>
@@ -308,6 +317,10 @@ export default function ManualRanksScreen() {
           <View style={styles.eloWrap}>
             <Text style={styles.eloNum}>{Math.round(item.elo)}</Text>
             <Text style={styles.eloLabel}>ELO</Text>
+          </View>
+          <View style={styles.grip} importantForAccessibility="no-hide-descendants">
+            <View style={styles.gripBar} />
+            <View style={styles.gripBar} />
           </View>
         </Pressable>
       );
@@ -351,9 +364,10 @@ export default function ManualRanksScreen() {
                 setFilter(f);
               }}
               style={({ pressed }) => [
-                styles.filterChip,
-                active && styles.filterChipActive,
-                pressed && { opacity: 0.7 },
+                styles.filterSeg,
+                active && styles.filterSegActive,
+                active && { borderBottomColor: FILTER_UNDERLINE[f] },
+                pressed && !active && { backgroundColor: ink.ink3 },
               ]}
             >
               <Text style={[styles.filterText, active && styles.filterTextActive]}>
@@ -366,14 +380,17 @@ export default function ManualRanksScreen() {
 
       {ranksQuery.isLoading ? (
         <View style={styles.center}>
-          <ActivityIndicator color={colors.accent} />
+          <ActivityIndicator color={ice.base} />
         </View>
       ) : ranksQuery.isError ? (
         <View style={styles.center}>
           <Text style={styles.errorText}>Could not load rankings.</Text>
-          <Pressable onPress={() => ranksQuery.refetch()}>
-            <Text style={styles.retry}>Try again</Text>
-          </Pressable>
+          <Button
+            variant="secondary"
+            compact
+            label="Try again"
+            onPress={() => ranksQuery.refetch()}
+          />
         </View>
       ) : visibleRows.length === 0 ? (
         <View style={styles.center}>
@@ -407,7 +424,7 @@ function SaveIndicator({ status, errorText }: { status: SaveStatus; errorText: s
   if (status === 'saving' || status === 'pending') {
     return (
       <View style={styles.saveIndicatorWrap}>
-        <ActivityIndicator size="small" color={colors.muted} />
+        <ActivityIndicator size="small" color={chalk.dim} />
         <Text style={styles.saveIndicatorText}>saving…</Text>
       </View>
     );
@@ -415,7 +432,7 @@ function SaveIndicator({ status, errorText }: { status: SaveStatus; errorText: s
   if (status === 'saved') {
     return (
       <View style={styles.saveIndicatorWrap}>
-        <View style={styles.savedDot} />
+        <Icon name="check" size={14} color={semantic.pos} />
         <Text style={styles.savedText}>saved</Text>
       </View>
     );
@@ -431,129 +448,114 @@ function SaveIndicator({ status, errorText }: { status: SaveStatus; errorText: s
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1, backgroundColor: ink.ink0 },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
   },
-  title: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
+  title: { ...type.heading },
 
   // Save status indicator — three visual variants.
   saveIndicatorWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
+    gap: space.xs,
+    paddingHorizontal: space.sm,
+    paddingVertical: space.xs,
   },
-  saveIndicatorText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  savedDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.green,
-  },
-  savedText: { color: colors.green, fontSize: fontSize.xs, fontWeight: '800' },
+  saveIndicatorText: { ...type.label },
+  savedText: { ...type.label, color: semantic.pos },
   errorPill: {
-    backgroundColor: 'rgba(239,68,68,0.14)',
-    borderColor: 'rgba(239,68,68,0.45)',
+    borderColor: semantic.neg,
     borderWidth: 1,
-    borderRadius: radius.pill,
+    borderRadius: radii.xs,
   },
   errorPillText: {
-    color: colors.red,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
+    ...type.label,
+    color: semantic.neg,
     maxWidth: 180,
   },
 
   hint: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
+    ...type.bodySm,
     textAlign: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.sm,
   },
 
+  // PositionTabs — segmented row (docs/design/components.md → Navigation).
   filterRow: {
     flexDirection: 'row',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
-  filterChip: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
+    marginHorizontal: space.lg,
+    marginBottom: space.sm,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    overflow: 'hidden',
+  },
+  filterSeg: {
+    flex: 1,
+    height: 44,
     alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  filterChipActive: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.10)',
+  filterSegActive: {
+    backgroundColor: ink.ink3,
   },
-  filterText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  filterTextActive: { color: colors.accent },
+  filterText: { ...type.label },
+  filterTextActive: { color: chalk.base },
 
   listContainer: { flex: 1 },
-  listContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl },
+  listContent: { paddingHorizontal: space.lg, paddingBottom: space.xxl },
 
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xs,
+    gap: space.md,
+    paddingVertical: space.md,
+    paddingHorizontal: space.xs,
   },
   rowActive: {
-    backgroundColor: 'rgba(79,124,255,0.10)',
-    borderRadius: radius.md,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.35,
-        shadowRadius: 8,
-      },
-      android: { elevation: 6 },
-    }),
+    backgroundColor: ink.ink2,
+    borderRadius: radii.sm,
   },
-  sep: { height: 1, backgroundColor: colors.border, opacity: 0.5 },
+  sep: { height: 1, backgroundColor: ink.line },
 
   rankNumWrap: { width: 36, alignItems: 'center' },
   rankNum: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
-    fontWeight: '800',
+    ...type.data,
+    color: chalk.dim,
     textAlign: 'center',
   },
   rankInput: {
+    ...type.data,
     width: 48,
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '800',
+    height: 44,
     textAlign: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.accent,
+    backgroundColor: ink.ink2,
+    borderColor: ice.base,
     borderWidth: 1,
-    borderRadius: radius.sm,
+    borderRadius: radii.sm,
     paddingVertical: 4,
   },
 
-  name: { color: colors.text, fontSize: fontSize.base, fontWeight: '700' },
-  meta: { color: colors.muted, fontSize: fontSize.xs, marginTop: 2 },
+  name: { ...type.title },
+  meta: { ...type.bodySm, marginTop: 2 },
   eloWrap: { alignItems: 'flex-end', minWidth: 56 },
-  eloNum: { color: colors.text, fontSize: fontSize.base, fontWeight: '800' },
-  eloLabel: { color: colors.muted, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  eloNum: { ...type.data },
+  eloLabel: { ...type.label, fontSize: 10, lineHeight: 12, letterSpacing: 0.8 },
 
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.xl },
-  errorText: { color: colors.red },
-  retry: { color: colors.accent, fontWeight: '700' },
-  emptyTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
-  emptyBody: { color: colors.muted, fontSize: fontSize.sm, textAlign: 'center', lineHeight: 22 },
+  // Drag affordance — decorative lineStrong grip bars (no emoji, no icon glyph).
+  grip: { gap: 3 },
+  gripBar: { width: 14, height: 2, backgroundColor: ink.lineStrong },
+
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.md, padding: space.xl },
+  errorText: { ...type.body, color: semantic.neg },
+  emptyTitle: { ...type.heading },
+  emptyBody: { ...type.bodySm, textAlign: 'center' },
 });

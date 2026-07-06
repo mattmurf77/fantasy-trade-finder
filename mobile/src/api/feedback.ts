@@ -44,6 +44,13 @@ export type FeedbackStatus =
   | 'shipped'
   | 'declined';
 
+// Terminal statuses hidden from the user's inbox. Mirrors the backend's
+// FEEDBACK_CLOSED_STATUSES (backend/database.py) — /api/feedback/mine
+// stops returning these rows; this client-side copy hides locally-persisted
+// notes whose last-merged status is already terminal. 'fixed' stays visible
+// ("Fixed — in next update") until the operator flips it to 'shipped'.
+export const CLOSED_FEEDBACK_STATUSES: readonly FeedbackStatus[] = ['shipped', 'declined'];
+
 export interface MyFeedbackItem {
   server_id: number;
   client_id: string;

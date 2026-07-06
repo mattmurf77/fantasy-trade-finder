@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, space, radii, type } from '../theme/chalkline';
+import { Icon } from './chalkline';
 import { useSession } from '../state/useSession';
 
 interface Props {
@@ -18,9 +18,11 @@ interface Props {
 }
 
 // Pressable widget showing the active league name + a chevron, signalling
-// "tap to switch." Used at the top of TradesScreen and on LeagueScreen.
-// Reads the active league from useSession so all instances stay in sync
-// the moment a switch completes.
+// "tap to switch." Chalkline chip construction: hairline interactive border,
+// radius xs, pressed = ink-3 fill (color change only, no transforms).
+// Used at the top of TradesScreen and on LeagueScreen. Reads the active
+// league from useSession so all instances stay in sync the moment a switch
+// completes.
 export default function LeaguePill({ onPress, label = 'League', compact = false }: Props) {
   const league = useSession((s) => s.league);
   const switching = useSession((s) => s.switching);
@@ -32,17 +34,24 @@ export default function LeaguePill({ onPress, label = 'League', compact = false 
       style={({ pressed }) => [
         styles.pill,
         compact && styles.pillCompact,
-        pressed && !switching && { opacity: 0.7 },
-        switching && { opacity: 0.6 },
+        pressed && !switching && styles.pillPressed,
+        switching && styles.pillSwitching,
       ]}
     >
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.label}>{label}</Text>
-        <Text style={[styles.name, compact && styles.nameCompact]} numberOfLines={1}>
+        <Text style={type.label}>{label}</Text>
+        <Text
+          style={[type.title, styles.name, compact && styles.nameCompact]}
+          numberOfLines={1}
+        >
           {league?.league_name || 'No league selected'}
         </Text>
       </View>
-      <Text style={styles.chevron}>{switching ? '…' : '⇅'}</Text>
+      {switching ? (
+        <Text style={styles.busy}>…</Text>
+      ) : (
+        <Icon name="chevron-down" size={20} color={chalk.dim} />
+      )}
     </Pressable>
   );
 }
@@ -51,23 +60,19 @@ const styles = StyleSheet.create({
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
+    gap: space.md,
+    backgroundColor: ink.ink1,
+    borderColor: ink.lineStrong,
     borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    paddingHorizontal: spacing.lg,
+    borderRadius: radii.xs,
+    padding: space.md,
+    paddingHorizontal: space.lg,
+    minHeight: 44,
   },
-  pillCompact: { padding: spacing.sm, paddingHorizontal: spacing.md },
-  label: {
-    color: colors.muted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  name:        { color: colors.text, fontSize: fontSize.base, fontWeight: '800', marginTop: 2 },
-  nameCompact: { fontSize: fontSize.sm },
-  chevron:     { color: colors.muted, fontSize: 20, fontWeight: '700' },
+  pillCompact: { padding: space.sm, paddingHorizontal: space.md },
+  pillPressed: { backgroundColor: ink.ink3 },
+  pillSwitching: { opacity: 0.45 },
+  name: { marginTop: 2 },
+  nameCompact: { fontSize: type.bodySm.fontSize, lineHeight: type.bodySm.lineHeight },
+  busy: { ...type.body, color: chalk.dim },
 });

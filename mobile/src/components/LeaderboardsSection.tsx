@@ -8,8 +8,8 @@ import {
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, ice, space, type, fonts } from '../theme/chalkline';
+import { Card, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
 import {
   getLeaderboard,
@@ -22,6 +22,10 @@ import {
 // Two leaderboard sections inline in LeagueScreen — League-specific and
 // Universal. Each owns its own metric/window picker. Top 10 + sticky
 // self-row when the user is out of top.
+//
+// Chalkline: TickLabel section headers, FilterTabs-style pickers (ghost
+// label text, active = chalk + ice underline), hairline rows in a Card
+// with rank/value numerals in Plex Mono. Self row = ink-2 fill.
 
 interface Props {
   // null when scope is universal-only (e.g. user has no league selected
@@ -32,7 +36,7 @@ interface Props {
 type Tab = { key: string; label: string; metric: LeaderboardMetric; window?: LeaderboardWindow };
 
 const TABS: Tab[] = [
-  { key: 'streak', label: '🔥 Streaks', metric: 'streak' },
+  { key: 'streak', label: 'Streaks', metric: 'streak' },
   { key: 'week',   label: 'This week',  metric: 'ranks', window: 'week'   },
   { key: 'month',  label: 'This month', metric: 'ranks', window: 'month'  },
   { key: 'season', label: 'Season',     metric: 'ranks', window: 'season' },
@@ -74,9 +78,9 @@ function Board({
 
   return (
     <View style={styles.section}>
-      <Text style={styles.title}>{title}</Text>
+      <TickLabel>{title}</TickLabel>
 
-      {/* Metric / window pills */}
+      {/* Metric / window tabs — FilterTabs: ghost label, ice underline on active */}
       <View style={styles.tabsRow}>
         {TABS.map((t) => {
           const isActive = t.key === tabKey;
@@ -90,7 +94,7 @@ function Board({
               style={({ pressed }) => [
                 styles.tab,
                 isActive && styles.tabActive,
-                pressed && { opacity: 0.7 },
+                pressed && styles.tabPressed,
               ]}
             >
               <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
@@ -103,7 +107,7 @@ function Board({
 
       {lbQuery.isLoading ? (
         <View style={styles.centered}>
-          <ActivityIndicator color={colors.accent} />
+          <ActivityIndicator color={chalk.dim} />
         </View>
       ) : lbQuery.isError ? (
         <Text style={styles.empty}>Couldn't load leaderboard.</Text>
@@ -114,9 +118,9 @@ function Board({
             : 'No one on the board yet. Be the first.'}
         </Text>
       ) : (
-        <View style={styles.list}>
-          {lbQuery.data.rows.slice(0, 10).map((r) => (
-            <Row key={r.user_id} row={r} metric={tab.metric} />
+        <Card>
+          {lbQuery.data.rows.slice(0, 10).map((r, i) => (
+            <Row key={r.user_id} row={r} metric={tab.metric} withRule={i > 0} />
           ))}
           {/* Sticky self-row when user is out of top 10 */}
           {lbQuery.data.self_row && lbQuery.data.self_row.rank > 10 ? (
@@ -125,104 +129,95 @@ function Board({
               <Row row={lbQuery.data.self_row} metric={tab.metric} />
             </>
           ) : null}
-        </View>
+        </Card>
       )}
     </View>
   );
 }
 
-function Row({ row, metric }: { row: LeaderboardRow; metric: LeaderboardMetric }) {
+function Row({
+  row,
+  metric,
+  withRule,
+}: {
+  row: LeaderboardRow;
+  metric: LeaderboardMetric;
+  withRule?: boolean;
+}) {
   return (
-    <View style={[styles.row, row.is_self && styles.rowSelf]}>
+    <View style={[styles.row, withRule && styles.rowRule, row.is_self && styles.rowSelf]}>
       <Text style={[styles.rank, row.is_self && styles.rankSelf]}>{row.rank}</Text>
       <Text style={[styles.name, row.is_self && styles.nameSelf]} numberOfLines={1}>
         {row.display_name}
       </Text>
       <Text style={[styles.value, row.is_self && styles.valueSelf]}>
-        {metric === 'streak' ? `🔥 ${row.value}` : row.value}
+        {metric === 'streak' ? String(row.value) : row.value}
       </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  section: { gap: spacing.sm, marginTop: spacing.md },
-  title: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
+  section: { gap: space.sm, marginTop: space.md },
   tabsRow: {
     flexDirection: 'row',
-    gap: spacing.xs,
+    gap: space.md,
     flexWrap: 'wrap',
   },
   tab: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: space.xs,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  tabActive: {
-    backgroundColor: 'rgba(79,124,255,0.14)',
-    borderColor: colors.accent,
-  },
-  tabText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  tabTextActive: { color: colors.accent },
-  list: { gap: 4 },
+  tabActive: { borderBottomColor: ice.base },
+  // Pressed = color change only (no transforms).
+  tabPressed: { backgroundColor: ink.ink3 },
+  tabText: { ...type.label },
+  tabTextActive: { color: chalk.base },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+    gap: space.sm,
+    paddingVertical: space.sm,
+  },
+  rowRule: {
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
   },
   rowSelf: {
-    backgroundColor: 'rgba(79,124,255,0.10)',
-    borderColor: colors.accent,
+    backgroundColor: ink.ink2,
+    paddingHorizontal: space.sm,
   },
   rank: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
-    fontWeight: '800',
+    ...type.data,
+    color: chalk.dim,
     width: 28,
     textAlign: 'right',
   },
-  rankSelf: { color: colors.accent },
+  rankSelf: { color: chalk.base, fontFamily: fonts.dataSemi },
   name: {
+    ...type.body,
     flex: 1,
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '600',
   },
-  nameSelf: { color: colors.text, fontWeight: '800' },
+  nameSelf: { fontFamily: fonts.uiSemi },
   value: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '700',
+    ...type.data,
     minWidth: 40,
     textAlign: 'right',
   },
-  valueSelf: { color: colors.accent },
-  centered: { paddingVertical: spacing.lg, alignItems: 'center' },
+  valueSelf: { fontFamily: fonts.dataSemi },
+  centered: { paddingVertical: space.lg, alignItems: 'center' },
   empty: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
+    ...type.bodySm,
     textAlign: 'center',
-    paddingVertical: spacing.md,
+    paddingVertical: space.md,
   },
   gap: {
-    color: colors.muted,
+    ...type.data,
+    color: chalk.faint,
     textAlign: 'center',
-    paddingVertical: 4,
+    paddingVertical: space.xs,
   },
 });

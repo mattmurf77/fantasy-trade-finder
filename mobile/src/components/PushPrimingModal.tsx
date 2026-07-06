@@ -1,7 +1,15 @@
 import React from 'react';
-import { Modal, View, Text, Pressable, StyleSheet } from 'react-native';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { Modal, View, Text, StyleSheet } from 'react-native';
+import {
+  ink,
+  chalk,
+  space,
+  radii,
+  type,
+  scrim,
+  shadowSheet,
+} from '../theme/chalkline';
+import { Button, Icon } from './chalkline';
 import { usePushPriming } from '../state/usePushPriming';
 
 // Pre-permission priming sheet. Shown once when usePushNotifications detects
@@ -29,7 +37,9 @@ export default function PushPrimingModal() {
     >
       <View style={styles.backdrop}>
         <View style={styles.card}>
-          <Text style={styles.emoji}>🔔</Text>
+          <View style={styles.iconWrap}>
+            <Icon name="bell" size={28} color={chalk.base} />
+          </View>
           <Text style={styles.title}>Get pinged when a trade match drops</Text>
           <Text style={styles.body}>
             We'll let you know when:{"\n"}
@@ -41,15 +51,8 @@ export default function PushPrimingModal() {
             Quiet hours (10pm–8am local) bundle overnight pings into one
             morning summary. Customize anytime in Settings.
           </Text>
-          <Pressable
-            onPress={accept}
-            style={({ pressed }) => [styles.primary, pressed && { opacity: 0.85 }]}
-          >
-            <Text style={styles.primaryText}>Enable notifications</Text>
-          </Pressable>
-          <Pressable onPress={dismiss} style={styles.secondary}>
-            <Text style={styles.secondaryText}>Maybe later</Text>
-          </Pressable>
+          <Button label="Enable notifications" onPress={accept} />
+          <Button variant="ghost" label="Maybe later" onPress={dismiss} />
         </View>
       </View>
     </Modal>
@@ -59,48 +62,31 @@ export default function PushPrimingModal() {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.66)',
+    backgroundColor: scrim,
     justifyContent: 'center',
-    padding: spacing.lg,
+    padding: space.lg,
   },
   card: {
-    backgroundColor: colors.bg,
-    borderRadius: radius.xl,
+    backgroundColor: ink.ink2,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.xl,
-    gap: spacing.sm,
+    borderColor: ink.line,
+    padding: space.xl,
+    gap: space.sm,
+    ...shadowSheet,
   },
-  emoji: { fontSize: 36, alignSelf: 'center', marginBottom: spacing.xs },
+  iconWrap: { alignSelf: 'center', marginBottom: space.xs },
   title: {
-    color: colors.text,
-    fontSize: fontSize.xl,
-    fontWeight: '800',
+    ...type.heading,
     textAlign: 'center',
   },
   body: {
-    color: colors.text,
-    fontSize: fontSize.base,
-    lineHeight: 22,
-    marginTop: spacing.xs,
+    ...type.body,
+    marginTop: space.xs,
   },
   fine: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    lineHeight: 18,
-    marginTop: spacing.xs,
-    marginBottom: spacing.md,
+    ...type.bodySm,
+    marginTop: space.xs,
+    marginBottom: space.md,
   },
-  primary: {
-    backgroundColor: colors.accent,
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  primaryText: { color: '#0b1020', fontWeight: '800', fontSize: fontSize.base },
-  secondary: {
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  secondaryText: { color: colors.muted, fontWeight: '700', fontSize: fontSize.sm },
 });

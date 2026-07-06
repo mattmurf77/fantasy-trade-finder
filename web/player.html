@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Player Profile — Fantasy Trade Finder</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --border:   #2a2d3a;
+      --text:     #e8eaf0;
+      --muted:    #7a7f96;
+      --accent:   #4f7cff;
+      --green:    #22c55e;
+      --red:      #ef4444;
+      --qb: #f97316;
+      --rb: #22c55e;
+      --wr: #3b82f6;
+      --te: #a855f7;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+    }
+
+    .wrap { max-width: 720px; margin: 0 auto; padding: 20px 18px 60px; }
+
+    .back-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 13px; color: var(--muted); text-decoration: none; margin-bottom: 18px;
+    }
+    .back-link:hover { color: var(--text); }
+
+    /* ── Header ── */
+    .ph { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+    .pos-chip {
+      font-size: 12px; font-weight: 700; color: #fff; padding: 3px 8px;
+      border-radius: 6px; letter-spacing: .02em;
+    }
+    .pos-QB { background: var(--qb); } .pos-RB { background: var(--rb); }
+    .pos-WR { background: var(--wr); } .pos-TE { background: var(--te); }
+    .pname { font-size: 24px; font-weight: 700; }
+    .pmeta { color: var(--muted); font-size: 13px; margin-bottom: 22px; }
+
+    /* ── Hero value ── */
+    .hero { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+    .hero-val { font-size: 40px; font-weight: 800; }
+    .delta { font-size: 14px; font-weight: 600; }
+    .delta.up { color: var(--green); } .delta.down { color: var(--red); }
+    .delta.flat { color: var(--muted); }
+    .hero-sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 16px 18px; margin-bottom: 14px;
+    }
+    .card h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
+               color: var(--muted); margin-bottom: 12px; font-weight: 600; }
+
+    .row { display: flex; justify-content: space-between; align-items: center;
+           padding: 7px 0; font-size: 14px; }
+    .row + .row { border-top: 1px solid var(--border); }
+    .row .k { color: var(--muted); } .row .v { font-weight: 600; }
+
+    /* ── You vs market ── */
+    .yvm-headline { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .yvm-headline .hi { color: var(--green); } .yvm-headline .lo { color: var(--accent); }
+    .yvm-sub { color: var(--muted); font-size: 13px; }
+
+    .chart-wrap { width: 100%; overflow: hidden; }
+    svg { display: block; width: 100%; height: auto; }
+    .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+    .empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+    .sugg { font-size: 13px; }
+    .sugg .side-give { color: var(--red); } .sugg .side-receive { color: var(--green); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back-link" href="index.html">← Back</a>
+    <div id="content"><p class="empty">Loading…</p></div>
+  </div>
+
+  <script>
+    const LS_TOKEN = 'fumble_session_token';
+    const POS_COLOR = { QB: 'var(--qb)', RB: 'var(--rb)', WR: 'var(--wr)', TE: 'var(--te)' };
+
+    function qs(name) { return new URLSearchParams(location.search).get(name); }
+    function fmtNum(n) { return n == null ? '—' : Math.round(n).toLocaleString(); }
+    function fmtDelta(d) {
+      if (d == null) return { txt: 'no history yet', cls: 'flat' };
+      if (d > 0) return { txt: '▲ ' + fmtNum(d), cls: 'up' };
+      if (d < 0) return { txt: '▼ ' + fmtNum(-d), cls: 'down' };
+      return { txt: 'flat', cls: 'flat' };
+    }
+
+    async function load() {
+      const id = qs('id');
+      const el = document.getElementById('content');
+      if (!id) { el.innerHTML = '<p class="empty">No player id.</p>'; return; }
+      const token = localStorage.getItem(LS_TOKEN);
+      if (!token) { el.innerHTML = '<p class="empty">Sign in on the home page to view player profiles.</p>'; return; }
+
+      let data;
+      try {
+        const res = await fetch(`/api/players/${id}/profile`, { headers: { 'X-Session-Token': token } });
+        if (res.status === 404) { el.innerHTML = '<p class="empty">Player profiles aren’t available yet.</p>'; return; }
+        if (res.status === 401) { el.innerHTML = '<p class="empty">Your session expired — sign in again on the home page.</p>'; return; }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        data = await res.json();
+      } catch (e) {
+        el.innerHTML = `<p class="empty">Couldn’t load this profile (${e.message}).</p>`; return;
+      }
+      el.innerHTML = render(data);
+    }
+
+    function render(d) {
+      const p = d.player, c = d.consensus || {};
+      const pos = (p.position || '').toUpperCase();
+      const d30 = fmtDelta(c.delta_30d);
+      const age = p.age != null ? `age ${p.age}` : '';
+      const exp = p.years_exp === 0 ? '(R)' : (p.years_exp != null ? `${p.years_exp} yr` : '');
+
+      let html = '';
+      html += `<div class="ph">
+        <span class="pos-chip pos-${pos}">${pos}</span>
+        <span class="pname">${esc(p.full_name || 'Unknown')}</span></div>`;
+      html += `<div class="pmeta">${[p.team, age, exp].filter(Boolean).join(' · ')}${p.injury_status ? ' · <span style="color:var(--red)">'+esc(p.injury_status)+'</span>' : ''}</div>`;
+
+      // hero
+      html += `<div class="hero"><span class="hero-val">${fmtNum(c.value)}</span>
+        <span class="delta ${d30.cls}">${d30.txt} <span style="color:var(--muted);font-weight:400">30d</span></span></div>`;
+      html += `<div class="hero-sub">Consensus value${c.tracking_since ? ' · tracking since ' + c.tracking_since : ''}</div>`;
+
+      // you vs market
+      if (d.you_vs_market) {
+        const y = d.you_vs_market, pct = Math.round(Math.abs(y.diff_pct) * 100);
+        let headline;
+        if (y.state === 'higher') headline = `You're <span class="hi">${pct}% higher</span> than market — buy-low target`;
+        else if (y.state === 'lower') headline = `You're <span class="lo">${pct}% lower</span> than market — sell-high candidate`;
+        else headline = `You're aligned with the market`;
+        html += `<div class="card"><h3>You vs Market</h3>
+          <div class="yvm-headline">${headline}</div>
+          <div class="yvm-sub">Your value ${fmtNum(y.your_value)} vs market ${fmtNum(y.market_value)} · from ${y.comparisons} ranking${y.comparisons===1?'':'s'}</div></div>`;
+      }
+
+      // chart
+      html += `<div class="card"><h3>Value History</h3>${chart(d.history || [])}</div>`;
+
+      // consensus detail
+      html += `<div class="card"><h3>Market Detail</h3>`;
+      html += rowHtml('7-day', fmtDelta(c.delta_7d).txt);
+      html += rowHtml('90-day', fmtDelta(c.delta_90d).txt);
+      if (c.high) html += rowHtml('All-time high', `${fmtNum(c.high.value)} (${c.high.date})`);
+      if (c.low)  html += rowHtml('All-time low',  `${fmtNum(c.low.value)} (${c.low.date})`);
+      html += `</div>`;
+
+      // recent suggestions
+      html += `<div class="card"><h3>Seen in your suggestions</h3>`;
+      if (!d.recent_suggestions || !d.recent_suggestions.length) {
+        html += `<p class="empty">Not in any of your recent trade suggestions.</p>`;
+      } else {
+        for (const s of d.recent_suggestions) {
+          const verb = s.side === 'give' ? '<span class="side-give">you send</span>' : '<span class="side-receive">you get</span>';
+          html += `<div class="row sugg"><span class="k">${verb} · ${esc(s.basis || '')}</span>
+            <span class="v">${(s.shown_at || '').slice(0,10)}</span></div>`;
+        }
+      }
+      html += `</div>`;
+      return html;
+    }
+
+    function rowHtml(k, v) { return `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`; }
+    function esc(s) { return String(s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+
+    // Dependency-free SVG sparkline: consensus (accent) + optional personal (green).
+    function chart(history) {
+      const pts = history.filter(h => h.consensus_value != null);
+      if (pts.length < 2) return `<p class="empty">Not enough history yet — charts begin once we’ve tracked a few days.</p>`;
+      const W = 660, H = 180, padL = 8, padR = 8, padT = 10, padB = 18;
+      const cons = pts.map(h => h.consensus_value);
+      const yours = pts.map(h => h.your_value);
+      const allY = cons.concat(yours.filter(v => v != null));
+      const min = Math.min(...allY), max = Math.max(...allY), span = (max - min) || 1;
+      const x = i => padL + (i / (pts.length - 1)) * (W - padL - padR);
+      const y = v => padT + (1 - (v - min) / span) * (H - padT - padB);
+      const line = arr => arr.map((v, i) => v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)
+                             .filter(Boolean).join(' ');
+      const hasYours = yours.some(v => v != null);
+      let svg = `<div class="chart-wrap"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Value history">`;
+      svg += `<polyline fill="none" stroke="var(--accent)" stroke-width="2" points="${line(cons)}"/>`;
+      if (hasYours) svg += `<polyline fill="none" stroke="var(--green)" stroke-width="2" stroke-dasharray="4 3" points="${line(yours)}"/>`;
+      svg += `<text x="${padL}" y="${H-4}" fill="var(--muted)" font-size="11">${pts[0].date}</text>`;
+      svg += `<text x="${W-padR}" y="${H-4}" fill="var(--muted)" font-size="11" text-anchor="end">${pts[pts.length-1].date}</text>`;
+      svg += `</svg></div>`;
+      svg += `<div class="legend"><span><span class="dot" style="background:var(--accent)"></span>Market</span>`;
+      if (hasYours) svg += `<span><span class="dot" style="background:var(--green)"></span>You</span>`;
+      svg += `</div>`;
+      return svg;
+    }
+
+    load();
+  </script>
+</body>
+</html>
