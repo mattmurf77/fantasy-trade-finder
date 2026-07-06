@@ -49,5 +49,5 @@
   "trade.preference_lists":          false,
   "trade.outlook_seed":             false,
   "trade.crown_asset":              false,
-  "trade.send_in_sleeper":          false
+  "trade.send_in_sleeper":          true
 }
