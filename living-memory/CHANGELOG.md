@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-07-06 (TestFlight build 21 — v1.3.0)](#2026-07-06-testflight-build-21--v130)
 - [2026-07-04 (manual trade calculator: live consensus mode)](#2026-07-04-manual-trade-calculator-live-consensus-mode)
 - [2026-06-10 (post-ship follow-ups)](#2026-06-10-post-ship-follow-ups)
 - [2026-05-21](#2026-05-21)
@@ -17,6 +18,13 @@
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
 
 ---
+
+## 2026-07-06 (TestFlight build 21 — v1.3.0)
+
+- **Send in Sleeper hardened + iOS build shipped to TestFlight.** Added 6 route tests locking the `/api/sleeper/link` + `/api/trades/propose` error contract (TC-API-002; suite 258 green); flag `trade.send_in_sleeper` stays OFF. `SLEEPER_TOKEN_KEY` set in Render + local (operator).
+- **EAS build 21 (v1.3.0) building + auto-submitting to TestFlight** from `trade-engine-v2` — carries the trade calculator (live + demo), Tiers fix, and the flag-OFF Send in Sleeper native module (`react-native-webview`). Build: `56e1a2da`.
+- ⚠️ **Version trap (build 20 aborted):** first trigger went out as 1.0.0 — the committed native `ios/` dir makes `app.json` version ignored (not `appVersionSource: remote` as NEXT.md#3 assumed). Cancelled mid-flight, set `Info.plist` + `MARKETING_VERSION` + app.json to 1.3.0 (commit `e291a09`), recorded as [GOTCHAS G-012](GOTCHAS.md). Android `versionName` has the same trap — see NEXT.md#3.
+- **Still deferred by design:** on-device Send-in-Sleeper test (needs this build on a device + throwaway Sleeper acct), the flag flip (ToS call), and slice-4 calculator Send surface.
 
 ## 2026-07-04 (manual trade calculator: live consensus mode)
 

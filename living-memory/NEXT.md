@@ -28,8 +28,8 @@
 
 ### Near-term
 
-3. **Bump iOS marketing version off 1.0.0 before the next build.**
-   *Why now:* eas.json uses `appVersionSource=remote`, so app.json bumps don't apply. Run `eas build:version:set` before the next `eas build` (operator or with operator present).
+3. **Align Android `versionName` to 1.3.0 before the next Android build.**
+   *Why now:* iOS marketing version is FIXED (2026-07-06 → 1.3.0, build 21 on TestFlight). The real cause wasn't `appVersionSource=remote` — it's the **committed native `ios/` dir**, which makes `app.json` version ignored (see [GOTCHAS G-012](GOTCHAS.md)). `android/app/build.gradle` `versionName` is the same trap and is likely still stale; fix it the same way when Android next builds.
 
 4. **Tune engine thresholds once metrics show signal.**
    *Why now:* deferred-by-design at ship time (~20 swipe labels). Revisit the learned acceptance model when trade_impressions volume supports it; Thompson sampling covers the interim.
