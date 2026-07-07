@@ -4256,11 +4256,26 @@ def propose_trade_to_sleeper():
     )
     try:
         result = _sleeper_write.propose_trade(token, req)
-    except _sleeper_write.SleeperAuthError:
-        delete_sleeper_credential(user_id)      # token dead → force reconnect
-        return jsonify({"error": "sleeper_expired"}), 409
+    except _sleeper_write.SleeperAuthError as e:
+        # Sleeper rejected the freshly-captured token (401/403 or an
+        # auth-flavored GraphQL error). Reconnecting re-captures the SAME
+        # token, so it would just loop — the client must NOT bounce back to
+        # the login webview here. Surface `sleeper_rejected` (distinct from
+        # `sleeper_expired`, which is a time-expiry the client CAN fix by
+        # reconnecting) plus a short detail so we can see WHY Sleeper says no.
+        log.warning("sleeper propose auth-rejected: %s", getattr(e, "detail", None))
+        delete_sleeper_credential(user_id)
+        return jsonify({
+            "error": "sleeper_rejected",
+            "detail": (str(getattr(e, "detail", "") or ""))[:200],
+        }), 409
     except _sleeper_write.SleeperWriteError as e:
-        return jsonify({"error": "sleeper_write_failed", "kind": e.kind}), 502
+        log.warning("sleeper propose write-failed [%s]: %s", e.kind, getattr(e, "detail", None))
+        return jsonify({
+            "error": "sleeper_write_failed",
+            "kind": e.kind,
+            "detail": (str(getattr(e, "detail", "") or ""))[:200],
+        }), 502
     return jsonify({
         "status": result.get("status") or "proposed",
         "transaction_id": result.get("transaction_id"),
