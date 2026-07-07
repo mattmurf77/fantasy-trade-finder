@@ -80,6 +80,7 @@ from .database import (
     create_trade_match, load_matches,
     load_awaiting_trades,
     record_match_disposition,
+    dismiss_match,
     upsert_league_preference, load_league_preference,
     load_asset_preferences, set_asset_preference, ASSET_PREF_LISTS,
     sync_players, needs_player_sync,
@@ -4509,6 +4510,41 @@ def get_awaiting_trades():
     except Exception as e:
         log.warning("get_awaiting_trades error: %s", e)
         return jsonify([])
+
+
+@app.route("/api/trades/matches/<int:match_id>/dismiss", methods=["POST"])
+def dismiss_trade_match(match_id):
+    """
+    POST /api/trades/matches/<match_id>/dismiss
+
+    Archive a mutual match from the caller's Matches inbox. Persisted and
+    per-user: it never returns for this user (survives sessions/redeploys),
+    the counterparty is unaffected, and NO ELO signal is applied. This is the
+    "Dismiss" CTA on mobile — distinct from a decline (which record_match_
+    disposition handles with a corrective ELO nudge).
+    """
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess.get("user_id")
+    if not g_user_id:
+        return jsonify({"error": "session not initialised"}), 400
+
+    result = dismiss_match(match_id=match_id, user_id=g_user_id)
+    if result["status"] == "not_found":
+        return jsonify({"error": "match not found"}), 404
+
+    try:
+        record_event(
+            g_user_id,
+            "match_dismissed",
+            source = "api",
+            props  = {"match_id": match_id},
+            **(getattr(g, "device_info", {}) or {}),
+        )
+    except Exception as ev_err:
+        log.warning("record_event(match_dismissed) failed: %s", ev_err)
+
+    return jsonify({"status": "dismissed", "match_id": match_id})
 
 
 @app.route("/api/trades/matches/<int:match_id>/disposition", methods=["POST"])

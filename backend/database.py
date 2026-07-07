@@ -173,6 +173,12 @@ trade_matches_table = Table("trade_matches", metadata,
     Column("user_b_decision",  String),   # accept | decline | NULL
     Column("user_a_decided_at", String),
     Column("user_b_decided_at", String),
+    # Per-user "archived from my inbox" flag (0|1|NULL). Distinct from
+    # decision: dismissing carries NO ELO signal and never reveals/affects
+    # the other party — it just hides the match from THIS user's Matches
+    # list permanently (see dismiss_match + load_matches filter).
+    Column("user_a_dismissed", Integer),
+    Column("user_b_dismissed", Integer),
 )
 
 # Composite indexes on (user, league) — both single-league and the new
@@ -759,6 +765,9 @@ def _migrate_db() -> None:
         ("trade_matches",      "user_b_decision",      "VARCHAR"),
         ("trade_matches",      "user_a_decided_at",    "VARCHAR"),
         ("trade_matches",      "user_b_decided_at",    "VARCHAR"),
+        # Per-user inbox dismissal (archive, no ELO) — see dismiss_match.
+        ("trade_matches",      "user_a_dismissed",     "INTEGER"),
+        ("trade_matches",      "user_b_dismissed",     "INTEGER"),
         ("league_preferences", "acquire_positions",    "TEXT"),
         ("league_preferences", "trade_away_positions", "TEXT"),
         # Feedback lifecycle status (operator-managed; NULL reads as 'new')
@@ -3533,6 +3542,15 @@ def load_matches(user_id: str, league_id: str | None = None) -> list[dict]:
         if not (is_a or is_b):
             continue
 
+        # Per-user dismissal: a match the caller archived stays out of THEIR
+        # inbox for good (the other party still sees it). getattr-guarded so
+        # a pre-migration row (column absent) is simply treated as not
+        # dismissed. Only the caller's own flag is consulted.
+        if is_a and getattr(r, "user_a_dismissed", None):
+            continue
+        if is_b and getattr(r, "user_b_dismissed", None):
+            continue
+
         try:
             a_give    = json.loads(r.user_a_give)
             a_receive = json.loads(r.user_a_receive)
@@ -3728,6 +3746,44 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
 # isn't available yet (e.g. during the very first init_db() call).
 _K_ACCEPT             = lambda: get_config().get("trade_k_accept",             20.0)
 _K_DECLINE_CORRECTION = lambda: get_config().get("trade_k_decline_correction", 20.0)
+
+
+def dismiss_match(match_id: int, user_id: str) -> dict:
+    """
+    Archive a trade match from ONE user's inbox — no ELO, no effect on the
+    counterparty. Sets the caller's `user_{a,b}_dismissed` flag so
+    `load_matches` filters it out for them from now on (survives sessions /
+    redeploys). Idempotent: re-dismissing an already-dismissed match is a
+    no-op 'ok'.
+
+    Returns: {'status': 'ok' | 'not_found', 'match_id': int}
+
+    Deliberately separate from record_match_disposition — dismissing is a
+    UI-hide, NOT a decline. A decline emits a corrective ELO signal
+    (winner=give, loser=receive, K=20); a dismiss must not touch rankings.
+    """
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(trade_matches_table).where(
+                trade_matches_table.c.id == match_id
+            )
+        ).fetchone()
+
+        if row is None:
+            return {"status": "not_found", "match_id": match_id}
+
+        is_a = row.user_a_id == user_id
+        is_b = row.user_b_id == user_id
+        if not (is_a or is_b):
+            return {"status": "not_found", "match_id": match_id}
+
+        col = "user_a_dismissed" if is_a else "user_b_dismissed"
+        conn.execute(
+            trade_matches_table.update()
+            .where(trade_matches_table.c.id == match_id)
+            .values(**{col: 1})
+        )
+        return {"status": "ok", "match_id": match_id}
 
 
 def record_match_disposition(
