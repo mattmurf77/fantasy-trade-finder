@@ -151,11 +151,16 @@ def test_propose_auth_error_drops_credential(client):
     rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1}]
     with patch.object(server, "_sleeper_get", return_value=rosters), \
          patch.object(server._sleeper_write, "propose_trade",
-                      MagicMock(side_effect=SleeperAuthError("dead"))):
+                      MagicMock(side_effect=SleeperAuthError("dead", detail="HTTP 403"))):
         r = c.post("/api/trades/propose", headers=_h(token), data=json.dumps({
             "league_id": LEAGUE, "their_roster_id": 2,
             "give_player_ids": ["1"], "receive_player_ids": ["2"]}))
-    assert r.status_code == 409 and r.get_json()["error"] == "sleeper_expired"
+    # Sleeper rejected the write → `sleeper_rejected` (NOT `sleeper_expired`,
+    # which the client would try to fix by reconnecting the same token). The
+    # rejection reason is surfaced so the client can show it.
+    body = r.get_json()
+    assert r.status_code == 409 and body["error"] == "sleeper_rejected"
+    assert body.get("detail") == "HTTP 403"
     # dead token was cleared → now shows disconnected
     assert c.get("/api/sleeper/link", headers=_h(token)).get_json()["connected"] is False
 

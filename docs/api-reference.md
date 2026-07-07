@@ -153,9 +153,10 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 |---|---|---|
 | 404 | `feature_disabled` | Flag off |
 | 409 | `sleeper_not_linked` | No stored token → prompt the webview login |
-| 409 | `sleeper_expired` | Token expired/rejected (also cleared server-side) → prompt reconnect |
+| 409 | `sleeper_expired` | Token time-expired → cleared server-side → prompt reconnect (a fresh token fixes it) |
+| 409 | `sleeper_rejected` | Sleeper's write API rejected the (valid-shape) token — 401/403 or auth GraphQL error; cleared server-side. Carries `detail`. Reconnecting re-captures the SAME token, so the client must NOT loop to login — surface the reason. |
 | 503 | `sleeper_unconfigured` | `SLEEPER_TOKEN_KEY` unset/invalid |
-| 502 | `sleeper_write_failed` | Sleeper rejected the trade → deep-link fallback |
+| 502 | `sleeper_write_failed` | Sleeper accepted auth but the write failed (non-auth). Carries `kind` + `detail`. |
 | 400 | `bad_request` / `roster_not_found` / `opponent_roster_not_found` | Malformed body / caller or counterparty not in that league |
 
 **v1 scope:** players (+ FAAB) only; draft picks are accepted only pre-encoded as `"orig,season,round,from,to"` strings.
