@@ -12,7 +12,9 @@ Captured facts (runbook §C1–C3):
   - endpoint : POST https://sleeper.com/graphql   (single endpoint, op per call)
   - headers  : content-type: application/json
                x-sleeper-graphql-op: <operationName>
-               authorization: Bearer <JWT>        (365-day HS256, self-contained)
+               authorization: <JWT>               (RAW token, NO "Bearer " prefix —
+                                                   365-day HS256; verified 2026-07-08)
+               + browser UA/origin/referer to clear Cloudflare (see _BROWSER_HEADERS)
   - propose_trade encodes *every* traded player in BOTH k_adds and k_drops,
     paired positionally with roster_ids:
         v_adds[i]  = roster_id that RECEIVES  k_adds[i]
@@ -251,7 +253,12 @@ def _post_graphql(op: str, token: str, body: dict, *, _opener=None) -> dict:
     request = urllib.request.Request(SLEEPER_GRAPHQL_URL, data=data, method="POST")
     request.add_header("content-type", "application/json")
     request.add_header("x-sleeper-graphql-op", op)
-    request.add_header("authorization", f"Bearer {token}")
+    # Sleeper's GraphQL wants the RAW token in `authorization` — NOT
+    # `Bearer <token>`. Verified 2026-07-08 against the live API by replaying a
+    # real request from a logged-in sleeper.com session: bare token → 200,
+    # `Bearer `-prefixed → 401 "Your token is invalid." (The 2026-07-02 capture
+    # recorded a Bearer prefix; Sleeper has since dropped it, or it was misread.)
+    request.add_header("authorization", token)
     # Look like a real sleeper.com fetch so Cloudflare doesn't 1010-ban us.
     for _hk, _hv in _BROWSER_HEADERS.items():
         request.add_header(_hk, _hv)
