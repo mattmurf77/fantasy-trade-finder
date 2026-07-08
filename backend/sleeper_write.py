@@ -46,7 +46,7 @@ _ENV_KEY = "SLEEPER_TOKEN_KEY"  # Fernet key (base64) — set in secrets.local.e
 # real browser UA + the origin/referer/accept headers a sleeper.com fetch
 # carries is what gets the server-side call past the 1010 block — the same
 # thing the browser (and other trade apps) send for free. Not auth: the
-# bearer token rides separately (see _post_graphql).
+# token rides separately in `authorization` (raw, no "Bearer " — see _post_graphql).
 _BROWSER_HEADERS = {
     "user-agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
