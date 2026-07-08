@@ -60,6 +60,32 @@ def _opener_returning(payload_obj):
     return _opener
 
 
+def test_request_carries_browser_headers_not_urllib():
+    """Cloudflare 1010 bans Python's default urllib signature. The Sleeper call
+    must present a real browser User-Agent + origin/referer so the server-side
+    request gets through — regression guard for the 1010 block."""
+    captured = {}
+
+    def _capturing_opener(request, timeout=None):
+        captured["ua"] = request.get_header("User-agent")
+        captured["origin"] = request.get_header("Origin")
+        captured["referer"] = request.get_header("Referer")
+        captured["auth"] = request.get_header("Authorization")
+        return _FakeResp(json.dumps({"data": {"propose_trade": {"transaction_id": "t1", "status": "proposed"}}}))
+
+    sw.propose_trade(
+        _fake_jwt({"user_id": "u1"}),
+        ProposeTradeRequest(league_id="999", my_roster_id=1, their_roster_id=2,
+                            give_player_ids=["10"], receive_player_ids=["20"]),
+        _opener=_capturing_opener,
+    )
+    assert captured["ua"] and "urllib" not in captured["ua"].lower()
+    assert "Mozilla" in captured["ua"]           # real browser signature
+    assert captured["origin"] == "https://sleeper.com"
+    assert captured["referer"] == "https://sleeper.com/"
+    assert captured["auth"].startswith("Bearer ")  # token still rides separately
+
+
 def _opener_http_error(code):
     def _opener(request, timeout=None):
         raise urllib.error.HTTPError(sw.SLEEPER_GRAPHQL_URL, code, "err", {}, io.BytesIO(b"{}"))
