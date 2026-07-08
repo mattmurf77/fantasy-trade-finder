@@ -65,7 +65,6 @@ def test_request_carries_browser_headers_not_urllib():
     must present a real browser User-Agent + origin/referer so the server-side
     request gets through — regression guard for the 1010 block."""
     captured = {}
-
     token = _fake_jwt({"user_id": "u1"})
 
     def _capturing_opener(request, timeout=None):
