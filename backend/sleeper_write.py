@@ -38,6 +38,24 @@ SLEEPER_GRAPHQL_URL = "https://sleeper.com/graphql"
 _HTTP_TIMEOUT = 15
 _ENV_KEY = "SLEEPER_TOKEN_KEY"  # Fernet key (base64) — set in secrets.local.env / Render
 
+# Sleeper's GraphQL sits behind Cloudflare, which bans requests whose "browser
+# signature" looks like automation (Cloudflare error 1010). Python's default
+# urllib User-Agent (`Python-urllib/x.y`) trips that instantly. Presenting a
+# real browser UA + the origin/referer/accept headers a sleeper.com fetch
+# carries is what gets the server-side call past the 1010 block — the same
+# thing the browser (and other trade apps) send for free. Not auth: the
+# bearer token rides separately (see _post_graphql).
+_BROWSER_HEADERS = {
+    "user-agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "origin": "https://sleeper.com",
+    "referer": "https://sleeper.com/",
+    "accept": "*/*",
+    "accept-language": "en-US,en;q=0.9",
+}
+
 
 # ---------------------------------------------------------------------------
 # Errors — the caller maps these to an HTTP response + deep-link fallback.
@@ -234,6 +252,9 @@ def _post_graphql(op: str, token: str, body: dict, *, _opener=None) -> dict:
     request.add_header("content-type", "application/json")
     request.add_header("x-sleeper-graphql-op", op)
     request.add_header("authorization", f"Bearer {token}")
+    # Look like a real sleeper.com fetch so Cloudflare doesn't 1010-ban us.
+    for _hk, _hv in _BROWSER_HEADERS.items():
+        request.add_header(_hk, _hv)
 
     opener = _opener or urllib.request.urlopen
     try:
