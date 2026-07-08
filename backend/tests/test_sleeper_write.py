@@ -65,6 +65,7 @@ def test_request_carries_browser_headers_not_urllib():
     must present a real browser User-Agent + origin/referer so the server-side
     request gets through — regression guard for the 1010 block."""
     captured = {}
+    token = _fake_jwt({"user_id": "u1"})
 
     def _capturing_opener(request, timeout=None):
         captured["ua"] = request.get_header("User-agent")
@@ -74,7 +75,7 @@ def test_request_carries_browser_headers_not_urllib():
         return _FakeResp(json.dumps({"data": {"propose_trade": {"transaction_id": "t1", "status": "proposed"}}}))
 
     sw.propose_trade(
-        _fake_jwt({"user_id": "u1"}),
+        token,
         ProposeTradeRequest(league_id="999", my_roster_id=1, their_roster_id=2,
                             give_player_ids=["10"], receive_player_ids=["20"]),
         _opener=_capturing_opener,
@@ -83,7 +84,9 @@ def test_request_carries_browser_headers_not_urllib():
     assert "Mozilla" in captured["ua"]           # real browser signature
     assert captured["origin"] == "https://sleeper.com"
     assert captured["referer"] == "https://sleeper.com/"
-    assert captured["auth"].startswith("Bearer ")  # token still rides separately
+    # Sleeper wants the RAW token — NOT `Bearer <token>` (verified vs live API).
+    assert captured["auth"] == token
+    assert not captured["auth"].lower().startswith("bearer ")
 
 
 def _opener_http_error(code):
