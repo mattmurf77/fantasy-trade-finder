@@ -71,14 +71,18 @@ Two layers, both read through `trade_service._cfg` at runtime:
 
 Legacy keys (Elo K-factors, KTC curve, package weights, outlook multipliers, tier multipliers, trade-math taxes, tier-engine knobs) are documented in [glossary.md](glossary.md) and listed by `GET /api/admin/config`.
 
-### Trios → tier calibration (Lever A) — `ranking_service._DEFAULT_CFG`, DB-seeded
+### Trios → tier calibration + variety — `ranking_service._DEFAULT_CFG`, DB-seeded
+
+The trio loop rotates among three strategies (never repeating the previous one), then anti-repeat suppresses recently-seen players so the same faces don't recur.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `trio_boundary_rate` | 0.5 | Fraction of trios that **probe a value-band boundary** — pairing a player just below a tier edge against one just above it, drawn from the FULL pool — instead of the legacy "tightest local trio". Boundary comparisons are the only ones that move a player across a tier (and thus meaningfully change value). **0 = legacy behaviour** (revert without a deploy). See [trios-tier-calibration-plan-2026-07-08.md](plans/trios-tier-calibration-plan-2026-07-08.md). |
+| `trio_boundary_rate` | 0.4 | Share of trios that **probe a value-band boundary** — a player just below a tier edge vs one just above, drawn from the FULL pool. The only comparison that moves a player across a tier. **0 = never boundary.** |
+| `trio_within_tier_rate` | 0.35 | Share of trios that compare **top-vs-bottom of the SAME tier** (rotating through tiers via a cursor) to nail intra-tier order. The remainder after `boundary + within` is the legacy **tightest** near-equal ordering. Set both rates to `0` for pure-legacy behaviour. |
 | `trio_boundary_margin` | 60.0 | Elo window on each side of a tier edge to pull boundary straddlers from. |
+| `trio_repeat_avoid` | 3.0 | Don't reuse a player seen in the last **N** served trios (fixes "same 2 players trio after trio"). Relaxes automatically when the pool is too small to honour it. |
 
-> Backend-only and **behavioural for all users** once deployed (changes which trio the Rank screen serves; Elo/value math is unchanged). Fully revertible live via `PUT /api/admin/config/trio_boundary_rate` → `0`.
+> Backend-only and **behavioural for all users** once deployed (changes which trio the Rank screen serves; Elo/value math is unchanged). Fully revertible live via `PUT /api/admin/config`. See [trios-tier-calibration-plan-2026-07-08.md](plans/trios-tier-calibration-plan-2026-07-08.md).
 
 ### Trade engine v2 (Tier 1) — `trade_service._DEFAULT_CFG`
 

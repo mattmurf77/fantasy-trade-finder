@@ -688,9 +688,11 @@ _MODEL_CONFIG_DEFAULTS = [
     ("mix_in_rate_max",        0.80,   "Maximum mix-in probability as top-tier comparisons saturate"),
     ("mix_in_saturation_pct",  0.70,   "Comparison saturation % at which mix-in rate reaches max"),
     ("mix_in_pre_unlock_start", 5.0,   "Interaction count at which pre-unlock mix-in begins"),
-    # ── Trios → tier calibration (Lever A) ───────────────────────────────
-    ("trio_boundary_rate",     0.5,   "Fraction of trios that probe a value-band boundary (cross-tier) instead of the tightest local trio; 0=legacy"),
+    # ── Trios → tier calibration + variety ───────────────────────────────
+    ("trio_boundary_rate",     0.4,   "Share of trios that probe a value-band boundary (cross-tier); 0=off"),
     ("trio_boundary_margin",  60.0,   "Elo window on each side of a tier edge to pull boundary straddlers from"),
+    ("trio_within_tier_rate",  0.35,  "Share of trios comparing top-vs-bottom of the SAME tier (intra-tier order); remainder after boundary+within = tightest local ordering"),
+    ("trio_repeat_avoid",      3.0,   "Avoid reusing a player seen in the last N served trios (anti-repeat); relaxes when the pool is too small"),
     # ── Trade ELO gap filter ─────────────────────────────────────────────
     ("trade_elo_gap_max",    250.0,   "Max user-ELO gap between give/receive sides before rejecting a trade (0=disabled)"),
     # ── Agent A8 — trade-math adjustments (flag-gated) ───────────────────

@@ -35,8 +35,9 @@ def svc(monkeypatch):
                for pid in _SEEDS]
     s = RankingService(players=players, seed_ratings=dict(_SEEDS))
     s._scoring_format = "1qb_ppr"
-    # Deterministic: always take the boundary path.
+    # Deterministic boundary path: 100% boundary, 0% within-tier.
     monkeypatch.setitem(rs._cfg, "trio_boundary_rate", 1.0)
+    monkeypatch.setitem(rs._cfg, "trio_within_tier_rate", 0.0)
     return s
 
 
