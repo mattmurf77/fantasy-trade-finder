@@ -688,9 +688,11 @@ _MODEL_CONFIG_DEFAULTS = [
     ("mix_in_rate_max",        0.80,   "Maximum mix-in probability as top-tier comparisons saturate"),
     ("mix_in_saturation_pct",  0.70,   "Comparison saturation % at which mix-in rate reaches max"),
     ("mix_in_pre_unlock_start", 5.0,   "Interaction count at which pre-unlock mix-in begins"),
-    # ── Trios → tier calibration (Lever A) ───────────────────────────────
-    ("trio_boundary_rate",     0.5,   "Fraction of trios that probe a value-band boundary (cross-tier) instead of the tightest local trio; 0=legacy"),
+    # ── Trios → tier calibration + variety ───────────────────────────────
+    ("trio_boundary_rate",     0.4,   "Share of trios that probe a value-band boundary (cross-tier); 0=off"),
     ("trio_boundary_margin",  60.0,   "Elo window on each side of a tier edge to pull boundary straddlers from"),
+    ("trio_within_tier_rate",  0.35,  "Share of trios comparing top-vs-bottom of the SAME tier (intra-tier order); remainder after boundary+within = tightest local ordering"),
+    ("trio_repeat_avoid",      3.0,   "Avoid reusing a player seen in the last N served trios (anti-repeat); relaxes when the pool is too small"),
     # ── Trade ELO gap filter ─────────────────────────────────────────────
     ("trade_elo_gap_max",    250.0,   "Max user-ELO gap between give/receive sides before rejecting a trade (0=disabled)"),
     # ── Agent A8 — trade-math adjustments (flag-gated) ───────────────────
@@ -723,6 +725,7 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── FB-47 finder targeting (flag trade.finder_targeting) ─────────────
     ("fit_consensus_weight",     0.5,   "FB-47: partner-fit blend weight on consensus-card composites"),
     ("fit_divergence_weight",    0.15,  "FB-47: partner-fit blend weight on divergence-card composites (tiebreak strength)"),
+    ("need_fit_weight",          0.30,  "FB-96: composite blend weight for automatic positional-need fit (0 disables the reordering)"),
     ("diversity_window_days",    7.0,   "A6: lookback window for league impression saturation counts"),
     ("diversity_user_cap",       3.0,   "A6: other-member count at which a target player is 'saturated'"),
     ("diversity_penalty",        0.6,   "A6: ordering-key multiplier applied to saturated targets"),
@@ -3840,11 +3843,25 @@ def record_match_disposition(
             return {"status": "not_found", "match_id": match_id,
                     "both_decided": False, "outcome": None, "elo_signals": []}
 
-        # Check already decided
+        # Check already decided. Include the existing decision + the match's
+        # current both_decided/outcome so the route can treat a repeat of the
+        # SAME decision as an idempotent success (feedback #77) instead of a
+        # blanket 409 — without re-emitting ELO signals.
         current_dec = row.user_a_decision if is_a else row.user_b_decision
         if current_dec is not None:
+            prior_both = (row.user_a_decision is not None
+                          and row.user_b_decision is not None)
+            prior_outcome = (
+                ("accepted" if (row.user_a_decision == "accept"
+                                and row.user_b_decision == "accept")
+                 else "declined")
+                if prior_both else None
+            )
             return {"status": "already_decided", "match_id": match_id,
-                    "both_decided": False, "outcome": None, "elo_signals": []}
+                    "existing_decision": current_dec,
+                    "league_id": row.league_id,
+                    "both_decided": prior_both, "outcome": prior_outcome,
+                    "elo_signals": []}
 
         # Write the decision
         if is_a:

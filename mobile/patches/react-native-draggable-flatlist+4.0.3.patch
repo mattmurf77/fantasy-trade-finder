@@ -1,0 +1,62 @@
+diff --git a/node_modules/react-native-draggable-flatlist/lib/module/hooks/useAutoScroll.js b/node_modules/react-native-draggable-flatlist/lib/module/hooks/useAutoScroll.js
+index 4923c20..cf45abb 100644
+--- a/node_modules/react-native-draggable-flatlist/lib/module/hooks/useAutoScroll.js
++++ b/node_modules/react-native-draggable-flatlist/lib/module/hooks/useAutoScroll.js
+@@ -17,7 +17,8 @@ export function useAutoScroll() {
+     containerSize,
+     activeCellSize,
+     hoverOffset,
+-    activeIndexAnim
++    activeIndexAnim,
++    touchTranslate
+   } = useAnimatedValues();
+   const hoverScreenOffset = useDerivedValue(() => {
+     return hoverOffset.value - scrollOffset.value;
+@@ -55,7 +56,15 @@ export function useAutoScroll() {
+   const shouldAutoScroll = useDerivedValue(() => {
+     const scrollTargetDiff = Math.abs(scrollTarget.value - scrollOffset.value);
+     const hasScrolledToTarget = scrollTargetDiff < SCROLL_POSITION_TOLERANCE;
+-    const isAtEdge = isAtTopEdge.value || isAtBottomEdge.value;
++
++    // FTF patch (feedback #82): only engage edge auto-scroll once the user
++    // has actually dragged TOWARD that edge (translation measured from the
++    // pickup point), so picking a row up inside the autoscroll threshold
++    // no longer starts scrolling immediately.
++    const MIN_TRANSLATE_TO_ENGAGE = 8;
++    const draggedTowardTop = touchTranslate.value <= -MIN_TRANSLATE_TO_ENGAGE;
++    const draggedTowardBottom = touchTranslate.value >= MIN_TRANSLATE_TO_ENGAGE;
++    const isAtEdge = isAtTopEdge.value && draggedTowardTop || isAtBottomEdge.value && draggedTowardBottom;
+     const topDisabled = isAtTopEdge.value && isScrolledUp.value;
+     const bottomDisabled = isAtBottomEdge.value && isScrolledDown.value;
+     const isEdgeDisabled = topDisabled || bottomDisabled;
+diff --git a/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx b/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx
+index d3add83..5f55b08 100644
+--- a/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx
++++ b/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx
+@@ -24,6 +24,7 @@ export function useAutoScroll() {
+     activeCellSize,
+     hoverOffset,
+     activeIndexAnim,
++    touchTranslate,
+   } = useAnimatedValues();
+ 
+   const hoverScreenOffset = useDerivedValue(() => {
+@@ -78,7 +79,17 @@ export function useAutoScroll() {
+     const scrollTargetDiff = Math.abs(scrollTarget.value - scrollOffset.value);
+     const hasScrolledToTarget = scrollTargetDiff < SCROLL_POSITION_TOLERANCE;
+ 
+-    const isAtEdge = isAtTopEdge.value || isAtBottomEdge.value;
++    // FTF patch (feedback #82): only engage edge auto-scroll once the user
++    // has actually dragged TOWARD that edge. `touchTranslate` measures pan
++    // translation from the pickup point, so a row picked up inside the
++    // autoscroll threshold (top/bottom of the page) no longer starts
++    // scrolling immediately at pickup.
++    const MIN_TRANSLATE_TO_ENGAGE = 8;
++    const draggedTowardTop = touchTranslate.value <= -MIN_TRANSLATE_TO_ENGAGE;
++    const draggedTowardBottom = touchTranslate.value >= MIN_TRANSLATE_TO_ENGAGE;
++    const isAtEdge =
++      (isAtTopEdge.value && draggedTowardTop) ||
++      (isAtBottomEdge.value && draggedTowardBottom);
+     const topDisabled = isAtTopEdge.value && isScrolledUp.value;
+     const bottomDisabled = isAtBottomEdge.value && isScrolledDown.value;
+     const isEdgeDisabled = topDisabled || bottomDisabled;

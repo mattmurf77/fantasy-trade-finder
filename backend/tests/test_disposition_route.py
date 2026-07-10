@@ -204,17 +204,63 @@ def test_decline_succeeds_and_persists(harness):
 
 
 # ---------------------------------------------------------------------------
-# (d) already-decided → 409
+# (d) already-decided:
+#   - CONFLICTING decision → 409
+#   - SAME decision → 200 idempotent success (feedback #77: clients ≤1.3.0
+#     show Accept/Decline on every match tile — including already-decided
+#     ones — and render any non-2xx as a generic "Action failed" toast, so a
+#     harmless re-accept must not error). No second ELO signal, no re-persist.
 # ---------------------------------------------------------------------------
 
-def test_already_decided_returns_409(harness):
+def test_already_decided_conflicting_decision_returns_409(harness):
     client, engine, service, token, save_swipes = harness
-    # The caller (user_b = ME) has already decided.
+    # The caller (user_b = ME) has already ACCEPTED; a DECLINE now conflicts.
     match_id = _insert_match(engine, league_id=ACTIVE_LEAGUE, b_decision="accept")
 
-    resp = _post(client, token, match_id, "accept")
+    resp = _post(client, token, match_id, "decline")
 
     assert resp.status_code == 409, resp.get_data(as_text=True)
+    assert save_swipes.call_count == 0
+
+
+def test_repeat_same_decision_is_idempotent_200(harness):
+    client, engine, service, token, save_swipes = harness
+    # The caller (user_b = ME) already accepted; partner hasn't decided yet.
+    match_id = _insert_match(engine, league_id=ACTIVE_LEAGUE, b_decision="accept")
+
+    before = len(service._trade_swipes)
+    resp = _post(client, token, match_id, "accept")
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert body["idempotent"] is True
+    assert body["both_decided"] is False
+    assert body["outcome"] is None
+    # `matches` must be ABSENT (not an empty list): the web client re-renders
+    # from data.matches when the key is present, and [] would wipe its inbox.
+    assert "matches" not in body
+    # No double ELO / persistence from the retry.
+    assert len(service._trade_swipes) == before
+    assert save_swipes.call_count == 0
+
+
+def test_repeat_after_both_decided_reports_outcome(harness):
+    client, engine, service, token, save_swipes = harness
+    # Both parties accepted earlier — a re-accept reports the settled outcome.
+    match_id = _insert_match(engine, league_id=ACTIVE_LEAGUE,
+                             a_decision="accept", b_decision="accept")
+
+    before = len(service._trade_swipes)
+    resp = _post(client, token, match_id, "accept")
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert body["idempotent"] is True
+    assert body["both_decided"] is True
+    assert body["outcome"] == "accepted"
+    assert len(service._trade_swipes) == before
     assert save_swipes.call_count == 0
 
 

@@ -289,6 +289,27 @@ def test_inject_likes_you_skips_stale_and_caps_at_three(mem_engine):
         assert "r9" not in c.receive_player_ids
 
 
+def test_inject_likes_you_skips_untouchable_give(mem_engine):
+    """Feedback #95 — a leaguemate's like whose mirror would send one of the
+    user's untouchables away is not injected; other likes still are."""
+    with mem_engine.begin() as conn:
+        # OPP wants g1 (the user's untouchable) — must be filtered.
+        _insert_like(conn, OPP, LEAGUE, give_ids=["r1"], recv_ids=["g1"])
+        # OPP wants g2 — fine.
+        _insert_like(conn, OPP, LEAGUE, give_ids=["r2"], recv_ids=["g2"])
+
+    svc = _mk_trade_service(["g1", "g2", "r1", "r2"])
+    deck = server._inject_likes_you_cards(
+        cards=[], trade_service=svc, user_id=ME, league_id=LEAGUE,
+        league=_mk_league(my_roster=["g1", "g2"], opp_roster=["r1", "r2"]),
+        user_roster=["g1", "g2"], seed_map={},
+        untouchable_ids={"g1"},
+    )
+
+    assert len(deck) == 1
+    assert deck[0].give_player_ids == ["g2"]
+
+
 # ---------------------------------------------------------------------------
 # (b+c) Full job flow: _run_trade_job — likes-you at position 0 + impressions
 # ---------------------------------------------------------------------------

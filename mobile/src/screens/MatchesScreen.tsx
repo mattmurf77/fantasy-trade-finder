@@ -10,14 +10,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { haptics } from '../utils/haptics';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { Button, Badge, Icon } from '../components/chalkline';
 import TradeCardComp from '../components/TradeCard';
 import Toast from '../components/Toast';
 import { getAllMatches, getAwaitingTrades, dismissMatch } from '../api/trades';
+import { getAssetPrefs, setAssetPref } from '../api/league';
 import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
 import { relativeTime } from '../utils/relativeTime';
 import type { TradeMatch, AwaitingTrade, Player } from '../shared/types';
 
@@ -102,6 +104,67 @@ export default function MatchesScreen() {
   const allMatches: TradeMatch[] = matchesQuery.data || [];
   const allAwaiting: AwaitingTrade[] = awaitingQuery.data || [];
 
+  // ── Untouchables (feedback #95, flag trade.preference_lists) ─────────
+  // Long-press a player on the YOU SEND side to mark/unmark them
+  // untouchable — the trade engine then never offers them from your
+  // roster. Matches are cross-league, so prefs are fetched per league
+  // present in either segment; `combine` memoizes the league→Set map so
+  // TradeCard's memo isn't busted every render.
+  const untouchablesEnabled = useFlag('trade.preference_lists');
+  const prefLeagueIds = useMemo(() => {
+    const ids = new Set<string>();
+    allMatches.forEach((m) => m.league_id && ids.add(m.league_id));
+    allAwaiting.forEach((a) => a.league_id && ids.add(a.league_id));
+    return Array.from(ids).sort();
+  }, [allMatches, allAwaiting]);
+
+  const untouchablesByLeague = useQueries({
+    queries: prefLeagueIds.map((lid) => ({
+      queryKey: ['asset-prefs', lid],
+      queryFn: () => getAssetPrefs(lid),
+      staleTime: 60_000,
+      enabled: untouchablesEnabled,
+    })),
+    combine: (results) => {
+      const map = new Map<string, Set<string>>();
+      results.forEach((r, i) => {
+        if (r.data) map.set(prefLeagueIds[i], new Set(r.data.untouchables || []));
+      });
+      return map;
+    },
+  });
+
+  const untouchableMutation = useMutation({
+    mutationFn: ({ leagueId, playerId, list }: {
+      leagueId: string;
+      playerId: string;
+      list: 'untouchable' | 'none';
+    }) => setAssetPref(leagueId, playerId, list),
+    onSuccess: (_res, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['asset-prefs', vars.leagueId] });
+      setToast({
+        msg: vars.list === 'untouchable'
+          ? 'Marked untouchable — never offered in trade ideas'
+          : 'Untouchable removed',
+        tone: 'success',
+      });
+    },
+    onError: () => {
+      setToast({ msg: 'Could not update untouchable — try again', tone: 'warn' });
+    },
+  });
+
+  function handleToggleUntouchable(leagueId: string, p: Player) {
+    if (untouchableMutation.isPending) return;
+    haptics.selection();
+    const marked = untouchablesByLeague.get(leagueId)?.has(p.id) ?? false;
+    untouchableMutation.mutate({
+      leagueId,
+      playerId: p.id,
+      list: marked ? 'none' : 'untouchable',
+    });
+  }
+
   const visibleMatches = useMemo(() => {
     if (filterLeagueId === 'all') return allMatches;
     return allMatches.filter((m) => m.league_id === filterLeagueId);
@@ -171,6 +234,14 @@ export default function MatchesScreen() {
             ? 'Trades where you and a leaguemate both said yes — across every league.'
             : "Trades you've liked — waiting on the other owner to swipe."}
         </Text>
+        {/* Untouchables affordance hint — long-press is invisible without
+            it. Only when the flag is on and there's something to press. */}
+        {untouchablesEnabled
+          && (segment === 'mutual' ? visibleMatches.length > 0 : visibleAwaiting.length > 0) ? (
+          <Text style={styles.hint}>
+            Hold a player you'd send to mark them untouchable.
+          </Text>
+        ) : null}
       </View>
 
       {/* Segment toggle. Two-pill control to flip between mutual matches
@@ -291,6 +362,16 @@ export default function MatchesScreen() {
                   onDismiss={() => handleDismiss(item)}
                   acting={dismissMutation.isPending}
                   showSend
+                  untouchableIds={
+                    untouchablesEnabled
+                      ? untouchablesByLeague.get(item.league_id)
+                      : undefined
+                  }
+                  onToggleUntouchable={
+                    untouchablesEnabled
+                      ? (p) => handleToggleUntouchable(item.league_id, p)
+                      : undefined
+                  }
                 />
               </View>
             )}
@@ -339,6 +420,16 @@ export default function MatchesScreen() {
                   variant="swipe"
                   data={awaitingToTradeCardShape(item, activeLeague?.league_id)}
                   showSend
+                  untouchableIds={
+                    untouchablesEnabled
+                      ? untouchablesByLeague.get(item.league_id)
+                      : undefined
+                  }
+                  onToggleUntouchable={
+                    untouchablesEnabled
+                      ? (p) => handleToggleUntouchable(item.league_id, p)
+                      : undefined
+                  }
                 />
               </View>
             )}
@@ -447,6 +538,7 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: space.lg, paddingVertical: space.md },
   title: { ...type.display },
   subtitle: { ...type.bodySm, marginTop: space.xs },
+  hint: { ...type.bodySm, color: chalk.faint, marginTop: space.xs },
 
   // flexGrow:0 prevents the horizontal ScrollView from stretching to fill
   // remaining vertical space when the body below is an empty-state View.

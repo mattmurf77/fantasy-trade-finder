@@ -27,6 +27,7 @@ import {
   shadowSheet,
 } from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
+import FormatToggle from '../components/FormatToggle';
 import PlayerCard from '../components/PlayerCard';
 import Toast from '../components/Toast';
 import {
@@ -35,9 +36,10 @@ import {
   getStreak,
   submitTrioRanking,
 } from '../api/rankings';
-import type { Position, Trio, RankingProgress } from '../shared/types';
+import type { Position, ScoringFormat, Trio, RankingProgress } from '../shared/types';
 import { useFlag } from '../state/useFeatureFlags';
 import { useSession } from '../state/useSession';
+import { useScoringFormat } from '../hooks/useScoringFormat';
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
 const THRESHOLD_FALLBACK = 10;
@@ -51,6 +53,10 @@ export default function RankScreen() {
   const navigation  = useNavigation();
   const activeFormat = useSession((s) => s.activeFormat);
   const leagueId = useSession((s) => s.league?.league_id ?? null);
+  // FB #80 — SF/1QB toggle. setFormat flips the server session + local
+  // mirrors and marks the choice explicit so the league-default applier
+  // (RootNav) won't override it this session.
+  const { setFormat, switching: formatSwitching } = useScoringFormat();
   const [position, setPosition] = useState<Position>('QB');
   const [selectionOrder, setSelectionOrder] = useState<('a' | 'b' | 'c')[]>([]);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
@@ -75,6 +81,17 @@ export default function RankScreen() {
 
   const qcEnabled      = useFlag('swipe.qc_compliments');
   const gestureEnabled = useFlag('swipe.gesture_audit');
+
+  // FB #80 — explicit format switch from the header toggle. On failure the
+  // local state is untouched (the toggle stays where it was) — just toast.
+  const onFormatChange = useCallback(
+    async (fmt: ScoringFormat) => {
+      haptics.selection();
+      const ok = await setFormat(fmt);
+      if (!ok) setToast({ msg: 'Could not switch format', tone: 'warn' });
+    },
+    [setFormat],
+  );
 
   // ── Data ────────────────────────────────────────────────────────────
   const trioQuery = useQuery({
@@ -331,6 +348,17 @@ export default function RankScreen() {
         ) : null}
 
         <Text style={styles.modeHint}>Trios · tap Rank below for more modes</Text>
+
+        {/* FB #80 — SF/1QB scoring-format toggle. Defaults to the selected
+            league's detected format (useLeagueFormatDefault in RootNav);
+            tapping here is an explicit in-session override so trios rank
+            the other format's board. Same slot as TiersScreen's: directly
+            above the position switcher. */}
+        <FormatToggle
+          value={activeFormat}
+          onChange={onFormatChange}
+          disabled={formatSwitching}
+        />
 
         {/* Position switcher — Chalkline segmented control */}
         <View style={styles.switcher}>

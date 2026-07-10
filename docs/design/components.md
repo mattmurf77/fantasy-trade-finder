@@ -53,6 +53,7 @@ Radius `--r-xs`, `label` type (11px Archivo 600 caps), 2px 6px padding. Construc
 |---|---|---|
 | **TopNav** | 56px bar, `--ink-0`, bottom hairline. Wordmark left (ice tick + `TRADE FINDER` condensed caps). Tabs: `label` type chalk-dim; active = chalk + 2px ice underline | `.header`, `.nav-tabs` |
 | **PositionTabs** | Segmented row, radius `--r-sm` group, 1px `--line` border. Active segment: `--ink-3` fill + 2px underline in that position's color. Overall tab: ice underline (not purple) | `.tab`, `.overall-tab` |
+| **FormatToggle** | PositionTabs construction, two segments (`1QB PPR` \| `SF TEP`), active underline always ice (action, not a data encoding). Sits directly above the position switcher on ranking screens (mobile Tiers + Trios). Defaults to the selected league's detected format; tapping is an explicit in-session override | mobile `FormatToggle` |
 | **FilterTabs** | Ghost text `label` chalk-dim; active chalk + ice underline | `.rookie-filter-tab` |
 
 ## Sheets, modals, menus
@@ -92,6 +93,9 @@ Replaces: `.auth-input`, `.league-select`.
 ## Tier bins & boards
 
 **TierBin** (`TierBin`, tiers screen): well of `--ink-0`, 1px dashed `--line-strong` border, radius `--r-md`; header = ice-tick label in tier color + Plex Mono count. Drag-over: border goes tier color solid.
+**Tier tiles** (mobile `TiersScreen` player rows): every tile carries the TierBadge for its **current zone** (tier colors are data encodings — `cross-client-invariants.md`); the 3px position rail is NOT a tier signal. Unassigned tiles carry no TierBadge.
+**Tier step buttons** (mobile `TiersScreen`, feedback #90): per-tile Icon Buttons (32×32, radius `--r-sm`, `chevron-up`/`chevron-down` in chalk-dim, pressed `--ink-3` fill) in a right-hand gutter; move that single player one whole tier with the same rules as the multi-select "Tier up / Tier down" actions (up → bottom of higher tier, down → top of lower tier; clamps at Elite/Bench with the disabled state at 45% opacity; never into/out of Unassigned).
+**Board expand toggle** (mobile `TiersScreen`, feedback #81): Icon Button with the `expand`/`collapse` glyphs on the board bar; expanded state hides the chrome above the board (title row, format + stat toggles, copy action, hint) while the position tabs, sticky tier banner and save bar stay.
 **Rookie board**: FilterTabs + hairline table rows; rank numerals Plex Mono.
 
 ## Extension

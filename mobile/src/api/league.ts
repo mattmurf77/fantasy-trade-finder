@@ -43,6 +43,36 @@ export async function saveLeaguePreferences(leagueId: string, prefs: LeaguePrefe
   });
 }
 
+// ── Asset preferences (untouchables + targets, backlog #2) ────────
+// Backend: GET/POST /api/league/asset-prefs. `untouchable` = never offer
+// this player FROM the caller's roster in generated trades (feedback #95);
+// `target` = bias suggestions toward acquiring the player. A player holds
+// at most one tag per league; list: 'none' removes the tag.
+// Enum strings are a cross-client contract (docs/cross-client-invariants.md).
+
+export interface AssetPrefs {
+  untouchables: string[];
+  targets: string[];
+}
+
+export async function getAssetPrefs(leagueId: string) {
+  return api.get<AssetPrefs>(
+    `/api/league/asset-prefs?league_id=${encodeURIComponent(leagueId)}`,
+  );
+}
+
+export async function setAssetPref(
+  leagueId: string,
+  playerId: string,
+  list: 'untouchable' | 'target' | 'none',
+) {
+  return api.post<{ ok: boolean } & AssetPrefs>('/api/league/asset-prefs', {
+    league_id: leagueId,
+    player_id: playerId,
+    list,
+  });
+}
+
 export interface LeagueCoverage {
   ranked: number;
   total: number;
@@ -102,6 +132,24 @@ export interface LeagueMember {
 export async function getLeagueMembers(leagueId: string) {
   return api.get<{ members: LeagueMember[] }>(
     `/api/league/members?league_id=${encodeURIComponent(leagueId)}`,
+  );
+}
+
+// ── League scoring format (auto-detected from Sleeper metadata) ────────
+// GET /api/league/format-stats — the backend detects each league's format
+// from Sleeper roster_positions / scoring_settings (SUPER_FLEX or 2 QB
+// slots, or TE-premium bonus → 'sf_tep'; otherwise '1qb_ppr') and stores
+// it on the leagues row. `default_scoring` is that detected value — the
+// league-driven format default (feedback #80 / #89). The per-format
+// ranking counts also on this payload are unused on mobile today.
+export interface LeagueFormatStats {
+  league_id: string;
+  default_scoring: ScoringFormat;
+  formats: Record<string, { ranking_count: number }>;
+}
+export async function getLeagueFormatStats(leagueId: string) {
+  return api.get<LeagueFormatStats>(
+    `/api/league/format-stats?league_id=${encodeURIComponent(leagueId)}`,
   );
 }
 
