@@ -1,5 +1,7 @@
 # Trios → Tier Calibration — Plan (2026-07-08, rev. 2 after pressure test)
 
+> **2026-07-10 addendum:** the **Pick Anchor wizard** (`POST /api/anchor/save` + mobile `PickAnchorScreen`) shipped as an *explicit-statement sibling* of Lever B: instead of inferring a band from a bracketing trio, the user states a player's worth directly in draft capital ("worth 2 firsts") and the Elo is pinned as an authoritative override (apply_tiers semantics, no cap). Trio-driven Lever B (ordinal anchor placement inside trios) remains design-only; if it lands, wizard-pinned players are overrides and must be treated as read-only reference points, per "Overrides win."
+
 *Reworking the Trios ranking loop so its outcomes drive **meaningful value change** and land players into the tiers we've defined — instead of small, local Elo nudges. **This is a personal-use calibration tool** (single operator ranking their own board), which lets us favour decisive, operator-tunable mechanics over anti-noise machinery built for a public audience. Grounded in `backend/ranking_service.py`, `backend/tier_config.json`, `backend/trade_service.py`. Design only, no code.*
 
 ---

@@ -1145,6 +1145,24 @@ class RankingService:
 
         self._version += 1
 
+    def apply_anchor(self, player_id: str, target_elo: float):
+        """
+        Pin one player's Elo from a pick-anchor statement (anchor wizard:
+        "worth 2 firsts" → a target Elo computed by the caller).
+
+        Same authoritative-override semantics as apply_tiers — the override
+        survives swipe replay (_compute_elo skips overridden ids) and the
+        caller persists it via save_tier_overrides. Returns the Player so
+        the route can report position/tier, or None when the id isn't in
+        the pool.
+        """
+        player = next((p for p in self._pool(None) if p.id == player_id), None)
+        if player is None:
+            return None
+        self._elo_overrides[player_id] = float(target_elo)
+        self._version += 1
+        return player
+
     def apply_reorder(self, position: Optional[str], ordered_ids: list[str]) -> None:
         """
         Apply a manual reorder by setting ELO overrides that match the

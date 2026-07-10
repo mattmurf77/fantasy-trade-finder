@@ -18,6 +18,24 @@ export interface CalcValueRow {
 
 export type CalcVerdict = 'even' | 'fair' | 'unfair';
 
+// Pick-denominated gap read: the package-value difference expressed as
+// generic-pick equivalents so the delta is an actionable counteroffer
+// ("add ≈ a Mid 2nd") instead of an abstract number.
+export interface CalcGapPick {
+  pick_id: string;
+  label: string; // e.g. "Mid 2nd Round Pick" — matches the pool's naming
+  value: number;
+}
+export interface CalcGap {
+  value: number;
+  /** The LIGHTER side — the one that needs the sweetener. Null when 0. */
+  add_to: 'give' | 'receive' | null;
+  /** Gap in units of a generic Mid 1st (the "base first"). */
+  firsts: number;
+  /** Nearest single generic pick — null when negligible or too big. */
+  pick_equivalent: CalcGapPick | null;
+}
+
 export interface CalcEvaluation {
   scoring_format: ScoringFormat;
   give_value: number;
@@ -28,6 +46,8 @@ export interface CalcEvaluation {
   fairness: number | null;
   verdict: CalcVerdict | null;
   favors: 'give' | 'receive' | 'even' | null;
+  /** Null until both sides have a valued asset. */
+  gap: CalcGap | null;
   per_player: { player_id: string; side: 'give' | 'receive'; value: number }[];
   dropped_player_ids: string[];
 }
@@ -56,6 +76,46 @@ export async function evaluateTrade(
       give_player_ids: givePlayerIds,
       receive_player_ids: receivePlayerIds,
       scoring_format: format,
+    },
+  });
+}
+
+// ── Mode B — in-league, both owners' boards ──────────────────────────────
+// Same endpoint, but WITH a session + {league_id, opponent_user_id}. The
+// server prices each side by the caller's AND the opponent's real rankings
+// (member_rankings) and returns per-board deltas + mutual_gain + basis. An
+// unranked opponent degrades to a consensus read (basis='consensus').
+export interface CalcEvaluationInLeague extends CalcEvaluation {
+  basis: 'divergence' | 'consensus';
+  opponent_user_id?: string;
+  opponent_username?: string | null;
+  opponent_has_rankings: boolean;
+  your_give_value: number;
+  your_receive_value: number;
+  their_give_value: number;
+  their_receive_value: number;
+  your_value_delta: number; // by YOUR board (positive = you gain)
+  their_value_delta: number; // by THEIR board (positive = they gain)
+  mutual_gain: boolean;
+}
+
+export async function evaluateTradeInLeague(
+  givePlayerIds: string[],
+  receivePlayerIds: string[],
+  format: ScoringFormat,
+  leagueId: string,
+  opponentUserId: string,
+  signal?: AbortSignal,
+): Promise<CalcEvaluationInLeague> {
+  return apiRequest('/api/trade/evaluate', {
+    method: 'POST',
+    signal, // authed — Mode B needs the session to read the caller's rankings
+    body: {
+      give_player_ids: givePlayerIds,
+      receive_player_ids: receivePlayerIds,
+      scoring_format: format,
+      league_id: leagueId,
+      opponent_user_id: opponentUserId,
     },
   });
 }

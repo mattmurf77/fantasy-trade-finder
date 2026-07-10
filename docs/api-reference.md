@@ -67,6 +67,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 | GET | `/api/tiers/stability` | Tier stability indicator |
 | POST | `/api/tiers/dismiss` | Dismiss a tier suggestion (writes `user_player_skips`) |
 | GET | `/api/tier-config` | Shared tier band table (`backend/tier_config.json`); used by web to bucket players |
+| POST | `/api/anchor/save` | Pick-anchor wizard (2026-07-10, mobile). Body `{player_id, anchor}`; `anchor` ∈ the cross-client enum `4_firsts, 3_firsts, 2_firsts, 1_first, 1_second, 1_third, 1_fourth, no_value` (see [cross-client-invariants.md](cross-client-invariants.md#pick-anchor-keys)). Pins the player's Elo to a pick-denominated value: single-pick anchors → that generic pick's Elo seed (`GENERIC_PICK_SEEDS`), N-firsts → N × value(Mid 1st) mapped back via `value_to_elo`, `no_value` → Elo 1100 (below every band → unranked). Position-uniform value by design; tier falls out of the band walk. Writes the same authoritative override as `/api/tiers/save`, persists via `save_tier_overrides`, publishes to `member_rankings`. Returns `{ok, player_id, anchor, elo, value, tier, scoring_format}` (`tier: null` = no value). 400 invalid anchor, 404 unknown player. |
 
 ## Trades
 
@@ -76,10 +77,11 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 | GET | `/api/trades/status` | Generation job status |
 | GET | `/api/trades` | List current trade cards |
 | POST | `/api/trades/swipe` | Like/pass a trade. Optional card-context fields (`give_player_ids`, `receive_player_ids`, `target_user_id`, `target_username`, `league_id`) let the server reconstruct the card after a restart wiped the in-memory deck (FB-46) |
+| POST | `/api/trades/flag` | Flag a card as a **bad trade** (feedback #85) — engine-quality signal, distinct from pass; writes `bad_trade_flags` for operator review. Body: `give_player_ids` + `receive_player_ids` (required), optional `trade_id` (pulls live engine telemetry when it still resolves), `league_id` (defaults to session league), `target_user_id`/`target_username`, `reason` (≤500 chars), and client-echoed telemetry fallback (`mismatch_score`, `fairness_score`, `composite_score`, `need_fit`, `partner_fit`, `basis`). Idempotent per (user, league, give set, receive set): `201 {ok, flag_id, created_at, duplicate:false}` on insert, `200 {…, duplicate:true}` on re-flag |
 | GET | `/api/trades/liked` | Trades the user liked |
 | GET | `/api/trades/matches` | Mutual matches (current league) |
 | GET | `/api/trades/matches/all` | Mutual matches across all leagues |
-| GET | `/api/trades/awaiting` | Cross-league trades the user liked that haven't matured into a mutual match yet ("Awaiting them"); bare array, mirrors `/api/trades/matches/all` shape |
+| GET | `/api/trades/awaiting` | Cross-league trades the user liked that haven't matured into a mutual match yet ("Awaiting them"); bare array, mirrors `/api/trades/matches/all` shape. One entry per underlying trade — repeat likes of the same give/receive sets across deck regenerations are deduped (#91) |
 | POST | `/api/trades/matches/<match_id>/disposition` | Accept/decline a match (records an ELO signal). Re-sending the **same** decision is idempotent → `200 {ok, idempotent: true, both_decided, outcome}` with **no** `matches` key and no second ELO signal (feedback #77 — clients ≤1.3.0 render Accept/Decline on already-decided tiles); a **conflicting** decision → 409 |
 | POST | `/api/trades/matches/<match_id>/dismiss` | Archive a match from the caller's inbox only — persisted, per-user, **ELO-neutral** (not a decline). Powers the mobile "Dismiss" CTA. 404 if the caller isn't a participant. |
 | POST | `/api/trades/propose` | **Flagged beta** (`trade.send_in_sleeper`, default off). Send a built trade to Sleeper as a real proposal — see [Send in Sleeper](#send-in-sleeper-flagged-beta) |
@@ -133,7 +135,7 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/trade/evaluate` | Dual-mode. **Mode A (public):** consensus values + fairness verdict for a hand-built trade. Body `{give_player_ids, receive_player_ids, scoring_format?, fairness_threshold?}` (≤6 ids/side; unknown ids dropped, reported in `dropped_player_ids`). Reuses `trade_optimizer._consensus_packages`/`_fairness_v3` (confidence=None → point-ratio gate). Returns `{give_value, receive_value, point_ratio, fairness, verdict: even\|fair\|unfair, favors, per_player, basis: "consensus", ...}`. One-sided → `verdict: null`. **Mode B (in-league — add `{league_id, opponent_user_id}`, requires a session):** prices each side by the caller's AND the opponent's real rankings (`member_rankings`), adding `{basis: divergence\|consensus, opponent_has_rankings, your_value_delta, their_value_delta, mutual_gain, your_/their_give_/receive_value}`. Unranked opponent → `basis: "consensus"`. This is the finder's mutual-gain math on one fixed package. |
+| POST | `/api/trade/evaluate` | Dual-mode. **Mode A (public):** consensus values + fairness verdict for a hand-built trade. Body `{give_player_ids, receive_player_ids, scoring_format?, fairness_threshold?}` (≤6 ids/side; unknown ids dropped, reported in `dropped_player_ids`). Reuses `trade_optimizer._consensus_packages`/`_fairness_v3` (confidence=None → point-ratio gate). Returns `{give_value, receive_value, point_ratio, fairness, verdict: even\|fair\|unfair, favors, per_player, basis: "consensus", ...}`. One-sided → `verdict: null`. **Mode B (in-league — add `{league_id, opponent_user_id}`, requires a session):** prices each side by the caller's AND the opponent's real rankings (`member_rankings`), adding `{basis: divergence\|consensus, opponent_has_rankings, your_value_delta, their_value_delta, mutual_gain, your_/their_give_/receive_value}`. Unranked opponent → `basis: "consensus"`. This is the finder's mutual-gain math on one fixed package. **`gap` (2026-07-10):** when both sides have a valued asset, the response includes `gap: {value, add_to: give\|receive\|null, firsts, pick_equivalent: {pick_id, label, value}\|null}` — the consensus package delta expressed in generic-pick terms (`firsts` = gap in units of a Mid 1st; `pick_equivalent` = nearest single generic pick, null when the gap is negligible (< ½ a Mid 4th) or bigger than any single pick). `add_to` is the LIGHTER side (the one needing the sweetener). One-sided → `gap: null`. |
 | GET | `/api/trade/values` | **Public.** Universal-pool player list with consensus values for `?scoring_format=` — `{players: [{id, name, position, team, age, value}]}` sorted value-desc, for pickers + client-side suggestion search. ETag + `Cache-Control: public, max-age=300`. |
 
 ## Send in Sleeper (flagged beta)
@@ -187,7 +189,7 @@ Verdict math is `trade_service.classify_verdict(give_value, receive_value)` (no 
 | POST | `/api/league/preferences` | Write outlook + position prefs |
 | GET | `/api/league/asset-prefs` | Read untouchables + targets (#2) → `{untouchables:[], targets:[]}` |
 | POST | `/api/league/asset-prefs` | Tag a player: body `{league_id, player_id, list: "untouchable"\|"target"\|"none"}`; single membership; invalidates the league's cached deck (#2) |
-| GET | `/api/league/summary` | League summary |
+| GET | `/api/league/summary` | League summary roll-up. Match tiles (#91): `matches_mutual` (non-dismissed `trade_matches` rows involving the caller, any status — equals the Matches tab's "Mutual matches" segment for the league) + `matches_awaiting` (caller's one-sided likes not yet matured — equals "Awaiting them"). Every trade is in exactly one bucket. Legacy `matches_pending`/`matches_accepted` (status-split, dismissal-blind) still emitted for pre-1.4 clients — do not use in new UI |
 | POST | `/api/league/scoring` | Set scoring format |
 | GET | `/api/league/coverage` | Member ranking coverage |
 | GET | `/api/league/member-unlock-states` | Per-member unlock badges |
@@ -263,6 +265,7 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 | PUT | `/api/admin/config/<key>` | Update one `model_config` value (hot-reloads ranking + trade math). **Auth: X-Cron-Secret** |
 | GET | `/api/admin/engine-metrics` | Trade-engine telemetry: like/pass rates by basis, likes-you, deck position, shape, league; match conversion (`?days=30&league_id=`). **Auth: X-Cron-Secret** |
 | PUT | `/api/feedback/admin/<id>/status` | Operator update for a feedback note: `status` (`new\|planned\|in_progress\|fixed\|shipped\|declined`) and/or `severity` (`bug\|polish\|idea`). **Auth: X-Cron-Secret** |
+| GET | `/api/trades/flags/admin` | Operator readback of bad-trade flags (`?since_id=N&limit=M`, max 500) → `{items, count, next_since_id}` — same paging contract as `/api/feedback/admin`. **Auth: X-Cron-Secret** |
 | GET | `/api/debug/log` | Last N debug ring-buffer entries (`?n=100`). **Auth: X-Cron-Secret** |
 
 ## Misc

@@ -35,6 +35,7 @@ import {
 // styles are Chalkline-ified. See the statToggle block in the StyleSheet.
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
+import { useNavigation } from '@react-navigation/native';
 import { TickLabel, Button, Icon } from '../components/chalkline';
 import FormatToggle from '../components/FormatToggle';
 import PlayerCard from '../components/PlayerCard';
@@ -81,6 +82,9 @@ const DRAG_ACTIVATION_MS = 220;
 
 export default function TiersScreen() {
   const queryClient = useQueryClient();
+  // Root-stack modal (PickAnchor) — nested-tab navigate bubbles up to the
+  // root stack; the AuthStack type isn't visible from here, hence the any.
+  const navigation = useNavigation<any>();
   const activeFormat = useSession((s) => s.activeFormat);
   // FB #80 — SF/1QB toggle. setFormat flips the server session + local
   // mirrors and marks the choice explicit so the league-default applier
@@ -830,6 +834,15 @@ export default function TiersScreen() {
             label="Reset to suggested"
             disabled={!rankingsQuery.data?.rankings}
             onPress={onResetToSuggested}
+            style={styles.headerBtn}
+          />
+          {/* Pick Anchor wizard — value players in draft-pick terms; the
+              anchors pin Elo overrides so tiers re-bucket on return. */}
+          <Button
+            variant="ghost"
+            compact
+            label="Anchors"
+            onPress={() => navigation.navigate('PickAnchor')}
             style={styles.headerBtn}
           />
         </View>

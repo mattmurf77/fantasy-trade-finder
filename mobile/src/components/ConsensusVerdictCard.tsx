@@ -68,6 +68,20 @@ export default function ConsensusVerdictCard({
             Value ratio {Math.round(evaluation.point_ratio * 100)}%
           </Text>
         ) : null}
+
+        {/* Pick-denominated gap: turn the delta into an actionable
+            counteroffer ("ask for ≈ a Mid 2nd back"). Hidden on dead-even
+            verdicts — naming a 4th under "Dead even" is noise. */}
+        {evaluation.verdict && evaluation.verdict !== 'even' &&
+         evaluation.gap && evaluation.gap.add_to ? (
+          <Text style={styles.gapNote}>
+            {evaluation.gap.pick_equivalent
+              ? evaluation.gap.add_to === 'give'
+                ? `You get more — evens out if you add ≈ a ${evaluation.gap.pick_equivalent.label}.`
+                : `You send more — ask for ≈ a ${evaluation.gap.pick_equivalent.label} back.`
+              : `Gap ≈ ${evaluation.gap.firsts.toFixed(1)} mid 1sts — more than any single pick closes.`}
+          </Text>
+        ) : null}
         {evaluation.dropped_player_ids.length > 0 ? (
           <Text style={styles.note}>
             {evaluation.dropped_player_ids.length} asset(s) had no consensus value and were
@@ -91,5 +105,6 @@ const styles = StyleSheet.create({
   meter: { flex: 1 },
   rowValue: { minWidth: 56, textAlign: 'right' },
   ratio: { ...type.data, textAlign: 'center', color: chalk.dim },
+  gapNote: { ...type.data, textAlign: 'center', color: chalk.base },
   note: { ...type.bodySm },
 });

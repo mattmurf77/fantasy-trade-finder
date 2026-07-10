@@ -132,6 +132,8 @@ from .database import (
     save_feedback,
     # GET /api/feedback/admin — operator readback, CRON_SECRET-protected
     list_feedback,
+    # Bad-trade flags (FB #85) — POST /api/trades/flag + admin readback
+    save_bad_trade_flag, list_bad_trade_flags,
     # "Send in Sleeper" — encrypted Sleeper write-token storage (flagged beta)
     upsert_sleeper_credential, get_sleeper_credential, delete_sleeper_credential,
 )
@@ -622,6 +624,97 @@ dp_values: dict[str, float] = {}
 g_universal_players: list[Player] = []
 g_universal_seed: dict[str, float] = {}
 
+# ── Generic draft-pick assets (shared constants) ───────────────────────────
+# Elo seeds for the 12 generic Early/Mid/Late picks (rounds 1–4) injected into
+# the universal pool, calibrated to typical dynasty trade values. Module-scoped
+# because they double as the reference ladder for pick-denominated features:
+# the pick-anchor wizard (/api/anchor/save) and the calculator's gap-to-pick
+# equivalence (/api/trade/evaluate `gap`). The MID column of each round is the
+# canonical "a 1st / a 2nd / …" anchor; a generic Mid 1st is the base unit.
+GENERIC_PICK_SEEDS: dict[tuple[int, str], float] = {
+    # (round, tier): elo_seed
+    (1, "Early"):  1720,   # ~top-3 pick: elite rookie prospect
+    (1, "Mid"):    1650,   # ~mid-1st: solid first-round value (BASE FIRST)
+    (1, "Late"):   1580,   # ~late-1st: still premium but less certain
+    (2, "Early"):  1520,   # ~early-2nd: solid starter potential
+    (2, "Mid"):    1460,   # ~mid-2nd: depth/upside piece
+    (2, "Late"):   1400,   # ~late-2nd: dart throw
+    (3, "Early"):  1360,   # ~early-3rd: longshot upside
+    (3, "Mid"):    1320,   # ~mid-3rd: roster filler
+    (3, "Late"):   1280,   # ~late-3rd: minimal value
+    (4, "Early"):  1260,   # ~early-4th: very speculative
+    (4, "Mid"):    1240,   # ~mid-4th: low value
+    (4, "Late"):   1220,   # ~late-4th: minimal
+}
+_PICK_ORDINALS = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}
+
+
+def generic_pick_label(rnd: int, tier: str) -> str:
+    """Display label matching the universal pool's pick naming."""
+    return f"{tier} {_PICK_ORDINALS[rnd]} Round Pick"
+
+
+def _pick_gap_equivalent(gap_value: float) -> dict:
+    """
+    Express a package-value gap in pick-denominated terms.
+
+    Returns {firsts, pick_equivalent}: `firsts` is the gap in units of a
+    generic Mid 1st (the base first), and `pick_equivalent` is the single
+    generic pick whose value is nearest the gap — or None when the gap is
+    negligible (< half a Mid 4th) or bigger than any single pick (then the
+    client leans on `firsts`, e.g. "≈ 2.3 firsts").
+    """
+    e2v = _trade_service_mod.elo_to_value
+    base_first = e2v(GENERIC_PICK_SEEDS[(1, "Mid")])
+    firsts = round(gap_value / base_first, 2)
+
+    values = {key: e2v(seed) for key, seed in GENERIC_PICK_SEEDS.items()}
+    min_val = min(values.values())
+    max_val = max(values.values())
+    pick = None
+    if gap_value >= min_val * 0.5 and gap_value <= max_val * 1.25:
+        (rnd, tier), v = min(
+            values.items(), key=lambda kv: abs(kv[1] - gap_value))
+        pick = {
+            "pick_id": f"generic_pick_{rnd}_{tier.lower()}",
+            "label":   generic_pick_label(rnd, tier),
+            "value":   round(v, 1),
+        }
+    return {"firsts": firsts, "pick_equivalent": pick}
+
+
+# ── Pick-anchor wizard (POST /api/anchor/save) ─────────────────────────────
+# Anchor keys are a cross-client enum (mobile sends them verbatim — see
+# docs/cross-client-invariants.md). Single-pick anchors pin directly to that
+# generic pick's Elo seed; multi-first anchors are VALUE multiples of the
+# base first (a generic Mid 1st) mapped back through value_to_elo — a player
+# "worth 2 firsts" is a value statement, not an Elo one. "no_value" pins
+# below the lowest tier band (→ unranked / no trade value).
+ANCHOR_NO_VALUE_ELO = 1100.0
+_ANCHOR_SINGLE_PICK = {
+    "1_first":  (1, "Mid"),
+    "1_second": (2, "Mid"),
+    "1_third":  (3, "Mid"),
+    "1_fourth": (4, "Mid"),
+}
+_ANCHOR_FIRST_MULTIPLES = {"4_firsts": 4.0, "3_firsts": 3.0, "2_firsts": 2.0}
+VALID_ANCHORS = (
+    set(_ANCHOR_FIRST_MULTIPLES) | set(_ANCHOR_SINGLE_PICK) | {"no_value"}
+)
+
+
+def _anchor_target_elo(anchor: str) -> float | None:
+    """Map an anchor key to its target Elo. None for unknown keys."""
+    if anchor == "no_value":
+        return ANCHOR_NO_VALUE_ELO
+    if anchor in _ANCHOR_SINGLE_PICK:
+        return float(GENERIC_PICK_SEEDS[_ANCHOR_SINGLE_PICK[anchor]])
+    mult = _ANCHOR_FIRST_MULTIPLES.get(anchor)
+    if mult is None:
+        return None
+    base_val = _trade_service_mod.elo_to_value(GENERIC_PICK_SEEDS[(1, "Mid")])
+    return _trade_service_mod.value_to_elo(mult * base_val)
+
 
 def build_universal_pool(
     sleeper_cache: dict | None = None,
@@ -719,30 +812,14 @@ def build_universal_pool(
     # ── Generic draft pick assets ────────────────────────────────────
     # Add Early/Mid/Late picks for rounds 1–4 as universal rankable assets.
     # These are generic (not league-specific) and let users rank draft capital
-    # against players.  Elo seeds are calibrated to match typical dynasty values.
-    _PICK_SEEDS = {
-        # (round, tier): elo_seed — calibrated to dynasty trade value expectations
-        (1, "Early"):  1720,   # ~top-3 pick: elite rookie prospect
-        (1, "Mid"):    1650,   # ~mid-1st: solid first-round value
-        (1, "Late"):   1580,   # ~late-1st: still premium but less certain
-        (2, "Early"):  1520,   # ~early-2nd: solid starter potential
-        (2, "Mid"):    1460,   # ~mid-2nd: depth/upside piece
-        (2, "Late"):   1400,   # ~late-2nd: dart throw
-        (3, "Early"):  1360,   # ~early-3rd: longshot upside
-        (3, "Mid"):    1320,   # ~mid-3rd: roster filler
-        (3, "Late"):   1280,   # ~late-3rd: minimal value
-        (4, "Early"):  1260,   # ~early-4th: very speculative
-        (4, "Mid"):    1240,   # ~mid-4th: low value
-        (4, "Late"):   1220,   # ~late-4th: minimal
-    }
-    _ORDINALS = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}
+    # against players. Elo seeds live at module scope (GENERIC_PICK_SEEDS)
+    # because the anchor wizard + calculator gap equivalence share them.
     # Distribute generic picks across position tabs so they mix in with players
     _PICK_POS = {1: "RB", 2: "WR", 3: "TE", 4: "QB"}
 
-    for (rnd, tier), seed_elo in _PICK_SEEDS.items():
-        ordinal = _ORDINALS[rnd]
+    for (rnd, tier), seed_elo in GENERIC_PICK_SEEDS.items():
         pick_id = f"generic_pick_{rnd}_{tier.lower()}"
-        label   = f"{tier} {ordinal} Round Pick"
+        label   = generic_pick_label(rnd, tier)
         pick_pos = _PICK_POS.get(rnd, "QB")
 
         # Compute a pick_value that matches the Elo seed (inverse of 1200 + pv*6)
@@ -761,7 +838,7 @@ def build_universal_pool(
         seeds[pick_id] = seed_elo
 
     log.info("✅ Universal player pool: %d players with DP value > 0 + %d generic picks",
-             len(players) - len(_PICK_SEEDS), len(_PICK_SEEDS))
+             len(players) - len(GENERIC_PICK_SEEDS), len(GENERIC_PICK_SEEDS))
     return players, seeds
 
 
@@ -2962,6 +3039,83 @@ def save_tiers_route():
         return jsonify({"error": "internal_error"}), 500
 
 
+@app.route("/api/anchor/save", methods=["POST"])
+def save_anchor_route():
+    """POST /api/anchor/save {player_id: '4046', anchor: '2_firsts'}
+
+    Pick-anchor wizard: pin a player's Elo to a pick-denominated value
+    statement ("worth 2 firsts", "worth a mid 2nd", "no trade value").
+    Anchors are position-uniform by design — the pick ladder drives the
+    same valuation across position groups, and tier assignment falls out
+    of the pinned Elo via the normal band walk (tier_for_elo). Writes the
+    same authoritative override apply_tiers uses, so the placement shows
+    up on Tiers, in trade math, and for leaguemates immediately.
+    """
+    sess = _require_initialized_session()
+    service   = sess["service"]
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    fmt       = _active_format(sess)
+    body      = request.get_json(force=True) or {}
+    player_id = str(body.get("player_id") or "").strip()
+    anchor    = str(body.get("anchor") or "").strip()
+
+    if not player_id:
+        return jsonify({"error": "player_id required"}), 400
+    if anchor not in VALID_ANCHORS:
+        return jsonify({"error": f"Invalid anchor: {anchor!r}",
+                        "valid_anchors": sorted(VALID_ANCHORS)}), 400
+
+    target_elo = _anchor_target_elo(anchor)
+
+    try:
+        player = service.apply_anchor(player_id, target_elo)
+        if player is None:
+            return jsonify({"error": f"Unknown player_id: {player_id}"}), 404
+
+        # Persist the override dict for THIS format (same path as tiers/save)
+        # so the anchor survives session rebuilds.
+        try:
+            save_tier_overrides(g_user_id, service._elo_overrides, scoring_format=fmt)
+        except Exception as db_err:
+            log.warning("save_tier_overrides after anchor failed: %s", db_err)
+
+        # Publish the updated Elo snapshot so leaguemates' trade generation
+        # sees the anchored value (mirrors tiers/save).
+        try:
+            if g_league and g_league.league_id not in ("league_demo",):
+                all_rankings = service.get_rankings(position=None)
+                ranking_payload = [
+                    {"player_id": rp.player.id, "elo": rp.elo}
+                    for rp in all_rankings.rankings
+                ]
+                upsert_member_rankings(
+                    user_id        = g_user_id,
+                    league_id      = g_league.league_id,
+                    rankings       = ranking_payload,
+                    scoring_format = fmt,
+                )
+        except Exception as db_err:
+            log.warning("member_rankings publish after anchor failed: %s", db_err)
+
+        tier = service.tier_for_elo(target_elo, player.position, fmt)
+        log.info("anchor/save [%s] %s → %s (elo %.0f, tier %s) for %s",
+                 fmt, player_id, anchor, target_elo, tier, g_user_id)
+
+        return jsonify({
+            "ok":             True,
+            "player_id":      player_id,
+            "anchor":         anchor,
+            "elo":            round(target_elo, 1),
+            "value":          round(_trade_service_mod.elo_to_value(target_elo), 1),
+            "tier":           tier,
+            "scoring_format": fmt,
+        })
+    except Exception as e:
+        log.error("anchor/save error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+
+
 @app.route("/api/tiers/status")
 def tiers_status_route():
     """GET /api/tiers/status — which positions have saved tiers for the active format."""
@@ -3431,6 +3585,21 @@ def trade_evaluate_route():
                 verdict = "fair" if fairness is not None else "unfair"
                 favors = "receive" if receive_value > give_value else "give"
 
+        # Pick-denominated gap read: how far apart the packages are, expressed
+        # as generic-pick equivalents ("≈ a Mid 2nd") so the delta is an
+        # actionable counteroffer instead of an abstract number. `add_to` is
+        # the LIGHTER side — the one that needs the sweetener.
+        gap = None
+        if give and recv:
+            gap_val = abs(receive_value - give_value)
+            gap = {
+                "value":  round(gap_val, 1),
+                "add_to": (None if gap_val == 0
+                           else "give" if give_value < receive_value
+                           else "receive"),
+                **_pick_gap_equivalent(gap_val),
+            }
+
         result = {
             "scoring_format":     fmt,
             "give_value":         give_value,
@@ -3439,6 +3608,7 @@ def trade_evaluate_route():
             "fairness":           fairness,
             "verdict":            verdict,
             "favors":             favors,
+            "gap":                gap,
             "per_player":         per_player,
             "dropped_player_ids": dropped,
             "basis":              "consensus",
@@ -4169,6 +4339,146 @@ def swipe_trade():
     except Exception as e:
         log.exception("swipe_trade failed")
         return jsonify({"error": "bad_request"}), 400
+
+
+# ---------------------------------------------------------------------------
+# Bad-trade flags (FB #85) — "this is a bad trade" on the swipe deck.
+# Distinct from a pass: a flag means "the engine got this one wrong". Rows
+# feed operator review to iterate on the trade-generation logic.
+# ---------------------------------------------------------------------------
+
+def _flag_num(value) -> float | None:
+    """Client-echoed telemetry fallback: accept real numbers, drop the rest."""
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+@app.route("/api/trades/flag", methods=["POST"])
+def flag_bad_trade():
+    """POST /api/trades/flag — flag a generated trade card as a bad trade.
+
+    Body:
+      give_player_ids      required, non-empty list of player ids (my give side)
+      receive_player_ids   required, non-empty list of player ids
+      trade_id             optional — used to pull authoritative engine
+                           telemetry from the in-memory deck when it's alive
+      league_id            optional — defaults to the session's active league
+      target_user_id / target_username   optional counterparty context
+      reason               optional free text (≤ 500 chars)
+      mismatch_score / fairness_score / composite_score / need_fit /
+      partner_fit / basis  optional client-echoed telemetry fallback, used
+                           only when the in-memory card is gone (restart)
+
+    Idempotent per (user, league, give set, receive set) — re-flagging the
+    same package returns 200 with `duplicate: true` instead of a new row.
+    """
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    body = request.get_json(force=True, silent=True) or {}
+
+    give_raw = body.get("give_player_ids")
+    recv_raw = body.get("receive_player_ids")
+    if not isinstance(give_raw, list) or not give_raw:
+        return jsonify({"error": "missing_field", "field": "give_player_ids"}), 400
+    if not isinstance(recv_raw, list) or not recv_raw:
+        return jsonify({"error": "missing_field", "field": "receive_player_ids"}), 400
+    give_ids = [str(p) for p in give_raw]
+    recv_ids = [str(p) for p in recv_raw]
+
+    league_id = body.get("league_id") or (g_league.league_id if g_league else None)
+    if not league_id:
+        return jsonify({"error": "missing_field", "field": "league_id"}), 400
+
+    reason_raw = body.get("reason")
+    reason = reason_raw.strip()[:500] if isinstance(reason_raw, str) and reason_raw.strip() else None
+
+    trade_id = body.get("trade_id") if isinstance(body.get("trade_id"), str) else None
+
+    # Engine telemetry: prefer the live in-memory card (authoritative),
+    # fall back to client-echoed values when the deck predates a restart.
+    card = None
+    if trade_id:
+        try:
+            card = sess["trade_svc"]._trade_cards.get(trade_id)
+        except Exception:
+            card = None
+    if card is not None:
+        mismatch_score  = card.mismatch_score
+        fairness_score  = card.fairness_score
+        composite_score = card.composite_score
+        need_fit        = getattr(card, "need_fit", None)
+        partner_fit     = getattr(card, "partner_fit", None)
+        basis           = getattr(card, "basis", "divergence")
+        target_user_id  = card.target_user_id
+        target_username = card.target_username
+    else:
+        mismatch_score  = _flag_num(body.get("mismatch_score"))
+        fairness_score  = _flag_num(body.get("fairness_score"))
+        composite_score = _flag_num(body.get("composite_score"))
+        need_fit        = _flag_num(body.get("need_fit"))
+        partner_fit     = _flag_num(body.get("partner_fit"))
+        basis           = body.get("basis") if body.get("basis") in ("divergence", "consensus") else None
+        target_user_id  = str(body["target_user_id"]) if body.get("target_user_id") else None
+        target_username = str(body["target_username"]) if body.get("target_username") else None
+
+    try:
+        result = save_bad_trade_flag(
+            user_id            = g_user_id,
+            username           = sess.get("display_name") or sess.get("username"),
+            league_id          = str(league_id),
+            target_user_id     = target_user_id,
+            target_username    = target_username,
+            give_player_ids    = give_ids,
+            receive_player_ids = recv_ids,
+            scoring_format     = _active_format(sess),
+            trade_id           = trade_id,
+            mismatch_score     = mismatch_score,
+            fairness_score     = fairness_score,
+            composite_score    = composite_score,
+            need_fit           = need_fit,
+            partner_fit        = partner_fit,
+            basis              = basis,
+            reason             = reason,
+        )
+    except Exception:
+        log.exception("save_bad_trade_flag failed")
+        return jsonify({"error": "internal"}), 500
+
+    status = 200 if result.get("duplicate") else 201
+    return jsonify({
+        "ok":         True,
+        "flag_id":    result["server_id"],
+        "created_at": result["created_at"],
+        "duplicate":  bool(result.get("duplicate")),
+    }), status
+
+
+@app.route("/api/trades/flags/admin", methods=["GET"])
+def list_bad_trade_flags_route():
+    """GET /api/trades/flags/admin?since_id=N&limit=M — operator readback of
+    bad-trade flags for engine-quality review.
+
+    Auth: same CRON_SECRET pattern as /api/feedback/admin (X-Cron-Secret
+    header). Local dev with no CRON_SECRET set: open. Prod without
+    CRON_SECRET: 503 (fail closed).
+
+    Response mirrors /api/feedback/admin:
+      { "items": [...], "count": N,
+        "next_since_id": <max id in items, or input since_id when empty> }
+    """
+    _require_cron_auth()
+    try:
+        since_id = int(request.args.get("since_id", 0))
+    except (TypeError, ValueError):
+        since_id = 0
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (TypeError, ValueError):
+        limit = 100
+    items = list_bad_trade_flags(since_id=since_id, limit=limit)
+    next_since = items[-1]["id"] if items else since_id
+    return jsonify({"items": items, "count": len(items), "next_since_id": next_since})
 
 
 # ---------------------------------------------------------------------------
@@ -5175,7 +5485,10 @@ def league_summary_route():
     """GET /api/league/summary?league_id=XXX
 
     Returns the roll-up shown on the League Summary page:
-      - matches_pending / matches_accepted (current user's)
+      - matches_mutual / matches_awaiting (current user's; mirror the
+        Matches tab's "Mutual matches" / "Awaiting them" segments — #91)
+      - matches_pending / matches_accepted (deprecated status-split counts,
+        kept for pre-1.4 clients)
       - leaguemates_total / _joined / _unlocked_1qb / _unlocked_sf
       - default_scoring, league_name
     """

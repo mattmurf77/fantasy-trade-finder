@@ -175,6 +175,25 @@ A player holds at most one tag per (user, league). If you add a list type, updat
 
 ---
 
+## Pick anchor keys
+
+The pick-anchor wizard's answer vocabulary (2026-07-10), defined in `backend/server.py:VALID_ANCHORS` and sent verbatim by mobile (`mobile/src/api/rankings.ts:AnchorKey`, buttons in `mobile/src/screens/PickAnchorScreen.tsx`):
+
+| Key | Button label | Pins to |
+|---|---|---|
+| `4_firsts` | 4 1sts | value_to_elo(4 × value(Mid 1st)) ≈ Elo 1927 |
+| `3_firsts` | 3 1sts | value_to_elo(3 × value(Mid 1st)) ≈ Elo 1870 |
+| `2_firsts` | 2 1sts | value_to_elo(2 × value(Mid 1st)) ≈ Elo 1789 |
+| `1_first` | 1 1st | Mid 1st seed (Elo 1650) |
+| `1_second` | 1 2nd | Mid 2nd seed (Elo 1460) |
+| `1_third` | 1 3rd | Mid 3rd seed (Elo 1320) |
+| `1_fourth` | 1 4th | Mid 4th seed (Elo 1240) |
+| `no_value` | No value | Elo 1100 — below every band → unranked |
+
+Anchor values are position-uniform on purpose (uniform valuation across position groups); tier assignment falls out of the per-position/format band walk. The Elo seeds come from `GENERIC_PICK_SEEDS` (`backend/server.py`) — if those seeds or the anchor set change, update the backend constant, the mobile union type + button rows, and this table. The ≈-Elo values above assume the default `elo_value_*` config (base 1000, ref 1500, k 0.005).
+
+---
+
 ## Feedback lifecycle statuses
 
 `app_feedback.status` vocabulary, defined in `backend/database.py:FEEDBACK_STATUSES` and mirrored by the mobile inbox chips (`mobile/src/screens/FeedbackInboxScreen.tsx:STATUS_LABEL`):

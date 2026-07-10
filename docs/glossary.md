@@ -21,6 +21,12 @@ Domain terms used throughout the codebase. Add a term when new jargon appears.
 
 **Tier band** — Bucket of similar Elo ratings rendered as a labeled, colored badge (Elite gold / Starter green / Solid blue / Depth purple / Bench gray). Cutoffs in client-side `tierBands.ts` and equivalents — keep in sync.
 
+**Base first** — The unit of the pick-denominated features (2026-07-10, adopted from the TI-CALC teardown, [docs/competitor-teardown-ti-calc.md](competitor-teardown-ti-calc.md)): a **generic Mid 1st Round Pick**, Elo seed 1650 in `GENERIC_PICK_SEEDS` (`backend/server.py`), ≈ 2117 in value space. "Worth 2 firsts" = 2 × value(base first).
+
+**Pick anchor** — An explicit user statement of a player's worth in draft capital ("worth 2 firsts", "worth a mid 2nd", "no trade value"), made in the mobile Pick Anchor wizard (`PickAnchorScreen`, entered from Tiers) and saved via `POST /api/anchor/save`. Pins the player's Elo as an authoritative override — the same mechanism as a tier drag. Anchor VALUES are position-uniform by design (the pick ladder drives uniform valuation across position groups); the resulting tier is still per-position/format via the band walk. The explicit-user-statement sibling of the trio calibration plan's Lever B (ordinal anchor placement).
+
+**Pick-gap equivalent** — The `gap` field on `/api/trade/evaluate`: the consensus package delta re-expressed as draft capital — `firsts` (units of the base first) plus the nearest single generic pick — so a verdict becomes an actionable counteroffer ("ask for ≈ a Mid 2nd back"). Rendered in the calculator's `ConsensusVerdictCard`.
+
 **Team outlook** — User's strategic mode for a league (`league_preferences.team_outlook`): `championship`, `contender`, `rebuilder`, `jets`, `not_sure`. Since the trade-engine v2 rebuild, outlook feeds the **outlook blend** (see below) — the old post-hoc score multiplier (`team_outlook_multiplier`) is deleted, and the legacy engine path ignores outlook entirely. The historic multiplier keys (`boost_strong`, `vet_age`, …) still exist in `model_config` but are unused.
 
 **Package weights / diminishing returns** — Multi-player trade sides apply diminishing weights so "5 bench guys for an elite WR" doesn't look equal. From `model_config`: `package_weight_1..5 = 1.00, 0.75, 0.55, 0.40, 0.28`.
@@ -51,6 +57,8 @@ Domain terms used throughout the codebase. Add a term when new jargon appears.
 
 **Likes-you card** — Tier 2 (`trade.likes_you`): a card whose mirror a league-mate already liked in the last 90 days (and which is still roster-valid). Flagged `likes_you: true`, boosted/pinned to the top of the deck (max 3 injections), rendered with the "👀 They're interested" pill.
 
+**Bad-trade flag** — Feedback #85: the "Bad trade?" tertiary action under the TradesHome swipe deck. Distinct from a **pass** (not interested — an ELO signal): a flag means "the engine got this one wrong" and writes a `bad_trade_flags` row (package + counterparty + engine telemetry snapshot, `POST /api/trades/flag`) for operator review via `GET /api/trades/flags/admin`, feeding iteration on the trade-generation logic. Flagging also advances the deck like a pass (a flagged trade is implicitly not interesting). One flag per (user, league, give set, receive set); carries no ELO signal itself.
+
 **Sweetener** — Tier 3 (`trade_engine.v3`): a low-value asset added to the under-paying side of a *near-miss-fair* trade to bring it into the fairness band. Serialized as `sweetener: {player_id, side}` (the player is already in give/receive); clients render "+ {name} added to balance the deal".
 
 **Thompson deck ordering** — Tier 2 amendment A5 (`trade.thompson_deck`): instead of a learned acceptance model (no training data yet — ~20 labels), the deck order is exploration-randomized by drawing one Beta(1+likes, 2+passes) sample per card *shape* (`1x1`, `2x1`, …) from the user's own decision history and multiplying ordering keys by a bounded (0.5, 1.5) factor. Deterministically seeded per job.
@@ -71,7 +79,9 @@ Domain terms used throughout the codebase. Add a term when new jargon appears.
 
 **Smart matchup** — Claude-powered matchup selection. Generates ~10 candidate pairs (nearby Elo, not yet compared), asks Claude to pick the most dynasty-informative. Toggle via `smart_matchup_enabled` (1.0). Falls back to algorithmic without `ANTHROPIC_API_KEY`.
 
-**Mutual gain trade / Trade match** — Both sides improve by their own Elo math. When both users like mirrored trades, a `trade_matches` row is created (status `pending`) and both inboxes get a `trade_match` notification.
+**Mutual gain trade / Trade match** — Both sides improve by their own Elo math. When both users like mirrored trades, a `trade_matches` row is created (status `pending`) and both inboxes get a `trade_match` notification. Status is a *disposition* state (`pending` → `accepted`/`declined` once both parties decide), not a separate kind of trade — user-facing surfaces bucket by segment (mutual vs awaiting), never by status (#91).
+
+**Awaiting them** — A trade the user liked whose counterparty hasn't liked the mirror yet: a `trade_decisions` like with no `trade_matches` row for the same league + player sets. Second segment on the Matches screen (`/api/trades/awaiting`) and the League tab's second Matches tile (`matches_awaiting`). A trade is either awaiting *or* a mutual match, never both; it leaves this bucket the moment the match row is created.
 
 **Mirrored trade** — Same player set viewed from both sides: A's "give X get Y" and B's "give Y get X" are mirrors.
 

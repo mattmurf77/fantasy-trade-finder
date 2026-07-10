@@ -159,6 +159,43 @@ export async function saveTiers(
   });
 }
 
+// ── Pick-anchor wizard ─────────────────────────────────────────────────
+// Anchor keys are a cross-client enum shared with the backend
+// (VALID_ANCHORS in backend/server.py — see docs/cross-client-invariants.md).
+export type AnchorKey =
+  | '4_firsts'
+  | '3_firsts'
+  | '2_firsts'
+  | '1_first'
+  | '1_second'
+  | '1_third'
+  | '1_fourth'
+  | 'no_value';
+
+export interface AnchorSaveResponse {
+  ok: true;
+  player_id: string;
+  anchor: AnchorKey;
+  elo: number;
+  value: number;
+  /** Tier the pinned Elo lands in — null = below every band (no value). */
+  tier: string | null;
+  scoring_format: string;
+}
+
+// POST /api/anchor/save — pin a player's value to a pick-denominated
+// statement ("worth 2 firsts"). The value is position-uniform by design
+// (the pick ladder drives uniform valuation across position groups); the
+// tier falls out of the pinned Elo via the server's band walk. Sends
+// X-Scoring-Format so the override lands on the format the wizard shows.
+export async function saveAnchor(playerId: string, anchor: AnchorKey) {
+  return api.post<AnchorSaveResponse>(
+    '/api/anchor/save',
+    { player_id: playerId, anchor },
+    { headers: await formatHeader() },
+  );
+}
+
 // GET /api/tier-config — shared tier-band table, single source of truth
 // across backend (apply_tiers / tier_for_elo) and frontend buckets. The
 // mobile app fetches this once at boot and caches it via the module-level

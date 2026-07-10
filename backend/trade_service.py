@@ -302,6 +302,19 @@ def elo_to_value(elo: float) -> float:
     )
 
 
+def value_to_elo(value: float) -> float:
+    """
+    Inverse of elo_to_value: map a dynasty value back onto the Elo scale.
+
+    Used by the pick-anchor wizard, where a user statement like "worth
+    2 firsts" is a VALUE statement (2 × value of a generic mid-1st) that
+    must be pinned as an Elo override. Clamps at a tiny positive value so
+    a zero/negative input can't blow up the log.
+    """
+    v = max(float(value), 1e-9)
+    return _c("elo_value_ref") + math.log(v / _c("elo_value_base")) / _c("elo_value_k")
+
+
 def package_value_v2(values: list[float], v_max: float,
                      n_other: int | None = None) -> float:
     """

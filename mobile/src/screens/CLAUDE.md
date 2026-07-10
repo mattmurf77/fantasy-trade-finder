@@ -9,6 +9,7 @@ One file per top-level route.
 | `LeagueScreen` | League home / settings |
 | `RankScreen` | 3-player swipe matchup loop |
 | `TiersScreen` | Tiered roster view |
+| `PickAnchorScreen` | Pick Anchor wizard (root-stack modal, entered from Tiers) — value one player at a time in draft-pick terms via `/api/anchor/save` |
 | `ManualRanksScreen` | Editable drag/tap rank board — labeled "Overall Ranks" in the UI |
 | `TradesScreen` | Trade card browser |
 | `TradeCalculatorScreen` | Manual trade builder — "Calculator" pill in Trades. Live mode: real consensus values via /api/trade/*; Demo mode: mock dual-board league |
