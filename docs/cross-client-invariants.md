@@ -80,6 +80,23 @@ Mapping lives in `get_pref_bucket()` in `backend/server.py`. **Add a new kind in
 
 ---
 
+## Match bucket labels & semantics (feedback #91)
+
+Every trade a user has acted on sits in exactly **one** of two buckets, everywhere they're counted or listed:
+
+| Bucket | `/api/league/summary` key | Definition | Sub/definition copy |
+|---|---|---|---|
+| Mutual matches | `matches_mutual` | Non-dismissed `trade_matches` rows involving the caller, **any** disposition status | `Liked by both sides` |
+| Awaiting them | `matches_awaiting` | Caller's one-sided likes not yet matured into a match (repeat likes of the same trade deduped) | `Your like, waiting on theirs` |
+
+A trade leaves "Awaiting them" and becomes a mutual match the moment the `trade_matches` row is created; disposition status never moves a match between buckets (see `backend/tests/test_league_summary_buckets.py`). The League tab's two Matches tiles must always equal the Matches screen's two segments. Casing follows each client's local convention (mobile sentence case "Mutual matches" / "Awaiting them"; web title-cases summary-card labels), but the wording and sub copy are shared.
+
+The legacy `matches_pending` / `matches_accepted` keys (status-split, dismissal-blind) are still emitted for pre-1.4 clients — **do not read them in new UI.**
+
+**Locations:** `backend/server.py` (`/api/league/summary`), `mobile/src/screens/LeagueScreen.tsx` + `mobile/src/screens/MatchesScreen.tsx`, `web/js/app.js` (`renderLeagueSummary`).
+
+---
+
 ## Trade-card copy strings (v2 engine UI)
 
 Shared user-facing strings rendered by both mobile and web — must stay character-identical:
