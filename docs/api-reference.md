@@ -72,7 +72,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/trades/generate` | Generate trade cards. Optional `pinned_give_players` ("what can I get for X") and, behind `trade.finder_targeting`, `pinned_receive_players` ("what does X cost") — pinned jobs bypass the cache. Cards may carry `partner_fit` (0–1 counterparty positional fit) when targeting is active |
+| POST | `/api/trades/generate` | Generate trade cards. Optional `pinned_give_players` ("what can I get for X") and, behind `trade.finder_targeting`, `pinned_receive_players` ("what does X cost") — pinned jobs bypass the cache. Cards may carry `partner_fit` (0–1 counterparty positional fit) when targeting is active, and `need_fit` (0–1 automatic positional-need fit, FB-96) when `trade.need_fit` is on |
 | GET | `/api/trades/status` | Generation job status |
 | GET | `/api/trades` | List current trade cards |
 | POST | `/api/trades/swipe` | Like/pass a trade. Optional card-context fields (`give_player_ids`, `receive_player_ids`, `target_user_id`, `target_username`, `league_id`) let the server reconstruct the card after a restart wiped the in-memory deck (FB-46) |
@@ -80,7 +80,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 | GET | `/api/trades/matches` | Mutual matches (current league) |
 | GET | `/api/trades/matches/all` | Mutual matches across all leagues |
 | GET | `/api/trades/awaiting` | Cross-league trades the user liked that haven't matured into a mutual match yet ("Awaiting them"); bare array, mirrors `/api/trades/matches/all` shape |
-| POST | `/api/trades/matches/<match_id>/disposition` | Accept/decline a match (records an ELO signal) |
+| POST | `/api/trades/matches/<match_id>/disposition` | Accept/decline a match (records an ELO signal). Re-sending the **same** decision is idempotent → `200 {ok, idempotent: true, both_decided, outcome}` with **no** `matches` key and no second ELO signal (feedback #77 — clients ≤1.3.0 render Accept/Decline on already-decided tiles); a **conflicting** decision → 409 |
 | POST | `/api/trades/matches/<match_id>/dismiss` | Archive a match from the caller's inbox only — persisted, per-user, **ELO-neutral** (not a decline). Powers the mobile "Dismiss" CTA. 404 if the caller isn't a participant. |
 | POST | `/api/trades/propose` | **Flagged beta** (`trade.send_in_sleeper`, default off). Send a built trade to Sleeper as a real proposal — see [Send in Sleeper](#send-in-sleeper-flagged-beta) |
 
@@ -133,7 +133,7 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/trade/evaluate` | **Public.** Consensus values + fairness verdict for a hand-built trade. Body `{give_player_ids, receive_player_ids, scoring_format?, fairness_threshold?}` (≤6 ids/side; unknown ids dropped and reported in `dropped_player_ids`). Reuses `trade_optimizer._consensus_packages`/`_fairness_v3` (confidence=None → point-ratio gate). Returns `{give_value, receive_value, point_ratio, fairness, verdict: even\|fair\|unfair, favors, per_player, ...}`. One-sided requests return package values with `verdict: null`. |
+| POST | `/api/trade/evaluate` | Dual-mode. **Mode A (public):** consensus values + fairness verdict for a hand-built trade. Body `{give_player_ids, receive_player_ids, scoring_format?, fairness_threshold?}` (≤6 ids/side; unknown ids dropped, reported in `dropped_player_ids`). Reuses `trade_optimizer._consensus_packages`/`_fairness_v3` (confidence=None → point-ratio gate). Returns `{give_value, receive_value, point_ratio, fairness, verdict: even\|fair\|unfair, favors, per_player, basis: "consensus", ...}`. One-sided → `verdict: null`. **Mode B (in-league — add `{league_id, opponent_user_id}`, requires a session):** prices each side by the caller's AND the opponent's real rankings (`member_rankings`), adding `{basis: divergence\|consensus, opponent_has_rankings, your_value_delta, their_value_delta, mutual_gain, your_/their_give_/receive_value}`. Unranked opponent → `basis: "consensus"`. This is the finder's mutual-gain math on one fixed package. |
 | GET | `/api/trade/values` | **Public.** Universal-pool player list with consensus values for `?scoring_format=` — `{players: [{id, name, position, team, age, value}]}` sorted value-desc, for pickers + client-side suggestion search. ETag + `Cache-Control: public, max-age=300`. |
 
 ## Send in Sleeper (flagged beta)

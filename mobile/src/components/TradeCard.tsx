@@ -1,12 +1,12 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { ink, chalk, flare, semantic, space, radii, type } from '../theme/chalkline';
-import { TickLabel, Button, Meter, fairnessColor, Icon } from './chalkline';
+import { TickLabel, Button, Meter, fairnessColor, Icon, Badge } from './chalkline';
 import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
 import SendInSleeperButton from './SendInSleeperButton';
 import { useFlag } from '../state/useFeatureFlags';
-import type { TradeCard as TradeCardData } from '../shared/types';
+import type { Player, TradeCard as TradeCardData } from '../shared/types';
 
 interface Props {
   data: TradeCardData;
@@ -18,6 +18,13 @@ interface Props {
   // "Send in Sleeper" — flagged beta. When true, render the direct-propose
   // button (itself flag-gated, so it's a no-op when the flag is off).
   showSend?: boolean;
+  // Untouchables (feedback #95, flag trade.preference_lists): ids of the
+  // caller's players marked "never offer in trades". Marked give-side
+  // players render an UNTOUCHABLE badge; long-pressing a give-side player
+  // invokes the toggle. Both optional — screens that don't wire the
+  // feature render exactly as before.
+  untouchableIds?: ReadonlySet<string>;
+  onToggleUntouchable?: (player: Player) => void;
 }
 
 // Shared rendering for generated trades (TradesScreen swipe deck) and
@@ -30,6 +37,8 @@ function TradeCardComp({
   onDismiss,
   acting,
   showSend = false,
+  untouchableIds,
+  onToggleUntouchable,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
   // `fairness` is always serialized by the v2 backend (fairness_score),
@@ -121,7 +130,19 @@ function TradeCardComp({
           <TickLabel>YOU SEND</TickLabel>
           <View style={styles.sideStack}>
             {givePlayers.map((p) => (
-              <PlayerCard key={p.id} player={p} compact />
+              <PlayerCard
+                key={p.id}
+                player={p}
+                compact
+                onLongPress={
+                  onToggleUntouchable ? () => onToggleUntouchable(p) : undefined
+                }
+                rightSlot={
+                  untouchableIds?.has(p.id)
+                    ? <Badge label="UNTOUCHABLE" color={flare.base} />
+                    : undefined
+                }
+              />
             ))}
           </View>
           {sweetenerSide === 'give' && sweetenerPlayer && (

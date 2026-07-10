@@ -128,6 +128,14 @@ export default function TrendsScreen() {
           />
         }
       >
+        {/* Screen explainer (FB-50 / FB-94): say whose ranks these are. */}
+        <Text style={styles.explainer}>
+          All ranks on this page are your own, built from your matchups.
+          Risers and fallers are your biggest movers over the last{' '}
+          {WINDOW_DAYS} days; sells and buys show where your rank differs
+          most from your leaguemates'.
+        </Text>
+
         {/* Risers */}
         <SectionHeader title={`Risers (${WINDOW_DAYS} days)`} />
         <SectionBody
@@ -184,12 +192,12 @@ export default function TrendsScreen() {
           }
         >
           <GapBlock
-            label="Easiest sells (you value above market)"
+            label="Easiest sells (you rank them higher than league consensus)"
             rows={filterGap(gapQuery.data?.easiest_sells, filter)}
             mode="sell"
           />
           <GapBlock
-            label="Easiest buys (you value above owner)"
+            label="Easiest buys (you rank them higher than their owner does)"
             rows={filterGap(gapQuery.data?.easiest_buys, filter)}
             mode="buy"
           />
@@ -299,14 +307,15 @@ function MoveRow({ row, max, kind }: MoveRowProps) {
   const posRankDelta     = formatRankDelta(row.pos_rank_delta);
   const posLabel         = posRankLabel(row.pos_rank, row.position as string);
 
-  // Compose the rank line, e.g. "Overall #12 +3 · RB7 +1". Degrades to "—".
+  // Compose the rank line, e.g. "You #12 overall +3 · RB7 +1". Degrades to
+  // "—". "You" makes explicit whose ranks these are (FB-94).
   const rankParts: string[] = [];
   if (overallRank != null) {
     rankParts.push(
-      `Overall #${overallRank}${overallRankDelta ? ` ${overallRankDelta}` : ''}`,
+      `You #${overallRank} overall${overallRankDelta ? ` ${overallRankDelta}` : ''}`,
     );
   } else if (overallRankDelta) {
-    rankParts.push(`Overall ${overallRankDelta}`);
+    rankParts.push(`You ${overallRankDelta} overall`);
   }
   if (posLabel != null) {
     rankParts.push(`${posLabel}${posRankDelta ? ` ${posRankDelta}` : ''}`);
@@ -370,7 +379,7 @@ function GapBlock({ label, rows, mode }: GapBlockProps) {
 
 function GapRow({ row, mode }: { row: ContrarianGapEntry; mode: 'sell' | 'buy' }) {
   const compareElo = mode === 'sell' ? row.community_elo : row.owner_elo;
-  const compareLabel = mode === 'sell' ? 'consensus' : (row.owner_username || 'owner');
+  const compareLabel = mode === 'sell' ? 'Consensus' : (row.owner_username || 'Owner');
 
   // Express the gap as a rank difference where meaningful (FB-04): your rank vs
   // the comparison rank. Prefer the rank view; fall back to the ELO gap when no
@@ -458,6 +467,12 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: space.lg,
     paddingBottom: space.xxl,
+  },
+
+  explainer: {
+    ...type.bodySm,
+    color: chalk.dim,
+    marginTop: space.sm,
   },
 
   sectionHeader: {

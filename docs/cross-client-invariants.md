@@ -159,6 +159,18 @@ See [data-dictionary.md](data-dictionary.md#user_events). When adding a new even
 
 ---
 
+## Asset preference list types
+
+`asset_preferences.list_type` vocabulary, defined in `backend/database.py:ASSET_PREF_LISTS` and sent verbatim by clients in the POST `/api/league/asset-prefs` body (`list` field — `mobile/src/api/league.ts:setAssetPref`):
+
+- `untouchable` — never offer this player FROM the owner's roster in generated trades (feedback #95)
+- `target` — bias suggestions toward acquiring this player
+- `none` — POST-body-only sentinel meaning "remove the tag" (never stored)
+
+A player holds at most one tag per (user, league). If you add a list type, update `ASSET_PREF_LISTS`, the mobile union type, and this list.
+
+---
+
 ## Feedback lifecycle statuses
 
 `app_feedback.status` vocabulary, defined in `backend/database.py:FEEDBACK_STATUSES` and mirrored by the mobile inbox chips (`mobile/src/screens/FeedbackInboxScreen.tsx:STATUS_LABEL`):

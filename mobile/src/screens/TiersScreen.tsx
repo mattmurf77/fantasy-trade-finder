@@ -36,6 +36,7 @@ import {
 import { colors } from '../theme/colors';
 import { spacing, radius, fontSize } from '../theme/spacing';
 import { TickLabel, Button, Icon } from '../components/chalkline';
+import FormatToggle from '../components/FormatToggle';
 import PlayerCard from '../components/PlayerCard';
 import TileStats, { StatMode } from '../components/TileStats';
 import TierStickyHeader from '../components/TierStickyHeader';
@@ -50,6 +51,7 @@ import {
 import { copyTiersFromFormat } from '../api/league';
 import { autoBucket, TIERS, TIER_LABEL } from '../utils/tierBands';
 import { useSession } from '../state/useSession';
+import { useScoringFormat } from '../hooks/useScoringFormat';
 import type { Position, RankedPlayer, Tier, ScoringFormat, TrendRow } from '../shared/types';
 
 // Format-key → human label for the copy button + confirm dialog. Mirrors
@@ -80,6 +82,10 @@ const DRAG_ACTIVATION_MS = 220;
 export default function TiersScreen() {
   const queryClient = useQueryClient();
   const activeFormat = useSession((s) => s.activeFormat);
+  // FB #80 — SF/1QB toggle. setFormat flips the server session + local
+  // mirrors and marks the choice explicit so the league-default applier
+  // (RootNav) won't override it this session.
+  const { setFormat, switching: formatSwitching } = useScoringFormat();
   const [position, setPosition] = useState<Position>('QB');
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
 
@@ -91,6 +97,17 @@ export default function TiersScreen() {
   // onViewableItemsChanged. Null until the first viewability callback fires
   // (or when the list is empty). Used to render the pinned tier banner.
   const [stickyZone, setStickyZone] = useState<Zone | null>(null);
+
+  // #81 — full-screen tier board. While expanded, the chrome above the
+  // board (title row, format toggle, stat toggle, copy button, hint) is
+  // hidden so the board gets the whole screen; the position switcher, the
+  // sticky tier banner and the save bar stay. The expand/collapse icon
+  // button lives on the board bar in both states.
+  const [expanded, setExpanded] = useState(false);
+  const toggleExpanded = useCallback(() => {
+    setExpanded((e) => !e);
+    haptics.selection();
+  }, []);
 
   // tiers[position] = { elite: [player...], starter: [...], ..., unassigned: [...] }
   const [buckets, setBuckets] = useState<Record<Zone, RankedPlayer[]>>(() => emptyBuckets());
@@ -124,6 +141,17 @@ export default function TiersScreen() {
     });
     haptics.selection();
   }, []);
+
+  // FB #80 — explicit format switch from the header toggle. On failure the
+  // local state is untouched (the toggle stays where it was) — just toast.
+  const onFormatChange = useCallback(
+    async (fmt: ScoringFormat) => {
+      haptics.selection();
+      const ok = await setFormat(fmt);
+      if (!ok) setToast({ msg: 'Could not switch format', tone: 'warn' });
+    },
+    [setFormat],
+  );
 
   // ── Data ────────────────────────────────────────────────────────────
   const rankingsQuery = useQuery({
@@ -394,54 +422,30 @@ export default function TiersScreen() {
 
   // ── Bulk TIER move (multi-select, FB-73) ────────────────────────────
   // Move every selected player one whole tier in `direction`, independent
-  // of rank position. Complements bulkMove (one RANK at a time). Placement
-  // inside the target tier: moving up appends to the BOTTOM of the higher
-  // tier (they're its newest/weakest members); moving down inserts at the
-  // TOP of the lower tier (its strongest). Relative order among the moved
-  // players is preserved. Clamps at elite / bench.
+  // of rank position. Complements bulkMove (one RANK at a time). Movement
+  // semantics live in the shared moveTierByOne helper below (also used by
+  // the per-tile chevron buttons, #90).
   const bulkTierMove = useCallback(
     (direction: 'up' | 'down') => {
       if (selectedIds.size === 0) return;
       bucketsDirtyRef.current = true;
-      setBuckets((prev) => {
-        const next = emptyBuckets();
-        next.unassigned = [...prev.unassigned];
-        // Split each tier into keepers and movers, preserving order.
-        const movers: Record<Tier, RankedPlayer[]> = {
-          elite: [], starter: [], solid: [], depth: [], bench: [],
-        };
-        for (const t of TIERS) {
-          for (const p of prev[t]) {
-            if (selectedIds.has(p.id)) movers[t].push(p);
-            else next[t].push(p);
-          }
-        }
-        let changed = false;
-        for (let ti = 0; ti < TIERS.length; ti++) {
-          const from = TIERS[ti];
-          if (movers[from].length === 0) continue;
-          const targetIdx =
-            direction === 'up'
-              ? Math.max(0, ti - 1)
-              : Math.min(TIERS.length - 1, ti + 1);
-          const to = TIERS[targetIdx];
-          if (to === from) {
-            next[from] = direction === 'up'
-              ? [...movers[from], ...next[from]]
-              : [...next[from], ...movers[from]];
-            continue; // clamped at the boundary tier
-          }
-          changed = true;
-          if (direction === 'up') next[to] = [...next[to], ...movers[from]];
-          else next[to] = [...movers[from], ...next[to]];
-        }
-        if (!changed) return prev;
-        return next;
-      });
+      setBuckets((prev) => moveTierByOne(prev, selectedIds, direction));
       haptics.success();
     },
     [selectedIds],
   );
+
+  // ── Per-tile tier step (#90) ────────────────────────────────────────
+  // Move ONE player one whole tier up/down from the chevron buttons on its
+  // tile — no drag, no multi-select. Reuses the multi-select "Tier up /
+  // Tier down" movement rules via moveTierByOne: up lands at the BOTTOM of
+  // the higher tier, down at the TOP of the lower tier, clamps at elite /
+  // bench, and never moves a player into or out of `unassigned` (#68).
+  const singleTierMove = useCallback((pid: string, direction: 'up' | 'down') => {
+    bucketsDirtyRef.current = true;
+    setBuckets((prev) => moveTierByOne(prev, new Set([pid]), direction));
+    haptics.selection();
+  }, []);
 
   // ── Quick tier-move (multi-select) — FB4-62 ─────────────────────────
   // Send EVERY selected player straight to `target`, appended to the end of
@@ -600,6 +604,14 @@ export default function TiersScreen() {
 
       // ── Player row ──────────────────────────────────────────────────
       const isSelected = selectedIds.has(item.player.id);
+      // #83/#84 — tiles carry the TIER encoding explicitly (TierChalkBadge
+      // via PlayerCard's `tier` prop), derived from the tile's CURRENT zone.
+      // Without it the only per-tile color was the 3px POSITION rail, which
+      // is constant across a position page (and happens to share hexes with
+      // tier colors on some pages) — so tier colors read as present on some
+      // position pages and missing on others (RB). Zone-derived, never
+      // hardcoded per position (docs/cross-client-invariants.md).
+      const zoneTier: Tier | null = item.zone === 'unassigned' ? null : item.zone;
       // FB4-61 — resolve the tile's two stats for the active mode. Rendered
       // inside the pointerEvents="none" wrapper so it never captures touches
       // away from the drag / selection Pressable.
@@ -619,6 +631,7 @@ export default function TiersScreen() {
               <PlayerCard
                 player={item.player}
                 compact
+                tier={zoneTier}
                 rightSlot={
                   isSelected ? (
                     <Icon name="check" size={16} color={ice.base} />
@@ -637,6 +650,9 @@ export default function TiersScreen() {
       // responder and swallow the long-press so onLongPress={drag} never fires
       // (the row then only scrolls, never lifts). With touches passing through,
       // the outer Pressable gets the long-press and calls the library's drag().
+      // #90 — the chevron column on the right sits OUTSIDE that wrapper so its
+      // own Pressables stay tappable; a press there becomes the touch
+      // responder, so it can't accidentally start a long-press drag.
       return (
         <Pressable
           onLongPress={drag}
@@ -644,14 +660,50 @@ export default function TiersScreen() {
           disabled={isActive}
           style={[styles.playerRow, isActive && styles.playerRowActive]}
         >
-          <View pointerEvents="none">
-            <PlayerCard player={item.player} compact />
+          <View pointerEvents="none" style={styles.rowBody}>
+            <PlayerCard player={item.player} compact tier={zoneTier} />
             <TileStats rankLabel={stats.rankLabel} trendDelta={stats.trendDelta} />
           </View>
+          {/* #90 — per-tile tier step buttons (Icon Button spec: 32×32,
+              radius sm, chalk-dim glyph, pressed = ink-3 fill). Hidden for
+              unassigned tiles — tier stepping never crosses the pool
+              boundary, matching the multi-select Tier up/down buttons. */}
+          {zoneTier ? (
+            <View style={styles.tierStepBtns}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Move ${item.player.name} up a tier`}
+                disabled={isActive || zoneTier === 'elite'}
+                hitSlop={4}
+                onPress={() => singleTierMove(item.player.id, 'up')}
+                style={({ pressed }) => [
+                  styles.tierStepBtn,
+                  pressed && styles.tierStepBtnPressed,
+                  zoneTier === 'elite' && styles.tierStepBtnDisabled,
+                ]}
+              >
+                <Icon name="chevron-up" size={16} />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Move ${item.player.name} down a tier`}
+                disabled={isActive || zoneTier === 'bench'}
+                hitSlop={4}
+                onPress={() => singleTierMove(item.player.id, 'down')}
+                style={({ pressed }) => [
+                  styles.tierStepBtn,
+                  pressed && styles.tierStepBtnPressed,
+                  zoneTier === 'bench' && styles.tierStepBtnDisabled,
+                ]}
+              >
+                <Icon name="chevron-down" size={16} />
+              </Pressable>
+            </View>
+          ) : null}
         </Pressable>
       );
     },
-    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor],
+    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor, singleTierMove],
   );
 
   // ── Copy-from-format button derivation ─────────────────────────────
@@ -748,6 +800,8 @@ export default function TiersScreen() {
         onDismiss={() => setToast(null)}
       />
 
+      {/* #81 — header + chrome hidden while the board is expanded. */}
+      {expanded ? null : (
       <View style={styles.headerRow}>
         <Text style={styles.title}>Positional Tiers</Text>
         <View style={styles.headerActions}>
@@ -780,6 +834,21 @@ export default function TiersScreen() {
           />
         </View>
       </View>
+      )}
+
+      {/* FB #80 — SF/1QB scoring-format toggle. Defaults to the selected
+          league's detected format (useLeagueFormatDefault in RootNav);
+          tapping here is an explicit in-session override to view/edit the
+          other format's rankings. Hidden while expanded (#81). */}
+      {expanded ? null : (
+      <View style={styles.formatRow}>
+        <FormatToggle
+          value={activeFormat}
+          onChange={onFormatChange}
+          disabled={formatSwitching}
+        />
+      </View>
+      )}
 
       {/* Position switcher — PositionTabs spec: segmented group, active
           segment gets an ink-3 fill + 2px underline in that position's
@@ -814,7 +883,9 @@ export default function TiersScreen() {
       </View>
 
       {/* FB4-61 — Consensus | You stat toggle. Switches the rank + 30d
-          trend each tile shows. Default Consensus; local state only. */}
+          trend each tile shows. Default Consensus; local state only.
+          Hidden while expanded (#81). */}
+      {expanded ? null : (
       <View style={styles.statToggle}>
         {([
           { key: 'consensus' as StatMode, label: 'Consensus' },
@@ -842,12 +913,15 @@ export default function TiersScreen() {
           );
         })}
       </View>
+      )}
 
       {/* Copy tier list from the OTHER scoring format. Mirrors web's
           `copy-tiers-btn` — the from-format reads as a label so the user
           knows EXACTLY which format they're pulling tiers from. Disabled
           while the copy is in flight. Composed inline (secondary-button
-          tokens) because the Button primitive has no icon/spinner slot. */}
+          tokens) because the Button primitive has no icon/spinner slot.
+          Hidden while expanded (#81). */}
+      {expanded ? null : (
       <Pressable
         disabled={copyMutation.isPending}
         onPress={onCopyFromOtherFormat}
@@ -868,12 +942,34 @@ export default function TiersScreen() {
           </>
         )}
       </Pressable>
+      )}
 
-      <Text style={styles.hint}>
-        {multiSelect
-          ? 'Tap chips to select. Use the bar below to move all selected up or down.'
-          : 'Long-press + drag to re-rank; the others slide to make room. Tap "Select" to move several at once.'}
-      </Text>
+      {/* Board bar — the hint (collapsed only) + the #81 expand/collapse
+          icon button. The button keeps the same slot in both states so
+          the toggle doesn't jump under the user's finger. */}
+      <View style={styles.boardBar}>
+        {expanded ? (
+          <View style={styles.boardBarSpacer} />
+        ) : (
+          <Text style={styles.hint}>
+            {multiSelect
+              ? 'Tap chips to select. Use the bar below to move all selected up or down.'
+              : 'Long-press + drag to re-rank, or tap a tile’s arrows to move it a tier. "Select" moves several at once.'}
+          </Text>
+        )}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? 'Exit full-screen board' : 'Expand board to full screen'}
+          hitSlop={4}
+          onPress={toggleExpanded}
+          style={({ pressed }) => [
+            styles.expandBtn,
+            pressed && styles.tierStepBtnPressed,
+          ]}
+        >
+          <Icon name={expanded ? 'collapse' : 'expand'} size={20} />
+        </Pressable>
+      </View>
 
       {/* FB4-63 — pinned tier banner. Sits between the hint and the list,
           shows the tier of the topmost VISIBLE player. Hidden in the
@@ -919,6 +1015,13 @@ export default function TiersScreen() {
           // press still initiates the drag and edge auto-scroll (library
           // autoscrollThreshold/Speed defaults, untouched) still works.
           activationDistance={18}
+          // #82: keep the lifted tile anchored to the touch point. Without
+          // this the library clamps the hover tile inside the list
+          // container, so picking up a partially-visible tile at the top/
+          // bottom of the page snaps it into view immediately. Edge
+          // auto-scroll engagement is also gated on actual drag movement
+          // toward the edge — see patches/react-native-draggable-flatlist.
+          dragItemOverflow
           containerStyle={styles.listContainer}
           contentContainerStyle={styles.scroll}
         />
@@ -1011,6 +1114,54 @@ function emptyBuckets(): Record<Zone, RankedPlayer[]> {
   };
 }
 
+// Move every player in `ids` one whole tier in `direction`, preserving
+// relative order. Placement inside the target tier: moving up appends to
+// the BOTTOM of the higher tier (they're its newest/weakest members);
+// moving down inserts at the TOP of the lower tier (its strongest).
+// Clamps at elite / bench; `unassigned` is never a source or target.
+// Shared by the multi-select "Tier up / Tier down" bar (FB-73) and the
+// per-tile chevron buttons (#90). Returns `prev` unchanged when every
+// mover is already clamped at the boundary (no re-render).
+function moveTierByOne(
+  prev: Record<Zone, RankedPlayer[]>,
+  ids: ReadonlySet<string>,
+  direction: 'up' | 'down',
+): Record<Zone, RankedPlayer[]> {
+  const next = emptyBuckets();
+  next.unassigned = [...prev.unassigned];
+  // Split each tier into keepers and movers, preserving order.
+  const movers: Record<Tier, RankedPlayer[]> = {
+    elite: [], starter: [], solid: [], depth: [], bench: [],
+  };
+  for (const t of TIERS) {
+    for (const p of prev[t]) {
+      if (ids.has(p.id)) movers[t].push(p);
+      else next[t].push(p);
+    }
+  }
+  let changed = false;
+  for (let ti = 0; ti < TIERS.length; ti++) {
+    const from = TIERS[ti];
+    if (movers[from].length === 0) continue;
+    const targetIdx =
+      direction === 'up'
+        ? Math.max(0, ti - 1)
+        : Math.min(TIERS.length - 1, ti + 1);
+    const to = TIERS[targetIdx];
+    if (to === from) {
+      next[from] = direction === 'up'
+        ? [...movers[from], ...next[from]]
+        : [...next[from], ...movers[from]];
+      continue; // clamped at the boundary tier
+    }
+    changed = true;
+    if (direction === 'up') next[to] = [...next[to], ...movers[from]];
+    else next[to] = [...movers[from], ...next[to]];
+  }
+  if (!changed) return prev;
+  return next;
+}
+
 // Accent (tick) color for a zone's header — mirrors TierBin's tickColor.
 function accentFor(zone: Zone): string {
   switch (zone) {
@@ -1063,7 +1214,11 @@ const styles = StyleSheet.create({
   tierHeaderCount: { ...type.data, color: chalk.dim },
   // Player row wrapper in normal (drag) mode. Active (picked-up) row gets
   // a ice ring — border color change only, no shadow/transform lift.
+  // Row layout: card body fills the width, the #90 tier-step chevron
+  // column sits in a fixed gutter on the right.
   playerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: space.xs,
     borderRadius: radii.md,
     borderWidth: 1,
@@ -1072,6 +1227,26 @@ const styles = StyleSheet.create({
   playerRowActive: {
     borderColor: ice.base,
   },
+  rowBody: { flex: 1 },
+  // #90 — per-tile tier step controls. Icon Button spec (components.md →
+  // Buttons → Icon): 32×32, radius sm, chalk-dim glyph, pressed ink-3 fill,
+  // disabled 45% opacity.
+  tierStepBtns: {
+    width: 32,
+    marginLeft: space.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+  },
+  tierStepBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tierStepBtnPressed: { backgroundColor: ink.ink3 },
+  tierStepBtnDisabled: { opacity: 0.45 },
   // Wrapper around each chip in multi-select mode. Always present so
   // toggling selection doesn't shift the layout.
   chipSelectableWrap: {
@@ -1117,6 +1292,12 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'flex-end',
     flexShrink: 1,
+  },
+  // FB #80 — row hosting the SF/1QB FormatToggle, between the header and
+  // the position switcher (consistent slot with RankScreen's).
+  formatRow: {
+    marginHorizontal: space.lg,
+    marginBottom: space.sm,
   },
   switcher: {
     flexDirection: 'row',
@@ -1181,11 +1362,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: chalk.base,
   },
+  // Board bar — hint + the #81 expand/collapse icon button in one row
+  // between the chrome and the board. Keeps the toggle in a stable slot
+  // in both states.
+  boardBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.xs,
+  },
+  boardBarSpacer: { flex: 1 },
   hint: {
     ...type.bodySm,
+    flex: 1,
     textAlign: 'center',
-    paddingHorizontal: space.lg,
-    paddingVertical: space.sm,
+    paddingVertical: space.xs,
+  },
+  // #81 — expand/collapse toggle. Icon Button spec (32×32, radius sm,
+  // chalk-dim glyph, pressed ink-3 fill) — shares tierStepBtnPressed.
+  expandBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   centered: {
     flex: 1,

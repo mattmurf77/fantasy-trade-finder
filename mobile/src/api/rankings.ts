@@ -49,6 +49,18 @@ export async function setActiveScoringFormat(fmt: ScoringFormat): Promise<void> 
   }
 }
 
+// POST /api/scoring/switch — flip the SERVER session's active scoring
+// format. Mirrors the web's user-scope toggle (web/js/app.js
+// onScoringToggleClick). Callers must update the local mirrors AFTER this
+// resolves (setActiveScoringFormat + useSession.setActiveFormat) — see
+// hooks/useScoringFormat.ts, which owns that ordering.
+export async function switchScoringFormat(fmt: ScoringFormat) {
+  return api.post<{ ok: true; active_format: ScoringFormat }>(
+    '/api/scoring/switch',
+    { format: fmt },
+  );
+}
+
 /** Helper: build the `{ 'X-Scoring-Format': <fmt> }` header dict — or `{}`
  *  when no format has been stored locally yet (so the backend falls back
  *  to the session's active_format). Use as `headers: await formatHeader()`

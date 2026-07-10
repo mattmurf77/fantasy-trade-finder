@@ -19,6 +19,9 @@ export type IconName =
   | 'chevron-left'
   | 'chevron-right'
   | 'chevron-down'
+  | 'chevron-up'
+  | 'expand'
+  | 'collapse'
   | 'search'
   | 'settings'
   | 'plus'
@@ -67,6 +70,9 @@ const GLYPHS: Record<IconName, React.ReactNode> = {
   'chevron-left': <Path d="M12 4l-6 6 6 6" />,
   'chevron-right': <Path d="M8 4l6 6-6 6" />,
   'chevron-down': <Path d="M4 8l6 6 6-6" />,
+  'chevron-up': <Path d="M4 12l6-6 6 6" />,
+  expand: <Path d="M11 3h6v6M17 3l-6 6M9 17H3v-6M3 17l6-6" />,
+  collapse: <Path d="M16 9h-5V4M17 3l-6 6M4 11h5v5M3 17l6-6" />,
   search: (
     <>
       <Circle cx={8.5} cy={8.5} r={5.5} />

@@ -177,6 +177,11 @@ _DEFAULT_CFG: dict[str, float] = {
     # with); divergence cards keep it at tiebreak strength.
     "fit_consensus_weight":       0.5,
     "fit_divergence_weight":      0.15,
+    # FB-96 (flag trade.need_fit) — automatic positional-need fit:
+    # composite *= 1 + w * (need_fit - 0.5), need_fit ∈ [0,1]. Bounded
+    # multiplier applied AFTER all gates — reorders acceptable trades,
+    # never rescues gated ones. 0 disables the reordering entirely.
+    "need_fit_weight":            0.30,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -499,6 +504,66 @@ def partner_fit_score(
     for pos in sell_targets:
         if pos in _SURPLUS_AT:
             parts.append(1.0 - _position_strength(opp_profile, pos))
+    if not parts:
+        return None
+    return round(sum(parts) / len(parts), 3)
+
+
+# ---------------------------------------------------------------------------
+# FB-96 — automatic positional-need fit (flag: trade.need_fit)
+# Feedback #96: "you're weak in RB but strong in WR — here's another team
+# that needs the swap with you." Unlike FB-47's partner_fit (which needs
+# user-stated targets), this scores EVERY card from the two rosters'
+# positional profiles alone.
+# ---------------------------------------------------------------------------
+
+
+def need_fit_score(
+    user_profile: dict,
+    opp_profile: dict,
+    give_ids: list[str],
+    recv_ids: list[str],
+    players: dict,
+    scoring_format: str = "1qb_ppr",
+) -> Optional[float]:
+    """Per-card positional-need fit, 0..1 (0.5 = neutral).
+
+    Each traded QB/RB/WR/TE contributes one term:
+      given player at P    → high when the USER is loaded at P (surplus to
+                             spend) and the OPPONENT is thin at P (fills
+                             their need)
+      received player at P → high when the USER is thin at P (fills the
+                             user's need) and the OPPONENT is loaded at P
+                             (they can spare one)
+    Terms average. Strength is _position_strength over the PRE-trade
+    profiles (same Tier-2 approximation the marginal path uses), except QB
+    in superflex needs one extra startable body to count as "loaded"
+    (starting 2 QBs means 2 startable QBs is zero surplus).
+
+    Returns None when no traded asset has a positional profile (e.g. a
+    picks-only side) — callers must treat None as "no signal", not 0.
+    """
+    def _strength(profile: dict, pos: str) -> float:
+        td = profile.get("tier_depth", {}).get(pos, {})
+        starters = td.get("elite", 0) + td.get("starter", 0)
+        denom = _SURPLUS_AT.get(pos, 2)
+        if pos == "QB" and scoring_format.startswith("sf"):
+            denom += 1
+        return min(1.0, starters / max(denom, 1))
+
+    parts: list[float] = []
+    for pid in give_ids:
+        p = players.get(pid)
+        pos = getattr(p, "position", None) if p else None
+        if pos in _SURPLUS_AT:
+            parts.append(0.5 * _strength(user_profile, pos)
+                         + 0.5 * (1.0 - _strength(opp_profile, pos)))
+    for pid in recv_ids:
+        p = players.get(pid)
+        pos = getattr(p, "position", None) if p else None
+        if pos in _SURPLUS_AT:
+            parts.append(0.5 * (1.0 - _strength(user_profile, pos))
+                         + 0.5 * _strength(opp_profile, pos))
     if not parts:
         return None
     return round(sum(parts) / len(parts), 3)
@@ -1069,6 +1134,12 @@ class TradeCard:
     # the user's stated targets, 0..1 (1 = ideal partner). None when the
     # flag is off or the user expressed no targets. Serialized when set.
     partner_fit: Optional[float] = None
+    # FB-96 (flag trade.need_fit) — automatic positional-need fit, 0..1
+    # (1 = gives from the user's surplus into the opponent's need AND
+    # receives at the user's need from the opponent's surplus). None when
+    # the flag is off or no traded asset has a positional profile.
+    # Serialized when set.
+    need_fit: Optional[float] = None
 
 
 @dataclass
@@ -1344,6 +1415,8 @@ class TradeService:
         # players via the generators; position-level targets drive the
         # counterparty fit ranking below.
         _targeting = FLAGS.trade_finder_targeting
+        # FB-96 — automatic positional-need fit (no user input required).
+        _need_fit_on = FLAGS.trade_need_fit
         acquire_targets: list[str] = []
         sell_targets: list[str] = []
         if _targeting:
@@ -1520,6 +1593,23 @@ class TradeService:
                          else _c("fit_divergence_weight"))
                     c.composite_score = round(
                         c.composite_score * (1.0 + w * (_fit - 0.5)), 3)
+            # FB-96 — per-card positional-need fit: boost swaps that give
+            # from the user's surplus into the opponent's need and receive
+            # at the user's need from the opponent's surplus. Bounded
+            # composite multiplier applied AFTER all gates (fairness /
+            # mutual gain are already settled) — it reorders acceptable
+            # trades, never rescues gated ones. Flag off ⇒ no-op.
+            if _need_fit_on:
+                w_nf = _c("need_fit_weight")
+                for c in cards:
+                    nf = need_fit_score(
+                        user_profile, opp_profile,
+                        c.give_player_ids, c.receive_player_ids,
+                        self._players, scoring_format)
+                    if nf is not None:
+                        c.need_fit = nf
+                        c.composite_score = round(
+                            c.composite_score * (1.0 + w_nf * (nf - 0.5)), 3)
             for c in cards:
                 c.match_context = match_ctx
                 c.narrative = build_narrative(c, match_ctx, self._players)

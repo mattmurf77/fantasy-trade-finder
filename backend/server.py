@@ -1206,6 +1206,7 @@ def _inject_likes_you_cards(
     league,
     user_roster: list,
     seed_map: dict,
+    untouchable_ids: set | None = None,
 ) -> list:
     """Tier 2 work item 2.3a — surface trades the counterparty already liked.
 
@@ -1259,6 +1260,11 @@ def _inject_likes_you_cards(
         if not set(their_give) <= set(opp.roster):
             continue
         if not set(their_recv) <= user_roster_set:
+            continue
+        # Backlog #2 / feedback #95 — untouchables never leave the user's
+        # roster, even when the counterparty already liked the mirror. Their
+        # receive side IS the user's give side after mirroring.
+        if untouchable_ids and set(their_recv) & untouchable_ids:
             continue
 
         my_give, my_recv = list(their_recv), list(their_give)
@@ -1683,6 +1689,7 @@ def _run_trade_job(
                     league        = g_league,
                     user_roster   = g_user_roster,
                     seed_map      = seed_map,
+                    untouchable_ids = untouchable_ids or None,
                 )
                 snapshot = []
                 for c in final_cards:
@@ -3726,6 +3733,10 @@ def trade_card_to_dict(card, players: dict) -> dict:
     partner_fit = getattr(card, "partner_fit", None)
     if partner_fit is not None:
         out["partner_fit"] = partner_fit
+    # FB-96 — automatic positional-need fit, only when the flag stamped it.
+    need_fit = getattr(card, "need_fit", None)
+    if need_fit is not None:
+        out["need_fit"] = need_fit
     # Agent A8 — expose human-readable reasons only when the flag is on
     # AND the card actually has some. Keeps legacy JSON identical when off.
     reasons = getattr(card, "reasons", None)
@@ -4677,6 +4688,24 @@ def disposition_trade_match(match_id):
         if result["status"] == "not_found":
             return jsonify({"error": "match not found"}), 404
         if result["status"] == "already_decided":
+            # Feedback #77 (recurrence of #8/#35/#36): mobile builds ≤1.3.0
+            # render Accept/Decline on EVERY match tile — including ones the
+            # caller already decided — and surface any non-2xx as a generic
+            # "Action failed" toast. Re-sending the SAME decision is a
+            # harmless retry, so answer it idempotently with 200 (no second
+            # ELO signal, no re-persist — record_match_disposition returns
+            # elo_signals=[] on this path). Only a CONFLICTING decision is
+            # still a 409. `matches` is deliberately omitted: the web client
+            # re-renders from `data.matches` when present, and an empty list
+            # here would wipe its inbox instead of triggering its
+            # loadMatches() fallback.
+            if decision == result.get("existing_decision"):
+                return jsonify({
+                    "ok":           True,
+                    "idempotent":   True,
+                    "both_decided": result["both_decided"],
+                    "outcome":      result["outcome"],
+                })
             return jsonify({"error": "you have already recorded a decision for this match"}), 409
 
         # Cross-league flag: the match carries its own league_id. The active

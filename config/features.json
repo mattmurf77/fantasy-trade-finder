@@ -45,8 +45,9 @@
   "trade.three_team":                false,
 
   "trade.finder_targeting":          false,
+  "trade.need_fit":                  true,
   "trade.outlook_infer":             false,
-  "trade.preference_lists":          false,
+  "trade.preference_lists":          true,
   "trade.outlook_seed":             false,
   "trade.crown_asset":              false,
   "trade.send_in_sleeper":          true

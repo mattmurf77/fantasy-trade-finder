@@ -87,6 +87,32 @@ def test_untouchable_never_on_give_side():
     assert all("G" not in c.give_player_ids for c in guarded)
 
 
+def test_unmarking_restores_give_side():
+    """Feedback #95 end-to-end: mark → the player is never offered; unmark →
+    the player is offered again. Mirrors _run_trade_job's wiring
+    (load_asset_preferences → untouchable_ids)."""
+    import backend.database as db
+    db.metadata.create_all(db.engine)
+    _set_flags(**{"trade_engine.v2": True})
+    uid, lid = "u_ap_e2e", "L_ap_e2e"
+    db.set_asset_preference(uid, lid, "G", None)   # clean slate
+
+    try:
+        db.set_asset_preference(uid, lid, "G", "untouchable")
+        ids = set(db.load_asset_preferences(uid, lid)["untouchables"])
+        assert ids == {"G"}
+        guarded = _gen(_svc(), untouchable_ids=ids or None)
+        assert all("G" not in c.give_player_ids for c in guarded)
+
+        db.set_asset_preference(uid, lid, "G", None)   # unmark
+        ids = set(db.load_asset_preferences(uid, lid)["untouchables"])
+        assert ids == set()
+        restored = _gen(_svc(), untouchable_ids=ids or None)
+        assert any("G" in c.give_player_ids for c in restored)
+    finally:
+        db.set_asset_preference(uid, lid, "G", None)   # cleanup
+
+
 def test_untouchable_blocks_consensus_give():
     # Opponent has NO rankings ⇒ consensus fallback path.
     _set_flags(**{"trade_engine.v2": True})

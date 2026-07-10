@@ -20,6 +20,7 @@ import SleeperConnectScreen from '../screens/SleeperConnectScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { useLeagueFormatDefault } from '../hooks/useScoringFormat';
 import { getProgress } from '../api/rankings';
 import { navigationIntegration } from '../observability/sentry';
 
@@ -58,6 +59,14 @@ export default function RootNav({ booted }: { booted: boolean }) {
   // tapped it. Updated on every navigation state change. Cheap because
   // the FAB only reads it when opened.
   const [activeScreen, setActiveScreen] = useState<string>('—');
+
+  // FB #80 / #89 — league-driven scoring-format default. Whenever the
+  // selected league changes, fetch its detected format (SF vs 1QB) and
+  // apply it app-wide unless the user explicitly toggled a format for
+  // this league in this session. Mounted here (once, at the authed root)
+  // so ManualRanks/Tiers/Trios all inherit the right default regardless
+  // of which screen the user opens first.
+  useLeagueFormatDefault();
 
   // Tap-router: the push hook decodes `data.type` and tells us which tab
   // to focus. We intentionally don't pass match_id deeper — the Matches

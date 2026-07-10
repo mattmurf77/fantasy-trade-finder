@@ -91,6 +91,8 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.three_team",       # 3-team cycle generation (no client surface yet)
     # FB-47 finder targeting (docs/plans/trade-finder-targeting.md)
     "trade.finder_targeting", # pinned-receive + counterparty positional fit
+    # FB-96 — automatic positional-need fit (feedback #96; kin of FB-47)
+    "trade.need_fit",         # boost swaps that cross-fill positional needs
     # Backlog #1 — opponent outlook inference (docs/plans/competitor-top20/01-*)
     "trade.outlook_infer",    # price opponents with their inferred/declared α
     # Backlog #2 — asset preference lists (docs/plans/competitor-top20/02-*)
