@@ -3350,14 +3350,21 @@ def trade_evaluate_route():
     """
     POST /api/trade/evaluate
     Body: {give_player_ids: [...], receive_player_ids: [...],
-           scoring_format?: '1qb_ppr'|'sf_tep', fairness_threshold?: float}
+           scoring_format?: '1qb_ppr'|'sf_tep', fairness_threshold?: float,
+           league_id?: str, opponent_user_id?: str}
 
-    Consensus values + fairness verdict for a hand-built trade. Reuses
-    trade_optimizer._consensus_packages/_fairness_v3 over the universal pool
-    so the numbers match the finder's. No auth, no league; confidence=None
-    degrades the range-overlap gate to the point-ratio gate (documented in
-    trade_service._value_uncertainty). Unvalued ids are dropped and reported
-    (the engine's graceful-drop rule).
+    Mode A (default — no auth, no league): consensus values + fairness verdict
+    for a hand-built trade. Reuses trade_optimizer._consensus_packages/
+    _fairness_v3 over the universal pool so the numbers match the finder's.
+    confidence=None degrades the range-overlap gate to the point-ratio gate.
+    Unvalued ids are dropped and reported (the engine's graceful-drop rule).
+
+    Mode B (when league_id + opponent_user_id given — requires a session): adds
+    the two-sided, both-boards read. Prices each side by the CALLER'S rankings
+    and the OPPONENT'S rankings (member_rankings), returning per-board deltas +
+    `mutual_gain` + `basis` ('divergence', or 'consensus' when the opponent
+    hasn't ranked). This is the finder's mutual-gain math applied to one fixed
+    package — a directed, manual counterpart to trade generation.
     """
     from .trade_optimizer import _consensus_packages, _fairness_v3
 
@@ -3377,6 +3384,14 @@ def trade_evaluate_route():
     except (TypeError, ValueError):
         thr = 0.75
     thr = min(max(thr, 0.5), 1.0)
+
+    # Mode B (in-league, both boards): triggered by league_id + opponent_user_id.
+    # Requires a session (needs the caller's + opponent's member_rankings).
+    # Resolved OUTSIDE the try so a missing session yields 401, not a 500.
+    league_id = str(body.get("league_id") or "").strip()
+    opponent_user_id = str(body.get("opponent_user_id") or "").strip()
+    mode_b = bool(league_id and opponent_user_id)
+    caller_user_id = _require_session().get("user_id") if mode_b else None
 
     try:
         _pool_players, seed = _get_universal_pool(fmt)
@@ -3409,7 +3424,7 @@ def trade_evaluate_route():
                 verdict = "fair" if fairness is not None else "unfair"
                 favors = "receive" if receive_value > give_value else "give"
 
-        return jsonify({
+        result = {
             "scoring_format":     fmt,
             "give_value":         give_value,
             "receive_value":      receive_value,
@@ -3419,7 +3434,48 @@ def trade_evaluate_route():
             "favors":             favors,
             "per_player":         per_player,
             "dropped_player_ids": dropped,
-        })
+            "basis":              "consensus",
+        }
+
+        # ── Mode B — in-league, both owners' boards ──────────────────────────
+        # Reuse the finder's per-package math (_consensus_packages) once per
+        # board: the caller's rankings and the opponent's, from member_rankings.
+        # Each board's value fn falls back to the consensus seed for players
+        # that owner hasn't ranked — so an unranked opponent degrades to a
+        # consensus read with no special-casing (basis flips to 'consensus').
+        if mode_b:
+            from .database import load_member_rankings
+            boards = load_member_rankings(league_id, exclude_user_id="", scoring_format=fmt)
+            user_elo = (boards.get(caller_user_id) or {}).get("elo_ratings") or {}
+            opp_entry = boards.get(opponent_user_id) or {}
+            opp_elo = opp_entry.get("elo_ratings") or {}
+            opp_has_rankings = bool(opp_elo)
+
+            def _board_value(elo_map):
+                return lambda pid: e2v(elo_map.get(pid, seed.get(pid, 1500.0)))
+
+            gv_u = rv_u = gv_o = rv_o = 0.0
+            if give or recv:
+                gv_u, rv_u = _consensus_packages(give, recv, _board_value(user_elo))
+                gv_o, rv_o = _consensus_packages(give, recv, _board_value(opp_elo))
+            your_delta  = round(rv_u - gv_u, 1)   # you receive rv, give gv — by YOUR board
+            their_delta = round(gv_o - rv_o, 1)   # they receive the give side, give up the receive side — by THEIR board
+
+            result.update({
+                "basis":                 "divergence" if opp_has_rankings else "consensus",
+                "opponent_user_id":      opponent_user_id,
+                "opponent_username":     opp_entry.get("username"),
+                "opponent_has_rankings": opp_has_rankings,
+                "your_give_value":       round(gv_u, 1),
+                "your_receive_value":    round(rv_u, 1),
+                "their_give_value":      round(gv_o, 1),
+                "their_receive_value":   round(rv_o, 1),
+                "your_value_delta":      your_delta,
+                "their_value_delta":     their_delta,
+                "mutual_gain":           bool(your_delta > 0 and their_delta > 0),
+            })
+
+        return jsonify(result)
     except Exception as e:
         log.error("trade_evaluate error: %s", e)
         return jsonify({"error": "internal_error"}), 500
@@ -6124,6 +6180,7 @@ def session_init():
                 seed_ratings      = fmt_seed,
             )
             svc._user_id = user_id
+            svc._scoring_format = fmt
 
             # Replay only the swipes tagged with this format
             try:
@@ -7785,6 +7842,7 @@ def _extension_build_session(user_id: str, username: str,
             seed_ratings      = fmt_seed,
         )
         svc._user_id = user_id
+        svc._scoring_format = fmt
         try:
             historical = load_swipe_decisions(user_id=user_id, scoring_format=fmt)
             if historical:
@@ -8405,6 +8463,7 @@ def session_demo():
                 seed_ratings=seed,
             )
             svc._user_id = demo_user_id
+            svc._scoring_format = fmt
             new_services[fmt] = svc
 
             tsvc = TradeService(players={p.id: p for p in DEMO_PLAYERS})
