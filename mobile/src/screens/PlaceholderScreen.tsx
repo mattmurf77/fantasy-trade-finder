@@ -1,8 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme/colors';
-import { spacing, fontSize } from '../theme/spacing';
+import { ink, type, space } from '../theme/chalkline';
 
 interface Props {
   title: string;
@@ -25,8 +24,8 @@ export default function PlaceholderScreen({ title, note }: Props) {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  body: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-  title: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '800', marginBottom: spacing.md },
-  note: { color: colors.muted, fontSize: fontSize.base, textAlign: 'center', lineHeight: 22 },
+  safe: { flex: 1, backgroundColor: ink.ink0 },
+  body: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.xl },
+  title: { ...type.heading, marginBottom: space.md },
+  note: { ...type.bodySm, textAlign: 'center' },
 });

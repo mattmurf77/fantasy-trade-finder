@@ -43,6 +43,12 @@ interface SessionState {
   /** Active scoring format — hydrated from AsyncStorage via rankings.ts.
    *  Null until bootstrap() completes (or the user hasn't set a format). */
   activeFormat: ScoringFormat | null;
+  /** True when the CURRENT activeFormat was chosen explicitly by the user
+   *  via the SF/1QB toggle (feedback #80). While true, the league-driven
+   *  default applier (hooks/useScoringFormat.useLeagueFormatDefault) must
+   *  not stomp the choice. In-memory only; reset on every league change
+   *  so a new league's detected format becomes the default again. */
+  formatExplicit: boolean;
   /** True while a switchLeague() call is in flight. UI uses this to
    *  disable the switcher rows / show a spinner. */
   switching: boolean;
@@ -74,9 +80,11 @@ interface SessionState {
    *  current league or another switch is in progress. */
   switchLeague: (lg: SavedLeague) => Promise<void>;
   /** Update the in-store active format after calling setActiveScoringFormat.
-   *  Called by the settings screen / format-picker so query keys that
-   *  include activeFormat invalidate correctly. */
-  setActiveFormat: (fmt: ScoringFormat | null) => void;
+   *  Called by hooks/useScoringFormat so query keys that include
+   *  activeFormat invalidate correctly. Pass `explicit: true` when the
+   *  change came from the user's SF/1QB toggle (protects it from the
+   *  league-default applier); league-driven applications omit it. */
+  setActiveFormat: (fmt: ScoringFormat | null, opts?: { explicit?: boolean }) => void;
   /** Record a referral attribution to forward on the next session_init.
    *  Stored in-memory only; the next sessionInit call picks it up via
    *  consumeInvitedBy(). Safe to call multiple times — last value wins. */
@@ -112,6 +120,7 @@ export const useSession = create<SessionState>((set, get) => ({
   leagues: [],
   hasToken: false,
   activeFormat: null,
+  formatExplicit: false,
   switching: false,
   isDemo: false,
   invitedBy: null,
@@ -160,8 +169,8 @@ export const useSession = create<SessionState>((set, get) => ({
     }
   },
 
-  setActiveFormat: (fmt) => {
-    set({ activeFormat: fmt });
+  setActiveFormat: (fmt, opts) => {
+    set({ activeFormat: fmt, formatExplicit: !!opts?.explicit });
   },
 
   setUser: async (u) => {
@@ -182,7 +191,11 @@ export const useSession = create<SessionState>((set, get) => ({
     // progressQuery) start working again. Without this, recovering from
     // a session-expired state would leave hasToken stuck at false even
     // though the new token is fine.
-    set({ league: lg, hasToken: !!lg });
+    //
+    // formatExplicit resets on every league change: the SF/1QB toggle is a
+    // per-league in-session override, so the NEW league's detected format
+    // becomes the default again (feedback #80).
+    set({ league: lg, hasToken: !!lg, formatExplicit: false });
   },
 
   setLeagues: async (lgs) => {
@@ -342,12 +355,13 @@ export const useSession = create<SessionState>((set, get) => ({
       clearSessionToken(),
     ]);
     set({
-      user:      null,
-      league:    null,
-      leagues:   [],
-      hasToken:  false,
-      isDemo:    false,
-      invitedBy: null,
+      user:           null,
+      league:         null,
+      leagues:        [],
+      hasToken:       false,
+      formatExplicit: false,
+      isDemo:         false,
+      invitedBy:      null,
     });
   },
 }));

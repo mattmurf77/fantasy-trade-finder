@@ -12,8 +12,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, ice, semantic, space, radii, type } from '../theme/chalkline';
+import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
 import { useSession } from '../state/useSession';
@@ -123,7 +123,7 @@ export default function SettingsScreen({ navigation }: any) {
     return (
       <SafeAreaView style={styles.root} edges={['bottom']}>
         <View style={styles.loading}>
-          <ActivityIndicator color={colors.accent} />
+          <ActivityIndicator color={ice.base} />
         </View>
       </SafeAreaView>
     );
@@ -137,7 +137,9 @@ export default function SettingsScreen({ navigation }: any) {
             just the "Connect another league" card. */}
         {leagues.length > 1 ? (
           <>
-            <Text style={styles.section}>Switch league</Text>
+            <View style={styles.section}>
+              <TickLabel>Switch league</TickLabel>
+            </View>
             {leagues.map((lg) => {
               const isActive = lg.league_id === activeLeague?.league_id;
               const isBusy   = busyLeagueId === lg.league_id || (switching && isActive);
@@ -149,21 +151,23 @@ export default function SettingsScreen({ navigation }: any) {
                   disabled={busyLeagueId !== null || switching || isActive}
                   style={({ pressed }) => [
                     styles.leagueRow,
-                    isActive && styles.leagueRowActive,
-                    dim && styles.leagueRowDim,
-                    pressed && !dim && !isActive && { opacity: 0.7 },
+                    dim && styles.rowDim,
+                    pressed && !dim && !isActive && styles.rowPressed,
                   ]}
                 >
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={styles.leagueName} numberOfLines={1}>{lg.name}</Text>
                     <Text style={styles.leagueMeta}>
-                      {(lg.total_rosters as number | undefined) || 12} teams
+                      <Text style={styles.leagueMetaCount}>
+                        {(lg.total_rosters as number | undefined) || 12}
+                      </Text>
+                      {' teams'}
                     </Text>
                   </View>
                   {isBusy ? (
-                    <ActivityIndicator color={colors.accent} />
+                    <ActivityIndicator color={chalk.dim} />
                   ) : isActive ? (
-                    <Text style={styles.check}>✓</Text>
+                    <Icon name="check" color={ice.base} />
                   ) : null}
                 </Pressable>
               );
@@ -171,41 +175,37 @@ export default function SettingsScreen({ navigation }: any) {
           </>
         ) : null}
 
-        <Text style={styles.section}>
-          {leagues.length > 1 ? 'Add another league' : 'Connect another league'}
-        </Text>
-        <View style={styles.connectCard}>
-          <Text style={styles.connectHelp}>
-            Paste a Sleeper league URL (or bare league ID) to sync it.
-          </Text>
-          <TextInput
-            value={connectUrl}
-            onChangeText={setConnectUrl}
-            placeholder="sleeper.com/leagues/..."
-            placeholderTextColor={colors.muted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!connectBusy}
-            style={styles.connectInput}
-          />
-          <Pressable
-            onPress={handleConnect}
-            disabled={!connectUrl.trim() || connectBusy}
-            style={({ pressed }) => [
-              styles.connectBtn,
-              (!connectUrl.trim() || connectBusy) && styles.connectBtnDisabled,
-              pressed && connectUrl.trim() && !connectBusy && { opacity: 0.85 },
-            ]}
-          >
-            {connectBusy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.connectBtnText}>Connect</Text>
-            )}
-          </Pressable>
+        <View style={styles.section}>
+          <TickLabel>
+            {leagues.length > 1 ? 'Add another league' : 'Connect another league'}
+          </TickLabel>
         </View>
+        <Card>
+          <View style={styles.connectBody}>
+            <Text style={styles.connectHelp}>
+              Paste a Sleeper league URL (or bare league ID) to sync it.
+            </Text>
+            <TextInput
+              value={connectUrl}
+              onChangeText={setConnectUrl}
+              placeholder="sleeper.com/leagues/..."
+              placeholderTextColor={chalk.faint}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!connectBusy}
+              style={styles.connectInput}
+            />
+            <Button
+              label="Connect"
+              onPress={handleConnect}
+              disabled={!connectUrl.trim() || connectBusy}
+            />
+          </View>
+        </Card>
 
-        <Text style={styles.section}>Notifications</Text>
+        <View style={styles.section}>
+          <TickLabel>Notifications</TickLabel>
+        </View>
 
         <Row
           title="Trade matches"
@@ -226,39 +226,43 @@ export default function SettingsScreen({ navigation }: any) {
           onChange={() => flip('reengagement')}
         />
 
-        <Text style={styles.section}>Quiet hours</Text>
+        <View style={styles.section}>
+          <TickLabel>Quiet hours</TickLabel>
+        </View>
         <Row
           title="Pause overnight (10pm – 8am)"
           sub="Notifications will bundle into one summary at 8am local"
           value={!!local.quiet_hours_enabled}
           onChange={() => flip('quiet_hours_enabled')}
         />
-        <View style={styles.tzRow}>
-          <Text style={styles.tzLabel}>Time zone</Text>
-          <Text style={styles.tzValue}>{local.tz}</Text>
+        <View style={styles.kvRow}>
+          <Text style={styles.rowKey}>Time zone</Text>
+          <Text style={styles.kvValue}>{local.tz}</Text>
         </View>
 
-        <Text style={styles.section}>Testing</Text>
+        <View style={styles.section}>
+          <TickLabel>Testing</TickLabel>
+        </View>
         <Pressable
           onPress={() => navigation.navigate?.('FeedbackInbox')}
-          style={({ pressed }) => [styles.feedbackRow, pressed && { opacity: 0.85 }]}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
         >
           <View style={{ flex: 1 }}>
-            <Text style={styles.feedbackTitle}>Test feedback</Text>
-            <Text style={styles.feedbackSub}>
-              Review and share notes you captured with the floating 📝 button.
+            <Text style={styles.rowKey}>Test feedback</Text>
+            <Text style={styles.rowSub}>
+              Review and share notes you captured with the floating button.
             </Text>
           </View>
-          <Text style={styles.feedbackChevron}>›</Text>
+          <Icon name="chevron-right" color={chalk.dim} size={16} />
         </Pressable>
 
-        <View style={{ height: spacing.xxl }} />
+        <View style={{ height: space.xxl }} />
         <Pressable
           onPress={async () => {
             await signOut();
             navigation.replace?.('SignIn');
           }}
-          style={({ pressed }) => [styles.signOut, pressed && { opacity: 0.7 }]}
+          style={({ pressed }) => [styles.signOut, pressed && styles.rowPressed]}
         >
           <Text style={styles.signOutText}>Sign out</Text>
         </Pressable>
@@ -278,130 +282,104 @@ function Row({
 }: { title: string; sub?: string; value: boolean; onChange: () => void }) {
   return (
     <View style={styles.row}>
-      <View style={{ flex: 1, paddingRight: spacing.md }}>
-        <Text style={styles.rowTitle}>{title}</Text>
+      <View style={{ flex: 1, paddingRight: space.md }}>
+        <Text style={styles.rowKey}>{title}</Text>
         {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
       </View>
       <Switch
         value={value}
         onValueChange={onChange}
-        trackColor={{ false: colors.border, true: colors.accent }}
-        thumbColor="#fff"
+        trackColor={{ false: ink.ink3, true: ice.base }}
+        thumbColor={chalk.base}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
+  root: { flex: 1, backgroundColor: ink.ink0 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  body: { padding: spacing.lg, gap: spacing.sm },
+  body: { padding: space.lg },
   section: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginTop: spacing.lg,
-    marginBottom: spacing.xs,
+    marginTop: space.xl,
+    marginBottom: space.sm,
   },
+  // Hairline key-value / toggle rows — surface stays ink-0, depth via lines.
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    padding: spacing.md,
+    minHeight: 44,
+    paddingVertical: space.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ink.line,
   },
-  rowTitle: { color: colors.text, fontSize: fontSize.base, fontWeight: '700' },
-  rowSub: { color: colors.muted, fontSize: fontSize.xs, marginTop: 2, lineHeight: 18 },
-  tzRow: {
+  rowKey: type.label,
+  rowSub: {
+    ...type.bodySm,
+    marginTop: space.xs,
+  },
+  kvRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    padding: spacing.md,
+    minHeight: 44,
+    paddingVertical: space.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ink.line,
   },
-  tzLabel: { color: colors.text, fontSize: fontSize.base, fontWeight: '700' },
-  tzValue: { color: colors.muted, fontSize: fontSize.base },
-  signOut: {
-    padding: spacing.md,
-    alignItems: 'center',
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  signOutText: { color: colors.red, fontWeight: '700', fontSize: fontSize.base },
-  feedbackRow: {
+  kvValue: type.body,
+  linkRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    gap: space.md,
+    minHeight: 44,
+    paddingVertical: space.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ink.line,
   },
-  feedbackTitle:   { color: colors.text,  fontSize: fontSize.base, fontWeight: '700' },
-  feedbackSub:     { color: colors.muted, fontSize: fontSize.xs,   marginTop: 2, lineHeight: 16 },
-  feedbackChevron: { color: colors.muted, fontSize: 24 },
-  // B3 — Switch league row + Connect another league card
+  rowPressed: { backgroundColor: ink.ink3 },
+  rowDim: { opacity: 0.45 },
+  signOut: {
+    minHeight: 44,
+    paddingVertical: space.md,
+    justifyContent: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: ink.line,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ink.line,
+  },
+  signOutText: {
+    ...type.body,
+    color: semantic.neg,
+  },
+  // B3 — Switch league rows + Connect another league card
   leagueRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    gap: space.md,
+    minHeight: 44,
+    paddingVertical: space.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ink.line,
   },
-  leagueRowActive: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.08)',
+  leagueName: type.title,
+  leagueMeta: {
+    ...type.bodySm,
+    marginTop: space.xs,
   },
-  leagueRowDim: { opacity: 0.45 },
-  leagueName: { color: colors.text, fontSize: fontSize.base, fontWeight: '700' },
-  leagueMeta: { color: colors.muted, fontSize: fontSize.xs, marginTop: 2 },
-  check: { color: colors.accent, fontSize: 22, fontWeight: '800' },
-  connectCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.sm,
+  leagueMetaCount: {
+    ...type.data,
+    color: chalk.dim,
   },
-  connectHelp: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    lineHeight: 18,
-  },
+  connectBody: { gap: space.md },
+  connectHelp: type.bodySm,
   connectInput: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    backgroundColor: colors.bg,
-    borderColor: colors.border,
+    ...type.body,
+    height: 44,
+    backgroundColor: ink.ink2,
     borderWidth: 1,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-  },
-  connectBtn: {
-    backgroundColor: colors.accent,
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  connectBtnDisabled: {
-    opacity: 0.45,
-  },
-  connectBtnText: {
-    color: '#fff',
-    fontSize: fontSize.base,
-    fontWeight: '800',
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.md,
   },
 });

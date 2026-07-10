@@ -1,31 +1,33 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
-  ActivityIndicator,
   ScrollView,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  withSequence,
-  runOnJS,
-  Easing,
-} from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useNavigation } from '@react-navigation/native';
 import { haptics } from '../utils/haptics';
 import { startSpan } from '../observability/sentry';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import {
+  ink,
+  chalk,
+  ice,
+  flare,
+  semantic,
+  position as positionColors,
+  space,
+  radii,
+  type,
+  scrim,
+  shadowSheet,
+} from '../theme/chalkline';
+import { Button, Icon } from '../components/chalkline';
+import FormatToggle from '../components/FormatToggle';
 import PlayerCard from '../components/PlayerCard';
 import Toast from '../components/Toast';
 import {
@@ -34,19 +36,27 @@ import {
   getStreak,
   submitTrioRanking,
 } from '../api/rankings';
-import type { Position, Trio, RankingProgress } from '../shared/types';
+import type { Position, ScoringFormat, Trio, RankingProgress } from '../shared/types';
 import { useFlag } from '../state/useFeatureFlags';
 import { useSession } from '../state/useSession';
+import { useScoringFormat } from '../hooks/useScoringFormat';
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
 const THRESHOLD_FALLBACK = 10;
 const SPEED_MODE_KEY = 'ftf.trios.speedMode';
+
+const posColorFor = (p: Position) =>
+  positionColors[p.toLowerCase() as keyof typeof positionColors];
 
 export default function RankScreen() {
   const queryClient = useQueryClient();
   const navigation  = useNavigation();
   const activeFormat = useSession((s) => s.activeFormat);
   const leagueId = useSession((s) => s.league?.league_id ?? null);
+  // FB #80 — SF/1QB toggle. setFormat flips the server session + local
+  // mirrors and marks the choice explicit so the league-default applier
+  // (RootNav) won't override it this session.
+  const { setFormat, switching: formatSwitching } = useScoringFormat();
   const [position, setPosition] = useState<Position>('QB');
   const [selectionOrder, setSelectionOrder] = useState<('a' | 'b' | 'c')[]>([]);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
@@ -71,6 +81,17 @@ export default function RankScreen() {
 
   const qcEnabled      = useFlag('swipe.qc_compliments');
   const gestureEnabled = useFlag('swipe.gesture_audit');
+
+  // FB #80 — explicit format switch from the header toggle. On failure the
+  // local state is untouched (the toggle stays where it was) — just toast.
+  const onFormatChange = useCallback(
+    async (fmt: ScoringFormat) => {
+      haptics.selection();
+      const ok = await setFormat(fmt);
+      if (!ok) setToast({ msg: 'Could not switch format', tone: 'warn' });
+    },
+    [setFormat],
+  );
 
   // ── Data ────────────────────────────────────────────────────────────
   const trioQuery = useQuery({
@@ -153,7 +174,7 @@ export default function RankScreen() {
       const prev = streakQuery.data?.current ?? 0;
       const next = resp.streak?.current ?? 0;
       if (next > prev && next >= 2) {
-        setToast({ msg: `🔥 ${next}-day streak!`, tone: 'success' });
+        setToast({ msg: `${next}-day streak!`, tone: 'success' });
         haptics.success();
       }
       if (resp.streak) {
@@ -218,7 +239,7 @@ export default function RankScreen() {
         trio.qc_expected_order.length === 3 &&
         rankedIds.every((id, i) => id === trio.qc_expected_order![i])
       ) {
-        setToast({ msg: '✓ Nice call — you helped verify the rankings!', tone: 'success' });
+        setToast({ msg: 'Nice call — you helped verify the rankings!', tone: 'success' });
         haptics.success();
       }
       submitMutation.mutate(rankedIds);
@@ -313,21 +334,35 @@ export default function RankScreen() {
                 // generic `navigate` doesn't know our route names here.
                 (navigation.getParent() as any)?.navigate('League');
               }}
-              style={({ pressed }) => [styles.streakChip, pressed && { opacity: 0.7 }]}
+              style={({ pressed }) => [
+                styles.streakChip,
+                pressed && { backgroundColor: ink.ink3 },
+              ]}
             >
-              <Text style={styles.streakFlame}>🔥</Text>
+              <Icon name="trends" size={16} color={flare.base} />
               <Text style={styles.streakNum}>{streakQuery.data!.current}</Text>
               <Text style={styles.streakLabel}>day streak</Text>
-              <Text style={styles.streakArrow}>›</Text>
+              <Icon name="chevron-right" size={14} color={chalk.dim} />
             </Pressable>
           </View>
         ) : null}
 
-        <Text style={styles.modeHint}>Trios · tap 🏈 Rank below for more modes ›</Text>
+        <Text style={styles.modeHint}>Trios · tap Rank below for more modes</Text>
 
-        {/* Position switcher */}
+        {/* FB #80 — SF/1QB scoring-format toggle. Defaults to the selected
+            league's detected format (useLeagueFormatDefault in RootNav);
+            tapping here is an explicit in-session override so trios rank
+            the other format's board. Same slot as TiersScreen's: directly
+            above the position switcher. */}
+        <FormatToggle
+          value={activeFormat}
+          onChange={onFormatChange}
+          disabled={formatSwitching}
+        />
+
+        {/* Position switcher — Chalkline segmented control */}
         <View style={styles.switcher}>
-          {POSITIONS.map((p) => {
+          {POSITIONS.map((p, i) => {
             const isActive = p === position;
             const count = progress?.[p] ?? 0;
             return (
@@ -340,8 +375,10 @@ export default function RankScreen() {
                 }}
                 style={({ pressed }) => [
                   styles.switcherBtn,
+                  i > 0 && styles.switcherBtnDivider,
+                  pressed && { backgroundColor: ink.ink3 },
                   isActive && styles.switcherBtnActive,
-                  pressed && styles.switcherBtnPressed,
+                  { borderBottomColor: isActive ? posColorFor(p) : 'transparent' },
                 ]}
               >
                 <Text
@@ -367,41 +404,57 @@ export default function RankScreen() {
           })}
         </View>
 
-        {/* Progress bar for the active position */}
+        {/* Unlock progress — segmented 4px track, one segment per position,
+            fill in that position's color (UnlockBar spec). */}
         <View style={styles.progressWrap}>
-          <View style={styles.progressTrack}>
-            <View
-              style={[
-                styles.progressFill,
-                {
-                  width: `${Math.min(100, (currentProgressForPos / threshold) * 100)}%`,
-                  backgroundColor: currentProgressForPos >= threshold ? colors.green : colors.accent,
-                },
-              ]}
-            />
+          <View style={styles.unlockTrack}>
+            {POSITIONS.map((p) => {
+              const c = Math.min(progress?.[p] ?? 0, threshold);
+              return (
+                <View key={p} style={styles.unlockSegment}>
+                  <View
+                    style={[
+                      styles.unlockFill,
+                      {
+                        width: `${Math.min(100, (c / threshold) * 100)}%`,
+                        backgroundColor: posColorFor(p),
+                      },
+                    ]}
+                  />
+                </View>
+              );
+            })}
           </View>
-          <Text style={styles.progressText}>
-            {currentProgressForPos >= threshold
-              ? `${position} rankings established ✓`
-              : `${currentProgressForPos} of ${threshold} ${position}s ranked`}
-          </Text>
+          {currentProgressForPos >= threshold ? (
+            <View style={styles.progressTextRow}>
+              <Icon name="check" size={14} color={semantic.pos} />
+              <Text style={styles.progressText}>{position} rankings established</Text>
+            </View>
+          ) : (
+            <Text style={styles.progressText}>
+              <Text style={styles.progressCount}>{currentProgressForPos}</Text>
+              {' of '}
+              <Text style={styles.progressCount}>{threshold}</Text>
+              {` ${position}s ranked`}
+            </Text>
+          )}
         </View>
 
         {/* Instruction */}
         <Text style={styles.instruction}>
           {submitMutation.isPending
-            ? '✓ Submitting…'
+            ? 'Submitting…'
             : selectionOrder.length === 0
             ? 'Tap in order of preference — best first'
             : selectionOrder.length === 1
             ? 'Good — now tap your 2nd choice'
             : selectionOrder.length === 2
             ? speedMode
-              ? '⚡ Speed mode — releasing now'
+              ? 'Speed mode — releasing now'
               : 'Last one — tap your 3rd choice'
             : speedMode
-            ? '✓ Submitting…'
-            : '✓ All ranked — confirm when ready'}
+            ? 'Submitting…'
+            : 'All ranked — confirm when ready'}
         </Text>
 
         {/* Cards */}
@@ -426,25 +479,23 @@ export default function RankScreen() {
                 ? trioQuery.error.message
                 : 'Could not load next trio'}
             </Text>
-            <Pressable onPress={() => trioQuery.refetch()}>
-              <Text style={styles.retryText}>Try again</Text>
-            </Pressable>
+            <Button
+              variant="ghost"
+              compact
+              label="Try again"
+              onPress={() => trioQuery.refetch()}
+            />
           </View>
         ) : (
           <View style={styles.cards}>
             {(['a', 'b', 'c'] as const).map((side) => (
-              <SwipePlayerCard
+              <TrioPlayerCard
                 key={`${trio.player_a.id}-${side}`}
                 trio={trio}
                 side={side}
                 rank={rankOf(side)}
                 onTap={() => rankSide(side)}
                 onLongPress={() => showInfoSheet(side)}
-                onSwipeSkip={handleSkipEntireTrio}
-                onSwipeRankFirst={() => {
-                  setSelectionOrder(() => [side]);
-                  haptics.selection();
-                }}
                 disabled={submitMutation.isPending || isRefetchingTrio}
               />
             ))}
@@ -457,12 +508,15 @@ export default function RankScreen() {
           style={({ pressed }) => [
             styles.speedTile,
             speedMode && styles.speedTileOn,
-            pressed && { opacity: 0.85 },
+            pressed && { backgroundColor: ink.ink3 },
           ]}
         >
-          <Text style={[styles.speedTileText, speedMode && styles.speedTileTextOn]}>
-            {speedMode ? '⚡ I AM SPEED — ON' : '⚡ I AM SPEED — OFF'}
-          </Text>
+          <View style={styles.speedTileTitleRow}>
+            <Icon name="trends" size={14} color={speedMode ? ice.base : chalk.dim} />
+            <Text style={[styles.speedTileText, speedMode && styles.speedTileTextOn]}>
+              {speedMode ? 'I AM SPEED — ON' : 'I AM SPEED — OFF'}
+            </Text>
+          </View>
           <Text style={styles.speedTileCaption}>
             {speedMode
               ? 'Pick your top 2 — we auto-rank the 3rd and save.'
@@ -474,22 +528,13 @@ export default function RankScreen() {
             cards (in manual mode). Pre-3 we say nothing here; the
             instruction line above the cards already coaches the user. */}
         {!speedMode && selectionOrder.length === 3 && (
-          <Pressable
+          <Button
+            variant="primary"
+            label="Confirm ranking"
             onPress={() => submitCurrent(selectionOrder)}
             disabled={!trio || submitMutation.isPending}
-            style={({ pressed }) => [
-              styles.confirmBtn,
-              styles.confirmBtnReady,
-              pressed && { opacity: 0.85 },
-              submitMutation.isPending && { opacity: 0.45 },
-            ]}
-          >
-            {submitMutation.isPending ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.confirmBtnText}>Confirm ranking →</Text>
-            )}
-          </Pressable>
+            style={styles.confirmBtn}
+          />
         )}
 
         {/* Bottom action — single Skip button. "I don't know" was removed
@@ -497,23 +542,20 @@ export default function RankScreen() {
             now ephemeral: refetches a different trio without persistently
             removing any player from the eligible pool. */}
         <View style={styles.actions}>
-          <Pressable
+          <Button
+            variant="secondary"
+            label="Skip"
             onPress={handleSkipEntireTrio}
             disabled={!trio || isRefetchingTrio}
-            style={({ pressed }) => [
-              styles.secondaryBtn,
-              pressed && { opacity: 0.6 },
-              (!trio || isRefetchingTrio) && { opacity: 0.4 },
-            ]}
-          >
-            <Text style={styles.secondaryBtnText}>Skip ↩</Text>
-          </Pressable>
+            style={styles.flex1}
+          />
         </View>
 
         {isUnlockedEverywhere && (
           <View style={styles.unlockedBanner}>
+            <View style={styles.bannerTick} />
             <Text style={styles.unlockedText}>
-              🔓 Trade Finder unlocked — check the Trades tab
+              Trade Finder unlocked — check the Trades tab
             </Text>
           </View>
         )}
@@ -524,11 +566,15 @@ export default function RankScreen() {
         <View style={styles.infoOverlay}>
           <Pressable style={styles.infoBackdrop} onPress={() => setInfoSheet(null)} />
           <View style={styles.infoSheet}>
+            <View style={styles.grabber} />
             <Text style={styles.infoTitle}>{infoSheet.name}</Text>
             <Text style={styles.infoBody}>{infoSheet.info}</Text>
-            <Pressable onPress={() => setInfoSheet(null)}>
-              <Text style={styles.infoClose}>Close</Text>
-            </Pressable>
+            <Button
+              variant="ghost"
+              label="Close"
+              onPress={() => setInfoSheet(null)}
+              style={styles.infoClose}
+            />
           </View>
         </View>
       )}
@@ -536,278 +582,217 @@ export default function RankScreen() {
   );
 }
 
-// ── SwipePlayerCard — Reanimated wrapper around PlayerCard ─────────
-interface SwipeProps {
+// ── TrioPlayerCard — plain PlayerCard wrapper for the trio arena ────
+// FB-72: the swipe-left-to-skip / swipe-right-to-rank gesture was removed
+// at operator request — it collided with scrolling and caused accidental
+// skips. Tap-to-rank + the Skip button are the only interactions now.
+interface TrioCardProps {
   trio: Trio;
   side: 'a' | 'b' | 'c';
   rank: 1 | 2 | 3 | null;
   onTap: () => void;
   onLongPress?: () => void;
-  onSwipeSkip: () => void;
-  onSwipeRankFirst: () => void;
   disabled?: boolean;
 }
 
-const SCREEN_W = Dimensions.get('window').width;
-const SWIPE_THRESHOLD = 120;
-
-function SwipePlayerCard({
+function TrioPlayerCard({
   trio,
   side,
   rank,
   onTap,
   onLongPress,
-  onSwipeSkip,
-  onSwipeRankFirst,
   disabled,
-}: SwipeProps) {
-  const translateX = useSharedValue(0);
+}: TrioCardProps) {
   const player = side === 'a' ? trio.player_a : side === 'b' ? trio.player_b : trio.player_c;
-
-  // Swipe gesture: horizontal pan with threshold dismisses in one of two
-  // directions. Vertical motion aborts the swipe (so the ScrollView keeps
-  // its normal scroll feel).
-  const pan = useMemo(
-    () =>
-      Gesture.Pan()
-        .minDistance(10)
-        .activeOffsetX([-20, 20])
-        .failOffsetY([-30, 30])
-        .enabled(!disabled)
-        .onUpdate((e) => {
-          translateX.value = e.translationX;
-        })
-        .onEnd((e) => {
-          const dx = e.translationX;
-          if (dx < -SWIPE_THRESHOLD) {
-            // Swipe-left = skip the trio
-            translateX.value = withTiming(-SCREEN_W, { duration: 180 }, (finished) => {
-              if (finished) runOnJS(onSwipeSkip)();
-              translateX.value = 0;
-            });
-          } else if (dx > SWIPE_THRESHOLD) {
-            // Swipe-right = rank as #1
-            translateX.value = withSequence(
-              withTiming(SCREEN_W * 0.35, {
-                duration: 140,
-                easing: Easing.out(Easing.cubic),
-              }),
-              withTiming(0, { duration: 180 }),
-            );
-            runOnJS(onSwipeRankFirst)();
-          } else {
-            translateX.value = withTiming(0, { duration: 160 });
-          }
-        }),
-    [disabled, onSwipeSkip, onSwipeRankFirst, translateX],
-  );
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX.value },
-      { rotate: `${translateX.value / 30}deg` },
-    ],
-  }));
-
   return (
-    <GestureDetector gesture={pan}>
-      <Animated.View style={animatedStyle}>
-        <PlayerCard
-          player={player}
-          rank={rank}
-          selected={rank !== null}
-          onPress={onTap}
-          onLongPress={onLongPress}
-          disabled={disabled}
-          showInjury={false}
-        />
-      </Animated.View>
-    </GestureDetector>
+    <PlayerCard
+      player={player}
+      rank={rank}
+      selected={rank !== null}
+      onPress={onTap}
+      onLongPress={onLongPress}
+      disabled={disabled}
+      showInjury={false}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1, backgroundColor: ink.ink0 },
   scroll: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl,
-    gap: spacing.md,
+    padding: space.lg,
+    paddingBottom: space.xxl,
+    gap: space.md,
   },
+  flex1: { flex: 1 },
   streakRow: { alignItems: 'center' },
   streakChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,140,40,0.12)',
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    minHeight: 44, // touch floor
+    borderRadius: radii.pill,
+    backgroundColor: ink.ink1,
     borderWidth: 1,
-    borderColor: 'rgba(255,140,40,0.35)',
+    borderColor: ink.line,
   },
-  streakFlame: { fontSize: fontSize.base },
-  streakNum: { color: '#ffb27a', fontSize: fontSize.base, fontWeight: '800' },
-  streakLabel: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '600' },
-  streakArrow: { color: colors.muted, fontSize: fontSize.base, marginLeft: 2 },
+  streakNum: { ...type.data, color: chalk.base },
+  streakLabel: { ...type.bodySm, color: chalk.dim },
   modeHint: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
+    ...type.bodySm,
+    color: chalk.faint,
     textAlign: 'center',
-    fontWeight: '600',
-    marginTop: -spacing.xs,
+    marginTop: -space.xs,
   },
+
+  // Segmented control: 1px line-bordered group, radii.sm; active segment =
+  // ink3 fill + 2px underline in that position's color (PositionTabs spec).
   switcher: {
     flexDirection: 'row',
-    gap: spacing.xs,
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
+    borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: colors.border,
-    padding: 4,
+    borderColor: ink.line,
+    overflow: 'hidden',
   },
   switcherBtn: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
+    justifyContent: 'center',
+    paddingVertical: space.sm,
+    minHeight: 48,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  switcherBtnActive: { backgroundColor: 'rgba(79,124,255,0.14)' },
-  switcherBtnPressed: { opacity: 0.7 },
-  switcherText: { color: colors.muted, fontSize: fontSize.base, fontWeight: '700' },
-  switcherTextActive: { color: colors.accent },
-  switcherCount: { color: colors.muted, fontSize: fontSize.xs, marginTop: 2 },
-  switcherCountActive: { color: colors.accent },
+  switcherBtnDivider: {
+    borderLeftWidth: 1,
+    borderLeftColor: ink.line,
+  },
+  switcherBtnActive: { backgroundColor: ink.ink3 },
+  switcherText: { ...type.label, color: chalk.dim },
+  switcherTextActive: { color: chalk.base },
+  switcherCount: { ...type.data, color: chalk.dim, marginTop: 2 },
+  switcherCountActive: { color: chalk.base },
 
-  progressWrap: { gap: 6 },
-  progressTrack: {
-    height: 6,
-    backgroundColor: colors.border,
-    borderRadius: radius.pill,
+  // Unlock progress: segmented 4px track, square ends, per-position fills,
+  // 1px line gaps between segments (UnlockBar spec).
+  progressWrap: { gap: space.sm - 2 },
+  unlockTrack: {
+    flexDirection: 'row',
+    height: 4,
+    backgroundColor: ink.line,
+    gap: 1,
+  },
+  unlockSegment: {
+    flex: 1,
+    height: 4,
+    backgroundColor: ink.ink3,
     overflow: 'hidden',
   },
-  progressFill: {
-    height: '100%',
-    borderRadius: radius.pill,
+  unlockFill: { height: 4 },
+  progressTextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
   },
-  progressText: { color: colors.muted, fontSize: fontSize.xs, textAlign: 'center' },
+  progressText: { ...type.bodySm, color: chalk.dim, textAlign: 'center' },
+  progressCount: { ...type.data, color: chalk.base },
 
   instruction: {
-    color: colors.text,
-    fontSize: fontSize.base,
+    ...type.body,
     textAlign: 'center',
-    fontWeight: '600',
-    paddingVertical: spacing.sm,
+    paddingVertical: space.sm,
   },
-  cards: { gap: spacing.md },
+  cards: { gap: space.md },
   centered: {
-    paddingVertical: spacing.xxl,
+    paddingVertical: space.xxl,
     alignItems: 'center',
-    gap: spacing.md,
+    gap: space.md,
   },
-  // Skeleton tiles — match the real PlayerCard outer shape (surface bg,
-  // border, radius.lg, padding) so the layout doesn't shift when the
-  // /api/trio response lands. Static fills, no shimmer (consistent with
-  // MatchesScreen skeleton — see Mobile #M1).
+  // Skeleton tiles — match the real PlayerCard outer shape (ink1 surface,
+  // hairline border, radii.md, padding) so the layout doesn't shift when
+  // the /api/trio response lands. Static fills, no shimmer (consistent
+  // with MatchesScreen skeleton — see Mobile #M1).
   skeletonCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
+    backgroundColor: ink.ink1,
+    borderColor: ink.line,
     borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    gap: spacing.sm,
+    borderRadius: radii.md,
+    padding: space.lg,
+    gap: space.sm,
     minHeight: 96,
   },
   skeletonChip: {
     width: 44,
     height: 18,
-    borderRadius: radius.sm,
-    backgroundColor: colors.border,
+    borderRadius: radii.xs,
+    backgroundColor: ink.ink3,
   },
   skeletonName: {
     width: 160,
     height: 18,
-    borderRadius: radius.sm,
-    backgroundColor: colors.border,
+    borderRadius: radii.xs,
+    backgroundColor: ink.ink3,
   },
   skeletonMeta: {
     width: 120,
     height: 12,
-    borderRadius: radius.sm,
-    backgroundColor: colors.border,
+    borderRadius: radii.xs,
+    backgroundColor: ink.ink3,
   },
-  errorText: { color: colors.red, fontSize: fontSize.sm, textAlign: 'center' },
-  retryText: { color: colors.accent, fontSize: fontSize.sm, fontWeight: '700' },
+  errorText: { ...type.bodySm, color: semantic.neg, textAlign: 'center' },
 
   speedTile: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
+    backgroundColor: ink.ink1,
+    borderColor: ink.line,
     borderWidth: 1,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    marginTop: spacing.lg,
+    borderRadius: radii.md,
+    paddingVertical: space.md,
+    paddingHorizontal: space.lg,
+    marginTop: space.lg,
     alignItems: 'center',
-    gap: 4,
+    minHeight: 44, // touch floor
+    gap: space.xs,
   },
   speedTileOn: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.10)',
+    borderColor: ice.base,
   },
-  speedTileText: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '800',
-    letterSpacing: 0.3,
+  speedTileTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm - 2,
   },
-  speedTileTextOn: { color: colors.accent },
+  speedTileText: { ...type.label, color: chalk.base },
+  speedTileTextOn: { color: ice.base },
   speedTileCaption: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
+    ...type.bodySm,
+    color: chalk.dim,
     textAlign: 'center',
   },
-  confirmBtn: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    paddingVertical: 14,
-    alignItems: 'center',
-    minHeight: 48,
-    marginTop: spacing.sm,
-  },
-  confirmBtnReady: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
-  },
-  confirmBtnText: { color: '#fff', fontSize: fontSize.base, fontWeight: '800' },
+  confirmBtn: { marginTop: space.sm },
 
   actions: {
     flexDirection: 'row',
-    gap: spacing.md,
-    marginTop: spacing.lg,
+    gap: space.md,
+    marginTop: space.lg,
   },
-  secondaryBtn: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    paddingVertical: 14,
-    alignItems: 'center',
-    minHeight: 44, // thumb-friendly
-  },
-  secondaryBtnText: { color: colors.text, fontSize: fontSize.sm, fontWeight: '600' },
 
+  // Banner spec: ink2 surface, hairline, ice tick + body-sm.
   unlockedBanner: {
-    marginTop: spacing.lg,
-    padding: spacing.md,
-    backgroundColor: 'rgba(34,197,94,0.1)',
+    marginTop: space.lg,
+    padding: space.md,
+    backgroundColor: ink.ink2,
     borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.35)',
-    borderRadius: radius.md,
+    borderColor: ink.line,
+    borderRadius: radii.md,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
   },
-  unlockedText: { color: colors.green, fontWeight: '700', fontSize: fontSize.sm },
+  bannerTick: { width: 3, height: 14, backgroundColor: ice.base },
+  unlockedText: { ...type.bodySm, color: chalk.base },
 
   infoOverlay: {
     position: 'absolute',
@@ -821,27 +806,32 @@ const styles = StyleSheet.create({
   },
   infoBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: scrim,
   },
   infoSheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing.xl,
-    paddingBottom: spacing.xxl,
-    gap: spacing.sm,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderTopLeftRadius: radii.md,
+    borderTopRightRadius: radii.md,
+    padding: space.xl,
+    paddingTop: space.md,
+    paddingBottom: space.xxl,
+    gap: space.sm,
+    ...shadowSheet,
   },
-  infoTitle: { color: colors.text, fontSize: fontSize.xl, fontWeight: '800' },
+  grabber: {
+    alignSelf: 'center',
+    width: 32,
+    height: 4,
+    backgroundColor: ink.lineStrong,
+    marginBottom: space.sm,
+  },
+  infoTitle: { ...type.title },
   infoBody: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
+    ...type.bodySm,
+    color: chalk.dim,
     lineHeight: 22,
   },
-  infoClose: {
-    color: colors.accent,
-    fontSize: fontSize.base,
-    fontWeight: '700',
-    textAlign: 'center',
-    paddingTop: spacing.lg,
-  },
+  infoClose: { marginTop: space.md },
 });

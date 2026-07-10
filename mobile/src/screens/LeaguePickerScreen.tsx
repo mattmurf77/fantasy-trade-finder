@@ -9,8 +9,8 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, ice, semantic, space, type } from '../theme/chalkline';
+import { Button, Icon } from '../components/chalkline';
 import { useSession } from '../state/useSession';
 import { getLeagues } from '../api/sleeper';
 import { buildSessionInitBody, submitSessionInit } from '../api/auth';
@@ -110,14 +110,12 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
           <Text style={styles.title}>Choose a League</Text>
           <Text style={styles.sub}>Leagues for {user?.display_name || '…'}</Text>
         </View>
-        <Pressable onPress={onSignOut} hitSlop={10}>
-          <Text style={styles.signout}>Sign out</Text>
-        </Pressable>
+        <Button label="Sign out" variant="ghost" compact onPress={onSignOut} />
       </View>
 
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator color={colors.accent} />
+          <ActivityIndicator color={ice.base} />
           <Text style={styles.loadingText}>
             {slowLoad
               ? 'Waking up server — first request after a quiet period can take 30s.'
@@ -127,9 +125,7 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
       ) : error ? (
         <View style={styles.centered}>
           <Text style={styles.error}>{error}</Text>
-          <Pressable onPress={refresh}>
-            <Text style={styles.retry}>Try again</Text>
-          </Pressable>
+          <Button label="Try again" variant="secondary" compact onPress={refresh} />
         </View>
       ) : cached.length === 0 ? (
         <View style={styles.centered}>
@@ -143,7 +139,7 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
           keyExtractor={(lg) => lg.league_id}
           contentContainerStyle={styles.list}
           refreshControl={
-            <RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.accent} />
+            <RefreshControl refreshing={false} onRefresh={refresh} tintColor={ice.base} />
           }
           renderItem={({ item }) => {
             const isBusy = selectingId === item.league_id;
@@ -157,9 +153,6 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
                 onPress={() => pickLeague(item)}
                 disabled={!!selectingId}
               >
-                <View style={styles.rowAvatar}>
-                  <Text style={styles.rowAvatarEmoji}>🏈</Text>
-                </View>
                 <View style={styles.rowBody}>
                   <Text style={styles.rowName} numberOfLines={1}>
                     {item.name}
@@ -169,9 +162,9 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
                   </Text>
                 </View>
                 {isBusy ? (
-                  <ActivityIndicator color={colors.accent} />
+                  <ActivityIndicator color={chalk.dim} />
                 ) : (
-                  <Text style={styles.chevron}>›</Text>
+                  <Icon name="chevron-right" size={16} color={chalk.dim} />
                 )}
               </Pressable>
             );
@@ -183,53 +176,41 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1, backgroundColor: ink.ink0 },
   header: {
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.md,
+    paddingLeft: space.xl,
+    paddingRight: space.lg,
+    paddingTop: space.lg,
+    paddingBottom: space.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  title: { color: colors.text, fontSize: fontSize.xl, fontWeight: '800' },
-  sub: { color: colors.muted, fontSize: fontSize.sm, marginTop: 2 },
-  signout: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '600' },
+  title: { ...type.heading },
+  sub: { ...type.bodySm, marginTop: 2 },
   centered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.xl,
-    gap: spacing.md,
+    padding: space.xl,
+    gap: space.md,
   },
-  loadingText: { color: colors.muted, fontSize: fontSize.sm, textAlign: 'center' },
-  error: { color: colors.red, fontSize: fontSize.sm, textAlign: 'center' },
-  retry: { color: colors.accent, fontSize: fontSize.sm, fontWeight: '700' },
-  list: { padding: spacing.lg, gap: spacing.sm },
+  loadingText: { ...type.bodySm, textAlign: 'center' },
+  error: { ...type.bodySm, color: semantic.neg, textAlign: 'center' },
+  list: { paddingVertical: space.sm },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.sm,
-    gap: spacing.md,
+    minHeight: 56,
+    paddingHorizontal: space.xl,
+    paddingVertical: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
+    gap: space.md,
   },
-  rowPressed: { borderColor: colors.accent, backgroundColor: 'rgba(79,124,255,0.06)' },
+  rowPressed: { backgroundColor: ink.ink3 },
   rowBusy: { opacity: 0.6 },
-  rowAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: 'rgba(79,124,255,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowAvatarEmoji: { fontSize: 22 },
   rowBody: { flex: 1, minWidth: 0 },
-  rowName: { color: colors.text, fontSize: fontSize.base, fontWeight: '700' },
-  rowMeta: { color: colors.muted, fontSize: fontSize.xs, marginTop: 2 },
-  chevron: { color: colors.muted, fontSize: 22 },
+  rowName: { ...type.title },
+  rowMeta: { ...type.bodySm, marginTop: 2 },
 });

@@ -1,0 +1,172 @@
+{
+  "summary": {
+    "total": 15,
+    "by_severity": {
+      "P1": 1,
+      "P2": 5,
+      "P3": 9
+    },
+    "by_role": {
+      "R7-live-smoke": 4,
+      "R9-mobile": 5,
+      "R10-extension": 6
+    }
+  },
+  "coverage": {
+    "R7-live-smoke": "Booted the real Flask app on 127.0.0.1:5077 with a copy DB (/tmp/ftf_qa_r7.db) and CRON_SECRET=r7secret; confirmed up (GET / -> 200) and killed the PID at the end (port verified free). Inventoried all ~80 @app.route entries via grep and exercised a representative sample across every category. Verified clean behavior (not reported): all session-backed GET/POST routes without X-Session-Token return 401 JSON {\\\"error\\\":\\\"session_expired\\\"}; admin/cron/debug/feature-flags-reload without X-Cron-Secret return 401 (gating works; bodies are Werkzeug HTML 401 pages but these are auth-deny responses, considered acceptable / low value and not separately filed); same routes WITH the secret return non-401 200 JSON; PUT /api/admin/config/<unknown_key> -> clean 404 JSON; cron ticks with secret -> 200 JSON. Edge IDs clean: /api/players/<bad>, /api/profile/<bad>, /u/<bad>, /api/sleeper/user/<bad> all 404 JSON; OG .png routes return PNG (correct) even on 404; /s/ share routes return HTML (correct, they are HTML pages). Malformed authed bodies on ~16 POST/PUT handlers (rank3, scoring/switch, tiers/save, league/preferences, trio/skip, etc.) all returned clean 400 JSON \u2014 only notifications/read leaked a 500. The generic Exception handler does emit JSON for in-handler exceptions (confirmed). Did NOT re-report the Phase-1 fixes (admin/debug/reload gating, 409 guard, notifications IDOR, test_user bypass, Sleeper 5xx->503, sleeper/players decorator) \u2014 verified they remain intact. Gaps: did not exercise flows requiring real Sleeper network success (live user_id/league_id), trade-generation deep paths, or OG image internals; share-HTML routes were not checked for stored-XSS via crafted usernames (out of R7 scope, worth a separate look).",
+    "R9-mobile": "Static review only (no device/build). Read all of mobile/src/api/client.ts + rankings/trades/league API wrappers, state stores (useSession, useFeatureFlags, useNotifications, queryClient), navigation (RootNav, TabNav), and every primary screen (Rank, Trades, League, Trends, Tiers, Matches, Profile, Portfolio, LeaguePicker, SignIn, ManualRanks) plus TradeCard and OutlookSheet components. Cross-checked backend/server.py for which routes use _require_session vs _require_initialized_session and the 409/500 shapes.\\n\\nKey systemic finding: the INIT-08 409 handling the review asked to verify is NOT robust. RankScreen (the default tab), TrendsScreen, and the RootNav progress tail fire league-backed queries with no `enabled: !!leagueId/hasToken` gate and with the global `retry:1` default, so the session-init window surfaces as generic error cards (Rank/Trends) or silent 0-state (progress). Worse, several of those endpoints (/api/trio, /api/me/streak, /api/rankings, /api/rankings/progress) still use `_require_session` and do `sess[\\\"service\\\"]` directly, returning a 500 (KeyError) rather than the structured 409 \u2014 so even a 409-aware client wouldn't catch them. TiersScreen and TradesScreen are gated/handled better (TiersScreen.rankingsQuery still ungated but has full loading/error/empty UI; TradesScreen gates on leagueId and has a switching overlay). MatchesScreen, ProfileScreen, PortfolioScreen, LeaguePickerScreen, SignInScreen all have solid loading/error/empty states and good null guards (TradeCard defends give/receive arrays; Profile defends tiers_snapshot/contrarian_takes; deepLinks guards route params).\\n\\nDid NOT re-flag the previously-fixed Phase-1 items (admin/debug auth, IDOR, test_user bypass, Sleeper 5xx\u2192503, players decorator) \u2014 none observed reintroduced. The known OutlookSheet not_sure P2 was not re-reported as-is, but I flagged a NEW adjacent bug (stale `initial` after mount that clobbers a saved outlook). Not exercised: actual push-notification tap routing, AppState foreground revalidate timing, and the trade-generate polling under real latency (reviewed statically only).",
+    "R10-extension": "Reviewed all extension files: manifest.json, background.js, content.js, popup.js, content.css, plus the two backend endpoints the extension calls (server.py /api/extension/auth :7238 and /api/extension/rankings :7317) to confirm header/contract alignment. Confirmed the header contract is consistent: background.js:42 and popup.js:79 both send X-Session-Token, and _require_session (server.py:7333) / the route read X-Session-Token (7333). No mismatch there. Token handling: session (incl. token) lives only in chrome.storage.local (background/content/popup all read via chrome.storage), is never written into the sleeper.com page DOM, and is never echoed to message senders except ftf:get_session which is in-extension-only. XSS hunt: grep-confirmed no innerHTML/insertAdjacentHTML/outerHTML in content.js \u2014 badges use textContent + .title + setAttribute, so backend data cannot inject script. Message-passing: neither onMessage handler checks sender, but manifest has no externally_connectable so web pages cannot reach the extension \u2014 rated P3 defense-in-depth. Permissions: 'tabs' is the known pre-existing P3 (not re-reported as new); no NEW over-broad permission found; localhost http host_permissions flagged P3 per brief. Did NOT re-report the Phase-1 backend fixes. Note outside R10 scope but adjacent: /api/extension/auth (server.py:7238) has no rate limiting (grep found no Limiter/flask_limiter anywhere), so the username->Sleeper-user-id lookup is an unthrottled enumeration/Sleeper-API-amplification vector \u2014 flagging here for a backend reviewer rather than as an extension finding. Gaps: did not load the extension into a live browser or exercise it against sleeper.com (static review only), so the badge-injection selectors were assessed by code reading, not against live Sleeper DOM; popup error-UX finding (P2) is reasoned from code paths, not reproduced live."
+  },
+  "findings": [
+    {
+      "where": "mobile/src/screens/RankScreen.tsx:76-81,408-432 (+ backend/server.py:1770-1775)",
+      "severity": "P1",
+      "category": "INIT-08 / missing-gate dead-end",
+      "title": "RankScreen (default-mounted tab) fires /api/trio with no leagueId/init gate and surfaces a hard error during the session-init window",
+      "description": "Rank is the focused tab on entry to Main, so RankScreen mounts and `trioQuery` (queryKey ['trio', position], queryFn getNextTrio) fires immediately with NO `enabled` gate. On the INIT-08 optimistic-navigation window \u2014 and on every cold launch where bootstrap() restored user+league+token and RootNav routed straight to 'Main' before revalidateSession()/submitSessionInit() completes \u2014 the backend session is bare. /api/trio uses `_require_session` (not `_require_initialized_session`) and does `service = sess[\"service\"]` (server.py:1775), which KeyErrors \u2192 generic 500 handler (NOT the structured 409), because `_require_session` only sets the `service` alias `if effective_format in services` and a bare session has none. With queryClient default `retry: 1`, the two fast attempts exhaust well before the 5\u201310s init finishes, so the user lands on the Trios screen showing 'Could not load next trio' (RankScreen.tsx:422-432) with the raw error. This is the exact INIT-08 graceful-handling case the review targets, and it is NOT handled: no 409/500-aware retry/spinner, just a dead-end error card. (Tapping 'Try again' eventually recovers, so it's recoverable, not fatal.)",
+      "evidence": "RankScreen.tsx:76-81 trioQuery has no `enabled`; backend get_trio (server.py:1770-1775) uses _require_session then `sess[\"service\"]`; _require_session (server.py:961-964) only aliases service when effective_format is in services; bare session => KeyError => 500. queryClient retry:1 (state/queryClient.ts:22).",
+      "suggested_fix": "Gate trioQuery with `enabled: !!leagueId && hasToken`, and add a query-level `retry` that treats 409 (session_not_initialized) and the cold-start 500/timeout as retryable with a few backoff attempts (or render the 'League data is still loading\u2026' spinner state for ApiError status 409/0 instead of the generic error card). Separately, switch backend /api/trio, /api/me/streak, /api/rankings, /api/rankings/progress to `_require_initialized_session` so the bare-session window returns a structured 409 rather than a 500.",
+      "role": "R9-mobile"
+    },
+    {
+      "where": "backend/server.py:5141-5155 (/api/sleeper/rosters/<league_id>)",
+      "severity": "P2",
+      "category": "error-handling/status-mapping",
+      "title": "Sleeper 404 on rosters route surfaces as HTTP 500 with leaked upstream error string",
+      "description": "For a digit-shaped but non-existent league_id, _sleeper_get() raises urllib HTTPError 404 (Sleeper returns 404 for /league/<id>/rosters). The route's blanket except returns jsonify({'error': str(e)}), 500 \u2014 so a missing league becomes a 500 with body {\"error\":\"HTTP Error 404: Not Found\"}. Wrong status class (should be 404), and it leaks the raw upstream error string. The sibling /api/sleeper/leagues/<id> route was hardened in Phase 1 to return 503/empty gracefully, but rosters (and league_users, same pattern at 5158-5172) were not, so behavior is inconsistent: leagues/1111111111 -> 200 [], league_users/1111111111 -> 200 [], rosters/1111111111 -> 500.",
+      "evidence": "GET /api/sleeper/rosters/1111111111 -> 500 application/json {\"error\":\"HTTP Error 404: Not Found\"} (repeatable). Compare GET /api/sleeper/leagues/1111111111 -> 200 [] and GET /api/sleeper/league_users/1111111111 -> 200 [].",
+      "suggested_fix": "In sleeper_rosters (and sleeper_league_users), catch urllib.error.HTTPError separately: map 404 -> return jsonify([]) or a clean 404 {\"error\":\"league_not_found\"}; map 5xx -> 503 sleeper_unavailable (mirror the leagues route). Never return str(e) to the client.",
+      "role": "R7-live-smoke"
+    },
+    {
+      "where": "backend/server.py:6003-6029 (/api/notifications/read)",
+      "severity": "P2",
+      "category": "input-validation/error-handling",
+      "title": "Non-list 'ids' triggers HTTP 500 with leaked SQLAlchemy internals",
+      "description": "ids = body.get('ids') or [] accepts any truthy type. A string is passed straight into mark_notifications_read -> SQLAlchemy IN() clause, raising an ArgumentError that the broad except returns as 500 with str(e). This is a client input error (should be 400) and it leaks DB-layer internals to the caller. Authenticated but any valid session can hit it.",
+      "evidence": "POST /api/notifications/read with X-Session-Token and body {\"ids\":\"x\"} -> 500 application/json {\"error\":\"IN expression list, SELECT construct, or bound parameter object expected, got 'x'.\"}",
+      "suggested_fix": "Validate ids: if present, require a list of ints (e.g. if ids and (not isinstance(ids, list) or not all(isinstance(i,int) for i in ids)): return 400 {\"error\":\"ids must be a list of integers\"}). Do not return str(e) on the 500 path; log it and return a generic message.",
+      "role": "R7-live-smoke"
+    },
+    {
+      "where": "mobile/src/screens/TrendsScreen.tsx:41-54,118-135 (+ backend/server.py:6696-6703,6794-6802)",
+      "severity": "P2",
+      "category": "INIT-08 / 409 surfaced as error",
+      "title": "TrendsScreen movers query has no init gate; a 409/500 in the init window renders 'Couldn't load' instead of a retry/loading state",
+      "description": "`moversQuery` (getRisersAndFallers) fires unconditionally with no `enabled` gate. Its endpoint /api/trends/risers-fallers uses `_require_initialized_session` (server.py:6703), so during the INIT-08 window it returns a structured 409. TanStack treats the thrown ApiError(409) as a normal failure; after `retry:1` the Risers and Fallers sections render the generic 'Couldn't load.' error card (TrendsScreen.tsx:237-245) rather than a 'still loading, retry' state. The consensus-gap query is correctly gated on `!!leagueId` but still gets a 409 if leagueId is set before init completes. User reaching Trends sub-screen quickly after league pick sees error cards that only clear on manual 'Try again'.",
+      "evidence": "TrendsScreen.tsx:41-45 moversQuery (no enabled); SectionBody renders error on isError (lines 237-245). Backend trends routes use _require_initialized_session (server.py:6703,6753,6802) \u2192 409 in init window.",
+      "suggested_fix": "On these queries, special-case ApiError status 409 (and cold-start timeout status 0) to keep showing the loading spinner and auto-retry with backoff, instead of routing to the error card. A shared `isInitPending(err)` helper used across RankScreen/TrendsScreen/TiersScreen would centralize this.",
+      "role": "R9-mobile"
+    },
+    {
+      "where": "mobile/src/components/OutlookSheet.tsx:59-62",
+      "severity": "P2",
+      "category": "stale state / dead-end UX",
+      "title": "OutlookSheet ignores `initial` after first mount \u2014 Edit always opens preselected to 'contender'",
+      "description": "`useState((initial as ...) || 'contender')` runs its initializer only once. OutlookSheet is mounted permanently in TradesScreen (visibility toggled by the `visible` prop), and `initial={prefsQuery.data?.team_outlook}` resolves asynchronously AFTER the sheet has already mounted with `initial===undefined`. So `outlook` is locked to 'contender' for the session. A returning user who saved (e.g.) 'rebuilder' and taps Edit sees 'contender' highlighted; saving silently overwrites their real outlook with 'contender'. Combines with the known not_sure gap: a saved 'not_sure' also never reflects. Not a crash, but a real data-clobbering UX dead-end on the Trades preferences flow.",
+      "evidence": "OutlookSheet.tsx:60-62 useState initializer; TradesScreen.tsx:487-492 always-mounted with async `initial={prefsQuery.data?.team_outlook}` (prefsQuery resolves after mount).",
+      "suggested_fix": "Sync local state to `initial` when the sheet opens: add `useEffect(() => { if (visible && initial) setOutlook(initial); }, [visible, initial])`, or remount the sheet via a `key` tied to `initial`/`visible` so a fresh initializer runs each open.",
+      "role": "R9-mobile"
+    },
+    {
+      "where": "extension/popup.js:145-169 (btn-refresh), 204-208 (renderConnectedFromActiveTab catch)",
+      "severity": "P2",
+      "category": "error handling / UX",
+      "title": "Popup silently swallows non-expiry rankings-fetch failures \u2014 refresh shows no error, looks like success",
+      "description": "When the popup's Refresh button fetch fails for any reason other than a 401 session_expired (e.g. backend 500/502/503, network down, Sleeper upstream error mapped to 503), the catch block (popup.js:160-168) calls renderConnectedFromActiveTab(sess) and show('connected') with NO error message surfaced. renderConnectedFromActiveTab's own fetch then also fails and hits its silent catch (lines 204-208), setting format/count to '\u2014'. Net effect: the user clicks Refresh during a backend outage, the spinner clears, the popup returns to the connected screen showing '\u2014' for format and count, and there is no indication that anything went wrong \u2014 it visually resembles a league with zero ranked players. There is no err element shown on the connected stage (els.errSignin is only on the signin stage). This will generate confused 'rankings disappeared' reports during any transient backend hiccup.",
+      "evidence": "popup.js:160 `} catch (e) {` -> only `if (String(e.message) === 'session_expired')` branches to re-auth; the else branch (165-167) just re-renders connected with no error. renderConnectedFromActiveTab catch at 204-208 sets connFmt/connCount to '\u2014' silently. No error UI exists on stage-connected (errSignin lives on stage-signin, popup.js:19).",
+      "suggested_fix": "Add an error/status line to the connected stage and populate it in both catch paths (e.g. 'Couldn\u2019t reach the ranking server \u2014 showing last cached data' / 'Refresh failed, try again'). Distinguish 'no ranked players' (count 0, fetch ok) from 'fetch failed' (count '\u2014') so the user knows it\u2019s an outage, not an empty league.",
+      "role": "R10-extension"
+    },
+    {
+      "where": "backend/server.py:5175-5188 (/api/debug/log)",
+      "severity": "P3",
+      "category": "input-validation/error-handling",
+      "title": "Bad ?n= query param returns HTTP 500 with leaked Python error",
+      "description": "int(request.args.get('n', 100)) raises ValueError on non-numeric input; the except returns jsonify({'error': str(e)}), 500. Operator-only route (cron-secret gated) so impact is low, but it is the wrong status (should be 400) and leaks the raw Python exception text.",
+      "evidence": "GET /api/debug/log?n=abc with header X-Cron-Secret: r7secret -> 500 application/json {\"error\":\"invalid literal for int() with base 10: 'abc'\"}",
+      "suggested_fix": "Parse n defensively: wrap the int() in a try and return 400 {\"error\":\"n must be an integer\"} on failure, or use a default on parse failure. Avoid returning str(e).",
+      "role": "R7-live-smoke"
+    },
+    {
+      "where": "backend/server.py:920-927 (generic errorhandler) + get_json(force=True) callers e.g. session_init:5383, parse_league_url:7536, extension_auth:7252",
+      "severity": "P3",
+      "category": "error-handling/contract",
+      "title": "Pre-session POST routes return Werkzeug HTML 400 (not JSON) on empty/invalid body",
+      "description": "The generic @app.errorhandler(Exception) deliberately re-returns HTTPException unchanged, so Werkzeug renders its default HTML page. request.get_json(force=True) (without silent=True) raises BadRequest (400) on an empty or malformed body, producing an HTML 400 on a JSON API. Session-gated routes are shielded because _require_session() raises first (clean 401 JSON), but routes parsed before any session check leak HTML: /api/session/init, /api/league/parse-url, /api/extension/auth. Clients expecting JSON will fail to parse the error.",
+      "evidence": "POST /api/session/init (no body) -> 400 text/html '<!doctype html>...400 Bad Request...'. Same for POST /api/league/parse-url (empty) and POST /api/extension/auth (empty). Contrast POST /api/feedback (empty) -> 400 application/json {\"error\":\"missing_field\",...} which uses silent=True and validates.",
+      "suggested_fix": "Either (a) register a JSON handler for werkzeug BadRequest/HTTPException in the generic errorhandler instead of returning e raw, or (b) switch these callers to request.get_json(force=True, silent=True) or {} and explicitly 400 with JSON when required fields are missing (as /api/feedback already does).",
+      "role": "R7-live-smoke"
+    },
+    {
+      "where": "mobile/src/screens/RankScreen.tsx:83-95 (progressQuery, streakQuery)",
+      "severity": "P3",
+      "category": "missing error state (degrades silently)",
+      "title": "RankScreen progress/streak queries have no init gate or error UI; on cold-start 500 the progress bar silently shows 0/10",
+      "description": "`progressQuery` (/api/rankings/progress) and `streakQuery` (/api/me/streak) fire with no `enabled` gate. Both endpoints do `sess[\"service\"]` under `_require_session` (server.py:2008,2190) \u2192 500 on a bare session in the INIT-08 window. There's no error UI for these \u2014 `progress` stays undefined so the position counters fall back to 0/threshold and the unlock banner won't show. This degrades gracefully (no crash, no dead-end), but a returning unlocked user briefly sees a locked-looking 0/10 board until the queries refetch post-init. Lower blast radius than the trio dead-end since it self-heals on the next staleTime refetch.",
+      "evidence": "RankScreen.tsx:285-287 currentProgressForPos = progress?.[position] ?? 0; no error branch for progressQuery/streakQuery. Backend get_rankings_progress/get_me_streak use _require_session + sess[\"service\"].",
+      "suggested_fix": "Gate both with `enabled: !!leagueId && hasToken`. Optional: keep `placeholderData` (already present) and let the post-init refetch repopulate \u2014 the gate alone removes the spurious cold-start 500s.",
+      "role": "R9-mobile"
+    },
+    {
+      "where": "mobile/src/screens/TrendsScreen.tsx:303; mobile/src/screens/ManualRanksScreen.tsx:309",
+      "severity": "P3",
+      "category": "unguarded numeric access",
+      "title": "Math.round on possibly-undefined elo renders 'NaN' when a row omits elo",
+      "description": "TrendsScreen MoveRow does `Math.round(row.previous_elo)` / `Math.round(row.current_elo)` and ManualRanksScreen does `Math.round(item.elo)` with no nullish guard. The `RankedPlayer.elo` reads elsewhere in these files use `?? 0`/`|| 0` (e.g. ManualRanks sort `a.elo || 0`, TiersScreen `b.elo ?? 0`), implying elo can be missing on some rows. When it is, `Math.round(undefined)` \u2192 NaN and the UI renders the literal 'NaN ELO'. Cosmetic only \u2014 no crash \u2014 but looks broken to a user.",
+      "evidence": "TrendsScreen.tsx:303 `{Math.round(row.previous_elo)} \u2192 {Math.round(row.current_elo)} ELO`; ManualRanksScreen.tsx:309 `{Math.round(item.elo)}`. Compare guarded reads at ManualRanksScreen.tsx:105 and TiersScreen.tsx:192.",
+      "suggested_fix": "Use `Math.round(row.previous_elo ?? 0)` (and the others), or render '\u2014' when elo is null/undefined.",
+      "role": "R9-mobile"
+    },
+    {
+      "where": "extension/background.js:12-13, extension/popup.js:6-8",
+      "severity": "P3",
+      "category": "config/build hygiene",
+      "title": "API base hardcoded as a const with localhost fallback in comments; no shared config",
+      "description": "Both background.js (API_BASE = 'https://fantasy-trade-finder.onrender.com', with a commented '// const API_BASE = http://127.0.0.1:5000' on the next line) and popup.js (same pattern, lines 6-8) hardcode the backend URL as a per-file constant. The production value is HTTPS (good) and the localhost line is commented out, so a normal build points at prod. The risk is purely that someone editing for local dev uncomments the http://127.0.0.1 line in ONE file (e.g. popup.js) and forgets the other (background.js), producing a split-brain build where the popup talks to localhost but the badge-fetching service worker talks to prod (or vice versa). Because the value is duplicated across two files instead of a single shared module, this divergence is silent. content.js has no API_BASE (it proxies all fetches through background), so only two files must stay in sync. Dev-only/load-unpacked status keeps this low.",
+      "evidence": "background.js:12 `const API_BASE = 'https://fantasy-trade-finder.onrender.com';` and :13 commented localhost; popup.js:6 same const, :8 commented `const API_BASE = 'http://127.0.0.1:5000';`. No import of a shared config; the two constants are independent.",
+      "suggested_fix": "Extract API_BASE into a single config.js imported by both background.js (module worker) and popup.js, or resolve it from chrome.storage / manifest at runtime, so dev/prod can never diverge between the two files.",
+      "role": "R10-extension"
+    },
+    {
+      "where": "extension/manifest.json:29-34",
+      "severity": "P3",
+      "category": "permissions/over-broad host access",
+      "title": "host_permissions includes http://localhost:5000 and http://127.0.0.1:5000 (non-HTTPS) alongside prod",
+      "description": "manifest.json grants host_permissions to http://localhost:5000/* and http://127.0.0.1:5000/* (cleartext) in addition to the HTTPS prod origin. For a load-unpacked dev build this is intentional and harmless, but if this manifest were ever packaged/shared as-is it ships cleartext-HTTP host grants. Flagging per the brief; not a live vuln given dev-only distribution and the fact that the active API_BASE constant points at HTTPS prod.",
+      "evidence": "manifest.json:33 `\"http://localhost:5000/*\"`, :34 `\"http://127.0.0.1:5000/*\"` in host_permissions; the bg/popup API_BASE constants do not reference these by default.",
+      "suggested_fix": "Strip the two http://localhost host_permissions from any manifest intended for sharing/packaging; keep a separate manifest.dev.json for local work, or rely on the dev convenience of load-unpacked without committing the cleartext grants.",
+      "role": "R10-extension"
+    },
+    {
+      "where": "extension/background.js:116-144 (onMessage), extension/content.js:412-427 (onMessage)",
+      "severity": "P3",
+      "category": "message-passing / sender validation",
+      "title": "Runtime message handlers do not validate sender, but exposure is limited by MV3 isolation",
+      "description": "Neither the background service worker's onMessage (background.js:116) nor the content script's onMessage (content.js:412) inspects the `sender` argument before acting on msg.type. Background will run fetchAndCache / refreshActiveTab / broadcast for any message it receives; content.js will clearRankings or reload rankings on ftf:signed_out / ftf:session_expired. In practice this is low risk because the manifest does NOT set externally_connectable, so arbitrary web pages cannot chrome.runtime.sendMessage into this extension, and content scripts run in an isolated world the page cannot reach. The worst a malicious in-extension actor could do is force a rankings refetch or a local sign-out clear \u2014 no token exfiltration (the token is never echoed back to senders; ftf:get_session returns the full session object but only to in-extension callers). Defense-in-depth gap, not an exploitable hole today.",
+      "evidence": "background.js:116 `chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {` \u2014 `sender` is destructured but never read. content.js:412 `chrome.runtime.onMessage.addListener((msg) => {` \u2014 sender omitted entirely. No externally_connectable key in manifest.json.",
+      "suggested_fix": "Add a lightweight guard (e.g. ignore messages where sender.id !== chrome.runtime.id, and for content.js ignore messages with a sender.tab since those originate from other tabs/pages) to harden against future externally_connectable changes. Note that ftf:get_session returns the whole session (incl. token) to any in-extension caller (background.js:119-122) \u2014 keep that handler internal-only.",
+      "role": "R10-extension"
+    },
+    {
+      "where": "extension/content.js:166-198 (applyRankingsPayload), 217-227 (makeBadge)",
+      "severity": "P3",
+      "category": "XSS / DOM injection (negative finding)",
+      "title": "No innerHTML usage of backend data \u2014 badge injection is safe",
+      "description": "Verified the content script does NOT inject any remote/backend data via innerHTML. Badge content is built with document.createElement + textContent (content.js:222 `b.textContent = ...`) and setAttribute, and the tooltip uses the `.title` property assignment (line 225), not HTML parsing. league_name, player name, tier, pos and pos_rank from the backend payload all flow through textContent/title/className, so a malicious or malformed backend response cannot inject script into the sleeper.com page. The className interpolates info.tier (line 219 `ftf-tier-${info.tier}`) into a class string \u2014 worst case a weird tier value yields a non-matching class, not script execution. Reporting as a confirmed clean result for the XSS hunt item.",
+      "evidence": "content.js:218 createElement('span'); :222 textContent assignment; :225 `b.title = ...`; no `innerHTML`/`insertAdjacentHTML`/`outerHTML` anywhere in content.js (grep clean).",
+      "suggested_fix": "No change required. If hardening is desired, whitelist info.tier against the known TIER_LABELS keys before interpolating into the class name.",
+      "role": "R10-extension"
+    },
+    {
+      "where": "extension/content.js:319-381 (scan), 310-317 (scheduleScan)",
+      "severity": "P3",
+      "category": "DOM fragility (resilience review)",
+      "title": "Sleeper-DOM selectors degrade gracefully \u2014 markup changes silently no-op rather than throw",
+      "description": "Reviewed the content-script selectors against Sleeper markup fragility. All three scan strategies (href a[href*=\"/players/nfl/\"], aria-label [aria-label*=\" - \"], and [class*=\"player-name\"] short-name fallback) are best-effort with null guards (findNameElement, playerRowAncestor, findPositionInRow all return null and callers bail), and the whole scan is wrapped in try/catch (scheduleScan:315 `try { scan(document); } catch (_) {}`; the MutationObserver-driven scan goes through the same path). watchUrlChanges also wraps onChange in try/catch (content.js:69,74,85). So if Sleeper changes its class names or aria-label format, the extension silently shows no badges instead of throwing uncaught errors or breaking the page. This is the desired failure mode. One latent maintainability risk: badge presence is the only signal of breakage \u2014 there is no telemetry, so a Sleeper redesign would silently disable the feature with no alert. Acceptable for a dev/beta extension.",
+      "evidence": "content.js:315 scan wrapped in try/catch; :274-289 findNameElement/playerRowAncestor return null guards; :291-299 findPositionInRow returns null; :69/74/85 url-change callbacks wrapped in try/catch. No throw path reaches the page.",
+      "suggested_fix": "No functional change needed. Consider a lightweight, infrequent 'badges_rendered: 0 on a /leagues/ page' beacon (respecting privacy) so a Sleeper markup change is detected before users report it.",
+      "role": "R10-extension"
+    }
+  ]
+}

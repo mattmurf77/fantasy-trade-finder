@@ -5,21 +5,21 @@ import {
   StyleSheet,
   FlatList,
   RefreshControl,
-  Linking,
-  Alert,
   Pressable,
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { haptics } from '../utils/haptics';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
+import { Button, Badge, Icon } from '../components/chalkline';
 import TradeCardComp from '../components/TradeCard';
 import Toast from '../components/Toast';
-import { getAllMatches, getAwaitingTrades, setMatchDisposition } from '../api/trades';
+import { getAllMatches, getAwaitingTrades, dismissMatch } from '../api/trades';
+import { getAssetPrefs, setAssetPref } from '../api/league';
 import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
 import { relativeTime } from '../utils/relativeTime';
 import type { TradeMatch, AwaitingTrade, Player } from '../shared/types';
 
@@ -67,13 +67,15 @@ export default function MatchesScreen() {
     enabled:  segment === 'awaiting',
   });
 
-  const dispMutation = useMutation({
-    mutationFn: ({ id, d }: { id: string; d: 'accepted' | 'declined' }) =>
-      setMatchDisposition(id, d),
-    onMutate: async ({ id }) => {
+  // Dismiss = archive the match from THIS user's inbox. Persisted + per-user
+  // + ELO-neutral (see /api/trades/matches/:id/dismiss). Replaces the old
+  // accept/decline dispositions on mutual matches — the real "do the trade"
+  // action is now the Send-in-Sleeper button, so the only inbox verb left is
+  // "clear it."
+  const dismissMutation = useMutation({
+    mutationFn: (id: string) => dismissMatch(id),
+    onMutate: async (id) => {
       // Optimistic — drop the match from the list so the UI feels instant.
-      // Same query key as above; using a different key here was the bug
-      // before this refactor.
       const prev = queryClient.getQueryData<TradeMatch[]>(['matches', 'all']);
       if (prev) {
         queryClient.setQueryData(
@@ -83,63 +85,85 @@ export default function MatchesScreen() {
       }
       return { prev };
     },
-    onError: (_err, _vars, ctx) => {
+    onError: (_err, _id, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(['matches', 'all'], ctx.prev);
-      setToast({ msg: 'Action failed — try again', tone: 'warn' });
+      setToast({ msg: 'Could not dismiss — try again', tone: 'warn' });
     },
-    onSuccess: (_res, vars) => {
-      if (vars.d === 'accepted') {
-        haptics.success();
-      }
-      // An accept/decline shouldn't just disappear the match from the
-      // Mutual segment — the same match can sit in the "Awaiting them"
-      // bucket (when only the counterparty has yet to swipe) and in the
-      // user's liked-trades list. Invalidate both so the inbox is
-      // consistent across segments without a manual refresh. The match
-      // inbox is cross-league, so we invalidate every league's
-      // liked-trades cache via the partial-key match (TanStack matches
-      // any queryKey that starts with the supplied array).
-      // Mirrors api-layer review #A2 + silent-bugs review bug #5.
-      queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
-      queryClient.invalidateQueries({ queryKey: ['liked-trades'] });
+    onSuccess: () => {
+      // Dismissed matches are gone server-side, so refetch to reconcile
+      // (the optimistic removal already hid it locally).
+      queryClient.invalidateQueries({ queryKey: ['matches', 'all'] });
     },
   });
 
-  async function handleAccept(m: TradeMatch) {
-    // Wait for the disposition POST to settle BEFORE deep-linking. The
-    // previous fire-and-forget pattern would optimistically remove the
-    // match from the list and then leave the user on Sleeper.com if the
-    // backend later 500'd — the rollback toast would only render after
-    // they switched back to the app, which is confusing.
-    //
-    // mutateAsync re-throws on failure (onError still fires for the
-    // optimistic rollback), so the catch keeps the user inside the app
-    // and the existing onError toast surfaces a real failure. On
-    // success: deep-link.
-    try {
-      await dispMutation.mutateAsync({ id: m.match_id, d: 'accepted' });
-    } catch {
-      // onError already toasts + rolls back the optimistic removal.
-      return;
-    }
-    // Deep-link to Sleeper. Sleeper's trade-propose deep link format:
-    //   https://sleeper.com/leagues/<league_id>/trade
-    const url = `https://sleeper.com/leagues/${m.league_id}/trade`;
-    try {
-      const can = await Linking.canOpenURL(url);
-      if (can) await Linking.openURL(url);
-      else Alert.alert('Accepted — open Sleeper to propose the trade.', url);
-    } catch {
-      Alert.alert('Accepted', 'Open Sleeper manually to propose the trade.');
-    }
-  }
-
-  function handleDecline(m: TradeMatch) {
-    dispMutation.mutate({ id: m.match_id, d: 'declined' });
+  function handleDismiss(m: TradeMatch) {
+    haptics.selection();
+    dismissMutation.mutate(m.match_id);
   }
 
   const allMatches: TradeMatch[] = matchesQuery.data || [];
   const allAwaiting: AwaitingTrade[] = awaitingQuery.data || [];
+
+  // ── Untouchables (feedback #95, flag trade.preference_lists) ─────────
+  // Long-press a player on the YOU SEND side to mark/unmark them
+  // untouchable — the trade engine then never offers them from your
+  // roster. Matches are cross-league, so prefs are fetched per league
+  // present in either segment; `combine` memoizes the league→Set map so
+  // TradeCard's memo isn't busted every render.
+  const untouchablesEnabled = useFlag('trade.preference_lists');
+  const prefLeagueIds = useMemo(() => {
+    const ids = new Set<string>();
+    allMatches.forEach((m) => m.league_id && ids.add(m.league_id));
+    allAwaiting.forEach((a) => a.league_id && ids.add(a.league_id));
+    return Array.from(ids).sort();
+  }, [allMatches, allAwaiting]);
+
+  const untouchablesByLeague = useQueries({
+    queries: prefLeagueIds.map((lid) => ({
+      queryKey: ['asset-prefs', lid],
+      queryFn: () => getAssetPrefs(lid),
+      staleTime: 60_000,
+      enabled: untouchablesEnabled,
+    })),
+    combine: (results) => {
+      const map = new Map<string, Set<string>>();
+      results.forEach((r, i) => {
+        if (r.data) map.set(prefLeagueIds[i], new Set(r.data.untouchables || []));
+      });
+      return map;
+    },
+  });
+
+  const untouchableMutation = useMutation({
+    mutationFn: ({ leagueId, playerId, list }: {
+      leagueId: string;
+      playerId: string;
+      list: 'untouchable' | 'none';
+    }) => setAssetPref(leagueId, playerId, list),
+    onSuccess: (_res, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['asset-prefs', vars.leagueId] });
+      setToast({
+        msg: vars.list === 'untouchable'
+          ? 'Marked untouchable — never offered in trade ideas'
+          : 'Untouchable removed',
+        tone: 'success',
+      });
+    },
+    onError: () => {
+      setToast({ msg: 'Could not update untouchable — try again', tone: 'warn' });
+    },
+  });
+
+  function handleToggleUntouchable(leagueId: string, p: Player) {
+    if (untouchableMutation.isPending) return;
+    haptics.selection();
+    const marked = untouchablesByLeague.get(leagueId)?.has(p.id) ?? false;
+    untouchableMutation.mutate({
+      leagueId,
+      playerId: p.id,
+      list: marked ? 'none' : 'untouchable',
+    });
+  }
 
   const visibleMatches = useMemo(() => {
     if (filterLeagueId === 'all') return allMatches;
@@ -210,6 +234,14 @@ export default function MatchesScreen() {
             ? 'Trades where you and a leaguemate both said yes — across every league.'
             : "Trades you've liked — waiting on the other owner to swipe."}
         </Text>
+        {/* Untouchables affordance hint — long-press is invisible without
+            it. Only when the flag is on and there's something to press. */}
+        {untouchablesEnabled
+          && (segment === 'mutual' ? visibleMatches.length > 0 : visibleAwaiting.length > 0) ? (
+          <Text style={styles.hint}>
+            Hold a player you'd send to mark them untouchable.
+          </Text>
+        ) : null}
       </View>
 
       {/* Segment toggle. Two-pill control to flip between mutual matches
@@ -244,10 +276,11 @@ export default function MatchesScreen() {
             <Pressable
               key={c.id}
               onPress={() => setFilterLeagueId(c.id)}
+              hitSlop={{ top: 6, bottom: 6 }}
               style={({ pressed }) => [
                 styles.chip,
                 isActive && styles.chipActive,
-                pressed && { opacity: 0.7 },
+                pressed && { backgroundColor: ink.ink3 },
               ]}
             >
               <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
@@ -264,7 +297,7 @@ export default function MatchesScreen() {
         ) ? (
         <View style={styles.list}>
           {[0, 1, 2].map((i) => (
-            <View key={i} style={{ gap: spacing.xs, marginBottom: spacing.lg }}>
+            <View key={i} style={{ gap: space.xs, marginBottom: space.lg }}>
               <View style={styles.matchHeader}>
                 <View style={styles.skeletonLabel} />
                 <View style={styles.skeletonTime} />
@@ -291,6 +324,7 @@ export default function MatchesScreen() {
               Head to the Trades tab and swipe on some proposals. When a
               leaguemate likes the same trade, it'll show up here.
             </Text>
+            <Button label="Refresh" variant="secondary" compact onPress={onRefresh} />
           </View>
         ) : (
           <FlatList
@@ -301,34 +335,47 @@ export default function MatchesScreen() {
               <RefreshControl
                 refreshing={isFetching}
                 onRefresh={onRefresh}
-                tintColor={colors.accent}
+                tintColor={ice.base}
               />
             }
             renderItem={({ item }) => (
-              <View style={{ gap: spacing.xs }}>
+              <View style={{ gap: space.xs }}>
                 {/* League badge — only shown in the "All" view; redundant
                     when a single-league filter is active. */}
                 {filterLeagueId === 'all' && item.league_name ? (
                   <View style={styles.leagueBadgeRow}>
-                    <Text style={styles.leagueBadge}>🏈 {item.league_name}</Text>
+                    <Badge label={item.league_name} />
                   </View>
                 ) : null}
                 <View style={styles.matchHeader}>
-                  <Text style={styles.matchLabel}>
-                    🎯 New match with @{item.counterparty_username}
-                  </Text>
+                  <View style={styles.matchLabelRow}>
+                    <Icon name="match" size={16} color={semantic.pos} />
+                    <Text style={styles.matchLabel}>
+                      New match with @{item.counterparty_username}
+                    </Text>
+                  </View>
                   <Text style={styles.matchTime}>{relativeTime(item.created_at)}</Text>
                 </View>
                 <TradeCardComp
                   variant="match"
                   data={matchToTradeCardShape(item, activeLeague?.league_id)}
-                  onAccept={() => handleAccept(item)}
-                  onDecline={() => handleDecline(item)}
-                  acting={dispMutation.isPending}
+                  onDismiss={() => handleDismiss(item)}
+                  acting={dismissMutation.isPending}
+                  showSend
+                  untouchableIds={
+                    untouchablesEnabled
+                      ? untouchablesByLeague.get(item.league_id)
+                      : undefined
+                  }
+                  onToggleUntouchable={
+                    untouchablesEnabled
+                      ? (p) => handleToggleUntouchable(item.league_id, p)
+                      : undefined
+                  }
                 />
               </View>
             )}
-            ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
+            ItemSeparatorComponent={() => <View style={{ height: space.lg }} />}
           />
         )
       ) : (
@@ -339,6 +386,7 @@ export default function MatchesScreen() {
             <Text style={styles.emptyBody}>
               Swipe more in the Trades tab.
             </Text>
+            <Button label="Refresh" variant="secondary" compact onPress={onRefresh} />
           </View>
         ) : (
           <FlatList
@@ -349,19 +397,19 @@ export default function MatchesScreen() {
               <RefreshControl
                 refreshing={isFetching}
                 onRefresh={onRefresh}
-                tintColor={colors.accent}
+                tintColor={ice.base}
               />
             }
             renderItem={({ item }) => (
-              <View style={{ gap: spacing.xs }}>
+              <View style={{ gap: space.xs }}>
                 {filterLeagueId === 'all' && item.league_name ? (
                   <View style={styles.leagueBadgeRow}>
-                    <Text style={styles.leagueBadge}>🏈 {item.league_name}</Text>
+                    <Badge label={item.league_name} />
                   </View>
                 ) : null}
                 <View style={styles.matchHeader}>
                   <Text style={styles.awaitingLabel}>
-                    ⏳ Waiting on @{item.counterparty_username}
+                    Waiting on @{item.counterparty_username}
                   </Text>
                   <Text style={styles.matchTime}>{relativeTime(item.liked_at)}</Text>
                 </View>
@@ -371,10 +419,21 @@ export default function MatchesScreen() {
                 <TradeCardComp
                   variant="swipe"
                   data={awaitingToTradeCardShape(item, activeLeague?.league_id)}
+                  showSend
+                  untouchableIds={
+                    untouchablesEnabled
+                      ? untouchablesByLeague.get(item.league_id)
+                      : undefined
+                  }
+                  onToggleUntouchable={
+                    untouchablesEnabled
+                      ? (p) => handleToggleUntouchable(item.league_id, p)
+                      : undefined
+                  }
                 />
               </View>
             )}
-            ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
+            ItemSeparatorComponent={() => <View style={{ height: space.lg }} />}
           />
         )
       )}
@@ -394,10 +453,12 @@ function SegmentBtn({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
       style={({ pressed }) => [
         styles.segmentBtn,
         active && styles.segmentBtnActive,
-        pressed && { opacity: 0.7 },
+        pressed && { backgroundColor: ink.ink3 },
       ]}
     >
       <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
@@ -473,115 +534,129 @@ function awaitingToTradeCardShape(a: AwaitingTrade, fallbackLeague: string | und
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  header: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  title: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '800' },
-  subtitle: { color: colors.muted, fontSize: fontSize.sm, marginTop: 4 },
+  safe: { flex: 1, backgroundColor: ink.ink0 },
+  header: { paddingHorizontal: space.lg, paddingVertical: space.md },
+  title: { ...type.display },
+  subtitle: { ...type.bodySm, marginTop: space.xs },
+  hint: { ...type.bodySm, color: chalk.faint, marginTop: space.xs },
 
   // flexGrow:0 prevents the horizontal ScrollView from stretching to fill
   // remaining vertical space when the body below is an empty-state View.
   chipScroll: { flexGrow: 0, flexShrink: 0 },
+
+  // Segmented group per PositionTabs spec: 1px hairline group at radii.sm;
+  // active segment = ink3 fill + 2px ice underline (ice use: active state).
   segmentRow: {
     flexDirection: 'row',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-    gap: spacing.xs,
+    marginHorizontal: space.lg,
+    marginBottom: space.sm,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    overflow: 'hidden',
   },
   segmentBtn: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    height: 44,
     alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+    backgroundColor: 'transparent',
   },
   segmentBtnActive: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.10)',
+    backgroundColor: ink.ink3,
+    borderBottomColor: ice.base,
   },
-  segmentText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
-  segmentTextActive: { color: colors.accent },
+  segmentText: { ...type.label },
+  segmentTextActive: { color: chalk.base },
 
   chipRow: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-    gap: spacing.xs,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.sm,
+    gap: space.xs,
     alignItems: 'center',
   },
+  // Chalkline badge construction, sized up for touch: 1px border in the
+  // encode color + chalk text on ink. Active = ice border (active state).
   chip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
     minHeight: 32,
     justifyContent: 'center',
-    borderRadius: radius.pill,
+    borderRadius: radii.xs,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: ink.lineStrong,
+    backgroundColor: 'transparent',
   },
   chipActive: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.10)',
+    borderColor: ice.base,
   },
-  // Explicit lineHeight prevents descenders ("g", "p") clipping at xs.
-  chipText: { color: colors.muted, fontSize: fontSize.xs, lineHeight: 16, fontWeight: '700' },
-  chipTextActive: { color: colors.accent },
+  chipText: { ...type.label },
+  chipTextActive: { color: chalk.base },
 
-  list: { padding: spacing.lg, paddingBottom: 96 },
-  leagueBadgeRow: { flexDirection: 'row', paddingHorizontal: 4 },
-  leagueBadge: {
-    color: colors.muted,
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
+  list: { padding: space.lg, paddingBottom: 96 },
+  leagueBadgeRow: { flexDirection: 'row', paddingHorizontal: space.xs },
   matchHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: space.xs,
   },
-  matchLabel: { color: colors.green, fontSize: fontSize.sm, fontWeight: '700' },
-  awaitingLabel: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
-  matchTime: { color: colors.muted, fontSize: fontSize.xs },
+  matchLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    flexShrink: 1,
+  },
+  matchLabel: {
+    ...type.bodySm,
+    fontFamily: fonts.uiSemi,
+    color: semantic.pos,
+    flexShrink: 1,
+  },
+  awaitingLabel: {
+    ...type.bodySm,
+    fontFamily: fonts.uiSemi,
+    flexShrink: 1,
+  },
+  // Timestamps are data — Plex Mono, chalk-faint (ActivityRow convention).
+  matchTime: { ...type.data, color: chalk.faint },
   centered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.xl,
-    gap: spacing.sm,
+    padding: space.xl,
+    gap: space.md,
   },
-  errorText: { color: colors.red, fontSize: fontSize.sm },
+  errorText: { ...type.bodySm, color: semantic.neg },
 
   // Skeleton tiles — same outer dimensions as a real TradeCard match
-  // tile (radius.xl, border, surface bg) so the page shape is stable on
-  // first paint. Static — no shimmer/animation library introduced.
+  // tile (ink-1 surface, hairline, radii.md) so the page shape is stable
+  // on first paint. Static — no shimmer/animation library introduced.
   skeletonCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: ink.ink1,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.xl,
+    borderColor: ink.line,
+    borderRadius: radii.md,
     height: 220,
   },
   skeletonLabel: {
     width: 180,
     height: 12,
-    borderRadius: radius.sm,
-    backgroundColor: colors.border,
+    borderRadius: radii.xs,
+    backgroundColor: ink.ink3,
   },
   skeletonTime: {
     width: 48,
     height: 10,
-    borderRadius: radius.sm,
-    backgroundColor: colors.border,
+    borderRadius: radii.xs,
+    backgroundColor: ink.ink3,
   },
-  emptyTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800', textAlign: 'center' },
+  emptyTitle: { ...type.heading, textAlign: 'center' },
   emptyBody: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
+    ...type.bodySm,
     textAlign: 'center',
-    lineHeight: 22,
     maxWidth: 340,
   },
 });

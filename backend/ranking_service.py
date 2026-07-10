@@ -59,6 +59,25 @@ _DEFAULT_CFG: dict[str, float] = {
     "mix_in_rate_max":            0.80,
     "mix_in_saturation_pct":      0.70,
     "mix_in_pre_unlock_start":    5.0,
+    # Trios → tier calibration (Lever A). Fraction of trios that probe a
+    # value-band boundary — pairing a player just below a tier edge against
+    # one just above it, drawn from the FULL pool — instead of the default
+    # "tightest local trio". Boundary comparisons are the only ones that move
+    # a player across a tier (and thus meaningfully change value). 0 = legacy
+    # behaviour. See docs/plans/trios-tier-calibration-plan-2026-07-08.md.
+    "trio_boundary_rate":         0.4,
+    "trio_boundary_margin":      60.0,  # Elo window around an edge to pull straddlers from
+    # Trio variety: the loop rotates among three strategies so the pattern
+    # varies and the same players don't recur. Weights are shares of the mix;
+    # tightest-ordering gets whatever's left after boundary + within-tier.
+    #   boundary     — cross-tier edge probe (moves value across a band)
+    #   within_tier  — top-vs-bottom of the SAME tier (nails intra-tier order)
+    #   tightest     — legacy near-equal fine ordering
+    "trio_within_tier_rate":      0.35,
+    # Don't reuse a player who appeared in the last N served trios (anti-repeat;
+    # fixes "2 of the same players 10 trios in a row"). Relaxes when the pool is
+    # too small to honour it.
+    "trio_repeat_avoid":          3.0,
 }
 
 _cfg: dict[str, float] = dict(_DEFAULT_CFG)
@@ -193,6 +212,16 @@ class RankingService:
         self._generator  = matchup_generator
         self._seed       = seed_ratings or {}
         self._elo_overrides: dict[str, float] = {}  # manual reorder overrides
+        # Scoring format this service ranks in — drives which tier_config.json
+        # value bands the boundary-probing trio selector reads. Defaults to
+        # 1qb_ppr; multi-format callers set it post-construct (like _user_id).
+        self._scoring_format = "1qb_ppr"
+        # Trio variety state (in-session, per position where relevant). Recent
+        # trios drive anti-repeat; the cursors rotate strategy + which tier a
+        # within-tier trio calibrates so successive trios feel varied.
+        self._recent_trios: list[frozenset] = []      # last-served trio id-sets
+        self._trio_last_variety: Optional[str] = None
+        self._within_tier_cursor: int = 0
 
         # INIT-03: instance-level memo for _compute_elo / _compute_stats.
         # Both methods re-iterate the full swipe history and are called 3-4x
@@ -340,8 +369,33 @@ class RankingService:
         if len(pool) < 3:
             raise ValueError(f"Need at least 3 players for position={position!r}")
 
-        # Claude-powered matchup selection (gated by feature flag)
-        if self._generator is not None and _c("smart_matchup_enabled") == 1.0:
+        # Players seen in the last N served trios — avoided so the same faces
+        # don't recur trio after trio. Selectors relax this when honouring it
+        # would leave too few candidates.
+        avoid = self._trio_avoid_ids()
+
+        # Rotate among strategies for variety (no long runs of one kind), each
+        # weighted, never repeating the immediately-previous strategy when an
+        # alternative exists:
+        #   boundary    — cross-tier edge probe (moves value across a band)
+        #   within_tier — top-vs-bottom of the same tier (fixes intra-tier order)
+        #   tightest    — legacy near-equal fine ordering (smart/algorithmic)
+        variety = self._pick_trio_variety(position)
+
+        trio: Optional[MatchupTrio] = None
+        if variety == "boundary":
+            trio = self._boundary_trio(position, skipped=_skipped, avoid=avoid)
+        elif variety == "within_tier":
+            trio = self._within_tier_trio(position, skipped=_skipped, avoid=avoid)
+
+        # Whatever actually produced the trio is the "effective" variety — a
+        # boundary/within lane that found nothing degrades to tightest, and the
+        # anti-run cursor should reflect that.
+        effective = variety if trio is not None else "tightest"
+
+        # Tightest lane (and the fallback for an empty boundary/within lane):
+        # Claude-powered selection when enabled, else the algorithmic tightest.
+        if trio is None and self._generator is not None and _c("smart_matchup_enabled") == 1.0:
             try:
                 from .smart_matchup_generator import SwipeDecision as SD
                 history = [SD(winner_id=s.winner_id, loser_id=s.loser_id) for s in self._swipes]
@@ -351,11 +405,117 @@ class RankingService:
                     position_filter=position,
                     skipped_player_ids=_skipped,
                 )
-                return trio
             except Exception:
-                pass
+                trio = None
+        if trio is None:
+            trio = self._algorithmic_trio(pool, position=position, avoid=avoid)
 
-        return self._algorithmic_trio(pool, position=position)
+        self._trio_last_variety = effective
+        self._remember_trio(trio)
+        return trio
+
+    # ── Trio variety helpers ─────────────────────────────────────────────
+    def _trio_avoid_ids(self) -> set:
+        """Player ids from the last `trio_repeat_avoid` served trios."""
+        n = int(_c("trio_repeat_avoid"))
+        if n <= 0 or not self._recent_trios:
+            return set()
+        avoid: set = set()
+        for s in self._recent_trios[-n:]:
+            avoid |= s
+        return avoid
+
+    def _remember_trio(self, trio: MatchupTrio) -> None:
+        """Record a served trio's id-set for anti-repeat."""
+        self._recent_trios.append(
+            frozenset({trio.player_a.id, trio.player_b.id, trio.player_c.id})
+        )
+        cap = max(6, int(_c("trio_repeat_avoid")) + 3)
+        if len(self._recent_trios) > cap:
+            self._recent_trios = self._recent_trios[-cap:]
+
+    def _pick_trio_variety(self, position: Optional[str]) -> str:
+        """Weighted choice of trio strategy, avoiding an immediate repeat.
+
+        Overall mode (position=None) has no positional bands, so only the
+        tightest (position-agnostic) strategy applies.
+        """
+        if position is None:
+            return "tightest"
+        w_b = max(0.0, _c("trio_boundary_rate"))
+        w_w = max(0.0, _c("trio_within_tier_rate"))
+        w_t = max(0.0, 1.0 - w_b - w_w)
+        choices = {k: v for k, v in
+                   (("boundary", w_b), ("within_tier", w_w), ("tightest", w_t))
+                   if v > 0.0}
+        if not choices:
+            return "tightest"
+        # Anti-run: drop the previous strategy when an alternative remains.
+        if self._trio_last_variety in choices and len(choices) > 1:
+            alt = {k: v for k, v in choices.items() if k != self._trio_last_variety}
+            if alt:
+                choices = alt
+        total = sum(choices.values())
+        r = random.random() * total
+        upto = 0.0
+        for k, v in choices.items():
+            upto += v
+            if r <= upto:
+                return k
+        return "tightest"
+
+    def _within_tier_trio(
+        self,
+        position: Optional[str],
+        skipped: Optional[set] = None,
+        avoid: Optional[set] = None,
+    ) -> Optional[MatchupTrio]:
+        """Compare the TOP and BOTTOM of the same tier (plus a middle) to nail
+        down intra-tier ordering. Rotates through tiers via a cursor so
+        successive within-tier trios cover different bands. Returns None when no
+        tier currently holds >= 3 players (caller falls back to tightest)."""
+        if position is None:
+            return None
+        _skip = skipped or set()
+        _avoid = avoid or set()
+        full = [p for p in self._pool(position) if p.id not in _skip]
+        if len(full) < 3:
+            return None
+        elo = self._compute_elo(full)
+        stats = self._compute_stats(full)
+        try:
+            self.tier_bands_for(position, self._scoring_format)
+        except Exception:
+            return None
+
+        by_tier: dict = {t: [] for t in ORDERED_TIERS}
+        for p in full:
+            t = self.tier_for_elo(elo[p.id], position, self._scoring_format)
+            if t in by_tier:
+                by_tier[t].append(p)
+
+        order = ORDERED_TIERS
+        n = len(order)
+        for off in range(n):
+            tier = order[(self._within_tier_cursor + off) % n]
+            members = by_tier.get(tier, [])
+            if len(members) < 3:
+                continue
+            # Prefer members not recently seen; relax if that drops below 3.
+            fresh = [p for p in members if p.id not in _avoid]
+            picks = fresh if len(fresh) >= 3 else members
+            picks.sort(key=lambda p: elo[p.id], reverse=True)  # top → bottom
+            top, bottom = picks[0], picks[-1]
+            interior = picks[1:-1]
+            # Middle = least-compared interior member (freshest signal).
+            interior.sort(key=lambda p: (len(stats[p.id]["compared"]), -elo[p.id]))
+            middle = interior[0] if interior else picks[1]
+            self._within_tier_cursor = (self._within_tier_cursor + off + 1) % n
+            return MatchupTrio(
+                player_a=top, player_b=middle, player_c=bottom,
+                reasoning=f"Within-tier spread: {tier}",
+            )
+        return None
 
     def get_rankings(self, position: Optional[str] = None) -> RankSet:
         """Return current ordered rankings for a position."""
@@ -739,12 +899,103 @@ class RankingService:
         self._stats_cache_key = cache_key
         return stats
 
-    def _algorithmic_trio(self, pool: list[Player], position: Optional[str] = None) -> MatchupTrio:
+    def _boundary_trio(
+        self,
+        position: Optional[str],
+        skipped: Optional[set] = None,
+        avoid: Optional[set] = None,
+    ) -> Optional[MatchupTrio]:
+        """Lever A — build a trio that straddles a value-band boundary.
+
+        Unlike `_algorithmic_trio` (tightest LOCAL trio) and the top-24 tiered
+        pool, this deliberately reaches into the FULL position pool to pair a
+        player sitting just *below* a tier edge against one just *above* it —
+        the comparison that lets a genuinely under/over-rated player cross a
+        band (and move value). Returns None when no contested edge exists
+        (e.g. single-tier pool, position=None/Overall), so the caller can fall
+        back to the normal selectors.
+        """
+        if position is None:
+            return None  # Overall mode has no single positional band set
+        _skip = skipped or set()
+        _avoid = avoid or set()
+        full = [p for p in self._pool(position) if p.id not in _skip]
+        if len(full) < 3:
+            return None
+
+        elo   = self._compute_elo(full)
+        stats = self._compute_stats(full)
+        try:
+            bands = self.tier_bands_for(position, self._scoring_format)
+        except Exception:
+            return None
+
+        margin = _c("trio_boundary_margin")
+        best: Optional[tuple] = None
+        best_score = float("inf")
+
+        # Each adjacent tier pair shares a crossing point at the UPPER tier's
+        # low edge: elo >= upper.lo ⇒ upper tier, else the lower tier.
+        for upper, lower in zip(ORDERED_TIERS, ORDERED_TIERS[1:]):
+            band = bands.get(upper)
+            if not band:
+                continue
+            edge = band[0]
+            below = [p for p in full if edge - margin <= elo[p.id] < edge]
+            above = [p for p in full if edge <= elo[p.id] <= edge + margin]
+            if not below or not above:
+                continue
+
+            # Candidate = freshest below-edge player (its tier is most in doubt).
+            # Recently-seen players sort last (anti-repeat) but stay eligible.
+            below.sort(key=lambda p: (p.id in _avoid, len(stats[p.id]["compared"]), -elo[p.id]))
+            cand = below[0]
+            # Opponent = above-edge player, preferring not-recent, then
+            # uncompared-with-candidate, then fresher, then closest to the edge.
+            above.sort(key=lambda p: (
+                p.id in _avoid,
+                cand.id in stats[p.id]["compared"],
+                len(stats[p.id]["compared"]),
+                elo[p.id] - edge,
+            ))
+            opp = above[0]
+            # Third = fresh, not-recent player nearest the edge (any tier).
+            rest = [p for p in full if p.id not in (cand.id, opp.id)]
+            if not rest:
+                continue
+            rest.sort(key=lambda p: (p.id in _avoid, len(stats[p.id]["compared"]), abs(elo[p.id] - edge)))
+            third = rest[0]
+
+            already = int(opp.id in stats[cand.id]["compared"])
+            recent = sum(1 for p in (opp, cand, third) if p.id in _avoid)
+            total_cmp = sum(len(stats[p.id]["compared"]) for p in (opp, cand, third))
+            score = recent * 200 + already * 100 + total_cmp  # fresher/uncompared/unseen = better
+            if score < best_score:
+                best_score = score
+                best = ((opp, cand, third), upper, lower)
+
+        if best is None:
+            return None
+        (a, b, c), upper, lower = best
+        return MatchupTrio(
+            player_a=a, player_b=b, player_c=c,
+            reasoning=f"Boundary probe: {lower} vs {upper}",
+        )
+
+    def _algorithmic_trio(
+        self,
+        pool: list[Player],
+        position: Optional[str] = None,
+        avoid: Optional[set] = None,
+    ) -> MatchupTrio:
         """Pick 3 adjacent players in Elo order that haven't all been compared.
 
         When position is None (cross-position / Overall mode), a diversity
-        bonus is applied to prefer trios spanning 2+ positions.
+        bonus is applied to prefer trios spanning 2+ positions. `avoid` (players
+        served in recent trios) is strongly penalised so the same faces don't
+        recur, but stays eligible if the pool is too small to avoid them.
         """
+        _avoid       = avoid or set()
         elo          = self._compute_elo(pool)
         sorted_p     = sorted(pool, key=lambda p: elo[p.id], reverse=True)
         stats        = self._compute_stats(pool)
@@ -774,7 +1025,11 @@ class RankingService:
                     if cross_pos:
                         positions = {p1.position, p2.position, p3.position}
                         diversity_bonus = -30 * (len(positions) - 1)  # reward multi-position
-                    score = spread + existing * 50 + freshness_penalty + diversity_bonus
+                    # Anti-repeat: heavily penalise players from recent trios.
+                    repeat_penalty = sum(
+                        200 for p in (p1, p2, p3) if p.id in _avoid
+                    )
+                    score = spread + existing * 50 + freshness_penalty + diversity_bonus + repeat_penalty
                     if score < best_score:
                         best_score = score
                         best_trio  = (p1, p2, p3)

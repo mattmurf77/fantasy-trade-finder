@@ -70,6 +70,8 @@ FLAG_KEYS: tuple[str, ...] = (
     "profiles.public_pages",
     "landing.smart_start_cta",
     "landing.try_before_sync",
+    # Player profiles (#17)
+    "players.profile_pages",
     # Trade math (Agent A8)
     "trade_math.qb_tax",
     "trade_math.star_tax",
@@ -89,6 +91,18 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.three_team",       # 3-team cycle generation (no client surface yet)
     # FB-47 finder targeting (docs/plans/trade-finder-targeting.md)
     "trade.finder_targeting", # pinned-receive + counterparty positional fit
+    # FB-96 — automatic positional-need fit (feedback #96; kin of FB-47)
+    "trade.need_fit",         # boost swaps that cross-fill positional needs
+    # Backlog #1 — opponent outlook inference (docs/plans/competitor-top20/01-*)
+    "trade.outlook_infer",    # price opponents with their inferred/declared α
+    # Backlog #2 — asset preference lists (docs/plans/competitor-top20/02-*)
+    "trade.preference_lists", # untouchables (give-side filter) + targets (reward)
+    # Backlog #8 — seed unset-league outlook from the user's own roster (01's classifier)
+    "trade.outlook_seed",
+    # Backlog #10 — crown-asset package premium (docs/plans/competitor-top20/10-*)
+    "trade.crown_asset",
+    # "Send in Sleeper" — undocumented Sleeper write API (FLAGGED-BETA / ToS-adverse)
+    "trade.send_in_sleeper",  # docs/plans/sleeper-write-capture-runbook.md
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

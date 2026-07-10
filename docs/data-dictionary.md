@@ -34,16 +34,22 @@ Sleeper user identities + denormalized hot-read activity columns.
 
 ## `leagues`
 
-A league a user has loaded.
+One row **per league** (PK is `sleeper_league_id` alone), owned by the first
+member to import it. `upsert_league` keys on the PK: the initial import
+INSERTs the owner's row; every later member of that league only refreshes
+`name` / `updated_at` (it does **not** INSERT — doing so raised
+`UNIQUE constraint failed: leagues.sleeper_league_id`). Per-member rosters
+are **not** stored here — see `league_members` for the authoritative
+per-`(league, user)` roster.
 
 | Column | Type | Notes |
 |---|---|---|
 | `sleeper_league_id` | str PK | |
-| `user_id` | str, not null | |
+| `user_id` | str, not null | Importer-owner (first member to import the league); not overwritten by later members |
 | `name` | str | |
 | `season` | str | |
-| `roster_data` | JSON text | User's player IDs |
-| `opponent_data` | JSON text | `[{user_id, username, player_ids}]` |
+| `roster_data` | JSON text | Importer-owner's player IDs at import time; write-once, not read back |
+| `opponent_data` | JSON text | `[{user_id, username, player_ids}]` — importer-owner's snapshot; write-once, not read back |
 | `default_scoring` | str | `'1qb_ppr'` / `'sf_tep'` (null → `'1qb_ppr'`) |
 | `created_at`, `updated_at` | str | |
 
@@ -135,6 +141,7 @@ Created when both users like mirrored trades. Lifecycle: `pending → accepted |
 | `status` | str | `pending` / `accepted` / `declined` (default `pending`). Pre-2026-05 rows could be `active`; `_migrate_db()` flips any remaining `active` → `pending` once. |
 | `user_a_decision`, `user_b_decision` | str | `accept` / `decline` / null |
 | `user_a_decided_at`, `user_b_decided_at` | str | |
+| `user_a_dismissed`, `user_b_dismissed` | int | 0/1/null — per-user inbox archive. Set by `dismiss_match`; `load_matches` hides the match from that user only. ELO-neutral (distinct from a decline). |
 | `matched_at` | str | |
 
 Indexes: `ix_trade_matches_user_a_league`, `ix_trade_matches_user_b_league` for cross-league `/api/trades/matches/all` scans.
@@ -216,7 +223,7 @@ Dynasty pick assets across upcoming seasons. `pick_id = "{league}_{season}_{roun
 | `owner_user_id`, `owner_username` | str | current owner |
 | `original_roster_id`, `original_user_id`, `original_username` | str | |
 | `is_traded` | int | 1 if ownership changed |
-| `pick_value` | float | computed dynasty value at sync time |
+| `pick_value` | float | `compute_pick_value()` output at sync time, on the **0–100 round-tier scale** (mid-1st ≈ 67.5), NOT the 0–10000 player value space. The v2 engine bridges it via `elo_to_value(1200 + 6·pick_value)` in `trade_service.dynasty_value` so a league pick prices like its universal-pool generic-pick twin. |
 | `synced_at` | str | |
 
 ---
@@ -267,6 +274,42 @@ Append-only Elo snapshots powering the Trends tab. Written on every `save_rankin
 Compaction (snapshots >90 days) is a future maintenance task — not done in v1.
 
 Indexes: `ix_elo_history_user_fmt_at` on `(user_id, scoring_format, snapshot_at)` — `/api/trends/risers-fallers` scans per (user, format) ordered by snapshot.
+
+---
+
+## `asset_preferences`
+
+Per-player trade preferences, per league (backlog #2). Where `league_preferences` expresses intent at position granularity, this expresses it per player.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `user_id` | str | |
+| `league_id` | str | |
+| `player_id` | str | Sleeper player id |
+| `list_type` | str | `'untouchable'` (never suggest giving away) \| `'target'` (bias toward acquiring) |
+| `created_at` | str | ISO UTC |
+
+Constraint: `uq_asset_pref` on `(user_id, league_id, player_id)` — a player holds at most one tag per league; `set_asset_preference` deletes any prior tag before inserting (single membership), so setting `target` on an existing untouchable moves it. Read via `load_asset_preferences` → `{"untouchables": [...], "targets": [...]}`; written via `set_asset_preference(..., list_type)` where `list_type=None` removes. Add/remove history for the #65 label stream is captured in `user_events` (`asset_pref_added`/`asset_pref_removed`), not here.
+
+---
+
+## `player_value_history`
+
+Daily **consensus** value snapshots (backlog #57 / player profiles #17). `elo_history` logs each user's *personal* Elo; this table logs the market side — one row per universal-pool player per scoring format per day, written by `POST /api/cron/value-snapshot`. The DynastyProcess-seeded universal pool is rebuilt from the live CSV on every boot, so yesterday's consensus numbers are otherwise unrecoverable; this is pure retention so value-history charts, the movers digest (#33), and Wrapped (#46) have history to draw on.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `player_id` | str | Sleeper player id (or pick pseudo-id) |
+| `scoring_format` | str | `'1qb_ppr'` / `'sf_tep'` |
+| `consensus_elo` | float | seed Elo at snapshot time |
+| `consensus_value` | float, nullable | `elo_to_value(consensus_elo)`, stored denormalised so later `elo_value_*` config changes don't rewrite recorded history |
+| `search_rank` | int, nullable | Sleeper rank proxy, if known |
+| `adp` | float, nullable | ADP, if known |
+| `snapshot_date` | str | `"YYYY-MM-DD"` UTC |
+
+Constraint: `uq_value_snapshot` on `(player_id, scoring_format, snapshot_date)` — the daily upsert (INSERT OR REPLACE / ON CONFLICT DO UPDATE) is idempotent, so a same-day cron retry overwrites rather than duplicating. Written via `record_value_snapshots`; read via `load_value_history` / `load_value_extremes`. Retention: keep-forever in v1 (~700 players × 2 formats × 365 ≈ 0.5M rows/yr; revisit with a downsample-to-weekly policy after year one).
 
 ---
 
@@ -335,6 +378,22 @@ Expo push tokens. Composite uniqueness via `device_token` PK + indexed `user_id`
 | `device_token` | str PK | |
 | `platform` | str | `ios` / `android` |
 | `created_at`, `last_seen_at` | str | |
+
+---
+
+## `sleeper_credentials`
+
+⚠️ Flagged-beta ("Send in Sleeper", `trade.send_in_sleeper`). Encrypted Sleeper write tokens — one row per FTF `user_id`. Written by `upsert_sleeper_credential`; read/deleted by `get_sleeper_credential` / `delete_sleeper_credential`. Crypto lives in `backend/sleeper_write.py` (Fernet, `SLEEPER_TOKEN_KEY`); this table never holds plaintext.
+
+| Column | Type | Notes |
+|---|---|---|
+| `user_id` | str PK | FTF user_id (one Sleeper link per user) |
+| `sleeper_user_id` | str | Linked Sleeper account (from the JWT `user_id` claim) |
+| `token_encrypted` | text | **Fernet ciphertext** of the Sleeper JWT — never plaintext, never logged |
+| `expires_at` | str | ISO UTC of the JWT `exp` (365-day token); drives proactive reconnect |
+| `created_at`, `updated_at` | str | |
+
+Interim home; folds into the auth epic's `linked_sources` when that lands.
 
 ---
 

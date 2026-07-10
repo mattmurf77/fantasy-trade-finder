@@ -84,7 +84,7 @@ Shared user-facing strings rendered by both mobile and web — must stay charact
 
 | String | Shown when |
 |---|---|
-| `👀 They're interested` | card has `likes_you: true` (likes-you pill) |
+| `They're interested` (preceded by the Chalkline `eye` icon, not an emoji — changed from `👀 They're interested` 2026-07-02, ADR-004) | card has `likes_you: true` (likes-you pill) |
 | `Fair-value idea` | card has `basis: "consensus"` (consensus label/tag) |
 | `This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.` | consensus-card explainer (mobile body text; web `title` tooltip on the tag) |
 | `+ {player name} added to balance the deal` | card has a `sweetener` (Tier 3) — name interpolated from the referenced player |
@@ -163,17 +163,29 @@ See [data-dictionary.md](data-dictionary.md#user_events). When adding a new even
 
 ---
 
+## Asset preference list types
+
+`asset_preferences.list_type` vocabulary, defined in `backend/database.py:ASSET_PREF_LISTS` and sent verbatim by clients in the POST `/api/league/asset-prefs` body (`list` field — `mobile/src/api/league.ts:setAssetPref`):
+
+- `untouchable` — never offer this player FROM the owner's roster in generated trades (feedback #95)
+- `target` — bias suggestions toward acquiring this player
+- `none` — POST-body-only sentinel meaning "remove the tag" (never stored)
+
+A player holds at most one tag per (user, league). If you add a list type, update `ASSET_PREF_LISTS`, the mobile union type, and this list.
+
+---
+
 ## Feedback lifecycle statuses
 
 `app_feedback.status` vocabulary, defined in `backend/database.py:FEEDBACK_STATUSES` and mirrored by the mobile inbox chips (`mobile/src/screens/FeedbackInboxScreen.tsx:STATUS_LABEL`):
 
-| Status | User-facing label |
-|---|---|
-| `new` | 📬 Received |
-| `planned` | 🗓 Planned |
-| `in_progress` | 🔧 In progress |
-| `fixed` | ✅ Fixed — in next update |
-| `shipped` | 🚀 Shipped |
-| `declined` | 🚫 Not planned |
+| Status | User-facing label | Visible in user inbox? |
+|---|---|---|
+| `new` | Received | yes |
+| `planned` | Planned | yes |
+| `in_progress` | In progress | yes |
+| `fixed` | Fixed — in next update | yes (the notification that a fix is coming) |
+| `shipped` | Shipped | **no — closed** |
+| `declined` | Not planned | **no — closed** |
 
-NULL in the DB reads as `new` everywhere. If you add a status, update both files and this table.
+NULL in the DB reads as `new` everywhere. Labels are emoji-free as of the Chalkline re-skin (ADR-004). Closed statuses (2026-07-04) are defined in `backend/database.py:FEEDBACK_CLOSED_STATUSES` and mirrored in `mobile/src/api/feedback.ts:CLOSED_FEEDBACK_STATUSES` — `/api/feedback/mine` excludes them server-side AND the mobile inbox hides locally-persisted notes whose merged status is closed (or that no longer come back from `/mine` for the signed-in account). If you add or reclassify a status, update both constants and this table.

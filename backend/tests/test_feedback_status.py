@@ -141,12 +141,70 @@ def test_mine_scopes_to_caller_and_defaults_new(harness):
     assert [it["server_id"] for it in items] == [mine_id]
     assert items[0]["status"] == "new"          # NULL reads as 'new'
 
-    # After the operator sets a status, the user sees it.
+    # Non-terminal operator statuses stay visible to the user.
+    client.put(f"/api/feedback/admin/{mine_id}/status",
+               data=json.dumps({"status": "planned"}),
+               content_type="application/json")
+    res2 = client.get("/api/feedback/mine", headers={"X-Session-Token": token})
+    assert res2.get_json()["items"][0]["status"] == "planned"
+
+    # Closed statuses (shipped/declined) disappear from the user's inbox
+    # (FB privacy/cleanup, 2026-07-04).
     client.put(f"/api/feedback/admin/{mine_id}/status",
                data=json.dumps({"status": "shipped"}),
                content_type="application/json")
-    res2 = client.get("/api/feedback/mine", headers={"X-Session-Token": token})
-    assert res2.get_json()["items"][0]["status"] == "shipped"
+    res3 = client.get("/api/feedback/mine", headers={"X-Session-Token": token})
+    assert res3.get_json()["items"] == []
+
+
+def test_closed_hidden_from_mine_but_visible_to_admin(harness):
+    client, token = harness
+    a = _submit(client, token, client_id="a").get_json()["server_id"]
+    b = _submit(client, token, client_id="b", text="second note").get_json()["server_id"]
+
+    # 'fixed' is NOT closed — the "Fixed — in next update" chip is the
+    # user-facing notification, so it must stay visible.
+    client.put(f"/api/feedback/admin/{a}/status",
+               data=json.dumps({"status": "fixed"}),
+               content_type="application/json")
+    # 'declined' is closed — hidden from the user.
+    client.put(f"/api/feedback/admin/{b}/status",
+               data=json.dumps({"status": "declined"}),
+               content_type="application/json")
+
+    mine = client.get("/api/feedback/mine", headers={"X-Session-Token": token})
+    ids = [it["server_id"] for it in mine.get_json()["items"]]
+    assert a in ids and b not in ids
+
+    # The operator's admin readback is unaffected — closed rows remain.
+    admin = client.get("/api/feedback/admin?since_id=0")
+    admin_ids = [it["id"] for it in admin.get_json()["items"]]
+    assert a in admin_ids and b in admin_ids
+
+
+def test_mine_never_returns_other_users_notes(harness):
+    client, token = harness
+    other_token = "test-token-other-user"
+    with server._sessions_lock:
+        server._sessions[other_token] = {
+            "user_id": OTHER, "username": "other", "last_active": 0.0,
+        }
+    try:
+        mine_id  = _submit(client, token, client_id="mine-x").get_json()["server_id"]
+        other_id = _submit(client, other_token, client_id="other-x",
+                           text="someone else's note").get_json()["server_id"]
+
+        mine = client.get("/api/feedback/mine", headers={"X-Session-Token": token})
+        ids = [it["server_id"] for it in mine.get_json()["items"]]
+        assert ids == [mine_id] and other_id not in ids
+
+        theirs = client.get("/api/feedback/mine",
+                            headers={"X-Session-Token": other_token})
+        their_ids = [it["server_id"] for it in theirs.get_json()["items"]]
+        assert their_ids == [other_id] and mine_id not in their_ids
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(other_token, None)
 
 
 def test_admin_readback_includes_status(harness):

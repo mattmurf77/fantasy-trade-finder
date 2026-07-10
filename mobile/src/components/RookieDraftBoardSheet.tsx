@@ -9,8 +9,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, ice, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
+import { Button, Icon } from './chalkline';
 import PositionChip from './PositionChip';
 import { getRookies, type RookiePlayer } from '../api/rankings';
 import type { Position } from '../shared/types';
@@ -23,10 +23,13 @@ interface Props {
 type Filter = 'ALL' | Position;
 const FILTERS: Filter[] = ['ALL', 'QB', 'RB', 'WR', 'TE'];
 
-// Bottom-sheet rookie draft board. Mirrors the web app's rookie overlay
-// (openRookieBoard / renderRookieList in web/js/app.js): filterable list
-// of rookie / first-year / pre-draft prospect players sorted by Sleeper
-// search_rank. Read-only — useful during dynasty rookie draft prep.
+// Bottom-sheet rookie draft board (Chalkline sheet construction: ink-2
+// surface, hairline border, sheet shadow, line-strong grabber, solid scrim;
+// ghost filter tabs with ice underline; hairline table rows with mono rank
+// numerals). Mirrors the web app's rookie overlay (openRookieBoard /
+// renderRookieList in web/js/app.js): filterable list of rookie / first-year
+// / pre-draft prospect players sorted by Sleeper search_rank. Read-only —
+// useful during dynasty rookie draft prep.
 export default function RookieDraftBoardSheet({ visible, onClose }: Props) {
   const [filter, setFilter] = useState<Filter>('ALL');
 
@@ -64,24 +67,24 @@ export default function RookieDraftBoardSheet({ visible, onClose }: Props) {
     >
       <Pressable style={styles.backdrop} onPress={onClose} />
       <View style={styles.sheet}>
-        <View style={styles.handle} />
+        <View style={styles.grabber} />
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Rookie Draft Board</Text>
-            <Text style={styles.sub}>
+            <Text style={type.heading}>Rookie Draft Board</Text>
+            <Text style={[type.bodySm, styles.sub]}>
               First-year players and pre-draft prospects.
             </Text>
           </View>
           <Pressable
             onPress={onClose}
             hitSlop={12}
-            style={({ pressed }) => [styles.closeBtn, pressed && { opacity: 0.6 }]}
+            style={({ pressed }) => [styles.closeBtn, pressed && styles.closeBtnPressed]}
           >
-            <Text style={styles.closeText}>✕</Text>
+            <Icon name="x" size={20} color={chalk.dim} />
           </Pressable>
         </View>
 
-        {/* Position filter chips */}
+        {/* Position filter tabs: ghost label text, active = chalk + ice underline */}
         <View style={styles.filterRow}>
           {FILTERS.map((f) => {
             const isActive = f === filter;
@@ -90,14 +93,14 @@ export default function RookieDraftBoardSheet({ visible, onClose }: Props) {
                 key={f}
                 onPress={() => setFilter(f)}
                 style={({ pressed }) => [
-                  styles.filterChip,
-                  isActive && styles.filterChipActive,
-                  pressed && { opacity: 0.7 },
+                  styles.filterTab,
+                  pressed && styles.filterTabPressed,
                 ]}
               >
-                <Text style={[styles.filterText, isActive && styles.filterTextActive]}>
+                <Text style={[type.label, isActive && styles.filterTextActive]}>
                   {f}
                 </Text>
+                <View style={[styles.filterUnderline, isActive && styles.filterUnderlineActive]} />
               </Pressable>
             );
           })}
@@ -106,18 +109,16 @@ export default function RookieDraftBoardSheet({ visible, onClose }: Props) {
         {/* List */}
         {query.isLoading ? (
           <View style={styles.centered}>
-            <ActivityIndicator color={colors.accent} />
+            <ActivityIndicator color={ice.base} />
           </View>
         ) : query.isError ? (
           <View style={styles.centered}>
             <Text style={styles.errorText}>Failed to load rookie data.</Text>
-            <Pressable onPress={() => query.refetch()}>
-              <Text style={styles.retryText}>Try again</Text>
-            </Pressable>
+            <Button label="Try again" variant="ghost" compact onPress={() => query.refetch()} />
           </View>
         ) : rows.length === 0 ? (
           <View style={styles.centered}>
-            <Text style={styles.emptyText}>
+            <Text style={[type.bodySm, styles.emptyText]}>
               {filter === 'ALL'
                 ? 'No rookie data available yet.'
                 : `No ${filter} rookies found.`}
@@ -126,15 +127,18 @@ export default function RookieDraftBoardSheet({ visible, onClose }: Props) {
         ) : (
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
             {rows.map((r, idx) => (
-              <View key={r.id} style={styles.row}>
+              <View
+                key={r.id}
+                style={[styles.row, idx === rows.length - 1 && styles.rowLast]}
+              >
                 <Text style={styles.rank}>{idx + 1}</Text>
                 <View style={styles.info}>
-                  <Text style={styles.name} numberOfLines={1}>
+                  <Text style={type.title} numberOfLines={1}>
                     {r.name || '?'}
                   </Text>
                   <View style={styles.metaRow}>
                     <PositionChip position={r.position} size="sm" />
-                    <Text style={styles.meta} numberOfLines={1}>
+                    <Text style={[type.bodySm, styles.meta]} numberOfLines={1}>
                       {[
                         r.team || 'Undrafted',
                         r.age != null ? `Age ${r.age}` : null,
@@ -155,87 +159,87 @@ export default function RookieDraftBoardSheet({ visible, onClose }: Props) {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: scrim },
   sheet: {
     position: 'absolute',
     left: 0, right: 0, bottom: 0,
     maxHeight: '90%',
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl,
-    gap: spacing.sm,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderTopLeftRadius: radii.md,
+    borderTopRightRadius: radii.md,
+    padding: space.lg,
+    paddingBottom: space.xxl,
+    gap: space.sm,
+    ...shadowSheet,
   },
-  handle: {
+  grabber: {
     alignSelf: 'center',
-    width: 44, height: 4, borderRadius: 2,
-    backgroundColor: colors.border,
-    marginBottom: spacing.sm,
+    width: 32,
+    height: 4,
+    backgroundColor: ink.lineStrong,
+    marginBottom: space.sm,
   },
-  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
-  title: { color: colors.text, fontSize: fontSize.xl, fontWeight: '800' },
-  sub: { color: colors.muted, fontSize: fontSize.sm, marginTop: 2 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md },
+  sub: { marginTop: 2 },
   closeBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: colors.surface,
-    borderWidth: 1, borderColor: colors.border,
+    width: 32, height: 32, borderRadius: radii.sm,
     alignItems: 'center', justifyContent: 'center',
   },
-  closeText: { color: colors.muted, fontSize: fontSize.base, fontWeight: '800' },
+  closeBtnPressed: { backgroundColor: ink.ink3 },
 
   filterRow: {
     flexDirection: 'row',
-    gap: spacing.xs,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
+    gap: space.xs,
+    marginTop: space.sm,
+    marginBottom: space.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
   },
-  filterChip: {
+  filterTab: {
     flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+    minHeight: 44,
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
   },
-  filterChipActive: {
-    backgroundColor: 'rgba(79,124,255,0.14)',
-    borderColor: colors.accent,
+  filterTabPressed: { backgroundColor: ink.ink3 },
+  filterTextActive: { color: chalk.base },
+  filterUnderline: {
+    alignSelf: 'stretch',
+    height: 2,
+    backgroundColor: 'transparent',
   },
-  filterText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: '700' },
-  filterTextActive: { color: colors.accent },
+  filterUnderlineActive: { backgroundColor: ice.base },
 
   list: { flexGrow: 0 },
-  listContent: { paddingBottom: spacing.lg, gap: spacing.sm },
+  listContent: { paddingBottom: space.lg },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    gap: space.md,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
   },
+  rowLast: { borderBottomWidth: 0 },
   rank: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
-    fontWeight: '800',
+    ...type.data,
+    color: chalk.dim,
     width: 28,
     textAlign: 'center',
   },
-  info: { flex: 1, minWidth: 0, gap: 4 },
-  name: { color: colors.text, fontSize: fontSize.base, fontWeight: '700' },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap' },
-  meta: { color: colors.muted, fontSize: fontSize.xs, flexShrink: 1 },
+  info: { flex: 1, minWidth: 0, gap: space.xs },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs, flexWrap: 'wrap' },
+  meta: { flexShrink: 1 },
 
   centered: {
-    paddingVertical: spacing.xxl,
+    paddingVertical: space.xxl,
     alignItems: 'center',
-    gap: spacing.md,
+    gap: space.md,
   },
-  emptyText: { color: colors.muted, fontSize: fontSize.sm, textAlign: 'center' },
-  errorText: { color: colors.red, fontSize: fontSize.sm, textAlign: 'center' },
-  retryText: { color: colors.accent, fontSize: fontSize.sm, fontWeight: '700' },
+  emptyText: { textAlign: 'center' },
+  errorText: { ...type.bodySm, color: semantic.neg, textAlign: 'center' },
 });

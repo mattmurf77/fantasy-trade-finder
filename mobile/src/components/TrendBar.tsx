@@ -1,10 +1,9 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { colors } from '../theme/colors';
-import { radius } from '../theme/spacing';
+import { ink, semantic } from '../theme/chalkline';
 
 interface Props {
-  /** Signed delta. Positive paints green (riser), negative paints red (faller). */
+  /** Signed delta. Positive paints pos (riser), negative paints neg (faller). */
   delta: number;
   /** Largest absolute delta in the current section; normalises bar width. */
   max: number;
@@ -12,17 +11,18 @@ interface Props {
   height?: number;
 }
 
-// Horizontal magnitude bar for trend rows. Width is |delta| / max, color
-// matches the direction. Kept dumb-presentational so any trend list (risers,
-// fallers, consensus gap) can reuse it.
+// Horizontal magnitude bar for trend rows (Chalkline meter pattern: square-end
+// track on ink-3, no rounding). Width is |delta| / max, color matches the
+// direction. Kept dumb-presentational so any trend list (risers, fallers,
+// consensus gap) can reuse it.
 export default function TrendBar({ delta, max, height = 4 }: Props) {
   const safeMax = Math.max(1, Math.abs(max));
   const ratio = Math.min(1, Math.abs(delta) / safeMax);
   const widthPct = `${Math.round(ratio * 100)}%` as const;
-  const fillColor = delta >= 0 ? colors.green : colors.red;
+  const fillColor = delta >= 0 ? semantic.pos : semantic.neg;
   return (
     <View style={[styles.track, { height }]}>
-      <View style={[styles.fill, { width: widthPct, backgroundColor: fillColor, height }]} />
+      <View style={[{ width: widthPct, backgroundColor: fillColor, height }]} />
     </View>
   );
 }
@@ -30,11 +30,7 @@ export default function TrendBar({ delta, max, height = 4 }: Props) {
 const styles = StyleSheet.create({
   track: {
     width: '100%',
-    backgroundColor: colors.border,
-    borderRadius: radius.sm,
+    backgroundColor: ink.ink3,
     overflow: 'hidden',
-  },
-  fill: {
-    borderRadius: radius.sm,
   },
 });

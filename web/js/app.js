@@ -445,7 +445,9 @@
         // Diagnose every failure branch individually
         if (!res.ok) {
           logDrawer.error(`res.ok=false (HTTP ${res.status}) — server rejected the request`);
-          errEl.textContent = data.error || `Server error ${res.status}. Check the debug log.`;
+          // Prefer the human-readable message (e.g. Sleeper-outage 503);
+          // fall back to the machine code, then a generic message.
+          errEl.textContent = data.message || data.error || `Server error ${res.status}. Check the debug log.`;
           input.classList.add('error');
           btn.disabled = false;
           btn.textContent = 'Connect with Sleeper →';
@@ -520,6 +522,17 @@
         const res     = await apiFetch(`/api/sleeper/leagues/${user.user_id}`);
         const leagues = await res.json();
         logDrawer.info(`Leagues response: ${JSON.stringify(leagues).slice(0, 200)}`);
+
+        // A Sleeper outage now returns a 503 with {error, message} instead
+        // of an empty array — show the retry message, not the "wrong username"
+        // dead end.
+        if (!res.ok) {
+          logDrawer.error(`leagues fetch failed (HTTP ${res.status})`);
+          const msg = (leagues && (leagues.message || leagues.error))
+                      || 'Couldn\'t reach Sleeper — try again shortly.';
+          list.innerHTML = `<div class="league-empty">${msg}</div>`;
+          return;
+        }
 
         if (!leagues || !leagues.length) {
           logDrawer.error('No 2024 leagues found for this user');
@@ -638,6 +651,18 @@
       }
     }
 
+    // Reset a league-item row to its idle state. `el` is null on the
+    // invited-league auto-select path (selectLeague(idx, null)), so every
+    // error path must go through this null-safe helper instead of touching
+    // el directly — otherwise an auto-select failure throws and leaves a
+    // blank screen.
+    function resetLeagueItem(el) {
+      if (!el) return;
+      el.classList.remove('loading');
+      const arrow = el.querySelector('.league-item-arrow');
+      if (arrow) arrow.textContent = '›';
+    }
+
     async function selectLeague(idx, el) {
       const lg         = _cachedLeagues[idx];
       const leagueId   = lg.league_id;
@@ -665,8 +690,7 @@
         logDrawer.error(`Player cache failed: ${e.message}`);
         hideInitOverlay();
         showToast('⚠️ Failed to load player database');
-        el.classList.remove('loading');
-        el.querySelector('.league-item-arrow').textContent = '›';
+        resetLeagueItem(el);
         showLeagueScreen(user);
         return;
       }
@@ -688,8 +712,7 @@
         logDrawer.error(`Roster/user fetch failed: ${e.message}`);
         hideInitOverlay();
         showToast('⚠️ Failed to fetch roster data');
-        el.classList.remove('loading');
-        el.querySelector('.league-item-arrow').textContent = '›';
+        resetLeagueItem(el);
         showLeagueScreen(user);
         return;
       }
@@ -710,8 +733,7 @@
         logDrawer.error(`No roster found for owner_id=${user.user_id} — owner_ids present: ${allOwnerIds}`);
         hideInitOverlay();
         showToast('⚠️ Could not find your roster in this league');
-        el.classList.remove('loading');
-        el.querySelector('.league-item-arrow').textContent = '›';
+        resetLeagueItem(el);
         showLeagueScreen(user);
         return;
       }
@@ -742,8 +764,7 @@
       if (!ok) {
         logDrawer.error('initSession returned false — see log above for details');
         showToast('⚠️ Failed to initialise session');
-        el.classList.remove('loading');
-        el.querySelector('.league-item-arrow').textContent = '›';
+        resetLeagueItem(el);
         showLeagueScreen(user);
         return;
       }
@@ -1030,6 +1051,20 @@
       return String(s)
         .replace(/&/g,'&amp;').replace(/</g,'&lt;')
         .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // Player-profile linkification (#17). Renders a player's name as a link to
+    // the profile page when players.profile_pages is on AND we have a real
+    // player id. Picks (pick_value != null) have no profile until #15 lands, so
+    // they fall back to plain text. Always escapes — safe to swap in anywhere a
+    // bare escapeHtml(name) was used.
+    function playerLink(p) {
+      const name = escapeHtml((p && (p.name || p.full_name)) || 'Unknown');
+      const id   = p && (p.id || p.player_id);
+      if (!id || (p && p.pick_value != null) || !window.FTF_FLAG('players.profile_pages')) {
+        return name;
+      }
+      return `<a class="player-link" href="player.html?id=${encodeURIComponent(id)}">${name}</a>`;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -3205,7 +3240,7 @@
         // v2 — likes-you: counterparty already liked the mirror of this
         // trade. Backend serializes the field only when true.
         const likesYouHTML = card.likes_you === true
-          ? `<div class="likes-you-pill">👀 They're interested</div>`
+          ? `<div class="likes-you-pill"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square" style="vertical-align:-2px;margin-right:4px;"><path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="10" cy="10" r="2.5"/></svg>They're interested</div>`
           : '';
 
         // v2 — consensus basis: fair-value idea vs an opponent who hasn't
@@ -3712,7 +3747,7 @@
       const tierBdg   = buildTierBadge(p);
       const metaParts = [team, age, yrsLabel].filter(Boolean).join(' · ');
       return `<div class="trade-player">
-        <div class="trade-player-name">${escapeHtml(p.name || 'Unknown')}</div>
+        <div class="trade-player-name">${playerLink(p)}</div>
         <div class="trade-player-meta">
           <span class="pos-badge ${pos}">${p.position || '?'}</span>
           ${dcBadge}${injBadge}${rookieBdg}${tierBdg}

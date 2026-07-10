@@ -2,7 +2,7 @@
   "expo": {
     "name": "DTF - Dynasty Trade Finder",
     "slug": "dtf-dynasty-trade-finder",
-    "version": "1.1.0",
+    "version": "1.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "dtf",
@@ -52,7 +52,8 @@
           "organization": "dynasty-trade-finder",
           "project": "react-native"
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "apiBaseUrl": "https://fantasy-trade-finder.onrender.com",

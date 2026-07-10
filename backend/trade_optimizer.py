@@ -55,6 +55,7 @@ from .trade_service import (
     _value_uncertainty,
     elo_to_value,
     marginal_value,
+    outlook_blend_mult,
     package_value_v2,
     replacement_levels,
 )
@@ -93,7 +94,8 @@ def _consensus_packages(give_ids, recv_ids, seed_value):
     gvals = [seed_value(p) for p in give_ids]
     rvals = [seed_value(p) for p in recv_ids]
     v_max = max(gvals + rvals)
-    return package_value_v2(gvals, v_max), package_value_v2(rvals, v_max)
+    return (package_value_v2(gvals, v_max, n_other=len(recv_ids)),
+            package_value_v2(rvals, v_max, n_other=len(give_ids)))
 
 
 def _fairness_v3(give_ids, recv_ids, seed_value, confidence,
@@ -112,8 +114,8 @@ def _fairness_v3(give_ids, recv_ids, seed_value, confidence,
     gvals = [seed_value(p) for p in give_ids]
     rvals = [seed_value(p) for p in recv_ids]
     v_max = max(gvals + rvals)
-    gv = package_value_v2(gvals, v_max)
-    rv = package_value_v2(rvals, v_max)
+    gv = package_value_v2(gvals, v_max, n_other=len(recv_ids))
+    rv = package_value_v2(rvals, v_max, n_other=len(give_ids))
     if gv <= 0 or rv <= 0:
         return 1.0, 1.0, gv, rv
     ratio = min(gv, rv) / max(gv, rv)
@@ -196,6 +198,9 @@ def generate_pair_trades_v3(
     pinned_give_players: list[str] | None = None,
     pinned_receive_players: list[str] | None = None,
     players: dict,
+    alpha_opp: float | None = None,
+    untouchable_ids: set | None = None,
+    target_ids: set | None = None,
 ) -> list[TradeCard]:
     """Exact v3 generation for one (user, opponent) pair.
 
@@ -241,6 +246,9 @@ def generate_pair_trades_v3(
     POOL_P   = int(_ts._cfg.get("v3_pool_size", 12))
     SW_BAND  = float(_ts._cfg.get("sweetener_band", 0.15))
     SW_MAX   = int(_ts._cfg.get("sweetener_max_cards", 2))
+    TARGET_BONUS = _c("target_acquire_bonus")   # #2 per-target reward
+    MULT_CAP     = _c("pos_multiplier_cap")
+    _targets     = target_ids or set()
 
     # --- per-player value accessors (cached), same spaces as v2 ----------
     _def_uval = elo_to_value(1500.0)
@@ -254,6 +262,15 @@ def generate_pair_trades_v3(
         v = _vo_cache.get(pid)
         if v is None:
             v = elo_to_value(opp_elo.get(pid, 1500.0))
+            # Backlog #1 — opponent outlook blend (mirrors v2 _vo). None ⇒
+            # flag off ⇒ raw value. Propagates to marginal/replacement paths.
+            if alpha_opp is not None:
+                p = players.get(pid)
+                v *= outlook_blend_mult(
+                    getattr(p, "position", None) if p else None,
+                    getattr(p, "age", None) if p else None,
+                    alpha_opp,
+                )
             _vo_cache[pid] = v
         return v
 
@@ -302,7 +319,8 @@ def generate_pair_trades_v3(
     # opponent. Pinned give players are ALWAYS in the give pool, regardless
     # of divergence rank.
     known_user = [p for p in user_roster
-                  if p in shrunk_user_elo and p in opp_elo]
+                  if p in shrunk_user_elo and p in opp_elo
+                  and not (untouchable_ids and p in untouchable_ids)]  # #2
     known_opp = [p for p in opponent.roster
                  if p in shrunk_user_elo and p in opp_elo]
     give_pool = sorted(known_user, key=lambda p: _vo(p) - _uv(p),
@@ -318,6 +336,11 @@ def generate_pair_trades_v3(
     if pinned_recv_set:
         for pid in known_opp:
             if pid in pinned_recv_set and pid not in recv_pool:
+                recv_pool.append(pid)
+    # Backlog #2 — targets the opponent rosters survive the prune too.
+    if target_ids:
+        for pid in known_opp:
+            if pid in target_ids and pid not in recv_pool:
                 recv_pool.append(pid)
     if not give_pool or not recv_pool:
         return []
@@ -363,14 +386,14 @@ def generate_pair_trades_v3(
         uvals_give = [_user_val(p) for p in give_ids]
         uvals_recv = [_user_val(p) for p in recv_ids]
         u_max = max(uvals_give + uvals_recv)
-        give_val_user = package_value_v2(uvals_give, u_max)
-        recv_val_user = package_value_v2(uvals_recv, u_max)
+        give_val_user = package_value_v2(uvals_give, u_max, n_other=len(recv_ids))
+        recv_val_user = package_value_v2(uvals_recv, u_max, n_other=len(give_ids))
 
         ovals_give = [_opp_val(p) for p in give_ids]
         ovals_recv = [_opp_val(p) for p in recv_ids]
         o_max = max(ovals_give + ovals_recv)
-        give_val_opp = package_value_v2(ovals_give, o_max)   # opp receives
-        recv_val_opp = package_value_v2(ovals_recv, o_max)   # opp gives
+        give_val_opp = package_value_v2(ovals_give, o_max, n_other=len(recv_ids))   # opp receives
+        recv_val_opp = package_value_v2(ovals_recv, o_max, n_other=len(give_ids))   # opp gives
 
         # Waiver-slot cost (A3) on the side receiving MORE players.
         extra = len(recv_ids) - len(give_ids)
@@ -381,9 +404,15 @@ def generate_pair_trades_v3(
 
         return recv_val_user - give_val_user, give_val_opp - recv_val_opp
 
-    def _composite(hm: float, fairness: float, all_ids) -> float:
+    def _composite(hm: float, fairness: float, all_ids, recv_ids=None) -> float:
         comp = W_MIS * min(hm, GAIN_CAP) / GAIN_CAP + W_FAIR * fairness
-        return comp * _tier_mult(shrunk_user_elo, all_ids)
+        comp *= _tier_mult(shrunk_user_elo, all_ids)
+        # Backlog #2 — per-target reward, after the mutual-gain gates, capped.
+        if _targets and recv_ids:
+            n_t = len(set(recv_ids) & _targets)
+            if n_t:
+                comp *= min(1.0 + TARGET_BONUS * n_t, MULT_CAP)
+        return comp
 
     # --- exact enumeration -------------------------------------------------
     give_subsets = [list(c) for size in (1, 2, 3)
@@ -425,7 +454,7 @@ def generate_pair_trades_v3(
 
             hm = _harmonic_mean(user_surplus, opp_surplus)
             order -= 1   # earlier combos win composite ties (desc sort)
-            scored.append((_composite(hm, fairness, give_ids + recv_ids),
+            scored.append((_composite(hm, fairness, give_ids + recv_ids, recv_ids),
                            order, hm, fairness, give_ids, recv_ids))
 
     scored.sort(key=lambda e: (e[0], e[1]), reverse=True)
@@ -482,6 +511,7 @@ def generate_pair_trades_v3(
                 seed_value=_sv, fairness_threshold=fairness_threshold,
                 min_side=MIN_SIDE, surpluses=_surpluses, gap_ok=_gap_ok,
                 both_feasible=_both_feasible, players=players,
+                untouchable_ids=untouchable_ids,
             )
             if sweet is None:
                 continue
@@ -490,7 +520,7 @@ def generate_pair_trades_v3(
             if key in organic_keys:
                 continue
             hm = _harmonic_mean(user_s, opp_s)
-            comp = _composite(hm, ratio, new_give + new_recv)
+            comp = _composite(hm, ratio, new_give + new_recv, new_recv)
             card = _card(comp, hm, ratio, new_give, new_recv)
             card.sweetener = {"player_id": s_pid, "side": side}
             cards.append(card)
@@ -502,7 +532,7 @@ def generate_pair_trades_v3(
 
 def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
                  fairness_threshold, min_side, surpluses, gap_ok,
-                 both_feasible, players):
+                 both_feasible, players, untouchable_ids=None):
     """3.4 — close a near-miss by adding ONE cheap player from the
     under-paying side's roster.
 
@@ -523,7 +553,9 @@ def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
     else:
         side, roster = "receive", opp_roster
 
-    candidates = sorted((p for p in roster if p not in in_trade),
+    candidates = sorted((p for p in roster if p not in in_trade
+                         and not (side == "give" and untouchable_ids
+                                  and p in untouchable_ids)),   # #2 never sweeten with an untouchable
                         key=seed_value)
     for s_pid in candidates:
         if side == "give":

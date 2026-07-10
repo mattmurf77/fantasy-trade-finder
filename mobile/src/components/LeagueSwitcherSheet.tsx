@@ -8,8 +8,8 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { ink, chalk, ice, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
+import { Button, Icon } from './chalkline';
 import { useSession } from '../state/useSession';
 
 interface Props {
@@ -20,9 +20,11 @@ interface Props {
   onSwitched?: (leagueId: string) => void;
 }
 
-// Bottom-sheet picker for the user's leagues. Tapping a row triggers
-// useSession.switchLeague which re-runs sessionInit on the backend; while
-// that's in flight the row shows a spinner and the rest of the list is
+// Bottom-sheet picker for the user's leagues (Chalkline sheet construction:
+// ink-2 surface, hairline border, sheet shadow, line-strong grabber, solid
+// scrim; leagues render as hairline-separated LeagueRows). Tapping a row
+// triggers useSession.switchLeague which re-runs sessionInit on the backend;
+// while that's in flight the row shows a spinner and the rest of the list is
 // disabled (sessionInit can take several seconds on Render free tier and
 // we don't want concurrent switches racing).
 export default function LeagueSwitcherSheet({ visible, onClose, onSwitched }: Props) {
@@ -63,9 +65,9 @@ export default function LeagueSwitcherSheet({ visible, onClose, onSwitched }: Pr
         onPress={() => (busyId ? null : onClose())}
       />
       <View style={styles.sheet}>
-        <View style={styles.handle} />
-        <Text style={styles.title}>Switch league</Text>
-        <Text style={styles.sub}>
+        <View style={styles.grabber} />
+        <Text style={type.heading}>Switch league</Text>
+        <Text style={[type.bodySm, styles.sub]}>
           Picking a league reloads your team rosters and trade pool.
         </Text>
 
@@ -74,12 +76,12 @@ export default function LeagueSwitcherSheet({ visible, onClose, onSwitched }: Pr
         <ScrollView style={styles.scroll} keyboardShouldPersistTaps="always">
           {leagues.length === 0 ? (
             <View style={styles.emptyWrap}>
-              <Text style={styles.emptyText}>
+              <Text style={[type.bodySm, styles.emptyText]}>
                 No leagues cached. Pull-to-refresh on the league picker.
               </Text>
             </View>
           ) : (
-            leagues.map((lg) => {
+            leagues.map((lg, idx) => {
               const isActive = lg.league_id === activeLeague?.league_id;
               const isBusy   = busyId === lg.league_id;
               const dim      = busyId !== null && !isBusy;
@@ -90,26 +92,23 @@ export default function LeagueSwitcherSheet({ visible, onClose, onSwitched }: Pr
                   disabled={busyId !== null}
                   style={({ pressed }) => [
                     styles.row,
-                    isActive && styles.rowActive,
+                    idx === leagues.length - 1 && styles.rowLast,
                     dim && styles.rowDim,
-                    pressed && !dim && { opacity: 0.7 },
+                    pressed && !dim && styles.rowPressed,
                   ]}
                 >
-                  <View style={styles.rowAvatar}>
-                    <Text style={styles.rowAvatarEmoji}>🏈</Text>
-                  </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={styles.rowName} numberOfLines={1}>{lg.name}</Text>
-                    <Text style={styles.rowMeta}>
+                    <Text style={type.title} numberOfLines={1}>{lg.name}</Text>
+                    <Text style={[type.bodySm, styles.rowMeta]}>
                       {(lg.total_rosters as number | undefined) || 12} teams
                     </Text>
                   </View>
                   {isBusy ? (
-                    <ActivityIndicator color={colors.accent} />
+                    <ActivityIndicator color={chalk.dim} />
                   ) : isActive ? (
-                    <Text style={styles.check}>✓</Text>
+                    <Icon name="check" size={20} color={ice.base} />
                   ) : (
-                    <Text style={styles.chevron}>›</Text>
+                    <Icon name="chevron-right" size={20} color={chalk.dim} />
                   )}
                 </Pressable>
               );
@@ -117,72 +116,59 @@ export default function LeagueSwitcherSheet({ visible, onClose, onSwitched }: Pr
           )}
         </ScrollView>
 
-        <Pressable
+        <Button
+          label="Cancel"
+          variant="ghost"
           onPress={() => (busyId ? null : onClose())}
           disabled={busyId !== null}
-          style={({ pressed }) => [
-            styles.cancel,
-            (pressed || busyId) && { opacity: 0.6 },
-          ]}
-        >
-          <Text style={styles.cancelText}>Cancel</Text>
-        </Pressable>
+          style={styles.cancel}
+        />
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: scrim },
   sheet: {
     position: 'absolute',
     left: 0, right: 0, bottom: 0,
     maxHeight: '85%',
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl,
-    gap: spacing.sm,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderTopLeftRadius: radii.md,
+    borderTopRightRadius: radii.md,
+    padding: space.lg,
+    paddingBottom: space.xxl,
+    gap: space.sm,
+    ...shadowSheet,
   },
-  handle: {
+  grabber: {
     alignSelf: 'center',
-    width: 44, height: 4, borderRadius: 2,
-    backgroundColor: colors.border,
-    marginBottom: spacing.sm,
+    width: 32,
+    height: 4,
+    backgroundColor: ink.lineStrong,
+    marginBottom: space.sm,
   },
-  title: { color: colors.text, fontSize: fontSize.xl,  fontWeight: '800' },
-  sub:   { color: colors.muted, fontSize: fontSize.sm,  marginBottom: spacing.sm },
-  error: { color: colors.red,  fontSize: fontSize.xs, marginBottom: spacing.xs },
+  sub:   { marginBottom: space.sm },
+  error: { ...type.bodySm, color: semantic.neg, marginBottom: space.xs },
   scroll: { maxHeight: 460 },
-  emptyWrap: { paddingVertical: spacing.xl, alignItems: 'center' },
-  emptyText: { color: colors.muted, fontSize: fontSize.sm, textAlign: 'center' },
+  emptyWrap: { paddingVertical: space.xl, alignItems: 'center' },
+  emptyText: { textAlign: 'center' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.lg,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    marginBottom: spacing.sm,
+    gap: space.md,
+    paddingVertical: space.md,
+    paddingHorizontal: space.xs,
+    minHeight: 44,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
   },
-  rowActive: {
-    borderColor: colors.accent,
-    backgroundColor: 'rgba(79,124,255,0.08)',
-  },
+  rowLast: { borderBottomWidth: 0 },
+  rowPressed: { backgroundColor: ink.ink3 },
   rowDim: { opacity: 0.45 },
-  rowAvatar: {
-    width: 40, height: 40, borderRadius: 10,
-    backgroundColor: 'rgba(79,124,255,0.14)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  rowAvatarEmoji: { fontSize: 20 },
-  rowName:  { color: colors.text,  fontSize: fontSize.base, fontWeight: '700' },
-  rowMeta:  { color: colors.muted, fontSize: fontSize.xs,   marginTop: 2 },
-  check:    { color: colors.accent, fontSize: 22, fontWeight: '800' },
-  chevron:  { color: colors.muted,  fontSize: 22 },
-  cancel:   { marginTop: spacing.md, padding: spacing.md, alignItems: 'center' },
-  cancelText: { color: colors.muted, fontWeight: '700', fontSize: fontSize.sm },
+  rowMeta: { marginTop: 2 },
+  cancel: { marginTop: space.md },
 });

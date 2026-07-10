@@ -1,0 +1,61 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ftf-fullstack",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-c",
+        "import os; os.environ['CRON_SECRET']='webqa'; from backend.server import app, _load_sleeper_cache; _load_sleeper_cache(); app.run(debug=False, host='127.0.0.1', port=5088, use_reloader=False)"
+      ],
+      "port": 5088
+    },
+    {
+      "name": "tiers-preview",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8766",
+        "--directory",
+        "web"
+      ],
+      "port": 8766
+    },
+    {
+      "name": "ftf-mobile-web",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "expo",
+        "start",
+        "--web",
+        "--port",
+        "8092"
+      ],
+      "cwd": "mobile",
+      "port": 8092
+    },
+    {
+      "name": "trade-calc-mock",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "expo",
+        "start",
+        "--web",
+        "--port",
+        "8091"
+      ],
+      "cwd": "mockups/trade-calc",
+      "port": 8091
+    },
+    {
+      "name": "jobpilot-preview",
+      "runtimeExecutable": "/Users/teresadickens/Documents/Claude/Projects/JobPilot/.venv/bin/python",
+      "runtimeArgs": [
+        "-c",
+        "import os, sys; root='/Users/teresadickens/Documents/Claude/Projects/JobPilot'; os.chdir(root); sys.path.insert(0, root); from backend.app import create_app; create_app().run(port=5252)"
+      ],
+      "port": 5252
+    }
+  ]
+}
