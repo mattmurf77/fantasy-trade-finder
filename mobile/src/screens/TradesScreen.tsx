@@ -55,6 +55,8 @@ import {
   getNewPartners,
   getLeagueCoverage,
   copyTiersFromFormat,
+  getAssetPrefs,
+  setAssetPref,
   type Outlook,
 } from '../api/league';
 import { getProgress } from '../api/rankings';
@@ -220,6 +222,54 @@ export default function TradesScreen({ navigation }: any) {
       setOutlookOpen(true);
     }
   }, [prefsQuery.data]);
+
+  // ── Untouchables (feedback #95, flag trade.preference_lists) ─────────
+  // Long-press a player on the YOU SEND side to mark/unmark them
+  // untouchable — the trade engine then never offers them from your
+  // roster. Mirrors MatchesScreen; single-league here, so one query.
+  const untouchablesEnabled = useFlag('trade.preference_lists');
+  const assetPrefsQuery = useQuery({
+    queryKey: ['asset-prefs', leagueId],
+    queryFn: () => getAssetPrefs(leagueId!),
+    staleTime: 60_000,
+    enabled: untouchablesEnabled && !!leagueId,
+  });
+  const untouchableIds = useMemo(
+    () =>
+      assetPrefsQuery.data
+        ? new Set<string>(assetPrefsQuery.data.untouchables || [])
+        : undefined,
+    [assetPrefsQuery.data],
+  );
+
+  const untouchableMutation = useMutation({
+    mutationFn: ({ playerId, list }: {
+      playerId: string;
+      list: 'untouchable' | 'none';
+    }) => setAssetPref(leagueId!, playerId, list),
+    onSuccess: (_res, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['asset-prefs', leagueId] });
+      setToast({
+        msg: vars.list === 'untouchable'
+          ? 'Marked untouchable — never offered in trade ideas'
+          : 'Untouchable removed',
+        tone: 'success',
+      });
+    },
+    onError: () => {
+      setToast({ msg: 'Could not update untouchable — try again', tone: 'warn' });
+    },
+  });
+
+  function handleToggleUntouchable(p: Player) {
+    if (untouchableMutation.isPending || !leagueId) return;
+    haptics.selection();
+    const marked = untouchableIds?.has(p.id) ?? false;
+    untouchableMutation.mutate({
+      playerId: p.id,
+      list: marked ? 'none' : 'untouchable',
+    });
+  }
 
   // ── FB4-59: single-format gate ───────────────────────────────────────
   // Trading requires the user to have established rankings for THIS league's
@@ -823,7 +873,10 @@ export default function TradesScreen({ navigation }: any) {
               {/* Peek of the next card behind the top one */}
               {nextCard && (
                 <View style={[styles.cardStack, styles.cardBehind]}>
-                  <TradeCardComp data={nextCard} />
+                  <TradeCardComp
+                    data={nextCard}
+                    untouchableIds={untouchablesEnabled ? untouchableIds : undefined}
+                  />
                 </View>
               )}
               <SwipableTopCard
@@ -831,6 +884,10 @@ export default function TradesScreen({ navigation }: any) {
                 card={topCard}
                 onLike={() => advance('like')}
                 onPass={() => advance('pass')}
+                untouchableIds={untouchablesEnabled ? untouchableIds : undefined}
+                onToggleUntouchable={
+                  untouchablesEnabled ? handleToggleUntouchable : undefined
+                }
               />
               {/* Queue action — Pass / Interested are driven by swipe
                   gestures on the top card; Queue is a third option that
@@ -1074,9 +1131,17 @@ interface SwipableProps {
   card: TradeCard;
   onLike: () => void;
   onPass: () => void;
+  untouchableIds?: ReadonlySet<string>;
+  onToggleUntouchable?: (player: Player) => void;
 }
 
-function SwipableTopCard({ card, onLike, onPass }: SwipableProps) {
+function SwipableTopCard({
+  card,
+  onLike,
+  onPass,
+  untouchableIds,
+  onToggleUntouchable,
+}: SwipableProps) {
   const translateX = useSharedValue(0);
 
   const pan = useMemo(
@@ -1115,7 +1180,11 @@ function SwipableTopCard({ card, onLike, onPass }: SwipableProps) {
   return (
     <GestureDetector gesture={pan}>
       <Animated.View style={[styles.cardStack, animatedStyle]}>
-        <TradeCardComp data={card} />
+        <TradeCardComp
+          data={card}
+          untouchableIds={untouchableIds}
+          onToggleUntouchable={onToggleUntouchable}
+        />
       </Animated.View>
     </GestureDetector>
   );
