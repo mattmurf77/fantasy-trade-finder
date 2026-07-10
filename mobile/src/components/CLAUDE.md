@@ -17,5 +17,6 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `PlayerPickerModal` | Calculator: search + position-filter player picker |
 | `OutlookSheet` | Bottom sheet for team outlook selection |
 | `SendInSleeperButton` | Flagged-beta ("Send in Sleeper"): propose a trade to Sleeper directly; routes to connect / deep-link fallback |
+| `SteerSlider` | Settings: "We steer ↔ You steer" 4-dot ranking-method selector (one dot per ranking flow, guided → manual) |
 | `Toast` | Transient notification |
 | `TopBar` | Screen header |

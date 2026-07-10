@@ -222,8 +222,10 @@ export async function dismissPlayer(playerId: string) {
   return api.post<any>('/api/tiers/dismiss', { player_id: playerId });
 }
 
-// POST /api/ranking-method — record the user's chosen method (trio/manual/tiers)
-export async function setRankingMethod(method: 'trio' | 'manual' | 'tiers') {
+// POST /api/ranking-method — record the user's chosen method. Mirrors the
+// RankMethodPref union in state/useSession.ts (device-local routing pref);
+// the backend copy is analytics + leaguemate visibility (has_ranking_method).
+export async function setRankingMethod(method: 'trio' | 'manual' | 'tiers' | 'anchor') {
   return api.post<any>('/api/ranking-method', { method });
 }
 

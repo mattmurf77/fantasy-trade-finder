@@ -2570,12 +2570,18 @@ def get_rankings_progress():
 
 @app.route("/api/ranking-method", methods=["POST"])
 def set_ranking_method_route():
-    """POST /api/ranking-method {method: 'trio'|'manual'|'tiers'}"""
+    """POST /api/ranking-method {method: 'trio'|'manual'|'tiers'|'anchor'}
+
+    'anchor' (2026-07-10) = the Pick Anchor wizard — added alongside the
+    mobile rank-home chooser, which records the user's preferred ranking
+    flow here (the routing itself is client-side; see cross-client-
+    invariants.md → Ranking method strings).
+    """
     sess = _require_session()
     g_user_id = sess["user_id"]
     body   = request.get_json(force=True) or {}
     method = body.get("method", "")
-    if method not in ("trio", "manual", "tiers"):
+    if method not in ("trio", "manual", "tiers", "anchor"):
         return jsonify({"error": f"Invalid method: {method!r}"}), 400
     try:
         set_ranking_method(g_user_id, method)

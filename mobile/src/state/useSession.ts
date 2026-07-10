@@ -16,6 +16,12 @@ const SL_KEY = 'sleeper_league';
 // B3 — cache the multi-league list so a returning user sees the switcher
 // populated without waiting for a Sleeper round-trip.
 const SLG_KEY = 'sleeper_leagues';
+// Rank-home preference: which ranking flow the Rank tab opens at launch.
+// Device-local; also POSTed to /api/ranking-method for analytics.
+const RM_KEY = 'ftf_rank_method_pref';
+
+export type RankMethodPref = 'trio' | 'anchor' | 'tiers' | 'manual';
+const RANK_METHOD_PREFS: readonly RankMethodPref[] = ['trio', 'anchor', 'tiers', 'manual'];
 
 // FB-45 — revalidation bookkeeping (module-level: internal, not UI state).
 // The throttle keeps quick app-switches from re-running the full league
@@ -62,8 +68,15 @@ interface SessionState {
    *  attribute new accounts to the inviter via session_init.invited_by.
    *  In-memory only — once consumed by a real session init it's cleared. */
   invitedBy: string | null;
+  /** Preferred ranking flow — where the Rank tab opens at launch. Null =
+   *  never chosen → the Rank tab shows the Build-your-board chooser
+   *  (RankHomeScreen). Hydrated from AsyncStorage in bootstrap(); changed
+   *  from the chooser or the Settings steer slider. */
+  rankingMethodPref: RankMethodPref | null;
 
   bootstrap: () => Promise<void>;
+  /** Persist the preferred ranking flow (see rankingMethodPref). */
+  setRankingMethodPref: (m: RankMethodPref) => Promise<void>;
   /** FB-45 — server sessions are in-memory; a deploy/restart orphans the
    *  stored token while the app still routes to Main. Re-run the league
    *  handshake to mint a fresh server session on cold launch and on
@@ -124,14 +137,16 @@ export const useSession = create<SessionState>((set, get) => ({
   switching: false,
   isDemo: false,
   invitedBy: null,
+  rankingMethodPref: null,
 
   bootstrap: async () => {
-    const [userRaw, leagueRaw, leaguesRaw, tok, fmt] = await Promise.all([
+    const [userRaw, leagueRaw, leaguesRaw, tok, fmt, prefRaw] = await Promise.all([
       AsyncStorage.getItem(SU_KEY),
       AsyncStorage.getItem(SL_KEY),
       AsyncStorage.getItem(SLG_KEY),
       getSessionToken(),
       getActiveScoringFormat(),
+      AsyncStorage.getItem(RM_KEY),
     ]);
     let user: SavedUser | null = null;
     let league: SavedLeague | null = null;
@@ -142,7 +157,19 @@ export const useSession = create<SessionState>((set, get) => ({
       const parsed = JSON.parse(leaguesRaw);
       if (Array.isArray(parsed)) leagues = parsed;
     } } catch {}
-    set({ user, league, leagues, hasToken: !!tok, activeFormat: fmt });
+    const rankingMethodPref = RANK_METHOD_PREFS.includes(prefRaw as RankMethodPref)
+      ? (prefRaw as RankMethodPref)
+      : null;
+    set({ user, league, leagues, hasToken: !!tok, activeFormat: fmt, rankingMethodPref });
+  },
+
+  setRankingMethodPref: async (m) => {
+    set({ rankingMethodPref: m });
+    try {
+      await AsyncStorage.setItem(RM_KEY, m);
+    } catch {
+      /* non-fatal — worst case the chooser shows again next launch */
+    }
   },
 
   revalidateSession: async () => {

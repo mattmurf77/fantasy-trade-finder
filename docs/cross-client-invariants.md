@@ -128,9 +128,9 @@ Canonical set: `championship`, `contender`, `rebuilder`, `jets`, `not_sure`.
 
 ## Ranking method strings
 
-`users.ranking_method`: null, `'trio'`, `'manual'`, `'tiers'`.
+`users.ranking_method`: null, `'trio'`, `'manual'`, `'tiers'`, `'anchor'` (added 2026-07-10 with the Pick Anchor wizard + rank-home chooser).
 
-**Locations:** `backend/server.py` (`/api/ranking-method`), each client's settings UI.
+**Locations:** `backend/server.py` (`/api/ranking-method` whitelist), `mobile/src/api/rankings.ts` (`setRankingMethod` union), `mobile/src/state/useSession.ts` (`RankMethodPref` — the device-local launch-routing preference), `mobile/src/navigation/TabNav.tsx` (`PREF_ROUTE` map), `mobile/src/screens/RankHomeScreen.tsx` + `mobile/src/components/SteerSlider.tsx` (the two pickers). Add a method in all of these together.
 
 ---
 

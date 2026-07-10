@@ -93,7 +93,7 @@ Domain terms used throughout the codebase. Add a term when new jargon appears.
 
 **Decision type** — `swipe_decisions.decision_type`: `'rank'` (3-player) or `'trade'` (trade card).
 
-**Ranking method** — `users.ranking_method`: `null`, `'trio'`, `'manual'`, or `'tiers'`. How the user is building their rankings.
+**Ranking method** — `users.ranking_method`: `null`, `'trio'`, `'manual'`, `'tiers'`, or `'anchor'` (2026-07-10, the Pick Anchor wizard). How the user is building their rankings. On mobile this doubles as the **rank-home preference**: the Rank tab's launch destination (`useSession.rankingMethodPref`, device-local) — null shows the Build-your-board chooser (`RankHomeScreen`); the Settings "We steer ↔ You steer" slider changes it.
 
 **Scoring format** — Stored as `'1qb_ppr'` or `'sf_tep'`. Affects which seed values are loaded and which `member_rankings` rows are visible. Per-league via `leagues.default_scoring`.
 

@@ -78,8 +78,8 @@ const DRAG_ACTIVATION_MS = 220;
 
 export default function TiersScreen() {
   const queryClient = useQueryClient();
-  // Root-stack modal (PickAnchor) — nested-tab navigate bubbles up to the
-  // root stack; the AuthStack type isn't visible from here, hence the any.
+  // Sibling Rank-stack routes (Anchors) — the stack's param types aren't
+  // exported, hence the any.
   const navigation = useNavigation<any>();
   const activeFormat = useSession((s) => s.activeFormat);
   // FB #80 — SF/1QB toggle. setFormat flips the server session + local
@@ -899,7 +899,7 @@ export default function TiersScreen() {
             variant="ghost"
             compact
             label="Anchors"
-            onPress={() => navigation.navigate('PickAnchor')}
+            onPress={() => navigation.navigate('Anchors')}
             style={styles.headerBtn}
           />
         </View>

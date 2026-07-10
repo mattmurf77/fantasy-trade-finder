@@ -16,7 +16,9 @@ import { ink, chalk, ice, semantic, space, radii, type } from '../theme/chalklin
 import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
-import { useSession } from '../state/useSession';
+import { setRankingMethod } from '../api/rankings';
+import SteerSlider from '../components/SteerSlider';
+import { useSession, type RankMethodPref } from '../state/useSession';
 import type { NotificationPrefs } from '../shared/types';
 
 // Settings sheet shown as a modal from the gear icon in the global TopBar.
@@ -38,6 +40,16 @@ export default function SettingsScreen({ navigation }: any) {
   const [busyLeagueId, setBusyLeagueId] = useState<string | null>(null);
   const [connectUrl, setConnectUrl] = useState('');
   const [connectBusy, setConnectBusy] = useState(false);
+  // Rank-home preference — which ranking flow the Rank tab opens at launch.
+  // Local persist is what routes; the backend POST is analytics-only, so a
+  // failure there never blocks or reverts the slider.
+  const rankingPref    = useSession((s) => s.rankingMethodPref);
+  const setRankingPref = useSession((s) => s.setRankingMethodPref);
+  const onRankingPrefChange = (m: RankMethodPref) => {
+    void setRankingPref(m);
+    setRankingMethod(m).catch(() => {});
+    setToast({ msg: 'Saved — the Rank tab opens there next launch.', tone: 'success' });
+  };
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
   // Local mirror of server prefs so toggles feel instant. Hydrated from the
   // query below; updates push through `mutation` and the query is invalidated
@@ -202,6 +214,18 @@ export default function SettingsScreen({ navigation }: any) {
             />
           </View>
         </Card>
+
+        <View style={styles.section}>
+          <TickLabel>Ranking</TickLabel>
+        </View>
+        <SteerSlider
+          value={rankingPref}
+          onChange={onRankingPrefChange}
+        />
+        <Text style={styles.rankingHint}>
+          Where the Rank tab opens at launch. Your trade suggestions are only
+          as good as your rankings — pick the flow you'll actually keep up with.
+        </Text>
 
         <View style={styles.section}>
           <TickLabel>Notifications</TickLabel>
@@ -373,6 +397,7 @@ const styles = StyleSheet.create({
   },
   connectBody: { gap: space.md },
   connectHelp: type.bodySm,
+  rankingHint: { ...type.bodySm, color: chalk.faint, marginTop: space.sm },
   connectInput: {
     ...type.body,
     height: 44,

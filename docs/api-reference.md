@@ -54,7 +54,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 |---|---|---|
 | GET | `/api/progress` | Per-position completion |
 | GET | `/api/rankings/progress` | Same, alternate shape |
-| POST | `/api/ranking-method` | Set ranking method (`trio` / `manual` / `tiers`) |
+| POST | `/api/ranking-method` | Set ranking method (`trio` / `manual` / `tiers` / `anchor`). Since 2026-07-10 the mobile rank-home chooser + Settings steer slider record the user's preferred ranking flow here; launch routing itself is client-side (`useSession.rankingMethodPref`) |
 | POST | `/api/scoring/switch` | Switch scoring format |
 
 ## Tiers

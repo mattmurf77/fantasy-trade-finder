@@ -17,7 +17,6 @@ import SettingsScreen from '../screens/SettingsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import FeedbackInboxScreen from '../screens/FeedbackInboxScreen';
 import SleeperConnectScreen from '../screens/SleeperConnectScreen';
-import PickAnchorScreen from '../screens/PickAnchorScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import { usePushNotifications } from '../hooks/usePushNotifications';
@@ -33,7 +32,6 @@ type AuthStack = {
   Profile: { username: string };
   FeedbackInbox: undefined;
   SleeperConnect: undefined;
-  PickAnchor: undefined;
 };
 
 const Stack = createNativeStackNavigator<AuthStack>();
@@ -259,18 +257,6 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerShown: true,
             title: 'Test feedback',
             headerTitle: () => <HeaderTitle>Test feedback</HeaderTitle>,
-            headerStyle: { backgroundColor: ink.ink0 },
-            headerTintColor: chalk.base,
-          }}
-        />
-        <Stack.Screen
-          name="PickAnchor"
-          component={PickAnchorScreen}
-          options={{
-            presentation: 'modal',
-            headerShown: true,
-            title: 'Pick Anchors',
-            headerTitle: () => <HeaderTitle>Pick Anchors</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
           }}

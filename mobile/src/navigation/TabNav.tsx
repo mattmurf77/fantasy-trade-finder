@@ -10,6 +10,8 @@ import { getNextTrio, getRankings, getTiersStatus } from '../api/rankings';
 import { getLikedTrades, getAllMatches } from '../api/trades';
 import { useSession } from '../state/useSession';
 import RankScreen from '../screens/RankScreen';
+import RankHomeScreen from '../screens/RankHomeScreen';
+import PickAnchorScreen from '../screens/PickAnchorScreen';
 import TiersScreen from '../screens/TiersScreen';
 import ManualRanksScreen from '../screens/ManualRanksScreen';
 import TrendsScreen from '../screens/TrendsScreen';
@@ -31,7 +33,7 @@ const RankStack = createNativeStackNavigator();
 // Portfolio; the bottom-nav still surfaces just four tabs.
 const TradesStack = createNativeStackNavigator();
 
-export type RankRoute = 'Trios' | 'Tiers' | 'ManualRanks' | 'Trends';
+export type RankRoute = 'RankHome' | 'Trios' | 'Anchors' | 'Tiers' | 'ManualRanks' | 'Trends';
 export type TradesRoute = 'TradesHome' | 'Portfolio' | 'TradeCalculator';
 
 // #51/#52 — Rank sub-screens (Tiers / Overall Ranks / Trends) are siblings
@@ -91,10 +93,34 @@ const subScreenOptions = (title: string, fallback: string) =>
     headerLeft: () => <HeaderBack navigation={navigation} fallback={fallback} />,
   });
 
+// Where the Rank stack opens at launch, per the saved preference
+// (useSession.rankingMethodPref). Null pref = never chosen → the
+// Build-your-board chooser. initialRouteName is only honored on the
+// navigator's FIRST mount, which is exactly the contract we want: a
+// mid-session preference change (Settings slider) applies next launch,
+// while the chooser itself routes immediately via navigation.replace.
+const PREF_ROUTE: Record<string, RankRoute> = {
+  trio:   'Trios',
+  anchor: 'Anchors',
+  tiers:  'Tiers',
+  manual: 'ManualRanks',
+};
+
 function RankStackNav() {
+  const pref = useSession((s) => s.rankingMethodPref);
+  const initial: RankRoute = (pref && PREF_ROUTE[pref]) || 'RankHome';
   return (
-    <RankStack.Navigator screenOptions={{ headerShown: false }}>
+    <RankStack.Navigator
+      initialRouteName={initial}
+      screenOptions={{ headerShown: false }}
+    >
+      <RankStack.Screen name="RankHome" component={RankHomeScreen} />
       <RankStack.Screen name="Trios" component={RankScreen} />
+      <RankStack.Screen
+        name="Anchors"
+        component={PickAnchorScreen}
+        options={subScreenOptions('Pick Anchors', 'Trios')}
+      />
       <RankStack.Screen
         name="Tiers"
         component={TiersScreen}
@@ -302,6 +328,15 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
         queryFn: () => getRankings(null),
         staleTime: 30_000,
       });
+    } else if (screen === 'Anchors') {
+      // PickAnchorScreen snapshots the pool under its own format-scoped key
+      // (staleTime: Infinity — the wizard queue must not reshuffle mid-run).
+      const fmt = useSession.getState().activeFormat ?? '1qb_ppr';
+      void queryClient.prefetchQuery({
+        queryKey: ['anchor-pool', fmt],
+        queryFn: () => getRankings(null),
+        staleTime: Infinity,
+      });
     }
     // Trends is intentionally not prefetched: its queries take runtime args
     // (window_days/top_n, plus a league_id for the consensus-gap call) and
@@ -318,6 +353,7 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
 
   const items: { route: RankRoute; label: string; sub: string }[] = [
     { route: 'Trios',         label: 'Trios',         sub: '3-at-a-time swipe ranking' },
+    { route: 'Anchors',       label: 'Pick Anchors',  sub: 'Say what each player is worth in draft picks — 4 1sts down to no value' },
     { route: 'Tiers',         label: 'Tiers',         sub: 'Drag players into Elite / Starter / Solid / Depth / Bench' },
     { route: 'ManualRanks',   label: 'Overall Ranks', sub: 'Drag rows or tap a rank number to re-order your board by hand' },
     { route: 'Trends',        label: 'Trends',        sub: 'See your biggest movers and how you differ from consensus' },
