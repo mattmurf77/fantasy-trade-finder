@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-07-08 (Send in Sleeper WORKS — Cloudflare 1010 + raw-token fix)](#2026-07-08-send-in-sleeper-works--cloudflare-1010--raw-token-fix)
 - [2026-07-06 (TestFlight build 21 — v1.3.0)](#2026-07-06-testflight-build-21--v130)
 - [2026-07-04 (manual trade calculator: live consensus mode)](#2026-07-04-manual-trade-calculator-live-consensus-mode)
 - [2026-06-10 (post-ship follow-ups)](#2026-06-10-post-ship-follow-ups)
@@ -18,6 +19,16 @@
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
 
 ---
+
+## 2026-07-08 (Send in Sleeper WORKS — Cloudflare 1010 + raw-token fix)
+
+- **✅ Send in Sleeper confirmed working end-to-end on device** (build 23, prod). A real trade posted into a live Sleeper league via `POST /api/trades/propose`. Two separate blockers, both backend-only, both found this session — no app rebuild needed for either:
+  1. **Cloudflare 1010** (`error code: 1010`, "banned by browser signature"). Sleeper's GraphQL is behind Cloudflare; our server call went out as `Python-urllib/x.y` → banned before reaching Sleeper. Fix: `_post_graphql` sends real browser headers (`_BROWSER_HEADERS`: Chrome UA + origin/referer/accept/accept-language). PR #95.
+  2. **`Bearer ` prefix** — Sleeper's GraphQL wants the **RAW token** in `authorization`, NOT `Bearer <token>`. The 2026-07-02 capture recorded `Bearer`; Sleeper dropped it since (or it was misread). Fix: `request.add_header("authorization", token)`. PR #96 (`3de9f92`).
+- **How #2 was proven (repeatable technique):** drove the claude-in-chrome MCP on the operator's logged-in sleeper.com session, installed a fetch/XHR interceptor, replayed a real GraphQL request toggling ONE variable at a time. Ruled out cookie (both `credentials:omit`/`include` failed with a fake op), token identity (app's auth == `localStorage['token']`, 356-char JWT, 359-day exp), XHR-vs-fetch (both failed), then the discriminator: `Authorization: <token>` → **200**, `Authorization: Bearer <token>` → **401 "Your token is invalid."** NOTE: the claude-in-chrome extension redacts any JS-result field whose NAME contains token/auth/key — name comparison fields innocuously (e.g. `no_prefix`/`with_prefix`, return only HTTP status).
+- **Diagnostic assets added earlier in the chain:** `sleeper_rejected` error code (distinct from `sleeper_expired`, carries `detail`, does NOT loop the client to re-login) + on-device error surfacing in `SendInSleeperButton` (this is what exposed the `1010` then the token error). The prod `sleeper propose auth-rejected: <detail>` log line (via `/api/debug/log`, `X-Cron-Secret: webqa` — LOCAL secret; prod CRON_SECRET differs/unset, so use the Render **Logs tab** instead) is what surfaced `1010`.
+- **Runbook correction:** `docs/plans/sleeper-write-capture-runbook.md` §C1 said `authorization: Bearer <JWT>` — WRONG as of 2026-07-08 (raw token). Also: the write API only needs 5 headers (accept, accept-language, content-type, x-sleeper-graphql-op, authorization) + a browser UA to clear Cloudflare; no cookie/CSRF/signature.
+- **Next (operator-flagged, not built):** replicate Sleeper's `create_message` op after a successful propose to post a branded "@user proposed a trade via <FTF link>" announcement in league chat (Dynasty Dealer's growth loop) — Sleeper auto-unfurls the link into a card via OG tags (we have `og_image.py`). Make it a toggle (ToS-adverse: posts to shared chat). Capture `create_message` shape in the same DevTools session.
 
 ## 2026-07-06 (Matches CTAs: Dismiss + Send in Sleeper)
 

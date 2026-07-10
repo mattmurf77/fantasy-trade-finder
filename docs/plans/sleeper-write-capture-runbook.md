@@ -139,7 +139,7 @@ With C1+C2 in hand, the build is mechanical and slots into Part C exactly as sco
 
 ### C2 — propose trade  ✅ (captured 2026-07-02)
 - **Endpoint:** `POST https://sleeper.com/graphql` — one GraphQL endpoint for every op. Body is a standard `{ operationName, variables, query }`.
-- **Headers:** `content-type: application/json`, `x-sleeper-graphql-op: <operationName>`, and **`authorization: Bearer <JWT>`** (the stored token — this confirms "where the token rides"; nothing else auth-bearing). Token value never recorded (redacted at capture).
+- **Headers:** `content-type: application/json`, `x-sleeper-graphql-op: <operationName>`, and **`authorization: <JWT>`** — the **RAW token, NO `Bearer ` prefix**. ⚠️ **CORRECTION 2026-07-08:** this line originally said `Bearer <JWT>`; that was wrong (or Sleeper changed it). Verified live from a logged-in session: bare token → 200, `Bearer `-prefixed → **401 "Your token is invalid."** Also required: a real browser **User-Agent + origin/referer** or Cloudflare returns **error 1010** ("banned by browser signature") before the request reaches Sleeper. No cookie/CSRF/signature needed — those 5 headers + a browser UA are the whole auth surface. Token value never recorded (redacted at capture).
 - **`propose_trade` mutation** (verbatim structure):
 
   ```graphql

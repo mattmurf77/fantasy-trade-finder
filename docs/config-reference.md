@@ -71,6 +71,15 @@ Two layers, both read through `trade_service._cfg` at runtime:
 
 Legacy keys (Elo K-factors, KTC curve, package weights, outlook multipliers, tier multipliers, trade-math taxes, tier-engine knobs) are documented in [glossary.md](glossary.md) and listed by `GET /api/admin/config`.
 
+### Trios → tier calibration (Lever A) — `ranking_service._DEFAULT_CFG`, DB-seeded
+
+| Key | Default | Meaning |
+|---|---|---|
+| `trio_boundary_rate` | 0.5 | Fraction of trios that **probe a value-band boundary** — pairing a player just below a tier edge against one just above it, drawn from the FULL pool — instead of the legacy "tightest local trio". Boundary comparisons are the only ones that move a player across a tier (and thus meaningfully change value). **0 = legacy behaviour** (revert without a deploy). See [trios-tier-calibration-plan-2026-07-08.md](plans/trios-tier-calibration-plan-2026-07-08.md). |
+| `trio_boundary_margin` | 60.0 | Elo window on each side of a tier edge to pull boundary straddlers from. |
+
+> Backend-only and **behavioural for all users** once deployed (changes which trio the Rank screen serves; Elo/value math is unchanged). Fully revertible live via `PUT /api/admin/config/trio_boundary_rate` → `0`.
+
 ### Trade engine v2 (Tier 1) — `trade_service._DEFAULT_CFG`
 
 | Key | Default | Meaning |

@@ -59,6 +59,14 @@ _DEFAULT_CFG: dict[str, float] = {
     "mix_in_rate_max":            0.80,
     "mix_in_saturation_pct":      0.70,
     "mix_in_pre_unlock_start":    5.0,
+    # Trios → tier calibration (Lever A). Fraction of trios that probe a
+    # value-band boundary — pairing a player just below a tier edge against
+    # one just above it, drawn from the FULL pool — instead of the default
+    # "tightest local trio". Boundary comparisons are the only ones that move
+    # a player across a tier (and thus meaningfully change value). 0 = legacy
+    # behaviour. See docs/plans/trios-tier-calibration-plan-2026-07-08.md.
+    "trio_boundary_rate":         0.5,
+    "trio_boundary_margin":      60.0,  # Elo window around an edge to pull straddlers from
 }
 
 _cfg: dict[str, float] = dict(_DEFAULT_CFG)
@@ -193,6 +201,10 @@ class RankingService:
         self._generator  = matchup_generator
         self._seed       = seed_ratings or {}
         self._elo_overrides: dict[str, float] = {}  # manual reorder overrides
+        # Scoring format this service ranks in — drives which tier_config.json
+        # value bands the boundary-probing trio selector reads. Defaults to
+        # 1qb_ppr; multi-format callers set it post-construct (like _user_id).
+        self._scoring_format = "1qb_ppr"
 
         # INIT-03: instance-level memo for _compute_elo / _compute_stats.
         # Both methods re-iterate the full swipe history and are called 3-4x
@@ -339,6 +351,18 @@ class RankingService:
 
         if len(pool) < 3:
             raise ValueError(f"Need at least 3 players for position={position!r}")
+
+        # Lever A — boundary probe. With probability `trio_boundary_rate`, ask a
+        # cross-tier question (a player just below a band edge vs. one just
+        # above) instead of the tightest local trio. This is the only kind of
+        # comparison that moves a player across a tier band, which is where
+        # meaningful value change lives. Falls through to the normal selectors
+        # when it doesn't fire or no contested edge exists.
+        rate = _c("trio_boundary_rate")
+        if rate > 0.0 and random.random() < rate:
+            bt = self._boundary_trio(position, skipped=_skipped)
+            if bt is not None:
+                return bt
 
         # Claude-powered matchup selection (gated by feature flag)
         if self._generator is not None and _c("smart_matchup_enabled") == 1.0:
@@ -738,6 +762,84 @@ class RankingService:
         self._stats_cache_version = self._version
         self._stats_cache_key = cache_key
         return stats
+
+    def _boundary_trio(
+        self,
+        position: Optional[str],
+        skipped: Optional[set] = None,
+    ) -> Optional[MatchupTrio]:
+        """Lever A — build a trio that straddles a value-band boundary.
+
+        Unlike `_algorithmic_trio` (tightest LOCAL trio) and the top-24 tiered
+        pool, this deliberately reaches into the FULL position pool to pair a
+        player sitting just *below* a tier edge against one just *above* it —
+        the comparison that lets a genuinely under/over-rated player cross a
+        band (and move value). Returns None when no contested edge exists
+        (e.g. single-tier pool, position=None/Overall), so the caller can fall
+        back to the normal selectors.
+        """
+        if position is None:
+            return None  # Overall mode has no single positional band set
+        _skip = skipped or set()
+        full = [p for p in self._pool(position) if p.id not in _skip]
+        if len(full) < 3:
+            return None
+
+        elo   = self._compute_elo(full)
+        stats = self._compute_stats(full)
+        try:
+            bands = self.tier_bands_for(position, self._scoring_format)
+        except Exception:
+            return None
+
+        margin = _c("trio_boundary_margin")
+        best: Optional[tuple] = None
+        best_score = float("inf")
+
+        # Each adjacent tier pair shares a crossing point at the UPPER tier's
+        # low edge: elo >= upper.lo ⇒ upper tier, else the lower tier.
+        for upper, lower in zip(ORDERED_TIERS, ORDERED_TIERS[1:]):
+            band = bands.get(upper)
+            if not band:
+                continue
+            edge = band[0]
+            below = [p for p in full if edge - margin <= elo[p.id] < edge]
+            above = [p for p in full if edge <= elo[p.id] <= edge + margin]
+            if not below or not above:
+                continue
+
+            # Candidate = freshest below-edge player (its tier is most in doubt).
+            below.sort(key=lambda p: (len(stats[p.id]["compared"]), -elo[p.id]))
+            cand = below[0]
+            # Opponent = above-edge player, preferring uncompared-with-candidate,
+            # then fresher, then closest to the edge (most informative).
+            above.sort(key=lambda p: (
+                cand.id in stats[p.id]["compared"],
+                len(stats[p.id]["compared"]),
+                elo[p.id] - edge,
+            ))
+            opp = above[0]
+            # Third = freshest remaining player nearest the edge (any tier).
+            rest = [p for p in full if p.id not in (cand.id, opp.id)]
+            if not rest:
+                continue
+            rest.sort(key=lambda p: (len(stats[p.id]["compared"]), abs(elo[p.id] - edge)))
+            third = rest[0]
+
+            already = int(opp.id in stats[cand.id]["compared"])
+            total_cmp = sum(len(stats[p.id]["compared"]) for p in (opp, cand, third))
+            score = already * 100 + total_cmp  # fewer/fresher/uncompared = better
+            if score < best_score:
+                best_score = score
+                best = ((opp, cand, third), upper, lower)
+
+        if best is None:
+            return None
+        (a, b, c), upper, lower = best
+        return MatchupTrio(
+            player_a=a, player_b=b, player_c=c,
+            reasoning=f"Boundary probe: {lower} vs {upper}",
+        )
 
     def _algorithmic_trio(self, pool: list[Player], position: Optional[str] = None) -> MatchupTrio:
         """Pick 3 adjacent players in Elo order that haven't all been compared.
