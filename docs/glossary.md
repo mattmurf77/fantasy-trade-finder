@@ -103,6 +103,10 @@ Domain terms used throughout the codebase. Add a term when new jargon appears.
 
 **Contrarian** — A user's ranking that materially disagrees with the league or community consensus. Surfaced via `/api/trends/contrarian` and `/api/league/contrarian`.
 
+**Tradeability** — 0–1 score on a player the user OWNS in the selected league: how easy/profitable it is to trade them away, derived from the Trends "easiest sells" gap (`user_elo − community_mean_elo`) scaled as `clamp01(0.5 + gap/800)` — gap ±400 Elo saturates, gap 0 (e.g. a seed-only never-really-ranked player) is a neutral half bar. Computed by `trends_service.compute_tile_trade_scores`, serialized on `GET /api/rankings`, rendered as the `TRADE` meter on Tiers tiles (TestFlight #71).
+
+**Acquirability** — 0–1 twin of tradeability for a player a LEAGUEMATE owns: how easy they are to buy, from the Trends "easiest buys" gap (`user_elo − owner_elo`, falling back to the community mean when the owner hasn't published rankings), same scaling. Free agents get no score (not acquirable via trade). Rendered as the `GET` meter on Tiers tiles.
+
 **Wrapped** — Year-end recap powered by `wrapped_events`. Event types: `swipe`, `trade_match`, `trade_accepted`, `trade_declined`, `tier_save`, `ranking_reorder`, `league_sync`.
 
 **user_events vs wrapped_events** — `user_events` is the structured product analytics log (one row per meaningful action with denormalized hot-read columns mirrored on `users`). `wrapped_events` is the silent stream specifically for the year-end recap. Both are append-only.

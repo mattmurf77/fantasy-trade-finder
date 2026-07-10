@@ -2378,6 +2378,41 @@ def get_rankings():
                     d["consensus_pos_rank_delta_30d"] = dd
         except Exception:
             log.warning("consensus pos-rank enrichment failed", exc_info=True)
+        # TestFlight #71 tile meters — attach tradeability (owned) /
+        # acquirability (unowned) 0-1 scores derived from the Trends
+        # consensus-gap math (trends_service.compute_tile_trade_scores).
+        # Additive & best-effort like the block above; both fields are
+        # omit-when-unavailable: no real league in session, demo league,
+        # < 3 community rankers, or no comparison basis for the player
+        # (free agent / absent from the community pool).
+        try:
+            g_league = sess.get("league")
+            league_id = g_league.league_id if g_league else None
+            if league_id and league_id != "league_demo":
+                community = load_community_elo_for_league(
+                    league_id       = league_id,
+                    exclude_user_id = sess.get("user_id", ""),
+                    scoring_format  = _active_format(sess),
+                )
+                members = [{
+                    "user_id":  m.user_id,
+                    "username": m.username,
+                    "roster":   list(getattr(m, "roster", []) or []),
+                } for m in g_league.members]
+                scores = _trends_service_mod.compute_tile_trade_scores(
+                    user_elo           = {d["id"]: d.get("elo") for d in rankings},
+                    community_rankings = community,
+                    user_roster        = sess.get("user_roster") or [],
+                    league_members     = members,
+                )
+                for d in rankings:
+                    s = scores.get(d["id"])
+                    if not s:
+                        continue
+                    key = "tradeability" if s["owned"] else "acquirability"
+                    d[key] = s["score"]
+        except Exception:
+            log.warning("tile trade-score enrichment failed", exc_info=True)
         return jsonify({
             "position":          rank_set.position,
             "rankings":          rankings,

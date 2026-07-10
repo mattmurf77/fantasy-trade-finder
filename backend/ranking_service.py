@@ -75,9 +75,10 @@ _DEFAULT_CFG: dict[str, float] = {
     #   tightest     — legacy near-equal fine ordering
     "trio_within_tier_rate":      0.35,
     # Don't reuse a player who appeared in the last N served trios (anti-repeat;
-    # fixes "2 of the same players 10 trios in a row"). Relaxes when the pool is
-    # too small to honour it.
-    "trio_repeat_avoid":          3.0,
+    # fixes "2 of the same players 10 trios in a row"). Relaxes gracefully
+    # (oldest-seen first) when the pool is too small to honour it. Raised
+    # 3 → 8 (FB #97): 3 was too short to stop the top value cluster recurring.
+    "trio_repeat_avoid":          8.0,
 }
 
 _cfg: dict[str, float] = dict(_DEFAULT_CFG)
@@ -221,7 +222,11 @@ class RankingService:
         # within-tier trio calibrates so successive trios feel varied.
         self._recent_trios: list[frozenset] = []      # last-served trio id-sets
         self._trio_last_variety: Optional[str] = None
-        self._within_tier_cursor: int = 0
+        # Random start (FB #97): a fixed 0 start meant every rebuilt service
+        # (each app session / server restart) aimed its first within-tier trio
+        # at ORDERED_TIERS[0] = elite, so the same top-cluster faces opened
+        # every session. The cursor still rotates deterministically from here.
+        self._within_tier_cursor: int = random.randrange(len(ORDERED_TIERS))
 
         # INIT-03: instance-level memo for _compute_elo / _compute_stats.
         # Both methods re-iterate the full swipe history and are called 3-4x
@@ -434,6 +439,15 @@ class RankingService:
         if len(self._recent_trios) > cap:
             self._recent_trios = self._recent_trios[-cap:]
 
+    def _last_seen_at(self, player_id: str) -> int:
+        """Index in _recent_trios where the player last appeared (-1 = never).
+        Higher = more recently seen. Lets avoid-relaxation degrade gracefully:
+        re-admit the LONGEST-unseen players first instead of all at once."""
+        for i in range(len(self._recent_trios) - 1, -1, -1):
+            if player_id in self._recent_trios[i]:
+                return i
+        return -1
+
     def _pick_trio_variety(self, position: Optional[str]) -> str:
         """Weighted choice of trio strategy, avoiding an immediate repeat.
 
@@ -501,15 +515,28 @@ class RankingService:
             members = by_tier.get(tier, [])
             if len(members) < 3:
                 continue
-            # Prefer members not recently seen; relax if that drops below 3.
-            fresh = [p for p in members if p.id not in _avoid]
-            picks = fresh if len(fresh) >= 3 else members
+            # Prefer members not recently seen. Relax PARTIALLY when that
+            # drops below 3: re-admit only the longest-unseen avoided members
+            # (FB #97 — the old all-or-nothing relax re-served the exact same
+            # trio whenever a small tier was fully inside the avoid window).
+            picks = [p for p in members if p.id not in _avoid]
+            if len(picks) < 3:
+                stale_first = sorted(
+                    (p for p in members if p.id in _avoid),
+                    key=lambda p: self._last_seen_at(p.id),
+                )
+                picks += stale_first[:3 - len(picks)]
             picks.sort(key=lambda p: elo[p.id], reverse=True)  # top → bottom
-            top, bottom = picks[0], picks[-1]
-            interior = picks[1:-1]
+            # Randomise WHICH extremes get probed (FB #97): always taking the
+            # single max/min-Elo member put the tier's #1 (e.g. the top RB) in
+            # every within-tier trio for that tier. Still a top-vs-bottom
+            # spread — just sampled from the top/bottom two.
+            top = random.choice(picks[:2]) if len(picks) >= 4 else picks[0]
+            bottom = random.choice(picks[-2:]) if len(picks) >= 4 else picks[-1]
+            interior = [p for p in picks if p.id not in (top.id, bottom.id)]
             # Middle = least-compared interior member (freshest signal).
             interior.sort(key=lambda p: (len(stats[p.id]["compared"]), -elo[p.id]))
-            middle = interior[0] if interior else picks[1]
+            middle = interior[0]
             self._within_tier_cursor = (self._within_tier_cursor + off + 1) % n
             return MatchupTrio(
                 player_a=top, player_b=middle, player_c=bottom,
@@ -946,10 +973,13 @@ class RankingService:
             if not below or not above:
                 continue
 
-            # Candidate = freshest below-edge player (its tier is most in doubt).
+            # Candidate = a fresh below-edge player (its tier is most in doubt).
             # Recently-seen players sort last (anti-repeat) but stay eligible.
+            # Random pick among the top-2 eligibles (FB #97): edge pools are
+            # small, and a deterministic closest-first pick re-served the same
+            # 2-3 straddlers every time this edge was probed.
             below.sort(key=lambda p: (p.id in _avoid, len(stats[p.id]["compared"]), -elo[p.id]))
-            cand = below[0]
+            cand = random.choice(below[:2])
             # Opponent = above-edge player, preferring not-recent, then
             # uncompared-with-candidate, then fresher, then closest to the edge.
             above.sort(key=lambda p: (
@@ -958,18 +988,21 @@ class RankingService:
                 len(stats[p.id]["compared"]),
                 elo[p.id] - edge,
             ))
-            opp = above[0]
+            opp = random.choice(above[:2])
             # Third = fresh, not-recent player nearest the edge (any tier).
             rest = [p for p in full if p.id not in (cand.id, opp.id)]
             if not rest:
                 continue
             rest.sort(key=lambda p: (p.id in _avoid, len(stats[p.id]["compared"]), abs(elo[p.id] - edge)))
-            third = rest[0]
+            third = random.choice(rest[:3])
 
             already = int(opp.id in stats[cand.id]["compared"])
             recent = sum(1 for p in (opp, cand, third) if p.id in _avoid)
+            # random() < 1 breaks integer-score ties between edges randomly —
+            # otherwise a fresh board always probed the FIRST tied edge
+            # (elite/starter, the hottest cluster) on every boundary trio.
             total_cmp = sum(len(stats[p.id]["compared"]) for p in (opp, cand, third))
-            score = recent * 200 + already * 100 + total_cmp  # fresher/uncompared/unseen = better
+            score = recent * 200 + already * 100 + total_cmp + random.random()
             if score < best_score:
                 best_score = score
                 best = ((opp, cand, third), upper, lower)

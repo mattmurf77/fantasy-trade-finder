@@ -74,6 +74,7 @@ All tracks: 4px height, `--ink-3`, radius 0 (square ends — chalk lines, not pi
 | **FairnessMeter** | Track + single fill: `--pos` ≥ balanced threshold, `--warn` middle, `--neg` lopsided; value as `data` Plex Mono right-aligned (`fairness_score` × 100, client-side — invariant) | `.trade-fairness` · fairness meter |
 | **CoverageBar** | Same track; ice fill; caption `body-sm` chalk-dim | `.coverage-bar-*`, `.gate-pos-bar-*` |
 | **StrengthBar** | Same track, position-color fill | `StrengthBar` |
+| **TradeMeter** (TestFlight #71) | Tile-scale variant for the Tiers dense 60px rows: 9px caps chalk-dim label (`TRADE` = tradeability, player you own; `GET` = acquirability, leaguemate-owned — label carries the meaning, never color alone) + 3px square-end `--ink-3` track, max-width 140, **flare** fill (informational highlight, ADR-005). Fill = the 0–1 score off the rankings payload; half bar = neutral (you agree with the market/owner). Rendered as line 3 of the dense PlayerCard (`meterSlot`); omitted entirely when the payload has no score | `TradeMeter` |
 | **Spinner** | 20px, 2px `--line` ring + ice arc | `.init-overlay` spinner |
 
 ## Forms

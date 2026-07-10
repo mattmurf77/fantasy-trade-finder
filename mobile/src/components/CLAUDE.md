@@ -9,6 +9,7 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `TierBadge`, `TierBin` | Tier label + drop-zone bin |
 | `PositionChip` | QB/RB/WR/TE chip with color |
 | `StrengthBar` | Horizontal value/strength meter |
+| `TradeMeter` | Tiers tile: thin TRADE (tradeability) / GET (acquirability) bar, 0–1 score from `/api/rankings` |
 | `TradeSide` | Calculator: one side of a hand-built trade (players + add button) |
 | `VerdictPanel` | Calculator: dual-board fairness verdict + gives/gets bars (demo mode) |
 | `ConsensusVerdictCard` | Calculator: server-authoritative consensus verdict from /api/trade/evaluate (live mode) |

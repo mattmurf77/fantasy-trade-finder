@@ -104,6 +104,35 @@ def _rank_delta(prev_rank: int | None, curr_rank: int | None) -> int | None:
 
 
 # ---------------------------------------------------------------------------
+# 0b. Community mean ELO (shared helper)
+# ---------------------------------------------------------------------------
+
+
+def _community_mean_elo(community_rankings: dict[str, dict]) -> dict[str, float]:
+    """{ player_id: mean elo across all community rankers }.
+
+    community_rankings has the load_member_rankings() shape:
+    { user_id: { "username": str, "elo_ratings": { pid: elo } } }.
+    Non-numeric ELOs are skipped.
+    """
+    community_elo: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    for uid, data in (community_rankings or {}).items():
+        ratings = (data or {}).get("elo_ratings") or {}
+        for pid, elo in ratings.items():
+            try:
+                e = float(elo)
+            except (TypeError, ValueError):
+                continue
+            community_elo[pid] = community_elo.get(pid, 0.0) + e
+            counts[pid] = counts.get(pid, 0) + 1
+    for pid, total in list(community_elo.items()):
+        n = counts.get(pid) or 1
+        community_elo[pid] = total / n
+    return community_elo
+
+
+# ---------------------------------------------------------------------------
 # 1. Contrarian meter
 # ---------------------------------------------------------------------------
 #
@@ -168,20 +197,7 @@ def compute_contrarian_score(
         }
 
     # Community mean ELO per player
-    community_elo: dict[str, float] = {}
-    counts: dict[str, int]          = {}
-    for uid, data in community_rankings.items():
-        ratings = (data or {}).get("elo_ratings") or {}
-        for pid, elo in ratings.items():
-            try:
-                e = float(elo)
-            except (TypeError, ValueError):
-                continue
-            community_elo[pid] = community_elo.get(pid, 0.0) + e
-            counts[pid]        = counts.get(pid, 0) + 1
-    for pid, total in list(community_elo.items()):
-        n = counts.get(pid) or 1
-        community_elo[pid] = total / n
+    community_elo = _community_mean_elo(community_rankings)
 
     deltas: list[dict[str, Any]] = []
     for pid, u_elo in (user_elo or {}).items():
@@ -293,20 +309,7 @@ def compute_consensus_gap(
         }
 
     # Community mean ELO
-    community_elo: dict[str, float] = {}
-    counts: dict[str, int]          = {}
-    for uid, data in community_rankings.items():
-        ratings = (data or {}).get("elo_ratings") or {}
-        for pid, elo in ratings.items():
-            try:
-                e = float(elo)
-            except (TypeError, ValueError):
-                continue
-            community_elo[pid] = community_elo.get(pid, 0.0) + e
-            counts[pid]        = counts.get(pid, 0) + 1
-    for pid, total in list(community_elo.items()):
-        n = counts.get(pid) or 1
-        community_elo[pid] = total / n
+    community_elo = _community_mean_elo(community_rankings)
 
     # Owner index — pid → (owner_user_id, owner_username)
     owner_of: dict[str, tuple[str, str]] = {}
@@ -444,6 +447,107 @@ def compute_consensus_gap(
         "easiest_sells":       sells,
         "easiest_buys":        buys,
     }
+
+
+# ---------------------------------------------------------------------------
+# 2b. Tile trade meters — Tradeability / Acquirability (TestFlight #71)
+# ---------------------------------------------------------------------------
+#
+# Per-player 0-1 score for the horizontal meter on each Tiers tile, derived
+# from EXACTLY the same gaps compute_consensus_gap surfaces on Trends:
+#
+#   • Owned player (on the user's roster in the selected league):
+#       TRADEABILITY — gap = user_elo - community_mean_elo.  Positive gap
+#       means you value them above the market → easy/profitable to trade
+#       away; negative means the market values them more than you do.
+#   • Unowned player rostered by a leaguemate:
+#       ACQUIRABILITY — gap = user_elo - owner_elo (that owner's own board;
+#       falls back to the community mean when the owner hasn't published
+#       rankings, mirroring the "easiest buys" fallback).
+#
+# Scaling: score = clamp01(0.5 + gap / (2 × 400)).  400 ELO points is the
+# same span _normalise_gap calibrates the Trends bars to, so gap +400 → 1.0,
+# gap −400 → 0.0, gap 0 → 0.5 (a half-full, neutral bar).  Because the
+# ranking service seeds every pool player from the consensus seed, a player
+# the user has never actually ranked carries user_elo ≈ consensus → gap ≈ 0
+# → neutral bar.  That is honest: no signal about a player you haven't
+# formed an opinion on.
+#
+# Free agents (rostered by nobody in the league) get NO score — they can't
+# be acquired via trade.  Same ≥3-ranker community baseline as the rest of
+# this module; below it the function returns {} and clients omit the bars.
+# ---------------------------------------------------------------------------
+
+_TILE_SCORE_SPAN = 400.0   # ELO span mapping gap ±400 → score 0/1
+
+
+def compute_tile_trade_scores(
+    user_elo: dict[str, float],
+    community_rankings: dict[str, dict],
+    user_roster: list[str],
+    league_members: list[dict],
+) -> dict[str, dict[str, Any]]:
+    """
+    Args:
+        user_elo:           { player_id: elo } — the logged-in user's board.
+        community_rankings: { user_id: { username, elo_ratings } }.
+        user_roster:        player_ids owned by the logged-in user.
+        league_members:     list of { user_id, username, roster } for owner
+                            lookup (same shape compute_consensus_gap takes).
+
+    Returns:
+        { player_id: { "owned": bool, "score": float 0-1 } }
+
+        Empty dict when the community baseline is too thin (< 3 rankers).
+        Players with no comparison basis (owned but absent from the
+        community pool; unowned and rostered by nobody) are omitted.
+    """
+    if len(community_rankings or {}) < _MIN_BASELINE_USERS:
+        return {}
+
+    community_elo = _community_mean_elo(community_rankings)
+
+    # Owner index — pid → owner_user_id
+    owner_of: dict[str, str] = {}
+    for m in (league_members or []):
+        for pid in (m.get("roster") or m.get("player_ids") or []):
+            owner_of[pid] = m.get("user_id")
+
+    roster_set = set(user_roster or [])
+
+    def _score(gap: float) -> float:
+        return round(max(0.0, min(1.0, 0.5 + gap / (2.0 * _TILE_SCORE_SPAN))), 2)
+
+    out: dict[str, dict[str, Any]] = {}
+    for pid, u_elo in (user_elo or {}).items():
+        try:
+            u = float(u_elo)
+        except (TypeError, ValueError):
+            continue
+
+        if pid in roster_set:
+            # TRADEABILITY vs the community mean (the "easiest sells" gap).
+            c = community_elo.get(pid)
+            if c is None:
+                continue
+            out[pid] = {"owned": True, "score": _score(u - c)}
+        else:
+            # ACQUIRABILITY vs the owner's board (the "easiest buys" gap).
+            owner_uid = owner_of.get(pid)
+            if owner_uid is None:
+                continue          # free agent — not acquirable via trade
+            owner_data = (community_rankings or {}).get(owner_uid)
+            owner_elo = ((owner_data or {}).get("elo_ratings") or {}).get(pid)
+            if owner_elo is None:
+                owner_elo = community_elo.get(pid)
+            if owner_elo is None:
+                continue
+            try:
+                o = float(owner_elo)
+            except (TypeError, ValueError):
+                continue
+            out[pid] = {"owned": False, "score": _score(u - o)}
+    return out
 
 
 # ---------------------------------------------------------------------------

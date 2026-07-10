@@ -45,7 +45,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 | POST | `/api/rank3` | Submit ordered (best→worst) result |
 | POST | `/api/rankings/submit` | Bulk submit pre-computed rankings |
 | POST | `/api/rankings/reorder` | Manually reorder ranks |
-| GET | `/api/rankings` | Read current rankings. Each player may carry `consensus_pos_rank` (1-based rank within position by consensus seed value over the active format's universal pool) and `consensus_pos_rank_delta_30d` (30d movement of that rank vs. the oldest prior-day `player_value_history` snapshot in-window; positive = moved up). Both omit-when-absent — the delta is absent until snapshot history accrues (FB4-61 tile stats, 2026-07-10) |
+| GET | `/api/rankings` | Read current rankings. Each player may carry `consensus_pos_rank` (1-based rank within position by consensus seed value over the active format's universal pool) and `consensus_pos_rank_delta_30d` (30d movement of that rank vs. the oldest prior-day `player_value_history` snapshot in-window; positive = moved up). Both omit-when-absent — the delta is absent until snapshot history accrues (FB4-61 tile stats, 2026-07-10). Each player may also carry ONE of `tradeability` / `acquirability` (0–1 tile trade meters, TestFlight #71, 2026-07-10): tradeability on players the user owns in the session's league (gap vs community-mean Elo), acquirability on leaguemate-owned players (gap vs that owner's Elo, community-mean fallback); scaling `clamp01(0.5 + gap/800)` via `trends_service.compute_tile_trade_scores`. Omitted when there's no basis: demo/no league, < 3 community rankers, free agent, or owned player absent from the community pool |
 | GET | `/api/skips` | Skipped matchups log |
 
 ## Progress / method

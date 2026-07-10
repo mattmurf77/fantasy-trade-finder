@@ -35,6 +35,7 @@ import { TickLabel, Button, Icon } from '../components/chalkline';
 import FormatToggle from '../components/FormatToggle';
 import PlayerCard from '../components/PlayerCard';
 import TileStats from '../components/TileStats';
+import TradeMeter from '../components/TradeMeter';
 import TierStickyHeader from '../components/TierStickyHeader';
 import TierTargetChips from '../components/TierTargetChips';
 import Toast from '../components/Toast';
@@ -221,6 +222,21 @@ export default function TiersScreen() {
       consensusTrendDelta: player.consensus_pos_rank_delta_30d ?? null,
     }),
     [trendByPid],
+  );
+
+  // #71 — resolve the tile's trade meter. The backend attaches at most one
+  // of tradeability (you own the player in the selected league) or
+  // acquirability (a leaguemate owns them), and omits both when there's no
+  // basis (demo/no league, thin community baseline, free agent) — so a tile
+  // simply has no bar in those cases and the row reads correctly without it.
+  const meterFor = useCallback(
+    (player: RankedPlayer): React.ReactNode =>
+      player.tradeability != null ? (
+        <TradeMeter kind="trade" score={player.tradeability} />
+      ) : player.acquirability != null ? (
+        <TradeMeter kind="get" score={player.acquirability} />
+      ) : undefined,
+    [],
   );
 
   const saveMutation = useMutation({
@@ -655,6 +671,8 @@ export default function TiersScreen() {
       // the drag / selection Pressable. Since #58 (cozy density) the strip
       // sits on line 2 of the dense PlayerCard via its statsSlot.
       const stats = tileStatsFor(item.player);
+      // #71 — tradeability/acquirability bar (line 3 of the dense card).
+      const meter = meterFor(item.player);
       // #53 — positional rank for the right cluster. /api/rankings is
       // queried per-position, so `rank` IS the positional rank.
       const posRank =
@@ -682,6 +700,7 @@ export default function TiersScreen() {
                 posRank={posRank}
                 value={tileValue}
                 statsSlot={<TileStats {...stats} />}
+                meterSlot={meter}
                 rightSlot={
                   isSelected ? (
                     <Icon name="check" size={16} color={ice.base} />
@@ -720,6 +739,7 @@ export default function TiersScreen() {
               posRank={posRank}
               value={tileValue}
               statsSlot={<TileStats {...stats} />}
+              meterSlot={meter}
             />
           </View>
           {/* #90 — per-tile tier step buttons (Icon Button spec: 32×32,
@@ -764,7 +784,7 @@ export default function TiersScreen() {
         </Pressable>
       );
     },
-    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor, singleTierMove],
+    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor, meterFor, singleTierMove],
   );
 
   // ── Copy-from-format button derivation ─────────────────────────────

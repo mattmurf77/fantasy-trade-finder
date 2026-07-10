@@ -74,14 +74,14 @@ Legacy keys (Elo K-factors, KTC curve, package weights, outlook multipliers, tie
 
 ### Trios → tier calibration + variety — `ranking_service._DEFAULT_CFG`, DB-seeded
 
-The trio loop rotates among three strategies (never repeating the previous one), then anti-repeat suppresses recently-seen players so the same faces don't recur.
+The trio loop rotates among three strategies (never repeating the previous one), then anti-repeat suppresses recently-seen players so the same faces don't recur. Since FB #97 the selectors also randomise *which* eligible straddlers/extremes get served (within-tier top/bottom drawn from the top/bottom two; boundary candidate/opponent from the top-two eligibles) and the within-tier cursor starts at a random tier on each service rebuild — so a fresh session no longer always opens on the elite tier's same top players.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `trio_boundary_rate` | 0.4 | Share of trios that **probe a value-band boundary** — a player just below a tier edge vs one just above, drawn from the FULL pool. The only comparison that moves a player across a tier. **0 = never boundary.** |
 | `trio_within_tier_rate` | 0.35 | Share of trios that compare **top-vs-bottom of the SAME tier** (rotating through tiers via a cursor) to nail intra-tier order. The remainder after `boundary + within` is the legacy **tightest** near-equal ordering. Set both rates to `0` for pure-legacy behaviour. |
 | `trio_boundary_margin` | 60.0 | Elo window on each side of a tier edge to pull boundary straddlers from. |
-| `trio_repeat_avoid` | 3.0 | Don't reuse a player seen in the last **N** served trios (fixes "same 2 players trio after trio"). Relaxes automatically when the pool is too small to honour it. |
+| `trio_repeat_avoid` | 8.0 | Don't reuse a player seen in the last **N** served trios (fixes "same 2 players trio after trio"). Relaxes gracefully when a pool/tier is too small to honour it — the longest-unseen players are re-admitted first, never the whole avoid set at once. Default raised 3 → 8 (FB #97) to match the live prod tune; 3 was too short to keep the top value cluster from recurring. |
 
 > Backend-only and **behavioural for all users** once deployed (changes which trio the Rank screen serves; Elo/value math is unchanged). Fully revertible live via `PUT /api/admin/config`. See [trios-tier-calibration-plan-2026-07-08.md](plans/trios-tier-calibration-plan-2026-07-08.md).
 

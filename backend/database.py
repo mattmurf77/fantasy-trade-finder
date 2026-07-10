@@ -733,7 +733,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trio_boundary_rate",     0.4,   "Share of trios that probe a value-band boundary (cross-tier); 0=off"),
     ("trio_boundary_margin",  60.0,   "Elo window on each side of a tier edge to pull boundary straddlers from"),
     ("trio_within_tier_rate",  0.35,  "Share of trios comparing top-vs-bottom of the SAME tier (intra-tier order); remainder after boundary+within = tightest local ordering"),
-    ("trio_repeat_avoid",      3.0,   "Avoid reusing a player seen in the last N served trios (anti-repeat); relaxes when the pool is too small"),
+    ("trio_repeat_avoid",      8.0,   "Avoid reusing a player seen in the last N served trios (anti-repeat); relaxes gracefully (oldest-seen first) when the pool is too small"),
     # ── Trade ELO gap filter ─────────────────────────────────────────────
     ("trade_elo_gap_max",    250.0,   "Max user-ELO gap between give/receive sides before rejecting a trade (0=disabled)"),
     # ── Agent A8 — trade-math adjustments (flag-gated) ───────────────────

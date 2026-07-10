@@ -47,6 +47,14 @@ export interface RankedPlayer extends Player {
   // until a prior-day consensus snapshot exists in the 30d window.
   consensus_pos_rank?: number | null;
   consensus_pos_rank_delta_30d?: number | null;
+  // TestFlight #71 tile meters — 0-1 scores from the Trends consensus-gap
+  // math, omitted by the backend when unavailable (no real league, thin
+  // community baseline, free agent). A player carries at most ONE of these:
+  // tradeability when the user owns them in the selected league (your value
+  // vs the market — high = profitable to trade away), acquirability when a
+  // leaguemate owns them (your value vs that owner's — high = easy to buy).
+  tradeability?: number | null;
+  acquirability?: number | null;
 }
 
 export interface LeagueSummary {
