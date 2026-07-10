@@ -36,24 +36,24 @@
 
 /* Tier variants */
 .ftf-badge.ftf-tier-elite {
-  background: rgba(245, 158, 11, 0.15);
-  border-color: #fbbf24;
+  background: rgba(251, 191, 36, 0.15);
+  border-color: #fcd34d;
   color: #fde68a;
 }
 .ftf-badge.ftf-tier-starter {
-  background: rgba(34, 197, 94, 0.15);
-  border-color: #4ade80;
-  color: #bbf7d0;
+  background: rgba(45, 212, 191, 0.15);
+  border-color: #5eead4;
+  color: #99f6e4;
 }
 .ftf-badge.ftf-tier-solid {
-  background: rgba(59, 130, 246, 0.15);
-  border-color: #60a5fa;
-  color: #bfdbfe;
+  background: rgba(56, 189, 248, 0.15);
+  border-color: #7dd3fc;
+  color: #bae6fd;
 }
 .ftf-badge.ftf-tier-depth {
-  background: rgba(168, 85, 247, 0.15);
-  border-color: #c084fc;
-  color: #e9d5ff;
+  background: rgba(244, 114, 182, 0.15);
+  border-color: #f9a8d4;
+  color: #fbcfe8;
 }
 .ftf-badge.ftf-tier-bench {
   background: rgba(122, 127, 150, 0.18);

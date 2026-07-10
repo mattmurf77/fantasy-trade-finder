@@ -6,7 +6,6 @@ import {
   ice,
   flare,
   semantic,
-  tier as tierColors,
   position as positionColors,
   space,
   radii,
@@ -14,6 +13,7 @@ import {
   fonts,
 } from '../theme/chalkline';
 import { Badge, PositionBadge, TierChalkBadge, RookieBadge, InjuryBadge } from './chalkline';
+import { colors } from '../theme/colors'; // medal tokens (gold/silver) for rank accents
 import type { Player, Tier } from '../shared/types';
 
 export interface PlayerCardProps {
@@ -272,11 +272,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: 3,
   },
-  // Rank accent border by assigned rank (1 gold / 2 green / 3 blue).
-  // Tier hexes are data encodings (cross-client invariants) via re-export.
-  rankBorder1: { borderColor: tierColors.elite },
-  rankBorder2: { borderColor: tierColors.starter },
-  rankBorder3: { borderColor: tierColors.solid },
+  // Rank accent border by assigned rank — MEDAL tokens (gold/silver/neutral),
+  // matching web .ranked-1/2/3. Not tier tokens: rank is not a tier, and tier
+  // hexes are data encodings (cross-client invariants) reserved for tiers.
+  rankBorder1: { borderColor: colors.gold },
+  rankBorder2: { borderColor: colors.silver },
+  rankBorder3: { borderColor: ink.lineStrong },
 
   rankBadge: {
     position: 'absolute',
@@ -288,9 +289,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rankFg1: { backgroundColor: tierColors.elite },
-  rankFg2: { backgroundColor: tierColors.starter },
-  rankFg3: { backgroundColor: tierColors.solid },
+  // Medal fills to match the borders above; rank 3 is a neutral bright-gray
+  // (chalk.faint) so the dark badge text stays readable on all three.
+  rankFg1: { backgroundColor: colors.gold },
+  rankFg2: { backgroundColor: colors.silver },
+  rankFg3: { backgroundColor: chalk.faint },
   rankBadgeText: {
     ...type.data,
     color: ink.ink0,
