@@ -2,7 +2,7 @@
   "expo": {
     "name": "DTF - Dynasty Trade Finder",
     "slug": "dtf-dynasty-trade-finder",
-    "version": "1.5.3",
+    "version": "1.5.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "dtf",
