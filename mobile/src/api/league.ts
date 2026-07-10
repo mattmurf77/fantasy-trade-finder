@@ -95,6 +95,12 @@ export interface LeagueSummaryRollup {
   league_id: string;
   league_name?: string;
   default_scoring?: string | null;
+  // Mirror the Matches tab's segments (feedback #91): mutual = non-dismissed
+  // trade_matches rows; awaiting = one-sided likes not yet matured.
+  matches_mutual?: number;
+  matches_awaiting?: number;
+  // Deprecated status-split counts — servers still send them for pre-1.4
+  // builds; new UI must not read them.
   matches_pending?: number;
   matches_accepted?: number;
   leaguemates_total?: number;

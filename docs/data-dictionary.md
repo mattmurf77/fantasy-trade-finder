@@ -469,3 +469,33 @@ In-app feedback notes captured via the mobile FeedbackSheet and POSTed to `/api/
 | `status_updated_at` | str, nullable | ISO timestamp of the last status change |
 
 Indexes: `idx_app_feedback_created_at`, `idx_app_feedback_user_id`.
+
+---
+
+## `bad_trade_flags`
+
+"This is a bad trade" flags from the TradesHome swipe deck (feedback #85) — an engine-quality feedback loop, distinct from a pass (not interested): a flag means "the engine got this one wrong". Written by `POST /api/trades/flag`; reviewed by the operator via `GET /api/trades/flags/admin` to iterate on the trade-generation logic. Each row snapshots the card's package, counterparty, and engine telemetry at flag time (pulled from the live in-memory card when `trade_id` still resolves, else from client-echoed fallback values).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | server-side autoincrement |
+| `dedupe_key` | str UNIQUE | `user\|league\|sorted(give)\|sorted(receive)` — one flag per user per package; idempotent-insert key (same pattern as `app_feedback.client_id`) |
+| `user_id` | str, not null | the flagger |
+| `username` | str | denormalized snapshot from session at flag time |
+| `league_id` | str, not null | |
+| `target_user_id` | str | counterparty on the card |
+| `target_username` | str | denormalized snapshot |
+| `give_player_ids` | JSON text, not null | flagger's give side |
+| `receive_player_ids` | JSON text, not null | flagger's receive side |
+| `scoring_format` | str | `'1qb_ppr'` / `'sf_tep'` — resolved server-side from the session |
+| `trade_id` | str | ephemeral card id, correlation only (deck ids don't survive restarts) |
+| `mismatch_score` | float, nullable | engine telemetry at flag time |
+| `fairness_score` | float, nullable | 0–1 |
+| `composite_score` | float, nullable | |
+| `need_fit` | float, nullable | 0–1 (FB-96); NULL when flag off / not stamped |
+| `partner_fit` | float, nullable | 0–1 (FB-47); NULL when not stamped |
+| `basis` | str, nullable | `'divergence'` / `'consensus'` |
+| `reason` | text, nullable | optional user free-text, ≤ 500 chars |
+| `created_at` | str, not null | ISO timestamp from server (canonical) |
+
+Indexes: `idx_bad_trade_flags_created_at`.

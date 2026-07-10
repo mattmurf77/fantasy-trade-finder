@@ -12,6 +12,7 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `TradeSide` | Calculator: one side of a hand-built trade (players + add button) |
 | `VerdictPanel` | Calculator: dual-board fairness verdict + gives/gets bars (demo mode) |
 | `ConsensusVerdictCard` | Calculator: server-authoritative consensus verdict from /api/trade/evaluate (live mode) |
+| `InLeagueCalculator` | Calculator "In league" mode: real opponent + rosters, two-board mutual-gain verdict (evaluate Mode B), carries Send in Sleeper |
 | `SuggestionCard` | Calculator: tappable fair-package suggestion |
 | `PlayerPickerModal` | Calculator: search + position-filter player picker |
 | `OutlookSheet` | Bottom sheet for team outlook selection |

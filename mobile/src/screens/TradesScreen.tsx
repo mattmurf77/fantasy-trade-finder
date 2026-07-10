@@ -47,6 +47,7 @@ import {
   generateTrades,
   getTradeStatus,
   swipeTrade,
+  flagBadTrade,
   getLikedTrades,
 } from '../api/trades';
 import {
@@ -548,6 +549,17 @@ export default function TradesScreen({ navigation }: any) {
     },
   });
 
+  // Bad-trade flag (feedback #85) — engine-quality signal, distinct from
+  // pass. Best-effort: the deck has already advanced via the pass path, so
+  // a failed flag just toasts instead of rewinding (the pass swipe carries
+  // the "not interested" signal regardless).
+  const flagMutation = useMutation({
+    mutationFn: (card: TradeCard) => flagBadTrade(card),
+    onError: () => {
+      setToast({ msg: "Flag didn't save — try again.", tone: 'warn' });
+    },
+  });
+
   const likedQuery = useQuery({
     queryKey: ['liked-trades', leagueId],
     queryFn: getLikedTrades,
@@ -588,6 +600,17 @@ export default function TradesScreen({ navigation }: any) {
     } else {
       haptics.swipe();
     }
+  }
+
+  // Bad-trade flag (feedback #85): file the engine-quality flag, then move
+  // past the card exactly like a pass — flagging implies "not interested",
+  // so the pass swipe records the disposition while the flag row records
+  // "the engine got this one wrong" for operator review.
+  function handleFlagBadTrade() {
+    if (!topCard) return;
+    flagMutation.mutate(topCard);
+    advance('pass');
+    setToast({ msg: 'Flagged — thanks, this trains the engine', tone: 'success' });
   }
 
   // ── Queue helpers (flag `trades.queue_2k`) ─────────────────────────
@@ -969,6 +992,24 @@ export default function TradesScreen({ navigation }: any) {
               <Text style={styles.deckHint}>
                 Swipe right to like · Swipe left to pass
               </Text>
+              {/* Bad-trade flag (feedback #85) — tertiary to like/pass, so it
+                  sits below the disposition row at hint-level prominence.
+                  Tapping files an engine-quality flag (operator review, not
+                  an ELO signal) and advances the deck like a pass. */}
+              <Pressable
+                onPress={handleFlagBadTrade}
+                disabled={swipeMutation.isPending}
+                style={({ pressed }) => [
+                  styles.badTradeBtn,
+                  pressed && styles.badTradeBtnPressed,
+                  swipeMutation.isPending && styles.dispositionDisabled,
+                ]}
+                accessibilityLabel="Flag as a bad trade suggestion"
+                accessibilityRole="button"
+              >
+                <Icon name="flag" size={14} color={chalk.dim} />
+                <Text style={styles.badTradeText}>Bad trade?</Text>
+              </Pressable>
             </>
           ) : generateMutation.isPending || job?.status === 'running' ? (
             // Job is running but no cards have arrived yet (first ~3s of
@@ -1377,6 +1418,26 @@ const styles = StyleSheet.create({
     ...type.label,
   },
   queueBtnTextQueued: { color: chalk.base },
+
+  // Bad-trade flag (feedback #85) — deliberately hint-tier: borderless,
+  // dim text, centered under the deck hint. It should never compete with
+  // the like/pass dispositions.
+  badTradeBtn: {
+    alignSelf: 'center',
+    marginTop: space.xs,
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingHorizontal: space.md,
+  },
+  badTradeBtnPressed: {
+    opacity: 0.6,
+  },
+  badTradeText: {
+    ...type.label,
+    color: chalk.dim,
+  },
 
   // Queue footer — anchored above the tab bar (the SafeAreaView already
   // reserves the bottom inset). Visible only when queue has ≥ 1 item.

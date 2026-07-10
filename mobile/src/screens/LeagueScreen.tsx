@@ -50,7 +50,8 @@ import ContrarianLeaderboard from '../components/ContrarianLeaderboard';
 // League tab v1 — replaces the prior PlaceholderScreen. Pulls
 // /api/league/summary + /api/league/coverage and renders:
 //   • League name + scoring + scoring chip
-//   • Matches stats (pending / accepted)
+//   • Matches stats (mutual matches / awaiting them — FB-91: tiles mirror
+//     the Matches tab's two segments so both surfaces always agree)
 //   • Leaguemate join progress (joined / total) + 1QB/SF unlocked counts
 //   • Ranking-coverage bar (ranked opponents / total)
 //   • "Switch league" → returns to LeaguePicker via session reset
@@ -170,8 +171,12 @@ export default function LeagueScreen() {
   const num = (v: unknown, fallback = 0) =>
     typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 
-  const matchesPending  = num((summary as any)?.matches_pending);
-  const matchesAccepted = num((summary as any)?.matches_accepted);
+  // FB-91 — the old matches_pending/matches_accepted split partitioned
+  // match rows by disposition status, so one match could read as "a trade
+  // available" under both tiles while the Matches tab showed a single
+  // entry. The tiles now mirror the Matches tab's segments exactly.
+  const matchesMutual   = num((summary as any)?.matches_mutual);
+  const matchesAwaiting = num((summary as any)?.matches_awaiting);
   const totalMates      = num((summary as any)?.leaguemates_total);
   const joinedMates     = num((summary as any)?.leaguemates_joined);
   const unlocked1qb     = num((summary as any)?.leaguemates_unlocked_1qb);
@@ -238,20 +243,24 @@ export default function LeagueScreen() {
           )}
         </Pressable>
 
-        {/* Matches roll-up — tiles route to the Matches tab (FB-37). */}
+        {/* Matches roll-up — tiles route to the Matches tab (FB-37), each
+            deep-linking into its own segment (FB-91). `at` forces the param
+            effect to re-fire when the same tile is tapped twice. */}
         <TickLabel>Matches</TickLabel>
         <View style={styles.statRow}>
           <StatCard
-            label="Pending"
-            value={summaryPending ? '—' : matchesPending}
+            label="Mutual matches"
+            sub="Liked by both sides"
+            value={summaryPending ? '—' : matchesMutual}
             icon="match"
-            onPress={() => navigation.navigate('Matches')}
+            onPress={() => navigation.navigate('Matches', { segment: 'mutual', at: Date.now() })}
           />
           <StatCard
-            label="Accepted"
-            value={summaryPending ? '—' : matchesAccepted}
-            icon="check"
-            onPress={() => navigation.navigate('Matches')}
+            label="Awaiting them"
+            sub="Your like, waiting on theirs"
+            value={summaryPending ? '—' : matchesAwaiting}
+            icon="eye"
+            onPress={() => navigation.navigate('Matches', { segment: 'awaiting', at: Date.now() })}
           />
         </View>
 
@@ -402,12 +411,15 @@ function StatusChip({ label, color, icon, dim }: {
   );
 }
 
-function StatCard({ label, value, icon, onPress }: {
-  label: string; value: number | string; icon: IconName; onPress?: () => void;
+function StatCard({ label, sub, value, icon, onPress }: {
+  label: string; sub?: string; value: number | string; icon: IconName;
+  onPress?: () => void;
 }) {
   // Pressable when a destination is supplied (FB-37: Matches tiles route
   // to the Matches tab); plain tile otherwise. The chevron icon next to
-  // the label is the clickability cue.
+  // the label is the clickability cue. Optional `sub` is a one-line
+  // body-sm definition under the label (FB-91) — MethodTile construction
+  // from docs/design/components.md (icon + title + body-sm desc).
   const body = (pressed: boolean) => (
     <Card style={pressed ? styles.statCardPressed : styles.statCard}>
       <Icon name={icon} size={20} color={chalk.dim} />
@@ -416,6 +428,7 @@ function StatCard({ label, value, icon, onPress }: {
         <Text style={type.label}>{label}</Text>
         {onPress ? <Icon name="chevron-right" size={12} color={chalk.dim} /> : null}
       </View>
+      {sub ? <Text style={type.bodySm} numberOfLines={2}>{sub}</Text> : null}
     </Card>
   );
   if (!onPress) return <View style={styles.statFlex}>{body(false)}</View>;

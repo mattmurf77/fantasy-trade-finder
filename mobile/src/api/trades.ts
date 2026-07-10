@@ -161,6 +161,26 @@ export async function swipeTrade(
   });
 }
 
+// POST /api/trades/flag — "this is a bad trade" (feedback #85). Distinct
+// from a pass: a flag means "the engine got this one wrong" and lands in a
+// review table the owner uses to iterate on the trade logic. Server-side
+// idempotent per (user, league, give set, receive set), so re-flagging the
+// same package is safe. Card context + telemetry are echoed so the server
+// can persist a reviewable snapshot even after its in-memory deck is gone.
+export async function flagBadTrade(card: TradeCard, reason?: string) {
+  return api.post<any>('/api/trades/flag', {
+    trade_id:           card.trade_id,
+    league_id:          card.league_id || undefined,
+    give_player_ids:    card.give_player_ids,
+    receive_player_ids: card.receive_player_ids,
+    target_user_id:     card.opponent_user_id || undefined,
+    target_username:    card.opponent_username || undefined,
+    fairness_score:     typeof card.fairness === 'number' ? card.fairness : undefined,
+    basis:              card.basis,
+    reason:             reason || undefined,
+  });
+}
+
 // ── Trade-match normalizer ───────────────────────────────────────────
 // Backend (database.py:load_matches + server.py enrichment) returns:
 //   { match_id (int), league_id, league_name?, partner_id, partner_name,

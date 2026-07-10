@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRoute } from '@react-navigation/native';
 import { haptics } from '../utils/haptics';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -44,6 +45,16 @@ export default function MatchesScreen() {
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
   const [filterLeagueId, setFilterLeagueId] = useState<LeagueFilter>('all');
   const [segment, setSegment] = useState<Segment>('mutual');
+
+  // FB-91 — the League tab's Matches tiles deep-link into a specific
+  // segment: navigate('Matches', { segment, at }). `at` (a timestamp)
+  // changes on every tap so re-tapping the same tile still lands on the
+  // requested segment after the user has toggled away.
+  const route = useRoute<any>();
+  useEffect(() => {
+    const s = route.params?.segment;
+    if (s === 'mutual' || s === 'awaiting') setSegment(s);
+  }, [route.params?.segment, route.params?.at]);
 
   // Stable query key — `'all'` not the active league. The endpoint returns
   // every-league results, so league switching shouldn't invalidate this

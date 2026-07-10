@@ -410,6 +410,46 @@ FEEDBACK_CLOSED_STATUSES = ("shipped", "declined")
 FEEDBACK_SEVERITIES = ("bug", "polish", "idea")
 
 # ---------------------------------------------------------------------------
+# bad_trade_flags — engine-quality feedback loop (FB #85)
+# ---------------------------------------------------------------------------
+# "This is a bad trade" flags from the TradesHome swipe deck. Distinct from a
+# pass (not interested): a flag means "the engine got this one wrong" and is
+# reviewed by the operator to iterate on the trade-generation logic. Each row
+# snapshots everything needed to reproduce/critique the card later — the
+# package, the counterparty, and the engine telemetry at flag time.
+#
+# dedupe_key = "user|league|sorted(give)|sorted(receive)" — one flag per user
+# per trade package. Retries / re-flags of the same card hit the unique
+# constraint and are dropped (same idempotent-insert pattern as
+# app_feedback.client_id; see save_bad_trade_flag).
+# ---------------------------------------------------------------------------
+
+bad_trade_flags_table = Table("bad_trade_flags", metadata,
+    Column("id",                 Integer, primary_key=True, autoincrement=True),
+    Column("dedupe_key",         String,  nullable=False, unique=True),
+    Column("user_id",            String,  nullable=False),
+    Column("username",           String),                  # denormalized snapshot
+    Column("league_id",          String,  nullable=False),
+    Column("target_user_id",     String),                  # counterparty on the card
+    Column("target_username",    String),                  # denormalized snapshot
+    Column("give_player_ids",    Text,    nullable=False), # JSON array (flagger's give side)
+    Column("receive_player_ids", Text,    nullable=False), # JSON array (flagger's receive side)
+    Column("scoring_format",     String),                  # '1qb_ppr' | 'sf_tep'
+    Column("trade_id",           String),                  # ephemeral card id (correlation only)
+    # Engine telemetry at flag time — nullable; sourced from the in-memory
+    # card when it's still alive, else from client-echoed fallback values.
+    Column("mismatch_score",     Float),
+    Column("fairness_score",     Float),                   # 0–1
+    Column("composite_score",    Float),
+    Column("need_fit",           Float),                   # 0–1 (FB-96), null when flag off
+    Column("partner_fit",        Float),                   # 0–1 (FB-47), null when not stamped
+    Column("basis",              String),                  # 'divergence' | 'consensus'
+    Column("reason",             Text),                    # optional user free-text
+    Column("created_at",         String,  nullable=False), # ISO from server (canonical)
+    Index("idx_bad_trade_flags_created_at", "created_at"),
+)
+
+# ---------------------------------------------------------------------------
 # Agent 1 additions — user_player_skips
 # ---------------------------------------------------------------------------
 # Persistent skip/dismiss decisions:
@@ -2645,13 +2685,28 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
     {
         "league_name":              str,
         "default_scoring":          '1qb_ppr' | 'sf_tep',
-        "matches_pending":          int,   # current user's pending matches in this league
-        "matches_accepted":         int,   # current user's accepted matches in this league
+        "matches_mutual":           int,   # mutual matches visible in the user's Matches inbox
+        "matches_awaiting":         int,   # user's one-sided likes not yet matured into a match
+        "matches_pending":          int,   # DEPRECATED (pre-1.4 clients): status='pending' rows
+        "matches_accepted":         int,   # DEPRECATED (pre-1.4 clients): status='accepted' rows
         "leaguemates_total":        int,   # members other than current user
         "leaguemates_joined":       int,   # how many have a users row
         "leaguemates_unlocked_1qb": int,   # how many unlocked 1qb_ppr
         "leaguemates_unlocked_sf":  int,   # how many unlocked sf_tep
     }
+
+    Bucketing (feedback #91) mirrors the Matches screen's two segments so the
+    League tiles count exactly what the user sees there, and every trade lives
+    in exactly one bucket:
+      - matches_mutual   = trade_matches rows involving the user (any status),
+                           excluding rows the user dismissed — i.e. the
+                           "Mutual matches" segment filtered to this league.
+      - matches_awaiting = the user's likes with no trade_matches row for the
+                           same players — the "Awaiting them" segment filtered
+                           to this league (see load_awaiting_trades).
+    The legacy matches_pending / matches_accepted split partitioned match rows
+    by disposition status and counted dismissed rows, so its numbers disagreed
+    with the Matches list; kept only so pre-1.4 builds keep rendering.
     """
     from sqlalchemy import func
 
@@ -2669,7 +2724,29 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
             else DEFAULT_SCORING
         )
 
-        # Match counts for the current user
+        # Mutual matches — every match row involving the user that the user
+        # has NOT dismissed, regardless of disposition status. This is the
+        # exact set the Matches tab's "Mutual matches" segment renders for
+        # this league (load_matches applies the same per-user dismissal
+        # filter), so the tile count always equals the visible list.
+        _not_dismissed_a = (
+            (trade_matches_table.c.user_a_id == user_id) &
+            ((trade_matches_table.c.user_a_dismissed.is_(None)) |
+             (trade_matches_table.c.user_a_dismissed == 0))
+        )
+        _not_dismissed_b = (
+            (trade_matches_table.c.user_b_id == user_id) &
+            ((trade_matches_table.c.user_b_dismissed.is_(None)) |
+             (trade_matches_table.c.user_b_dismissed == 0))
+        )
+        matches_mutual = conn.execute(
+            select(func.count()).select_from(trade_matches_table).where(
+                (trade_matches_table.c.league_id == league_id) &
+                (_not_dismissed_a | _not_dismissed_b)
+            )
+        ).scalar() or 0
+
+        # Legacy status-split counts (deprecated — pre-1.4 clients only)
         matches_pending = conn.execute(
             select(func.count()).select_from(trade_matches_table).where(
                 (trade_matches_table.c.league_id == league_id) &
@@ -2692,6 +2769,16 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
             )
         ).scalar() or 0
 
+    # Awaiting-them — one-sided likes that have not matured into a match.
+    # Reuses the same query the Matches tab's "Awaiting them" segment is
+    # built on (load_awaiting_trades), filtered to this league, so the two
+    # surfaces can never disagree. Outside the connection block: it opens
+    # its own connection.
+    matches_awaiting = sum(
+        1 for a in load_awaiting_trades(user_id) if a["league_id"] == league_id
+    )
+
+    with engine.connect() as conn:
         # Leaguemate IDs excluding current user
         leaguemate_rows = conn.execute(
             select(league_members_table.c.user_id).where(
@@ -2706,6 +2793,8 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
             return {
                 "league_name":              league_name,
                 "default_scoring":          default_scoring,
+                "matches_mutual":           matches_mutual,
+                "matches_awaiting":         matches_awaiting,
                 "matches_pending":          matches_pending,
                 "matches_accepted":         matches_accepted,
                 "leaguemates_total":        0,
@@ -2740,6 +2829,8 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
     return {
         "league_name":              league_name,
         "default_scoring":          default_scoring,
+        "matches_mutual":           matches_mutual,
+        "matches_awaiting":         matches_awaiting,
         "matches_pending":          matches_pending,
         "matches_accepted":         matches_accepted,
         "leaguemates_total":        leaguemates_total,
@@ -3648,13 +3739,17 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
         # Pull recent matches the user is part of so we can filter out the
         # already-matured ones. Set comparison handles JSON ordering. Same
         # 500-row defense as above.
+        # NOTE: trade_matches has no created_at column — matched_at is its
+        # timestamp. Ordering by .c.created_at raised AttributeError here,
+        # which the /api/trades/awaiting route swallowed into an empty list
+        # for ANY user with likes (found while fixing feedback #91).
         match_rows = conn.execute(
             select(trade_matches_table).where(
                 or_(
                     trade_matches_table.c.user_a_id == user_id,
                     trade_matches_table.c.user_b_id == user_id,
                 )
-            ).order_by(trade_matches_table.c.created_at.desc()).limit(500)
+            ).order_by(trade_matches_table.c.matched_at.desc()).limit(500)
         ).fetchall()
 
         # Fan out one league_members fetch covering every league the user
@@ -3706,6 +3801,7 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
         )
 
     result = []
+    seen_keys: set[tuple[str, frozenset, frozenset]] = set()
     for r in like_rows:
         try:
             give    = json.loads(r.give_player_ids)
@@ -3716,6 +3812,10 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
         key = (r.league_id, frozenset(give), frozenset(receive))
         if key in matched_keys:
             continue   # already matured into a match
+        if key in seen_keys:
+            continue   # same trade re-liked across deck regenerations —
+                       # one awaiting entry per underlying trade (#91)
+        seen_keys.add(key)
 
         # Recover counterparty: owner of any of the receive players in this
         # league. If we can't find one (stale roster cache, missing member
@@ -5959,3 +6059,133 @@ def list_feedback_for_user(user_id: str, limit: int = 200) -> list[dict]:
         }
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Bad-trade flags (FB #85) — engine-quality feedback loop
+# ---------------------------------------------------------------------------
+
+def _bad_trade_dedupe_key(
+    user_id: str,
+    league_id: str,
+    give_player_ids: list[str],
+    receive_player_ids: list[str],
+) -> str:
+    """Canonical uniqueness key: one flag per (user, league, trade package).
+    Player-id order is irrelevant to the package, so both sides are sorted."""
+    give = ",".join(sorted(str(p) for p in give_player_ids))
+    recv = ",".join(sorted(str(p) for p in receive_player_ids))
+    return f"{user_id}|{league_id}|{give}|{recv}"
+
+
+def save_bad_trade_flag(
+    *,
+    user_id: str,
+    league_id: str,
+    give_player_ids: list[str],
+    receive_player_ids: list[str],
+    username: str | None = None,
+    target_user_id: str | None = None,
+    target_username: str | None = None,
+    scoring_format: str | None = None,
+    trade_id: str | None = None,
+    mismatch_score: float | None = None,
+    fairness_score: float | None = None,
+    composite_score: float | None = None,
+    need_fit: float | None = None,
+    partner_fit: float | None = None,
+    basis: str | None = None,
+    reason: str | None = None,
+) -> dict:
+    """Insert (idempotently on the derived dedupe_key) a bad-trade flag and
+    return {server_id, created_at, duplicate}.
+
+    Re-flagging the same package (same user + league + give/receive sets,
+    order-insensitive) is dropped: the existing row's ids are returned so
+    the client can move on. Same dual-dialect pattern as save_feedback —
+    SQLite INSERT OR IGNORE; Postgres ON CONFLICT (dedupe_key) DO NOTHING.
+    """
+    dedupe_key = _bad_trade_dedupe_key(
+        user_id, league_id, give_player_ids, receive_player_ids)
+    is_postgres = not DATABASE_URL.startswith("sqlite")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    params = {
+        "dedupe_key":         dedupe_key,
+        "user_id":            user_id,
+        "username":           username,
+        "league_id":          league_id,
+        "target_user_id":     target_user_id,
+        "target_username":    target_username,
+        "give_player_ids":    json.dumps(list(give_player_ids)),
+        "receive_player_ids": json.dumps(list(receive_player_ids)),
+        "scoring_format":     scoring_format,
+        "trade_id":           trade_id,
+        "mismatch_score":     mismatch_score,
+        "fairness_score":     fairness_score,
+        "composite_score":    composite_score,
+        "need_fit":           need_fit,
+        "partner_fit":        partner_fit,
+        "basis":              basis,
+        "reason":             reason,
+        "created_at":         now_iso,
+    }
+    cols = ", ".join(params.keys())
+    binds = ", ".join(f":{k}" for k in params)
+    with engine.begin() as conn:
+        if is_postgres:
+            res = conn.execute(
+                text(
+                    f"INSERT INTO bad_trade_flags ({cols}) VALUES ({binds}) "
+                    "ON CONFLICT (dedupe_key) DO NOTHING RETURNING id"
+                ),
+                params,
+            ).fetchone()
+            if res:
+                return {"server_id": int(res[0]), "created_at": now_iso, "duplicate": False}
+        else:
+            # rowcount==1 on insert, 0 on conflict — `lastrowid` alone is
+            # unreliable on ignored inserts (see save_feedback).
+            cur = conn.execute(
+                text(f"INSERT OR IGNORE INTO bad_trade_flags ({cols}) VALUES ({binds})"),
+                params,
+            )
+            if cur.rowcount == 1 and cur.lastrowid:
+                return {"server_id": int(cur.lastrowid), "created_at": now_iso, "duplicate": False}
+
+        existing = conn.execute(
+            select(bad_trade_flags_table.c.id, bad_trade_flags_table.c.created_at)
+            .where(bad_trade_flags_table.c.dedupe_key == dedupe_key)
+        ).fetchone()
+        if existing:
+            return {
+                "server_id": int(existing[0]),
+                "created_at": existing[1] or now_iso,
+                "duplicate": True,
+            }
+        return {"server_id": 0, "created_at": now_iso, "duplicate": True}
+
+
+def list_bad_trade_flags(*, since_id: int = 0, limit: int = 100) -> list[dict]:
+    """Return bad-trade flags with id > since_id, oldest first, capped at
+    `limit`. Used by GET /api/trades/flags/admin so the operator can stream
+    new flags since their last poll. Caller must enforce auth. JSON-encoded
+    player-id arrays are decoded back to lists."""
+    limit = max(1, min(int(limit), 500))
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(bad_trade_flags_table)
+            .where(bad_trade_flags_table.c.id > int(since_id))
+            .order_by(bad_trade_flags_table.c.id.asc())
+            .limit(limit)
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r._mapping)
+        d.pop("dedupe_key", None)   # internal uniqueness key, not operator data
+        for field in ("give_player_ids", "receive_player_ids"):
+            try:
+                d[field] = json.loads(d[field])
+            except (json.JSONDecodeError, TypeError):
+                d[field] = []
+        out.append(d)
+    return out

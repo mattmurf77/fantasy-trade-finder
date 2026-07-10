@@ -37,6 +37,8 @@ import PlayerPickerModal from '../components/PlayerPickerModal';
 import { Button, Card, Icon, TickLabel } from '../components/chalkline';
 import { haptics } from '../utils/haptics';
 import { chalk, flare, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
+import { useSession } from '../state/useSession';
+import InLeagueCalculator from '../components/InLeagueCalculator';
 import type { ScoringFormat } from '../shared/types';
 
 // Manual Trade Calculator. Two modes:
@@ -62,7 +64,7 @@ const ARBITRAGE_EDGE = 1.05;
 // 40 keeps the 1–3-piece combo scan around ~10k evaluations per edit).
 const LIVE_SUGGEST_POOL = 40;
 
-type CalcMode = 'live' | 'demo';
+type CalcMode = 'live' | 'demo' | 'league';
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: '1qb_ppr', label: '1QB PPR' },
@@ -91,6 +93,16 @@ export default function TradeCalculatorScreen() {
   const [liveReceiveIds, setLiveReceiveIds] = useState<string[]>([]);
   const [picker, setPicker] = useState<'send' | 'receive' | null>(null);
   const [hydrated, setHydrated] = useState(false);
+
+  // In-league mode (Mode B) is only offered when a real league is active.
+  const league = useSession((s) => s.league);
+  const user = useSession((s) => s.user);
+  const hasLeague = !!(league?.league_id && user?.user_id);
+  const modeTabs: { key: CalcMode; label: string }[] = [
+    ...(hasLeague ? [{ key: 'league' as CalcMode, label: 'In league' }] : []),
+    { key: 'live', label: 'Real values' },
+    { key: 'demo', label: 'Demo league' },
+  ];
 
   // Restore the persisted draft once; demo ids validate against the mock
   // rosters here, live ids validate lazily once the pool loads (below).
@@ -330,12 +342,7 @@ export default function TradeCalculatorScreen() {
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Mode switch: real consensus values vs the seeded demo league. */}
         <View style={styles.modeRow}>
-          {(
-            [
-              { key: 'live', label: 'Real values' },
-              { key: 'demo', label: 'Demo league' },
-            ] as { key: CalcMode; label: string }[]
-          ).map((m) => {
+          {modeTabs.map((m) => {
             const active = mode === m.key;
             return (
               <Pressable
@@ -351,6 +358,10 @@ export default function TradeCalculatorScreen() {
           })}
         </View>
 
+        {mode === 'league' && league && user ? (
+          <InLeagueCalculator leagueId={league.league_id} userId={user.user_id} />
+        ) : (
+        <>
         {isLive ? (
           <>
             <TickLabel>Scoring format</TickLabel>
@@ -566,8 +577,12 @@ export default function TradeCalculatorScreen() {
             />
           </View>
         ) : null}
+        </>
+        )}
       </ScrollView>
 
+      {mode !== 'league' && (
+      <>
       <PlayerPickerModal
         visible={picker === 'send'}
         title={isLive ? 'Add to Side A' : `Send from ${CALC_MY_TEAM.teamName}`}
@@ -615,6 +630,8 @@ export default function TradeCalculatorScreen() {
         }}
         onClose={() => setPicker(null)}
       />
+      </>
+      )}
     </SafeAreaView>
   );
 }
