@@ -1554,17 +1554,19 @@
     // a player into tier T iff player.elo >= min_T (top-down walk),
     // matching how the backend's `tier_for_elo` maps ELOs to tier labels.
     let TIER_CONFIG = {
+      // 2026-07-10 consensus recalibration (FB #60/#69) — mirrors
+      // backend/tier_config.json; see docs/cross-client-invariants.md.
       "1qb_ppr": {
-        "QB": { elite: {min:1600,max:1680}, starter:{min:1480,max:1560}, solid:{min:1370,max:1450}, depth:{min:1200,max:1330}, bench:{min:1060,max:1180} },
-        "RB": { elite: {min:1720,max:1790}, starter:{min:1600,max:1680}, solid:{min:1480,max:1560}, depth:{min:1370,max:1450}, bench:{min:1200,max:1330} },
-        "WR": { elite: {min:1720,max:1790}, starter:{min:1600,max:1680}, solid:{min:1480,max:1560}, depth:{min:1370,max:1450}, bench:{min:1200,max:1330} },
-        "TE": { elite: {min:1600,max:1680}, starter:{min:1480,max:1560}, solid:{min:1370,max:1450}, depth:{min:1200,max:1330}, bench:{min:1060,max:1180} },
+        "QB": { elite: {min:1445,max:1800}, starter:{min:1330,max:1440}, solid:{min:1260,max:1325}, depth:{min:1206,max:1255}, bench:{min:1150,max:1201} },
+        "RB": { elite: {min:1600,max:1800}, starter:{min:1450,max:1595}, solid:{min:1330,max:1445}, depth:{min:1215,max:1325}, bench:{min:1150,max:1210} },
+        "WR": { elite: {min:1700,max:1800}, starter:{min:1505,max:1695}, solid:{min:1360,max:1500}, depth:{min:1220,max:1355}, bench:{min:1150,max:1215} },
+        "TE": { elite: {min:1400,max:1800}, starter:{min:1280,max:1395}, solid:{min:1225,max:1275}, depth:{min:1204,max:1220}, bench:{min:1150,max:1199} },
       },
       "sf_tep": {
-        "QB": { elite: {min:1720,max:1790}, starter:{min:1600,max:1680}, solid:{min:1480,max:1560}, depth:{min:1370,max:1450}, bench:{min:1200,max:1330} },
-        "RB": { elite: {min:1720,max:1790}, starter:{min:1600,max:1680}, solid:{min:1480,max:1560}, depth:{min:1370,max:1450}, bench:{min:1200,max:1330} },
-        "WR": { elite: {min:1720,max:1790}, starter:{min:1600,max:1680}, solid:{min:1480,max:1560}, depth:{min:1370,max:1450}, bench:{min:1200,max:1330} },
-        "TE": { elite: {min:1720,max:1790}, starter:{min:1600,max:1680}, solid:{min:1480,max:1560}, depth:{min:1370,max:1450}, bench:{min:1200,max:1330} },
+        "QB": { elite: {min:1650,max:1800}, starter:{min:1460,max:1645}, solid:{min:1320,max:1455}, depth:{min:1210,max:1315}, bench:{min:1150,max:1205} },
+        "RB": { elite: {min:1500,max:1800}, starter:{min:1380,max:1495}, solid:{min:1270,max:1375}, depth:{min:1210,max:1265}, bench:{min:1150,max:1205} },
+        "WR": { elite: {min:1600,max:1800}, starter:{min:1450,max:1595}, solid:{min:1340,max:1445}, depth:{min:1215,max:1335}, bench:{min:1150,max:1210} },
+        "TE": { elite: {min:1330,max:1800}, starter:{min:1260,max:1325}, solid:{min:1220,max:1255}, depth:{min:1203,max:1215}, bench:{min:1150,max:1198} },
       },
     };
 

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tier density mockup — Cozy (60px rows)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ─────────
+     Tier hexes are the CANONICAL values from docs/cross-client-invariants.md.
+     Fonts render as Barlow Condensed / Archivo / IBM Plex Mono when installed;
+     offline fallbacks are Arial Narrow / Helvetica / Menlo (no external requests). */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#3D4654;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --on-ice:#071013;    --flare:#F0508C;
+    --pos-up:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --tier-elite:#f59e0b; --tier-starter:#22c55e; --tier-solid:#3b82f6;
+    --tier-depth:#a855f7; --tier-bench:#7a7f96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:24px 16px 64px}
+
+  .note{max-width:640px;width:100%;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:8px;padding:16px 20px;margin-bottom:24px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.1;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note ul{margin:0;padding-left:18px;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .note li{margin-bottom:4px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note a{color:var(--ice);text-decoration:none;font-size:12px}
+  .note .back{display:inline-block;margin-bottom:10px}
+
+  .phone{position:relative;width:390px;height:844px;background:var(--ink-0);
+         border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;flex:none}
+  .statusbar{height:44px;display:flex;align-items:flex-end;justify-content:space-between;
+             padding:0 20px 6px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)}
+  .batt{display:inline-block;width:20px;height:10px;border:1px solid var(--chalk-dim);
+        border-radius:2px;position:relative}
+  .batt::after{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:70%;
+               background:var(--chalk-dim)}
+  .titlerow{display:flex;align-items:center;justify-content:space-between;padding:6px 16px 4px}
+  .title{font-family:var(--cond);font-weight:600;font-size:22px;letter-spacing:.03em;
+         text-transform:uppercase}
+  .btn-sec{height:32px;padding:0 12px;border:1px solid var(--line-strong);border-radius:4px;
+           color:var(--chalk);font:600 12px var(--ui);display:flex;align-items:center}
+  .tabs{display:flex;margin:4px 16px 8px;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:4px;overflow:hidden}
+  .tab{flex:1;min-height:40px;display:flex;align-items:center;justify-content:center;
+       font:600 11px var(--ui);letter-spacing:.08em;color:var(--chalk-dim);
+       border-bottom:2px solid transparent}
+  .tab.active{background:var(--ink-3);color:var(--chalk);border-bottom-color:var(--qb)}
+
+  .sticky{display:flex;align-items:center;justify-content:space-between;margin:0 16px 8px;
+          padding:7px 12px;border:1px solid var(--line);border-left:4px solid var(--tier-elite);
+          border-radius:8px;background:var(--ink-1)}
+  .sticky .lab{font:800 13px var(--ui);letter-spacing:.4px;color:var(--tier-elite)}
+  .sticky .cnt{font:500 12px var(--mono);color:var(--chalk-dim)}
+
+  .board{padding:0 16px}
+  .tierhead{display:flex;align-items:center;gap:8px;padding:10px 0 6px;
+            border-bottom:1px solid var(--line);margin-bottom:6px}
+  .tierhead .tick{width:14px;height:3px;flex:none}
+  .tierhead .tname{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase}
+  .tierhead .tcount{font:500 12px var(--mono);color:var(--chalk-dim)}
+  .tierhead .tsum{margin-left:auto;font:500 12px var(--mono);color:var(--chalk-dim)}
+  .t-elite .tick{background:var(--tier-elite)}     .t-elite .tname{color:var(--tier-elite)}
+  .t-starter .tick{background:var(--tier-starter)} .t-starter .tname{color:var(--tier-starter)}
+
+  /* ── COZY ROW — 60px, two lines, explicit chevrons ── */
+  .row{display:flex;align-items:center;height:60px;background:var(--ink-1);
+       border:1px solid var(--line);border-radius:8px;margin-bottom:4px;overflow:hidden}
+  .rail{width:3px;align-self:stretch;background:var(--qb);flex:none}
+  .main{flex:1;min-width:0;padding:0 8px 0 10px}
+  .l1{display:flex;align-items:baseline;gap:6px}
+  .nm{font:600 15px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+      text-overflow:ellipsis}
+  .tm{font:400 11px var(--ui);color:var(--chalk-dim);flex:none}
+  .tag{font:600 9px var(--ui);letter-spacing:.06em;padding:1px 3px;border:1px solid;
+       border-radius:2px;flex:none}
+  .tag.rk{color:var(--flare);border-color:var(--flare)}
+  .tag.q{color:var(--warn);border-color:var(--warn)}
+  /* Line 2 — TierChalkBadge (kept per #83/#84) + tightened TileStats trend */
+  .l2{display:flex;align-items:center;gap:8px;margin-top:3px}
+  .tb{font:600 9px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+      padding:1px 4px;border:1px solid;border-radius:2px}
+  .tb.elite{color:var(--tier-elite);border-color:var(--tier-elite)}
+  .tb.starter{color:var(--tier-starter);border-color:var(--tier-starter)}
+  .trend{font:700 11px var(--mono);font-variant-numeric:tabular-nums}
+  .trend.up{color:var(--pos-up)} .trend.down{color:var(--neg)} .trend.flat{color:var(--chalk-dim)}
+  .tlab{font:700 9px var(--ui);letter-spacing:.5px;color:var(--chalk-faint)}
+  /* #53/#54 — positional rank prominent over 0–10k value */
+  .nums{text-align:right;margin-right:6px;flex:none}
+  .pr{display:block;font:600 14px var(--mono);color:var(--qb);font-variant-numeric:tabular-nums}
+  .val{display:block;font:500 11px var(--mono);color:var(--chalk-dim);
+       font-variant-numeric:tabular-nums;margin-top:1px}
+  /* FB-90 chevrons — SIDE-BY-SIDE 32×32 icon buttons (visual); with 6px
+     surrounding clearances + hitSlop the effective target is 44×44pt */
+  .steps{display:flex;gap:4px;margin-right:6px;flex:none}
+  .sbtn{width:32px;height:32px;border-radius:4px;display:flex;align-items:center;
+        justify-content:center;color:var(--chalk-dim)}
+  .sbtn.dis{opacity:.45}
+  .chev{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;
+        stroke-linecap:square}
+
+  .savebar{position:absolute;left:0;right:0;bottom:0;padding:12px 16px;background:var(--ink-0);
+           border-top:1px solid var(--line)}
+  .savebtn{height:48px;border-radius:4px;background:var(--ice);color:var(--on-ice);
+           display:flex;align-items:center;justify-content:center;font:600 14px var(--ui)}
+  .cap{width:390px;margin-top:12px;font:400 12px/1.5 var(--ui);color:var(--chalk-faint)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <a class="back" href="index.html">&larr; All density variants</a>
+  <h1>Cozy &mdash; 60px two-line rows</h1>
+  <ul>
+    <li><strong>Row height: 60px</strong> (+4px gap = 64px pitch). Roughly <strong>8 player rows per screen</strong> vs ~4 today. The middle ground: half today's height without dropping the stat strip.</li>
+    <li><strong>Shown:</strong> 3px position rail &middot; line 1 = name + team + injury/RK micro-tags &middot; line 2 = <strong>TierChalkBadge kept</strong> (preserves #83/#84's per-tile tier signal) + tightened TileStats 30d trend (FB4-61 Consensus|You modes still have a home) &middot; right edge = <strong>positional rank prominent</strong> (#53) stacked over the <strong>0&ndash;10k value</strong> (#54).</li>
+    <li><strong>Dropped vs today:</strong> PositionChip (redundant with the rail + &ldquo;QB5&rdquo;), age/experience meta, headshot slot (no room on a 60px two-line row without crowding the name).</li>
+    <li><strong>FB-90 chevrons:</strong> explicit, <strong>side-by-side</strong> 32&times;32 icon buttons. Side-by-side matters: stacking two buttons inside a 60px row would leave ~30pt vertical targets (below HIG 44pt); side-by-side each button gets the full row height, and 32&times;32 visual + hitSlop reaches 44&times;44pt effective (today's stacked 32px + hitSlop 4 is only 40pt &mdash; this variant actually fixes that). Up-chevron shown disabled (45%) on Elite rows &mdash; the clamp rule.</li>
+    <li><strong>Tradeoffs:</strong> chevron pair costs ~74px of row width, squeezing long names (ellipsis earlier than compact); two text lines at 60px means 11px secondary type &mdash; at the floor for comfortable reading.</li>
+  </ul>
+</div>
+
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+  <div class="titlerow">
+    <div class="title">Positional Tiers</div>
+    <div class="btn-sec">Select</div>
+  </div>
+  <div class="tabs">
+    <div class="tab active">QB</div><div class="tab">RB</div><div class="tab">WR</div><div class="tab">TE</div>
+  </div>
+  <div class="sticky"><span class="lab">Elite</span><span class="cnt">4</span></div>
+
+  <div class="board">
+    <div class="tierhead t-elite">
+      <span class="tick"></span><span class="tname">Elite</span><span class="tcount">(4)</span>
+      <span class="tsum">36,960</span>
+    </div>
+
+    <div class="row">
+      <span class="rail"></span>
+      <span class="main">
+        <span class="l1"><span class="nm">Josh Allen</span><span class="tm">BUF</span></span>
+        <span class="l2"><span class="tb elite">Elite</span><span class="trend flat">&ndash;0</span><span class="tlab">30D</span></span>
+      </span>
+      <span class="nums"><span class="pr">QB1</span><span class="val">9,650</span></span>
+      <span class="steps">
+        <span class="sbtn dis"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </span>
+    </div>
+    <div class="row">
+      <span class="rail"></span>
+      <span class="main">
+        <span class="l1"><span class="nm">Jayden Daniels</span><span class="tm">WAS</span></span>
+        <span class="l2"><span class="tb elite">Elite</span><span class="trend up">&#9650;1</span><span class="tlab">30D</span></span>
+      </span>
+      <span class="nums"><span class="pr">QB2</span><span class="val">9,410</span></span>
+      <span class="steps">
+        <span class="sbtn dis"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </span>
+    </div>
+    <div class="row">
+      <span class="rail"></span>
+      <span class="main">
+        <span class="l1"><span class="nm">Drake Maye</span><span class="tm">NE</span></span>
+        <span class="l2"><span class="tb elite">Elite</span><span class="trend up">&#9650;3</span><span class="tlab">30D</span></span>
+      </span>
+      <span class="nums"><span class="pr">QB3</span><span class="val">9,180</span></span>
+      <span class="steps">
+        <span class="sbtn dis"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </span>
+    </div>
+    <div class="row">
+      <span class="rail"></span>
+      <span class="main">
+        <span class="l1"><span class="nm">Lamar Jackson</span><span class="tm">BAL</span></span>
+        <span class="l2"><span class="tb elite">Elite</span><span class="trend down">&#9660;2</span><span class="tlab">30D</span></span>
+      </span>
+      <span class="nums"><span class="pr">QB4</span><span class="val">8,720</span></span>
+      <span class="steps">
+        <span class="sbtn dis"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </span>
+    </div>
+
+    <div class="tierhead t-starter">
+      <span class="tick"></span><span class="tname">Starter</span><span class="tcount">(5)</span>
+      <span class="tsum">35,920</span>
+    </div>
+
+    <div class="row">
+      <span class="rail"></span>
+      <span class="main">
+        <span class="l1"><span class="nm">Caleb Williams</span><span class="tm">CHI</span></span>
+        <span class="l2"><span class="tb starter">Starter</span><span class="trend up">&#9650;1</span><span class="tlab">30D</span></span>
+      </span>
+      <span class="nums"><span class="pr">QB5</span><span class="val">7,940</span></span>
+      <span class="steps">
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </span>
+    </div>
+    <div class="row">
+      <span class="rail"></span>
+      <span class="main">
+        <span class="l1"><span class="nm">Jalen Hurts</span><span class="tm">PHI</span></span>
+        <span class="l2"><span class="tb starter">Starter</span><span class="trend down">&#9660;1</span><span class="tlab">30D</span></span>
+      </span>
+      <span class="nums"><span class="pr">QB6</span><span class="val">7,610</span></span>
+      <span class="steps">
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </span>
+    </div>
+    <div class="row">
+      <span class="rail"></span>
+      <span class="main">
+        <span class="l1"><span class="nm">Patrick Mahomes</span><span class="tm">KC</span></span>
+        <span class="l2"><span class="tb starter">Starter</span><span class="trend down">&#9660;3</span><span class="tlab">30D</span></span>
+      </span>
+      <span class="nums"><span class="pr">QB7</span><span class="val">7,280</span></span>
+      <span class="steps">
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </span>
+    </div>
+    <div class="row">
+      <span class="rail"></span>
+      <span class="main">
+        <span class="l1"><span class="nm">Justin Herbert</span><span class="tm">LAC</span><span class="tag q">Q</span></span>
+        <span class="l2"><span class="tb starter">Starter</span><span class="trend flat">&ndash;0</span><span class="tlab">30D</span></span>
+      </span>
+      <span class="nums"><span class="pr">QB8</span><span class="val">6,850</span></span>
+      <span class="steps">
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </span>
+    </div>
+    <div class="row">
+      <span class="rail"></span>
+      <span class="main">
+        <span class="l1"><span class="nm">Bo Nix</span><span class="tm">DEN</span></span>
+        <span class="l2"><span class="tb starter">Starter</span><span class="trend up">&#9650;2</span><span class="tlab">30D</span></span>
+      </span>
+      <span class="nums"><span class="pr">QB9</span><span class="val">6,240</span></span>
+      <span class="steps">
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </span>
+    </div>
+  </div>
+
+  <div class="savebar"><div class="savebtn">Save QB tiers</div></div>
+</div>
+
+<p class="cap">Frame = iPhone 14/15 point grid (390&times;844). Content clips at the fold &mdash; one
+honest screenful. The 9th demo row just slips under the save bar: ~8 player rows + 2 tier
+headers per screen at this density.</p>
+
+</body>
+</html>

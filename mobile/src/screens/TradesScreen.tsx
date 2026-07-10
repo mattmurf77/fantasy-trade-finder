@@ -43,6 +43,7 @@ import OutlookSheet from '../components/OutlookSheet';
 import LeaguePill from '../components/LeaguePill';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import QueueChip from '../components/QueueChip';
+import SwapPlayerSheet from '../components/SwapPlayerSheet';
 import {
   generateTrades,
   getTradeStatus,
@@ -60,6 +61,12 @@ import {
   setAssetPref,
   type Outlook,
 } from '../api/league';
+import { getLeagueRosters } from '../api/sleeper';
+import {
+  getTradeValues,
+  evaluateTradeInLeague,
+  type CalcValueRow,
+} from '../api/calc';
 import { getProgress } from '../api/rankings';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import FormatGate, { formatLabel } from '../components/FormatGate';
@@ -86,6 +93,14 @@ const FAIRNESS_PREF_KEY = 'ftf:trades:fairness_on';
 // will return so client-side sort-by-mismatch sees real candidates.
 const FAIRNESS_ON_THRESHOLD = 0.75;
 const FAIRNESS_OFF_THRESHOLD = 0.5;
+
+// Player-swap (feedback #86): trade_id suffix marking a user-modified
+// package. Deliberately unknown to the server — a like/flag under this id
+// misses the in-memory ORIGINAL card and takes the FB-46 context-
+// reconstruction path instead, so the EDITED give/receive ids echoed in
+// the payload are what get recorded (Elo signal, persistence, and mutual-
+// match detection all run on the modified package).
+const EDITED_SUFFIX = '::edited';
 
 export default function TradesScreen({ navigation }: any) {
   const queryClient = useQueryClient();
@@ -206,6 +221,8 @@ export default function TradesScreen({ navigation }: any) {
     setDeck([]);
     setDeckIdx(0);
     setJob(null);
+    setEdits({});
+    setSwapTarget(null);
   }
 
   // Preferences — open outlook sheet the first time the user lands here
@@ -498,6 +515,8 @@ export default function TradesScreen({ navigation }: any) {
     setDeck([]);
     setDeckIdx(0);
     setJob(null);
+    setEdits({});
+    setSwapTarget(null);
   }, [leagueId]);
 
   const swipeMutation = useMutation({
@@ -505,14 +524,20 @@ export default function TradesScreen({ navigation }: any) {
       swipeTrade(card, decision),
     onMutate: ({ card }) => {
       const tradeId = card.trade_id;
+      // Edited cards (player swap, feedback #86) carry a derived trade_id
+      // (`<raw>::edited`); resolve back to the raw deck id so the rollback
+      // bookkeeping below still finds the deck entry.
+      const rawId = tradeId.endsWith(EDITED_SUFFIX)
+        ? tradeId.slice(0, -EDITED_SUFFIX.length)
+        : tradeId;
       // Snapshot the index this card was at when the swipe fired. On
       // error we use this to decide whether to rewind the deck — only
       // safe if the user hasn't already swiped past it. Capturing the
       // index inside the deck (rather than the position in `sortedDeck`)
       // keeps the rollback correct under fairness re-sorts that happen
       // between the swipe and the error.
-      const dispatchedIdx = deck.findIndex((c) => c.trade_id === tradeId);
-      return { tradeId, dispatchedIdx };
+      const dispatchedIdx = deck.findIndex((c) => c.trade_id === rawId);
+      return { tradeId, rawId, dispatchedIdx };
     },
     onSuccess: (_, vars) => {
       if (vars.decision === 'like') {
@@ -535,13 +560,15 @@ export default function TradesScreen({ navigation }: any) {
       // `like` invalidation has populated a stale entry; idempotent
       // when no like was in flight.
       setDeckIdx((cur) => {
-        const tradeId = ctx?.tradeId;
-        if (!tradeId) return cur;
+        // Compare on the RAW id — sortedDeck holds the original cards even
+        // when the swiped payload was an edited variant.
+        const rawId = ctx?.rawId;
+        if (!rawId) return cur;
         // The card that was at the top when we swiped lives at cur-1
         // post-advance. If sortedDeck no longer has it there, the user
         // has swiped further or the deck was re-sorted — don't rewind.
         const prevCard = sortedDeck[cur - 1];
-        if (prevCard && prevCard.trade_id === tradeId) return cur - 1;
+        if (prevCard && prevCard.trade_id === rawId) return cur - 1;
         return cur;
       });
       queryClient.invalidateQueries({ queryKey: ['liked-trades', leagueId] });
@@ -557,6 +584,92 @@ export default function TradesScreen({ navigation }: any) {
     mutationFn: (card: TradeCard) => flagBadTrade(card),
     onError: () => {
       setToast({ msg: "Flag didn't save — try again.", tone: 'warn' });
+    },
+  });
+
+  // ── Player swap (feedback #86) ───────────────────────────────────────
+  // Tap the swap affordance next to any player on the top card to replace
+  // them with another player from the same roster (give side → your
+  // roster, receive side → the counterparty's). Edited variants live in
+  // `edits`, keyed by the ORIGINAL trade_id — the top-card lookup below
+  // overlays them without mutating the deck.
+  const [edits, setEdits] = useState<Record<string, TradeCard>>({});
+  const [swapTarget, setSwapTarget] = useState<{
+    player: Player;
+    side: 'give' | 'receive';
+  } | null>(null);
+
+  // Consensus values + league rosters feed the swap sheet's candidates and
+  // "closest in value" suggestions. Query keys are shared with
+  // InLeagueCalculator so the two surfaces reuse one cache. Fetched lazily
+  // once the deck has cards — the sheet can't open before that.
+  const calcFormat: ScoringFormat = activeFormat ?? '1qb_ppr';
+  const valuesQuery = useQuery({
+    queryKey: ['calc-values', calcFormat],
+    queryFn: ({ signal }) => getTradeValues(calcFormat, signal),
+    enabled: deck.length > 0,
+    staleTime: 5 * 60_000,
+  });
+  const rostersQuery = useQuery({
+    queryKey: ['league-rosters', leagueId],
+    queryFn: () => getLeagueRosters(leagueId!),
+    enabled: !!leagueId && deck.length > 0,
+    staleTime: 5 * 60_000,
+  });
+  const valueById = useMemo(() => {
+    const m = new Map<string, CalcValueRow>();
+    for (const r of valuesQuery.data?.players ?? []) m.set(r.id, r);
+    return m;
+  }, [valuesQuery.data]);
+  const rosterByOwner = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const row of rostersQuery.data ?? []) {
+      if (row.owner_id) m.set(row.owner_id, row.players ?? []);
+    }
+    return m;
+  }, [rostersQuery.data]);
+
+  // Re-price an edited package via /api/trade/evaluate Mode B — the same
+  // dual-board math the finder used to build the card. Success refreshes
+  // the edited card's fairness/basis; failure just toasts (fairness was
+  // cleared on swap, so no stale number is ever shown).
+  const repriceMutation = useMutation({
+    mutationFn: ({ card }: { rawId: string; card: TradeCard }) =>
+      evaluateTradeInLeague(
+        card.give_player_ids,
+        card.receive_player_ids,
+        calcFormat,
+        card.league_id || leagueId!,
+        card.opponent_user_id,
+      ),
+    onSuccess: (ev, vars) => {
+      setEdits((prev) => {
+        const cur = prev[vars.rawId];
+        // Apply only if the entry still holds the exact package we priced —
+        // the user may have swapped again while this round-trip was in
+        // flight (a newer mutation will land its own numbers).
+        if (
+          !cur ||
+          cur.give_player_ids.join(',') !== vars.card.give_player_ids.join(',') ||
+          cur.receive_player_ids.join(',') !== vars.card.receive_player_ids.join(',')
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [vars.rawId]: {
+            ...cur,
+            fairness: (ev.fairness ?? undefined) as unknown as number,
+            basis: ev.basis,
+          },
+        };
+      });
+    },
+    onError: () => {
+      setToast({
+        msg: "Couldn't re-price the edited trade — fairness unavailable.",
+        tone: 'warn',
+      });
     },
   });
 
@@ -587,8 +700,73 @@ export default function TradesScreen({ navigation }: any) {
     return [...pinned, ...rest];
   }, [deck, fairnessOn]);
 
-  const topCard = sortedDeck[deckIdx];
+  // Player-swap (feedback #86): overlay the user's edited variant of the
+  // top card, if any. Everything downstream — swipe/like, bad-trade flag,
+  // Queue, Send in Sleeper — reads `topCard`, so an edit automatically
+  // carries the MODIFIED package into every payload.
+  const rawTopCard = sortedDeck[deckIdx];
+  const topCard = rawTopCard ? edits[rawTopCard.trade_id] ?? rawTopCard : undefined;
   const nextCard = sortedDeck[deckIdx + 1];
+
+  // Swap-sheet candidates: the tapped side's roster (give → yours,
+  // receive → the counterparty's), minus everyone already in the trade
+  // and anyone the consensus pool doesn't price (K/DST).
+  const swapCandidates = useMemo<CalcValueRow[]>(() => {
+    if (!swapTarget || !topCard) return [];
+    const ownerId = swapTarget.side === 'give' ? userId : topCard.opponent_user_id;
+    const rosterIds = rosterByOwner.get(ownerId) ?? [];
+    const inTrade = new Set([
+      ...topCard.give_player_ids,
+      ...topCard.receive_player_ids,
+    ]);
+    return rosterIds
+      .filter((id) => !inTrade.has(id))
+      .map((id) => valueById.get(id))
+      .filter((r): r is CalcValueRow => !!r);
+  }, [swapTarget, topCard, rosterByOwner, valueById, userId]);
+
+  function handleSwapPick(replacement: CalcValueRow) {
+    if (!swapTarget || !rawTopCard || !topCard) return;
+    const rawId = rawTopCard.trade_id;
+    const { player: outgoing, side } = swapTarget;
+    const incoming: Player = {
+      id: replacement.id,
+      name: replacement.name,
+      position: replacement.position,
+      team: replacement.team,
+      age: replacement.age,
+    };
+    const swapIn = (arr: Player[]) =>
+      arr.map((p) => (p.id === outgoing.id ? incoming : p));
+    const give = side === 'give' ? swapIn(topCard.give_players) : topCard.give_players;
+    const receive =
+      side === 'receive' ? swapIn(topCard.receive_players) : topCard.receive_players;
+    const editedCard: TradeCard = {
+      ...topCard,
+      trade_id: `${rawId}${EDITED_SUFFIX}`,
+      give_players: give,
+      receive_players: receive,
+      give_player_ids: give.map((p) => p.id),
+      receive_player_ids: receive.map((p) => p.id),
+      edited: true,
+      // The engine's numbers described the ORIGINAL package. Clear them —
+      // the fairness meter hides while undefined and the re-price below
+      // fills it back in; reasons/sweetener narrated the old package; the
+      // counterparty's like was for the original mirror, not this variant.
+      fairness: undefined as unknown as number,
+      reasons: undefined,
+      sweetener: undefined,
+      likesYou: false,
+    };
+    setEdits((prev) => ({ ...prev, [rawId]: editedCard }));
+    setSwapTarget(null);
+    haptics.selection();
+    // Mode B needs a real counterparty id; without one the card just shows
+    // EDITED with no fairness read (shouldn't happen on generated cards).
+    if (editedCard.opponent_user_id) {
+      repriceMutation.mutate({ rawId, card: editedCard });
+    }
+  }
 
   function advance(decision: 'like' | 'pass') {
     if (!topCard) return;
@@ -911,6 +1089,8 @@ export default function TradesScreen({ navigation }: any) {
                 onToggleUntouchable={
                   untouchablesEnabled ? handleToggleUntouchable : undefined
                 }
+                onSwapPlayer={(player, side) => setSwapTarget({ player, side })}
+                repricing={topCard.edited === true && repriceMutation.isPending}
               />
               {/* Queue action — Pass / Interested are driven by swipe
                   gestures on the top card; Queue is a third option that
@@ -1131,6 +1311,33 @@ export default function TradesScreen({ navigation }: any) {
           </View>
         </View>
       </Modal>
+
+      {/* Player-swap sheet (feedback #86) — replace one player on the top
+          card with someone from the same roster. Suggested section = the
+          roster's closest consensus values to the outgoing player; full
+          roster below, grouped QB → RB → WR → TE. */}
+      <SwapPlayerSheet
+        visible={!!swapTarget}
+        replacing={
+          swapTarget
+            ? {
+                name: swapTarget.player.name,
+                value: valueById.get(swapTarget.player.id)?.value ?? null,
+              }
+            : null
+        }
+        rosterLabel={
+          swapTarget?.side === 'give'
+            ? 'your roster'
+            : topCard?.opponent_username
+            ? `@${topCard.opponent_username}'s roster`
+            : 'their roster'
+        }
+        candidates={swapCandidates}
+        loading={valuesQuery.isLoading || rostersQuery.isLoading}
+        onPick={handleSwapPick}
+        onClose={() => setSwapTarget(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -1174,6 +1381,9 @@ interface SwipableProps {
   onPass: () => void;
   untouchableIds?: ReadonlySet<string>;
   onToggleUntouchable?: (player: Player) => void;
+  // Player-swap (feedback #86) — pass-throughs to TradeCard.
+  onSwapPlayer?: (player: Player, side: 'give' | 'receive') => void;
+  repricing?: boolean;
 }
 
 function SwipableTopCard({
@@ -1182,6 +1392,8 @@ function SwipableTopCard({
   onPass,
   untouchableIds,
   onToggleUntouchable,
+  onSwapPlayer,
+  repricing,
 }: SwipableProps) {
   const translateX = useSharedValue(0);
 
@@ -1225,6 +1437,8 @@ function SwipableTopCard({
           data={card}
           untouchableIds={untouchableIds}
           onToggleUntouchable={onToggleUntouchable}
+          onSwapPlayer={onSwapPlayer}
+          repricing={repricing}
         />
       </Animated.View>
     </GestureDetector>

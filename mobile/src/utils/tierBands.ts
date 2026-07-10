@@ -3,9 +3,11 @@
 // and is fetched at boot via api/rankings.getTierConfig() →
 // setTierConfigCache() below. While the cache is empty (e.g. very first
 // app launch before the network call resolves, or offline mode) the
-// hardcoded fallback bands keep the UI usable; they're seeded from the
-// same constants the backend used to ship in
-// ranking_service.UNIFORM_TIER_ELO_BANDS / QB_TE_1QB_TIER_ELO_BANDS.
+// hardcoded fallback bands keep the UI usable; they mirror the 2026-07-10
+// consensus recalibration of backend/tier_config.json (FB #60/#69) —
+// per-(format, position) lower bounds anchored to the DynastyProcess
+// seed scale so Elite holds ~top-5 per position, Starter to ~rank 15,
+// Solid to ~rank 30.
 //
 // If you ever change either side without the other, mobile will silently
 // drift from server until the user re-launches and the network fetch
@@ -34,18 +36,19 @@ interface Thresholds {
   depth: number;
 }
 
-const FALLBACK_UNIFORM: Thresholds = {
-  elite:   1720,
-  starter: 1600,
-  solid:   1480,
-  depth:   1370,
-};
-
-const FALLBACK_QB_TE_1QB: Thresholds = {
-  elite:   1600,
-  starter: 1480,
-  solid:   1370,
-  depth:   1200,
+const FALLBACK: Record<ScoringFormat, Record<Position, Thresholds>> = {
+  '1qb_ppr': {
+    QB: { elite: 1445, starter: 1330, solid: 1260, depth: 1206 },
+    RB: { elite: 1600, starter: 1450, solid: 1330, depth: 1215 },
+    WR: { elite: 1700, starter: 1505, solid: 1360, depth: 1220 },
+    TE: { elite: 1400, starter: 1280, solid: 1225, depth: 1204 },
+  },
+  sf_tep: {
+    QB: { elite: 1650, starter: 1460, solid: 1320, depth: 1210 },
+    RB: { elite: 1500, starter: 1380, solid: 1270, depth: 1210 },
+    WR: { elite: 1600, starter: 1450, solid: 1340, depth: 1215 },
+    TE: { elite: 1330, starter: 1260, solid: 1220, depth: 1203 },
+  },
 };
 
 // ── Cache, populated from /api/tier-config ─────────────────────────────
@@ -82,10 +85,7 @@ export function thresholdsFor(
       depth:   lb('depth'),
     };
   }
-  if (scoringFormat === '1qb_ppr' && (position === 'QB' || position === 'TE')) {
-    return FALLBACK_QB_TE_1QB;
-  }
-  return FALLBACK_UNIFORM;
+  return FALLBACK[scoringFormat]?.[position] ?? FALLBACK['1qb_ppr'].RB;
 }
 
 /** Map a raw ELO to its tier for the given position + scoring format. */

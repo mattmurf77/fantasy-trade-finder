@@ -126,7 +126,7 @@ def test_anchor_save_pins_override_and_reports_tier(harness):
     assert d["ok"] is True and d["anchor"] == "2_firsts"
     # Override written with the mapped Elo.
     assert service._elo_overrides["rb1"] == pytest.approx(d["elo"], abs=0.1)
-    # 2 firsts ≈ Elo 1789 → elite for an RB in 1qb (band 1720–1790).
+    # 2 firsts ≈ Elo 1789 → elite for an RB in 1qb (elite floor 1600).
     assert d["tier"] == "elite"
     assert d["value"] == pytest.approx(2 * _mid_first_value(), rel=1e-3)
     save_overrides.assert_called_once()
@@ -134,12 +134,13 @@ def test_anchor_save_pins_override_and_reports_tier(harness):
 
 def test_anchor_value_is_position_uniform_but_tier_is_band_aware(harness):
     client, service, token, _ = harness
-    rb = _post(client, token, {"player_id": "rb1", "anchor": "1_first"}).get_json()
-    qb = _post(client, token, {"player_id": "qb1", "anchor": "1_first"}).get_json()
+    rb = _post(client, token, {"player_id": "rb1", "anchor": "1_second"}).get_json()
+    qb = _post(client, token, {"player_id": "qb1", "anchor": "1_second"}).get_json()
     # Same anchor → same Elo/value regardless of position…
-    assert rb["elo"] == qb["elo"] == 1650
+    assert rb["elo"] == qb["elo"] == 1460
     assert rb["value"] == qb["value"]
-    # …but tier falls out of each position's band walk (1qb compresses QB).
+    # …but tier falls out of each position's band walk (1qb compresses QB:
+    # a mid-2nd Elo is a top-5 1QB QB but only a starter-grade RB).
     assert rb["tier"] == "starter"
     assert qb["tier"] == "elite"
 

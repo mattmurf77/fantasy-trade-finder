@@ -30,16 +30,11 @@ import {
   type,
   fonts,
 } from '../theme/chalkline';
-// Old-theme tokens — used only by the FB4 statToggle styles merged from the
-// batch-4 branch (which predates the Chalkline re-skin). Kept until those
-// styles are Chalkline-ified. See the statToggle block in the StyleSheet.
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
 import { useNavigation } from '@react-navigation/native';
 import { TickLabel, Button, Icon } from '../components/chalkline';
 import FormatToggle from '../components/FormatToggle';
 import PlayerCard from '../components/PlayerCard';
-import TileStats, { StatMode } from '../components/TileStats';
+import TileStats from '../components/TileStats';
 import TierStickyHeader from '../components/TierStickyHeader';
 import TierTargetChips from '../components/TierTargetChips';
 import Toast from '../components/Toast';
@@ -93,17 +88,13 @@ export default function TiersScreen() {
   const [position, setPosition] = useState<Position>('QB');
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
 
-  // FB4-61 — Consensus | You stat-mode toggle. Drives which rank + 30d trend
-  // each tile shows. Local screen state, defaults to consensus, no persistence.
-  const [statMode, setStatMode] = useState<StatMode>('consensus');
-
   // FB4-63 — zone of the topmost VISIBLE player row, driven by the list's
   // onViewableItemsChanged. Null until the first viewability callback fires
   // (or when the list is empty). Used to render the pinned tier banner.
   const [stickyZone, setStickyZone] = useState<Zone | null>(null);
 
   // #81 — full-screen tier board. While expanded, the chrome above the
-  // board (title row, format toggle, stat toggle, copy button, hint) is
+  // board (title row, format toggle, copy button, hint) is
   // hidden so the board gets the whole screen; the position switcher, the
   // sticky tier banner and the save bar stay. The expand/collapse icon
   // button lives on the board bar in both states.
@@ -176,7 +167,7 @@ export default function TiersScreen() {
   // endpoint (FB-04 rank-delta view) rather than inventing a new one. The
   // response is the user's OWN ELO-history rank deltas, so it powers the
   // "You" 30d trend. There is no consensus 30d-trend field on any current
-  // payload (see the consensus branch in tileStatsFor below).
+  // payload (see the consensus notes in tileStatsFor below).
   const trendsQuery = useQuery({
     queryKey: ['trends', 'risers-fallers', 30, 50],
     queryFn: () => getRisersAndFallers({ days: 30, topN: 50 }),
@@ -205,32 +196,34 @@ export default function TiersScreen() {
     return map;
   }, [trendsQuery.data]);
 
-  // FB4-61 — resolve the two tile stats (rank label + 30d trend) for a player
-  // in the active mode. DATA NOTES:
+  // #65 — resolve the tile stats for a player. Both the user's and the
+  // consensus values render side by side (the FB4-61 Consensus | You toggle
+  // is gone). DATA NOTES:
   //  • You rank      → player.rank (the user's positional rank, on payload).
   //  • You 30d trend → trendByPid (risers/fallers rank-delta source).
   //  • Consensus rank → player.adp ?? player.search_rank (consensus-ish signals
-  //    already on the rankings payload). FB4-61: a dedicated consensus-rank
+  //    already on the rankings payload). #61: a dedicated consensus-rank
   //    field is not in the payload — needs backend.
-  //  • Consensus 30d trend → not in any payload. FB4-61: consensus 30d trend
-  //    not in payload — needs backend. Renders "—".
+  //  • Consensus 30d trend → not in any payload (#61 — needs backend).
+  //    TileStats omits the consensus trend entirely until it exists.
   const tileStatsFor = useCallback(
-    (player: RankedPlayer): { rankLabel: string | null; trendDelta: number | null } => {
-      if (statMode === 'you') {
-        return {
-          rankLabel: player.rank != null ? `#${player.rank}` : null,
-          trendDelta: trendByPid.get(player.id) ?? null,
-        };
-      }
-      // Consensus mode.
+    (player: RankedPlayer): {
+      youRankLabel: string | null;
+      youTrendDelta: number | null;
+      consensusRankLabel: string | null;
+    } => {
       const adp = player.adp;
       const searchRank = player.search_rank;
-      let rankLabel: string | null = null;
-      if (adp != null) rankLabel = `ADP ${Math.round(adp)}`;
-      else if (searchRank != null) rankLabel = `#${searchRank}`;
-      return { rankLabel, trendDelta: null };
+      let consensusRankLabel: string | null = null;
+      if (adp != null) consensusRankLabel = `ADP ${Math.round(adp)}`;
+      else if (searchRank != null) consensusRankLabel = `#${searchRank}`;
+      return {
+        youRankLabel: player.rank != null ? `#${player.rank}` : null,
+        youTrendDelta: trendByPid.get(player.id) ?? null,
+        consensusRankLabel,
+      };
     },
-    [statMode, trendByPid],
+    [trendByPid],
   );
 
   const saveMutation = useMutation({
@@ -547,7 +540,16 @@ export default function TiersScreen() {
       );
       const pick = firstPlayer ?? viewableItems[0];
       const zone = (pick?.item as Row | undefined)?.zone;
-      if (zone) setStickyZone(zone);
+      if (!zone) return;
+      // #67 — gate: the banner only appears once the current section's own
+      // INLINE header has scrolled off the top. While that header is still
+      // on screen (page load, or scrolled back to the very top) the banner
+      // is hidden — the inline header already labels the section.
+      const headerOnScreen = viewableItems.some((v) => {
+        const it = v.item as Row | undefined;
+        return it?.kind === 'header' && it.zone === zone;
+      });
+      setStickyZone(headerOnScreen ? null : zone);
     },
   );
 
@@ -561,9 +563,33 @@ export default function TiersScreen() {
     isDraggingRef.current = true;
   }, []);
   const onDragEnd = useCallback(
-    ({ data }: DragEndParams<Row>) => {
-      bucketsDirtyRef.current = true;
+    ({ data, from, to }: DragEndParams<Row>) => {
       isDraggingRef.current = false;
+      // #68 — one-directional pool guard, matching the chevron path
+      // (moveTierByOne): a TIERED player can never land in `unassigned`;
+      // dragging FROM the pool INTO a tier stays allowed. `data[to]` is the
+      // dragged row at its landing index; its `zone` is the PRE-drag zone
+      // (rows are built from the last-committed buckets). The landing zone
+      // is the nearest header at/above the landing index. On reject we
+      // leave `buckets` untouched, so the controlled list re-renders the
+      // row back where it came from (snap-back) — light haptic + toast.
+      const moved = from !== to ? data[to] : undefined;
+      if (moved?.kind === 'player' && moved.zone !== 'unassigned') {
+        let landing: Zone = 'unassigned';
+        for (let i = to - 1; i >= 0; i--) {
+          const r = data[i];
+          if (r.kind === 'header') {
+            landing = r.zone;
+            break;
+          }
+        }
+        if (landing === 'unassigned') {
+          haptics.warning();
+          setToast({ msg: 'Tiered players can’t move to Unassigned', tone: 'warn' });
+          return;
+        }
+      }
+      bucketsDirtyRef.current = true;
       let zone: Zone = 'unassigned';
       const next = emptyBuckets();
       for (const r of data) {
@@ -588,10 +614,21 @@ export default function TiersScreen() {
         const accent = accentFor(item.zone);
         const label = item.zone === 'unassigned' ? 'Unassigned' : TIER_LABEL[item.zone];
         const count = buckets[item.zone].length;
+        // #58 (cozy) — header aggregates: count sits next to the label,
+        // summed 0–10k value right-aligned (tier zones with players only).
+        const sum =
+          item.zone !== 'unassigned' && count > 0
+            ? buckets[item.zone].reduce((acc, p) => acc + (valueForElo(p.elo) ?? 0), 0)
+            : null;
         return (
           <View style={styles.tierHeader}>
-            <TickLabel color={accent}>{label}</TickLabel>
-            <Text style={styles.tierHeaderCount}>{count}</Text>
+            <View style={styles.tierHeaderLeft}>
+              <TickLabel color={accent}>{label}</TickLabel>
+              <Text style={styles.tierHeaderCount}>{count}</Text>
+            </View>
+            {sum != null ? (
+              <Text style={styles.tierHeaderSum}>{sum.toLocaleString('en-US')}</Text>
+            ) : null}
           </View>
         );
       }
@@ -616,33 +653,44 @@ export default function TiersScreen() {
       // position pages and missing on others (RB). Zone-derived, never
       // hardcoded per position (docs/cross-client-invariants.md).
       const zoneTier: Tier | null = item.zone === 'unassigned' ? null : item.zone;
-      // FB4-61 — resolve the tile's two stats for the active mode. Rendered
-      // inside the pointerEvents="none" wrapper so it never captures touches
-      // away from the drag / selection Pressable.
+      // #65 — resolve the tile's You + Consensus stats. Rendered inside the
+      // pointerEvents="none" wrapper so it never captures touches away from
+      // the drag / selection Pressable. Since #58 (cozy density) the strip
+      // sits on line 2 of the dense PlayerCard via its statsSlot.
       const stats = tileStatsFor(item.player);
+      // #53 — positional rank for the right cluster. /api/rankings is
+      // queried per-position, so `rank` IS the positional rank.
+      const posRank =
+        item.player.rank != null ? `${item.player.position}${item.player.rank}` : undefined;
+      const tileValue = valueForElo(item.player.elo);
 
       if (multiSelect) {
         return (
           <Pressable
             onPress={() => toggleSelected(item.player.id)}
-            style={[styles.chipSelectableWrap, isSelected && styles.chipSelected]}
+            style={styles.chipSelectableWrap}
           >
             {/* pointerEvents="none" so PlayerCard's own inner Pressable
                 can't become the touch responder — without this the inner
                 Pressable swallows the tap and the outer selection onPress
-                never fires, leaving multi-select dead. */}
+                never fires, leaving multi-select dead. Selection ring is
+                the dense card's own `selected` ice border (#16's two
+                signals stay: ring + check icon). */}
             <View pointerEvents="none">
               <PlayerCard
                 player={item.player}
-                compact
+                dense
                 tier={zoneTier}
+                selected={isSelected}
+                posRank={posRank}
+                value={tileValue}
+                statsSlot={<TileStats {...stats} />}
                 rightSlot={
                   isSelected ? (
                     <Icon name="check" size={16} color={ice.base} />
                   ) : undefined
                 }
               />
-              <TileStats rankLabel={stats.rankLabel} trendDelta={stats.trendDelta} />
             </View>
           </Pressable>
         );
@@ -662,14 +710,26 @@ export default function TiersScreen() {
           onLongPress={drag}
           delayLongPress={DRAG_ACTIVATION_MS}
           disabled={isActive}
-          style={[styles.playerRow, isActive && styles.playerRowActive]}
+          style={styles.playerRow}
         >
           <View pointerEvents="none" style={styles.rowBody}>
-            <PlayerCard player={item.player} compact tier={zoneTier} />
-            <TileStats rankLabel={stats.rankLabel} trendDelta={stats.trendDelta} />
+            <PlayerCard
+              player={item.player}
+              dense
+              tier={zoneTier}
+              // Active (picked-up) ring rides the dense card's own ice
+              // border so the 60px row pitch stays exact (no wrapper border).
+              selected={isActive}
+              posRank={posRank}
+              value={tileValue}
+              statsSlot={<TileStats {...stats} />}
+            />
           </View>
           {/* #90 — per-tile tier step buttons (Icon Button spec: 32×32,
-              radius sm, chalk-dim glyph, pressed = ink-3 fill). Hidden for
+              radius sm, chalk-dim glyph, pressed = ink-3 fill). #58 cozy:
+              SIDE-BY-SIDE, so each button gets the full 60px row height and
+              32×32 visual + hitSlop 6 reaches the 44pt effective target
+              (the old stacked pair only reached ~40pt). Hidden for
               unassigned tiles — tier stepping never crosses the pool
               boundary, matching the multi-select Tier up/down buttons. */}
           {zoneTier ? (
@@ -678,7 +738,7 @@ export default function TiersScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={`Move ${item.player.name} up a tier`}
                 disabled={isActive || zoneTier === 'elite'}
-                hitSlop={4}
+                hitSlop={6}
                 onPress={() => singleTierMove(item.player.id, 'up')}
                 style={({ pressed }) => [
                   styles.tierStepBtn,
@@ -692,7 +752,7 @@ export default function TiersScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={`Move ${item.player.name} down a tier`}
                 disabled={isActive || zoneTier === 'bench'}
-                hitSlop={4}
+                hitSlop={6}
                 onPress={() => singleTierMove(item.player.id, 'down')}
                 style={({ pressed }) => [
                   styles.tierStepBtn,
@@ -895,39 +955,6 @@ export default function TiersScreen() {
         })}
       </View>
 
-      {/* FB4-61 — Consensus | You stat toggle. Switches the rank + 30d
-          trend each tile shows. Default Consensus; local state only.
-          Hidden while expanded (#81). */}
-      {expanded ? null : (
-      <View style={styles.statToggle}>
-        {([
-          { key: 'consensus' as StatMode, label: 'Consensus' },
-          { key: 'you' as StatMode, label: 'You' },
-        ]).map(({ key, label }) => {
-          const isActive = statMode === key;
-          return (
-            <Pressable
-              key={key}
-              onPress={() => {
-                if (statMode !== key) { setStatMode(key); haptics.selection(); }
-              }}
-              style={({ pressed }) => [
-                styles.statToggleBtn,
-                isActive && styles.statToggleBtnActive,
-                pressed && { opacity: 0.7 },
-              ]}
-            >
-              <Text
-                style={[styles.statToggleText, isActive && styles.statToggleTextActive]}
-              >
-                {label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-      )}
-
       {/* Copy tier list from the OTHER scoring format. Mirrors web's
           `copy-tiers-btn` — the from-format reads as a label so the user
           knows EXACTLY which format they're pulling tiers from. Disabled
@@ -984,17 +1011,6 @@ export default function TiersScreen() {
         </Pressable>
       </View>
 
-      {/* FB4-63 — pinned tier banner. Sits between the hint and the list,
-          shows the tier of the topmost VISIBLE player. Hidden in the
-          empty/loading/error states (no rankings → nothing to anchor to). */}
-      {!loading && !rankingsQuery.isError && hasRankings && stickyZone ? (
-        <TierStickyHeader
-          label={stickyZone === 'unassigned' ? 'Unassigned' : TIER_LABEL[stickyZone]}
-          accent={accentFor(stickyZone)}
-          count={buckets[stickyZone].length}
-        />
-      ) : null}
-
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator color={chalk.dim} />
@@ -1010,6 +1026,7 @@ export default function TiersScreen() {
           />
         </View>
       ) : (
+        <View style={styles.boardWrap}>
         <DraggableFlatList
           data={listData}
           keyExtractor={keyExtractor}
@@ -1038,6 +1055,21 @@ export default function TiersScreen() {
           containerStyle={styles.listContainer}
           contentContainerStyle={styles.scroll}
         />
+        {/* FB4-63 / #67 — pinned tier banner, OVERLAYING the top of the
+            board so appearing/disappearing never shifts the list. stickyZone
+            is null until the current section's inline header scrolls off
+            the top (and again when scrolled back to the very top) — see the
+            viewability handler. pointerEvents="none": purely informational. */}
+        {hasRankings && stickyZone ? (
+          <View style={styles.stickyOverlay} pointerEvents="none">
+            <TierStickyHeader
+              label={stickyZone === 'unassigned' ? 'Unassigned' : TIER_LABEL[stickyZone]}
+              accent={accentFor(stickyZone)}
+              count={buckets[stickyZone].length}
+            />
+          </View>
+        ) : null}
+        </View>
       )}
 
       {/* Multi-select action bar — only shown in select mode with at
@@ -1175,6 +1207,19 @@ function moveTierByOne(
   return next;
 }
 
+// #53/#54 — 0–10k display value for a tile / header aggregate. The rankings
+// payload carries no raw DynastyProcess value, so invert the DOCUMENTED
+// seed-scale mapping instead (docs/cross-client-invariants.md, banding rule:
+// `elo = 1200 + value/10000 × 600`), clamped to the 0–10k scale. Note the
+// input is the user's CURRENT Elo (consensus-seeded, then personalized by
+// trios / tier saves / anchors), so this reads as the player's value on the
+// USER'S board; a pure consensus value would need the #53/#54 backend
+// payload work — do not build that here.
+function valueForElo(elo: number | null | undefined): number | null {
+  if (elo == null) return null;
+  return Math.max(0, Math.min(10_000, Math.round(((elo - 1200) / 600) * 10_000)));
+}
+
 // Accent (tick) color for a zone's header — mirrors TierBin's tickColor.
 function accentFor(zone: Zone): string {
   switch (zone) {
@@ -1214,6 +1259,8 @@ const styles = StyleSheet.create({
   },
   // Standalone tier-header row inside the flat list. Mirrors TierBin's
   // header (tier-colored tick label + mono count) over the ink-0 scaffold.
+  // #58 cozy: label + count sit together on the left; the summed 0–10k
+  // value is right-aligned.
   tierHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1224,31 +1271,32 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: ink.line,
   },
+  tierHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
   tierHeaderCount: { ...type.data, color: chalk.dim },
-  // Player row wrapper in normal (drag) mode. Active (picked-up) row gets
-  // a ice ring — border color change only, no shadow/transform lift.
+  tierHeaderSum: { ...type.data, color: chalk.dim },
+  // Player row wrapper in normal (drag) mode. #58 cozy: no wrapper border —
+  // the active (picked-up) ice ring is the dense card's own `selected`
+  // border, keeping the row pitch at exactly 60px card + 4px gap.
   // Row layout: card body fills the width, the #90 tier-step chevron
-  // column sits in a fixed gutter on the right.
+  // pair sits in a fixed gutter on the right.
   playerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: space.xs,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  playerRowActive: {
-    borderColor: ice.base,
   },
   rowBody: { flex: 1 },
   // #90 — per-tile tier step controls. Icon Button spec (components.md →
   // Buttons → Icon): 32×32, radius sm, chalk-dim glyph, pressed ink-3 fill,
-  // disabled 45% opacity.
+  // disabled 45% opacity. #58 cozy: SIDE-BY-SIDE pair (each button gets the
+  // full row height; 32×32 + hitSlop 6 = 44pt effective target).
   tierStepBtns: {
-    width: 32,
-    marginLeft: space.xs,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    marginLeft: space.xs,
     gap: space.xs,
   },
   tierStepBtn: {
@@ -1260,19 +1308,12 @@ const styles = StyleSheet.create({
   },
   tierStepBtnPressed: { backgroundColor: ink.ink3 },
   tierStepBtnDisabled: { opacity: 0.45 },
-  // Wrapper around each chip in multi-select mode. Always present so
-  // toggling selection doesn't shift the layout.
+  // Wrapper around each chip in multi-select mode. #58 cozy: the selected
+  // ring (issue #16 — ice ring + check icon, two signals so selection reads
+  // for color-vision-impaired users too) is the dense card's own `selected`
+  // border, so this wrapper only owns the row gap.
   chipSelectableWrap: {
     marginBottom: space.xs,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  // Selected-chip state (multi-select mode, issue #16). Volt ring + check
-  // icon in the right slot — two signals (color + shape) so selection
-  // reads clearly including for color-vision-impaired users.
-  chipSelected: {
-    borderColor: ice.base,
   },
   // Floating action bar — shown above the save bar when 1+ chips are
   // selected. Holds the FB4-62 tier-target chip row on top + the Up/Down/
@@ -1332,29 +1373,6 @@ const styles = StyleSheet.create({
   switcherBtnActive: { backgroundColor: ink.ink3 },
   switcherText: { ...type.label },
   switcherTextActive: { color: chalk.base },
-  // FB4-61 — Consensus | You segmented toggle. Compact mirror of the position
-  // switcher; sits just below it. (Old-theme tokens; Chalkline-ify as a
-  // visual follow-up, matching the FB4 components merged in the same batch.)
-  statToggle: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: 4,
-  },
-  statToggleBtn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: spacing.xs,
-    borderRadius: radius.sm,
-  },
-  statToggleBtnActive: { backgroundColor: 'rgba(79,124,255,0.14)' },
-  statToggleText: { color: colors.muted, fontSize: fontSize.xs, fontWeight: '700' },
-  statToggleTextActive: { color: colors.accent },
   // Copy-tiers-from-other-format action. Secondary-button construction
   // (hairline line-strong border, chalk text) with the swap icon.
   copyBtn: {
@@ -1408,6 +1426,16 @@ const styles = StyleSheet.create({
     gap: space.sm,
   },
   errorText: { ...type.body, color: semantic.neg },
+  // #67 — hosts the list + the sticky-banner overlay (banner floats over
+  // the board's top edge instead of occupying layout, so its gated
+  // appear/disappear never shifts the list mid-scroll).
+  boardWrap: { flex: 1 },
+  stickyOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+  },
   listContainer: { flex: 1 },
   scroll: {
     padding: space.lg,

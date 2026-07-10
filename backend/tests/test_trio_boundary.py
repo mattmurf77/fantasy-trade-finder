@@ -14,18 +14,19 @@ import backend.ranking_service as rs
 from backend.ranking_service import Player, RankingService
 
 
-# WR 1qb_ppr bands: elite 1720–1790, starter 1600–1680, solid 1480–1560,
-# depth 1370–1450, bench 1200–1330. Seed players so several edges are
-# contested within the ±60 margin (e.g. the starter/elite edge at 1720).
+# WR 1qb_ppr bands (2026-07-10 consensus recalibration): elite 1700–1800,
+# starter 1505–1695, solid 1360–1500, depth 1220–1355, bench 1150–1215.
+# Seed players so several edges are contested within the ±60 margin
+# (e.g. the starter/elite edge at 1700).
 _SEEDS = {
     "elite_a":   1755,   # elite
-    "elite_b":   1730,   # elite (just above the 1720 edge)
-    "star_a":    1690,   # starter (just below the 1720 edge)
-    "star_b":    1650,   # starter
-    "star_c":    1610,   # starter (just above the 1600 edge)
-    "solid_a":   1560,   # solid (just below the 1600 edge)
-    "solid_b":   1500,   # solid
-    "depth_a":   1420,   # depth
+    "elite_b":   1710,   # elite (just above the 1700 edge)
+    "star_a":    1690,   # starter (just below the 1700 edge)
+    "star_b":    1600,   # starter
+    "star_c":    1515,   # starter (just above the 1505 edge)
+    "solid_a":   1495,   # solid (just below the 1505 edge)
+    "solid_b":   1400,   # solid
+    "depth_a":   1300,   # depth
 }
 
 
@@ -81,7 +82,7 @@ def test_boundary_trio_none_for_overall_mode(svc):
 def test_boundary_trio_none_when_single_tier(monkeypatch):
     # All players packed inside one band → no contested edge → None (caller
     # falls back to the tightest-trio selector).
-    seeds = {f"s{i}": 1500 + i for i in range(6)}  # all 'solid' (1480–1560)
+    seeds = {f"s{i}": 1400 + i for i in range(6)}  # all 'solid' (1360–1500)
     players = [Player(id=pid, name=pid, position="WR", team="A", age=25) for pid in seeds]
     s = RankingService(players=players, seed_ratings=seeds)
     s._scoring_format = "1qb_ppr"

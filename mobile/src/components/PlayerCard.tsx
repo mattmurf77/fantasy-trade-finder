@@ -4,12 +4,14 @@ import {
   ink,
   chalk,
   ice,
+  flare,
   semantic,
   tier as tierColors,
   position as positionColors,
   space,
   radii,
   type,
+  fonts,
 } from '../theme/chalkline';
 import { Badge, PositionBadge, TierChalkBadge, RookieBadge, InjuryBadge } from './chalkline';
 import type { Player, Tier } from '../shared/types';
@@ -28,6 +30,15 @@ export interface PlayerCardProps {
   compact?: boolean;               // shorter card for tier bins / trade cards
   rightSlot?: React.ReactNode;     // optional right-side widget (drag handle, trend arrow, etc.)
   showInjury?: boolean;            // render the injury-status tag (default true). Off for Trios tiles (feedback #33).
+  // #58 (cozy) — dense 60px two-line row, used ONLY by the Tiers board.
+  // Renders a separate layout branch: line 1 = name + team + RK/injury
+  // micro-tags, line 2 = TierChalkBadge + `statsSlot`, right cluster =
+  // posRank (position-colored mono, #53) over `value` (#54). Drops the
+  // PositionBadge and age/experience meta (redundant with the rail +
+  // posRank at this density). All other callers render the classic card.
+  dense?: boolean;
+  statsSlot?: React.ReactNode;     // dense line 2 — the TileStats strip
+  value?: number | null;           // dense right cluster — 0–10k seed-scale value
 }
 
 // Normalize Sleeper injury strings to the Chalkline InjuryBadge codes.
@@ -60,6 +71,9 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     compact = false,
     rightSlot,
     showInjury = true,
+    dense = false,
+    statsSlot,
+    value,
   },
   ref,
 ) {
@@ -94,6 +108,71 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     rank === 1 ? styles.rankFg1 :
     rank === 2 ? styles.rankFg2 :
     rank === 3 ? styles.rankFg3 : null;
+
+  // ── Dense (cozy) branch — Tiers board only (#58) ────────────────────
+  if (dense) {
+    return (
+      <Pressable
+        ref={ref as any}
+        onPress={onPress}
+        onLongPress={onLongPress}
+        disabled={disabled}
+        delayLongPress={400}
+        style={({ pressed }) => [
+          styles.card,
+          styles.cardDense,
+          selected && styles.cardSelected,
+          pressed && !disabled && styles.cardPressed,
+          disabled && styles.cardDisabled,
+        ]}
+      >
+        {railColor ? <View style={[styles.rail, { backgroundColor: railColor }]} /> : null}
+        <View style={styles.denseMain}>
+          <View style={styles.denseLine1}>
+            <Text style={styles.denseName} numberOfLines={1}>
+              {player.name}
+            </Text>
+            <Text style={styles.denseTeam}>{teamStr}</Text>
+            {isRookie && (
+              <Text style={[styles.denseTag, { color: flare.base, borderColor: flare.base }]}>
+                RK
+              </Text>
+            )}
+            {injury ? (
+              <Text
+                style={[
+                  styles.denseTag,
+                  injCode === 'Q' || injCode === 'D'
+                    ? { color: semantic.warn, borderColor: semantic.warn }
+                    : { color: semantic.neg, borderColor: semantic.neg },
+                ]}
+              >
+                {injCode ?? injury}
+              </Text>
+            ) : null}
+          </View>
+          <View style={styles.denseLine2}>
+            {tier && <TierChalkBadge t={tier} />}
+            {statsSlot}
+          </View>
+        </View>
+        {/* #53/#54 — positional rank prominent, 0–10k value secondary */}
+        {posRank || value != null ? (
+          <View style={styles.denseNums}>
+            {posRank ? (
+              <Text style={[styles.densePosRank, railColor ? { color: railColor } : null]}>
+                {posRank}
+              </Text>
+            ) : null}
+            {value != null ? (
+              <Text style={styles.denseValue}>{value.toLocaleString('en-US')}</Text>
+            ) : null}
+          </View>
+        ) : null}
+        {rightSlot ? <View style={styles.denseRightSlot}>{rightSlot}</View> : null}
+      </Pressable>
+    );
+  }
 
   return (
     <Pressable
@@ -234,4 +313,77 @@ const styles = StyleSheet.create({
   },
   metaDot: { color: chalk.faint, marginHorizontal: space.xs },
   rightSlot: { position: 'absolute', right: space.md, top: space.md },
+
+  // ── Dense (cozy) variant — #58, Tiers board only ─────────────────────
+  // 60px fixed-height two-line row (mockups/tier-density/cozy.html). The
+  // classic card's ink-1 surface / hairline / 3px rail carry over; padding
+  // is replaced by vertical centering inside the fixed height.
+  cardDense: {
+    height: 60,
+    padding: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  denseMain: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingLeft: 13, // 3px rail + 10px inset (mockup .main)
+    paddingRight: space.sm,
+  },
+  denseLine1: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+  },
+  denseName: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 15,
+    color: chalk.base,
+    flexShrink: 1, // long names ellipsize before the team/tags/nums do
+  },
+  denseTeam: {
+    fontFamily: fonts.ui,
+    fontSize: 11,
+    color: chalk.dim,
+  },
+  // Micro-tag (mockup .tag): Badge construction (border in encode color +
+  // colored text) shrunk to fit line 1 of a 60px row.
+  denseTag: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 9,
+    letterSpacing: 0.5,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    borderWidth: 1,
+    borderRadius: radii.xs,
+    overflow: 'hidden',
+  },
+  denseLine2: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    marginTop: 3,
+  },
+  // Right cluster (#53/#54): positional rank prominent (mono, position
+  // color) stacked over the 0–10k value (mono, chalk-dim).
+  denseNums: {
+    alignItems: 'flex-end',
+    marginRight: space.sm,
+  },
+  densePosRank: {
+    fontFamily: fonts.dataSemi,
+    fontSize: 14,
+    fontVariant: ['tabular-nums'],
+    color: chalk.base,
+  },
+  denseValue: {
+    fontFamily: fonts.data,
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+    color: chalk.dim,
+    marginTop: 1,
+  },
+  denseRightSlot: {
+    marginRight: space.sm,
+  },
 });

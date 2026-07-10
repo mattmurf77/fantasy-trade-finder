@@ -16,14 +16,15 @@ import pytest
 import backend.ranking_service as rs
 from backend.ranking_service import Player, RankingService
 
-# WR 1qb_ppr bands. Pack ~6 players into each band so within-tier trios have
-# >=3 members and the pool is large enough for anti-repeat to breathe.
+# WR 1qb_ppr bands (2026-07-10 consensus recalibration). Pack ~6 players into
+# each band so within-tier trios have >=3 members and the pool is large enough
+# for anti-repeat to breathe.
 _BANDS = {
-    "elite":   (1720, 1790),
-    "starter": (1600, 1680),
-    "solid":   (1480, 1560),
-    "depth":   (1370, 1450),
-    "bench":   (1200, 1330),
+    "elite":   (1700, 1800),
+    "starter": (1505, 1695),
+    "solid":   (1360, 1500),
+    "depth":   (1220, 1355),
+    "bench":   (1150, 1215),
 }
 
 

@@ -24,9 +24,11 @@ Note: `web/css/styles.css` has a separate 4-level *dynasty value* badge set (`.t
 
 ## Tier band Elo cutoffs
 
-The Elo ranges that map a player into a tier.
+The Elo ranges that map a player into a tier. Single source of truth is `backend/tier_config.json`, served to clients via `GET /api/tier-config`; bucketing is a top-down walk assigning the first tier whose `min <= elo`.
 
-**Locations:** `mobile/src/utils/tierBands.ts`, `web/js/app.js` (search "tier"), `extension/content.js` (search "tier"), any backend tier computation in `backend/`.
+**Banding rule (recalibrated 2026-07-10, FB #60/#69):** bands are per **position AND scoring format**, anchored to the DynastyProcess consensus seed scale (`elo = 1200 + value/10000 × 600`) with rank-count targets from the current consensus pool — Elite ≈ top 5, Starter ≈ through rank 15, Solid ≈ through rank 30, Depth = anything with real consensus value, Bench = the near-zero tail plus post-trio Elo down to 1150 (below 1150 = unranked; keeps the `no_value` anchor at Elo 1100 below every band). Occupancy is pinned by `backend/tests/test_tier_occupancy.py` against a checked-in consensus snapshot — recalibrate bands (and refresh that fixture) if consensus drift makes Elite leave the 2–10 range. A related invariant: `apply_reorder` (manual ranks) is a pure permutation of existing Elo values, so reorders never change tier occupancy.
+
+**Locations:** `backend/tier_config.json` (canonical), `backend/ranking_service.py` (`tier_bands_for` / `tier_for_elo` / `apply_tiers`), `mobile/src/utils/tierBands.ts` (offline fallback mirror — keep in sync), `web/positional-tiers.html` + `extension` badge (consume the served config / backend walk).
 
 ---
 

@@ -1166,8 +1166,19 @@ class RankingService:
     def apply_reorder(self, position: Optional[str], ordered_ids: list[str]) -> None:
         """
         Apply a manual reorder by setting ELO overrides that match the
-        desired ranking order.  ELO values are linearly interpolated
-        between the current max and min of the pool.
+        desired ranking order.  The reordered players receive the SORTED
+        MULTISET OF THEIR OWN CURRENT ELOs (rank 1 gets the highest, rank
+        2 the next, ...), i.e. a reorder is a pure permutation of the
+        existing Elo values.
+
+        Why not linear interpolation between pool max and min (the old
+        behaviour): consensus dynasty values decay convexly, so a linear
+        max→min spread flattened the value curve and pushed the top third
+        of a position board above the Elite band floor — a full-board
+        manual reorder then mislabelled dozens of players Elite on the
+        Tiers screen (FB #60/#69, "44 elite QBs"). Permuting the existing
+        Elos changes ORDER without distorting the value distribution, so
+        tier occupancy is invariant under reorders.
         """
         pool = self._pool(position)
         if len(pool) < 2:
@@ -1181,15 +1192,17 @@ class RankingService:
         if len(valid_ids) < 2:
             return
 
-        # Compute target ELO range from the current pool
-        elo_vals = list(current_elo.values())
-        max_elo = max(elo_vals)
-        min_elo = min(elo_vals)
-        spread = max(max_elo - min_elo, 100)  # at least 100 ELO spread
+        # Sorted (desc) Elo values of exactly the players being reordered.
+        target_elos = sorted((current_elo[pid] for pid in valid_ids), reverse=True)
 
-        # Assign linearly spaced ELO values from max to min
-        for i, pid in enumerate(valid_ids):
-            target_elo = max_elo - (spread * i / max(len(valid_ids) - 1, 1))
+        # Break exact ties with a hair of descending epsilon so the user's
+        # requested order survives an elo-desc re-sort (tail players often
+        # share an identical seed Elo).
+        for i in range(1, len(target_elos)):
+            if target_elos[i] >= target_elos[i - 1]:
+                target_elos[i] = target_elos[i - 1] - 0.001
+
+        for pid, target_elo in zip(valid_ids, target_elos):
             self._elo_overrides[pid] = target_elo
 
         self._version += 1

@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { ink, chalk, flare, semantic, space, radii, type } from '../theme/chalkline';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
+import { ink, chalk, flare, ice, semantic, space, radii, type } from '../theme/chalkline';
 import { TickLabel, Button, Meter, fairnessColor, Icon, Badge } from './chalkline';
 import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
@@ -25,6 +25,13 @@ interface Props {
   // feature render exactly as before.
   untouchableIds?: ReadonlySet<string>;
   onToggleUntouchable?: (player: Player) => void;
+  // Player-swap (feedback #86): when set, every player row gets a swap
+  // affordance that opens the replacement picker (swipe deck only —
+  // MatchesScreen doesn't pass it, so match cards render exactly as
+  // before). `repricing` shows a small in-flight indicator while an
+  // edited card's /api/trade/evaluate round-trip re-prices the package.
+  onSwapPlayer?: (player: Player, side: 'give' | 'receive') => void;
+  repricing?: boolean;
 }
 
 // Shared rendering for generated trades (TradesScreen swipe deck) and
@@ -39,6 +46,8 @@ function TradeCardComp({
   showSend = false,
   untouchableIds,
   onToggleUntouchable,
+  onSwapPlayer,
+  repricing = false,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
   // `fairness` is always serialized by the v2 backend (fairness_score),
@@ -76,6 +85,24 @@ function TradeCardComp({
   // the chip entirely rather than guessing.
   const hasOpponentConfidence = typeof data.real_opponent === 'boolean';
 
+  // Player-swap affordance (feedback #86) — 28px icon button per player
+  // row (Chalkline icon-button construction: square radius, 1px border;
+  // hitSlop lifts the touch target to ~44px). Rendered via PlayerCard's
+  // rightSlot; on the give side it shares the slot with the UNTOUCHABLE
+  // badge so both features co-exist.
+  const swapSlot = (p: Player, side: 'give' | 'receive') =>
+    onSwapPlayer ? (
+      <Pressable
+        hitSlop={8}
+        onPress={() => onSwapPlayer(p, side)}
+        accessibilityRole="button"
+        accessibilityLabel={`Swap ${p.name} for another player`}
+        style={({ pressed }) => [styles.swapBtn, pressed && styles.swapBtnPressed]}
+      >
+        <Icon name="swap" size={14} color={chalk.dim} />
+      </Pressable>
+    ) : null;
+
   return (
     <View style={styles.card}>
       {/* Likes-you pill — counterparty already liked the mirror of this
@@ -109,6 +136,10 @@ function TradeCardComp({
             )}
           </View>
         </View>
+        {/* Player-swap (feedback #86): the user modified this package, so
+            the engine's original numbers no longer describe it. Flare =
+            informational accent (ADR-005). */}
+        {data.edited && <Badge label="EDITED" color={flare.base} colorText />}
       </View>
 
       {/* Consensus basis — subtle label so users know this card isn't
@@ -123,7 +154,10 @@ function TradeCardComp({
         </View>
       )}
 
-      <StrengthBar value={matchPct} label="Match strength" />
+      {/* Match strength was computed for the ORIGINAL package; after a
+          player swap it's stale, so edited cards hide it and lean on the
+          re-priced fairness meter below. */}
+      {!data.edited && <StrengthBar value={matchPct} label="Match strength" />}
 
       <View style={styles.split}>
         <View style={styles.side}>
@@ -138,9 +172,14 @@ function TradeCardComp({
                   onToggleUntouchable ? () => onToggleUntouchable(p) : undefined
                 }
                 rightSlot={
-                  untouchableIds?.has(p.id)
-                    ? <Badge label="UNTOUCHABLE" color={flare.base} />
-                    : undefined
+                  untouchableIds?.has(p.id) || onSwapPlayer ? (
+                    <View style={styles.rightSlotRow}>
+                      {untouchableIds?.has(p.id) ? (
+                        <Badge label="UNTOUCHABLE" color={flare.base} />
+                      ) : null}
+                      {swapSlot(p, 'give')}
+                    </View>
+                  ) : undefined
                 }
               />
             ))}
@@ -156,7 +195,12 @@ function TradeCardComp({
           <TickLabel>YOU GET</TickLabel>
           <View style={styles.sideStack}>
             {receivePlayers.map((p) => (
-              <PlayerCard key={p.id} player={p} compact />
+              <PlayerCard
+                key={p.id}
+                player={p}
+                compact
+                rightSlot={swapSlot(p, 'receive') ?? undefined}
+              />
             ))}
           </View>
           {sweetenerSide === 'receive' && sweetenerPlayer && (
@@ -174,6 +218,15 @@ function TradeCardComp({
           label="Fairness"
           showPercent
         />
+      )}
+
+      {/* Edited-card re-price in flight — the fairness meter above is
+          hidden (fairness cleared on swap) until fresh numbers land. */}
+      {repricing && (
+        <View style={styles.repricingRow}>
+          <ActivityIndicator size="small" color={ice.base} />
+          <Text style={type.bodySm}>Re-pricing…</Text>
+        </View>
       )}
 
       {/* Human-readable reasons (flag trade_math.human_explanations is ON).
@@ -312,4 +365,30 @@ const styles = StyleSheet.create({
   },
   actionBtn: { flex: 1 },
   sendRow: { marginTop: space.sm },
+
+  // Player-swap (feedback #86) — per-row icon button + shared rightSlot
+  // row (swap button beside the UNTOUCHABLE badge on give-side rows).
+  rightSlotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+  },
+  swapBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: radii.xs,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: ink.ink1,
+  },
+  swapBtnPressed: {
+    backgroundColor: ink.ink3,
+  },
+  repricingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
 });

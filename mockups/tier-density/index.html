@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB #58 — Tier tile density mockups</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#3D4654;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --flare:#F0508C;
+    --tier-elite:#f59e0b; --tier-starter:#22c55e; --tier-solid:#3b82f6;
+    --tier-depth:#a855f7; --tier-bench:#7a7f96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;justify-content:center;
+       padding:32px 16px 64px}
+  .wrap{max-width:680px;width:100%}
+  h1{font-family:var(--cond);font-weight:700;font-size:30px;line-height:1.1;
+     letter-spacing:.02em;text-transform:uppercase;margin:0 0 8px;display:flex;
+     align-items:center;gap:12px}
+  h1::before{content:"";width:18px;height:3px;background:var(--ice);flex:none}
+  .sub{font-size:13px;line-height:1.6;color:var(--chalk-dim);margin:0 0 24px}
+  .sub strong{color:var(--chalk)}
+
+  a.card{display:block;background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+         padding:16px 20px;margin-bottom:12px;text-decoration:none;color:var(--chalk)}
+  a.card:hover{border-color:var(--line-strong);background:var(--ink-2)}
+  .card h2{font-family:var(--cond);font-weight:600;font-size:20px;letter-spacing:.03em;
+           text-transform:uppercase;margin:0 0 4px;display:flex;align-items:baseline;gap:10px}
+  .card h2 .m{font:600 13px var(--mono);color:var(--ice)}
+  .card p{margin:0;font-size:13px;line-height:1.5;color:var(--chalk-dim)}
+
+  table{width:100%;border-collapse:collapse;margin-top:24px;font-size:12px}
+  caption{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+          color:var(--chalk-dim);text-align:left;padding-bottom:8px}
+  th{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+     color:var(--chalk-dim);text-align:left;padding:6px 10px;border-bottom:1px solid var(--line-strong)}
+  td{padding:7px 10px;border-bottom:1px solid var(--line);color:var(--chalk);
+     font-variant-numeric:tabular-nums}
+  td.n{font-family:var(--mono);font-size:12px}
+  td.dim{color:var(--chalk-dim)}
+  .swatches{display:flex;gap:8px;margin-top:24px;align-items:center;flex-wrap:wrap}
+  .sw{display:flex;align-items:center;gap:5px;font:500 11px var(--mono);color:var(--chalk-dim)}
+  .sw i{width:12px;height:12px;border-radius:2px;display:inline-block}
+  .foot{margin-top:24px;font-size:12px;line-height:1.6;color:var(--chalk-faint)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Tier tile density &mdash; FB #58</h1>
+  <p class="sub">Offline design mockups answering TestFlight feedback #58 (&ldquo;our tiles are too
+  big&rdquo;), calibrated against the owner's reference screenshots (KTC-style ~50px single-line
+  rows). All three render the same Tiers-screen fragment &mdash; Elite + Starter QB bins, sticky
+  tier banner, FB-90 tier-step chevrons &mdash; in a 390&times;844 iPhone frame with Chalkline
+  tokens and the canonical tier hexes. Compact and cozy also fold in <strong>#53</strong>
+  (positional rank prominent) and <strong>#54</strong> (0&ndash;10k value scale) via the reference
+  app's right-edge &ldquo;value (QB2)&rdquo; treatment.</p>
+
+  <a class="card" href="compact.html">
+    <h2>1 &middot; Compact <span class="m">50px rows</span></h2>
+    <p>Closest to the reference app: single-line rows with tiny monogram, name + team left,
+    &ldquo;QB1&nbsp;&middot;&nbsp;9,650&rdquo; right, chevrons collapsed behind a stacked-chevron
+    popover affordance. ~10 rows per screen (vs ~4 today); drops the per-tile tier badge and
+    trend strip.</p>
+  </a>
+
+  <a class="card" href="cozy.html">
+    <h2>2 &middot; Cozy <span class="m">60px rows</span></h2>
+    <p>Middle ground: two-line rows keeping the TierChalkBadge and a tightened TileStats 30d
+    trend, with explicit side-by-side chevrons (44pt effective &mdash; better than today's 40pt).
+    ~8 rows per screen.</p>
+  </a>
+
+  <a class="card" href="current-tightened.html">
+    <h2>3 &middot; Current, tightened &minus;20% <span class="m">&asymp;92px rows</span></h2>
+    <p>Comparison honesty: today's exact tile anatomy (badge row, name, meta, stats strip,
+    stacked chevrons) with padding/type reduced ~20% and nothing dropped. Only ~5 rows per
+    screen &mdash; the case that #58 needs a re-layout, not just smaller numbers.</p>
+  </a>
+
+  <table>
+    <caption>At a glance (board viewport &asymp;585pt after chrome + save bar)</caption>
+    <tr><th>Variant</th><th>Row pitch</th><th>Player rows / screen</th><th>Trend strip</th><th>Tier badge on tile</th><th>Chevron target</th></tr>
+    <tr><td>Today (v1.2.0)</td><td class="n">&asymp;118&ndash;122px</td><td class="n">~4</td><td class="dim">yes</td><td class="dim">yes</td><td class="n dim">40pt (stacked+hitSlop)</td></tr>
+    <tr><td>Compact</td><td class="n">54px</td><td class="n">~10</td><td class="dim">no (dropped)</td><td class="dim">no &mdash; headers/banner only</td><td class="n">44pt+ (row-height hit area)</td></tr>
+    <tr><td>Cozy</td><td class="n">64px</td><td class="n">~8</td><td class="dim">yes (tightened)</td><td class="dim">yes</td><td class="n">44pt (side-by-side)</td></tr>
+    <tr><td>Current &minus;20%</td><td class="n">&asymp;92px</td><td class="n">~5</td><td class="dim">yes</td><td class="dim">yes</td><td class="n dim">40pt (unchanged)</td></tr>
+  </table>
+
+  <div class="swatches">
+    <span class="sw"><i style="background:var(--tier-elite)"></i>Elite #f59e0b</span>
+    <span class="sw"><i style="background:var(--tier-starter)"></i>Starter #22c55e</span>
+    <span class="sw"><i style="background:var(--tier-solid)"></i>Solid #3b82f6</span>
+    <span class="sw"><i style="background:var(--tier-depth)"></i>Depth #a855f7</span>
+    <span class="sw"><i style="background:var(--tier-bench)"></i>Bench #7a7f96</span>
+  </div>
+
+  <p class="foot">Reference-app ideas adopted: dense single-line row grammar &middot; right-edge
+  value + positional rank &middot; group-header aggregates (count + summed value) &middot; tiny
+  avatar slot. Rejected as off-brand: light theme, red filled header bars (tier tick-labels on a
+  hairline instead), circular avatars (Chalkline radius rule &mdash; squared to 2px), team-color
+  chips. Values shown are illustrative 0&ndash;10k <span style="font-family:var(--mono)">elo_to_value</span>
+  numbers, not live data. Self-contained files, zero external requests; Chalkline fonts render
+  when installed locally, otherwise system fallbacks.</p>
+</div>
+</body>
+</html>

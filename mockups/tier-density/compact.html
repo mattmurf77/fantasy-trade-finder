@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tier density mockup — Compact (50px rows)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ─────────
+     Tier hexes are the CANONICAL values from docs/cross-client-invariants.md.
+     Fonts render as Barlow Condensed / Archivo / IBM Plex Mono when installed;
+     offline fallbacks are Arial Narrow / Helvetica / Menlo (no external requests). */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#3D4654;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --on-ice:#071013;    --flare:#F0508C;
+    --pos-up:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --tier-elite:#f59e0b; --tier-starter:#22c55e; --tier-solid:#3b82f6;
+    --tier-depth:#a855f7; --tier-bench:#7a7f96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+    --shadow-sheet:0 12px 32px rgba(0,0,0,.55);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:24px 16px 64px}
+
+  /* ── Mockup header note ── */
+  .note{max-width:640px;width:100%;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:8px;padding:16px 20px;margin-bottom:24px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.1;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note ul{margin:0;padding-left:18px;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .note li{margin-bottom:4px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note a{color:var(--ice);text-decoration:none;font-size:12px}
+  .note .back{display:inline-block;margin-bottom:10px}
+
+  /* ── iPhone frame (390 × 844 pt, content clipped at the fold) ── */
+  .phone{position:relative;width:390px;height:844px;background:var(--ink-0);
+         border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;flex:none}
+  .statusbar{height:44px;display:flex;align-items:flex-end;justify-content:space-between;
+             padding:0 20px 6px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)}
+  .batt{display:inline-block;width:20px;height:10px;border:1px solid var(--chalk-dim);
+        border-radius:2px;position:relative}
+  .batt::after{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:70%;
+               background:var(--chalk-dim)}
+  .titlerow{display:flex;align-items:center;justify-content:space-between;padding:6px 16px 4px}
+  .title{font-family:var(--cond);font-weight:600;font-size:22px;letter-spacing:.03em;
+         text-transform:uppercase}
+  .btn-sec{height:32px;padding:0 12px;border:1px solid var(--line-strong);border-radius:4px;
+           color:var(--chalk);font:600 12px var(--ui);display:flex;align-items:center}
+  .tabs{display:flex;margin:4px 16px 8px;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:4px;overflow:hidden}
+  .tab{flex:1;min-height:40px;display:flex;align-items:center;justify-content:center;
+       font:600 11px var(--ui);letter-spacing:.08em;color:var(--chalk-dim);
+       border-bottom:2px solid transparent}
+  .tab.active{background:var(--ink-3);color:var(--chalk);border-bottom-color:var(--qb)}
+
+  /* Sticky tier banner (FB4-63) — topmost visible tier */
+  .sticky{display:flex;align-items:center;justify-content:space-between;margin:0 16px 8px;
+          padding:7px 12px;border:1px solid var(--line);border-left:4px solid var(--tier-elite);
+          border-radius:8px;background:var(--ink-1)}
+  .sticky .lab{font:800 13px var(--ui);letter-spacing:.4px;color:var(--tier-elite)}
+  .sticky .cnt{font:500 12px var(--mono);color:var(--chalk-dim)}
+
+  .board{padding:0 16px}
+
+  /* Tier group header — carries count + summed 0–10k value (reference-app
+     aggregate idea, restyled: tick label on a hairline, NOT a filled bar). */
+  .tierhead{display:flex;align-items:center;gap:8px;padding:10px 0 6px;
+            border-bottom:1px solid var(--line);margin-bottom:6px}
+  .tierhead .tick{width:14px;height:3px;flex:none}
+  .tierhead .tname{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase}
+  .tierhead .tcount{font:500 12px var(--mono);color:var(--chalk-dim)}
+  .tierhead .tsum{margin-left:auto;font:500 12px var(--mono);color:var(--chalk-dim)}
+  .t-elite .tick{background:var(--tier-elite)}   .t-elite .tname{color:var(--tier-elite)}
+  .t-starter .tick{background:var(--tier-starter)} .t-starter .tname{color:var(--tier-starter)}
+
+  /* ── COMPACT ROW — 50px, single line ── */
+  .row{position:relative;display:flex;align-items:center;height:50px;background:var(--ink-1);
+       border:1px solid var(--line);border-radius:8px;margin-bottom:4px;overflow:visible}
+  .rail{width:3px;align-self:stretch;background:var(--qb);border-radius:8px 0 0 8px;flex:none}
+  .ava{width:22px;height:22px;border-radius:2px;background:var(--ink-3);color:var(--chalk-dim);
+       font:600 9px var(--mono);display:flex;align-items:center;justify-content:center;
+       margin:0 8px;flex:none}
+  .who{flex:1;min-width:0;display:flex;align-items:baseline;gap:6px}
+  .nm{font:600 14px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+      text-overflow:ellipsis}
+  .tm{font:400 11px var(--ui);color:var(--chalk-dim);flex:none}
+  .tag{font:600 9px var(--ui);letter-spacing:.06em;padding:1px 3px;border:1px solid;
+       border-radius:2px;flex:none}
+  .tag.rk{color:var(--flare);border-color:var(--flare)}
+  .tag.q{color:var(--warn);border-color:var(--warn)}
+  /* #53/#54 — positional rank PROMINENT (position color), 0–10k value secondary */
+  .valblock{display:flex;align-items:baseline;gap:6px;margin:0 2px 0 8px;flex:none}
+  .pr{font:600 13px var(--mono);color:var(--qb);font-variant-numeric:tabular-nums}
+  .val{font:500 12px var(--mono);color:var(--chalk-dim);font-variant-numeric:tabular-nums}
+  /* FB-90 collapsed affordance — stacked chevrons; visual 28×36, hit area
+     spans the full 50px row height × 44pt width via hitSlop */
+  .aff{width:28px;height:36px;display:flex;align-items:center;justify-content:center;
+       color:var(--chalk-faint);border-radius:4px;margin-right:4px;flex:none}
+  .chev{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;
+        stroke-linecap:square}
+
+  /* FB-90 revealed state — tier-step popover (sheet construction) */
+  .pop{position:absolute;right:34px;top:46px;z-index:5;background:var(--ink-2);
+       border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow-sheet);
+       display:flex;overflow:hidden}
+  .pbtn{display:flex;align-items:center;gap:6px;height:44px;padding:0 14px;
+        color:var(--chalk);font:600 12px var(--ui);white-space:nowrap}
+  .pbtn + .pbtn{border-left:1px solid var(--line)}
+  .pbtn.dis{opacity:.45}
+  .row.open{border-color:var(--ice)}
+
+  .savebar{position:absolute;left:0;right:0;bottom:0;padding:12px 16px;background:var(--ink-0);
+           border-top:1px solid var(--line)}
+  .savebtn{height:48px;border-radius:4px;background:var(--ice);color:var(--on-ice);
+           display:flex;align-items:center;justify-content:center;font:600 14px var(--ui)}
+
+  .cap{width:390px;margin-top:12px;font:400 12px/1.5 var(--ui);color:var(--chalk-faint)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <a class="back" href="index.html">&larr; All density variants</a>
+  <h1>Compact &mdash; 50px single-line rows</h1>
+  <ul>
+    <li><strong>Row height: 50px</strong> (+4px gap = 54px pitch). Roughly <strong>10 player rows per screen</strong> vs ~4 today (~118&ndash;122px rows). Closest to the reference app's ~50px rows.</li>
+    <li><strong>Shown:</strong> 3px position rail &middot; 22px square monogram (headshot slot) &middot; name + team &middot; RK/injury micro-tags &middot; right edge = <strong>positional rank prominent</strong> (#53, position-colored mono) with the <strong>0&ndash;10k value</strong> secondary (#54) &mdash; the reference app's &ldquo;9,815&nbsp;(QB2)&rdquo; idea with the prominence inverted per #53.</li>
+    <li><strong>Dropped vs today:</strong> PositionChip + TierBadge on the tile (tier now carried only by group headers + sticky banner &mdash; a step back from #83/#84's per-tile tier signal), age/experience meta, 30d trend strip (TileStats). Tier group headers gain the reference-app aggregate: count + summed value.</li>
+    <li><strong>FB-90 chevrons:</strong> collapsed behind a stacked-chevron affordance (28&times;36 visual; hit area = full 50px row height &times; 44pt via hitSlop &mdash; meets HIG). Tap opens a tier-step popover with two 44pt actions; shown open on Drake Maye, where <em>Tier up</em> is disabled (clamped at Elite).</li>
+    <li><strong>Tradeoffs:</strong> row itself is 50px &gt; 44pt so tap/drag targets are fine, but the extra tap to reach tier-step is a real interaction cost; losing the trend strip removes the FB4-61 stat mode from this screen; circular avatars from the reference are squared to 2px radius (radius rule).</li>
+  </ul>
+</div>
+
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+  <div class="titlerow">
+    <div class="title">Positional Tiers</div>
+    <div class="btn-sec">Select</div>
+  </div>
+  <div class="tabs">
+    <div class="tab active">QB</div><div class="tab">RB</div><div class="tab">WR</div><div class="tab">TE</div>
+  </div>
+  <div class="sticky"><span class="lab">Elite</span><span class="cnt">4</span></div>
+
+  <div class="board">
+    <div class="tierhead t-elite">
+      <span class="tick"></span><span class="tname">Elite</span><span class="tcount">(4)</span>
+      <span class="tsum">36,960</span>
+    </div>
+
+    <div class="row">
+      <span class="rail"></span><span class="ava">JA</span>
+      <span class="who"><span class="nm">Josh Allen</span><span class="tm">BUF</span></span>
+      <span class="valblock"><span class="pr">QB1</span><span class="val">9,650</span></span>
+      <span class="aff"><svg class="chev" viewBox="0 0 16 16"><path d="M4.5 6.5 8 3l3.5 3.5M4.5 9.5 8 13l3.5-3.5"/></svg></span>
+    </div>
+    <div class="row">
+      <span class="rail"></span><span class="ava">JD</span>
+      <span class="who"><span class="nm">Jayden Daniels</span><span class="tm">WAS</span></span>
+      <span class="valblock"><span class="pr">QB2</span><span class="val">9,410</span></span>
+      <span class="aff"><svg class="chev" viewBox="0 0 16 16"><path d="M4.5 6.5 8 3l3.5 3.5M4.5 9.5 8 13l3.5-3.5"/></svg></span>
+    </div>
+    <div class="row open">
+      <span class="rail"></span><span class="ava">DM</span>
+      <span class="who"><span class="nm">Drake Maye</span><span class="tm">NE</span></span>
+      <span class="valblock"><span class="pr">QB3</span><span class="val">9,180</span></span>
+      <span class="aff" style="color:var(--ice)"><svg class="chev" viewBox="0 0 16 16"><path d="M4.5 6.5 8 3l3.5 3.5M4.5 9.5 8 13l3.5-3.5"/></svg></span>
+      <!-- FB-90 revealed tier-step popover: two 44pt actions; up clamped at Elite -->
+      <div class="pop">
+        <span class="pbtn dis"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg>Tier up</span>
+        <span class="pbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>Tier down</span>
+      </div>
+    </div>
+    <div class="row">
+      <span class="rail"></span><span class="ava">LJ</span>
+      <span class="who"><span class="nm">Lamar Jackson</span><span class="tm">BAL</span></span>
+      <span class="valblock"><span class="pr">QB4</span><span class="val">8,720</span></span>
+      <span class="aff"><svg class="chev" viewBox="0 0 16 16"><path d="M4.5 6.5 8 3l3.5 3.5M4.5 9.5 8 13l3.5-3.5"/></svg></span>
+    </div>
+
+    <div class="tierhead t-starter">
+      <span class="tick"></span><span class="tname">Starter</span><span class="tcount">(5)</span>
+      <span class="tsum">35,920</span>
+    </div>
+
+    <div class="row">
+      <span class="rail"></span><span class="ava">CW</span>
+      <span class="who"><span class="nm">Caleb Williams</span><span class="tm">CHI</span></span>
+      <span class="valblock"><span class="pr">QB5</span><span class="val">7,940</span></span>
+      <span class="aff"><svg class="chev" viewBox="0 0 16 16"><path d="M4.5 6.5 8 3l3.5 3.5M4.5 9.5 8 13l3.5-3.5"/></svg></span>
+    </div>
+    <div class="row">
+      <span class="rail"></span><span class="ava">JH</span>
+      <span class="who"><span class="nm">Jalen Hurts</span><span class="tm">PHI</span></span>
+      <span class="valblock"><span class="pr">QB6</span><span class="val">7,610</span></span>
+      <span class="aff"><svg class="chev" viewBox="0 0 16 16"><path d="M4.5 6.5 8 3l3.5 3.5M4.5 9.5 8 13l3.5-3.5"/></svg></span>
+    </div>
+    <div class="row">
+      <span class="rail"></span><span class="ava">PM</span>
+      <span class="who"><span class="nm">Patrick Mahomes</span><span class="tm">KC</span></span>
+      <span class="valblock"><span class="pr">QB7</span><span class="val">7,280</span></span>
+      <span class="aff"><svg class="chev" viewBox="0 0 16 16"><path d="M4.5 6.5 8 3l3.5 3.5M4.5 9.5 8 13l3.5-3.5"/></svg></span>
+    </div>
+    <div class="row">
+      <span class="rail"></span><span class="ava">JH</span>
+      <span class="who"><span class="nm">Justin Herbert</span><span class="tm">LAC</span><span class="tag q">Q</span></span>
+      <span class="valblock"><span class="pr">QB8</span><span class="val">6,850</span></span>
+      <span class="aff"><svg class="chev" viewBox="0 0 16 16"><path d="M4.5 6.5 8 3l3.5 3.5M4.5 9.5 8 13l3.5-3.5"/></svg></span>
+    </div>
+    <div class="row">
+      <span class="rail"></span><span class="ava">BN</span>
+      <span class="who"><span class="nm">Bo Nix</span><span class="tm">DEN</span></span>
+      <span class="valblock"><span class="pr">QB9</span><span class="val">6,240</span></span>
+      <span class="aff"><svg class="chev" viewBox="0 0 16 16"><path d="M4.5 6.5 8 3l3.5 3.5M4.5 9.5 8 13l3.5-3.5"/></svg></span>
+    </div>
+  </div>
+
+  <div class="savebar"><div class="savebtn">Save QB tiers</div></div>
+</div>
+
+<p class="cap">Frame = iPhone 14/15 point grid (390&times;844). Content clips at the fold, so what's
+visible is one honest screenful. All 9 demo rows fit with room to spare &mdash; at this density a
+full QB board shows ~10 player rows + 2 tier headers per screen.</p>
+
+</body>
+</html>

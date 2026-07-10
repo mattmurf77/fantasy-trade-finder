@@ -103,6 +103,13 @@ export interface TradeCard {
   // trade. The player is ALREADY in give_players/receive_players — this
   // just identifies which one, so the UI can call it out.
   sweetener?: { playerId: string; side: 'give' | 'receive' };
+  // Player-swap (feedback #86): true when the user has replaced a player
+  // on this card via the swap sheet. Set client-side only (TradesScreen);
+  // the backend never returns it. Edited cards carry a derived trade_id
+  // (`<original>::edited`) so a like/flag records the MODIFIED package via
+  // the server's FB-46 context-reconstruction path instead of the original
+  // in-memory card.
+  edited?: boolean;
 }
 
 export interface TradeMatch {

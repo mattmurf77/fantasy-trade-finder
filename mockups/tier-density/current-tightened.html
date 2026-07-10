@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tier density mockup — Current layout, tightened ~20% (≈92px rows)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ─────────
+     Tier hexes are the CANONICAL values from docs/cross-client-invariants.md.
+     Fonts render as Barlow Condensed / Archivo / IBM Plex Mono when installed;
+     offline fallbacks are Arial Narrow / Helvetica / Menlo (no external requests). */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#3D4654;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --on-ice:#071013;    --flare:#F0508C;
+    --pos-up:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --tier-elite:#f59e0b; --tier-starter:#22c55e; --tier-solid:#3b82f6;
+    --tier-depth:#a855f7; --tier-bench:#7a7f96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:24px 16px 64px}
+
+  .note{max-width:640px;width:100%;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:8px;padding:16px 20px;margin-bottom:24px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.1;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note ul{margin:0;padding-left:18px;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .note li{margin-bottom:4px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note a{color:var(--ice);text-decoration:none;font-size:12px}
+  .note .back{display:inline-block;margin-bottom:10px}
+
+  .phone{position:relative;width:390px;height:844px;background:var(--ink-0);
+         border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;flex:none}
+  .statusbar{height:44px;display:flex;align-items:flex-end;justify-content:space-between;
+             padding:0 20px 6px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)}
+  .batt{display:inline-block;width:20px;height:10px;border:1px solid var(--chalk-dim);
+        border-radius:2px;position:relative}
+  .batt::after{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:70%;
+               background:var(--chalk-dim)}
+  .titlerow{display:flex;align-items:center;justify-content:space-between;padding:6px 16px 4px}
+  .title{font-family:var(--cond);font-weight:600;font-size:22px;letter-spacing:.03em;
+         text-transform:uppercase}
+  .btn-sec{height:32px;padding:0 12px;border:1px solid var(--line-strong);border-radius:4px;
+           color:var(--chalk);font:600 12px var(--ui);display:flex;align-items:center}
+  .tabs{display:flex;margin:4px 16px 8px;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:4px;overflow:hidden}
+  .tab{flex:1;min-height:40px;display:flex;align-items:center;justify-content:center;
+       font:600 11px var(--ui);letter-spacing:.08em;color:var(--chalk-dim);
+       border-bottom:2px solid transparent}
+  .tab.active{background:var(--ink-3);color:var(--chalk);border-bottom-color:var(--qb)}
+
+  .sticky{display:flex;align-items:center;justify-content:space-between;margin:0 16px 8px;
+          padding:7px 12px;border:1px solid var(--line);border-left:4px solid var(--tier-elite);
+          border-radius:8px;background:var(--ink-1)}
+  .sticky .lab{font:800 13px var(--ui);letter-spacing:.4px;color:var(--tier-elite)}
+  .sticky .cnt{font:500 12px var(--mono);color:var(--chalk-dim)}
+
+  .board{padding:0 16px}
+  .tierhead{display:flex;align-items:center;gap:8px;padding:10px 0 6px;
+            border-bottom:1px solid var(--line);margin-bottom:6px}
+  .tierhead .tick{width:14px;height:3px;flex:none}
+  .tierhead .tname{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase}
+  .tierhead .tcount{font:500 12px var(--mono);color:var(--chalk-dim)}
+  .t-elite .tick{background:var(--tier-elite)}     .t-elite .tname{color:var(--tier-elite)}
+  .t-starter .tick{background:var(--tier-starter)} .t-starter .tname{color:var(--tier-starter)}
+
+  /* ── CURRENT LAYOUT, −20% — today's tile anatomy, tightened ──
+     Today (PlayerCard compact + TileStats + chevron gutter): padding 12,
+     badge row ~18 + 8 gap, name 16/22, meta 13/18, stats strip below card
+     → ≈118–122px pitch. Here: padding 10, badges 13 + 5, name 13/17,
+     meta 11/15, stats 11 → ≈92px pitch. Chevrons NOT shrunk (touch floor). */
+  .rowwrap{display:flex;align-items:center;margin-bottom:3px}
+  .body{flex:1;min-width:0}
+  .card{position:relative;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:8px;padding:9px 10px 8px 12px;overflow:hidden}
+  .rail{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--qb)}
+  .badges{display:flex;gap:4px;margin-bottom:5px;flex-wrap:wrap}
+  .b{font:600 9px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+     padding:1px 4px;border:1px solid;border-radius:2px}
+  .b.pos{color:var(--qb);border-color:var(--qb)}
+  .b.t-el{color:var(--tier-elite);border-color:var(--tier-elite)}
+  .b.t-st{color:var(--tier-starter);border-color:var(--tier-starter)}
+  .b.q{color:var(--warn);border-color:var(--warn)}
+  .b.rk{color:var(--flare);border-color:var(--flare)}
+  .nm{font:600 13px/1.3 var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+      text-overflow:ellipsis}
+  .meta{font:400 11px/1.35 var(--ui);color:var(--chalk-dim);margin-top:2px}
+  /* TileStats strip — sits BELOW the card border, exactly like today */
+  .stats{display:flex;align-items:center;gap:4px;margin:3px 0 0 4px}
+  .srank{font:700 11px var(--ui);color:var(--chalk)}
+  .ssep{color:var(--line-strong);font-size:11px}
+  .strend{font:800 11px var(--mono);font-variant-numeric:tabular-nums}
+  .strend.up{color:var(--pos-up)} .strend.down{color:var(--neg)} .strend.flat{color:var(--chalk-dim)}
+  .slab{font:700 9px var(--ui);letter-spacing:.5px;color:var(--chalk-faint)}
+  /* FB-90 gutter — stacked 32×32, unchanged from today (shrinking these
+     would take the 40pt effective target even further below HIG 44pt) */
+  .steps{width:32px;margin-left:4px;display:flex;flex-direction:column;gap:4px;flex:none}
+  .sbtn{width:32px;height:32px;border-radius:4px;display:flex;align-items:center;
+        justify-content:center;color:var(--chalk-dim)}
+  .sbtn.dis{opacity:.45}
+  .chev{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;
+        stroke-linecap:square}
+
+  .savebar{position:absolute;left:0;right:0;bottom:0;padding:12px 16px;background:var(--ink-0);
+           border-top:1px solid var(--line)}
+  .savebtn{height:48px;border-radius:4px;background:var(--ice);color:var(--on-ice);
+           display:flex;align-items:center;justify-content:center;font:600 14px var(--ui)}
+  .cap{width:390px;margin-top:12px;font:400 12px/1.5 var(--ui);color:var(--chalk-faint)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <a class="back" href="index.html">&larr; All density variants</a>
+  <h1>Current layout, tightened &minus;20% &mdash; &asymp;92px rows</h1>
+  <ul>
+    <li><strong>Row pitch: &asymp;92px</strong> (vs &asymp;118&ndash;122px in v1.2.0 today). Roughly <strong>5 player rows per screen</strong> vs ~4 today. The honesty baseline: same anatomy, padding and type reduced ~20%, nothing restructured.</li>
+    <li><strong>Shown (unchanged from today):</strong> badge row (PositionChip + TierChalkBadge + injury/RK), name, team &middot; age meta, TileStats strip below the card (&ldquo;#3 &middot; &#9650;2 30D&rdquo;), FB-90 stacked chevron gutter, tier group headers, sticky banner. <strong>Nothing dropped</strong> &mdash; every current signal survives.</li>
+    <li><strong>Deliberately NOT folded in:</strong> the #53 positional-rank / #54 0&ndash;10k value display &mdash; this variant shows what a pure sizing pass buys without the row-content rework, so the comparison against compact/cozy is honest.</li>
+    <li><strong>Touch targets:</strong> chevrons stay 32&times;32 (shrinking them was off the table). Note: today's stacked chevrons with <code>hitSlop=4</code> are 40&times;40pt effective &mdash; already <em>below</em> the HIG 44pt floor; a &minus;20% pass doesn't fix that, and the tighter card gives even less slack around them. Card long-press/drag area stays &gt;44pt.</li>
+    <li><strong>Tradeoff:</strong> only ~1 extra row per screen for a visibly more cramped card &mdash; the badge row + two text lines + stats strip is structurally tall, so padding cuts hit a floor fast. This is the argument that #58 needs a re-layout (compact/cozy), not just smaller numbers.</li>
+  </ul>
+</div>
+
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+  <div class="titlerow">
+    <div class="title">Positional Tiers</div>
+    <div class="btn-sec">Select</div>
+  </div>
+  <div class="tabs">
+    <div class="tab active">QB</div><div class="tab">RB</div><div class="tab">WR</div><div class="tab">TE</div>
+  </div>
+  <div class="sticky"><span class="lab">Elite</span><span class="cnt">4</span></div>
+
+  <div class="board">
+    <div class="tierhead t-elite">
+      <span class="tick"></span><span class="tname">Elite</span><span class="tcount">(4)</span>
+    </div>
+
+    <div class="rowwrap">
+      <div class="body">
+        <div class="card"><span class="rail"></span>
+          <div class="badges"><span class="b pos">QB</span><span class="b t-el">Elite</span></div>
+          <div class="nm">Josh Allen</div>
+          <div class="meta">BUF &middot; 30 yo</div>
+        </div>
+        <div class="stats"><span class="srank">#1</span><span class="ssep">&middot;</span><span class="strend flat">&ndash;0</span><span class="slab">30D</span></div>
+      </div>
+      <div class="steps">
+        <span class="sbtn dis"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </div>
+    </div>
+
+    <div class="rowwrap">
+      <div class="body">
+        <div class="card"><span class="rail"></span>
+          <div class="badges"><span class="b pos">QB</span><span class="b t-el">Elite</span></div>
+          <div class="nm">Jayden Daniels</div>
+          <div class="meta">WAS &middot; 25 yo</div>
+        </div>
+        <div class="stats"><span class="srank">#2</span><span class="ssep">&middot;</span><span class="strend up">&#9650;1</span><span class="slab">30D</span></div>
+      </div>
+      <div class="steps">
+        <span class="sbtn dis"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </div>
+    </div>
+
+    <div class="rowwrap">
+      <div class="body">
+        <div class="card"><span class="rail"></span>
+          <div class="badges"><span class="b pos">QB</span><span class="b t-el">Elite</span></div>
+          <div class="nm">Drake Maye</div>
+          <div class="meta">NE &middot; 24 yo</div>
+        </div>
+        <div class="stats"><span class="srank">#3</span><span class="ssep">&middot;</span><span class="strend up">&#9650;3</span><span class="slab">30D</span></div>
+      </div>
+      <div class="steps">
+        <span class="sbtn dis"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </div>
+    </div>
+
+    <div class="rowwrap">
+      <div class="body">
+        <div class="card"><span class="rail"></span>
+          <div class="badges"><span class="b pos">QB</span><span class="b t-el">Elite</span></div>
+          <div class="nm">Lamar Jackson</div>
+          <div class="meta">BAL &middot; 29 yo</div>
+        </div>
+        <div class="stats"><span class="srank">#4</span><span class="ssep">&middot;</span><span class="strend down">&#9660;2</span><span class="slab">30D</span></div>
+      </div>
+      <div class="steps">
+        <span class="sbtn dis"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </div>
+    </div>
+
+    <div class="tierhead t-starter">
+      <span class="tick"></span><span class="tname">Starter</span><span class="tcount">(5)</span>
+    </div>
+
+    <div class="rowwrap">
+      <div class="body">
+        <div class="card"><span class="rail"></span>
+          <div class="badges"><span class="b pos">QB</span><span class="b t-st">Starter</span></div>
+          <div class="nm">Caleb Williams</div>
+          <div class="meta">CHI &middot; 24 yo</div>
+        </div>
+        <div class="stats"><span class="srank">#5</span><span class="ssep">&middot;</span><span class="strend up">&#9650;1</span><span class="slab">30D</span></div>
+      </div>
+      <div class="steps">
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </div>
+    </div>
+
+    <div class="rowwrap">
+      <div class="body">
+        <div class="card"><span class="rail"></span>
+          <div class="badges"><span class="b pos">QB</span><span class="b t-st">Starter</span></div>
+          <div class="nm">Jalen Hurts</div>
+          <div class="meta">PHI &middot; 27 yo</div>
+        </div>
+        <div class="stats"><span class="srank">#6</span><span class="ssep">&middot;</span><span class="strend down">&#9660;1</span><span class="slab">30D</span></div>
+      </div>
+      <div class="steps">
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </div>
+    </div>
+
+    <div class="rowwrap">
+      <div class="body">
+        <div class="card"><span class="rail"></span>
+          <div class="badges"><span class="b pos">QB</span><span class="b t-st">Starter</span></div>
+          <div class="nm">Patrick Mahomes</div>
+          <div class="meta">KC &middot; 30 yo</div>
+        </div>
+        <div class="stats"><span class="srank">#7</span><span class="ssep">&middot;</span><span class="strend down">&#9660;3</span><span class="slab">30D</span></div>
+      </div>
+      <div class="steps">
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </div>
+    </div>
+
+    <div class="rowwrap">
+      <div class="body">
+        <div class="card"><span class="rail"></span>
+          <div class="badges"><span class="b pos">QB</span><span class="b t-st">Starter</span><span class="b q">Q</span></div>
+          <div class="nm">Justin Herbert</div>
+          <div class="meta">LAC &middot; 28 yo</div>
+        </div>
+        <div class="stats"><span class="srank">#8</span><span class="ssep">&middot;</span><span class="strend flat">&ndash;0</span><span class="slab">30D</span></div>
+      </div>
+      <div class="steps">
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </div>
+    </div>
+
+    <div class="rowwrap">
+      <div class="body">
+        <div class="card"><span class="rail"></span>
+          <div class="badges"><span class="b pos">QB</span><span class="b t-st">Starter</span></div>
+          <div class="nm">Bo Nix</div>
+          <div class="meta">DEN &middot; 26 yo</div>
+        </div>
+        <div class="stats"><span class="srank">#9</span><span class="ssep">&middot;</span><span class="strend up">&#9650;2</span><span class="slab">30D</span></div>
+      </div>
+      <div class="steps">
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></svg></span>
+        <span class="sbtn"><svg class="chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="savebar"><div class="savebtn">Save QB tiers</div></div>
+</div>
+
+<p class="cap">Frame = iPhone 14/15 point grid (390&times;844). Content clips at the fold &mdash; one
+honest screenful. All 9 demo rows are in the markup, but even tightened 20% only ~5 player rows
++ 2 tier headers fit above the save bar &mdash; the rest clip below the fold. Today's untightened
+layout shows ~4.</p>
+
+</body>
+</html>

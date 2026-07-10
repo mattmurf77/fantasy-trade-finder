@@ -40,12 +40,14 @@ export type TradesRoute = 'TradesHome' | 'Portfolio' | 'TradeCalculator';
 // (when it worked) always landed on Trios rather than where the user came
 // from. Replace it with an always-enabled header-left control that resolves
 // to a defined destination every time: go back if there's history, otherwise
-// fall to Trios (the stack root / stable home). Never greyed, never dead.
-function RankHeaderBack({ navigation }: { navigation: any }) {
+// fall to the stack's stable home (`fallback`). Never greyed, never dead.
+// FB #79 generalized this beyond Rank: the Trades stack's Calculator screen
+// hit the same dead native back, so the fallback route is now a prop.
+function HeaderBack({ navigation, fallback }: { navigation: any; fallback: string }) {
   return (
     <Pressable
       onPress={() =>
-        navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Trios')
+        navigation.canGoBack() ? navigation.goBack() : navigation.navigate(fallback)
       }
       hitSlop={space.md}
       style={({ pressed }) => [styles.headerBack, pressed && { opacity: 0.6 }]}
@@ -77,15 +79,16 @@ const chalklineHeader = (title: string) => ({
   headerTintColor: chalk.base,
 });
 
-// Shared options for the three pushed Rank sub-screens: Chalkline header + the
-// custom always-on back control. Built from the per-screen options callback so
-// the live `navigation` object for that screen is captured — the native-stack
-// `headerLeft` render prop itself does NOT receive `navigation`, so closing
-// over it here is what makes the control act on the right screen.
-const rankSubScreenOptions = (title: string) =>
+// Shared options for pushed sub-screens: Chalkline header + the custom
+// always-on back control falling back to `fallback` (the stack's home route).
+// Built from the per-screen options callback so the live `navigation` object
+// for that screen is captured — the native-stack `headerLeft` render prop
+// itself does NOT receive `navigation`, so closing over it here is what makes
+// the control act on the right screen.
+const subScreenOptions = (title: string, fallback: string) =>
   ({ navigation }: { navigation: any }) => ({
     ...chalklineHeader(title),
-    headerLeft: () => <RankHeaderBack navigation={navigation} />,
+    headerLeft: () => <HeaderBack navigation={navigation} fallback={fallback} />,
   });
 
 function RankStackNav() {
@@ -95,17 +98,17 @@ function RankStackNav() {
       <RankStack.Screen
         name="Tiers"
         component={TiersScreen}
-        options={rankSubScreenOptions('Tiers')}
+        options={subScreenOptions('Tiers', 'Trios')}
       />
       <RankStack.Screen
         name="ManualRanks"
         component={ManualRanksScreen}
-        options={rankSubScreenOptions('Overall Ranks')}
+        options={subScreenOptions('Overall Ranks', 'Trios')}
       />
       <RankStack.Screen
         name="Trends"
         component={TrendsScreen}
-        options={rankSubScreenOptions('Trends')}
+        options={subScreenOptions('Trends', 'Trios')}
       />
     </RankStack.Navigator>
   );
@@ -123,7 +126,10 @@ function TradesStackNav() {
       <TradesStack.Screen
         name="TradeCalculator"
         component={TradeCalculatorScreen}
-        options={chalklineHeader('Calculator')}
+        // FB #79 — the native back control here was unreliable (greyed/dead),
+        // same failure #51/#52 fixed on the Rank sub-screens. Use the shared
+        // always-on back control, falling back to the Trades home screen.
+        options={subScreenOptions('Calculator', 'TradesHome')}
       />
     </TradesStack.Navigator>
   );
@@ -351,7 +357,7 @@ const styles = StyleSheet.create({
   // the tab's icon box so there's no clipping on the bottom bar.
   rankIconWrap: { flexDirection: 'row', alignItems: 'center', gap: 2 },
 
-  // #51/#52: always-on header back control for Rank sub-screens. Padded for a
+  // #51/#52: always-on header back control for pushed sub-screens. Padded for a
   // comfortable tap target; chevron + label in chalk so it reads as actionable
   // (never the greyed/disabled native arrow).
   headerBack: {
