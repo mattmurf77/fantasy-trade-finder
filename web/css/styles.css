@@ -2478,8 +2478,8 @@
       color: var(--muted);
       margin-top: 2px;
     }
-    .summary-card-value.pending  { color: #fb923c; }
-    .summary-card-value.accepted { color: var(--green); }
+    .summary-card-value.mutual   { color: var(--green); }
+    .summary-card-value.awaiting { color: #fb923c; }
 
     @media (max-width: 768px) {
       .summary-grid { grid-template-columns: repeat(2, 1fr); }

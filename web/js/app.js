@@ -4635,14 +4635,14 @@
       if (grid) {
         grid.innerHTML = `
           <div class="summary-card">
-            <div class="summary-card-value pending">${data.matches_pending || 0}</div>
-            <div class="summary-card-label">Matches Pending</div>
-            <div class="summary-card-sub">Waiting on a decision</div>
+            <div class="summary-card-value mutual">${data.matches_mutual || 0}</div>
+            <div class="summary-card-label">Mutual Matches</div>
+            <div class="summary-card-sub">Liked by both sides</div>
           </div>
           <div class="summary-card">
-            <div class="summary-card-value accepted">${data.matches_accepted || 0}</div>
-            <div class="summary-card-label">Matches Accepted</div>
-            <div class="summary-card-sub">Both sides agreed</div>
+            <div class="summary-card-value awaiting">${data.matches_awaiting || 0}</div>
+            <div class="summary-card-label">Awaiting Them</div>
+            <div class="summary-card-sub">Your like, waiting on theirs</div>
           </div>
           <div class="summary-card">
             <div class="summary-card-value">${(data.leaguemates_joined || 0) + 1} / ${(data.leaguemates_total || 0) + 1}</div>
