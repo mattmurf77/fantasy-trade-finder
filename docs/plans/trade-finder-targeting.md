@@ -54,5 +54,5 @@ What already exists and is reused:
 - [x] Decisions locked
 - [x] Phase A (2026-06-10 — A3 deferred, see above; tests in `test_finder_targeting.py`)
 - [x] Phase B (2026-06-10 — `pinned_receive_players` honored behind the flag; `partner_fit` serialized; pinned jobs bypass cache)
-- [ ] Phase C (web)
-- [ ] Phase C (mobile)
+- [x] Phase C (web) (2026-07-10 — picker direction toggle Trade away / Acquire; acquire mode lists leaguemates' valued players with @owner chips via rosters + league_users + `/api/trade/values`; `partner_fit` line on cards)
+- [x] Phase C (mobile) (2026-07-10 — Target-players section in TradesScreen's Find-a-Trade controls: direction toggle + PlayerPickerModal-based picker, removable SEND/GET chips, `pinned_give_players`/`pinned_receive_players` on generate; TradeCard renders the fit line. Flag `trade.finder_targeting` flipped on in `config/features.json`)

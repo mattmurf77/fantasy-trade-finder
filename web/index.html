@@ -569,13 +569,15 @@
         </div>
       </div>
 
-      <!-- Player Picker — select players to trade away (collapsed by default) -->
+      <!-- Player Picker — pin specific players to target (collapsed by default).
+           FB-47: with flag trade.finder_targeting on, a direction toggle adds
+           an Acquire mode that lists leaguemates' players. -->
       <div class="player-picker-section collapsed" id="player-picker-section" style="display:none">
         <div class="player-picker-header" onclick="togglePlayerPicker()">
           <div>
             <div class="player-picker-title">
               <span class="picker-chevron" id="picker-chevron">&#9654;</span>
-              Select players to trade away
+              <span id="picker-title-text">Select players to trade away</span>
               <span class="selected-count-badge" id="picker-count-badge" style="display:none">0</span>
             </div>
             <div class="player-picker-sub" id="picker-sub">Pick specific players from your roster, then hit Find a Trade</div>
@@ -583,6 +585,13 @@
           <button class="player-picker-clear" id="picker-clear-btn" onclick="event.stopPropagation(); clearPinnedPlayers()" style="display:none">Clear all</button>
         </div>
         <div class="player-picker-body" id="player-picker-body" style="display:none">
+          <!-- FB-47 direction toggle — hidden unless trade.finder_targeting is on -->
+          <div class="picker-direction-tabs" id="picker-direction-tabs" style="display:none">
+            <button class="picker-dir-tab active" id="picker-dir-give"
+                    onclick="setPickerDirection('give')">Trade away</button>
+            <button class="picker-dir-tab" id="picker-dir-receive"
+                    onclick="setPickerDirection('receive')">Acquire</button>
+          </div>
           <div class="player-picker-controls">
             <div class="player-picker-pos-filters" id="picker-pos-filters">
               <button class="picker-pos-tab active" onclick="filterPickerPos('ALL', this)">All</button>

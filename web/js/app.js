@@ -277,6 +277,11 @@
     let currentOutlook  = null; // team outlook for the active league (loaded from DB)
     let _myRoster       = [];   // player objects from session/init user_roster
     let _pinnedGivePlayers = new Set();  // player IDs the user wants to trade away
+    // FB-47 finder targeting (flag trade.finder_targeting): player IDs the
+    // user wants to ACQUIRE (leaguemates' players). Independent of the
+    // give set — the picker's direction toggle just selects which pool the
+    // chips show, so "move X to land Y" is expressible.
+    let _pinnedReceivePlayers = new Set();
     let _pickerPosFilter   = 'ALL';      // current position filter for the picker
 
     // ── Boot: check stored session ──────────────────────────────────
@@ -2928,13 +2933,120 @@
     // Map of player_id → ELO for sorting picker chips by value
     let _playerEloMap = {};
 
+    // ── FB-47 finder targeting: picker direction + leaguemate pool ──────
+    let _pickerDirection = 'give';          // 'give' | 'receive'
+    // Cached acquire pool: [{id, name, position, team, owner, value}],
+    // value-desc. Built lazily from rosters + league users + the consensus
+    // value list (/api/trade/values — same numbers the calculator shows).
+    let _leaguematePool = null;
+    let _leaguematePoolLeague = null;
+    let _leaguematePoolLoading = false;
+
+    function _targetingOn() {
+      return !!(window.FTF_FLAG && window.FTF_FLAG('trade.finder_targeting'));
+    }
+
+    function _activeDirectionSet() {
+      return _pickerDirection === 'receive' ? _pinnedReceivePlayers : _pinnedGivePlayers;
+    }
+
+    function setPickerDirection(dir) {
+      _pickerDirection = dir === 'receive' ? 'receive' : 'give';
+      const tabG = document.getElementById('picker-dir-give');
+      const tabR = document.getElementById('picker-dir-receive');
+      if (tabG) tabG.classList.toggle('active', _pickerDirection === 'give');
+      if (tabR) tabR.classList.toggle('active', _pickerDirection === 'receive');
+      const title = document.getElementById('picker-title-text');
+      const sub   = document.getElementById('picker-sub');
+      if (title) title.textContent = _pickerDirection === 'receive'
+        ? 'Select players to acquire'
+        : 'Select players to trade away';
+      if (sub) sub.textContent = _pickerDirection === 'receive'
+        ? "Pick leaguemates' players you want, then hit Find a Trade"
+        : 'Pick specific players from your roster, then hit Find a Trade';
+      if (_pickerDirection === 'receive') _ensureLeaguematePool();
+      renderPlayerPicker();
+    }
+
+    async function _ensureLeaguematePool() {
+      const leagueId = currentLeagueId;
+      if (!leagueId) return;
+      if (_leaguematePool && _leaguematePoolLeague === leagueId) return;
+      if (_leaguematePoolLoading) return;
+      // League changed under a stale pool — old pins point at rosters that
+      // don't exist here, so drop them along with the pool.
+      if (_leaguematePoolLeague && _leaguematePoolLeague !== leagueId) {
+        _pinnedReceivePlayers.clear();
+        _leaguematePool = null;
+      }
+      _leaguematePoolLoading = true;
+      renderPlayerPicker();                 // shows the loading hint
+      try {
+        let fmt = '1qb_ppr';
+        try {
+          const stored = localStorage.getItem('ftf_active_format');
+          if (stored === '1qb_ppr' || stored === 'sf_tep') fmt = stored;
+        } catch (_) { /* default */ }
+        const [rRes, uRes, vRes] = await Promise.all([
+          apiFetch(`/api/sleeper/rosters/${leagueId}`),
+          apiFetch(`/api/sleeper/league_users/${leagueId}`),
+          apiFetch(`/api/trade/values?scoring_format=${fmt}`),
+        ]);
+        const rosters = await rRes.json();
+        const users   = await uRes.json();
+        const values  = await vRes.json();
+        const nameByOwner = {};
+        for (const u of (users || [])) {
+          nameByOwner[u.user_id] = u.display_name || u.username || u.user_id;
+        }
+        const valueRow = {};
+        for (const row of (values && values.players) || []) valueRow[row.id] = row;
+        const pool = [];
+        for (const r of (rosters || [])) {
+          if (!r.owner_id || r.owner_id === currentUserId) continue;
+          for (const pid of (r.players || [])) {
+            const v = valueRow[pid];
+            if (!v) continue;               // unvalued (K/DST etc.) — skip
+            pool.push({
+              id:       pid,
+              name:     v.name,
+              position: (v.position || '?').toUpperCase(),
+              team:     v.team || 'FA',
+              owner:    nameByOwner[r.owner_id] || `Team ${r.roster_id}`,
+              value:    v.value || 0,
+            });
+          }
+        }
+        pool.sort((a, b) => b.value - a.value);
+        _leaguematePool = pool;
+        _leaguematePoolLeague = leagueId;
+      } catch (e) {
+        logDrawer.error(`Leaguemate pool fetch failed: ${e.message}`);
+        showToast('⚠️ Could not load leaguemate rosters');
+      } finally {
+        _leaguematePoolLoading = false;
+        renderPlayerPicker();
+      }
+    }
+
     function renderPlayerPicker() {
       const section = document.getElementById('player-picker-section');
       if (!section || !_myRoster.length) return;
       section.style.display = '';
 
+      // FB-47 — direction toggle only exists when the flag is on.
+      const dirTabs = document.getElementById('picker-direction-tabs');
+      if (dirTabs) dirTabs.style.display = _targetingOn() ? '' : 'none';
+      if (!_targetingOn() && _pickerDirection !== 'give') _pickerDirection = 'give';
+
       const chips = document.getElementById('picker-chips');
       if (!chips) return;
+
+      if (_pickerDirection === 'receive') {
+        _renderReceiveChips(chips);
+        _updatePickerBadge();
+        return;
+      }
 
       // Sort by ELO value descending (highest value first).
       // Falls back to search_rank if no ELO data available yet.
@@ -2965,17 +3077,41 @@
       _updatePickerBadge();
     }
 
+    // FB-47 — acquire-mode chips: every leaguemate's valued players, owner
+    // handle in the team slot so the user knows whose player they're pinning.
+    function _renderReceiveChips(chips) {
+      if (_leaguematePoolLoading || !_leaguematePool) {
+        chips.innerHTML = `<div class="picker-loading-hint">Loading leaguemate rosters…</div>`;
+        if (!_leaguematePoolLoading) _ensureLeaguematePool();
+        return;
+      }
+      const filtered = _pickerPosFilter === 'ALL'
+        ? _leaguematePool
+        : _leaguematePool.filter(p => p.position === _pickerPosFilter);
+      chips.innerHTML = filtered.map(p => {
+        const pos = (p.position || '?').toLowerCase();
+        const sel = _pinnedReceivePlayers.has(p.id) ? 'selected' : '';
+        return `<div class="player-chip ${sel}" onclick="togglePinnedPlayer('${p.id}')">
+          <span class="chip-check">${sel ? '✓' : ''}</span>
+          <span class="chip-pos ${pos}">${p.position}</span>
+          <span class="chip-name">${escapeHtml(p.name)}</span>
+          <span class="chip-team">@${escapeHtml(p.owner)}</span>
+        </div>`;
+      }).join('');
+    }
+
     function togglePinnedPlayer(playerId) {
-      if (_pinnedGivePlayers.has(playerId)) {
-        _pinnedGivePlayers.delete(playerId);
+      const set = _activeDirectionSet();
+      if (set.has(playerId)) {
+        set.delete(playerId);
       } else {
-        _pinnedGivePlayers.add(playerId);
+        set.add(playerId);
       }
       renderPlayerPicker();
     }
 
     function clearPinnedPlayers() {
-      _pinnedGivePlayers.clear();
+      _activeDirectionSet().clear();
       renderPlayerPicker();
     }
 
@@ -3016,22 +3152,30 @@
       const badge = document.getElementById('picker-count-badge');
       const clearBtn = document.getElementById('picker-clear-btn');
       const selectAllBtn = document.getElementById('picker-select-all-btn');
-      const count = _pinnedGivePlayers.size;
+      // Badge counts BOTH directions (they're sent together); the clear
+      // button scopes to the direction currently on screen.
+      const count = _pinnedGivePlayers.size + _pinnedReceivePlayers.size;
       if (badge) {
         badge.textContent = count;
         badge.style.display = count > 0 ? '' : 'none';
       }
       if (clearBtn) {
-        clearBtn.style.display = count > 0 ? '' : 'none';
+        clearBtn.style.display = _activeDirectionSet().size > 0 ? '' : 'none';
       }
       if (selectAllBtn) {
-        // Label flips between Select all / Clear all based on whether every
-        // currently visible (filter-respecting) player is already pinned.
-        const visible = _pickerVisiblePlayers();
-        const allSelected = visible.length > 0 && visible.every(p => _pinnedGivePlayers.has(p.id));
-        selectAllBtn.textContent = allSelected ? 'Clear all' : 'Select all';
-        selectAllBtn.classList.toggle('all-selected', allSelected);
-        selectAllBtn.disabled = visible.length === 0;
+        // Give mode only — "select all leaguemate players" is meaningless.
+        if (_pickerDirection === 'receive') {
+          selectAllBtn.style.display = 'none';
+        } else {
+          selectAllBtn.style.display = '';
+          // Label flips between Select all / Clear all based on whether every
+          // currently visible (filter-respecting) player is already pinned.
+          const visible = _pickerVisiblePlayers();
+          const allSelected = visible.length > 0 && visible.every(p => _pinnedGivePlayers.has(p.id));
+          selectAllBtn.textContent = allSelected ? 'Clear all' : 'Select all';
+          selectAllBtn.classList.toggle('all-selected', allSelected);
+          selectAllBtn.disabled = visible.length === 0;
+        }
       }
     }
 
@@ -3045,12 +3189,22 @@
       const leagueId         = currentLeagueId || 'league_demo';
       const fairnessThreshold = getFairnessThreshold();
       const pinnedGive       = [..._pinnedGivePlayers];
+      // FB-47 — acquire pins ride along when the flag is on and the pins
+      // belong to THIS league (the pool cache is league-keyed; a mismatch
+      // means stale pins from a previous league).
+      const pinnedReceive    = (_targetingOn() && _leaguematePoolLeague === leagueId)
+        ? [..._pinnedReceivePlayers]
+        : [];
 
       try {
         const payload = { league_id: leagueId, fairness_threshold: fairnessThreshold };
         if (pinnedGive.length > 0) {
           payload.pinned_give_players = pinnedGive;
           logDrawer.info(`Pinned ${pinnedGive.length} player(s) to trade away`);
+        }
+        if (pinnedReceive.length > 0) {
+          payload.pinned_receive_players = pinnedReceive;
+          logDrawer.info(`Pinned ${pinnedReceive.length} player(s) to acquire`);
         }
         const res  = await apiFetch('/api/trades/generate', {
           method:  'POST',
@@ -3089,7 +3243,8 @@
           return;
         }
 
-        const pinnedLabel = pinnedGive.length > 0 ? ` for ${pinnedGive.length} pinned player(s)` : '';
+        const pinnedTotal = pinnedGive.length + pinnedReceive.length;
+        const pinnedLabel = pinnedTotal > 0 ? ` for ${pinnedTotal} pinned player(s)` : '';
         showToast(`✅ Found ${cards.length} trade ideas${pinnedLabel}`);
         renderTrades(cards);
         updateLikedBadge();
@@ -3171,6 +3326,34 @@
         if (!cards.error) renderTrades(cards);
         updateLikedBadge();
       } catch {}
+    }
+
+    // FB-47 — partner-fit copy. `partner_fit` is a 0–1 scalar (exact depth
+    // counts aren't serialized), so the line is a calibrated tier label —
+    // sharpened to name the position when the card's match_context confirms
+    // the opponent is surplus-deep at a position the user is acquiring.
+    // Mirrors mobile's partnerFitLine (TradeCard.tsx).
+    function _partnerFitLine(card) {
+      const fit = card.partner_fit;
+      const surplus = (card.match_context && Array.isArray(card.match_context.opponent_surplus))
+        ? card.match_context.opponent_surplus
+        : [];
+      let hit = null;
+      if (_leaguematePool && _pinnedReceivePlayers.size > 0 && surplus.length > 0) {
+        for (const row of _leaguematePool) {
+          if (_pinnedReceivePlayers.has(row.id) && surplus.includes(row.position)) {
+            hit = row.position;
+            break;
+          }
+        }
+      }
+      if (fit >= 0.65) {
+        return hit
+          ? `They're deep at ${hit} — a natural seller`
+          : 'Strong fit for your targets';
+      }
+      if (fit >= 0.35) return 'Decent fit for your targets';
+      return 'Weak fit for your targets';
     }
 
     function renderTrades(cards) {
@@ -3279,6 +3462,14 @@
           }
         }
 
+        // FB-47 — partner-fit line. The backend serializes `partner_fit`
+        // (0–1) only when trade.finder_targeting is on AND the user
+        // expressed targets; the line explains why this counterparty ranks
+        // where they do in the deck (order is already fit-aware).
+        const fitHTML = typeof card.partner_fit === 'number'
+          ? `<div class="trade-fit-line">${escapeHtml(_partnerFitLine(card))}</div>`
+          : '';
+
         // Agent A8 — human-readable trade explanations (flag-gated).
         // Render only when the flag is on AND the backend supplied reasons.
         let reasonsHTML = '';
@@ -3296,6 +3487,7 @@
             <span>vs <span class="trade-league">${escapeHtml(card.target_username)}</span>${dataTag}${consensusTag}</span>
             <span class="score-pill">Match score ${score}</span>
           </div>
+          ${fitHTML}
           <div class="trade-sides">
             <div class="trade-side give">
               <div class="trade-side-label">You give</div>

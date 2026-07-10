@@ -44,7 +44,7 @@
   "trade_engine.v3":                 true,
   "trade.three_team":                false,
 
-  "trade.finder_targeting":          false,
+  "trade.finder_targeting":          true,
   "trade.need_fit":                  true,
   "trade.outlook_infer":             false,
   "trade.preference_lists":          true,

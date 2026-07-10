@@ -32,6 +32,32 @@ interface Props {
   // edited card's /api/trade/evaluate round-trip re-prices the package.
   onSwapPlayer?: (player: Player, side: 'give' | 'receive') => void;
   repricing?: boolean;
+  // FB-47 finder targeting: positions the user is trying to ACQUIRE
+  // (pinned targets + saved acquire prefs). Used only to sharpen the
+  // partner-fit line's copy ("They're deep at WR"); the line itself
+  // renders whenever the card carries `partner_fit`.
+  fitTargetPositions?: string[];
+}
+
+// FB-47 — partner-fit line copy. `partner_fit` is a 0–1 scalar; the exact
+// depth count behind it isn't serialized, so the copy is a calibrated tier
+// label — sharpened to name the position when the card's match_context
+// confirms the opponent is surplus-deep at a position the user targets.
+export function partnerFitLine(
+  fit: number,
+  opponentSurplus?: string[],
+  targetPositions?: string[],
+): string {
+  const hit = (targetPositions ?? []).find((pos) =>
+    (opponentSurplus ?? []).includes(pos),
+  );
+  if (fit >= 0.65) {
+    return hit
+      ? `They're deep at ${hit} — a natural seller`
+      : 'Strong fit for your targets';
+  }
+  if (fit >= 0.35) return 'Decent fit for your targets';
+  return 'Weak fit for your targets';
 }
 
 // Shared rendering for generated trades (TradesScreen swipe deck) and
@@ -48,6 +74,7 @@ function TradeCardComp({
   onToggleUntouchable,
   onSwapPlayer,
   repricing = false,
+  fitTargetPositions,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
   // `fairness` is always serialized by the v2 backend (fairness_score),
@@ -84,6 +111,17 @@ function TradeCardComp({
   // explicitly returned the field. Undefined = legacy/static path, hide
   // the chip entirely rather than guessing.
   const hasOpponentConfidence = typeof data.real_opponent === 'boolean';
+  // FB-47 — partner-fit line, only when the engine stamped a fit score
+  // (flag on + user expressed targets). One short line; the deck order
+  // already reflects fit server-side, this just explains it.
+  const fitLine =
+    typeof data.partner_fit === 'number'
+      ? partnerFitLine(
+          data.partner_fit,
+          data.match_context?.opponent_surplus,
+          fitTargetPositions,
+        )
+      : null;
 
   // Player-swap affordance (feedback #86) — 28px icon button per player
   // row (Chalkline icon-button construction: square radius, 1px border;
@@ -141,6 +179,15 @@ function TradeCardComp({
             informational accent (ADR-005). */}
         {data.edited && <Badge label="EDITED" color={flare.base} colorText />}
       </View>
+
+      {/* FB-47 — partner-fit line. Muted, hint-tier: it narrates why this
+          counterparty ranks where they do in the deck, nothing more. */}
+      {fitLine && (
+        <View style={styles.fitRow}>
+          <View style={styles.fitDot} />
+          <Text style={type.bodySm}>{fitLine}</Text>
+        </View>
+      )}
 
       {/* Consensus basis — subtle label so users know this card isn't
           built on real ranking disagreement. No tooltip pattern in the
@@ -311,6 +358,19 @@ const styles = StyleSheet.create({
   likesYouText: { color: chalk.base },
   // Consensus-basis note: deliberately muted — it's a caveat, not a sell.
   consensusNote: { gap: space.xs },
+  // FB-47 partner-fit line: hint-tier row — 6px hollow square marker (same
+  // construction as the est. opponent dot) + muted body text.
+  fitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
+  fitDot: {
+    width: 6,
+    height: 6,
+    borderWidth: 1,
+    borderColor: chalk.dim,
+  },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',

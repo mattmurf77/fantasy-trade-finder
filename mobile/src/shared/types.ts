@@ -116,6 +116,18 @@ export interface TradeCard {
   // the server's FB-46 context-reconstruction path instead of the original
   // in-memory card.
   edited?: boolean;
+  // FB-47 finder targeting (flag trade.finder_targeting): counterparty
+  // positional fit for the user's stated targets, 0–1. Serialized only
+  // when the flag is on AND the user expressed targets; drives the fit
+  // line on cards (deck order is already fit-aware server-side).
+  partner_fit?: number;
+  // Structured "why this match" context stamped on every v2 card
+  // (server.py trade_card_to_dict → match_context). Only the fields the
+  // client reads are typed; extend as needed.
+  match_context?: {
+    user_needs?: string[];
+    opponent_surplus?: string[];
+  };
 }
 
 export interface TradeMatch {

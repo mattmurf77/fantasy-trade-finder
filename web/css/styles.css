@@ -905,6 +905,22 @@
       font-style: italic;
     }
 
+    /* FB-47 — partner-fit line: hint-tier, hollow square marker + muted text. */
+    .trade-fit-line {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .trade-fit-line::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border: 1px solid var(--muted);
+      flex: none;
+    }
+
     .trade-sides {
       display: flex;
       align-items: center;
@@ -2299,6 +2315,32 @@
     }
     .picker-pos-tab:hover { color: var(--text); border-color: var(--text); }
     .picker-pos-tab.active { color: var(--text); border-color: var(--accent); background: rgba(79,124,255,0.1); }
+    /* FB-47 — direction toggle (Trade away / Acquire). Same construction
+       as the position tabs, one size up since it switches the whole pool. */
+    .picker-direction-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .picker-dir-tab {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .picker-dir-tab:hover { color: var(--text); border-color: var(--text); }
+    .picker-dir-tab.active { color: var(--text); border-color: var(--accent); background: rgba(79,124,255,0.1); }
+    /* FB-47 — acquire pool loading hint inside the chips well. */
+    .picker-loading-hint {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 10px 4px;
+    }
     /* Row that holds the position filter tabs on the left and the
        Select all / Clear all toggle button on the right. */
     .player-picker-controls {

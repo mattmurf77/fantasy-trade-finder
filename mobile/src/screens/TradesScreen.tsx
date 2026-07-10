@@ -44,6 +44,8 @@ import LeaguePill from '../components/LeaguePill';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import QueueChip from '../components/QueueChip';
 import SwapPlayerSheet from '../components/SwapPlayerSheet';
+import PlayerPickerModal from '../components/PlayerPickerModal';
+import type { CalcPlayer } from '../data/tradeCalcMock';
 import {
   generateTrades,
   getTradeStatus,
@@ -61,7 +63,7 @@ import {
   setAssetPref,
   type Outlook,
 } from '../api/league';
-import { getLeagueRosters } from '../api/sleeper';
+import { getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import {
   getTradeValues,
   evaluateTradeInLeague,
@@ -383,6 +385,23 @@ export default function TradesScreen({ navigation }: any) {
     navigation?.navigate?.('Rank', { screen: 'Tiers' });
   }
 
+  // ── FB-47 finder targeting (flag trade.finder_targeting) ─────────────
+  // "Find a Trade" controls gain a direction toggle + player picker:
+  // Trade away = pin players from YOUR roster (pinned_give_players),
+  // Acquire = pin LEAGUEMATES' players you want (pinned_receive_players).
+  // The two lists are independent — the toggle only selects which pool the
+  // picker shows — so "move X to land Y" is expressible. Position-level
+  // targeting already lives in OutlookSheet's acquire/trade-away chips.
+  // Targets are session-local (reset on league switch, not persisted):
+  // pinned jobs bypass the server cache, so a stale sticky pin would make
+  // every future tap slow + narrow without the user remembering why.
+  const targetingEnabled = useFlag('trade.finder_targeting');
+  const [targetDirection, setTargetDirection] =
+    useState<'trade_away' | 'acquire'>('trade_away');
+  const [pinnedGive, setPinnedGive] = useState<Player[]>([]);
+  const [pinnedReceive, setPinnedReceive] = useState<Player[]>([]);
+  const [targetPickerOpen, setTargetPickerOpen] = useState(false);
+
   // ── Find-a-Trade: streaming job snapshot ─────────────────────────────
   // The backend runs generation in a background thread and we poll for
   // results. The job snapshot drives both the deck (cards stream in) and
@@ -394,6 +413,16 @@ export default function TradesScreen({ navigation }: any) {
       generateTrades({
         league_id: leagueId!,
         fairness_threshold: effectiveFairness,
+        // FB-47 — omit (not []) when unset so untargeted payloads stay
+        // byte-identical to the pre-targeting shape.
+        pinned_give_players:
+          targetingEnabled && pinnedGive.length > 0
+            ? pinnedGive.map((p) => p.id)
+            : undefined,
+        pinned_receive_players:
+          targetingEnabled && pinnedReceive.length > 0
+            ? pinnedReceive.map((p) => p.id)
+            : undefined,
       }),
     onSuccess: (snapshot) => {
       setJob(snapshot);
@@ -511,12 +540,16 @@ export default function TradesScreen({ navigation }: any) {
   // When the user switches leagues, drop the local deck/job so the next
   // "Find a Trade" tap kicks off a fresh job instead of streaming into
   // stale state. (The fairness toggle handles its own reset inline.)
+  // FB-47 targets are roster-specific, so they clear with the league too.
   useEffect(() => {
     setDeck([]);
     setDeckIdx(0);
     setJob(null);
     setEdits({});
     setSwapTarget(null);
+    setPinnedGive([]);
+    setPinnedReceive([]);
+    setTargetPickerOpen(false);
   }, [leagueId]);
 
   const swipeMutation = useMutation({
@@ -602,18 +635,27 @@ export default function TradesScreen({ navigation }: any) {
   // Consensus values + league rosters feed the swap sheet's candidates and
   // "closest in value" suggestions. Query keys are shared with
   // InLeagueCalculator so the two surfaces reuse one cache. Fetched lazily
-  // once the deck has cards — the sheet can't open before that.
+  // once the deck has cards — the sheet can't open before that — or when
+  // the FB-47 target picker opens (it draws on the same two sources).
   const calcFormat: ScoringFormat = activeFormat ?? '1qb_ppr';
   const valuesQuery = useQuery({
     queryKey: ['calc-values', calcFormat],
     queryFn: ({ signal }) => getTradeValues(calcFormat, signal),
-    enabled: deck.length > 0,
+    enabled: deck.length > 0 || targetPickerOpen,
     staleTime: 5 * 60_000,
   });
   const rostersQuery = useQuery({
     queryKey: ['league-rosters', leagueId],
     queryFn: () => getLeagueRosters(leagueId!),
-    enabled: !!leagueId && deck.length > 0,
+    enabled: !!leagueId && (deck.length > 0 || targetPickerOpen),
+    staleTime: 5 * 60_000,
+  });
+  // FB-47 — owner display names for the acquire picker's @owner badges.
+  // Only fetched while the picker is actually open.
+  const leagueUsersQuery = useQuery({
+    queryKey: ['league-users', leagueId],
+    queryFn: () => getLeagueUsers(leagueId!),
+    enabled: !!leagueId && targetingEnabled && targetPickerOpen,
     staleTime: 5 * 60_000,
   });
   const valueById = useMemo(() => {
@@ -628,6 +670,87 @@ export default function TradesScreen({ navigation }: any) {
     }
     return m;
   }, [rostersQuery.data]);
+
+  // ── FB-47 targeting: picker pool + handlers ──────────────────────────
+  // Trade away → the user's own roster; Acquire → every LEAGUEMATE roster.
+  // Rows come from the consensus value pool (same source as the swap
+  // sheet), mapped to PlayerPickerModal's CalcPlayer shape. Unvalued
+  // players (K/DST, deep stashes) drop out — consistent with the swap
+  // sheet's candidate rules.
+  const ownerByPlayerId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [ownerId, ids] of rosterByOwner) {
+      if (ownerId === userId) continue;
+      for (const id of ids) m.set(id, ownerId);
+    }
+    return m;
+  }, [rosterByOwner, userId]);
+  const usernameByOwner = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const u of leagueUsersQuery.data ?? []) {
+      m.set(u.user_id, u.display_name || u.username || u.user_id);
+    }
+    return m;
+  }, [leagueUsersQuery.data]);
+  const targetPickerPool = useMemo<CalcPlayer[]>(() => {
+    if (!targetPickerOpen) return [];
+    const ids =
+      targetDirection === 'trade_away'
+        ? rosterByOwner.get(userId) ?? []
+        : [...ownerByPlayerId.keys()];
+    return ids
+      .map((id) => valueById.get(id))
+      .filter((r): r is CalcValueRow => !!r)
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        pos: r.position as CalcPlayer['pos'],
+        nflTeam: r.team ?? 'FA',
+        age: r.age ?? 0,
+        base: r.value,
+      }));
+  }, [targetPickerOpen, targetDirection, rosterByOwner, ownerByPlayerId, valueById, userId]);
+
+  // Any target change invalidates the current deck — the next "Find a
+  // Trade" tap regenerates through the normal job flow (pinned jobs bypass
+  // the server cache). Deliberately NOT auto-firing a job per chip change.
+  function resetDeckForNewTargets() {
+    setDeck([]);
+    setDeckIdx(0);
+    setJob(null);
+    setEdits({});
+    setSwapTarget(null);
+  }
+
+  function handleAddTarget(p: CalcPlayer) {
+    const player: Player = {
+      id: p.id,
+      name: p.name,
+      position: p.pos,
+      team: p.nflTeam,
+      age: p.age,
+    };
+    const setter = targetDirection === 'trade_away' ? setPinnedGive : setPinnedReceive;
+    setter((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, player]));
+    haptics.selection();
+    resetDeckForNewTargets();
+  }
+
+  function handleRemoveTarget(id: string, dir: 'trade_away' | 'acquire') {
+    const setter = dir === 'trade_away' ? setPinnedGive : setPinnedReceive;
+    setter((prev) => prev.filter((p) => p.id !== id));
+    haptics.selection();
+    resetDeckForNewTargets();
+  }
+
+  // Positions the user is trying to acquire — sharpens the card fit line's
+  // copy ("They're deep at WR"). Pinned acquire targets + saved prefs.
+  const fitTargetPositions = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of pinnedReceive) if (p.position) set.add(String(p.position));
+    for (const pos of prefsQuery.data?.acquire_positions ?? []) set.add(pos);
+    return [...set];
+  }, [pinnedReceive, prefsQuery.data]);
 
   // Re-price an edited package via /api/trade/evaluate Mode B — the same
   // dual-board math the finder used to build the card. Success refreshes
@@ -1012,6 +1135,100 @@ export default function TradesScreen({ navigation }: any) {
             </Pressable>
           </View>
 
+          {/* FB-47 — finder targeting (flag trade.finder_targeting).
+              Direction toggle (Trade away / Acquire) + player picker.
+              Position-level targeting stays in OutlookSheet's chips; this
+              is the player-level entry point. Chip construction mirrors
+              the subnav pills. */}
+          {targetingEnabled && (
+            <View style={styles.targetSection}>
+              <View style={styles.controlRow}>
+                <View style={{ flex: 1 }}>
+                  <TickLabel>Target players</TickLabel>
+                  <Text style={styles.fairnessHint}>
+                    {targetDirection === 'trade_away'
+                      ? 'Trades will send a targeted player'
+                      : 'Trades will get you a targeted player'}
+                  </Text>
+                </View>
+                <Button
+                  variant="secondary"
+                  compact
+                  label="Add player"
+                  onPress={() => setTargetPickerOpen(true)}
+                />
+              </View>
+              <View style={styles.targetDirRow}>
+                {(
+                  [
+                    ['trade_away', 'Trade away'],
+                    ['acquire', 'Acquire'],
+                  ] as const
+                ).map(([dir, label]) => {
+                  const active = targetDirection === dir;
+                  return (
+                    <Pressable
+                      key={dir}
+                      onPress={() => setTargetDirection(dir)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      style={({ pressed }) => [
+                        styles.targetDirPill,
+                        active && styles.targetDirPillActive,
+                        pressed && styles.subnavPillPressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.subnavPillText,
+                          active && styles.subnavPillTextActive,
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {(pinnedGive.length > 0 || pinnedReceive.length > 0) && (
+                <View style={styles.targetChipsWrap}>
+                  {pinnedGive.map((p) => (
+                    <Pressable
+                      key={`send-${p.id}`}
+                      onPress={() => handleRemoveTarget(p.id, 'trade_away')}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${p.name} from trade-away targets`}
+                      style={({ pressed }) => [
+                        styles.targetChip,
+                        pressed && styles.subnavPillPressed,
+                      ]}
+                    >
+                      <Text style={styles.targetChipDir}>SEND</Text>
+                      <Text style={styles.subnavPillText}>{p.name}</Text>
+                      <Icon name="x" size={12} color={chalk.dim} />
+                    </Pressable>
+                  ))}
+                  {pinnedReceive.map((p) => (
+                    <Pressable
+                      key={`get-${p.id}`}
+                      onPress={() => handleRemoveTarget(p.id, 'acquire')}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${p.name} from acquire targets`}
+                      style={({ pressed }) => [
+                        styles.targetChip,
+                        pressed && styles.subnavPillPressed,
+                      ]}
+                    >
+                      <Text style={styles.targetChipDir}>GET</Text>
+                      <Text style={styles.subnavPillText}>{p.name}</Text>
+                      <Icon name="x" size={12} color={chalk.dim} />
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+
           {/* Find-a-Trade button. While a job is running, the button is
               disabled — the progress strip below acts as the live signal.
               `generateMutation.isPending` is only true during the brief
@@ -1077,6 +1294,7 @@ export default function TradesScreen({ navigation }: any) {
                   <TradeCardComp
                     data={nextCard}
                     untouchableIds={untouchablesEnabled ? untouchableIds : undefined}
+                    fitTargetPositions={fitTargetPositions}
                   />
                 </View>
               )}
@@ -1091,6 +1309,7 @@ export default function TradesScreen({ navigation }: any) {
                 }
                 onSwapPlayer={(player, side) => setSwapTarget({ player, side })}
                 repricing={topCard.edited === true && repriceMutation.isPending}
+                fitTargetPositions={fitTargetPositions}
               />
               {/* Queue action — Pass / Interested are driven by swipe
                   gestures on the top card; Queue is a third option that
@@ -1338,6 +1557,35 @@ export default function TradesScreen({ navigation }: any) {
         onPick={handleSwapPick}
         onClose={() => setSwapTarget(null)}
       />
+
+      {/* FB-47 — target picker. Trade away = the user's roster; Acquire =
+          every leaguemate's roster (@owner badge per row). Reuses the
+          calculator's search + position-filter picker; picking keeps the
+          sheet open so multiple targets can be stacked, Done closes. */}
+      <PlayerPickerModal
+        visible={targetPickerOpen}
+        title={
+          targetDirection === 'trade_away'
+            ? 'Target players to trade away'
+            : 'Target players to acquire'
+        }
+        players={targetPickerPool}
+        selectedIds={(targetDirection === 'trade_away' ? pinnedGive : pinnedReceive).map(
+          (p) => p.id,
+        )}
+        ownerBoardValue={(p) => p.base}
+        badgeFor={
+          targetDirection === 'acquire'
+            ? (p) => {
+                const ownerId = ownerByPlayerId.get(p.id);
+                const name = ownerId ? usernameByOwner.get(ownerId) : undefined;
+                return name ? { label: `@${name}`, color: chalk.dim } : null;
+              }
+            : undefined
+        }
+        onPick={handleAddTarget}
+        onClose={() => setTargetPickerOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -1384,6 +1632,8 @@ interface SwipableProps {
   // Player-swap (feedback #86) — pass-throughs to TradeCard.
   onSwapPlayer?: (player: Player, side: 'give' | 'receive') => void;
   repricing?: boolean;
+  // FB-47 — pass-through to TradeCard's partner-fit line copy.
+  fitTargetPositions?: string[];
 }
 
 function SwipableTopCard({
@@ -1394,6 +1644,7 @@ function SwipableTopCard({
   onToggleUntouchable,
   onSwapPlayer,
   repricing,
+  fitTargetPositions,
 }: SwipableProps) {
   const translateX = useSharedValue(0);
 
@@ -1439,6 +1690,7 @@ function SwipableTopCard({
           onToggleUntouchable={onToggleUntouchable}
           onSwapPlayer={onSwapPlayer}
           repricing={repricing}
+          fitTargetPositions={fitTargetPositions}
         />
       </Animated.View>
     </GestureDetector>
@@ -1541,6 +1793,52 @@ const styles = StyleSheet.create({
   },
   findBtn: {
     marginTop: space.sm,
+  },
+  // FB-47 — target players section. Direction pills reuse the subnav
+  // chip construction; target chips add a mono direction prefix + x icon.
+  targetSection: {
+    gap: space.sm,
+    paddingVertical: space.xs,
+  },
+  targetDirRow: {
+    flexDirection: 'row',
+    gap: space.sm,
+  },
+  targetDirPill: {
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radii.xs,
+    borderWidth: 1,
+    borderColor: ink.line,
+    backgroundColor: ink.ink1,
+  },
+  targetDirPillActive: {
+    borderColor: ink.lineStrong,
+    backgroundColor: ink.ink3,
+  },
+  targetChipsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: space.sm,
+  },
+  targetChip: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingHorizontal: space.sm,
+    borderRadius: radii.xs,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    backgroundColor: ink.ink1,
+  },
+  targetChipDir: {
+    fontFamily: fonts.dataSemi,
+    fontSize: 10,
+    letterSpacing: 0.5,
+    color: chalk.dim,
   },
   progressStrip: {
     marginTop: space.sm,

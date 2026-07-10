@@ -5,6 +5,10 @@ export interface GenerateBody {
   league_id: string;
   fairness_threshold?: number;      // 0.5 – 1.0
   pinned_give_players?: string[];
+  // FB-47 finder targeting: specific players the user wants to ACQUIRE.
+  // Honored by the backend only when flag trade.finder_targeting is on;
+  // every returned card's receive side then includes at least one of them.
+  pinned_receive_players?: string[];
 }
 
 // NOTE: backend returns BARE ARRAYS for the trade endpoints — not
@@ -69,6 +73,25 @@ function normalizeTradeCard(raw: any): TradeCard {
     && (rawSweetener.side === 'give' || rawSweetener.side === 'receive')
       ? { playerId: rawSweetener.player_id, side: rawSweetener.side as 'give' | 'receive' }
       : undefined;
+  // FB-47 — counterparty positional fit (0–1). Backend serializes it only
+  // when trade.finder_targeting is on AND the user expressed targets;
+  // undefined hides the fit line entirely.
+  const partnerFit =
+    typeof raw?.partner_fit === 'number' ? raw.partner_fit : undefined;
+  // Structured match context — only the string-array fields the fit-line
+  // copy reads are kept; a malformed payload degrades to undefined.
+  const rawCtx = raw?.match_context;
+  const matchContext =
+    rawCtx && typeof rawCtx === 'object'
+      ? {
+          user_needs: Array.isArray(rawCtx.user_needs)
+            ? rawCtx.user_needs.filter((x: unknown) => typeof x === 'string')
+            : undefined,
+          opponent_surplus: Array.isArray(rawCtx.opponent_surplus)
+            ? rawCtx.opponent_surplus.filter((x: unknown) => typeof x === 'string')
+            : undefined,
+        }
+      : undefined;
 
   return {
     trade_id:           String(raw?.trade_id ?? ''),
@@ -96,6 +119,8 @@ function normalizeTradeCard(raw: any): TradeCard {
     basis:              raw?.basis === 'consensus' ? 'consensus' : 'divergence',
     likesYou:           raw?.likes_you === true,
     sweetener,
+    partner_fit:        partnerFit,
+    match_context:      matchContext,
   };
 }
 
