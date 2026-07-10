@@ -6,19 +6,19 @@ Things that **must** stay in sync across backend, web, mobile, and the extension
 
 ## Tier color tokens
 
-Canonical hex per tier (unified 2026-07-04; the extension's base hues are canon). Lighter same-hue accents (e.g. Tailwind 300/400-level borders and text on tinted dark backgrounds, as in the extension badge and web tier legend) are allowed per client, but the base identity color and rgba() tint bases must be these values.
+Canonical hex per tier (re-canonicalized 2026-07-10 to de-collide from position colors — the 2026-07-04 set made Starter/Solid/Depth byte-identical to RB/WR/TE, source of TestFlight FB #83/#84). Rule: **tier hues must not share a hue with any position color.** Tiers are the *bright* family (Tailwind 400-level), positions the *deeper* family (500-level). Lighter same-hue accents (300/200-level borders and text on tinted dark backgrounds, as in the extension badge and web tier legend) are allowed per client, but the base identity color and rgba() tint bases must be these values.
 
-| Tier | Color | Canonical hex |
-|---|---|---|
-| Elite | gold | `#f59e0b` |
-| Starter | green | `#22c55e` |
-| Solid | blue | `#3b82f6` |
-| Depth | purple | `#a855f7` |
-| Bench | gray | `#7a7f96` |
+| Tier | Color | Canonical hex | rgba tint base |
+|---|---|---|---|
+| Elite | gold | `#fbbf24` | `251,191,36` |
+| Starter | teal | `#2dd4bf` | `45,212,191` |
+| Solid | sky | `#38bdf8` | `56,189,248` |
+| Depth | pink | `#f472b6` | `244,114,182` |
+| Bench | gray | `#7a7f96` | `122,127,150` |
 
-**Locations:** `mobile/src/theme/colors.ts` (`colors.tier`), `web/positional-tiers.html` (inline CSS: tier-row accents, tier-assign buttons, legend swatches), `web/profile.html` (inline `:root` vars `--elite`…`--bench`), `extension/content.css` (`.ftf-badge.ftf-tier-*`).
+**Locations:** `mobile/src/theme/colors.ts` (`colors.tier`), `mobile/src/components/TierBadge.tsx` + `TierBin.tsx` (hardcoded rgba tint bases), `web/positional-tiers.html` (inline CSS: tier-row accents, tier-assign buttons, legend swatches), `web/profile.html` (inline `:root` vars `--elite`…`--bench`), `extension/content.css` (`.ftf-badge.ftf-tier-*`).
 
-Note: `web/css/styles.css` has a separate 4-level *dynasty value* badge set (`.tier-elite/.tier-high/.tier-mid/.tier-depth`) — a different taxonomy, not these tokens. `extension/popup.css` contains no tier colors.
+Note: `web/css/styles.css` has a separate 4-level *dynasty value* badge set (`.tier-elite/.tier-high/.tier-mid/.tier-depth`) — a different taxonomy, not these tokens. `extension/popup.css` contains no tier colors. Rank-medal accents (web `.ranked-1/2/3`, mobile `PlayerCard` rank styles) use the gold/silver/neutral medal tokens, not tier tokens.
 
 ---
 
@@ -117,14 +117,14 @@ Canonical set: `championship`, `contender`, `rebuilder`, `jets`, `not_sure`.
 
 ## Position color tokens (segmented progress bar)
 
-| Position | Color |
-|---|---|
-| QB | orange |
-| RB | green |
-| WR | blue |
-| TE | purple |
+| Position | Color | Canonical hex |
+|---|---|---|
+| QB | orange | `#f97316` |
+| RB | green | `#22c55e` |
+| WR | blue | `#3b82f6` |
+| TE | purple | `#a855f7` |
 
-**Locations:** same files as tier colors plus any progress-bar component.
+**Locations:** `mobile/src/theme/colors.ts` (`colors.position`), `mobile/src/components/PositionChip.tsx` (rgba tint bases), `web/profile.html` (`--qb`…`--te`), plus any progress-bar component. Tier colors must not reuse these hues (see Tier color tokens above).
 
 ---
 

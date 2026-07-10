@@ -19,11 +19,12 @@ export const colors = {
     wr: '#3b82f6',
     te: '#a855f7',
   },
+  // Tier hues deliberately share no hue with position colors (docs/cross-client-invariants.md).
   tier: {
-    elite: '#f59e0b',
-    starter: '#22c55e',
-    solid: '#3b82f6',
-    depth: '#a855f7',
+    elite: '#fbbf24',
+    starter: '#2dd4bf',
+    solid: '#38bdf8',
+    depth: '#f472b6',
     bench: '#7a7f96',
   },
 } as const;

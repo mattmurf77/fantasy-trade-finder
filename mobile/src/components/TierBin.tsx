@@ -46,11 +46,11 @@ export default TierBin;
 
 function accentFor(tier: Tier | 'unassigned') {
   switch (tier) {
-    case 'elite':   return { fg: colors.tier.elite,   border: 'rgba(245,158,11,0.45)', bgActive: 'rgba(245,158,11,0.08)' };
-    case 'starter': return { fg: colors.tier.starter, border: 'rgba(34,197,94,0.45)',  bgActive: 'rgba(34,197,94,0.08)' };
-    case 'solid':   return { fg: colors.tier.solid,   border: 'rgba(59,130,246,0.45)', bgActive: 'rgba(59,130,246,0.08)' };
-    case 'depth':   return { fg: colors.tier.depth,   border: 'rgba(249,115,22,0.45)', bgActive: 'rgba(249,115,22,0.08)' };
-    case 'bench':   return { fg: colors.tier.bench,   border: 'rgba(148,163,184,0.45)', bgActive: 'rgba(148,163,184,0.08)' };
+    case 'elite':   return { fg: colors.tier.elite,   border: 'rgba(251,191,36,0.45)', bgActive: 'rgba(251,191,36,0.08)' };
+    case 'starter': return { fg: colors.tier.starter, border: 'rgba(45,212,191,0.45)', bgActive: 'rgba(45,212,191,0.08)' };
+    case 'solid':   return { fg: colors.tier.solid,   border: 'rgba(56,189,248,0.45)', bgActive: 'rgba(56,189,248,0.08)' };
+    case 'depth':   return { fg: colors.tier.depth,   border: 'rgba(244,114,182,0.45)', bgActive: 'rgba(244,114,182,0.08)' };
+    case 'bench':   return { fg: colors.tier.bench,   border: 'rgba(122,127,150,0.45)', bgActive: 'rgba(122,127,150,0.08)' };
     default:        return { fg: colors.muted,        border: colors.border,           bgActive: 'rgba(255,255,255,0.04)' };
   }
 }

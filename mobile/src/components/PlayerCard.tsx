@@ -154,20 +154,20 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(79,124,255,0.06)',
   },
   // Subtle accent top border by rank to echo the web's .ranked-1 / .ranked-2 / .ranked-3
+  // (medal tokens, not tier tokens — web uses --gold/--silver/neutral for rank).
   rankBg1: {
-    borderColor: colors.tier.elite,
+    borderColor: colors.gold,
     borderTopWidth: 3,
     backgroundColor: 'rgba(245,158,11,0.06)',
   },
   rankBg2: {
-    borderColor: colors.tier.starter,
+    borderColor: colors.silver,
     borderTopWidth: 3,
-    backgroundColor: 'rgba(34,197,94,0.06)',
+    backgroundColor: 'rgba(148,163,184,0.06)',
   },
   rankBg3: {
-    borderColor: colors.tier.solid,
+    borderColor: colors.border,
     borderTopWidth: 3,
-    backgroundColor: 'rgba(59,130,246,0.06)',
   },
 
   rankBadge: {
@@ -180,9 +180,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rankFg1: { backgroundColor: colors.tier.elite },
-  rankFg2: { backgroundColor: colors.tier.starter },
-  rankFg3: { backgroundColor: colors.tier.solid },
+  rankFg1: { backgroundColor: colors.gold },
+  rankFg2: { backgroundColor: colors.silver },
+  rankFg3: { backgroundColor: '#374151' },
   rankBadgeText: { color: '#fff', fontWeight: '800', fontSize: 14 },
 
   header: {
