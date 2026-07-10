@@ -15,11 +15,12 @@ import DraggableFlatList, {
 } from 'react-native-draggable-flatlist';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { ink, chalk, ice, semantic, position, space, radii, type } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, position, space, radii, type, fonts } from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
 import PositionChip from '../components/PositionChip';
 import { getRankings, reorderRankings } from '../api/rankings';
 import { haptics } from '../utils/haptics';
+import { valueForElo } from '../utils/playerValue';
 import { startSpan } from '../observability/sentry';
 import { useSession } from '../state/useSession';
 import type { Position, RankedPlayer } from '../shared/types';
@@ -123,6 +124,23 @@ export default function ManualRanksScreen() {
   const visibleRows: RankedPlayer[] = useMemo(() => {
     return filter === 'ALL' ? rows : rows.filter((r) => r.position === filter);
   }, [rows, filter]);
+
+  // #53 — positional rank (QB1, RB4, …) derived client-side from the FULL
+  // local ordering: a player's positional rank is their 1-based index among
+  // same-position players in `rows`, regardless of the active filter (so
+  // the Overall view shows the same QB4 as the QB view). Recomputed from
+  // local state so ranks update live during drag/jump edits, before the
+  // debounced save lands.
+  const posRanks = useMemo(() => {
+    const counts: Partial<Record<string, number>> = {};
+    const map = new Map<string, number>();
+    for (const r of rows) {
+      const n = (counts[r.position] ?? 0) + 1;
+      counts[r.position] = n;
+      map.set(r.id, n);
+    }
+    return map;
+  }, [rows]);
 
   // ── Save plumbing ─────────────────────────────────────────────────
   // Debounce + mutation. We hold the latest `ordered_ids` payload in a
@@ -277,6 +295,13 @@ export default function ManualRanksScreen() {
       const rankNum = visIdx != null ? visIdx + 1 : 0;
       const isEditing = editingPid === item.id;
       const ageStr = item.age != null ? `${item.age} yo` : null;
+      // #53/#54 — right cluster: positional rank prominent (mono, position
+      // color), 0–10k value secondary. Raw Elo is no longer shown.
+      const posRankNum = posRanks.get(item.id);
+      const posRank = posRankNum != null ? `${item.position}${posRankNum}` : 'NR';
+      const posColor =
+        position[String(item.position).toLowerCase() as keyof typeof position];
+      const value = valueForElo(item.elo);
 
       return (
         <Pressable
@@ -314,9 +339,13 @@ export default function ManualRanksScreen() {
               {item.injury_status ? ` · ${item.injury_status}` : ''}
             </Text>
           </View>
-          <View style={styles.eloWrap}>
-            <Text style={styles.eloNum}>{Math.round(item.elo)}</Text>
-            <Text style={styles.eloLabel}>ELO</Text>
+          <View style={styles.valueWrap}>
+            <Text style={[styles.posRank, posColor ? { color: posColor } : null]}>
+              {posRank}
+            </Text>
+            {value != null ? (
+              <Text style={styles.valueNum}>{value.toLocaleString('en-US')}</Text>
+            ) : null}
           </View>
           <View style={styles.grip} importantForAccessibility="no-hide-descendants">
             <View style={styles.gripBar} />
@@ -325,7 +354,7 @@ export default function ManualRanksScreen() {
         </Pressable>
       );
     },
-    [commitRankEdit, editingPid],
+    [commitRankEdit, editingPid, posRanks],
   );
 
   // ── Header save indicator ─────────────────────────────────────────
@@ -546,9 +575,22 @@ const styles = StyleSheet.create({
 
   name: { ...type.title },
   meta: { ...type.bodySm, marginTop: 2 },
-  eloWrap: { alignItems: 'flex-end', minWidth: 56 },
-  eloNum: { ...type.data },
-  eloLabel: { ...type.label, fontSize: 10, lineHeight: 12, letterSpacing: 0.8 },
+  // #53/#54 right cluster — mirrors PlayerCard dense (posRank prominent in
+  // the position color, 0–10k value secondary chalk-dim, both Plex Mono).
+  valueWrap: { alignItems: 'flex-end', minWidth: 56 },
+  posRank: {
+    fontFamily: fonts.dataSemi,
+    fontSize: 14,
+    fontVariant: ['tabular-nums'],
+    color: chalk.base,
+  },
+  valueNum: {
+    fontFamily: fonts.data,
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+    color: chalk.dim,
+    marginTop: 1,
+  },
 
   // Drag affordance — decorative lineStrong grip bars (no emoji, no icon glyph).
   grip: { gap: 3 },

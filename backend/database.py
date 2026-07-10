@@ -97,6 +97,7 @@ leagues_table = Table("leagues", metadata,
     Column("created_at",        String),
     Column("updated_at",        String),
     Column("default_scoring",   String), # '1qb_ppr' | 'sf_tep' (null → treated as '1qb_ppr')
+    Column("total_rosters",     Integer),# Sleeper's total_rosters (all teams, owned or orphaned)
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -826,6 +827,9 @@ def _migrate_db() -> None:
         ("swipe_decisions",    "scoring_format",        "VARCHAR"),
         ("member_rankings",    "scoring_format",        "VARCHAR"),
         ("leagues",            "default_scoring",       "VARCHAR"),
+        # FB #41 — Sleeper's total_rosters, persisted at session_init so the
+        # League tile can show the league's true team count.
+        ("leagues",            "total_rosters",         "INTEGER"),
         ("users",              "invited_by",            "VARCHAR"),
         ("users",              "unlocked_formats",      "TEXT"),
         # Agent 4 additions — referral receipt feature reuses the existing
@@ -2665,6 +2669,24 @@ def set_league_scoring(league_id: str, scoring_format: str) -> None:
         )
 
 
+def set_league_total_rosters(league_id: str, total_rosters: int) -> None:
+    """Persist Sleeper's total_rosters for the league (FB #41).
+
+    Written by session_init's background daemon whenever Sleeper league meta
+    is fetched. This is the league's TRUE team count — it includes orphaned
+    (ownerless) rosters that never make it into league_members, so the
+    League tile can't undercount when a manager leaves the league.
+    """
+    if not isinstance(total_rosters, int) or total_rosters <= 0:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            update(leagues_table)
+            .where(leagues_table.c.sleeper_league_id == league_id)
+            .values(total_rosters=total_rosters)
+        )
+
+
 def get_league_scoring(league_id: str) -> str:
     """Return the league's default scoring format, defaulting to '1qb_ppr'."""
     with engine.connect() as conn:
@@ -2689,11 +2711,19 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
         "matches_awaiting":         int,   # user's one-sided likes not yet matured into a match
         "matches_pending":          int,   # DEPRECATED (pre-1.4 clients): status='pending' rows
         "matches_accepted":         int,   # DEPRECATED (pre-1.4 clients): status='accepted' rows
+        "total_teams":              int,   # TOTAL teams in the league (incl. caller)
         "leaguemates_total":        int,   # members other than current user
         "leaguemates_joined":       int,   # how many have a users row
         "leaguemates_unlocked_1qb": int,   # how many unlocked 1qb_ppr
         "leaguemates_unlocked_sf":  int,   # how many unlocked sf_tep
     }
+
+    total_teams (FB #41) is Sleeper's total_rosters when we have it (persisted
+    by session_init's meta fetch). The old client-side leaguemates_total + 1
+    derivation undercounts when a roster is ownerless (departed manager —
+    clients drop it from opponent_rosters) and overcounts when league_members
+    holds stale rows for managers who left. Falls back to the derived count
+    for local leagues / rows that pre-date the total_rosters column.
 
     Bucketing (feedback #91) mirrors the Matches screen's two segments so the
     League tiles count exactly what the user sees there, and every trade lives
@@ -2713,11 +2743,16 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
     with engine.connect() as conn:
         # League name and default scoring (first row wins)
         league_row = conn.execute(
-            select(leagues_table.c.name, leagues_table.c.default_scoring)
+            select(
+                leagues_table.c.name,
+                leagues_table.c.default_scoring,
+                leagues_table.c.total_rosters,
+            )
             .where(leagues_table.c.sleeper_league_id == league_id)
             .limit(1)
         ).fetchone()
         league_name = league_row.name if league_row else ""
+        stored_total_rosters = league_row.total_rosters if league_row else None
         default_scoring = (
             league_row.default_scoring
             if league_row and league_row.default_scoring in SCORING_FORMATS
@@ -2789,6 +2824,15 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
         leaguemate_ids = [r.user_id for r in leaguemate_rows]
         leaguemates_total = len(leaguemate_ids)
 
+        # True team count: Sleeper's total_rosters wins; fall back to the
+        # derived members-plus-caller count for local leagues / unbackfilled
+        # rows (matches the pre-FB-41 client arithmetic).
+        total_teams = (
+            stored_total_rosters
+            if isinstance(stored_total_rosters, int) and stored_total_rosters > 0
+            else leaguemates_total + 1
+        )
+
         if leaguemates_total == 0:
             return {
                 "league_name":              league_name,
@@ -2797,6 +2841,7 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
                 "matches_awaiting":         matches_awaiting,
                 "matches_pending":          matches_pending,
                 "matches_accepted":         matches_accepted,
+                "total_teams":              total_teams,
                 "leaguemates_total":        0,
                 "leaguemates_joined":       0,
                 "leaguemates_unlocked_1qb": 0,
@@ -2833,6 +2878,7 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
         "matches_awaiting":         matches_awaiting,
         "matches_pending":          matches_pending,
         "matches_accepted":         matches_accepted,
+        "total_teams":              total_teams,
         "leaguemates_total":        leaguemates_total,
         "leaguemates_joined":       leaguemates_joined,
         "leaguemates_unlocked_1qb": unlocked_1qb,
@@ -5150,6 +5196,43 @@ def load_value_history(
             .order_by(player_value_history_table.c.snapshot_date.asc())
         ).fetchall()
     return [dict(r._mapping) for r in rows]
+
+
+def load_value_snapshot_baseline(
+    scoring_format: str = DEFAULT_SCORING,
+    days: int = 30,
+) -> dict[str, float]:
+    """
+    Consensus 30d-trend BASELINE (FB4-61 tile stats): { player_id:
+    consensus_elo } for the OLDEST snapshot_date within the trailing `days`
+    window, excluding today (UTC) — a same-day snapshot is no trend baseline.
+
+    Returns {} while history hasn't accrued yet (callers serve the trend as
+    null and clients omit the segment). Mirrors compute_risers_fallers'
+    earliest-in-window semantics, so early-life deltas span however much
+    history exists rather than a strict 30 days.
+    """
+    now    = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    today  = now.strftime("%Y-%m-%d")
+    with engine.connect() as conn:
+        baseline_date = conn.execute(
+            select(func.min(player_value_history_table.c.snapshot_date))
+            .where(player_value_history_table.c.scoring_format == scoring_format)
+            .where(player_value_history_table.c.snapshot_date  >= cutoff)
+            .where(player_value_history_table.c.snapshot_date  <  today)
+        ).scalar()
+        if not baseline_date:
+            return {}
+        rows = conn.execute(
+            select(
+                player_value_history_table.c.player_id,
+                player_value_history_table.c.consensus_elo,
+            )
+            .where(player_value_history_table.c.scoring_format == scoring_format)
+            .where(player_value_history_table.c.snapshot_date  == baseline_date)
+        ).fetchall()
+    return {r.player_id: r.consensus_elo for r in rows}
 
 
 def load_value_extremes(

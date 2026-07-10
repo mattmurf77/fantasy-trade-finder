@@ -41,6 +41,12 @@ export interface RankedPlayer extends Player {
   wins: number;
   losses: number;
   rank: number;
+  // FB4-61 tile stats — market side, omitted by the backend when unknown.
+  // consensus_pos_rank: 1-based rank within position by consensus seed value.
+  // ..._delta_30d: 30d rank movement (positive = moved UP toward #1); absent
+  // until a prior-day consensus snapshot exists in the 30d window.
+  consensus_pos_rank?: number | null;
+  consensus_pos_rank_delta_30d?: number | null;
 }
 
 export interface LeagueSummary {

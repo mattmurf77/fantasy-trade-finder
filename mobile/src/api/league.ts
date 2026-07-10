@@ -103,6 +103,10 @@ export interface LeagueSummaryRollup {
   // builds; new UI must not read them.
   matches_pending?: number;
   matches_accepted?: number;
+  // FB #41 — TOTAL teams in the league (caller included). Sleeper's
+  // total_rosters when the backend has it; else leaguemates_total + 1.
+  // Prefer this over deriving the count from leaguemates_total.
+  total_teams?: number;
   leaguemates_total?: number;
   leaguemates_joined?: number;
   leaguemates_unlocked_1qb?: number;

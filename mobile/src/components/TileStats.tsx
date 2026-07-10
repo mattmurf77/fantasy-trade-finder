@@ -4,24 +4,26 @@ import { colors } from '../theme/colors';
 import { spacing, fontSize } from '../theme/spacing';
 
 // FB4-61 / #65 — compact stat strip rendered under a player tile on Tiers.
-// Shows BOTH the user's rank + 30d trend and the consensus rank on one line,
-// each with a short text label ("You" / "Cons") so the distinction never
-// relies on color. The old Consensus | You toggle is gone (#65). Purely
-// presentational: the parent resolves the numbers from the rankings payload /
-// Trends source and passes them in. Tiles are already flagged as too big
-// (#58), so this stays one tight line.
+// Shows the SAME two stats (rank + 30d trend) for BOTH the user and the
+// consensus on one line, each with a short text label ("You" / "Cons") so
+// the distinction never relies on color. The old Consensus | You toggle is
+// gone (#65). Purely presentational: the parent resolves the numbers from
+// the rankings payload / Trends source and passes them in. Tiles are already
+// flagged as too big (#58), so this stays one tight line.
 //
-// Consensus 30d trend has no backend payload yet (#61) — the consensus
-// segment intentionally shows rank only, and is omitted entirely when the
-// consensus rank is unavailable (no dash graveyard).
+// Omit-when-missing: the whole consensus segment drops when its rank is
+// unavailable, and the consensus trend glyph drops while the backend has no
+// prior-day consensus snapshot yet (no dash graveyard).
 
 export interface TileStatsProps {
   /** User's pre-formatted rank label, e.g. "#4". `null` → "—". */
   youRankLabel: string | null;
   /** User's 30-day rank delta. Positive = moved UP toward #1; null → "–". */
   youTrendDelta: number | null;
-  /** Consensus rank label, e.g. "ADP 12" or "#37". `null` → segment omitted. */
+  /** Consensus positional rank label, e.g. "#7". `null` → segment omitted. */
   consensusRankLabel: string | null;
+  /** Consensus 30-day rank delta. Positive = moved UP; null → glyph omitted. */
+  consensusTrendDelta: number | null;
 }
 
 // Format a rank delta with a direction glyph. Mirrors TrendsScreen's
@@ -33,8 +35,14 @@ function formatTrend(delta: number | null): { text: string; color: string } {
   return { text: '–0', color: colors.muted };
 }
 
-function TileStats({ youRankLabel, youTrendDelta, consensusRankLabel }: TileStatsProps) {
+function TileStats({
+  youRankLabel,
+  youTrendDelta,
+  consensusRankLabel,
+  consensusTrendDelta,
+}: TileStatsProps) {
   const trend = formatTrend(youTrendDelta);
+  const consTrend = consensusTrendDelta != null ? formatTrend(consensusTrendDelta) : null;
   return (
     <View style={styles.row}>
       <Text style={styles.label}>You</Text>
@@ -52,6 +60,14 @@ function TileStats({ youRankLabel, youTrendDelta, consensusRankLabel }: TileStat
           <Text style={styles.rank} numberOfLines={1}>
             {consensusRankLabel}
           </Text>
+          {consTrend != null ? (
+            <>
+              <Text style={[styles.trend, { color: consTrend.color }]} numberOfLines={1}>
+                {consTrend.text}
+              </Text>
+              <Text style={styles.label}>30d</Text>
+            </>
+          ) : null}
         </>
       ) : null}
     </View>

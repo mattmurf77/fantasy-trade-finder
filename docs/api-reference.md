@@ -45,7 +45,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 | POST | `/api/rank3` | Submit ordered (best→worst) result |
 | POST | `/api/rankings/submit` | Bulk submit pre-computed rankings |
 | POST | `/api/rankings/reorder` | Manually reorder ranks |
-| GET | `/api/rankings` | Read current rankings |
+| GET | `/api/rankings` | Read current rankings. Each player may carry `consensus_pos_rank` (1-based rank within position by consensus seed value over the active format's universal pool) and `consensus_pos_rank_delta_30d` (30d movement of that rank vs. the oldest prior-day `player_value_history` snapshot in-window; positive = moved up). Both omit-when-absent — the delta is absent until snapshot history accrues (FB4-61 tile stats, 2026-07-10) |
 | GET | `/api/skips` | Skipped matchups log |
 
 ## Progress / method
@@ -189,7 +189,7 @@ Verdict math is `trade_service.classify_verdict(give_value, receive_value)` (no 
 | POST | `/api/league/preferences` | Write outlook + position prefs |
 | GET | `/api/league/asset-prefs` | Read untouchables + targets (#2) → `{untouchables:[], targets:[]}` |
 | POST | `/api/league/asset-prefs` | Tag a player: body `{league_id, player_id, list: "untouchable"\|"target"\|"none"}`; single membership; invalidates the league's cached deck (#2) |
-| GET | `/api/league/summary` | League summary roll-up. Match tiles (#91): `matches_mutual` (non-dismissed `trade_matches` rows involving the caller, any status — equals the Matches tab's "Mutual matches" segment for the league) + `matches_awaiting` (caller's one-sided likes not yet matured — equals "Awaiting them"). Every trade is in exactly one bucket. Legacy `matches_pending`/`matches_accepted` (status-split, dismissal-blind) still emitted for pre-1.4 clients — do not use in new UI |
+| GET | `/api/league/summary` | League summary roll-up. Match tiles (#91): `matches_mutual` (non-dismissed `trade_matches` rows involving the caller, any status — equals the Matches tab's "Mutual matches" segment for the league) + `matches_awaiting` (caller's one-sided likes not yet matured — equals "Awaiting them"). Every trade is in exactly one bucket. Legacy `matches_pending`/`matches_accepted` (status-split, dismissal-blind) still emitted for pre-1.4 clients — do not use in new UI. `total_teams` (FB #41): TOTAL teams in the league, caller included — Sleeper's `total_rosters` when persisted, else `leaguemates_total + 1`; clients must show this in the teams tile, not a derived count |
 | POST | `/api/league/scoring` | Set scoring format |
 | GET | `/api/league/coverage` | Member ranking coverage |
 | GET | `/api/league/member-unlock-states` | Per-member unlock badges |

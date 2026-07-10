@@ -564,3 +564,61 @@ def compute_risers_fallers(
         "window_days":  window_days,
         "sample_size":  len(moves),
     }
+
+
+# ---------------------------------------------------------------------------
+# 4. Consensus positional ranks + 30-day deltas (FB4-61 tile stats)
+# ---------------------------------------------------------------------------
+#
+# The Tiers tile-stat strip shows the same two stats for both sides: rank +
+# 30d trend.  The "You" side comes from compute_risers_fallers above (personal
+# elo_history).  This is its CONSENSUS twin: rank within position by the
+# universal-pool consensus seed Elo, and the 30-day delta of that rank versus
+# a dated consensus snapshot (player_value_history baseline).
+# ---------------------------------------------------------------------------
+
+
+def compute_consensus_pos_ranks(
+    current_elo: dict[str, float],
+    baseline_elo: dict[str, float],
+    players_by_id: dict[str, dict] | None,
+) -> dict[str, dict[str, int]]:
+    """
+    Args:
+        current_elo:   { player_id: consensus seed elo } — today's pool.
+        baseline_elo:  { player_id: consensus_elo } from the oldest in-window
+                       snapshot (load_value_snapshot_baseline). Empty dict →
+                       no history accrued yet → ranks only, no deltas.
+        players_by_id: { player_id: {"position": ...} } enrichment.
+
+    Returns:
+        { "pos_rank":       { player_id: int },     # 1-based, per position
+          "pos_rank_delta": { player_id: int } }    # prev - curr; + = moved UP
+
+    Mirrors compute_risers_fallers' rank view: the prior ranking is
+    reconstructed over the FULL current pool (players missing from the
+    baseline fall back to their current elo so prior ranks stay comparable),
+    but a delta is only reported for players actually present in the baseline.
+    Ties break on player_id via _pos_rank_map for deterministic ranks.
+    """
+    curr_pos = _pos_rank_map(current_elo, players_by_id)
+    if not baseline_elo:
+        return {"pos_rank": curr_pos, "pos_rank_delta": {}}
+
+    prev_snapshot: dict[str, float] = {}
+    for pid, curr in (current_elo or {}).items():
+        try:
+            prev_snapshot[pid] = (float(baseline_elo[pid])
+                                  if pid in baseline_elo else float(curr))
+        except (TypeError, ValueError):
+            continue
+    prev_pos = _pos_rank_map(prev_snapshot, players_by_id)
+
+    deltas: dict[str, int] = {}
+    for pid, curr_rank in curr_pos.items():
+        if pid not in baseline_elo:
+            continue
+        d = _rank_delta(prev_pos.get(pid), curr_rank)
+        if d is not None:
+            deltas[pid] = d
+    return {"pos_rank": curr_pos, "pos_rank_delta": deltas}

@@ -46,6 +46,7 @@ import {
 } from '../api/rankings';
 import { copyTiersFromFormat } from '../api/league';
 import { autoBucket, TIERS, TIER_LABEL } from '../utils/tierBands';
+import { valueForElo } from '../utils/playerValue';
 import { useSession } from '../state/useSession';
 import { useScoringFormat } from '../hooks/useScoringFormat';
 import type { Position, RankedPlayer, Tier, ScoringFormat, TrendRow } from '../shared/types';
@@ -163,11 +164,11 @@ export default function TiersScreen() {
     placeholderData: (prev) => prev,
   });
 
-  // FB4-61 — 30-day trend source. Reuses the Trends screen's risers/fallers
-  // endpoint (FB-04 rank-delta view) rather than inventing a new one. The
-  // response is the user's OWN ELO-history rank deltas, so it powers the
-  // "You" 30d trend. There is no consensus 30d-trend field on any current
-  // payload (see the consensus notes in tileStatsFor below).
+  // FB4-61 — 30-day trend source for the "You" side. Reuses the Trends
+  // screen's risers/fallers endpoint (FB-04 rank-delta view) rather than
+  // inventing a new one; the response is the user's OWN ELO-history rank
+  // deltas. The consensus side's rank + 30d trend ride the rankings payload
+  // itself (see tileStatsFor below).
   const trendsQuery = useQuery({
     queryKey: ['trends', 'risers-fallers', 30, 50],
     queryFn: () => getRisersAndFallers({ days: 30, topN: 50 }),
@@ -198,31 +199,27 @@ export default function TiersScreen() {
 
   // #65 — resolve the tile stats for a player. Both the user's and the
   // consensus values render side by side (the FB4-61 Consensus | You toggle
-  // is gone). DATA NOTES:
-  //  • You rank      → player.rank (the user's positional rank, on payload).
-  //  • You 30d trend → trendByPid (risers/fallers rank-delta source).
-  //  • Consensus rank → player.adp ?? player.search_rank (consensus-ish signals
-  //    already on the rankings payload). #61: a dedicated consensus-rank
-  //    field is not in the payload — needs backend.
-  //  • Consensus 30d trend → not in any payload (#61 — needs backend).
-  //    TileStats omits the consensus trend entirely until it exists.
+  // is gone). Same two stats for both sides (#61): rank + 30d trend.
+  //  • You rank        → player.rank (the user's positional rank, on payload).
+  //  • You 30d trend   → trendByPid (risers/fallers rank-delta source).
+  //  • Cons rank       → player.consensus_pos_rank (rank within position by
+  //    consensus value — replaced the old ADP/search_rank proxy).
+  //  • Cons 30d trend  → player.consensus_pos_rank_delta_30d. Absent until
+  //    the backend has a prior-day consensus snapshot in the 30d window —
+  //    TileStats omits the glyph when null.
   const tileStatsFor = useCallback(
     (player: RankedPlayer): {
       youRankLabel: string | null;
       youTrendDelta: number | null;
       consensusRankLabel: string | null;
-    } => {
-      const adp = player.adp;
-      const searchRank = player.search_rank;
-      let consensusRankLabel: string | null = null;
-      if (adp != null) consensusRankLabel = `ADP ${Math.round(adp)}`;
-      else if (searchRank != null) consensusRankLabel = `#${searchRank}`;
-      return {
-        youRankLabel: player.rank != null ? `#${player.rank}` : null,
-        youTrendDelta: trendByPid.get(player.id) ?? null,
-        consensusRankLabel,
-      };
-    },
+      consensusTrendDelta: number | null;
+    } => ({
+      youRankLabel: player.rank != null ? `#${player.rank}` : null,
+      youTrendDelta: trendByPid.get(player.id) ?? null,
+      consensusRankLabel:
+        player.consensus_pos_rank != null ? `#${player.consensus_pos_rank}` : null,
+      consensusTrendDelta: player.consensus_pos_rank_delta_30d ?? null,
+    }),
     [trendByPid],
   );
 
@@ -1205,19 +1202,6 @@ function moveTierByOne(
   }
   if (!changed) return prev;
   return next;
-}
-
-// #53/#54 — 0–10k display value for a tile / header aggregate. The rankings
-// payload carries no raw DynastyProcess value, so invert the DOCUMENTED
-// seed-scale mapping instead (docs/cross-client-invariants.md, banding rule:
-// `elo = 1200 + value/10000 × 600`), clamped to the 0–10k scale. Note the
-// input is the user's CURRENT Elo (consensus-seeded, then personalized by
-// trios / tier saves / anchors), so this reads as the player's value on the
-// USER'S board; a pure consensus value would need the #53/#54 backend
-// payload work — do not build that here.
-function valueForElo(elo: number | null | undefined): number | null {
-  if (elo == null) return null;
-  return Math.max(0, Math.min(10_000, Math.round(((elo - 1200) / 600) * 10_000)));
 }
 
 // Accent (tick) color for a zone's header — mirrors TierBin's tickColor.

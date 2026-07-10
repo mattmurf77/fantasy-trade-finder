@@ -103,6 +103,7 @@ from .database import (
     save_tier_overrides, load_tier_overrides,
     mark_format_unlocked, get_unlocked_formats,
     set_league_scoring, get_league_scoring, get_league_summary,
+    set_league_total_rosters,
     # Agent A4 additions — league social features
     load_league_member_unlock_states, load_league_activity,
     SCORING_FORMATS, DEFAULT_SCORING,
@@ -111,6 +112,7 @@ from .database import (
     load_user_cross_league_exposure,
     # Player value history (#57 / #17)
     record_value_snapshots, load_value_history, load_value_extremes,
+    load_value_snapshot_baseline,
     # Agent 1 additions — user_player_skips helpers
     add_skip as _skip_add,
     load_skips as _skip_load,
@@ -929,6 +931,41 @@ def _get_universal_pool(scoring_format: str) -> tuple[list[Player], dict[str, fl
     _ensure_universal_pools()
     pool = g_universal_by_format.get(scoring_format) or g_universal_by_format.get("1qb_ppr") or {}
     return pool.get("players", []), pool.get("seed", {})
+
+
+# ---------------------------------------------------------------------------
+# Consensus positional ranks + 30d trend (FB4-61 tile stats)
+# ---------------------------------------------------------------------------
+# A player's consensus positional rank = their 1-based rank within their
+# position by consensus seed Elo over the format's universal pool. The 30d
+# trend compares that rank against the oldest in-window player_value_history
+# snapshot (daily cron #57). Both inputs change at most once per UTC day
+# (pool rebuild on boot + daily snapshot), so results are memoised per
+# (format, day).
+# ---------------------------------------------------------------------------
+
+# fmt → (utc_date, pos_rank_map, pos_rank_delta_map)
+_consensus_rank_cache: dict[str, tuple[str, dict, dict]] = {}
+
+
+def _consensus_pos_ranks(scoring_format: str) -> tuple[dict[str, int], dict[str, int]]:
+    """({pid: consensus_pos_rank}, {pid: 30d rank delta, + = moved UP}).
+
+    The delta map only carries players present in the baseline snapshot —
+    absent players (or no accrued history at all) simply have no trend, and
+    clients omit the glyph.
+    """
+    from .trends_service import compute_consensus_pos_ranks
+    today  = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cached = _consensus_rank_cache.get(scoring_format)
+    if cached and cached[0] == today:
+        return cached[1], cached[2]
+    players, seed = _get_universal_pool(scoring_format)
+    players_by_id = {p.id: {"position": p.position} for p in players}
+    baseline = load_value_snapshot_baseline(scoring_format=scoring_format, days=30)
+    out = compute_consensus_pos_ranks(seed, baseline, players_by_id)
+    _consensus_rank_cache[scoring_format] = (today, out["pos_rank"], out["pos_rank_delta"])
+    return out["pos_rank"], out["pos_rank_delta"]
 
 
 # ---------------------------------------------------------------------------
@@ -2323,9 +2360,27 @@ def get_rankings():
     position = request.args.get("position") or None
     try:
         rank_set = service.get_rankings(position=position)
+        rankings = [ranked_player_to_dict(rp) for rp in rank_set.rankings]
+        # FB4-61 tile stats — attach the market side: consensus positional
+        # rank + its 30d delta. Additive & best-effort: an enrichment failure
+        # must never break the rankings read, and both fields follow
+        # player_to_dict's omit-when-absent convention (the trend is absent
+        # until player_value_history has a prior-day snapshot in-window).
+        try:
+            cons_rank, cons_delta = _consensus_pos_ranks(_active_format(sess))
+            for d in rankings:
+                r = cons_rank.get(d["id"])
+                if r is None:
+                    continue
+                d["consensus_pos_rank"] = r
+                dd = cons_delta.get(d["id"])
+                if dd is not None:
+                    d["consensus_pos_rank_delta_30d"] = dd
+        except Exception:
+            log.warning("consensus pos-rank enrichment failed", exc_info=True)
         return jsonify({
             "position":          rank_set.position,
-            "rankings":          [ranked_player_to_dict(rp) for rp in rank_set.rankings],
+            "rankings":          rankings,
             "interaction_count": rank_set.interaction_count,
             "threshold":         rank_set.threshold,
             "threshold_met":     rank_set.threshold_met,
@@ -5489,6 +5544,8 @@ def league_summary_route():
         Matches tab's "Mutual matches" / "Awaiting them" segments — #91)
       - matches_pending / matches_accepted (deprecated status-split counts,
         kept for pre-1.4 clients)
+      - total_teams (TOTAL teams in the league, caller included — Sleeper's
+        total_rosters when known, else leaguemates_total + 1; FB #41)
       - leaguemates_total / _joined / _unlocked_1qb / _unlocked_sf
       - default_scoring, league_name
     """
@@ -6823,6 +6880,16 @@ def session_init():
                         pass
                     meta = _fetch_sleeper_league_meta(league_id)
                     if meta:
+                        # FB #41 — persist the league's TRUE team count.
+                        # league_members can't be trusted for this: clients
+                        # drop ownerless rosters from opponent_rosters and
+                        # stale rows linger after a manager leaves.
+                        try:
+                            _tr = meta.get("total_rosters")
+                            if isinstance(_tr, int) and _tr > 0:
+                                set_league_total_rosters(league_id, _tr)
+                        except Exception as tr_err:
+                            log.warning("  total_rosters persist failed (continuing): %s", tr_err)
                         detected = _detect_scoring_format_from_meta(meta)
                         if detected != existing_fmt:
                             set_league_scoring(league_id, detected)

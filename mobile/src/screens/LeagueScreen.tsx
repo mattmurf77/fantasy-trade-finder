@@ -220,7 +220,18 @@ export default function LeagueScreen() {
               </Text>
               <View style={styles.heroChips}>
                 <Badge label={fmtScoring(summary?.default_scoring)} />
-                <Badge label={summary ? `${num((summary as any)?.leaguemates_total) + 1} teams` : '— teams'} />
+                {/* FB #41 — show the league's TRUE team count (backend
+                    total_teams = Sleeper total_rosters). Deriving it as
+                    leaguemates_total + 1 undercounted when a roster was
+                    ownerless (departed manager never reaches
+                    league_members). Fallback keeps old backends working. */}
+                <Badge
+                  label={
+                    summary
+                      ? `${num(summary.total_teams, num((summary as any)?.leaguemates_total) + 1)} teams`
+                      : '— teams'
+                  }
+                />
                 {/* FB-38/42 — joined summary lives in the hero; tapping it opens
                     the member-roster overlay. Inner Pressable so the tap doesn't
                     bubble to the hero's switch-league handler. The chevron icon
