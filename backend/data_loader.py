@@ -25,6 +25,8 @@ consensus. User swipes personalise the rankings from there.
 
 import csv
 import io
+import os
+import pathlib
 import re
 import urllib.request
 from typing import Optional
@@ -187,16 +189,28 @@ def _fetch_dynasty_process(
         scoring = DP_SCORING_PARAM[scoring]
     value_col = f"value_{scoring}"
 
-    try:
-        req = urllib.request.Request(
-            VALUES_URL,
-            headers={"User-Agent": "FantasyTradeFinder/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-    except Exception as e:
-        print(f"⚠️  DynastyProcess fetch failed ({e}) — using flat Elo baseline")
-        return {}, {}
+    # UI-test harness seam (docs/plans/mobile-testing/lld.md §4.3): the DP CSV
+    # is a live egress the fixture seam can't see. FTF_DP_VALUES_FILE serves a
+    # local DP-shaped CSV through the IDENTICAL parse path; under FTF_TEST_MODE
+    # it is mandatory — the silent flat-Elo fallback below would otherwise
+    # reshape the universal pool mid-test without any counter tripping.
+    _dp_file = os.environ.get("FTF_DP_VALUES_FILE")
+    if os.environ.get("FTF_TEST_MODE") == "1" and not _dp_file:
+        raise RuntimeError(
+            "FTF_TEST_MODE=1 requires FTF_DP_VALUES_FILE (hermetic DynastyProcess values)")
+    if _dp_file:
+        raw = pathlib.Path(_dp_file).read_text()  # missing file = loud failure, by design
+    else:
+        try:
+            req = urllib.request.Request(
+                VALUES_URL,
+                headers={"User-Agent": "FantasyTradeFinder/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+        except Exception as e:
+            print(f"⚠️  DynastyProcess fetch failed ({e}) — using flat Elo baseline")
+            return {}, {}
 
     elo_map: dict[str, float] = {}
     value_map: dict[str, float] = {}

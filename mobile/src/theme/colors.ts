@@ -20,17 +20,25 @@ export const colors = {
     te: '#a855f7',
   },
   // Tier hues deliberately share no hue with position colors (docs/cross-client-invariants.md).
+  // Pick-value tier ladder (2026-07-11): keys read directly in draft-pick terms.
   tier: {
-    elite: '#fbbf24',
-    starter: '#2dd4bf',
-    solid: '#38bdf8',
-    depth: '#f472b6',
+    firsts_2plus: '#fbbf24',
+    first_1: '#2dd4bf',
+    second: '#38bdf8',
+    third: '#f472b6',
+    fourth: '#a3e635',
     bench: '#7a7f96',
   },
 } as const;
 
 export type Position = 'QB' | 'RB' | 'WR' | 'TE';
-export type Tier = 'elite' | 'starter' | 'solid' | 'depth' | 'bench';
+export type Tier =
+  | 'firsts_2plus'
+  | 'first_1'
+  | 'second'
+  | 'third'
+  | 'fourth'
+  | 'bench';
 
 export function tierColor(t: Tier) {
   return colors.tier[t];

@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "name": "standard",
+  "description": "12-team SF TEP league; qa_standard unlocked in both formats with full 4-position rankings + 30-day Elo history; one ranked opponent (qa_opp_ranked), one unranked (qa_opp_unranked); 2 mutual matches + 1 awaiting like.",
+  "season": 2026,
+  "flags_base": "release",
+  "flag_overrides": {
+    "landing.smart_start_cta":         false,
+    "landing.try_before_sync":         false,
+    "league.activity_feed":            false,
+    "league.unlock_badges_per_member": false,
+    "profiles.public_pages":           false,
+    "swipe.gesture_audit":             true,
+    "swipe.qc_compliments":            true,
+    "trade.finder_targeting":          true,
+    "trade.preference_lists":          true,
+    "trade.send_in_sleeper":           true,
+    "trade_math.human_explanations":   true,
+    "trades.new_partners_alerts":      false,
+    "trades.queue_2k":                 false
+  },
+  "app_user": {
+    "username": "qa_standard",
+    "user_id": "900000000000000001",
+    "unlocked": true,
+    "rankings": {
+      "positions": ["QB", "RB", "WR", "TE"],
+      "trios_per_position": "threshold+2",
+      "history_days": 30,
+      "formats": ["1qb_ppr", "sf_tep"]
+    },
+    "tiers": "seeded-suggested",
+    "anchors": null
+  },
+  "extra_users": [],
+  "activity_seed": 3,
+  "feedback_reply_seed": 1,
+  "leagues": [
+    {
+      "league_id": "990000000000000001",
+      "name": "QA Standard League",
+      "total_rosters": 12,
+      "format": "sf_tep",
+      "roster_size": 26,
+      "members": [
+        { "username": "qa_opp_ranked",   "user_id": "900000000000000002", "rankings": "generated", "roster": "generated:balanced" },
+        { "username": "qa_opp_unranked", "user_id": "900000000000000003", "rankings": null,        "roster": "generated:balanced" }
+      ],
+      "matches_seed": { "mutual": 2, "awaiting": 1 }
+    }
+  ],
+  "players_cache": "warm"
+}

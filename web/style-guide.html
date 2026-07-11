@@ -16,7 +16,7 @@
     --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
     --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
     --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
-    --tier-elite:#F59E0B; --tier-starter:#22C55E; --tier-solid:#3B82F6; --tier-depth:#A855F7; --tier-bench:#94A3B8;
+    --tier-firsts-2plus:#fbbf24; --tier-first-1:#2dd4bf; --tier-second:#38bdf8; --tier-third:#f472b6; --tier-fourth:#a3e635; --tier-bench:#7a7f96;
     --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
     --shadow-sheet:0 12px 32px rgba(0,0,0,0.55);
     --t-fast:120ms ease-out; --t-base:180ms ease-out;
@@ -67,7 +67,7 @@
   /* badges */
   .badge { display:inline-block; padding:2px 6px; border-radius:var(--r-xs); font:600 11px/14px var(--font-ui); text-transform:uppercase; letter-spacing:.08em; border:1px solid var(--line-strong); color:var(--chalk); }
   .badge-qb{border-color:var(--qb)} .badge-rb{border-color:var(--rb)} .badge-wr{border-color:var(--wr)} .badge-te{border-color:var(--te)}
-  .badge-elite{border-color:var(--tier-elite)} .badge-starter{border-color:var(--tier-starter)} .badge-solid{border-color:var(--tier-solid)} .badge-depth{border-color:var(--tier-depth)} .badge-bench{border-color:var(--tier-bench)}
+  .badge-firsts-2plus{border-color:var(--tier-firsts-2plus)} .badge-first-1{border-color:var(--tier-first-1)} .badge-second{border-color:var(--tier-second)} .badge-third{border-color:var(--tier-third)} .badge-fourth{border-color:var(--tier-fourth)} .badge-bench{border-color:var(--tier-bench)}
   .badge-rookie{border-color:var(--flare); color:var(--flare)}
   .badge-inj-q{border-color:var(--warn); color:var(--warn)} .badge-inj-out{border-color:var(--neg); color:var(--neg)}
   .badge-dc{color:var(--chalk-dim)}
@@ -174,7 +174,7 @@
       <div class="swatch"><div class="chip" style="background:var(--pos)"></div><div class="meta"><div class="label">pos / like</div><div class="data">#22C55E</div></div></div>
       <div class="swatch"><div class="chip" style="background:var(--neg)"></div><div class="meta"><div class="label">neg / pass</div><div class="data">#EF4444</div></div></div>
     </div>
-    <p class="body-sm" style="margin-top:12px">Position + tier hexes are preserved cross-client invariants (QB <span class="data">#F97316</span>, RB <span class="data">#22C55E</span>, WR <span class="data">#3B82F6</span>, TE <span class="data">#A855F7</span>; tiers gold/green/blue/purple/gray). Data encodings only — never chrome.</p>
+    <p class="body-sm" style="margin-top:12px">Position + tier hexes are preserved cross-client invariants (QB <span class="data">#F97316</span>, RB <span class="data">#22C55E</span>, WR <span class="data">#3B82F6</span>, TE <span class="data">#A855F7</span>; tiers = the pick-value ladder, gold/teal/sky/pink/lime/gray). Data encodings only — never chrome.</p>
   </div>
 
   <!-- TYPE -->
@@ -216,10 +216,11 @@
       <span class="badge badge-inj-out">IR</span>
     </div>
     <div class="btn-row" style="margin-top:12px">
-      <span class="badge badge-elite">Elite</span>
-      <span class="badge badge-starter">Starter</span>
-      <span class="badge badge-solid">Solid</span>
-      <span class="badge badge-depth">Depth</span>
+      <span class="badge badge-firsts-2plus">2+ 1sts</span>
+      <span class="badge badge-first-1">1st</span>
+      <span class="badge badge-second">2nd</span>
+      <span class="badge badge-third">3rd</span>
+      <span class="badge badge-fourth">4th</span>
       <span class="badge badge-bench">Bench</span>
       <span class="pill-likes"><svg class="icon" style="width:14px;height:14px" viewBox="0 0 20 20"><path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="10" cy="10" r="2.5"/></svg>They're interested</span>
     </div>
@@ -232,17 +233,17 @@
       <div class="card player-card pos-wr selected">
         <div class="title">Puka Nacua</div>
         <div class="row"><span class="badge badge-wr">WR</span><span class="badge badge-dc">WR1</span></div>
-        <div class="row" style="justify-content:space-between"><span class="data">1608</span><span class="badge badge-elite">Elite</span></div>
+        <div class="row" style="justify-content:space-between"><span class="data">1608</span><span class="badge badge-first-1">1st</span></div>
       </div>
       <div class="card player-card pos-rb">
         <div class="title">Jahmyr Gibbs</div>
         <div class="row"><span class="badge badge-rb">RB</span><span class="badge badge-dc">RB1</span></div>
-        <div class="row" style="justify-content:space-between"><span class="data">1571</span><span class="badge badge-starter">Starter</span></div>
+        <div class="row" style="justify-content:space-between"><span class="data">1571</span><span class="badge badge-second">2nd</span></div>
       </div>
       <div class="card player-card pos-te">
         <div class="title">Brock Bowers</div>
         <div class="row"><span class="badge badge-te">TE</span><span class="badge badge-dc">TE1</span><span class="badge badge-inj-q">Q</span></div>
-        <div class="row" style="justify-content:space-between"><span class="data">1544</span><span class="badge badge-starter">Starter</span></div>
+        <div class="row" style="justify-content:space-between"><span class="data">1544</span><span class="badge badge-second">2nd</span></div>
       </div>
     </div>
   </div>

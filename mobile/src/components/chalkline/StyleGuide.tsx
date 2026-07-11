@@ -54,10 +54,11 @@ export default function StyleGuide() {
           <InjuryBadge status="IR" />
         </View>
         <View style={styles.row}>
-          <TierChalkBadge t="elite" />
-          <TierChalkBadge t="starter" />
-          <TierChalkBadge t="solid" />
-          <TierChalkBadge t="depth" />
+          <TierChalkBadge t="firsts_2plus" />
+          <TierChalkBadge t="first_1" />
+          <TierChalkBadge t="second" />
+          <TierChalkBadge t="third" />
+          <TierChalkBadge t="fourth" />
           <TierChalkBadge t="bench" />
         </View>
       </Section>
@@ -67,7 +68,7 @@ export default function StyleGuide() {
           <Text style={type.title}>Puka Nacua</Text>
           <View style={[styles.row, { marginTop: space.sm }]}>
             <PositionBadge pos="WR" />
-            <TierChalkBadge t="elite" />
+            <TierChalkBadge t="firsts_2plus" />
             <Text style={[type.data, { marginLeft: 'auto' }]}>1608</Text>
           </View>
         </Card>

@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { clearSessionToken, getSessionToken } from '../api/client';
+import {
+  clearSessionToken,
+  getSessionToken,
+  setOnVerificationRequired,
+} from '../api/client';
 import { initLeagueSession, startDemoSession as apiStartDemoSession } from '../api/auth';
 import { connectLeague as apiConnectLeague } from '../api/league';
 import { getLeagues } from '../api/sleeper';
@@ -35,6 +39,21 @@ export interface SavedUser {
   username: string;
   display_name: string;
   avatar_id: string | null;
+}
+
+/** Verified-session state from the backend (account-auth P1). Shape mirrors
+ *  session_init's additive `verification` response field. */
+export interface SessionVerification {
+  /** THIS session proved control of the account (Sleeper-JWT capture +
+   *  live-token proof via SleeperConnectScreen). */
+  session_verified: boolean;
+  /** SOME session has verified this user_id. If true while
+   *  session_verified is false, this session has already lost write access
+   *  (first-verified-controller-wins). */
+  user_verified: boolean;
+  verified_via?: string | null;
+  /** Grace period is over — unverified writes are hard-denied server-side. */
+  enforced: boolean;
 }
 export interface SavedLeague {
   league_id: string;
@@ -73,10 +92,24 @@ interface SessionState {
    *  (RankHomeScreen). Hydrated from AsyncStorage in bootstrap(); changed
    *  from the chooser or the Settings steer slider. */
   rankingMethodPref: RankMethodPref | null;
+  /** Verified-session state (account-auth P1). Null until the first
+   *  session_init response of this launch arrives. In-memory only — the
+   *  server is authoritative and re-reports it on every session_init. */
+  verification: SessionVerification | null;
+  /** "Verify your account" banner dismissal — session-scoped (in-memory)
+   *  so the quiet reminder returns on the next launch, never nags twice
+   *  in one. */
+  verifyBannerDismissed: boolean;
 
   bootstrap: () => Promise<void>;
   /** Persist the preferred ranking flow (see rankingMethodPref). */
   setRankingMethodPref: (m: RankMethodPref) => Promise<void>;
+  /** Record the server-reported verification state. Called by api/auth's
+   *  sessionInit (every response carries it) and by SleeperConnectScreen
+   *  when a link capture upgrades the session to verified. */
+  setVerification: (v: SessionVerification | null) => void;
+  /** Hide the "Verify your account" banner for the rest of this launch. */
+  dismissVerifyBanner: () => void;
   /** FB-45 — server sessions are in-memory; a deploy/restart orphans the
    *  stored token while the app still routes to Main. Re-run the league
    *  handshake to mint a fresh server session on cold launch and on
@@ -138,6 +171,8 @@ export const useSession = create<SessionState>((set, get) => ({
   isDemo: false,
   invitedBy: null,
   rankingMethodPref: null,
+  verification: null,
+  verifyBannerDismissed: false,
 
   bootstrap: async () => {
     const [userRaw, leagueRaw, leaguesRaw, tok, fmt, prefRaw] = await Promise.all([
@@ -170,6 +205,14 @@ export const useSession = create<SessionState>((set, get) => ({
     } catch {
       /* non-fatal — worst case the chooser shows again next launch */
     }
+  },
+
+  setVerification: (v) => {
+    set({ verification: v });
+  },
+
+  dismissVerifyBanner: () => {
+    set({ verifyBannerDismissed: true });
   },
 
   revalidateSession: async () => {
@@ -389,6 +432,34 @@ export const useSession = create<SessionState>((set, get) => ({
       formatExplicit: false,
       isDemo:         false,
       invitedBy:      null,
+      verification:   null,
+      verifyBannerDismissed: false,
     });
   },
 }));
+
+// ── Read-gate signal (account-auth P2.5) ────────────────────────────────
+// Any API call answered with 403 verification_required means this session
+// is unverified while a verified controller exists for its user_id (the
+// squatter / second-device case — the same condition session_init reports
+// as user_verified=true). Mirror that into `verification` so the existing
+// VerifyAccountBanner (mounted at the authed root) appears and routes the
+// user into SleeperConnect. Central here — screens don't each map the 403;
+// their query error states just show the shared "verify to view" copy
+// (utils/verification.readErrorCopy).
+setOnVerificationRequired(() => {
+  const cur = useSession.getState().verification;
+  // Already reflecting a banner-visible state? Don't churn the store on
+  // every gated response.
+  if (cur && !cur.session_verified && (cur.user_verified || cur.enforced)) {
+    return;
+  }
+  useSession.setState({
+    verification: {
+      session_verified: false,
+      user_verified:    true,
+      verified_via:     cur?.verified_via ?? null,
+      enforced:         cur?.enforced ?? false,
+    },
+  });
+});

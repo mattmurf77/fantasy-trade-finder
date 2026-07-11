@@ -13,6 +13,7 @@ import RankScreen from '../screens/RankScreen';
 import RankHomeScreen from '../screens/RankHomeScreen';
 import PickAnchorScreen from '../screens/PickAnchorScreen';
 import TiersScreen from '../screens/TiersScreen';
+import QuickSetTiersScreen from '../screens/QuickSetTiersScreen';
 import ManualRanksScreen from '../screens/ManualRanksScreen';
 import TrendsScreen from '../screens/TrendsScreen';
 import TradesScreen from '../screens/TradesScreen';
@@ -33,7 +34,14 @@ const RankStack = createNativeStackNavigator();
 // Portfolio; the bottom-nav still surfaces just four tabs.
 const TradesStack = createNativeStackNavigator();
 
-export type RankRoute = 'RankHome' | 'Trios' | 'Anchors' | 'Tiers' | 'ManualRanks' | 'Trends';
+export type RankRoute =
+  | 'RankHome'
+  | 'Trios'
+  | 'Anchors'
+  | 'Tiers'
+  | 'QuickSetTiers'
+  | 'ManualRanks'
+  | 'Trends';
 export type TradesRoute = 'TradesHome' | 'Portfolio' | 'TradeCalculator';
 
 // #51/#52 — Rank sub-screens (Tiers / Overall Ranks / Trends) are siblings
@@ -126,6 +134,14 @@ function RankStackNav() {
         component={TiersScreen}
         options={subScreenOptions('Tiers', 'Trios')}
       />
+      {/* 1.5.4 #104 — guided tier quick-set walk. Entered from the Tiers
+          header's "Quick set" action (not the Rank menu), so its back
+          fallback is the Tiers board. */}
+      <RankStack.Screen
+        name="QuickSetTiers"
+        component={QuickSetTiersScreen}
+        options={subScreenOptions('Quick Set Tiers', 'Tiers')}
+      />
       <RankStack.Screen
         name="ManualRanks"
         component={ManualRanksScreen}
@@ -213,7 +229,7 @@ export default function TabNav() {
           // #49: FB-28 added a chevron to the label, but the icon already
           // renders one (PR #79) — the two cues stacked. Keep the icon chevron
           // (the conventional "fans out" signal) and drop the label arrow.
-          options={{ tabBarIcon: rankTabIcon('rank'), tabBarLabel: 'Rank' }}
+          options={{ tabBarIcon: rankTabIcon('rank'), tabBarLabel: 'Rank', tabBarButtonTestID: 'tab.rank' }}
           listeners={() => ({
             // Intercept the tap on the Rank tab — open the action sheet
             // instead of jumping into a sub-screen. We still keep the tab
@@ -227,7 +243,7 @@ export default function TabNav() {
         <Tab.Screen
           name="Trades"
           component={TradesStackNav}
-          options={{ tabBarIcon: tabIcon('trade') }}
+          options={{ tabBarIcon: tabIcon('trade'), tabBarButtonTestID: 'tab.trades' }}
           listeners={() => ({
             // Warm the liked-trades cache during the tab transition so
             // TradesScreen's `useQuery(['liked-trades', leagueId])` adopts
@@ -250,7 +266,7 @@ export default function TabNav() {
         <Tab.Screen
           name="Matches"
           component={MatchesScreen}
-          options={{ tabBarIcon: tabIcon('match') }}
+          options={{ tabBarIcon: tabIcon('match'), tabBarButtonTestID: 'tab.matches' }}
           listeners={() => ({
             // Warm the cross-league matches cache during the tab transition
             // so MatchesScreen's `useQuery(['matches', 'all'])` adopts the
@@ -268,7 +284,7 @@ export default function TabNav() {
         <Tab.Screen
           name="League"
           component={LeagueScreen}
-          options={{ tabBarIcon: tabIcon('crown') }}
+          options={{ tabBarIcon: tabIcon('crown'), tabBarButtonTestID: 'tab.league' }}
         />
       </Tab.Navigator>
 
@@ -354,7 +370,7 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
   const items: { route: RankRoute; label: string; sub: string }[] = [
     { route: 'Trios',         label: 'Trios',         sub: '3-at-a-time swipe ranking' },
     { route: 'Anchors',       label: 'Pick Anchors',  sub: 'Say what each player is worth in draft picks — 4 1sts down to no value' },
-    { route: 'Tiers',         label: 'Tiers',         sub: 'Drag players into Elite / Starter / Solid / Depth / Bench' },
+    { route: 'Tiers',         label: 'Tiers',         sub: 'Drag players into pick-value tiers (2+ 1sts / 1st / 2nd / 3rd / 4th / Bench)' },
     { route: 'ManualRanks',   label: 'Overall Ranks', sub: 'Drag rows or tap a rank number to re-order your board by hand' },
     { route: 'Trends',        label: 'Trends',        sub: 'See your biggest movers and how you differ from consensus' },
   ];

@@ -122,6 +122,29 @@ export class ApiError extends Error {
   get isUnauthorized() {
     return this.status === 401;
   }
+  /** Account-auth read/write gate: this session is unverified while a
+   *  verified controller exists for the user_id (or enforcement is on).
+   *  The fix is always the same — verify via SleeperConnect. */
+  get isVerificationRequired() {
+    return (
+      this.status === 403 &&
+      typeof this.body === 'object' &&
+      this.body !== null &&
+      (this.body as any).error === 'verification_required'
+    );
+  }
+}
+
+// ── verification_required listener (account-auth P2.5) ─────────────────────
+// The backend read gate 403s board-content reads from unverified sessions
+// once a verified controller exists for the user_id. One central hook — the
+// session store registers a handler that flips useSession.verification so
+// the existing VerifyAccountBanner appears, instead of every screen mapping
+// the error itself. Registered as a callback (not a direct import) to keep
+// this module free of state dependencies (useSession already imports us).
+let _onVerificationRequired: (() => void) | null = null;
+export function setOnVerificationRequired(fn: (() => void) | null): void {
+  _onVerificationRequired = fn;
 }
 
 // ── Request deadlines (INIT-12 Wave 1, FR-1/FR-2) ───────────────────────────
@@ -300,7 +323,16 @@ export async function apiRequest<T = unknown>(
               }
             }
             const msg = (parsed && (parsed.message || parsed.error)) || `HTTP ${res!.status}`;
-            throw new ApiError(res!.status, parsed, msg);
+            const apiErr = new ApiError(res!.status, parsed, msg);
+            // Central read-gate signal — see setOnVerificationRequired above.
+            if (apiErr.isVerificationRequired && _onVerificationRequired) {
+              try {
+                _onVerificationRequired();
+              } catch {
+                /* listener errors must never mask the API error */
+              }
+            }
+            throw apiErr;
           }
 
           return parsed as T;

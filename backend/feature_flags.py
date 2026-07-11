@@ -103,6 +103,18 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.crown_asset",
     # "Send in Sleeper" — undocumented Sleeper write API (FLAGGED-BETA / ToS-adverse)
     "trade.send_in_sleeper",  # docs/plans/sleeper-write-capture-runbook.md
+    # Account-auth P2 — Apple/Google identity anchors (docs/plans/account-auth-plan-2026-07-11.md)
+    # Gates the sign-in surface (/api/auth/apple, /api/auth/google,
+    # GET /api/account + mobile Sign in with Apple UI). DELETE /api/account
+    # is deliberately NOT gated — App Store 5.1.1(v) in-app deletion.
+    "auth.accounts",
+    # Account-auth P1/P3 — write-gate enforcement (plan §3-P1/P3).
+    # False (default) = GRACE: unverified writes allowed but logged
+    # (AUTH-GRACE lines; see docs/runbook.md). True = P3: unverified writes
+    # → 403 verification_required. Hard-verified routes (POST
+    # /api/sleeper/link, POST /api/trades/propose) ignore this flag and
+    # always require proof.
+    "auth.enforce_verified_writes",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

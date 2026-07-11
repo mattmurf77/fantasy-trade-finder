@@ -22,6 +22,7 @@ import { getAssetPrefs, setAssetPref } from '../api/league';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { relativeTime } from '../utils/relativeTime';
+import { readErrorCopy } from '../utils/verification';
 import type { TradeMatch, AwaitingTrade, Player } from '../shared/types';
 
 type LeagueFilter = string | 'all';
@@ -320,7 +321,10 @@ export default function MatchesScreen() {
       ) : isError ? (
         <View style={styles.centered}>
           <Text style={styles.errorText}>
-            {segment === 'mutual' ? 'Could not load matches.' : 'Could not load pending trades.'}
+            {readErrorCopy(
+              segment === 'mutual' ? matchesQuery.error : awaitingQuery.error,
+              segment === 'mutual' ? 'Could not load matches.' : 'Could not load pending trades.',
+            )}
           </Text>
         </View>
       ) : segment === 'mutual' ? (

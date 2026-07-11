@@ -1,0 +1,542 @@
+{
+ "_fixture_note": "Recorded-shape ESPN Fantasy v3 payload (GET lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/2026/segments/0/leagues/{id}?view=mTeam&view=mRoster&view=mSettings). Live public test leagues (espn-api's 1234/368876) were purged by ESPN, so this fixture was assembled 2026-07-11 to the documented shape with REAL espn player IDs from dp_playerids_snapshot_2026-07-11.csv. Shape refs: stmorse.github.io/journal/espn-fantasy-v3.html, github.com/cwendt94/espn-api.",
+ "id": 987654321,
+ "seasonId": 2026,
+ "segmentId": 0,
+ "scoringPeriodId": 1,
+ "status": {
+  "isActive": true,
+  "currentMatchupPeriod": 1
+ },
+ "settings": {
+  "name": "Recorded Shape Dynasty",
+  "size": 3,
+  "rosterSettings": {
+   "lineupSlotCounts": {}
+  }
+ },
+ "members": [
+  {
+   "id": "{A1111111-1111-1111-1111-111111111111}",
+   "displayName": "owner1",
+   "isLeagueManager": true
+  },
+  {
+   "id": "{B2222222-2222-2222-2222-222222222222}",
+   "displayName": "owner2",
+   "isLeagueManager": false
+  },
+  {
+   "id": "{C3333333-3333-3333-3333-333333333333}",
+   "displayName": "owner3",
+   "isLeagueManager": false
+  }
+ ],
+ "teams": [
+  {
+   "id": 1,
+   "abbrev": "CHAL",
+   "name": "Chalk Dusters",
+   "primaryOwner": "{A1111111-1111-1111-1111-111111111111}",
+   "owners": [
+    "{A1111111-1111-1111-1111-111111111111}"
+   ],
+   "roster": {
+    "entries": [
+     {
+      "playerId": 4362628,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4362628,
+       "player": {
+        "id": 4362628,
+        "fullName": "Ja'Marr Chase",
+        "defaultPositionId": 3,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         3,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4430807,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4430807,
+       "player": {
+        "id": 4430807,
+        "fullName": "Bijan Robinson",
+        "defaultPositionId": 2,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         2,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 3918298,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 3918298,
+       "player": {
+        "id": 3918298,
+        "fullName": "Josh Allen",
+        "defaultPositionId": 1,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         1,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4432665,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4432665,
+       "player": {
+        "id": 4432665,
+        "fullName": "Brock Bowers",
+        "defaultPositionId": 4,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         4,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4569618,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4569618,
+       "player": {
+        "id": 4569618,
+        "fullName": "Garrett Wilson",
+        "defaultPositionId": 3,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         3,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4379399,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4379399,
+       "player": {
+        "id": 4379399,
+        "fullName": "James Cook",
+        "defaultPositionId": 2,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         2,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4685472,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4685472,
+       "player": {
+        "id": 4685472,
+        "fullName": "Tetairoa McMillan",
+        "defaultPositionId": 3,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         3,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4360516,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4360516,
+       "player": {
+        "id": 4360516,
+        "fullName": "Tyrone Tracy",
+        "defaultPositionId": 2,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         2,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 15683,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 15683,
+       "player": {
+        "id": 15683,
+        "fullName": "Justin Tucker",
+        "defaultPositionId": 5,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         5,
+         20
+        ]
+       }
+      }
+     },
+     {
+      "playerId": -16012,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": -16012,
+       "player": {
+        "id": -16012,
+        "fullName": "Chiefs D/ST",
+        "defaultPositionId": 16,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         16,
+         20
+        ]
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": 2,
+   "abbrev": "ICY",
+   "name": "Icy Veins",
+   "primaryOwner": "{B2222222-2222-2222-2222-222222222222}",
+   "owners": [
+    "{B2222222-2222-2222-2222-222222222222}"
+   ],
+   "roster": {
+    "entries": [
+     {
+      "playerId": 4262921,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4262921,
+       "player": {
+        "id": 4262921,
+        "fullName": "Justin Jefferson",
+        "defaultPositionId": 3,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         3,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4429795,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4429795,
+       "player": {
+        "id": 4429795,
+        "fullName": "Jahmyr Gibbs",
+        "defaultPositionId": 2,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         2,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4426348,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4426348,
+       "player": {
+        "id": 4426348,
+        "fullName": "Jayden Daniels",
+        "defaultPositionId": 1,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         1,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4361307,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4361307,
+       "player": {
+        "id": 4361307,
+        "fullName": "Trey McBride",
+        "defaultPositionId": 4,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         4,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4426502,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4426502,
+       "player": {
+        "id": 4426502,
+        "fullName": "Drake London",
+        "defaultPositionId": 3,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         3,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4567048,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4567048,
+       "player": {
+        "id": 4567048,
+        "fullName": "Kenneth Walker III",
+        "defaultPositionId": 2,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         2,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4432708,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4432708,
+       "player": {
+        "id": 4432708,
+        "fullName": "Marvin Harrison Jr.",
+        "defaultPositionId": 3,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         3,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4239996,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4239996,
+       "player": {
+        "id": 4239996,
+        "fullName": "Travis Etienne",
+        "defaultPositionId": 2,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         2,
+         20,
+         21
+        ]
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": 3,
+   "abbrev": "FLAR",
+   "name": "Flare Guns",
+   "primaryOwner": "{C3333333-3333-3333-3333-333333333333}",
+   "owners": [
+    "{C3333333-3333-3333-3333-333333333333}"
+   ],
+   "roster": {
+    "entries": [
+     {
+      "playerId": 4241389,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4241389,
+       "player": {
+        "id": 4241389,
+        "fullName": "CeeDee Lamb",
+        "defaultPositionId": 3,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         3,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 3929630,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 3929630,
+       "player": {
+        "id": 3929630,
+        "fullName": "Saquon Barkley",
+        "defaultPositionId": 2,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         2,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 3915511,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 3915511,
+       "player": {
+        "id": 3915511,
+        "fullName": "Joe Burrow",
+        "defaultPositionId": 1,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         1,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4430027,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4430027,
+       "player": {
+        "id": 4430027,
+        "fullName": "Sam LaPorta",
+        "defaultPositionId": 4,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         4,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4258173,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4258173,
+       "player": {
+        "id": 4258173,
+        "fullName": "Nico Collins",
+        "defaultPositionId": 3,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         3,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4427366,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4427366,
+       "player": {
+        "id": 4427366,
+        "fullName": "Breece Hall",
+        "defaultPositionId": 2,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         2,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 4360423,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 4360423,
+       "player": {
+        "id": 4360423,
+        "fullName": "Michael Penix Jr.",
+        "defaultPositionId": 1,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         1,
+         20,
+         21
+        ]
+       }
+      }
+     },
+     {
+      "playerId": 15795,
+      "lineupSlotId": 20,
+      "playerPoolEntry": {
+       "id": 15795,
+       "player": {
+        "id": 15795,
+        "fullName": "DeAndre Hopkins",
+        "defaultPositionId": 3,
+        "proTeamId": 0,
+        "eligibleSlots": [
+         3,
+         20,
+         21
+        ]
+       }
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

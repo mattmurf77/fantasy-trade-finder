@@ -4,21 +4,24 @@ Things that **must** stay in sync across backend, web, mobile, and the extension
 
 ---
 
-## Tier color tokens
+## Tier keys, labels & color tokens
 
-Canonical hex per tier (re-canonicalized 2026-07-10 to de-collide from position colors — the 2026-07-04 set made Starter/Solid/Depth byte-identical to RB/WR/TE, source of TestFlight FB #83/#84). Rule: **tier hues must not share a hue with any position color.** Tiers are the *bright* family (Tailwind 400-level), positions the *deeper* family (500-level). Lighter same-hue accents (300/200-level borders and text on tinted dark backgrounds, as in the extension badge and web tier legend) are allowed per client, but the base identity color and rgba() tint bases must be these values.
+**The tier taxonomy is the pick-value tier ladder (2026-07-11):** tier keys/labels read directly in draft-pick terms — a tier says what a player in it is worth in the Pick Anchor wizard's vocabulary. The former abstract five (elite/starter/solid/depth/bench) are retired; `bench` survives as the "below 4th-round value" floor. Keys are cross-client enums (sent verbatim in `/api/tiers/save`, served by `/api/tier-config`, `/api/extension/rankings`, `/api/anchor/save`, profile tier snapshots).
 
-| Tier | Color | Canonical hex | rgba tint base |
-|---|---|---|---|
-| Elite | gold | `#fbbf24` | `251,191,36` |
-| Starter | teal | `#2dd4bf` | `45,212,191` |
-| Solid | sky | `#38bdf8` | `56,189,248` |
-| Depth | pink | `#f472b6` | `244,114,182` |
-| Bench | gray | `#7a7f96` | `122,127,150` |
+Color rule unchanged (re-canonicalized 2026-07-10 to de-collide from position colors): **tier hues must not share a hue with any position color.** Tiers are the *bright* family (Tailwind 400-level), positions the *deeper* family (500-level). Lighter same-hue accents (300/200-level borders and text on tinted dark backgrounds, as in the extension badge and web tier legend) are allowed per client, but the base identity color and rgba() tint bases must be these values.
 
-**Locations:** `mobile/src/theme/colors.ts` (`colors.tier`), `mobile/src/components/TierBadge.tsx` + `TierBin.tsx` (hardcoded rgba tint bases), `web/positional-tiers.html` (inline CSS: tier-row accents, tier-assign buttons, legend swatches), `web/profile.html` (inline `:root` vars `--elite`…`--bench`), `extension/content.css` (`.ftf-badge.ftf-tier-*`).
+| Tier key | Label | Color | Canonical hex | rgba tint base | Elo band [min, max] |
+|---|---|---|---|---|---|
+| `firsts_2plus` | 2+ 1sts | gold | `#fbbf24` | `251,191,36` | [1788, 1870] |
+| `first_1` | 1st | teal | `#2dd4bf` | `45,212,191` | [1580, 1785] |
+| `second` | 2nd | sky | `#38bdf8` | `56,189,248` | [1400, 1575] |
+| `third` | 3rd | pink | `#f472b6` | `244,114,182` | [1280, 1395] |
+| `fourth` | 4th | lime | `#a3e635` | `163,230,53` | [1220, 1275] |
+| `bench` | Bench | gray | `#7a7f96` | `122,127,150` | [1150, 1215] |
 
-Note: `web/css/styles.css` has a separate 4-level *dynasty value* badge set (`.tier-elite/.tier-high/.tier-mid/.tier-depth`) — a different taxonomy, not these tokens. `extension/popup.css` contains no tier colors. Rank-medal accents (web `.ranked-1/2/3`, mobile `PlayerCard` rank styles) use the gold/silver/neutral medal tokens, not tier tokens.
+**Locations (colors + labels):** `mobile/src/theme/colors.ts` (`colors.tier`), `mobile/src/components/TierBadge.tsx` + `chalkline/Badge.tsx` (`TierChalkBadge`) label maps, `mobile/src/utils/tierBands.ts` (`TIERS`/`TIER_LABEL`), `web/positional-tiers.html` (inline CSS: tier-row accents, tier-assign buttons, legend swatches; JS `TIERS`/`TIER_LABELS_SHORT`), `web/profile.html` (inline `:root` vars + `TIER_ORDER`/`TIER_LABELS`), `web/style-guide.html` (badge swatches), `extension/content.css` (`.ftf-badge.ftf-tier-*`) + `extension/content.js` (`TIER_LABELS`), `backend/og_image.py` (`TIER_ORDER`/`TIER_LABELS`/`TIER_TINTS`).
+
+Note: `web/css/styles.css` has a separate 4-level *dynasty value* badge set (`.tier-elite/.tier-high/.tier-mid/.tier-depth`) — a different taxonomy, not these tokens. Likewise `trade_service.analyze_roster_strengths`' `tier_depth` profile bins (`elite/starter/bench`, KTC-value thresholds) and the `tier_mult_*` `model_config` keys are backend-internal engine taxonomies that merely reuse the old words — they are NOT the tier enum and were deliberately left untouched by the 2026-07-11 ladder migration. `extension/popup.css` contains no tier colors. Rank-medal accents (web `.ranked-1/2/3`, mobile `PlayerCard` rank styles) use the gold/silver/neutral medal tokens, not tier tokens.
 
 ---
 
@@ -26,9 +29,11 @@ Note: `web/css/styles.css` has a separate 4-level *dynasty value* badge set (`.t
 
 The Elo ranges that map a player into a tier. Single source of truth is `backend/tier_config.json`, served to clients via `GET /api/tier-config`; bucketing is a top-down walk assigning the first tier whose `min <= elo`.
 
-**Banding rule (recalibrated 2026-07-10, FB #60/#69):** bands are per **position AND scoring format**, anchored to the DynastyProcess consensus seed scale (`elo = 1200 + value/10000 × 600`) with rank-count targets from the current consensus pool — Elite ≈ top 5, Starter ≈ through rank 15, Solid ≈ through rank 30, Depth = anything with real consensus value, Bench = the near-zero tail plus post-trio Elo down to 1150 (below 1150 = unranked; keeps the `no_value` anchor at Elo 1100 below every band). Occupancy is pinned by `backend/tests/test_tier_occupancy.py` against a checked-in consensus snapshot — recalibrate bands (and refresh that fixture) if consensus drift makes Elite leave the 2–10 range. A related invariant: `apply_reorder` (manual ranks) is a pure permutation of existing Elo values, so reorders never change tier occupancy.
+**Banding rule (pick-value ladder, 2026-07-11):** each tier's floor is a rung of the anchor/pick Elo ladder (`GENERIC_PICK_SEEDS` + the multi-first anchor Elos — see "Pick anchor keys" below): `firsts_2plus` ≥ 1788 (just under `value_to_elo(2 × Mid 1st)` = 1788.6, so a "2 firsts" anchor pin lands inside; 3/4-firsts pins at 1869.7/1927.2 land here too), `first_1` ≥ 1580 (Late 1st seed — "worth a pick in round 1"), `second` ≥ 1400 (Late 2nd), `third` ≥ 1280 (Late 3rd), `fourth` ≥ 1220 (Late 4th), `bench` = below 4th-round value down to 1150 (below 1150 = unranked; keeps the `no_value` anchor at Elo 1100 below every band). Because pick value is position-uniform by design, the bands are **identical across positions AND scoring formats** — the JSON keeps its per-(format, position) shape so consumers don't change, but every cell holds the same six bands. Occupancy differs per position/format because the seed Elos differ (`elo = 1200 + value/10000 × 600`; e.g. 1QB QBs are rarely worth a 1st — that asymmetry is the point). Occupancy + the "every anchor rung lands in the tier that carries its name" invariant are pinned by `backend/tests/test_tier_occupancy.py` against a checked-in consensus snapshot. A related invariant: `apply_reorder` (manual ranks) is a pure permutation of existing Elo values, so reorders never change tier occupancy.
 
-**Locations:** `backend/tier_config.json` (canonical), `backend/ranking_service.py` (`tier_bands_for` / `tier_for_elo` / `apply_tiers`), `mobile/src/utils/tierBands.ts` (offline fallback mirror — keep in sync), `web/positional-tiers.html` + `extension` badge (consume the served config / backend walk).
+Saved boards need no data migration when bands change: `users.tier_overrides` stores raw Elo per player, so overrides re-bucket through the new walk on read.
+
+**Locations:** `backend/tier_config.json` (canonical), `backend/ranking_service.py` (`ORDERED_TIERS` / `tier_bands_for` / `tier_for_elo` / `apply_tiers`), `mobile/src/utils/tierBands.ts` (offline fallback mirror — keep in sync), `web/positional-tiers.html` (fallback `TIER_CONFIG` mirror), `web/js/app.js` (`_eloToTierLabel` floor mirror), `extension` badge (consumes the backend walk).
 
 ---
 
@@ -53,6 +58,14 @@ Authoritative defaults live in `model_config` (`elo_k`, `trade_k_like`, `trade_k
 Allowed values: `'1qb_ppr'`, `'sf_tep'`. Null in legacy rows is treated as `'1qb_ppr'`.
 
 **Locations:** `backend/database.py` (defaults), `backend/data_loader.py`, `backend/server.py`, `mobile/src/api/league.ts`, `web/js/app.js`. Tables affected: `swipe_decisions`, `member_rankings`, `elo_history`, `user_player_skips`, `leagues.default_scoring`.
+
+---
+
+## Verified-via strings (account-auth P1/P2)
+
+`users.verified_via` / session `verified_via` / `GET /api/account`: `'sleeper'`, `'apple'`, `'google'`. NULL = never verified. Identity-provider strings double as `linked_identities.provider` values (`'apple'`, `'google'`).
+
+**Locations:** `backend/accounts.py` (`PROVIDERS`), `backend/server.py` (auth routes), `mobile/src/api/auth.ts` (`AccountInfo` / `AccountAuthResponse` types).
 
 ---
 
@@ -210,6 +223,10 @@ The pick-anchor wizard's answer vocabulary (2026-07-10), defined in `backend/ser
 | `no_value` | No value | Elo 1100 — below every band → unranked |
 
 Anchor values are position-uniform on purpose (uniform valuation across position groups); tier assignment falls out of the per-position/format band walk. The Elo seeds come from `GENERIC_PICK_SEEDS` (`backend/server.py`) — if those seeds or the anchor set change, update the backend constant, the mobile union type + button rows, and this table. The ≈-Elo values above assume the default `elo_value_*` config (base 1000, ref 1500, k 0.005).
+
+**Per-user pick-value scale does NOT change this enum** (1.5.4 #111): `/api/anchor/scale` lets a user declare "a top-tier asset = N firsts" (N ∈ 2/3/4, default 2 = the table above, persisted in `users.anchor_scale`). A non-default N re-spaces only the three multi-first rows' target Elos for THAT user's saves (`m firsts → value(Mid 1st) × m^(log 2 / log N)`; the user's own N-firsts answer pins to the default top-tier Elo ≈ 1789). The keys, button labels, single-pick rows, `no_value`, the generic pick assets in the pool, the calculator's `gap` firsts unit (`/api/trade/evaluate` is public/sessionless), and the tier-ladder band floors all stay consensus-denominated per this table. A scaled user's own top-tier answer (m = N) still pins to Elo ≈ 1789 → `firsts_2plus`; their intermediate multi-first answers re-space downward and may land in `first_1` — by design (on that user's scale those packages are worth less than a top-tier asset).
+
+**Tier labels ARE pick terms** (2026-07-11, supersedes the 1.5.4 #103 display-sublabel approach): the tier ladder itself is denominated in this table's vocabulary — every anchor answer lands in the tier that carries its name (`2_firsts`/`3_firsts`/`4_firsts` → `firsts_2plus`, `1_first` → `first_1`, …, `no_value` → unranked). `mobile/src/utils/pickTerms.ts` (the #103 sublabel helper) was removed. If `GENERIC_PICK_SEEDS` or the anchor multiples change, recalibrate `backend/tier_config.json` (and its mirrors) alongside the locations above so the name↔rung invariant holds (`test_tier_occupancy.py::test_anchor_rungs_land_in_matching_tiers`).
 
 ---
 

@@ -1,0 +1,57 @@
+{
+  "_comment": "Exact mirror of config/features.json (the shipped 'release' flag set). Keep byte-synced with that file — test_seed_ui_test_db.py::test_release_flags_mirror_features_json enforces it. Consumed as flags_base by profiles/*.json via seed_ui_test_db.py.",
+
+  "swipe.community_compare":         false,
+  "swipe.qc_compliments":            true,
+  "swipe.gesture_audit":             true,
+
+  "tiers.community_diff":            false,
+  "tiers.stability_indicator":       false,
+  "tiers.swipe_secondary_actions":   false,
+
+  "trades.queue_2k":                 false,
+  "trades.new_partners_alerts":      false,
+
+  "league.unlock_badges_per_member": false,
+  "league.activity_feed":            false,
+  "league.unlock_badges_nav_pill":   false,
+
+  "invite.k_factor_dashboard":       false,
+
+  "mobile.sticky_cta":               false,
+  "mobile.thumb_zone_tables":        false,
+  "mobile.rankings_card_view":       false,
+
+  "profiles.public_pages":           false,
+  "players.profile_pages":           false,
+  "landing.smart_start_cta":         false,
+  "landing.try_before_sync":         false,
+
+  "trade_math.qb_tax":               false,
+  "trade_math.star_tax":             true,
+  "trade_math.roster_clogger":       false,
+  "trade_math.human_explanations":   true,
+
+  "trade_engine.v2":                 true,
+
+  "trade.marginal_value":            true,
+  "trade.outlook_blend":             true,
+  "trade.likes_you":                 true,
+  "trade.fuzzy_match":               true,
+  "trade.thompson_deck":             true,
+  "trade.deck_diversity":            true,
+
+  "trade_engine.v3":                 true,
+  "trade.three_team":                false,
+
+  "trade.finder_targeting":          true,
+  "trade.need_fit":                  true,
+  "trade.outlook_infer":             false,
+  "trade.preference_lists":          true,
+  "trade.outlook_seed":             false,
+  "trade.crown_asset":              false,
+  "trade.send_in_sleeper":          true,
+
+  "auth.accounts":                  false,
+  "auth.enforce_verified_writes":   false
+}

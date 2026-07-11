@@ -9,11 +9,13 @@ import {
   Keyboard,
   Platform,
   KeyboardAvoidingView,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { TickLabel } from '../components/chalkline';
-import { resolveSmartStart, signIn } from '../api/auth';
+import { appleSignIn, resolveSmartStart, signIn } from '../api/auth';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
@@ -49,6 +51,14 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
   const startDemoSession = useSession((s) => s.startDemoSession);
   const smartStartEnabled = useFlag('landing.smart_start_cta');
   const tryDemoEnabled    = useFlag('landing.try_before_sync');
+  const accountsEnabled   = useFlag('auth.accounts');
+
+  // ── Sign in with Apple (auth.accounts flag; account-auth plan P2) ──────
+  // appleToken holds the verified identity token while the account still
+  // needs a Sleeper username bound to it — the username submit re-posts it.
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  const [appleBusy, setAppleBusy] = useState(false);
+  const [appleToken, setAppleToken] = useState<string | null>(null);
 
   useEffect(() => {
     getLastUsername().then((u) => {
@@ -58,6 +68,57 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (!accountsEnabled || Platform.OS !== 'ios') return;
+    AppleAuthentication.isAvailableAsync()
+      .then(setAppleAvailable)
+      .catch(() => setAppleAvailable(false));
+  }, [accountsEnabled]);
+
+  async function handleAppleSignIn() {
+    if (busy || demoBusy || appleBusy) return;
+    setAppleBusy(true);
+    setError(null);
+    try {
+      const cred = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      if (!cred.identityToken) throw new Error('Apple did not return an identity token.');
+      const res = await appleSignIn(cred.identityToken);
+      if (res.linked && res.sleeper_user_id && res.session_token) {
+        // Returning account — the backend restored a session for the bound
+        // Sleeper user. Same post-auth steps as the username path.
+        await setUser({
+          user_id:      res.sleeper_user_id,
+          username:     res.username || '',
+          display_name: res.display_name || res.username || 'Manager',
+          avatar_id:    res.avatar ?? null,
+        });
+        if (res.username) void setLastUsername(res.username);
+        try {
+          const lgs = await getLeagues(res.sleeper_user_id);
+          setLeagues(lgs);
+        } catch {
+          // Non-fatal; picker will fetch its own copy
+        }
+        onSignedIn();
+      } else {
+        // New Apple account with no Sleeper user bound yet — keep the token
+        // and ask for the Sleeper username; handleSubmit re-posts it to bind.
+        setAppleToken(cred.identityToken);
+      }
+    } catch (err: any) {
+      if (err?.code !== 'ERR_REQUEST_CANCELED') {
+        setError(err?.message || 'Apple sign-in failed. Try again.');
+      }
+    } finally {
+      setAppleBusy(false);
+    }
+  }
 
   async function handleSubmit(override?: string) {
     if (busy) return;
@@ -120,6 +181,18 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
 
     try {
       const auth = await signIn(usernameToAuth);
+      // Apple-first flow: a verified Apple identity is waiting for a Sleeper
+      // user to bind to. Now that the session exists, re-post the identity
+      // token so the backend links + verifies. Best-effort — a failure here
+      // never blocks Sleeper sign-in (the link can be redone next launch).
+      if (appleToken) {
+        try {
+          await appleSignIn(appleToken);
+        } catch {
+          /* non-fatal */
+        }
+        setAppleToken(null);
+      }
       await setUser({
         user_id: auth.user_id,
         username: auth.username,
@@ -180,8 +253,33 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
           </View>
 
           <View style={styles.form}>
+            {appleAvailable && !appleToken ? (
+              <>
+                {/* Official Apple button (HIG-required component). White
+                    variant — the HIG mandates it on dark backgrounds. */}
+                <AppleAuthentication.AppleAuthenticationButton
+                  testID="signin.apple-btn"
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                  cornerRadius={radii.sm}
+                  style={styles.appleButton}
+                  onPress={handleAppleSignIn}
+                />
+                <Text style={styles.orDivider}>or continue with your Sleeper username</Text>
+              </>
+            ) : null}
+            {appleToken ? (
+              <View style={styles.appleLinkBlock}>
+                <Text style={styles.appleLinkTitle}>Link your Sleeper username</Text>
+                <Text style={styles.fieldHint}>
+                  You're signed in with Apple — connect your Sleeper username
+                  to load your leagues.
+                </Text>
+              </View>
+            ) : null}
             {hint ? (
               <Pressable
+                testID="signin.hint-btn"
                 style={({ pressed }) => [
                   styles.hintRow,
                   pressed && styles.hintRowPressed,
@@ -197,6 +295,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
               </Pressable>
             ) : null}
             <TextInput
+              testID="signin.username-input"
               style={[styles.input, focused && styles.inputFocused]}
               placeholder={smartStartEnabled ? 'Sleeper username or league URL' : 'Sleeper username'}
               placeholderTextColor={chalk.faint}
@@ -217,8 +316,9 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
                 Paste your Sleeper username or league URL.
               </Text>
             ) : null}
-            {error ? <Text style={styles.error}>{error}</Text> : null}
+            {error ? <Text testID="signin.error-text" style={styles.error}>{error}</Text> : null}
             <Pressable
+              testID="signin.continue-btn"
               accessibilityRole="button"
               style={({ pressed }) => [
                 styles.button,
@@ -237,6 +337,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
 
             {tryDemoEnabled ? (
               <Pressable
+                testID="signin.demo-link"
                 onPress={handleTryDemo}
                 disabled={busy || demoBusy}
                 style={styles.tryDemoBtn}
@@ -255,6 +356,23 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
                 }
               </Pressable>
             ) : null}
+
+            <Text style={styles.legalLine}>
+              By signing in you agree to the{' '}
+              <Text
+                style={styles.legalLink}
+                onPress={() => Linking.openURL('https://fantasy-trade-finder.onrender.com/terms')}
+              >
+                Terms
+              </Text>
+              {' '}&amp;{' '}
+              <Text
+                style={styles.legalLink}
+                onPress={() => Linking.openURL('https://fantasy-trade-finder.onrender.com/privacy')}
+              >
+                Privacy Policy
+              </Text>
+            </Text>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -338,6 +456,25 @@ const styles = StyleSheet.create({
     marginTop: -space.xs,
     marginBottom: space.sm,
   },
+  // ── Sign in with Apple (auth.accounts) ─────────────────────────────────
+  appleButton: {
+    alignSelf: 'stretch',
+    height: 44,
+    marginBottom: space.md,
+  },
+  orDivider: {
+    ...type.bodySm,
+    color: chalk.faint,
+    textAlign: 'center',
+    marginBottom: space.md,
+  },
+  appleLinkBlock: {
+    marginBottom: space.md,
+  },
+  appleLinkTitle: {
+    ...type.title,
+    marginBottom: space.xs,
+  },
   tryDemoBtn: {
     alignSelf: 'stretch',
     alignItems: 'center',
@@ -350,4 +487,15 @@ const styles = StyleSheet.create({
     fontFamily: fonts.uiSemi,
   },
   tryDemoTextPressed: { color: chalk.base },
+  legalLine: {
+    ...type.bodySm,
+    color: chalk.faint,
+    textAlign: 'center',
+    alignSelf: 'stretch',
+    marginTop: space.lg,
+  },
+  legalLink: {
+    color: chalk.dim,
+    textDecorationLine: 'underline',
+  },
 });

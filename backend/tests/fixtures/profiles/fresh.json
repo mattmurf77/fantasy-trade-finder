@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "name": "fresh",
+  "description": "Brand-new user state: exactly 1 league (10-team 1QB PPR), locked, ZERO rankings, no matches, no history. Carries qa_no_leagues as an extra fixture user with an empty league list for the empty-picker case.",
+  "season": 2026,
+  "flags_base": "release",
+  "flag_overrides": {
+    "landing.smart_start_cta":         false,
+    "landing.try_before_sync":         false,
+    "league.activity_feed":            false,
+    "league.unlock_badges_per_member": false,
+    "profiles.public_pages":           false,
+    "swipe.gesture_audit":             true,
+    "swipe.qc_compliments":            true,
+    "trade.finder_targeting":          true,
+    "trade.preference_lists":          true,
+    "trade.send_in_sleeper":           true,
+    "trade_math.human_explanations":   true,
+    "trades.new_partners_alerts":      false,
+    "trades.queue_2k":                 false
+  },
+  "app_user": {
+    "username": "qa_standard",
+    "user_id": "900000000000000001",
+    "unlocked": false,
+    "rankings": null,
+    "tiers": null,
+    "anchors": null
+  },
+  "extra_users": [
+    { "username": "qa_no_leagues", "user_id": "900000000000000099", "leagues": [] }
+  ],
+  "activity_seed": 0,
+  "feedback_reply_seed": 0,
+  "leagues": [
+    {
+      "league_id": "990000000000000001",
+      "name": "QA Fresh League",
+      "total_rosters": 10,
+      "format": "1qb_ppr",
+      "roster_size": 26,
+      "members": [
+        { "username": "qa_opp_ranked",   "user_id": "900000000000000002", "rankings": "generated", "roster": "generated:balanced" },
+        { "username": "qa_opp_unranked", "user_id": "900000000000000003", "rankings": null,        "roster": "generated:balanced" }
+      ],
+      "matches_seed": { "mutual": 0, "awaiting": 0 }
+    }
+  ],
+  "players_cache": "warm"
+}

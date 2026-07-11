@@ -10,11 +10,65 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/session/init` | Establish session for a Sleeper username |
+| POST | `/api/session/init` | Establish session for a Sleeper username. Response includes the additive `verification` field (below) |
 | GET | `/api/session/ping` | Liveness / session check |
 | POST/GET | `/api/session/demo` | Demo session bootstrap |
 | POST | `/api/extension/auth` | Issue extension bearer token |
-| POST | `/api/reset` | Wipe current user's rankings + decisions |
+| POST | `/api/reset` | Wipe current user's rankings + decisions (in-memory service state) |
+| POST | `/api/account/reset-rankings` | **Verified-only** (403 `verification_required`, no grace). Squatter remedy (account-auth P1 §2d): deletes the caller's persisted ranking inputs across all formats — `swipe_decisions`, published `member_rankings`, `users.tier_overrides`/`tiers_saved`/`ranking_method` — and resets this session's in-memory services. → `{ok, counts}`. UI entry point ships with P2's Settings account section |
+
+### Verified sessions & the write gate (account-auth P1)
+
+A session is **verified** when the app captured a Sleeper JWT whose `user_id` claim matches the session's user **and** the token was proven live against Sleeper's authenticated GraphQL API (`sleeper_write.verify_token_live` — Sleeper is the signature oracle, since the JWT's HS256 signature can't be checked locally). Verification happens in `POST /api/sleeper/link`; it stamps `sess["verified"]` and persists `users.verified_at`/`verified_via='sleeper'` (shared with P2's Apple/Google anchors).
+
+Every mutating user route (`rank3`, `reset`, `rankings/reorder`, `rankings/submit`, `tiers/save|copy-from-format|dismiss`, `anchor/save|scale`, `ranking-method`, `scoring/switch`, `trades/swipe|generate|flag`, `trades/matches/*/dismiss|disposition`, `league/preferences|asset-prefs|scoring`, `notifications/read|read-all|register-device|prefs`, `feedback`, `sleeper/link` DELETE) runs the gate (`@_gate_unverified_write`):
+
+| Caller | Result |
+|---|---|
+| Verified session | allow |
+| Unverified, user_id has a verified controller (`users.verified_via` set) | **403 `{error: verification_required}`** — first-verified-controller-wins, even during grace |
+| Unverified, no controller, grace (`auth.enforce_verified_writes` false) | allow + one `AUTH-GRACE` log line (runbook monitors the funnel) |
+| Unverified, no controller, enforcement on | **403 `verification_required`** |
+
+Hard-verified regardless of grace: `POST /api/sleeper/link` (carries its own proof — see Send in Sleeper below), `POST /api/trades/propose`, `POST /api/account/reset-rankings`.
+
+### The read gate (account-auth P2.5 — read privacy)
+
+"Ranks hidden behind an account" (#102) covers reads too: the write gate alone still let a username-only session *view* the victim's board. Board-content READ routes run `@_gate_unverified_read`, which mirrors **only** the write gate's verified-controller branch:
+
+| Caller | Result |
+|---|---|
+| Verified session | allow |
+| Unverified, user_id has a verified controller (`users.verified_via` set) | **403 `{error: verification_required}`** — no grace: the owner has proven control, squatters get nothing (`AUTH-DENY unverified_read` log line) |
+| Unverified, no controller | allow — onboarding users must see their own board, so `auth.enforce_verified_writes` is deliberately **not** consulted for reads |
+
+**Gated reads** (the user's own board / board-derived content): `GET /api/rankings`, `/api/progress`, `/api/rankings/progress`, `/api/me/streak`, `/api/tiers/status`, `/api/tiers/community-diff`, `/api/tiers/stability`, `/api/anchor/scale` (GET side; POST side keeps the write gate), `/api/trades`, `/api/trades/status`, `/api/trades/liked`, `/api/trades/matches`, `/api/trades/matches/all`, `/api/trades/awaiting`, `/api/league/preferences` (GET), `/api/league/asset-prefs` (GET), `/api/feedback/mine`, `/api/notifications`, `/api/trends/risers-fallers`, `/api/trends/contrarian`, `/api/trends/consensus-gap`, `/api/extension/rankings`, plus **Mode B of `POST /api/trade/evaluate`** (gated inline — it prices by the caller's board; Mode A stays public).
+
+**Deliberately left open** (documented decisions, not omissions): `/api/trade/values` + `/api/trade/evaluate` Mode A (public calculator by design), `/api/tier-config` (global band table, no user data), `/api/leaderboard` (community content; `is_self` tagging only), `/api/trio` + `/api/skips` (onboarding surface — the trio/skip list doesn't expose the board's ordering), `/api/portfolio` (Sleeper-public roster exposure, no Elo), `/api/leagues`, `/api/league/summary` (counts of the caller's matches, no content), `/api/league/coverage|members|member-unlock-states|activity|contrarian|format-stats` (league-shared aggregates by design), `/api/notifications/prefs` GET (settings toggles, not board content), `/api/session/init` + `/api/session/ping` + `/api/sleeper/link` GET (must work for unverified sessions — they drive the verify prompt itself), `/og/*`, `/s/*`, `/u/*`, `/api/profile/*` (public share surfaces by explicit product design).
+
+**Client contract:** the mobile API client (`mobile/src/api/client.ts`) treats any 403 `verification_required` as a central signal — it flips `useSession.verification` so the existing `VerifyAccountBanner` appears; gated screens' load-error states show "Verify your account to view your data." **Known limitation:** web + extension clients have no verification flow yet, so once an owner verifies on mobile, their own username-only web/extension sessions read-403 until those clients grow a capture path (same asymmetry the write gate already has).
+
+`/api/session/init` response — additive field:
+
+```
+"verification": {
+  "session_verified": false,   // THIS session proved control
+  "user_verified":    false,   // some controller has verified this user_id
+  "verified_via":     null,    // 'sleeper' | 'apple' | 'google' | null
+  "enforced":         false    // auth.enforce_verified_writes (grace over)
+}
+```
+
+## Account auth (identity anchors — `auth.accounts` flag, ships dark)
+
+Account-auth plan P2 (docs/plans/account-auth-plan-2026-07-11.md). Logic in `backend/accounts.py`; routes are thin wrappers.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/auth/apple` | Verify a Sign in with Apple identity token (JWKS RS256 + iss + aud=`com.fantasytradefinder.app` + exp). Find-or-create the account, then: with a session → bind the session's Sleeper user + mark session `verified_via='apple'`; no session + bound account → device-loss restore (returns `session_token`); no session + new account → `linked:false` (client links a Sleeper username, then re-posts the token). Binding is sticky — a session for a different user gets `conflict:true`, never a rebind. 404 while flag off. |
+| POST | `/api/auth/google` | Same flow, Google JWKS + `GOOGLE_OAUTH_CLIENT_ID` as `aud`. 503 `not_configured` until that env var is set. 404 while flag off. |
+| GET | `/api/account` | Current account: `{sleeper_user_id, verified_via, account: {account_id, identities:[{provider, linked_at}]} \| null}`. 404 while flag off. |
+| DELETE | `/api/account` | **In-app account deletion (App Store 5.1.1(v)) — NOT flag-gated.** Deletes/anonymizes per the matrix in `accounts.delete_user_data` (honors `web/privacy.html` §6): own rows deleted; shared rows (trade matches, others' impressions/flags naming this user) anonymized so counterparties keep their records; feedback anonymized; non-user-keyed aggregates kept. If `users.verified_via` is set, the calling session must itself be verified (403 `verification_required` otherwise). Evicts all of the user's live sessions. |
 
 ## Sleeper passthrough
 
@@ -61,13 +115,14 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/tiers/save` | Persist tiered roster |
+| POST | `/api/tiers/save` | Persist tiered roster. Body `{position, tiers: {<tier_key>: [pids]}, cleared_pids}`; tier keys are the pick-value ladder enum `firsts_2plus, first_1, second, third, fourth, bench` (2026-07-11 — see [cross-client-invariants.md](cross-client-invariants.md)) |
 | GET | `/api/tiers/status` | Tier completion status; returns `{saved, all_done, scoring_format}` (`scoring_format` added 2026-07-03, FB-76 — mobile re-buckets by it) |
 | GET | `/api/tiers/community-diff` | Compare against community |
 | GET | `/api/tiers/stability` | Tier stability indicator |
 | POST | `/api/tiers/dismiss` | Dismiss a tier suggestion (writes `user_player_skips`) |
-| GET | `/api/tier-config` | Shared tier band table (`backend/tier_config.json`); used by web to bucket players |
-| POST | `/api/anchor/save` | Pick-anchor wizard (2026-07-10, mobile). Body `{player_id, anchor}`; `anchor` ∈ the cross-client enum `4_firsts, 3_firsts, 2_firsts, 1_first, 1_second, 1_third, 1_fourth, no_value` (see [cross-client-invariants.md](cross-client-invariants.md#pick-anchor-keys)). Pins the player's Elo to a pick-denominated value: single-pick anchors → that generic pick's Elo seed (`GENERIC_PICK_SEEDS`), N-firsts → N × value(Mid 1st) mapped back via `value_to_elo`, `no_value` → Elo 1100 (below every band → unranked). Position-uniform value by design; tier falls out of the band walk. Writes the same authoritative override as `/api/tiers/save`, persists via `save_tier_overrides`, publishes to `member_rankings`. Returns `{ok, player_id, anchor, elo, value, tier, scoring_format}` (`tier: null` = no value). 400 invalid anchor, 404 unknown player. |
+| GET | `/api/tier-config` | Shared tier band table (`backend/tier_config.json`); used by web + mobile to bucket players. Returns `{tiers: [firsts_2plus, first_1, second, third, fourth, bench], config: {fmt: {pos: {tier: {min, max}}}}}` — since 2026-07-11 the bands are the pick-value ladder, identical across positions/formats |
+| POST | `/api/anchor/save` | Pick-anchor wizard (2026-07-10, mobile). Body `{player_id, anchor}`; `anchor` ∈ the cross-client enum `4_firsts, 3_firsts, 2_firsts, 1_first, 1_second, 1_third, 1_fourth, no_value` (see [cross-client-invariants.md](cross-client-invariants.md#pick-anchor-keys)). Pins the player's Elo to a pick-denominated value: single-pick anchors → that generic pick's Elo seed (`GENERIC_PICK_SEEDS`), N-firsts → N × value(Mid 1st) mapped back via `value_to_elo` — re-spaced by the user's pick-value scale when one is set (#111, see `/api/anchor/scale`) — `no_value` → Elo 1100 (below every band → unranked). Position-uniform value by design; tier falls out of the band walk (since the 2026-07-11 pick-value ladder, every anchor lands in the tier carrying its name). Writes the same authoritative override as `/api/tiers/save`, persists via `save_tier_overrides`, publishes to `member_rankings`. Returns `{ok, player_id, anchor, elo, value, tier, scoring_format, top_tier_firsts}` (`tier: null` = no value). 400 invalid anchor, 404 unknown player. |
+| GET/POST | `/api/anchor/scale` | Per-user pick-value scale (1.5.4 #111): `{top_tier_firsts: 2\|3\|4}` = "a top-tier dynasty asset is worth N firsts". Persisted per user + scoring format (`users.anchor_scale`); default 2 reproduces the legacy anchor math exactly. Recalibrates ONLY the wizard's multi-first anchors via a power curve (`m firsts → value(Mid 1st) × m^γ`, `γ = log 2 / log N` — exact at `m=1` (the actual Mid 1st) and at `m=N`, which pins to the default top-tier Elo ≈ 1789). Single-pick anchors, the generic pick pool assets, and the public `/api/trade/evaluate` `gap` line stay consensus-denominated. GET returns `{top_tier_firsts, scoring_format}`; POST body `{top_tier_firsts}` (400 unless ∈ {2,3,4}). |
 
 ## Trades
 
@@ -144,16 +199,17 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/sleeper/link` | Store a freshly captured Sleeper JWT (`{token}`) encrypted. Validates it is an unexpired JWT; extracts `sleeper_user_id` + `exp`. → `{connected, sleeper_user_id, expires_at}` |
+| POST | `/api/sleeper/link` | Store a freshly captured Sleeper JWT (`{token}`) encrypted — **and verify the session (account-auth P1)**. Requires the JWT's `user_id` claim to equal the session user (403 `token_user_mismatch`), then exercises the token once against Sleeper's authed GraphQL (`verify_token_live`, a no-op `__typename` query): Sleeper rejects it → 403 `token_rejected`, nothing stored; probe passes → session verified + `users.verified_via='sleeper'` persisted; probe unreachable (network/config) → link stores but `verified:false`. → `{connected, sleeper_user_id, expires_at, verified}` |
 | GET | `/api/sleeper/link` | Link status (never returns the token): `{connected, sleeper_user_id, expires_at, expired}` |
-| DELETE | `/api/sleeper/link` | Disconnect — deletes the stored token → `{connected: false}` |
-| POST | `/api/trades/propose` | Send a trade. Body `{league_id, their_user_id (or their_roster_id), give_player_ids[], receive_player_ids[], draft_picks?[]}`. Server resolves **both** roster_ids from one public-rosters fetch (caller's from the linked Sleeper account, counterparty's from `their_user_id` — FTF user_id == Sleeper user_id); the client never asserts its own roster_id. → `{status: "proposed", transaction_id}` |
+| DELETE | `/api/sleeper/link` | Disconnect — deletes the stored token → `{connected: false}`. Standard write gate (grace applies) |
+| POST | `/api/trades/propose` | Send a trade. **Hard-verified: requires a verified session (403 `verification_required`), no grace** — highest blast radius (writes into the user's real Sleeper league). Body `{league_id, their_user_id (or their_roster_id), give_player_ids[], receive_player_ids[], draft_picks?[]}`. Server resolves **both** roster_ids from one public-rosters fetch (caller's from the linked Sleeper account, counterparty's from `their_user_id` — FTF user_id == Sleeper user_id); the client never asserts its own roster_id. → `{status: "proposed", transaction_id}` |
 
 `/api/trades/propose` error contract (client maps these to a reconnect prompt / deep-link fallback):
 
 | Status | `error` | Meaning |
 |---|---|---|
 | 404 | `feature_disabled` | Flag off |
+| 403 | `verification_required` | Session not verified (P1 hard gate) → route into the SleeperConnect capture, which verifies in one login |
 | 409 | `sleeper_not_linked` | No stored token → prompt the webview login |
 | 409 | `sleeper_expired` | Token time-expired → cleared server-side → prompt reconnect (a fresh token fixes it) |
 | 409 | `sleeper_rejected` | Sleeper's write API rejected the (valid-shape) token — 401/403 or auth GraphQL error; cleared server-side. Carries `detail`. Reconnecting re-captures the SAME token, so the client must NOT loop to login — surface the reason. |
@@ -273,6 +329,8 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/` | Serve `web/index.html` |
+| GET | `/privacy` | Serve `web/privacy.html` (clean URL; App Store Connect privacy-policy URL) |
+| GET | `/terms` | Serve `web/terms.html` (clean URL) |
 | GET | `/api/invite/impact` | Invite-program impact stats |
 | GET | `/api/me/streak` | Current user's daily-activity streak |
 
@@ -303,3 +361,14 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 Auth is best-effort. `X-Session-Token`, when present, attributes the row to the matching `user_id` + `username`; when absent the row stores `user_id = null` (anonymous submission allowed).
 
 Stores into `app_feedback` (see data-dictionary). The mobile client also retains a local AsyncStorage copy and re-POSTs unsynced items on app foreground.
+
+## Test support (`FTF_TEST_MODE=1` only — never mounted in normal operation)
+
+UI-test harness blueprint (`backend/test_support.py`, spec: `docs/plans/mobile-testing/lld.md` §4.3c). These routes 404 unless the backend was started in test mode, which itself startup-aborts without `FTF_SLEEPER_FIXTURES_DIR` + `FTF_PLAYERS_CACHE_FILE`. Under test mode, `POST /api/trades/propose` unconditionally fails closed with 599.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/__test__/fail_next` | Arm a response override: `{path (glob), status, count=1, body?}`. Any status incl. 2xx (precondition overrides) — except overrides matching `/api/trades/propose`, which refuse status <400 (propose can never be faked to success) |
+| POST | `/__test__/latency` | `{path (glob), ms}` — delay matching requests until reset |
+| POST | `/__test__/reset` | Clear injections + all in-memory sessions (`{"counters": true}` also zeroes guardrail counters — pytest only) |
+| GET | `/__test__/whoami` | `{profile, test_mode, fixtures, active_injections, counters}` — the run report's guardrail source (`vcr_misses`, `sleeper_live_egress_attempts`, `propose_route_hits`, `completed_proposes`) |

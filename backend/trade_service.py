@@ -130,6 +130,16 @@ _DEFAULT_CFG: dict[str, float] = {
     # to over-replacement deltas + a 15% bench credit), so the raw-value
     # 150 bar would gate out nearly every legitimate marginal-gain trade.
     "min_side_surplus_marginal": 60.0,
+    # #108 — user-board gain gate. Minimum value-space gain the USER must
+    # see before a card surfaces, judged on the board the card is built
+    # from: for 1-for-1 player swaps (any basis) the user's OWN raw board
+    # (pre-shrinkage, pre-blend — "never send a player you rank above the
+    # player you receive"); for consensus-basis cards additionally the
+    # consensus package delta (receive − give), since consensus IS the
+    # user's board there. 0.0 = receive must be at least as valuable as
+    # give. Multi-asset divergence packages are exempt from the raw-board
+    # check (the aggregate surplus gate is the compensation test).
+    "user_gain_epsilon":         0.0,
     # ------------------------------------------------------------------
     # Tier 2 — work item 2.2: outlook as now/future valuation blend
     # (flag: trade.outlook_blend). α = weight on NOW value; 1−α on FUTURE.
@@ -405,6 +415,33 @@ def _value_uncertainty(pid: str, confidence: dict[str, int] | None) -> float:
         return 0.0
     n = max(confidence.get(pid, 0), 0)
     return _c("range_base") / math.sqrt(1.0 + n)
+
+
+def user_gain_ok_1for1(
+    give_ids: list[str],
+    recv_ids: list[str],
+    raw_user_elo: dict[str, float] | None,
+) -> bool:
+    """
+    #108 — 1-for-1 user-board gate. A 1-for-1 player swap must never ask
+    the user to send a player they rank ABOVE the player they receive on
+    their OWN raw board (user_elo as saved, pre-shrinkage/pre-blend).
+    Shrinkage exists to damp overstated divergence, but it can also pull a
+    lightly-sampled player toward a consensus that inverts the user's own
+    ordering — the surplus gate then runs on a board the user never saw.
+
+    Multi-asset packages pass unconditionally: there the aggregate surplus
+    gate is the compensation test. Players absent from the raw board carry
+    no signal and pass. Threshold: user_gain_epsilon (value space).
+    """
+    if len(give_ids) != 1 or len(recv_ids) != 1 or not raw_user_elo:
+        return True
+    give_e = raw_user_elo.get(give_ids[0])
+    recv_e = raw_user_elo.get(recv_ids[0])
+    if give_e is None or recv_e is None:
+        return True
+    return (elo_to_value(recv_e) - elo_to_value(give_e)
+            >= _c("user_gain_epsilon"))
 
 
 # ---------------------------------------------------------------------------
@@ -863,9 +900,9 @@ def build_match_context(
 # rather than paying per-function branches.
 # ---------------------------------------------------------------------------
 
-# Elite-tier ELO lower bound — matches RankingService.UNIFORM_TIER_ELO_BANDS
-# elite band (1720-1790). We use the "starter" lower bound (1600) for
-# "premium QB" per the QB Tax spec; any QB at or above 1600 qualifies.
+# "Premium QB" ELO lower bound per the QB Tax spec: any QB at or above
+# 1600 qualifies (an engine threshold, independent of the user-facing
+# pick-value tier ladder; 1600 sits inside the first_1 band).
 _QB_PREMIUM_ELO = 1600.0
 
 
@@ -955,23 +992,25 @@ def star_tax_adjustment(
     Compare the TOP asset on each side (highest seed ELO).  If they sit
     more than one tier apart, apply `star_tax_per_tier_gap` per extra
     tier step to the side RECEIVING the lower-tier package.  When the
-    higher-tier star is Tier 1 (elite), multiply the penalty by
-    `star_tax_elite_multiplier` — trading away an elite star is extra
-    costly.
+    higher-tier star is Tier 1 (top of the ladder), multiply the penalty
+    by `star_tax_elite_multiplier` — trading away a top-shelf star is
+    extra costly.
 
-    Tiers from RankingService.tier_for_elo. Tier order (top→bottom):
-      elite (0) → starter (1) → solid (2) → depth (3) → bench (4) → unranked (5)
+    Tiers from RankingService.tier_for_elo, ordered by ORDERED_TIERS
+    (pick-value ladder, top→bottom):
+      firsts_2plus (0) → first_1 (1) → second (2) → third (3) →
+      fourth (4) → bench (5) → unranked (6)
     Gap = |give_tier_idx - recv_tier_idx|.
     """
     if not FLAGS.trade_math_star_tax:
         return 1.0
 
     try:
-        from .ranking_service import RankingService
+        from .ranking_service import ORDERED_TIERS, RankingService
     except Exception:
         return 1.0
 
-    tier_order = ("elite", "starter", "solid", "depth", "bench")
+    tier_order = ORDERED_TIERS
 
     def _top_tier_idx(ids: list[str]) -> tuple[int, Optional[str], Optional[str]]:
         """Return (tier_index, tier_name, pid) of the highest-ELO asset."""
@@ -1023,7 +1062,12 @@ def star_tax_adjustment(
         else:
             side_label = "Team 2 trades away"
             tier_label = recv_tier or "unranked"
-        tier_tag = "Tier 1" if higher_is_elite else tier_label.capitalize()
+        _tier_display = {
+            "firsts_2plus": "2+ 1sts", "first_1": "1st", "second": "2nd",
+            "third": "3rd", "fourth": "4th", "bench": "Bench",
+        }
+        tier_tag = ("Tier 1" if higher_is_elite
+                    else _tier_display.get(tier_label, tier_label.capitalize()))
         reasons.append(
             f"⭐ Star tax: {side_label} a {tier_tag} star (−{penalty*100:.1f}%)"
         )
@@ -1553,6 +1597,7 @@ class TradeService:
                         alpha_opp            = alpha_opp,
                         untouchable_ids      = untouchable_ids,
                         target_ids           = target_ids,
+                        raw_user_elo         = user_elo,
                     )
                 else:
                     cards = self._generate_for_pair_v2(
@@ -1574,6 +1619,7 @@ class TradeService:
                         alpha_opp            = alpha_opp,
                         untouchable_ids      = untouchable_ids,
                         target_ids           = target_ids,
+                        raw_user_elo         = user_elo,
                     )
             else:
                 cards = self._generate_consensus_for_pair(
@@ -1593,6 +1639,7 @@ class TradeService:
                     pinned_receive_players = pinned_receive_players,
                     untouchable_ids      = untouchable_ids,
                     target_ids           = target_ids,
+                    raw_user_elo         = user_elo,
                 )
             # FB-47 — stamp partner fit and blend it into the composite:
             # strongly on consensus cards (no divergence signal there),
@@ -1664,6 +1711,7 @@ class TradeService:
         alpha_opp: float | None = None,
         untouchable_ids: set | None = None,
         target_ids: set | None = None,
+        raw_user_elo: dict[str, float] | None = None,
     ) -> list[TradeCard]:
         """Divergence-based v2 generation for one (user, opponent) pair.
 
@@ -1828,6 +1876,11 @@ class TradeService:
             if not _positions_ok(give_ids, recv_ids):
                 return
             if not _gap_ok(give_ids, recv_ids):
+                return
+            # #108 — never offer a 1-for-1 that sends a player the user
+            # ranks above the received player on their own raw board (the
+            # shrunk surplus below can be inverted by consensus pull).
+            if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
                 return
 
             # Package values in EACH side's own value space (Change 2).
@@ -2005,6 +2058,7 @@ class TradeService:
         pinned_receive_players: list[str] | None = None,
         untouchable_ids: set | None = None,
         target_ids: set | None = None,
+        raw_user_elo: dict[str, float] | None = None,
     ) -> list[TradeCard]:
         """Consensus-basis fallback cards for an opponent with NO rankings.
 
@@ -2069,6 +2123,16 @@ class TradeService:
             gv = package_value_v2(gvals, v_max, n_other=len(recv_ids))
             rv = package_value_v2(rvals, v_max, n_other=len(give_ids))
             if gv <= 0 or rv <= 0:
+                return
+            # #108 — on a consensus card the user's board IS consensus:
+            # the user's side must come out ahead (receive − give ≥ ε).
+            # Fairness alone allowed the user to be the side paying up to
+            # (1 − threshold) more consensus value (TC-CFG-001 gap).
+            if rv - gv < _c("user_gain_epsilon"):
+                return
+            # #108 — and when the user DOES have both players on their own
+            # raw board, a 1-for-1 must respect that ordering too.
+            if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
                 return
             fairness = min(gv, rv) / max(gv, rv)
             if fairness < fairness_threshold:

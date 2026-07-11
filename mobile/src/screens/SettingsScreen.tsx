@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   Pressable,
   TextInput,
+  Linking,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -16,9 +18,11 @@ import { ink, chalk, ice, semantic, space, radii, type } from '../theme/chalklin
 import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
+import { deleteAccount, getAccount } from '../api/auth';
 import { setRankingMethod } from '../api/rankings';
 import SteerSlider from '../components/SteerSlider';
 import { useSession, type RankMethodPref } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
 import type { NotificationPrefs } from '../shared/types';
 
 // Settings sheet shown as a modal from the gear icon in the global TopBar.
@@ -51,6 +55,64 @@ export default function SettingsScreen({ navigation }: any) {
     setToast({ msg: 'Saved — the Rank tab opens there next launch.', tone: 'success' });
   };
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
+  // ── Account (account-auth plan P2) ─────────────────────────────────────
+  // Identity display is gated on auth.accounts (GET /api/account 404s while
+  // the flag is off); "Verify account" and "Delete account" always show —
+  // in-app deletion is App Store Guideline 5.1.1(v), not a flagged feature.
+  const accountsEnabled = useFlag('auth.accounts');
+  const isDemo = useSession((s) => s.isDemo);
+  const [deleting, setDeleting] = useState(false);
+  const accountQuery = useQuery({
+    queryKey: ['account'],
+    queryFn: getAccount,
+    enabled: accountsEnabled && !isDemo,
+    staleTime: 60_000,
+  });
+
+  async function performDeleteAccount() {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      await deleteAccount();
+      await signOut();
+      navigation.replace?.('SignIn');
+    } catch (e: any) {
+      setToast({ msg: e?.message || "Couldn't delete your account — try again.", tone: 'warn' });
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function confirmDeleteAccount() {
+    Alert.alert(
+      'Delete account?',
+      'This permanently deletes your rankings, comparison history, trade activity, ' +
+        'notifications, push tokens, and any stored Sleeper connection from our ' +
+        'servers. Trade matches shared with leaguemates are anonymized on your side. ' +
+        'This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          style: 'destructive',
+          onPress: () =>
+            Alert.alert(
+              'Are you absolutely sure?',
+              'Your account and all of its data will be deleted immediately. ' +
+                'There is no way to recover them.',
+              [
+                { text: 'Keep my account', style: 'cancel' },
+                {
+                  text: 'Delete everything',
+                  style: 'destructive',
+                  onPress: () => void performDeleteAccount(),
+                },
+              ],
+            ),
+        },
+      ],
+    );
+  }
   // Local mirror of server prefs so toggles feel instant. Hydrated from the
   // query below; updates push through `mutation` and the query is invalidated
   // on success.
@@ -280,6 +342,80 @@ export default function SettingsScreen({ navigation }: any) {
           <Icon name="chevron-right" color={chalk.dim} size={16} />
         </Pressable>
 
+        <View style={styles.section}>
+          <TickLabel>Account</TickLabel>
+        </View>
+        {accountsEnabled && !isDemo ? (
+          accountQuery.data?.account?.identities?.length ? (
+            accountQuery.data.account.identities.map((ident) => (
+              <View key={ident.provider} style={styles.kvRow}>
+                <Text style={styles.rowKey}>
+                  {ident.provider === 'apple' ? 'Signed in with Apple' : 'Signed in with Google'}
+                </Text>
+                <Text style={styles.kvValue}>
+                  {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
+                </Text>
+              </View>
+            ))
+          ) : (
+            <View style={styles.kvRow}>
+              <Text style={styles.rowKey}>Linked sign-in</Text>
+              <Text style={styles.kvValue}>None</Text>
+            </View>
+          )
+        ) : null}
+        {!isDemo ? (
+          <>
+            <Pressable
+              onPress={() => navigation.navigate?.('SleeperConnect')}
+              style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowKey}>Verify account</Text>
+                <Text style={styles.rowSub}>
+                  Prove you own this Sleeper account to protect your ranks.
+                </Text>
+              </View>
+              <Icon name="chevron-right" color={chalk.dim} size={16} />
+            </Pressable>
+            <Pressable
+              onPress={confirmDeleteAccount}
+              disabled={deleting}
+              style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.rowKey, styles.destructiveKey]}>Delete account</Text>
+                <Text style={styles.rowSub}>
+                  Permanently delete your account and all of its data.
+                </Text>
+              </View>
+              {deleting ? (
+                <ActivityIndicator color={semantic.neg} />
+              ) : (
+                <Icon name="chevron-right" color={chalk.dim} size={16} />
+              )}
+            </Pressable>
+          </>
+        ) : null}
+
+        <View style={styles.section}>
+          <TickLabel>About</TickLabel>
+        </View>
+        <Pressable
+          onPress={() => Linking.openURL('https://fantasy-trade-finder.onrender.com/privacy')}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+        >
+          <Text style={[styles.rowKey, { flex: 1 }]}>Privacy Policy</Text>
+          <Icon name="chevron-right" color={chalk.dim} size={16} />
+        </Pressable>
+        <Pressable
+          onPress={() => Linking.openURL('https://fantasy-trade-finder.onrender.com/terms')}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+        >
+          <Text style={[styles.rowKey, { flex: 1 }]}>Terms of Use</Text>
+          <Icon name="chevron-right" color={chalk.dim} size={16} />
+        </Pressable>
+
         <View style={{ height: space.xxl }} />
         <Pressable
           onPress={async () => {
@@ -374,6 +510,10 @@ const styles = StyleSheet.create({
   },
   signOutText: {
     ...type.body,
+    color: semantic.neg,
+  },
+  destructiveKey: {
+    ...type.label,
     color: semantic.neg,
   },
   // B3 — Switch league rows + Connect another league card

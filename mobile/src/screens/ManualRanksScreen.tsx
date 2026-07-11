@@ -21,6 +21,7 @@ import PositionChip from '../components/PositionChip';
 import { getRankings, reorderRankings } from '../api/rankings';
 import { haptics } from '../utils/haptics';
 import { valueForElo } from '../utils/playerValue';
+import { readErrorCopy } from '../utils/verification';
 import { startSpan } from '../observability/sentry';
 import { useSession } from '../state/useSession';
 import type { Position, RankedPlayer } from '../shared/types';
@@ -413,7 +414,9 @@ export default function ManualRanksScreen() {
         </View>
       ) : ranksQuery.isError ? (
         <View style={styles.center}>
-          <Text style={styles.errorText}>Could not load rankings.</Text>
+          <Text style={styles.errorText}>
+            {readErrorCopy(ranksQuery.error, 'Could not load rankings.')}
+          </Text>
           <Button
             variant="secondary"
             compact

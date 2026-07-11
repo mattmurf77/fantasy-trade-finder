@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,14 +13,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Card, PositionBadge } from '../components/chalkline';
 import TierBadge from '../components/TierBadge';
 import {
-  getRankings,
+  getAnchorPool,
+  getAnchorScale,
   saveAnchor,
+  setAnchorScale,
   type AnchorKey,
   type AnchorSaveResponse,
+  type TopTierFirsts,
 } from '../api/rankings';
 import { useSession } from '../state/useSession';
 import { tierForElo, TIER_LABEL } from '../utils/tierBands';
-import { chalk, ice, ink, space, type } from '../theme/chalkline';
+import { chalk, ice, ink, radii, space, type } from '../theme/chalkline';
 import { haptics } from '../utils/haptics';
 import type { Position, Tier } from '../shared/types';
 
@@ -66,11 +70,28 @@ export default function PickAnchorScreen() {
 
   // Snapshot the pool once (staleTime: Infinity) — anchoring re-sorts the
   // server-side rankings, and a mid-wizard refetch would shuffle the queue
-  // under the user's thumbs.
+  // under the user's thumbs. getAnchorPool sends X-Scoring-Format (#112)
+  // so the queue is ordered by the same format's board the saves write to.
   const poolQuery = useQuery({
     queryKey: ['anchor-pool', activeFormat],
-    queryFn: () => getRankings(null),
+    queryFn: getAnchorPool,
     staleTime: Infinity,
+  });
+
+  // Pick-value scale (#111): "a top-tier asset = N firsts". Per user +
+  // format, default 2 (consensus math). Changing it only re-spaces how
+  // FUTURE multi-first answers pin — already-saved anchors keep their Elo.
+  const scaleQuery = useQuery({
+    queryKey: ['anchor-scale', activeFormat],
+    queryFn: getAnchorScale,
+  });
+  const topTierFirsts = scaleQuery.data?.top_tier_firsts ?? 2;
+  const scaleMutation = useMutation({
+    mutationFn: (n: TopTierFirsts) => setAnchorScale(n),
+    onSuccess: (res) => {
+      queryClient.setQueryData(['anchor-scale', activeFormat], res);
+      haptics.selection();
+    },
   });
 
   // Answered/skipped ids for this format (resume support).
@@ -256,6 +277,37 @@ export default function PickAnchorScreen() {
           on every team, so tiers mean the same thing for everyone.
         </Text>
       )}
+
+      {/* Pick-value scale (#111) — subnav-pill construction per
+          components.md: hairline chip, radius xs, active = ink-3 well +
+          line-strong border. Setting, not an answer, so it sits below
+          the wizard flow. */}
+      <View style={styles.scaleBlock}>
+        <Text style={styles.scaleLabel}>A top-tier asset is worth</Text>
+        <View style={styles.scaleRow}>
+          {([2, 3, 4] as TopTierFirsts[]).map((n) => {
+            const active = topTierFirsts === n;
+            return (
+              <Pressable
+                key={n}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                disabled={scaleMutation.isPending}
+                onPress={() => !active && scaleMutation.mutate(n)}
+                style={[styles.scalePill, active && styles.scalePillActive]}
+              >
+                <Text style={[styles.scalePillText, active && styles.scalePillTextActive]}>
+                  {n} 1sts
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={styles.scaleHint}>
+          Re-spaces how your “firsts” answers pin from here on — saved
+          anchors keep their value.
+        </Text>
+      </View>
     </ScrollView>
   );
 }
@@ -287,4 +339,29 @@ const styles = StyleSheet.create({
   error: { ...type.bodySm, textAlign: 'center', color: chalk.dim },
   consequence: { ...type.data, textAlign: 'center', color: ice.base },
   hint: { ...type.bodySm, textAlign: 'center', color: chalk.dim },
+  scaleBlock: {
+    marginTop: space.lg,
+    paddingTop: space.md,
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
+    gap: space.sm,
+    alignItems: 'center',
+  },
+  scaleLabel: { ...type.label, textAlign: 'center' },
+  scaleRow: { flexDirection: 'row', gap: space.sm },
+  scalePill: {
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.xs,
+    paddingVertical: space.xs,
+    paddingHorizontal: space.md,
+    backgroundColor: 'transparent',
+  },
+  scalePillActive: {
+    backgroundColor: ink.ink3,
+    borderColor: ink.lineStrong,
+  },
+  scalePillText: { ...type.data, color: chalk.dim },
+  scalePillTextActive: { color: chalk.base },
+  scaleHint: { ...type.bodySm, textAlign: 'center', color: chalk.faint },
 });

@@ -1,0 +1,57 @@
+{
+  "_comment": "release.json with the 13 inventory-gated client flags (app-inventory-2026-07-10.md section 5) all forced ON. Used by flag-sweep matrix cells; non-inventory engine flags keep their release values.",
+
+  "swipe.community_compare":         false,
+  "swipe.qc_compliments":            true,
+  "swipe.gesture_audit":             true,
+
+  "tiers.community_diff":            false,
+  "tiers.stability_indicator":       false,
+  "tiers.swipe_secondary_actions":   false,
+
+  "trades.queue_2k":                 true,
+  "trades.new_partners_alerts":      true,
+
+  "league.unlock_badges_per_member": true,
+  "league.activity_feed":            true,
+  "league.unlock_badges_nav_pill":   false,
+
+  "invite.k_factor_dashboard":       false,
+
+  "mobile.sticky_cta":               false,
+  "mobile.thumb_zone_tables":        false,
+  "mobile.rankings_card_view":       false,
+
+  "profiles.public_pages":           true,
+  "players.profile_pages":           false,
+  "landing.smart_start_cta":         true,
+  "landing.try_before_sync":         true,
+
+  "trade_math.qb_tax":               false,
+  "trade_math.star_tax":             true,
+  "trade_math.roster_clogger":       false,
+  "trade_math.human_explanations":   true,
+
+  "trade_engine.v2":                 true,
+
+  "trade.marginal_value":            true,
+  "trade.outlook_blend":             true,
+  "trade.likes_you":                 true,
+  "trade.fuzzy_match":               true,
+  "trade.thompson_deck":             true,
+  "trade.deck_diversity":            true,
+
+  "trade_engine.v3":                 true,
+  "trade.three_team":                false,
+
+  "trade.finder_targeting":          true,
+  "trade.need_fit":                  true,
+  "trade.outlook_infer":             false,
+  "trade.preference_lists":          true,
+  "trade.outlook_seed":             false,
+  "trade.crown_asset":              false,
+  "trade.send_in_sleeper":          true,
+
+  "auth.accounts":                  false,
+  "auth.enforce_verified_writes":   false
+}

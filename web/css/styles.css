@@ -3175,6 +3175,14 @@
     }
     .faq-link:hover { color: var(--accent); border-color: var(--accent); }
 
+    /* FAQ / Privacy / Terms row in auth card */
+    .legal-links-row {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      align-self: center;
+    }
+
      .nav-subtab.active:hover {
        border-color: var(--accent);
      }

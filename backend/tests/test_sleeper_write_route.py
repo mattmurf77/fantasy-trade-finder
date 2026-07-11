@@ -5,9 +5,16 @@
 
 Exercised through Flask's test client against an isolated in-memory SQLite DB,
 with a real injected session and a real encryption key. The one thing mocked is
-the network: `_sleeper_get` (roster lookup) and `sleeper_write.propose_trade`
-(the actual Sleeper call) — so nothing here touches Sleeper or the ToS-adverse
+the network: `_sleeper_get` (roster lookup), `sleeper_write.propose_trade`
+(the actual Sleeper call), and `sleeper_write.verify_token_live` (the P1
+verification oracle probe) — so nothing here touches Sleeper or the ToS-adverse
 endpoint. The flag is forced on via a patched `is_enabled`.
+
+Account-auth P1 contract (docs/plans/account-auth-plan-2026-07-11.md):
+POST /api/sleeper/link requires the token claim to match the session user
+(so USER == SLEEPER_UID here) and marks the session verified on oracle
+success; POST /api/trades/propose is hard-gated on that verified state.
+The verification matrix itself lives in test_verified_sessions.py.
 """
 import base64
 import json
@@ -22,8 +29,9 @@ import backend.server as server
 from backend.database import metadata
 from backend.sleeper_write import SleeperAuthError
 
-USER = "user_me"
 SLEEPER_UID = "313560442465169408"
+# P1: the link route 403s unless the JWT's user_id claim == session user_id.
+USER = SLEEPER_UID
 LEAGUE = "1312140920132497408"
 
 
@@ -57,6 +65,8 @@ def client(monkeypatch):
 
     with patch.object(db_module, "engine", engine), \
          patch.object(server, "is_enabled", lambda k: k == "trade.send_in_sleeper"), \
+         patch.object(server._sleeper_write, "verify_token_live",
+                      MagicMock(return_value={"raw": {}})), \
          patch.object(server, "touch_user_activity", MagicMock()):
         with server._sessions_lock:
             server._sessions[token] = sess
@@ -65,6 +75,13 @@ def client(monkeypatch):
         finally:
             with server._sessions_lock:
                 server._sessions.pop(token, None)
+
+
+def _mark_verified(token):
+    """Simulate a session that verified earlier (for propose tests that never
+    POST /api/sleeper/link — the P1 gate runs before the credential checks)."""
+    with server._sessions_lock:
+        server._sessions[token]["verified"] = True
 
 
 def test_link_status_unlink_round_trip(client):
@@ -139,6 +156,7 @@ def test_propose_unknown_opponent_returns_400(client):
 
 def test_propose_not_linked_returns_409(client):
     c, token = client
+    _mark_verified(token)   # e.g. verified earlier, then unlinked
     r = c.post("/api/trades/propose", headers=_h(token), data=json.dumps({
         "league_id": LEAGUE, "their_roster_id": 2,
         "give_player_ids": ["1"], "receive_player_ids": ["2"]}))
@@ -194,6 +212,7 @@ def test_propose_bad_request(client):
     """Non-numeric league_id, or neither their_user_id nor their_roster_id → 400
     bad_request (checked before the linked-credential gate)."""
     c, token = client
+    _mark_verified(token)
     r = c.post("/api/trades/propose", headers=_h(token), data=json.dumps({
         "league_id": "not-a-number", "their_roster_id": 2,
         "give_player_ids": ["1"], "receive_player_ids": ["2"]}))

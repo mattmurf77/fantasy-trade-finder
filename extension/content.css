@@ -34,26 +34,33 @@
   filter: brightness(1.15);
 }
 
-/* Tier variants */
-.ftf-badge.ftf-tier-elite {
+/* Tier variants — pick-value tier ladder (docs/cross-client-invariants.md);
+   rgba tint bases are the canonical tier hexes, borders/text the lighter
+   same-hue accents the invariants rule allows per client. */
+.ftf-badge.ftf-tier-firsts_2plus {
   background: rgba(251, 191, 36, 0.15);
   border-color: #fcd34d;
   color: #fde68a;
 }
-.ftf-badge.ftf-tier-starter {
+.ftf-badge.ftf-tier-first_1 {
   background: rgba(45, 212, 191, 0.15);
   border-color: #5eead4;
   color: #99f6e4;
 }
-.ftf-badge.ftf-tier-solid {
+.ftf-badge.ftf-tier-second {
   background: rgba(56, 189, 248, 0.15);
   border-color: #7dd3fc;
   color: #bae6fd;
 }
-.ftf-badge.ftf-tier-depth {
+.ftf-badge.ftf-tier-third {
   background: rgba(244, 114, 182, 0.15);
   border-color: #f9a8d4;
   color: #fbcfe8;
+}
+.ftf-badge.ftf-tier-fourth {
+  background: rgba(163, 230, 53, 0.15);
+  border-color: #bef264;
+  color: #d9f99d;
 }
 .ftf-badge.ftf-tier-bench {
   background: rgba(122, 127, 150, 0.18);

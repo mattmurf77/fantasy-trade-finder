@@ -115,6 +115,19 @@ export default function SendInSleeperButton({
             { text: 'Connect', onPress: goConnect },
           ],
         );
+      } else if (code === 'verification_required') {
+        // Account-auth P1: sends require a VERIFIED session. A linked-but-
+        // unverified session (e.g. linked before verification shipped, or a
+        // fresh app session) re-verifies via the same connect webview — the
+        // capture doubles as proof.
+        Alert.alert(
+          'Verify your account',
+          'Sending trades needs a quick account verification. We’ll open Sleeper so you can log in — that’s it.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Verify', onPress: goConnect },
+          ],
+        );
       } else if (code === 'sleeper_rejected') {
         Alert.alert(
           'Sleeper wouldn’t accept the send',

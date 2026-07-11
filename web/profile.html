@@ -19,11 +19,13 @@
       --wr: #3b82f6;
       --te: #a855f7;
       --gold:   #f59e0b;
-      --elite:   #fbbf24;
-      --starter: #2dd4bf;
-      --solid:   #38bdf8;
-      --depth:   #f472b6;
-      --bench:   #7a7f96;
+      /* Pick-value tier ladder (docs/cross-client-invariants.md) */
+      --firsts-2plus: #fbbf24;
+      --first-1:      #2dd4bf;
+      --second:       #38bdf8;
+      --third:        #f472b6;
+      --fourth:       #a3e635;
+      --bench:        #7a7f96;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -215,10 +217,11 @@
       text-transform: uppercase;
       padding-top: 3px;
     }
-    .pp-tier-label[data-tier="elite"]   { color: var(--elite); }
-    .pp-tier-label[data-tier="starter"] { color: var(--starter); }
-    .pp-tier-label[data-tier="solid"]   { color: var(--solid); }
-    .pp-tier-label[data-tier="depth"]   { color: var(--depth); }
+    .pp-tier-label[data-tier="firsts_2plus"] { color: var(--firsts-2plus); }
+    .pp-tier-label[data-tier="first_1"] { color: var(--first-1); }
+    .pp-tier-label[data-tier="second"]  { color: var(--second); }
+    .pp-tier-label[data-tier="third"]   { color: var(--third); }
+    .pp-tier-label[data-tier="fourth"]  { color: var(--fourth); }
     .pp-tier-label[data-tier="bench"]   { color: var(--bench); }
 
     .pp-tier-names {
@@ -281,10 +284,10 @@
   <script>
     (function () {
       const POS_LABELS = { qb: 'QB', rb: 'RB', wr: 'WR', te: 'TE' };
-      const TIER_ORDER = ['elite', 'starter', 'solid', 'depth', 'bench'];
+      const TIER_ORDER = ['firsts_2plus', 'first_1', 'second', 'third', 'fourth', 'bench'];
       const TIER_LABELS = {
-        elite: 'Elite', starter: 'Starter', solid: 'Solid',
-        depth: 'Depth', bench: 'Bench',
+        firsts_2plus: '2+ 1sts', first_1: '1st', second: '2nd',
+        third: '3rd', fourth: '4th', bench: 'Bench',
       };
 
       function esc(s) {

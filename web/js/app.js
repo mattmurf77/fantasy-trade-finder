@@ -2000,26 +2000,18 @@
       } catch (_) { /* ignore */ }
     }
 
-    // ELO → tier label, mirroring the thresholds in positional-tiers.html
-    // (UNIFORM_ELO_TIER_THRESHOLDS / QB_TE_1QB_ELO_TIER_THRESHOLDS) and the
-    // server-side bands in ranking_service.tier_bands_for(). Returns one of
-    // 'Elite' / 'Starter' / 'Solid' / 'Depth' / 'Bench', or '' when ELO is
-    // missing.
+    // ELO → tier label, mirroring the pick-value tier ladder in
+    // backend/tier_config.json (2026-07-11) — bands are position- and
+    // format-uniform in Elo space (docs/cross-client-invariants.md).
+    // Returns one of '2+ 1sts' / '1st' / '2nd' / '3rd' / '4th' / 'Bench',
+    // or '' when ELO is missing.
     function _eloToTierLabel(elo, position) {
       if (elo == null || isNaN(elo)) return '';
-      const pos = (position || '').toUpperCase();
-      let fmt = '1qb_ppr';
-      try {
-        const stored = localStorage.getItem('ftf_active_format');
-        if (stored === '1qb_ppr' || stored === 'sf_tep') fmt = stored;
-      } catch (_) { /* ignore */ }
-      const thresholds = (fmt === '1qb_ppr' && (pos === 'QB' || pos === 'TE'))
-        ? { elite: 1580, starter: 1460, solid: 1350, depth: 1190 }
-        : { elite: 1700, starter: 1580, solid: 1460, depth: 1350 };
-      if (elo >= thresholds.elite)   return 'Elite';
-      if (elo >= thresholds.starter) return 'Starter';
-      if (elo >= thresholds.solid)   return 'Solid';
-      if (elo >= thresholds.depth)   return 'Depth';
+      if (elo >= 1788) return '2+ 1sts';
+      if (elo >= 1580) return '1st';
+      if (elo >= 1400) return '2nd';
+      if (elo >= 1280) return '3rd';
+      if (elo >= 1220) return '4th';
       return 'Bench';
     }
 

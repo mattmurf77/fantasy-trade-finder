@@ -9,6 +9,7 @@ import {
   Dimensions,
   Modal,
   Alert,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -152,6 +153,11 @@ export default function TradesScreen({ navigation }: any) {
   const [fairnessOn, setFairnessOn] = useState(true);
   const [deck, setDeck] = useState<TradeCard[]>([]);
   const [deckIdx, setDeckIdx] = useState(0);
+  // #107/#110 — measured layout height of the TOP card. The behind-card
+  // peek is clipped to this so a taller next card (e.g. 2 player tiles
+  // behind a 1-player top) can't leak its extra tile out from under the
+  // top card. Updated via onLayout on every top-card mount/re-layout.
+  const [topCardH, setTopCardH] = useState<number | null>(null);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
   const [outlookOpen, setOutlookOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -1288,9 +1294,19 @@ export default function TradesScreen({ navigation }: any) {
         <View style={styles.deckWrap}>
           {topCard ? (
             <>
-              {/* Peek of the next card behind the top one */}
-              {nextCard && (
-                <View style={[styles.cardStack, styles.cardBehind]}>
+              {/* Peek of the next card behind the top one. Clipped to the
+                  TOP card's measured height (#107/#110): a taller next card
+                  (2 player tiles behind a 1-player top) would otherwise poke
+                  its extra tile out below the top card. The wrapper keeps
+                  the stack aesthetic — 8px downward offset, scale, dim, and
+                  the card-radius clip edge — so at most the 8px offset strip
+                  ever peeks; content can never render beyond the top card's
+                  bounds. A shorter next card is unaffected (it already fits).
+                  Hidden until the first onLayout lands (one frame). */}
+              {nextCard && topCardH != null && (
+                <View
+                  style={[styles.cardStack, styles.cardBehind, { height: topCardH }]}
+                >
                   <TradeCardComp
                     data={nextCard}
                     untouchableIds={untouchablesEnabled ? untouchableIds : undefined}
@@ -1301,6 +1317,7 @@ export default function TradesScreen({ navigation }: any) {
               <SwipableTopCard
                 key={topCard.trade_id}
                 card={topCard}
+                onCardLayout={(e) => setTopCardH(e.nativeEvent.layout.height)}
                 onLike={() => advance('like')}
                 onPass={() => advance('pass')}
                 untouchableIds={untouchablesEnabled ? untouchableIds : undefined}
@@ -1532,9 +1549,9 @@ export default function TradesScreen({ navigation }: any) {
       </Modal>
 
       {/* Player-swap sheet (feedback #86) — replace one player on the top
-          card with someone from the same roster. Suggested section = the
-          roster's closest consensus values to the outgoing player; full
-          roster below, grouped QB → RB → WR → TE. */}
+          card with someone from the same roster. Suggested section = roster
+          players within a tight value band of the outgoing player (#109);
+          full roster below, grouped QB → RB → WR → TE. */}
       <SwapPlayerSheet
         visible={!!swapTarget}
         replacing={
@@ -1625,6 +1642,10 @@ function summarizePlayers(players: Player[]): string {
 // ── SwipableTopCard — Tinder-style gesture on the top card only ─────
 interface SwipableProps {
   card: TradeCard;
+  // #107/#110 — reports the card's laid-out height so the deck can clip
+  // the behind-card peek to the top card's bounds. onLayout height is the
+  // pre-transform layout box, so the swipe translation never re-fires it.
+  onCardLayout: (e: LayoutChangeEvent) => void;
   onLike: () => void;
   onPass: () => void;
   untouchableIds?: ReadonlySet<string>;
@@ -1638,6 +1659,7 @@ interface SwipableProps {
 
 function SwipableTopCard({
   card,
+  onCardLayout,
   onLike,
   onPass,
   untouchableIds,
@@ -1683,7 +1705,7 @@ function SwipableTopCard({
 
   return (
     <GestureDetector gesture={pan}>
-      <Animated.View style={[styles.cardStack, animatedStyle]}>
+      <Animated.View style={[styles.cardStack, animatedStyle]} onLayout={onCardLayout}>
         <TradeCardComp
           data={card}
           untouchableIds={untouchableIds}
@@ -1873,6 +1895,9 @@ const styles = StyleSheet.create({
   cardStack: {
     width: '100%',
   },
+  // Height is set inline from the measured top card (#107/#110); overflow
+  // hidden + the TradeCard radius keep the clipped bottom edge reading as
+  // a card corner rather than a raw content cut.
   cardBehind: {
     position: 'absolute',
     top: 8,
@@ -1880,6 +1905,8 @@ const styles = StyleSheet.create({
     right: 0,
     opacity: 0.55,
     transform: [{ scale: 0.97 }],
+    overflow: 'hidden',
+    borderRadius: radii.md,
   },
   deckHint: {
     ...type.bodySm,

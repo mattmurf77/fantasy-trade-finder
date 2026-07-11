@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "name": "near-unlock",
+  "description": "qa_standard at threshold-1 trio interactions per position in the league's format (sf_tep), still locked — one more trio per position crosses the unlock threshold. Used by the unlock-banner and push-priming cases.",
+  "season": 2026,
+  "flags_base": "release",
+  "flag_overrides": {
+    "landing.smart_start_cta":         false,
+    "landing.try_before_sync":         false,
+    "league.activity_feed":            false,
+    "league.unlock_badges_per_member": false,
+    "profiles.public_pages":           false,
+    "swipe.gesture_audit":             true,
+    "swipe.qc_compliments":            true,
+    "trade.finder_targeting":          true,
+    "trade.preference_lists":          true,
+    "trade.send_in_sleeper":           true,
+    "trade_math.human_explanations":   true,
+    "trades.new_partners_alerts":      false,
+    "trades.queue_2k":                 false
+  },
+  "app_user": {
+    "username": "qa_standard",
+    "user_id": "900000000000000001",
+    "unlocked": false,
+    "rankings": {
+      "positions": ["QB", "RB", "WR", "TE"],
+      "trios_per_position": "threshold-1",
+      "history_days": 7,
+      "formats": ["sf_tep"]
+    },
+    "tiers": null,
+    "anchors": null
+  },
+  "extra_users": [],
+  "activity_seed": 0,
+  "feedback_reply_seed": 0,
+  "leagues": [
+    {
+      "league_id": "990000000000000001",
+      "name": "QA Near-Unlock League",
+      "total_rosters": 12,
+      "format": "sf_tep",
+      "roster_size": 26,
+      "members": [
+        { "username": "qa_opp_ranked",   "user_id": "900000000000000002", "rankings": "generated", "roster": "generated:balanced" },
+        { "username": "qa_opp_unranked", "user_id": "900000000000000003", "rankings": null,        "roster": "generated:balanced" }
+      ],
+      "matches_seed": { "mutual": 0, "awaiting": 0 }
+    }
+  ],
+  "players_cache": "warm"
+}

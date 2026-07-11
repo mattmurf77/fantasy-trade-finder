@@ -27,14 +27,25 @@ import {
 // per-player swap affordance; replaces one player with another from the
 // SAME roster (give side → the user's roster, receive side → the
 // counterparty's). Two sections, per the owner's spec:
-//   1. "Suggested swaps" — the roster players closest in consensus value
-//      to the player being replaced (a keeps-it-fair shortlist).
+//   1. "Suggested swaps" — roster players inside a tight value band around
+//      the player being replaced (a keeps-it-fair shortlist, feedback #109).
 //   2. "Full roster" — everyone else, grouped QB → RB → WR → TE (→ Other).
 // Values come from /api/trade/values (consensus board — same numbers the
 // calculator picker shows). Sheet construction mirrors PlayerPickerModal
 // (components.md → Sheets, modals, menus).
 
 const SUGGESTED_COUNT = 6;
+// Feedback #109: suggested swaps must actually be CLOSE in value, not just
+// the 6 nearest whatever the distance. A candidate qualifies only within
+// ±15% of the outgoing player's consensus value. Why 15%: fairness_score is
+// the lesser/greater package-value ratio (cross-client-invariants.md), and
+// the deck's own balanced gate is ratio ≥ 0.75 (FAIRNESS_ON_THRESHOLD,
+// TradesScreen) — a ±15% one-player swap keeps a 1-for-1 package's ratio
+// ≥ ~0.87, comfortably inside that gate, while the post-pick
+// /api/trade/evaluate re-price confirms the exact number. Fewer than
+// SUGGESTED_COUNT qualify → show only those (even zero, with a no-close-
+// swaps hint) rather than padding with far-off values.
+const SUGGESTED_BAND_PCT = 0.15;
 const POS_ORDER = ['QB', 'RB', 'WR', 'TE'] as const;
 
 interface SheetSection {
@@ -74,10 +85,13 @@ export default function SwapPlayerSheet({
   const replacingValue = replacing?.value ?? null;
 
   const sections = useMemo<SheetSection[]>(() => {
-    // Suggested = closest by |consensus value delta| to the outgoing player.
+    // Suggested = within ±SUGGESTED_BAND_PCT of the outgoing player's value
+    // (feedback #109), sorted by closeness, capped at SUGGESTED_COUNT.
     let suggested: CalcValueRow[] = [];
     if (replacingValue != null) {
-      suggested = [...candidates]
+      const band = replacingValue * SUGGESTED_BAND_PCT;
+      suggested = candidates
+        .filter((p) => Math.abs(p.value - replacingValue) <= band)
         .sort(
           (a, b) =>
             Math.abs(a.value - replacingValue) - Math.abs(b.value - replacingValue),
@@ -98,13 +112,19 @@ export default function SwapPlayerSheet({
     }
 
     const out: SheetSection[] = [];
-    if (suggested.length > 0) {
+    // Section renders whenever the outgoing player has a consensus value —
+    // even with zero qualifiers, an honest "no close swaps" beats padding
+    // the shortlist with players far from the trade's value (#109).
+    if (replacingValue != null) {
       out.push({
         key: 'suggested',
         banner: 'SUGGESTED SWAPS',
-        bannerHint: replacing
-          ? `Closest in value to ${replacing.name} — keeps the trade fair`
-          : undefined,
+        bannerHint:
+          suggested.length === 0
+            ? 'No close-value swaps on this roster — pick from the full roster below'
+            : replacing
+            ? `Closest in value to ${replacing.name} — keeps the trade fair`
+            : undefined,
         posLabel: null,
         data: suggested,
       });

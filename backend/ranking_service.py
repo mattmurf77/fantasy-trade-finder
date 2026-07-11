@@ -37,7 +37,12 @@ def _load_tier_config() -> dict:
     return {k: v for k, v in raw.items() if not k.startswith("_")}
 
 TIER_CONFIG: dict = _load_tier_config()
-ORDERED_TIERS: tuple[str, ...] = ("elite", "starter", "solid", "depth", "bench")
+# Pick-value tier ladder (2026-07-11) — tier keys read directly in draft-pick
+# terms; each tier's floor is a rung of the anchor/pick Elo ladder (see
+# tier_config.json _calibration + docs/cross-client-invariants.md).
+ORDERED_TIERS: tuple[str, ...] = (
+    "firsts_2plus", "first_1", "second", "third", "fourth", "bench",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -224,8 +229,9 @@ class RankingService:
         self._trio_last_variety: Optional[str] = None
         # Random start (FB #97): a fixed 0 start meant every rebuilt service
         # (each app session / server restart) aimed its first within-tier trio
-        # at ORDERED_TIERS[0] = elite, so the same top-cluster faces opened
-        # every session. The cursor still rotates deterministically from here.
+        # at ORDERED_TIERS[0] (the top tier), so the same top-cluster faces
+        # opened every session. The cursor still rotates deterministically
+        # from here.
         self._within_tier_cursor: int = random.randrange(len(ORDERED_TIERS))
 
         # INIT-03: instance-level memo for _compute_elo / _compute_stats.
@@ -866,7 +872,7 @@ class RankingService:
         # has explicitly placed them via tiers/reorder and wants that value
         # to stick. The OTHER side of the swipe (if not overridden) still
         # evolves against the overridden player's anchor ELO, which is the
-        # right behaviour: a non-tier-placed player who beat a tier-elite
+        # right behaviour: a non-tier-placed player who beat a top-tier
         # player should still gain ELO.
         for s in self._swipes:
             w, l = s.winner_id, s.loser_id
@@ -1000,7 +1006,8 @@ class RankingService:
             recent = sum(1 for p in (opp, cand, third) if p.id in _avoid)
             # random() < 1 breaks integer-score ties between edges randomly —
             # otherwise a fresh board always probed the FIRST tied edge
-            # (elite/starter, the hottest cluster) on every boundary trio.
+            # (the top of the ladder, the hottest cluster) on every boundary
+            # trio.
             total_cmp = sum(len(stats[p.id]["compared"]) for p in (opp, cand, third))
             score = recent * 200 + already * 100 + total_cmp + random.random()
             if score < best_score:
@@ -1109,10 +1116,9 @@ class RankingService:
     ) -> Optional[str]:
         """Inverse of `tier_bands_for` — bucket a raw ELO into a tier name.
 
-        Returns one of: 'elite', 'starter', 'solid', 'depth', 'bench', or
-        None when the ELO falls below the lowest band (unranked). Uses the
-        band's `hi` as the upper inclusive cutoff per tier so the mapping
-        matches what `apply_tiers` writes.
+        Returns one of ORDERED_TIERS ('firsts_2plus', 'first_1', 'second',
+        'third', 'fourth', 'bench'), or None when the ELO falls below the
+        lowest band (unranked).
 
         This is the source of truth for the browser extension's tier badge
         and for anywhere the backend needs to label a player without going
@@ -1121,10 +1127,9 @@ class RankingService:
         if elo is None:
             return None
         bands = cls.tier_bands_for(position, scoring_format)
-        # Walk tiers top-down; return the first band whose hi >= elo >= lo.
-        # We allow elo above 'elite' hi to still register as elite.
-        ordered = ("elite", "starter", "solid", "depth", "bench")
-        for tier in ordered:
+        # Walk tiers top-down; return the first tier whose lo <= elo. Elo
+        # above the top tier's hi still registers as the top tier.
+        for tier in ORDERED_TIERS:
             lo, hi = bands[tier]
             if elo >= lo:
                 return tier

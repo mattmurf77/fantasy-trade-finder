@@ -38,7 +38,6 @@ export interface PlayerCardProps {
   // posRank at this density). All other callers render the classic card.
   dense?: boolean;
   statsSlot?: React.ReactNode;     // dense line 2 — the TileStats strip
-  meterSlot?: React.ReactNode;     // dense line 3 — thin TradeMeter bar (#71); omitted when absent
   value?: number | null;           // dense right cluster — 0–10k seed-scale value
 }
 
@@ -74,7 +73,6 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     showInjury = true,
     dense = false,
     statsSlot,
-    meterSlot,
     value,
   },
   ref,
@@ -157,11 +155,6 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
             {tier && <TierChalkBadge t={tier} />}
             {statsSlot}
           </View>
-          {/* #71 — thin tradeability/acquirability meter under line 2.
-              Optional third line; the row must (and does) read correctly
-              without it. Fits the fixed 60px pitch: lines 1+2 (~37px) +
-              3px gap + 3px track stay well inside the centered denseMain. */}
-          {meterSlot ? <View style={styles.denseMeter}>{meterSlot}</View> : null}
         </View>
         {/* #53/#54 — positional rank prominent, 0–10k value secondary */}
         {posRank || value != null ? (
@@ -372,10 +365,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    marginTop: 3,
-  },
-  // #71 — optional third line hosting the TradeMeter bar.
-  denseMeter: {
     marginTop: 3,
   },
   // Right cluster (#53/#54): positional rank prominent (mono, position

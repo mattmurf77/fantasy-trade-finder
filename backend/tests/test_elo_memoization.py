@@ -61,13 +61,13 @@ def _build_service():
     # _compute_elo (the _trade_swipes branch).
     svc.record_trade_signal(winner_ids=["r4"], loser_ids=["r6"], decision="like")
 
-    # Tier override scenario: pin r1 (elite) and r6 (bench) via a tier save.
+    # Tier override scenario: pin r1 (top tier) and r6 (bench) via a tier save.
     # This populates _elo_overrides so the anchoring path (623-662) runs:
     # overridden players keep their pinned ELO while their swipe partners
     # still evolve against the anchor.
     svc.apply_tiers(
         position="RB",
-        tiers={"elite": ["r1"], "bench": ["r6"]},
+        tiers={"first_1": ["r1"], "bench": ["r6"]},
         scoring_format="1qb_ppr",
     )
     return svc
@@ -211,10 +211,10 @@ def test_tier_override_bumps_version_and_recomputes():
     before = svc._compute_elo(pool)
     v_before = svc._version
 
-    # Re-tier r2 into elite — apply_tiers must bump _version (ranking_service:828).
+    # Re-tier r2 into the top tier — apply_tiers must bump _version (ranking_service:828).
     svc.apply_tiers(
         position="RB",
-        tiers={"elite": ["r2"]},
+        tiers={"firsts_2plus": ["r2"]},
         scoring_format="1qb_ppr",
     )
     assert svc._version > v_before

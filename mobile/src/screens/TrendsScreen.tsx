@@ -25,6 +25,7 @@ import { TickLabel, Button } from '../components/chalkline';
 import PositionChip from '../components/PositionChip';
 import TrendBar from '../components/TrendBar';
 import { getRisersAndFallers, getContrarianGap } from '../api/rankings';
+import { readErrorCopy } from '../utils/verification';
 import { useSession } from '../state/useSession';
 import type {
   Position,
@@ -141,6 +142,7 @@ export default function TrendsScreen() {
         <SectionBody
           loading={moversQuery.isLoading}
           error={moversQuery.isError}
+          errorText={readErrorCopy(moversQuery.error, "Couldn't load.")}
           retry={() => moversQuery.refetch()}
           empty={
             !moversQuery.data?.has_history
@@ -160,6 +162,7 @@ export default function TrendsScreen() {
         <SectionBody
           loading={moversQuery.isLoading}
           error={moversQuery.isError}
+          errorText={readErrorCopy(moversQuery.error, "Couldn't load.")}
           retry={() => moversQuery.refetch()}
           empty={
             !moversQuery.data?.has_history
@@ -179,6 +182,7 @@ export default function TrendsScreen() {
         <SectionBody
           loading={!!leagueId && gapQuery.isLoading}
           error={gapQuery.isError}
+          errorText={readErrorCopy(gapQuery.error, "Couldn't load.")}
           retry={() => gapQuery.refetch()}
           empty={
             !leagueId
@@ -260,11 +264,14 @@ function SectionHeader({ title }: { title: string }) {
 interface SectionBodyProps {
   loading: boolean;
   error: boolean;
+  /** Load-error copy — callers pass utils/verification.readErrorCopy so a
+   *  read-gate 403 explains itself instead of a generic "Couldn't load." */
+  errorText?: string;
   retry: () => void;
   empty: string | null;
   children: React.ReactNode;
 }
-function SectionBody({ loading, error, retry, empty, children }: SectionBodyProps) {
+function SectionBody({ loading, error, errorText, retry, empty, children }: SectionBodyProps) {
   if (loading) {
     return (
       <View style={[styles.sectionCard, styles.sectionCenter]}>
@@ -275,7 +282,7 @@ function SectionBody({ loading, error, retry, empty, children }: SectionBodyProp
   if (error) {
     return (
       <View style={[styles.sectionCard, styles.sectionCenter]}>
-        <Text style={styles.errorText}>Couldn't load.</Text>
+        <Text style={styles.errorText}>{errorText ?? "Couldn't load."}</Text>
         <Button label="Try again" variant="ghost" compact onPress={retry} />
       </View>
     );

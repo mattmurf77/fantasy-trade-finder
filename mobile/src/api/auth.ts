@@ -1,4 +1,4 @@
-import { api, setSessionToken } from './client';
+import { api, apiRequest, setSessionToken } from './client';
 import { getLeagueRosters, getLeagueUsers, warmPlayerCache, resetWarmedFlag } from './sleeper';
 import type {
   DemoSessionResponse,
@@ -6,7 +6,7 @@ import type {
   PublicProfile,
   SmartStartResolution,
 } from '../shared/types';
-import type { SavedUser } from '../state/useSession';
+import type { SavedUser, SessionVerification } from '../state/useSession';
 
 // POST /api/extension/auth — the lightweight, one-shot username auth endpoint.
 // Shipped earlier for the Chrome extension; perfect for mobile too.
@@ -32,6 +32,72 @@ export async function signIn(username: string): Promise<AuthResponse> {
     await setSessionToken(res.session_token);
   }
   return res;
+}
+
+// ── Account auth (auth.accounts flag; account-auth plan P2) ─────────────
+//
+// POST /api/auth/apple — verify a Sign in with Apple identity token.
+// Backend behavior (see docs/api-reference.md):
+//   * called WITH a live session → binds the session's Sleeper user to the
+//     Apple account and verifies the session (linked=true)
+//   * called with NO session, account already bound → device-loss restore:
+//     returns a fresh session_token + the bound user's profile
+//   * called with NO session, brand-new Apple account → linked=false; the
+//     client shows the "Link your Sleeper username" step, signs in with
+//     the username, then re-posts the SAME identity token to bind.
+export interface AccountAuthResponse {
+  ok: boolean;
+  provider: 'apple' | 'google';
+  account_id: string;
+  linked: boolean;
+  conflict: boolean;
+  sleeper_user_id: string | null;
+  username?: string | null;
+  display_name?: string | null;
+  avatar?: string | null;
+  session_token?: string;
+  verified_via?: 'apple' | 'google';
+}
+
+export async function appleSignIn(identityToken: string): Promise<AccountAuthResponse> {
+  const res = await api.post<AccountAuthResponse>('/api/auth/apple', {
+    identity_token: identityToken,
+  });
+  if (res?.session_token) {
+    await setSessionToken(res.session_token);
+  }
+  return res;
+}
+
+// GET /api/account — current account: linked identities + bound Sleeper id.
+// 404s while the auth.accounts flag is off.
+export interface AccountInfo {
+  ok: boolean;
+  sleeper_user_id: string;
+  verified_via: 'sleeper' | 'apple' | 'google' | null;
+  account: {
+    account_id: string;
+    sleeper_user_id: string | null;
+    created_at: string;
+    identities: Array<{ provider: 'apple' | 'google'; linked_at: string }>;
+  } | null;
+}
+
+export async function getAccount(): Promise<AccountInfo> {
+  return api.get<AccountInfo>('/api/account');
+}
+
+// DELETE /api/account — in-app account deletion (App Store 5.1.1(v)).
+// Always available (not flag-gated). Deletes the user's data per the
+// privacy policy; the backend also invalidates every session server-side,
+// so the caller must sign out locally on success.
+export interface DeleteAccountResponse {
+  ok: boolean;
+  deleted: Record<string, number>;
+}
+
+export async function deleteAccount(): Promise<DeleteAccountResponse> {
+  return apiRequest<DeleteAccountResponse>('/api/account', { method: 'DELETE' });
 }
 
 // POST /api/session/init — full app session. Called after the user picks
@@ -67,6 +133,9 @@ export interface SessionInitResponse {
   user_roster?: unknown[];
   league_id?: string;
   opponents?: number;
+  /** Account-auth P1 (additive) — verified-session state. Feeds the
+   *  "Verify your account" banner via useSession.verification. */
+  verification?: SessionVerification;
 }
 
 export async function sessionInit(body: SessionInitBody): Promise<SessionInitResponse> {
@@ -78,6 +147,17 @@ export async function sessionInit(body: SessionInitBody): Promise<SessionInitRes
   // Idempotent when the backend echoes back the existing token.
   if (res?.token) {
     await setSessionToken(res.token);
+  }
+  // Mirror the server's verified-session state into the store so the
+  // verify banner reacts to every init/revalidate. Loaded inline to avoid
+  // a circular import (same pattern as consumeInvitedBy below).
+  if (res?.verification) {
+    try {
+      const { useSession } = require('../state/useSession');
+      useSession.getState().setVerification(res.verification);
+    } catch {
+      /* require may fail in test contexts; non-fatal */
+    }
   }
   return res;
 }

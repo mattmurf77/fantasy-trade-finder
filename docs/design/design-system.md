@@ -17,7 +17,7 @@ These override any default tendency. If generated UI contains one of these, it i
 3. No `backdrop-filter` / glassmorphism / translucent `rgba(255,255,255,x)` surfaces. Surfaces are solid ink steps.
 4. No Inter, Roboto, or bare system font stack. Fonts are Barlow Condensed / Archivo / IBM Plex Mono only.
 5. No border-radius above 8px except true pills (`999px` on count badges and chips explicitly specced as pills).
-6. No purple/indigo accent for brand or CTAs. The primary accent is ice; the secondary is flare, and flare appears ONLY on informational highlights, never on actions. (`#a855f7` and `#3b82f6` remain **only** as TE-position and WR-position/Solid-tier data colors; ice is distinguishable from WR blue by brightness.)
+6. No purple/indigo accent for brand or CTAs. The primary accent is ice; the secondary is flare, and flare appears ONLY on informational highlights, never on actions. (`#a855f7` and `#3b82f6` remain **only** as TE-position and WR-position data colors; ice is distinguishable from WR blue by brightness.)
 7. No hover `translateY` lift on cards. State changes use border and surface color.
 8. No box-shadow except `--shadow-sheet` on sheets/menus/toasts.
 9. No new hues. If a color isn't in this file or `cross-client-invariants.md`, don't ship it.
@@ -69,14 +69,14 @@ Division of labor: **ice = what you can do** (CTAs, active states, focus, ticks,
 
 | Token | Hex | Use |
 |---|---|---|
-| `--pos` | `#22C55E` | Like/accept, positive deltas (shared hex with RB/Starter — intentional) |
+| `--pos` | `#22C55E` | Like/accept, positive deltas (shared hex with RB — intentional) |
 | `--neg` | `#EF4444` | Pass/decline, errors, destructive |
-| `--warn` | `#F59E0B` | Warnings, injury Q (shared hex with Elite gold — intentional) |
+| `--warn` | `#F59E0B` | Warnings, injury Q (amber-500 — deeper than the tier gold `#fbbf24`) |
 
 ### Preserved invariants (do not restyle — see `docs/cross-client-invariants.md`)
 
 Positions: QB `#F97316` · RB `#22C55E` · WR `#3B82F6` · TE `#A855F7`.
-Tiers: Elite `#F59E0B` · Starter `#22C55E` · Solid `#3B82F6` · Depth `#A855F7` · Bench `#94A3B8`.
+Tiers (pick-value ladder, 2026-07-11): 2+ 1sts `#fbbf24` · 1st `#2dd4bf` · 2nd `#38bdf8` · 3rd `#f472b6` · 4th `#a3e635` · Bench `#7a7f96`. Tier hues never share a hue with a position color (tiers = bright 400-level family, positions = deeper 500-level).
 These are data encodings rendered on ink surfaces (rails, badges, meter segments), never used as chrome/brand colors.
 
 ## Typography

@@ -3,11 +3,14 @@
 // and is fetched at boot via api/rankings.getTierConfig() →
 // setTierConfigCache() below. While the cache is empty (e.g. very first
 // app launch before the network call resolves, or offline mode) the
-// hardcoded fallback bands keep the UI usable; they mirror the 2026-07-10
-// consensus recalibration of backend/tier_config.json (FB #60/#69) —
-// per-(format, position) lower bounds anchored to the DynastyProcess
-// seed scale so Elite holds ~top-5 per position, Starter to ~rank 15,
-// Solid to ~rank 30.
+// hardcoded fallback bands keep the UI usable; they mirror the 2026-07-11
+// pick-value tier ladder in backend/tier_config.json — tiers read directly
+// in draft-pick terms, each floor a rung of the anchor/pick Elo ladder
+// (firsts_2plus ≥ 1788 ≈ 2 mid 1sts, first_1 ≥ 1580 = Late 1st, second ≥
+// 1400 = Late 2nd, third ≥ 1280 = Late 3rd, fourth ≥ 1220 = Late 4th,
+// bench below that). Pick value is position-uniform by design, so the
+// bands are identical across positions and scoring formats; occupancy
+// differs because the seed Elos do.
 //
 // If you ever change either side without the other, mobile will silently
 // drift from server until the user re-launches and the network fetch
@@ -17,38 +20,46 @@
 import type { Position, ScoringFormat, Tier } from '../shared/types';
 import type { TierConfigResponse, TierBand } from '../api/rankings';
 
-export const TIERS: readonly Tier[] = ['elite', 'starter', 'solid', 'depth', 'bench'] as const;
+export const TIERS: readonly Tier[] = [
+  'firsts_2plus',
+  'first_1',
+  'second',
+  'third',
+  'fourth',
+  'bench',
+] as const;
 
+// Labels ARE pick terms (operator directive, supersedes the #103
+// sublabels): a tier name says what a player in it is worth in the Pick
+// Anchor wizard's vocabulary. Bench = below 4th-round value.
 export const TIER_LABEL: Record<Tier, string> = {
-  elite:   'Elite',
-  starter: 'Starter',
-  solid:   'Solid',
-  depth:   'Depth',
-  bench:   'Bench',
+  firsts_2plus: '2+ 1sts',
+  first_1:      '1st',
+  second:       '2nd',
+  third:        '3rd',
+  fourth:       '4th',
+  bench:        'Bench',
 };
 
 /** Inclusive ELO lower bounds per tier — fallback only. Live values come
- *  from the cached backend config (TierConfigResponse.config).  */
+ *  from the cached backend config (TierConfigResponse.config). Bench is
+ *  implicit (everything below `fourth`). */
 interface Thresholds {
-  elite: number;
-  starter: number;
-  solid: number;
-  depth: number;
+  firsts_2plus: number;
+  first_1: number;
+  second: number;
+  third: number;
+  fourth: number;
 }
 
-const FALLBACK: Record<ScoringFormat, Record<Position, Thresholds>> = {
-  '1qb_ppr': {
-    QB: { elite: 1445, starter: 1330, solid: 1260, depth: 1206 },
-    RB: { elite: 1600, starter: 1450, solid: 1330, depth: 1215 },
-    WR: { elite: 1700, starter: 1505, solid: 1360, depth: 1220 },
-    TE: { elite: 1400, starter: 1280, solid: 1225, depth: 1204 },
-  },
-  sf_tep: {
-    QB: { elite: 1650, starter: 1460, solid: 1320, depth: 1210 },
-    RB: { elite: 1500, starter: 1380, solid: 1270, depth: 1210 },
-    WR: { elite: 1600, starter: 1450, solid: 1340, depth: 1215 },
-    TE: { elite: 1330, starter: 1260, solid: 1220, depth: 1203 },
-  },
+// Uniform across positions AND formats (pick value is position-uniform);
+// kept as a single constant rather than a per-(format, position) table.
+const FALLBACK: Thresholds = {
+  firsts_2plus: 1788,
+  first_1:      1580,
+  second:       1400,
+  third:        1280,
+  fourth:       1220,
 };
 
 // ── Cache, populated from /api/tier-config ─────────────────────────────
@@ -67,7 +78,7 @@ export function getTierConfigCache(): TierConfigResponse | null {
 
 /** Read the per-(format, position) thresholds. Prefers the cached
  *  backend config; falls back to the seeded constants when the cache is
- *  empty. Bench is implicit (everything below `depth`). */
+ *  empty. Bench is implicit (everything below `fourth`). */
 export function thresholdsFor(
   position: Position,
   scoringFormat: ScoringFormat = '1qb_ppr',
@@ -79,13 +90,14 @@ export function thresholdsFor(
     // for ELO-spread within a tier; not needed in the frontend walk).
     const lb = (t: Tier): number => liveBands[t]?.min ?? 0;
     return {
-      elite:   lb('elite'),
-      starter: lb('starter'),
-      solid:   lb('solid'),
-      depth:   lb('depth'),
+      firsts_2plus: lb('firsts_2plus'),
+      first_1:      lb('first_1'),
+      second:       lb('second'),
+      third:        lb('third'),
+      fourth:       lb('fourth'),
     };
   }
-  return FALLBACK[scoringFormat]?.[position] ?? FALLBACK['1qb_ppr'].RB;
+  return FALLBACK;
 }
 
 /** Map a raw ELO to its tier for the given position + scoring format. */
@@ -95,21 +107,22 @@ export function tierForElo(
   scoringFormat: ScoringFormat = '1qb_ppr',
 ): Tier {
   const t = thresholdsFor(position, scoringFormat);
-  if (elo >= t.elite)   return 'elite';
-  if (elo >= t.starter) return 'starter';
-  if (elo >= t.solid)   return 'solid';
-  if (elo >= t.depth)   return 'depth';
+  if (elo >= t.firsts_2plus) return 'firsts_2plus';
+  if (elo >= t.first_1)      return 'first_1';
+  if (elo >= t.second)       return 'second';
+  if (elo >= t.third)        return 'third';
+  if (elo >= t.fourth)       return 'fourth';
   return 'bench';
 }
 
-/** Auto-bucket a sorted-by-ELO list into the five tier buckets. */
+/** Auto-bucket a sorted-by-ELO list into the six tier buckets. */
 export function autoBucket<T extends { id: string; elo: number }>(
   players: T[],
   position: Position,
   scoringFormat: ScoringFormat = '1qb_ppr',
 ): Record<Tier, T[]> {
   const buckets: Record<Tier, T[]> = {
-    elite: [], starter: [], solid: [], depth: [], bench: [],
+    firsts_2plus: [], first_1: [], second: [], third: [], fourth: [], bench: [],
   };
   for (const p of players) {
     const t = tierForElo(p.elo, position, scoringFormat);

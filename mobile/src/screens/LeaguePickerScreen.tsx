@@ -145,6 +145,7 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
             const isBusy = selectingId === item.league_id;
             return (
               <Pressable
+                testID={`leagues.row.${item.league_id}`}
                 style={({ pressed }) => [
                   styles.row,
                   pressed && styles.rowPressed,

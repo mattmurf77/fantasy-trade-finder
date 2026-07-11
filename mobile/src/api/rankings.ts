@@ -138,7 +138,7 @@ export async function reorderRankings(
 
 // POST /api/tiers/save — save a tier assignment for a position.
 // Body shape matches the web's save_tiers_route expectation:
-//   { position: 'RB', tiers: { elite: [id,...], starter: [...], ... },
+//   { position: 'RB', tiers: { firsts_2plus: [id,...], first_1: [...], ... },
 //     cleared_pids: ['12345', ...] }
 //
 // `clearedPids`: players the user dragged OUT of any tier (back to the
@@ -181,6 +181,46 @@ export interface AnchorSaveResponse {
   /** Tier the pinned Elo lands in — null = below every band (no value). */
   tier: string | null;
   scoring_format: string;
+  /** Pick-value scale applied to this save (#111). 2 = consensus default. */
+  top_tier_firsts: number;
+}
+
+// GET /api/rankings for the anchor wizard's queue snapshot. Unlike the
+// plain getRankings (Tiers screen), this sends X-Scoring-Format so the
+// queue is ordered by the SAME format's Elo board the wizard's saves
+// write to (#112) — without it, session/local format drift could order
+// candidates by the wrong format (e.g. 1QB order in an SF league,
+// pushing QBs into the depth end of the queue).
+export async function getAnchorPool() {
+  return api.get<{ position: string | null; rankings: any[] }>(
+    '/api/rankings',
+    { headers: await formatHeader() },
+  );
+}
+
+// ── Pick-value scale (#111) ────────────────────────────────────────────
+// "A top-tier dynasty asset is worth N firsts." Persisted per user +
+// scoring format; recalibrates only the wizard's multi-first anchors
+// (backend _anchor_target_elo). 2 = the consensus default (legacy math).
+export type TopTierFirsts = 2 | 3 | 4;
+
+export interface AnchorScaleResponse {
+  top_tier_firsts: number;
+  scoring_format: string;
+}
+
+export async function getAnchorScale() {
+  return api.get<AnchorScaleResponse>('/api/anchor/scale', {
+    headers: await formatHeader(),
+  });
+}
+
+export async function setAnchorScale(topTierFirsts: TopTierFirsts) {
+  return api.post<AnchorScaleResponse & { ok: true }>(
+    '/api/anchor/scale',
+    { top_tier_firsts: topTierFirsts },
+    { headers: await formatHeader() },
+  );
 }
 
 // POST /api/anchor/save — pin a player's value to a pick-denominated
@@ -203,7 +243,7 @@ export async function saveAnchor(playerId: string, anchor: AnchorKey) {
 // with the backend without baking thresholds into the bundle.
 export interface TierBand { min: number; max: number; }
 export interface TierConfigResponse {
-  /** Display order: ['elite','starter','solid','depth','bench'] */
+  /** Display order: ['firsts_2plus','first_1','second','third','fourth','bench'] */
   tiers:  string[];
   /** Nested: scoring_format → position → tier → {min, max}. */
   config: Record<string, Record<string, Record<string, TierBand>>>;

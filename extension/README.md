@@ -106,7 +106,7 @@ Two endpoints on the FTF server:
         "name": "Josh Allen",
         "pos":  "QB",
         "pos_rank": 1,
-        "tier": "elite"
+        "tier": "first_1"
       }
     }
   }

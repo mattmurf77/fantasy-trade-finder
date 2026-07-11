@@ -59,5 +59,25 @@ target 'DTFDynastyTradeFinder' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+
+    # Space-in-path fix (2026-07-11): EXConstants' "Generate app.config" phase
+    # breaks twice on this repo's spaced path ("Fantasy Trade Finder"):
+    #   1. the podspec's `bash -l -c "…$PODS_TARGET_SRCROOT/…/get-app-config-ios.sh"`
+    #      word-splits and fails the build; and once quoted,
+    #   2. get-app-config-ios.sh's own `basename $PROJECT_DIR` (unquoted) yields
+    #      "Fantasy" ≠ "Pods", so it SILENTLY no-ops and never embeds app.config —
+    #      the built app then falls back to the PROD apiBaseUrl.
+    # Replace the phase wholesale: call getAppConfig.js directly, fully quoted.
+    installer.pods_project.targets.each do |target|
+      next unless target.name == 'EXConstants'
+      target.shell_script_build_phases.each do |phase|
+        next unless phase.name.to_s.include?('Generate app.config')
+        phase.shell_script =
+          "bash -l -c \"\\\"$PODS_TARGET_SRCROOT/../scripts/with-node.sh\\\" " \
+          "\\\"$PODS_TARGET_SRCROOT/../scripts/getAppConfig.js\\\" " \
+          "\\\"$PODS_ROOT/../..\\\" " \
+          "\\\"$CONFIGURATION_BUILD_DIR/EXConstants.bundle\\\"\"\n"
+      end
+    end
   end
 end

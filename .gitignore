@@ -38,3 +38,4 @@ qa/**/scratch*/
 
 # Staged subagent implementations pending 1-by-1 validation (never auto-commit)
 staged-work/
+mobile/test-artifacts/

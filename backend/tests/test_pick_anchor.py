@@ -9,19 +9,31 @@ statement ("worth 2 firsts"). Covers:
       the lowest band.
   (b) the route: 200 + override written + persistence called; 400 on a
       bad anchor key; 404 on an unknown player.
-  (c) tier assignment falls out of the pinned Elo (band walk), and is
-      position-aware even though the anchor VALUE is position-uniform.
+  (c) tier assignment falls out of the pinned Elo (band walk); with the
+      pick-value tier ladder (2026-07-11) the bands are position-uniform,
+      so every anchor lands in the tier that carries its name.
   (d) _pick_gap_equivalent: nearest-pick selection + firsts unit +
       the negligible / too-big cutoffs.
+  (e) candidate ordering (#112): the wizard queue's source —
+      get_rankings(position=None) — serves players value-descending, so
+      the highest-value unanchored player is always asked first and depth
+      players only surface once the top of the board is anchored.
+  (f) per-user pick-value scale (#111): "top-tier asset = N firsts"
+      re-spaces the multi-first anchors (power curve), leaves single-pick
+      anchors + no_value untouched, persists per user + format, and is
+      byte-identical to the legacy mapping at the default N = 2.
 """
 import json
 import math
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import create_engine
 
+import backend.database as db_module
 import backend.server as server
 import backend.trade_service as ts
+from backend.database import load_anchor_scale, save_anchor_scale, metadata
 from backend.ranking_service import Player, RankingService
 
 ME = "user_anchor_test"
@@ -126,23 +138,24 @@ def test_anchor_save_pins_override_and_reports_tier(harness):
     assert d["ok"] is True and d["anchor"] == "2_firsts"
     # Override written with the mapped Elo.
     assert service._elo_overrides["rb1"] == pytest.approx(d["elo"], abs=0.1)
-    # 2 firsts ≈ Elo 1789 → elite for an RB in 1qb (elite floor 1600).
-    assert d["tier"] == "elite"
+    # 2 firsts ≈ Elo 1789 → firsts_2plus (floor 1789) — the anchor lands
+    # in the tier that carries its name.
+    assert d["tier"] == "firsts_2plus"
     assert d["value"] == pytest.approx(2 * _mid_first_value(), rel=1e-3)
     save_overrides.assert_called_once()
 
 
-def test_anchor_value_is_position_uniform_but_tier_is_band_aware(harness):
+def test_anchor_value_and_tier_are_position_uniform(harness):
     client, service, token, _ = harness
     rb = _post(client, token, {"player_id": "rb1", "anchor": "1_second"}).get_json()
     qb = _post(client, token, {"player_id": "qb1", "anchor": "1_second"}).get_json()
     # Same anchor → same Elo/value regardless of position…
     assert rb["elo"] == qb["elo"] == 1460
     assert rb["value"] == qb["value"]
-    # …but tier falls out of each position's band walk (1qb compresses QB:
-    # a mid-2nd Elo is a top-5 1QB QB but only a starter-grade RB).
-    assert rb["tier"] == "starter"
-    assert qb["tier"] == "elite"
+    # …and, with the position-uniform pick-value ladder, the same tier —
+    # the one that carries the anchor's name ("worth a 2nd" → second).
+    assert rb["tier"] == "second"
+    assert qb["tier"] == "second"
 
 
 def test_anchor_save_rejects_bad_anchor_and_unknown_player(harness):
@@ -178,3 +191,138 @@ def test_gap_equivalent_negligible_and_oversized_gaps_have_no_pick():
     big = server._pick_gap_equivalent(max_pick * 2)
     assert big["pick_equivalent"] is None
     assert big["firsts"] > 1.5   # client falls back to the firsts unit
+
+
+# ---------------------------------------------------------------------------
+# (e) candidate ordering (#112) — the wizard queue's source contract
+# ---------------------------------------------------------------------------
+
+def test_wizard_candidate_source_is_value_descending():
+    """The wizard asks remaining[0] of get_rankings(None): top value first,
+    depth only after the board's top players are anchored/answered."""
+    pool = [
+        Player(id="depth1", name="Depth Guy",  position="RB", team="AAA", age=27),
+        Player(id="elite1", name="Elite Guy",  position="WR", team="BBB", age=24),
+        Player(id="mid1",   name="Middle Guy", position="QB", team="CCC", age=25),
+    ]
+    seeds = {"elite1": 1800.0, "mid1": 1500.0, "depth1": 1300.0}
+    service = RankingService(players=pool, seed_ratings=seeds)
+
+    ranked = service.get_rankings(position=None).rankings
+    elos = [rp.elo for rp in ranked]
+    assert elos == sorted(elos, reverse=True)
+    assert [rp.player.id for rp in ranked] == ["elite1", "mid1", "depth1"]
+
+    # Anchoring reshuffles the board but the serve order stays descending:
+    # with elite1 answered, the next-highest-value player is up, and the
+    # depth player still comes last.
+    service.apply_anchor("elite1", 1789.0)
+    ranked2 = service.get_rankings(position=None).rankings
+    elos2 = [rp.elo for rp in ranked2]
+    assert elos2 == sorted(elos2, reverse=True)
+    remaining = [rp.player.id for rp in ranked2 if rp.player.id != "elite1"]
+    assert remaining == ["mid1", "depth1"]
+
+
+# ---------------------------------------------------------------------------
+# (f) per-user pick-value scale (#111)
+# ---------------------------------------------------------------------------
+
+def test_default_scale_is_byte_identical_for_every_anchor_key():
+    for key in server.VALID_ANCHORS:
+        assert server._anchor_target_elo(key) == server._anchor_target_elo(
+            key, top_tier_firsts=server.ANCHOR_TOP_TIER_FIRSTS_DEFAULT)
+    # And the default constant really is the legacy math (m × base first).
+    assert server.ANCHOR_TOP_TIER_FIRSTS_DEFAULT == 2.0
+    assert server._anchor_target_elo("3_firsts") == pytest.approx(
+        ts.value_to_elo(3 * _mid_first_value()))
+
+
+def test_scale_respaces_multi_first_anchors_only():
+    top_tier_elo = server._anchor_target_elo("2_firsts")  # default top-tier pin
+    for n in (3.0, 4.0):
+        key = f"{int(n)}_firsts"
+        # The user's own "top-tier = N firsts" answer lands exactly where
+        # the default math pins a top-tier asset.
+        assert server._anchor_target_elo(key, top_tier_firsts=n) == \
+            pytest.approx(top_tier_elo)
+        # Single-pick anchors + no_value are consensus assets — untouched.
+        for fixed in ("1_first", "1_second", "1_third", "1_fourth", "no_value"):
+            assert server._anchor_target_elo(fixed, top_tier_firsts=n) == \
+                server._anchor_target_elo(fixed)
+        # Ladder stays monotone: 4 > 3 > 2 firsts > the actual Mid 1st.
+        ladder = [server._anchor_target_elo(k, top_tier_firsts=n)
+                  for k in ("4_firsts", "3_firsts", "2_firsts", "1_first")]
+        assert ladder == sorted(ladder, reverse=True)
+
+
+def test_anchor_scale_persistence_roundtrip():
+    """save/load_anchor_scale: per-format isolation + unset → None."""
+    eng = create_engine("sqlite:///:memory:",
+                        connect_args={"check_same_thread": False})
+    metadata.create_all(eng)
+    with patch.object(db_module, "engine", eng):
+        with eng.begin() as conn:
+            conn.execute(db_module.users_table.insert().values(
+                sleeper_user_id=ME, username="anchor_tester"))
+        assert load_anchor_scale(ME, scoring_format="1qb_ppr") is None
+        save_anchor_scale(ME, 3.0, scoring_format="1qb_ppr")
+        assert load_anchor_scale(ME, scoring_format="1qb_ppr") == 3.0
+        assert load_anchor_scale(ME, scoring_format="sf_tep") is None
+        save_anchor_scale(ME, 4.0, scoring_format="sf_tep")
+        assert load_anchor_scale(ME, scoring_format="1qb_ppr") == 3.0
+        assert load_anchor_scale(ME, scoring_format="sf_tep") == 4.0
+
+
+def test_anchor_save_route_applies_user_scale(harness):
+    client, service, token, _ = harness
+    with patch.object(server, "load_anchor_scale", return_value=3.0):
+        d = _post(client, token, {"player_id": "rb1", "anchor": "3_firsts"}).get_json()
+    # Under "top-tier = 3 firsts", a 3-firsts answer pins to the default
+    # top-tier Elo (what 2_firsts maps to at the default scale).
+    assert d["elo"] == pytest.approx(server._anchor_target_elo("2_firsts"), abs=0.1)
+    assert d["top_tier_firsts"] == 3.0
+    assert service._elo_overrides["rb1"] == pytest.approx(d["elo"], abs=0.1)
+
+
+def test_anchor_save_route_default_scale_unchanged(harness):
+    client, _, token, _ = harness
+    with patch.object(server, "load_anchor_scale", return_value=None):
+        d = _post(client, token, {"player_id": "rb1", "anchor": "2_firsts"}).get_json()
+    assert d["elo"] == pytest.approx(
+        ts.value_to_elo(2 * _mid_first_value()), abs=0.1)
+    assert d["top_tier_firsts"] == 2.0
+
+
+def test_anchor_scale_route_get_post_and_validation(harness):
+    client, _, token, _ = harness
+    saved = {}
+
+    def _fake_save(user_id, n, scoring_format):
+        saved[scoring_format] = n
+
+    with patch.object(server, "load_anchor_scale",
+                      side_effect=lambda uid, scoring_format: saved.get(scoring_format)), \
+         patch.object(server, "save_anchor_scale", side_effect=_fake_save):
+        # GET before any save → default
+        r = client.get("/api/anchor/scale", headers={"X-Session-Token": token})
+        assert r.status_code == 200
+        assert r.get_json()["top_tier_firsts"] == 2.0
+
+        # POST a valid scale, GET reflects it
+        r = client.post("/api/anchor/scale",
+                        headers={"X-Session-Token": token,
+                                 "Content-Type": "application/json"},
+                        data=json.dumps({"top_tier_firsts": 3}))
+        assert r.status_code == 200 and r.get_json()["top_tier_firsts"] == 3.0
+        r = client.get("/api/anchor/scale", headers={"X-Session-Token": token})
+        assert r.get_json()["top_tier_firsts"] == 3.0
+
+        # Invalid values → 400, nothing saved
+        for bad in (1, 5, "lots", None):
+            r = client.post("/api/anchor/scale",
+                            headers={"X-Session-Token": token,
+                                     "Content-Type": "application/json"},
+                            data=json.dumps({"top_tier_firsts": bad}))
+            assert r.status_code == 400
+        assert saved == {"1qb_ppr": 3.0}

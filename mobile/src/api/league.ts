@@ -168,7 +168,7 @@ export async function getLeagueFormatStats(leagueId: string) {
 //
 // Copies the user's tier assignments (tier label + within-tier rank) from
 // `fromFormat` into `toFormat`. Backend handles the per-format band
-// translation: a player at QB1 Elite in 1QB PPR stays at QB1 Elite in SF
+// translation: a player at QB1 in the top tier in 1QB PPR keeps tier + rank in SF
 // TEP, with new ELO values appropriate to SF TEP's bands.
 //
 // Sends X-Scoring-Format: toFormat so the backend's `_active_format`

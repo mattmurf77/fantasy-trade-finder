@@ -35,7 +35,6 @@ import { TickLabel, Button, Icon } from '../components/chalkline';
 import FormatToggle from '../components/FormatToggle';
 import PlayerCard from '../components/PlayerCard';
 import TileStats from '../components/TileStats';
-import TradeMeter from '../components/TradeMeter';
 import TierStickyHeader from '../components/TierStickyHeader';
 import TierTargetChips from '../components/TierTargetChips';
 import Toast from '../components/Toast';
@@ -79,8 +78,8 @@ const DRAG_ACTIVATION_MS = 220;
 
 export default function TiersScreen() {
   const queryClient = useQueryClient();
-  // Sibling Rank-stack routes (Anchors) — the stack's param types aren't
-  // exported, hence the any.
+  // Sibling Rank-stack routes (QuickSetTiers) — the stack's param types
+  // aren't exported, hence the any.
   const navigation = useNavigation<any>();
   const activeFormat = useSession((s) => s.activeFormat);
   // FB #80 — SF/1QB toggle. setFormat flips the server session + local
@@ -106,7 +105,7 @@ export default function TiersScreen() {
     haptics.selection();
   }, []);
 
-  // tiers[position] = { elite: [player...], starter: [...], ..., unassigned: [...] }
+  // tiers[position] = { firsts_2plus: [player...], first_1: [...], ..., unassigned: [...] }
   const [buckets, setBuckets] = useState<Record<Zone, RankedPlayer[]>>(() => emptyBuckets());
 
   // Players the user has dragged OUT of any tier (back to the pool) since
@@ -224,28 +223,13 @@ export default function TiersScreen() {
     [trendByPid],
   );
 
-  // #71 — resolve the tile's trade meter. The backend attaches at most one
-  // of tradeability (you own the player in the selected league) or
-  // acquirability (a leaguemate owns them), and omits both when there's no
-  // basis (demo/no league, thin community baseline, free agent) — so a tile
-  // simply has no bar in those cases and the row reads correctly without it.
-  const meterFor = useCallback(
-    (player: RankedPlayer): React.ReactNode =>
-      player.tradeability != null ? (
-        <TradeMeter kind="trade" score={player.tradeability} />
-      ) : player.acquirability != null ? (
-        <TradeMeter kind="get" score={player.acquirability} />
-      ) : undefined,
-    [],
-  );
-
   const saveMutation = useMutation({
     // Wrap the tier save in a Sentry span — measures end-to-end latency
     // including the per-position payload build + the network round-trip.
     // No-op when Sentry isn't initialized.
     mutationFn: () =>
       startSpan({ name: 'tiers.save', op: 'mutation' }, () => {
-        // Only send the 5 real tiers — `unassigned` isn't a real tier on the server.
+        // Only send the real tiers — `unassigned` isn't a tier on the server.
         const payload: Record<string, string[]> = {};
         for (const t of TIERS) payload[t] = buckets[t].map((p) => p.id);
         // Pass the accumulated clearedPids so the backend can DELETE the
@@ -365,13 +349,13 @@ export default function TiersScreen() {
   // Collapse the selected chips into a CONTIGUOUS BLOCK and move the whole
   // block by ONE rank in `direction` (#32). Non-adjacent selections gather
   // together; the block crosses tier boundaries as a single unit; clamps
-  // at the top of `elite` / bottom of `bench`.
+  // at the top of the first tier / bottom of `bench`.
   const bulkMove = useCallback(
     (direction: 'up' | 'down') => {
       if (selectedIds.size === 0) return;
       bucketsDirtyRef.current = true;
       setBuckets((prev) => {
-        // 1. Flatten the five real tiers into one ordered list.
+        // 1. Flatten the real tiers into one ordered list.
         const flat: { p: RankedPlayer; tier: Tier }[] = [];
         for (const t of TIERS) for (const p of prev[t]) flat.push({ p, tier: t });
 
@@ -433,8 +417,9 @@ export default function TiersScreen() {
   // ── Bulk TIER move (multi-select, FB-73) ────────────────────────────
   // Move every selected player one whole tier in `direction`, independent
   // of rank position. Complements bulkMove (one RANK at a time). Movement
-  // semantics live in the shared moveTierByOne helper below (also used by
-  // the per-tile chevron buttons, #90).
+  // semantics live in the shared moveTierByOne helper below. With the #90
+  // per-tile chevrons removed (1.5.4 #98), this + the FB4-62 tier-target
+  // chips are the no-drag paths for moving players between tiers.
   const bulkTierMove = useCallback(
     (direction: 'up' | 'down') => {
       if (selectedIds.size === 0) return;
@@ -444,18 +429,6 @@ export default function TiersScreen() {
     },
     [selectedIds],
   );
-
-  // ── Per-tile tier step (#90) ────────────────────────────────────────
-  // Move ONE player one whole tier up/down from the chevron buttons on its
-  // tile — no drag, no multi-select. Reuses the multi-select "Tier up /
-  // Tier down" movement rules via moveTierByOne: up lands at the BOTTOM of
-  // the higher tier, down at the TOP of the lower tier, clamps at elite /
-  // bench, and never moves a player into or out of `unassigned` (#68).
-  const singleTierMove = useCallback((pid: string, direction: 'up' | 'down') => {
-    bucketsDirtyRef.current = true;
-    setBuckets((prev) => moveTierByOne(prev, new Set([pid]), direction));
-    haptics.selection();
-  }, []);
 
   // ── Quick tier-move (multi-select) — FB4-62 ─────────────────────────
   // Send EVERY selected player straight to `target`, appended to the end of
@@ -503,13 +476,17 @@ export default function TiersScreen() {
   );
 
   // ── Flat list derivation ───────────────────────────────────────────
-  // Walk unassigned first, then the five tiers in TIERS order. Every
-  // zone always contributes a header (so empty tiers stay visible and
-  // droppable); a zone with no players contributes a single muted
-  // `empty` placeholder row instead of player rows.
+  // Walk unassigned first, then the tiers in TIERS order. Every
+  // TIER always contributes a header (so empty tiers stay visible and
+  // droppable); a tier with no players contributes a single muted
+  // `empty` placeholder row instead of player rows. #105: the Unassigned
+  // section (header + bin) is omitted entirely while the pool is empty —
+  // it reappears whenever players land back in the pool (the buckets
+  // rebuild after resets/clears repopulates it the same way).
   const listData: Row[] = useMemo(() => {
     const rows: Row[] = [];
-    const zones: Zone[] = ['unassigned', ...TIERS];
+    const zones: Zone[] =
+      buckets.unassigned.length > 0 ? ['unassigned', ...TIERS] : [...TIERS];
     for (const zone of zones) {
       rows.push({ kind: 'header', zone });
       const players = buckets[zone];
@@ -578,7 +555,16 @@ export default function TiersScreen() {
   const onDragEnd = useCallback(
     ({ data, from, to }: DragEndParams<Row>) => {
       isDraggingRef.current = false;
-      // #68 — one-directional pool guard, matching the chevron path
+      // #105 — the Unassigned section is omitted from the list while the
+      // pool is empty, so rows dropped ABOVE the first header can't mean
+      // "into the pool" then: they belong to the topmost rendered tier
+      // (TIERS[0]). When the pool section IS rendered, the pre-header zone
+      // stays `unassigned` as before.
+      const poolRendered = data.some(
+        (r) => r.kind === 'header' && r.zone === 'unassigned',
+      );
+      const topZone: Zone = poolRendered ? 'unassigned' : TIERS[0];
+      // #68 — one-directional pool guard, matching the tier-move path
       // (moveTierByOne): a TIERED player can never land in `unassigned`;
       // dragging FROM the pool INTO a tier stays allowed. `data[to]` is the
       // dragged row at its landing index; its `zone` is the PRE-drag zone
@@ -588,7 +574,7 @@ export default function TiersScreen() {
       // row back where it came from (snap-back) — light haptic + toast.
       const moved = from !== to ? data[to] : undefined;
       if (moved?.kind === 'player' && moved.zone !== 'unassigned') {
-        let landing: Zone = 'unassigned';
+        let landing: Zone = topZone;
         for (let i = to - 1; i >= 0; i--) {
           const r = data[i];
           if (r.kind === 'header') {
@@ -603,7 +589,7 @@ export default function TiersScreen() {
         }
       }
       bucketsDirtyRef.current = true;
-      let zone: Zone = 'unassigned';
+      let zone: Zone = topZone;
       const next = emptyBuckets();
       for (const r of data) {
         if (r.kind === 'header') zone = r.zone;
@@ -636,6 +622,8 @@ export default function TiersScreen() {
         return (
           <View style={styles.tierHeader}>
             <View style={styles.tierHeaderLeft}>
+              {/* Tier labels ARE pick terms now ("2+ 1sts" / "1st" / …) —
+                  the former #103 sublabel is folded into the name. */}
               <TickLabel color={accent}>{label}</TickLabel>
               <Text style={styles.tierHeaderCount}>{count}</Text>
             </View>
@@ -647,13 +635,9 @@ export default function TiersScreen() {
       }
 
       if (item.kind === 'empty') {
-        return (
-          <Text style={styles.emptyBin}>
-            {item.zone === 'unassigned'
-              ? 'Every player is in a tier.'
-              : 'Drag players here'}
-          </Text>
-        );
+        // Tier zones only — the Unassigned section is hidden while empty
+        // (#105), so an empty pool never renders a placeholder row.
+        return <Text style={styles.emptyBin}>Drag players here</Text>;
       }
 
       // ── Player row ──────────────────────────────────────────────────
@@ -671,8 +655,6 @@ export default function TiersScreen() {
       // the drag / selection Pressable. Since #58 (cozy density) the strip
       // sits on line 2 of the dense PlayerCard via its statsSlot.
       const stats = tileStatsFor(item.player);
-      // #71 — tradeability/acquirability bar (line 3 of the dense card).
-      const meter = meterFor(item.player);
       // #53 — positional rank for the right cluster. /api/rankings is
       // queried per-position, so `rank` IS the positional rank.
       const posRank =
@@ -700,7 +682,6 @@ export default function TiersScreen() {
                 posRank={posRank}
                 value={tileValue}
                 statsSlot={<TileStats {...stats} />}
-                meterSlot={meter}
                 rightSlot={
                   isSelected ? (
                     <Icon name="check" size={16} color={ice.base} />
@@ -718,9 +699,9 @@ export default function TiersScreen() {
       // responder and swallow the long-press so onLongPress={drag} never fires
       // (the row then only scrolls, never lifts). With touches passing through,
       // the outer Pressable gets the long-press and calls the library's drag().
-      // #90 — the chevron column on the right sits OUTSIDE that wrapper so its
-      // own Pressables stay tappable; a press there becomes the touch
-      // responder, so it can't accidentally start a long-press drag.
+      // 1.5.4 #98 — the per-tile #90 chevron gutter is gone; the no-drag
+      // paths for tier moves are multi-select's Tier up/down buttons (FB-73)
+      // and the tier-target chips (FB4-62).
       return (
         <Pressable
           onLongPress={drag}
@@ -728,7 +709,7 @@ export default function TiersScreen() {
           disabled={isActive}
           style={styles.playerRow}
         >
-          <View pointerEvents="none" style={styles.rowBody}>
+          <View pointerEvents="none">
             <PlayerCard
               player={item.player}
               dense
@@ -739,52 +720,12 @@ export default function TiersScreen() {
               posRank={posRank}
               value={tileValue}
               statsSlot={<TileStats {...stats} />}
-              meterSlot={meter}
             />
           </View>
-          {/* #90 — per-tile tier step buttons (Icon Button spec: 32×32,
-              radius sm, chalk-dim glyph, pressed = ink-3 fill). #58 cozy:
-              SIDE-BY-SIDE, so each button gets the full 60px row height and
-              32×32 visual + hitSlop 6 reaches the 44pt effective target
-              (the old stacked pair only reached ~40pt). Hidden for
-              unassigned tiles — tier stepping never crosses the pool
-              boundary, matching the multi-select Tier up/down buttons. */}
-          {zoneTier ? (
-            <View style={styles.tierStepBtns}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Move ${item.player.name} up a tier`}
-                disabled={isActive || zoneTier === 'elite'}
-                hitSlop={6}
-                onPress={() => singleTierMove(item.player.id, 'up')}
-                style={({ pressed }) => [
-                  styles.tierStepBtn,
-                  pressed && styles.tierStepBtnPressed,
-                  zoneTier === 'elite' && styles.tierStepBtnDisabled,
-                ]}
-              >
-                <Icon name="chevron-up" size={16} />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Move ${item.player.name} down a tier`}
-                disabled={isActive || zoneTier === 'bench'}
-                hitSlop={6}
-                onPress={() => singleTierMove(item.player.id, 'down')}
-                style={({ pressed }) => [
-                  styles.tierStepBtn,
-                  pressed && styles.tierStepBtnPressed,
-                  zoneTier === 'bench' && styles.tierStepBtnDisabled,
-                ]}
-              >
-                <Icon name="chevron-down" size={16} />
-              </Pressable>
-            </View>
-          ) : null}
         </Pressable>
       );
     },
-    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor, meterFor, singleTierMove],
+    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor],
   );
 
   // ── Copy-from-format button derivation ─────────────────────────────
@@ -913,13 +854,15 @@ export default function TiersScreen() {
             onPress={onResetToSuggested}
             style={styles.headerBtn}
           />
-          {/* Pick Anchor wizard — value players in draft-pick terms; the
-              anchors pin Elo overrides so tiers re-bucket on return. */}
+          {/* #104 — guided quick-set walk (top tier → Bench, tap-to-assign).
+              Occupies the slot the Anchors link held (#99 — the Pick
+              Anchor wizard stays reachable from the Rank tab's menu and
+              the Build-your-board chooser). */}
           <Button
             variant="ghost"
             compact
-            label="Anchors"
-            onPress={() => navigation.navigate('Anchors')}
+            label="Quick set"
+            onPress={() => navigation.navigate('QuickSetTiers', { position })}
             style={styles.headerBtn}
           />
         </View>
@@ -1011,7 +954,7 @@ export default function TiersScreen() {
           <Text style={styles.hint}>
             {multiSelect
               ? 'Tap chips to select. Use the bar below to move all selected up or down.'
-              : 'Long-press + drag to re-rank, or tap a tile’s arrows to move it a tier. "Select" moves several at once.'}
+              : 'Long-press + drag to re-rank. "Select" moves one or several players between tiers without dragging.'}
           </Text>
         )}
         <Pressable
@@ -1021,7 +964,7 @@ export default function TiersScreen() {
           onPress={toggleExpanded}
           style={({ pressed }) => [
             styles.expandBtn,
-            pressed && styles.tierStepBtnPressed,
+            pressed && styles.iconBtnPressed,
           ]}
         >
           <Icon name={expanded ? 'collapse' : 'expand'} size={20} />
@@ -1168,10 +1111,11 @@ export default function TiersScreen() {
 function emptyBuckets(): Record<Zone, RankedPlayer[]> {
   return {
     unassigned: [],
-    elite: [],
-    starter: [],
-    solid: [],
-    depth: [],
+    firsts_2plus: [],
+    first_1: [],
+    second: [],
+    third: [],
+    fourth: [],
     bench: [],
   };
 }
@@ -1180,10 +1124,10 @@ function emptyBuckets(): Record<Zone, RankedPlayer[]> {
 // relative order. Placement inside the target tier: moving up appends to
 // the BOTTOM of the higher tier (they're its newest/weakest members);
 // moving down inserts at the TOP of the lower tier (its strongest).
-// Clamps at elite / bench; `unassigned` is never a source or target.
-// Shared by the multi-select "Tier up / Tier down" bar (FB-73) and the
-// per-tile chevron buttons (#90). Returns `prev` unchanged when every
-// mover is already clamped at the boundary (no re-render).
+// Clamps at the top/bottom tiers (TIERS[0] / bench); `unassigned` is never
+// a source or target. Used by the multi-select "Tier up / Tier down" bar
+// (FB-73). Returns `prev` unchanged when every mover is already clamped
+// at the boundary (no re-render).
 function moveTierByOne(
   prev: Record<Zone, RankedPlayer[]>,
   ids: ReadonlySet<string>,
@@ -1193,7 +1137,7 @@ function moveTierByOne(
   next.unassigned = [...prev.unassigned];
   // Split each tier into keepers and movers, preserving order.
   const movers: Record<Tier, RankedPlayer[]> = {
-    elite: [], starter: [], solid: [], depth: [], bench: [],
+    firsts_2plus: [], first_1: [], second: [], third: [], fourth: [], bench: [],
   };
   for (const t of TIERS) {
     for (const p of prev[t]) {
@@ -1226,14 +1170,7 @@ function moveTierByOne(
 
 // Accent (tick) color for a zone's header — mirrors TierBin's tickColor.
 function accentFor(zone: Zone): string {
-  switch (zone) {
-    case 'elite':   return tierColors.elite;
-    case 'starter': return tierColors.starter;
-    case 'solid':   return tierColors.solid;
-    case 'depth':   return tierColors.depth;
-    case 'bench':   return tierColors.bench;
-    default:        return chalk.faint;
-  }
+  return zone === 'unassigned' ? chalk.faint : tierColors[zone];
 }
 
 // ── Styles ──────────────────────────────────────────────────────────
@@ -1285,33 +1222,11 @@ const styles = StyleSheet.create({
   // Player row wrapper in normal (drag) mode. #58 cozy: no wrapper border —
   // the active (picked-up) ice ring is the dense card's own `selected`
   // border, keeping the row pitch at exactly 60px card + 4px gap.
-  // Row layout: card body fills the width, the #90 tier-step chevron
-  // pair sits in a fixed gutter on the right.
   playerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     marginBottom: space.xs,
   },
-  rowBody: { flex: 1 },
-  // #90 — per-tile tier step controls. Icon Button spec (components.md →
-  // Buttons → Icon): 32×32, radius sm, chalk-dim glyph, pressed ink-3 fill,
-  // disabled 45% opacity. #58 cozy: SIDE-BY-SIDE pair (each button gets the
-  // full row height; 32×32 + hitSlop 6 = 44pt effective target).
-  tierStepBtns: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: space.xs,
-    gap: space.xs,
-  },
-  tierStepBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: radii.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tierStepBtnPressed: { backgroundColor: ink.ink3 },
-  tierStepBtnDisabled: { opacity: 0.45 },
+  // Pressed fill shared by the icon buttons on this screen (#81 expand).
+  iconBtnPressed: { backgroundColor: ink.ink3 },
   // Wrapper around each chip in multi-select mode. #58 cozy: the selected
   // ring (issue #16 — ice ring + check icon, two signals so selection reads
   // for color-vision-impaired users too) is the dense card's own `selected`
@@ -1415,7 +1330,7 @@ const styles = StyleSheet.create({
     paddingVertical: space.xs,
   },
   // #81 — expand/collapse toggle. Icon Button spec (32×32, radius sm,
-  // chalk-dim glyph, pressed ink-3 fill) — shares tierStepBtnPressed.
+  // chalk-dim glyph, pressed ink-3 fill).
   expandBtn: {
     width: 32,
     height: 32,

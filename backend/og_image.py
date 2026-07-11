@@ -54,22 +54,26 @@ POS_COLORS = {
     "TE": (255, 167, 38),
 }
 
-# Matches ranking_service.TIER_ELO_BANDS ordering (best → worst).
-TIER_ORDER = ["elite", "starter", "solid", "depth", "bench"]
+# Matches ranking_service.ORDERED_TIERS ordering (best → worst) — the
+# pick-value tier ladder (2026-07-11, docs/cross-client-invariants.md).
+TIER_ORDER = ["firsts_2plus", "first_1", "second", "third", "fourth", "bench"]
 TIER_LABELS = {
-    "elite":   "Elite",
-    "starter": "Starter",
-    "solid":   "Solid",
-    "depth":   "Depth",
-    "bench":   "Bench",
+    "firsts_2plus": "2+ 1sts",
+    "first_1":      "1st",
+    "second":       "2nd",
+    "third":        "3rd",
+    "fourth":       "4th",
+    "bench":        "Bench",
 }
 TIER_TINTS = {
-    # translucent band fill (R, G, B, A)
-    "elite":   (255, 183, 77,  235),
-    "starter": (102, 187, 106, 220),
-    "solid":   (66,  165, 245, 210),
-    "depth":   (126, 87,  194, 200),
-    "bench":   (120, 144, 156, 190),
+    # translucent band fill (R, G, B, A) — canonical tier hexes from
+    # docs/cross-client-invariants.md at og-card alphas.
+    "firsts_2plus": (251, 191, 36,  235),
+    "first_1":      (45,  212, 191, 220),
+    "second":       (56,  189, 248, 210),
+    "third":        (244, 114, 182, 200),
+    "fourth":       (163, 230, 53,  200),
+    "bench":        (122, 127, 150, 190),
 }
 
 FORMAT_LABELS = {
@@ -214,29 +218,11 @@ def _compute_tier_assignments(
     """
     Map saved tier-override ELOs back to tier buckets.
 
-    Uses the same band table as ranking_service.TierStrategy so the
-    round-trip matches: a player with elo inside the 'elite' band is
-    categorized as elite.
+    Delegates to the canonical RankingService.tier_for_elo band walk
+    (tier_config.json) so the round-trip matches what the tiers UI shows —
+    the previous inline band tables here had drifted from the config.
     """
-    # Inline copy of band tables so this module stays standalone / fast.
-    uniform = {
-        "elite":   (1720.0, 1790.0),
-        "starter": (1600.0, 1680.0),
-        "solid":   (1480.0, 1560.0),
-        "depth":   (1370.0, 1450.0),
-        "bench":   (1200.0, 1330.0),
-    }
-    qb_te_1qb = {
-        "elite":   (1600.0, 1680.0),
-        "starter": (1480.0, 1560.0),
-        "solid":   (1370.0, 1450.0),
-        "depth":   (1200.0, 1330.0),
-        "bench":   (1060.0, 1180.0),
-    }
-    if scoring_format == "1qb_ppr" and position.upper() in ("QB", "TE"):
-        bands = qb_te_1qb
-    else:
-        bands = uniform
+    from .ranking_service import RankingService as _RS
 
     buckets: dict[str, list[tuple[float, dict]]] = {t: [] for t in TIER_ORDER}
 
@@ -246,16 +232,13 @@ def _compute_tier_assignments(
             continue
         if (player.get("position") or "").upper() != position.upper():
             continue
-        # find the band this elo sits in (use midpoint tolerance, but bands
-        # already don't overlap)
         try:
             elo_f = float(elo)
         except (TypeError, ValueError):
             continue
-        for tier_name, (lo, hi) in bands.items():
-            if lo - 5 <= elo_f <= hi + 5:
-                buckets[tier_name].append((elo_f, player))
-                break
+        tier_name = _RS.tier_for_elo(elo_f, position.upper(), scoring_format)
+        if tier_name in buckets:
+            buckets[tier_name].append((elo_f, player))
 
     # Sort descending by elo within each bucket and strip elo
     sorted_buckets: dict[str, list[dict]] = {}
@@ -396,7 +379,7 @@ def _render_tier_card_filled(
     sub = _truncate(draw, sub, font_sub, CARD_W - 120)
     draw.text((60, 130), sub, font=font_sub, fill=TEXT_MUTED)
 
-    # Body: 5 horizontal tier bands
+    # Body: one horizontal band per tier (len(TIER_ORDER))
     body_top = 185
     body_bot = CARD_H - 90
     n = len(TIER_ORDER)

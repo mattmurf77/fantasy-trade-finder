@@ -24,15 +24,16 @@ import pytest
 import backend.ranking_service as rs
 from backend.ranking_service import Player, RankingService
 
-# WR 1qb_ppr bands (2026-07-10 consensus recalibration). Pack ~6 players into
-# each band so within-tier trios have >=3 members and the pool is large enough
-# for anti-repeat to breathe.
+# Pick-value ladder bands (2026-07-11, uniform in Elo space). Pack ~6 players
+# into each band so within-tier trios have >=3 members and the pool is large
+# enough for anti-repeat to breathe.
 _BANDS = {
-    "elite":   (1700, 1800),
-    "starter": (1505, 1695),
-    "solid":   (1360, 1500),
-    "depth":   (1220, 1355),
-    "bench":   (1150, 1215),
+    "firsts_2plus": (1788, 1870),
+    "first_1":      (1580, 1785),
+    "second":       (1400, 1575),
+    "third":        (1280, 1395),
+    "fourth":       (1220, 1275),
+    "bench":        (1150, 1215),
 }
 
 
@@ -193,24 +194,26 @@ def test_within_tier_avoid_relaxes_partially_not_fully():
     """When a small tier sits entirely inside the avoid window, relaxation
     must re-admit the longest-unseen members — not reset to the full tier and
     re-serve the identical trio (the Bijan/Gibbs/Jeanty loop)."""
-    # 4 elites (so one is always left out of a trio) + solid filler.
-    seeds = {f"e{i}": 1700 + i * 25 for i in range(4)}
-    seeds.update({f"s{i}": 1360 + i * 20 for i in range(6)})
+    # 4 first_1-band players (so one is always left out of a trio) + a
+    # second-band filler cohort.
+    seeds = {f"e{i}": 1700 + i * 25 for i in range(4)}       # 1700–1775 = first_1
+    seeds.update({f"s{i}": 1410 + i * 20 for i in range(6)})  # 1410–1510 = second
     players = [Player(id=p, name=p, position="WR", team="A", age=25) for p in seeds]
     s = RankingService(players=players, seed_ratings=seeds)
     s._scoring_format = "1qb_ppr"
 
     random.seed(3)
-    s._within_tier_cursor = 0  # aim at elite
+    s._within_tier_cursor = 0  # walk starts at the top; first_1 is the
+    # highest occupied tier (firsts_2plus is empty in this pool)
     first = s._within_tier_trio("WR", avoid=s._trio_avoid_ids())
     s._remember_trio(first)
-    s._within_tier_cursor = 0  # aim at elite again, all 3 now in avoid
+    s._within_tier_cursor = 0  # aim at the same tier again, all 3 now in avoid
     second = s._within_tier_trio("WR", avoid=s._trio_avoid_ids())
     assert second is not None
     assert _ids(second) != _ids(first), (
         "avoid relaxation re-served the identical small-tier trio"
     )
-    # The one elite who sat out the first trio must be in the second.
+    # The one top-band player who sat out the first trio must be in the second.
     left_out = {f"e{i}" for i in range(4)} - _ids(first)
     assert left_out <= _ids(second)
 
@@ -222,7 +225,7 @@ def test_within_tier_top_pick_varies_across_serves():
     random.seed(5)
     tops = set()
     for _ in range(12):
-        s._within_tier_cursor = 0  # elite every time
+        s._within_tier_cursor = 0  # top tier every time
         trio = s._within_tier_trio("WR", avoid=set())
         tops.add(trio.player_a.id)
     assert len(tops) >= 2, f"top slot always went to {tops}"

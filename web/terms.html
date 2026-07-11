@@ -1,113 +1,166 @@
 <!DOCTYPE html>
+<!-- Template — pending legal review. Drafted 2026-07-11 from code audit.
+     Placeholders: governing law [STATE], support contact. -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Terms of Service — DTF Dynasty Trade Finder</title>
+  <title>Terms of Use — Fantasy Trade Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Archivo:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
-      --text: #e8eaf0; --muted: #7a7f96; --accent: #4f7cff;
+      --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25;
+      --line: #262C35; --line-strong: #3D4654;
+      --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
+      --ice: #56D9EC; --ice-press: #3FC2D6;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: var(--bg); color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      line-height: 1.65;
-      padding: 40px 24px 80px;
+      background: var(--ink-0); color: var(--chalk);
+      font-family: 'Archivo', sans-serif;
+      font-size: 14px; line-height: 1.6;
+      padding: 48px 24px 96px;
     }
     .wrap { max-width: 720px; margin: 0 auto; }
-    h1 { font-size: 28px; margin-bottom: 8px; }
-    .updated { color: var(--muted); font-size: 13px; margin-bottom: 32px; }
-    h2 { font-size: 18px; margin-top: 32px; margin-bottom: 12px; color: var(--accent); }
-    p, li { color: var(--text); font-size: 15px; margin-bottom: 12px; }
-    ul { padding-left: 24px; margin-bottom: 16px; }
-    a { color: var(--accent); text-decoration: none; border-bottom: 1px dashed var(--border); }
-    .back { display: inline-block; margin-top: 40px; font-size: 13px; color: var(--muted); }
+    h1 {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-weight: 700; font-size: 32px; line-height: 34px;
+      text-transform: uppercase; letter-spacing: 0.02em;
+      margin-bottom: 8px;
+    }
+    .updated { color: var(--chalk-dim); font-size: 13px; margin-bottom: 32px; }
+    h2 {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-weight: 600; font-size: 22px; line-height: 26px;
+      text-transform: uppercase; letter-spacing: 0.03em;
+      margin: 32px 0 12px;
+      padding-left: 12px;
+      border-left: 3px solid var(--ice);
+    }
+    p, li { color: var(--chalk); margin-bottom: 12px; }
+    li { margin-bottom: 8px; }
+    ul { padding-left: 22px; margin-bottom: 16px; }
+    strong { font-weight: 600; }
+    a { color: var(--ice); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
+    a:hover { color: var(--ice-press); border-color: var(--ice-press); }
+    .back { display: inline-block; margin-top: 40px; font-size: 13px; color: var(--chalk-dim); border-bottom-color: var(--line); }
+    .legal-links { margin-top: 8px; font-size: 13px; color: var(--chalk-faint); }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Terms of Service</h1>
-    <p class="updated">Last updated: April 19, 2026</p>
+    <h1>Terms of Use</h1>
+    <p class="updated">Effective date: July 11, 2026</p>
 
     <p>
-      By using Fantasy Trade Finder ("the Service"), you agree to these
-      terms. Read them carefully.
+      By using Fantasy Trade Finder ("the Service") — the website at
+      <a href="https://fantasy-trade-finder.onrender.com">fantasy-trade-finder.onrender.com</a>,
+      the mobile app, and the browser extension — you agree to these terms.
+      If you don't agree, don't use the Service.
     </p>
 
-    <h2>1. Who we are</h2>
+    <h2>1. What the Service is</h2>
     <p>
-      Fantasy Trade Finder is an independent tool for fantasy football
-      managers. We are not affiliated with, endorsed by, or associated
-      with Sleeper, the NFL, or any fantasy platform.
+      Fantasy Trade Finder is a small, independent hobby project — currently in
+      beta — that helps dynasty fantasy football managers rank players and
+      discover trades. It is operated by an individual, not a company with a
+      support staff. We are not affiliated with, endorsed by, or associated with
+      Sleeper, the NFL, or any fantasy platform, team, or league.
     </p>
 
-    <h2>2. Your use of the Service</h2>
+    <h2>2. Eligibility and your account</h2>
     <ul>
-      <li>You need a Sleeper account to use the Service; we don't manage your Sleeper login.</li>
-      <li>You agree to use the Service only for personal, non-commercial fantasy football use.</li>
-      <li>You agree not to scrape, reverse-engineer, or bulk-export data from the Service for redistribution.</li>
-      <li>You agree not to use the Service to harass, spam, or disrupt your leaguemates.</li>
+      <li>You must be at least 13 years old to use the Service.</li>
+      <li>You need a Sleeper account; sign-in is by Sleeper username. Only sign in with a Sleeper account you own or are authorized to use.</li>
+      <li>If you connect your Sleeper account for sending trades, you are responsible for every proposal sent through that connection at your direction.</li>
     </ul>
 
-    <h2>3. Data + rankings</h2>
+    <h2>3. Acceptable use</h2>
+    <ul>
+      <li>Personal, non-commercial fantasy football use only.</li>
+      <li>Don't scrape, bulk-export, or redistribute data from the Service.</li>
+      <li>Don't use the Service to harass, spam, or disrupt other managers.</li>
+      <li>Don't probe, overload, reverse-engineer, or interfere with the Service or attempt to access other users' data.</li>
+      <li>Don't impersonate another Sleeper user.</li>
+    </ul>
+
+    <h2>4. Rankings, values, and trade suggestions are informational only</h2>
+    <ul>
+      <li>Player values, tiers, trends, fairness scores, and trade suggestions are generated algorithmically from public Sleeper data, third-party consensus values, and user rankings. They can be wrong, stale, or incomplete. <strong>We make no guarantee of accuracy.</strong></li>
+      <li>The Service is for entertainment and league management. It is <strong>not gambling, not a betting product, and not financial or investment advice</strong>. Nothing in the Service is a recommendation to wager money on anything.</li>
+      <li>You are responsible for your own roster decisions. We are not liable for trade outcomes, league results, or anything your leaguemates think of your trades.</li>
+    </ul>
+
+    <h2>5. "Send in Sleeper" (beta feature)</h2>
+    <ul>
+      <li>Sending trade proposals to Sleeper from the app is an optional beta feature that uses an unofficial Sleeper interface. It may stop working, change, or be removed at any time without notice.</li>
+      <li>Proposals are only sent when you explicitly tap send. Review every trade before sending — a sent proposal is a real proposal in your league.</li>
+      <li>Your use of Sleeper, including proposals sent through the Service, remains subject to Sleeper's own terms of service.</li>
+    </ul>
+
+    <h2>6. Your data and content</h2>
     <p>
-      Your personal rankings are yours. We may use aggregate, anonymized
-      ranking data to power community consensus values shown to all users.
-      We do not expose your individual rankings to other users.
+      Your rankings are yours. We store and process them as described in the
+      <a href="/privacy">Privacy Policy</a>, including using them to find
+      mutual-gain trades with your leaguemates. Feedback you submit may be used
+      to improve the Service without obligation to you.
     </p>
 
-    <h2>4. Accuracy</h2>
+    <h2>7. Intellectual property</h2>
     <p>
-      Trade suggestions, rankings, and tier placements are generated
-      algorithmically from public Sleeper data and community signals. They
-      are informational only. We make no guarantees about trade outcomes
-      or the performance of your fantasy team.
+      The Service's original code, design, and branding are owned by its
+      operator. Sleeper data belongs to Sleeper; consensus value data belongs to
+      its publishers. Player names and team information are used for
+      identification only.
     </p>
 
-    <h2>5. Availability</h2>
+    <h2>8. Beta status and availability</h2>
     <p>
-      We provide the Service on a best-effort basis. We may update,
-      suspend, or discontinue features at any time. We are not liable for
-      missed trade opportunities or league outcomes due to downtime.
+      The Service is provided on a best-effort basis with no uptime commitment.
+      Features may be added, changed, flagged off, or removed, and data may be
+      migrated or (in rare cases during beta) reset. We may update these terms;
+      continued use after an update is acceptance of the new terms.
     </p>
 
-    <h2>6. Intellectual property</h2>
+    <h2>9. Termination</h2>
     <p>
-      All original code, visual design, and brand assets of the Service
-      are owned by us. Sleeper player data is owned by Sleeper.
+      We may suspend or terminate your access if you violate these terms or if
+      operating the Service requires it. You can stop using the Service at any
+      time, and you can request deletion of your data as described in the
+      <a href="/privacy">Privacy Policy</a>.
     </p>
 
-    <h2>7. Termination</h2>
+    <h2>10. Disclaimer of warranties</h2>
     <p>
-      We may terminate or suspend access if you violate these terms. You
-      can stop using the Service at any time. See our
-      <a href="/privacy">Privacy Policy</a> for how to delete your data.
+      The Service is provided "as is" and "as available", without warranties of
+      any kind, express or implied, including merchantability, fitness for a
+      particular purpose, and non-infringement.
     </p>
 
-    <h2>8. Disclaimer of warranties</h2>
+    <h2>11. Limitation of liability</h2>
     <p>
-      The Service is provided "as is" without warranties of any kind,
-      express or implied. We disclaim all warranties to the fullest extent
-      permitted by law.
+      To the maximum extent permitted by law, the Service's operator is not
+      liable for any indirect, incidental, special, consequential, or punitive
+      damages, or any loss of data, opportunities, or league standings, arising
+      from your use of the Service.
     </p>
 
-    <h2>9. Limitation of liability</h2>
+    <h2>12. Governing law</h2>
     <p>
-      To the maximum extent permitted by law, we are not liable for any
-      indirect, incidental, or consequential damages arising from your use
-      of the Service.
+      These terms are governed by the laws of [STATE], without regard to its
+      conflict-of-law rules.
     </p>
 
-    <h2>10. Contact</h2>
+    <h2>13. Contact</h2>
     <p>
-      Email
-      <a href="mailto:support@fantasy-trade-finder.onrender.com">support@fantasy-trade-finder.onrender.com</a>
-      with questions.
+      Questions: use the in-app feedback button, or the support contact listed
+      on our App Store page.
     </p>
 
-    <a class="back" href="/">← Back to the app</a>
+    <a class="back" href="/">&larr; Back to the app</a>
+    <div class="legal-links"><a href="/privacy">Privacy Policy</a></div>
   </div>
 </body>
 </html>

@@ -111,7 +111,7 @@ def test_three_player_exact_sequential():
 
 def test_override_pins_winner_partner_still_moves():
     svc = _svc(["a", "b"])
-    svc.apply_tiers(position="RB", tiers={"elite": ["a"]}, scoring_format="1qb_ppr")
+    svc.apply_tiers(position="RB", tiers={"first_1": ["a"]}, scoring_format="1qb_ppr")
     pinned = _elo(svc)["a"]
     svc.record_ranking(["a", "b"])           # a wins but is pinned
     elo = _elo(svc)

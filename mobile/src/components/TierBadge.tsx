@@ -10,11 +10,13 @@ interface Props {
   size?: 'sm' | 'md';
 }
 
+// Pick-value tier ladder labels (docs/cross-client-invariants.md).
 const TIER_LABEL: Record<Tier, string> = {
-  elite: 'Elite',
-  starter: 'Starter',
-  solid: 'Solid',
-  depth: 'Depth',
+  firsts_2plus: '2+ 1sts',
+  first_1: '1st',
+  second: '2nd',
+  third: '3rd',
+  fourth: '4th',
   bench: 'Bench',
 };
 

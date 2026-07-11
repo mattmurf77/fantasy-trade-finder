@@ -12,6 +12,11 @@ export interface SleeperLinkStatus {
   sleeper_user_id?: string;
   expires_at?: string;
   expired?: boolean;
+  /** POST only (account-auth P1): true when the captured token's claim
+   *  matched the session user AND the live-token proof passed — the
+   *  session is now VERIFIED. False = linked but unverified (oracle
+   *  unreachable); retry by reconnecting. */
+  verified?: boolean;
 }
 
 export interface ProposeTradePayload {

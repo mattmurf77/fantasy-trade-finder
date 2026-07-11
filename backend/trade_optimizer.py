@@ -58,6 +58,7 @@ from .trade_service import (
     outlook_blend_mult,
     package_value_v2,
     replacement_levels,
+    user_gain_ok_1for1,
 )
 
 __all__ = ["generate_pair_trades_v3", "find_three_team_cycles"]
@@ -201,6 +202,7 @@ def generate_pair_trades_v3(
     alpha_opp: float | None = None,
     untouchable_ids: set | None = None,
     target_ids: set | None = None,
+    raw_user_elo: dict[str, float] | None = None,
 ) -> list[TradeCard]:
     """Exact v3 generation for one (user, opponent) pair.
 
@@ -435,6 +437,12 @@ def generate_pair_trades_v3(
             if not _positions_ok(give_ids, recv_ids):
                 continue
             if not _gap_ok(give_ids, recv_ids):
+                continue
+            # #108 — never offer a 1-for-1 that sends a player the user
+            # ranks above the received player on their own raw board
+            # (mirrors the v2 _consider gate; the shrunk surplus below can
+            # be inverted by consensus pull on lightly-sampled players).
+            if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
                 continue
             if not _both_feasible(give_ids, recv_ids):    # 3.2 hard gate
                 continue

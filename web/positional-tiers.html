@@ -223,17 +223,20 @@
     }
 
     /* Tier colour accents */
-    .tier-row[data-tier="elite"]   .tier-label-area { background: rgba(251,191,36,0.06); }
-    .tier-row[data-tier="elite"]   .tier-label-name { color: #fbbf24; }
+    .tier-row[data-tier="firsts_2plus"] .tier-label-area { background: rgba(251,191,36,0.06); }
+    .tier-row[data-tier="firsts_2plus"] .tier-label-name { color: #fbbf24; }
 
-    .tier-row[data-tier="starter"] .tier-label-area { background: rgba(45,212,191,0.06); }
-    .tier-row[data-tier="starter"] .tier-label-name { color: #2dd4bf; }
+    .tier-row[data-tier="first_1"] .tier-label-area { background: rgba(45,212,191,0.06); }
+    .tier-row[data-tier="first_1"] .tier-label-name { color: #2dd4bf; }
 
-    .tier-row[data-tier="solid"]   .tier-label-area { background: rgba(56,189,248,0.06); }
-    .tier-row[data-tier="solid"]   .tier-label-name { color: #38bdf8; }
+    .tier-row[data-tier="second"]  .tier-label-area { background: rgba(56,189,248,0.06); }
+    .tier-row[data-tier="second"]  .tier-label-name { color: #38bdf8; }
 
-    .tier-row[data-tier="depth"]   .tier-label-area { background: rgba(244,114,182,0.06); }
-    .tier-row[data-tier="depth"]   .tier-label-name { color: #f472b6; }
+    .tier-row[data-tier="third"]   .tier-label-area { background: rgba(244,114,182,0.06); }
+    .tier-row[data-tier="third"]   .tier-label-name { color: #f472b6; }
+
+    .tier-row[data-tier="fourth"]  .tier-label-area { background: rgba(163,230,53,0.06); }
+    .tier-row[data-tier="fourth"]  .tier-label-name { color: #a3e635; }
 
     .tier-row[data-tier="bench"]   .tier-label-area { background: rgba(122,127,150,0.03); }
     .tier-row[data-tier="bench"]   .tier-label-name { color: #7a7f96; }
@@ -572,16 +575,18 @@
       .tier-assign-btn { min-height: 40px; font-size: 10px; }
     }
     /* Always show tier colors on buttons */
-    .tier-assign-btn[data-tier="elite"]   { border-color: rgba(251,191,36,0.3); color: #fbbf24; background: rgba(251,191,36,0.06); }
-    .tier-assign-btn[data-tier="starter"] { border-color: rgba(45,212,191,0.3); color: #2dd4bf; background: rgba(45,212,191,0.06); }
-    .tier-assign-btn[data-tier="solid"]   { border-color: rgba(56,189,248,0.3); color: #38bdf8; background: rgba(56,189,248,0.06); }
-    .tier-assign-btn[data-tier="depth"]   { border-color: rgba(244,114,182,0.3); color: #f472b6; background: rgba(244,114,182,0.06); }
+    .tier-assign-btn[data-tier="firsts_2plus"] { border-color: rgba(251,191,36,0.3); color: #fbbf24; background: rgba(251,191,36,0.06); }
+    .tier-assign-btn[data-tier="first_1"] { border-color: rgba(45,212,191,0.3); color: #2dd4bf; background: rgba(45,212,191,0.06); }
+    .tier-assign-btn[data-tier="second"]  { border-color: rgba(56,189,248,0.3); color: #38bdf8; background: rgba(56,189,248,0.06); }
+    .tier-assign-btn[data-tier="third"]   { border-color: rgba(244,114,182,0.3); color: #f472b6; background: rgba(244,114,182,0.06); }
+    .tier-assign-btn[data-tier="fourth"]  { border-color: rgba(163,230,53,0.3); color: #a3e635; background: rgba(163,230,53,0.06); }
     .tier-assign-btn[data-tier="bench"]   { border-color: rgba(122,127,150,0.3); color: #7a7f96; background: rgba(122,127,150,0.04); }
     /* Hover — intensify */
-    .tier-assign-btn[data-tier="elite"]:hover   { background: rgba(251,191,36,0.18); border-color: #fbbf24; }
-    .tier-assign-btn[data-tier="starter"]:hover  { background: rgba(45,212,191,0.18); border-color: #2dd4bf; }
-    .tier-assign-btn[data-tier="solid"]:hover    { background: rgba(56,189,248,0.18); border-color: #38bdf8; }
-    .tier-assign-btn[data-tier="depth"]:hover    { background: rgba(244,114,182,0.18); border-color: #f472b6; }
+    .tier-assign-btn[data-tier="firsts_2plus"]:hover { background: rgba(251,191,36,0.18); border-color: #fbbf24; }
+    .tier-assign-btn[data-tier="first_1"]:hover  { background: rgba(45,212,191,0.18); border-color: #2dd4bf; }
+    .tier-assign-btn[data-tier="second"]:hover   { background: rgba(56,189,248,0.18); border-color: #38bdf8; }
+    .tier-assign-btn[data-tier="third"]:hover    { background: rgba(244,114,182,0.18); border-color: #f472b6; }
+    .tier-assign-btn[data-tier="fourth"]:hover   { background: rgba(163,230,53,0.18); border-color: #a3e635; }
     .tier-assign-btn[data-tier="bench"]:hover    { background: rgba(122,127,150,0.14); border-color: #7a7f96; }
 
     /* ── Tier legend/key — sits in the pool-header to the right of the title ── */
@@ -623,10 +628,11 @@
       border: 1.5px solid;
       text-shadow: 0 1px 4px rgba(0,0,0,0.5);
     }
-    .tier-legend-swatch[data-tier="elite"]   { border-color: #fbbf24; color: #fcd34d; background: rgba(251,191,36,0.2); box-shadow: 0 0 8px rgba(251,191,36,0.25); }
-    .tier-legend-swatch[data-tier="starter"] { border-color: #2dd4bf; color: #5eead4; background: rgba(45,212,191,0.2); box-shadow: 0 0 8px rgba(45,212,191,0.25); }
-    .tier-legend-swatch[data-tier="solid"]   { border-color: #38bdf8; color: #7dd3fc; background: rgba(56,189,248,0.2); box-shadow: 0 0 8px rgba(56,189,248,0.25); }
-    .tier-legend-swatch[data-tier="depth"]   { border-color: #f472b6; color: #f9a8d4; background: rgba(244,114,182,0.2); box-shadow: 0 0 8px rgba(244,114,182,0.25); }
+    .tier-legend-swatch[data-tier="firsts_2plus"] { border-color: #fbbf24; color: #fcd34d; background: rgba(251,191,36,0.2); box-shadow: 0 0 8px rgba(251,191,36,0.25); }
+    .tier-legend-swatch[data-tier="first_1"] { border-color: #2dd4bf; color: #5eead4; background: rgba(45,212,191,0.2); box-shadow: 0 0 8px rgba(45,212,191,0.25); }
+    .tier-legend-swatch[data-tier="second"]  { border-color: #38bdf8; color: #7dd3fc; background: rgba(56,189,248,0.2); box-shadow: 0 0 8px rgba(56,189,248,0.25); }
+    .tier-legend-swatch[data-tier="third"]   { border-color: #f472b6; color: #f9a8d4; background: rgba(244,114,182,0.2); box-shadow: 0 0 8px rgba(244,114,182,0.25); }
+    .tier-legend-swatch[data-tier="fourth"]  { border-color: #a3e635; color: #bef264; background: rgba(163,230,53,0.2); box-shadow: 0 0 8px rgba(163,230,53,0.25); }
     .tier-legend-swatch[data-tier="bench"]   { border-color: #7a7f96; color: #9ca3af; background: rgba(122,127,150,0.2); box-shadow: 0 0 8px rgba(122,127,150,0.15); }
     .tier-legend-desc {
       color: rgba(255,255,255,0.6);
@@ -1322,24 +1328,28 @@
         <div class="tier-legend">
           <div class="tier-legend-inner">
             <span class="tier-legend-item">
-              <span class="tier-legend-swatch" data-tier="elite">Elite</span>
-              <span class="tier-legend-desc">League winners</span>
+              <span class="tier-legend-swatch" data-tier="firsts_2plus">2+ 1sts</span>
+              <span class="tier-legend-desc">Worth 2+ firsts</span>
             </span>
             <span class="tier-legend-item">
-              <span class="tier-legend-swatch" data-tier="starter">Starter</span>
-              <span class="tier-legend-desc">Weekly locks</span>
+              <span class="tier-legend-swatch" data-tier="first_1">1st</span>
+              <span class="tier-legend-desc">Worth a 1st</span>
             </span>
             <span class="tier-legend-item">
-              <span class="tier-legend-swatch" data-tier="solid">Solid</span>
-              <span class="tier-legend-desc">Flex / matchup</span>
+              <span class="tier-legend-swatch" data-tier="second">2nd</span>
+              <span class="tier-legend-desc">Worth a 2nd</span>
             </span>
             <span class="tier-legend-item">
-              <span class="tier-legend-swatch" data-tier="depth">Depth</span>
-              <span class="tier-legend-desc">Bye-week fills</span>
+              <span class="tier-legend-swatch" data-tier="third">3rd</span>
+              <span class="tier-legend-desc">Worth a 3rd</span>
+            </span>
+            <span class="tier-legend-item">
+              <span class="tier-legend-swatch" data-tier="fourth">4th</span>
+              <span class="tier-legend-desc">Worth a 4th</span>
             </span>
             <span class="tier-legend-item">
               <span class="tier-legend-swatch" data-tier="bench">Bench</span>
-              <span class="tier-legend-desc">Stashes</span>
+              <span class="tier-legend-desc">Below 4th value</span>
             </span>
           </div>
         </div>
@@ -1354,62 +1364,75 @@
     <!-- Tier rows -->
     <div class="tier-rows" id="tier-rows">
 
-      <div class="tier-row" data-tier="elite">
+      <div class="tier-row" data-tier="firsts_2plus">
         <div class="tier-label-area">
-          <div class="tier-label-name">Elite</div>
-          <div class="tier-label-desc">League winners</div>
-          <div class="tier-label-count" id="count-elite">0</div>
-          <button class="tier-multiselect-btn" id="ms-toggle-elite"
-                  data-tier="elite" onclick="toggleMultiSelectMode('elite')"
+          <div class="tier-label-name">2+ 1sts</div>
+          <div class="tier-label-desc">Worth 2+ firsts</div>
+          <div class="tier-label-count" id="count-firsts_2plus">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-firsts_2plus"
+                  data-tier="firsts_2plus" onclick="toggleMultiSelectMode('firsts_2plus')"
                   title="Select multiple players to move together">Multi-select</button>
         </div>
-        <div class="tier-drop-zone empty" id="zone-elite"
-             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'elite')"></div>
+        <div class="tier-drop-zone empty" id="zone-firsts_2plus"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'firsts_2plus')"></div>
       </div>
 
-      <div class="tier-row" data-tier="starter">
+      <div class="tier-row" data-tier="first_1">
         <div class="tier-label-area">
-          <div class="tier-label-name">Starter</div>
-          <div class="tier-label-desc">Weekly locks</div>
-          <div class="tier-label-count" id="count-starter">0</div>
-          <button class="tier-multiselect-btn" id="ms-toggle-starter"
-                  data-tier="starter" onclick="toggleMultiSelectMode('starter')"
+          <div class="tier-label-name">1st</div>
+          <div class="tier-label-desc">Worth a 1st</div>
+          <div class="tier-label-count" id="count-first_1">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-first_1"
+                  data-tier="first_1" onclick="toggleMultiSelectMode('first_1')"
                   title="Select multiple players to move together">Multi-select</button>
         </div>
-        <div class="tier-drop-zone empty" id="zone-starter"
-             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'starter')"></div>
+        <div class="tier-drop-zone empty" id="zone-first_1"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'first_1')"></div>
       </div>
 
-      <div class="tier-row" data-tier="solid">
+      <div class="tier-row" data-tier="second">
         <div class="tier-label-area">
-          <div class="tier-label-name">Solid</div>
-          <div class="tier-label-desc">Flex / matchup plays</div>
-          <div class="tier-label-count" id="count-solid">0</div>
-          <button class="tier-multiselect-btn" id="ms-toggle-solid"
-                  data-tier="solid" onclick="toggleMultiSelectMode('solid')"
+          <div class="tier-label-name">2nd</div>
+          <div class="tier-label-desc">Worth a 2nd</div>
+          <div class="tier-label-count" id="count-second">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-second"
+                  data-tier="second" onclick="toggleMultiSelectMode('second')"
                   title="Select multiple players to move together">Multi-select</button>
         </div>
-        <div class="tier-drop-zone empty" id="zone-solid"
-             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'solid')"></div>
+        <div class="tier-drop-zone empty" id="zone-second"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'second')"></div>
       </div>
 
-      <div class="tier-row" data-tier="depth">
+      <div class="tier-row" data-tier="third">
         <div class="tier-label-area">
-          <div class="tier-label-name">Depth</div>
-          <div class="tier-label-desc">Bye-week fill-ins</div>
-          <div class="tier-label-count" id="count-depth">0</div>
-          <button class="tier-multiselect-btn" id="ms-toggle-depth"
-                  data-tier="depth" onclick="toggleMultiSelectMode('depth')"
+          <div class="tier-label-name">3rd</div>
+          <div class="tier-label-desc">Worth a 3rd</div>
+          <div class="tier-label-count" id="count-third">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-third"
+                  data-tier="third" onclick="toggleMultiSelectMode('third')"
                   title="Select multiple players to move together">Multi-select</button>
         </div>
-        <div class="tier-drop-zone empty" id="zone-depth"
-             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'depth')"></div>
+        <div class="tier-drop-zone empty" id="zone-third"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'third')"></div>
+      </div>
+
+      <div class="tier-row" data-tier="fourth">
+        <div class="tier-label-area">
+          <div class="tier-label-name">4th</div>
+          <div class="tier-label-desc">Worth a 4th</div>
+          <div class="tier-label-count" id="count-fourth">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-fourth"
+                  data-tier="fourth" onclick="toggleMultiSelectMode('fourth')"
+                  title="Select multiple players to move together">Multi-select</button>
+        </div>
+        <div class="tier-drop-zone empty" id="zone-fourth"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'fourth')"></div>
       </div>
 
       <div class="tier-row" data-tier="bench">
         <div class="tier-label-area">
           <div class="tier-label-name">Bench</div>
-          <div class="tier-label-desc">Roster stashes</div>
+          <div class="tier-label-desc">Below 4th value</div>
           <div class="tier-label-count" id="count-bench">0</div>
           <button class="tier-multiselect-btn" id="ms-toggle-bench"
                   data-tier="bench" onclick="toggleMultiSelectMode('bench')"
@@ -1539,7 +1562,9 @@
       ],
     };
 
-    const TIERS = ['elite', 'starter', 'solid', 'depth', 'bench'];
+    // Pick-value tier ladder (2026-07-11) — keys read directly in draft-pick
+    // terms (docs/cross-client-invariants.md).
+    const TIERS = ['firsts_2plus', 'first_1', 'second', 'third', 'fourth', 'bench'];
 
     // ── Tier band config — single source of truth ──
     // Populated from backend/tier_config.json via GET /api/tier-config (see
@@ -1554,19 +1579,20 @@
     // a player into tier T iff player.elo >= min_T (top-down walk),
     // matching how the backend's `tier_for_elo` maps ELOs to tier labels.
     let TIER_CONFIG = {
-      // 2026-07-10 consensus recalibration (FB #60/#69) — mirrors
-      // backend/tier_config.json; see docs/cross-client-invariants.md.
+      // 2026-07-11 pick-value tier ladder — mirrors backend/tier_config.json;
+      // see docs/cross-client-invariants.md. Bands are position- and
+      // format-uniform in Elo space (pick value is position-uniform).
       "1qb_ppr": {
-        "QB": { elite: {min:1445,max:1800}, starter:{min:1330,max:1440}, solid:{min:1260,max:1325}, depth:{min:1206,max:1255}, bench:{min:1150,max:1201} },
-        "RB": { elite: {min:1600,max:1800}, starter:{min:1450,max:1595}, solid:{min:1330,max:1445}, depth:{min:1215,max:1325}, bench:{min:1150,max:1210} },
-        "WR": { elite: {min:1700,max:1800}, starter:{min:1505,max:1695}, solid:{min:1360,max:1500}, depth:{min:1220,max:1355}, bench:{min:1150,max:1215} },
-        "TE": { elite: {min:1400,max:1800}, starter:{min:1280,max:1395}, solid:{min:1225,max:1275}, depth:{min:1204,max:1220}, bench:{min:1150,max:1199} },
+        "QB": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
+        "RB": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
+        "WR": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
+        "TE": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
       },
       "sf_tep": {
-        "QB": { elite: {min:1650,max:1800}, starter:{min:1460,max:1645}, solid:{min:1320,max:1455}, depth:{min:1210,max:1315}, bench:{min:1150,max:1205} },
-        "RB": { elite: {min:1500,max:1800}, starter:{min:1380,max:1495}, solid:{min:1270,max:1375}, depth:{min:1210,max:1265}, bench:{min:1150,max:1205} },
-        "WR": { elite: {min:1600,max:1800}, starter:{min:1450,max:1595}, solid:{min:1340,max:1445}, depth:{min:1215,max:1335}, bench:{min:1150,max:1210} },
-        "TE": { elite: {min:1330,max:1800}, starter:{min:1260,max:1325}, solid:{min:1220,max:1255}, depth:{min:1203,max:1215}, bench:{min:1150,max:1198} },
+        "QB": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
+        "RB": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
+        "WR": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
+        "TE": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
       },
     };
 
@@ -1613,8 +1639,8 @@
       TIERS.forEach(t => tiers[t] = []);
 
       // Walk tiers top-down. Use each band's `min` as the inclusive
-      // threshold — first match wins. ELOs above the elite max (rare
-      // but possible for boosted overrides) still register as elite
+      // threshold — first match wins. ELOs above the top tier's max (rare
+      // but possible for boosted overrides) still register as the top tier
       // because we walk top-down. ELOs below the bench min fall through
       // to the unassigned pool (the function just doesn't push them
       // anywhere; the chip ends up in `pool-list`).
@@ -1943,7 +1969,8 @@
     }
 
     function createChip(player, tierName, rankInTier) {
-      // tierName: null = in pool (unassigned), or 'elite'/'starter'/'solid'/'depth'/'bench'
+      // tierName: null = in pool (unassigned), or one of TIERS
+      // ('firsts_2plus'/'first_1'/'second'/'third'/'fourth'/'bench')
       // rankInTier: 0-based array index of this chip within its tier (in-tier only;
       //             ignored for pool chips). Rendered as 1-based "1." "2." etc.
       const inTier = !!tierName;
@@ -2033,8 +2060,8 @@
           <div class="pool-chip-meta">${ageStr ? ageStr + ' &middot; ' : ''}${player.team}</div>
           <div class="tier-assign-row">
             ${TIERS.map(t => {
-              // 5-char max labels so all fit uniformly in the narrow card
-              const shortLabels = { elite: 'Elite', starter: 'Start', solid: 'Solid', depth: 'Depth', bench: 'Bench' };
+              // Short labels so all fit uniformly in the narrow card
+              const shortLabels = { firsts_2plus: '2+1st', first_1: '1st', second: '2nd', third: '3rd', fourth: '4th', bench: 'Bench' };
               const label = shortLabels[t] || (t.charAt(0).toUpperCase() + t.slice(1, 5));
               return `<button class="tier-assign-btn" data-tier="${t}" ${stopDrag}
                 onclick="event.stopPropagation(); assignToTier('${player.id}', '${t}')"
@@ -2251,8 +2278,8 @@
       const tierCounts = TIERS.map(t => ({ tier: t, count: state[t].length }));
 
       // Find the first tier that has room (fewer than others proportionally)
-      // Simple heuristic: fill elite first up to ~3, then starter up to ~5, etc.
-      const limits = { elite: 3, starter: 5, solid: 5, depth: 4, bench: 999 };
+      // Simple heuristic: fill the top tier up to ~2, then 1st up to ~4, etc.
+      const limits = { firsts_2plus: 2, first_1: 4, second: 5, third: 5, fourth: 5, bench: 999 };
       let target = 'bench';
       for (const t of TIERS) {
         if (state[t].length < limits[t]) {
@@ -2267,7 +2294,7 @@
     // Up: move up one position within the current tier. If already at the
     //     top of a tier, hop to the END of the tier above (so the visual
     //     "kept moving up" intuition stays consistent across the boundary).
-    //     At the top of `elite`, no-op.
+    //     At the top of the first tier, no-op.
     // Down: symmetric. At the bottom of a tier, move to the START of the
     //      tier below. At the bottom of `bench`, send back to the pool.
     //
@@ -2297,7 +2324,7 @@
 
       // At top of current tier: spill to end of tier above
       const tierIdx = TIERS.indexOf(currentTier);
-      if (tierIdx <= 0) return;                     // already at top of `elite`
+      if (tierIdx <= 0) return;                     // already at top of the first tier
       const above = TIERS[tierIdx - 1];
       assignToTierAt(playerId, above, state[above].length);
     }
@@ -2854,10 +2881,10 @@
     const LS_COMMUNITY_DIFF_ON = 'ftf_tiers_community_diff_on';
     const _communityDiffCache = {};   // pos → { player_id: {user_tier, community_tier} }
     const _communityDiffLoading = {}; // pos → bool
-    const TIER_ORDER = ['elite', 'starter', 'solid', 'depth', 'bench'];
+    const TIER_ORDER = ['firsts_2plus', 'first_1', 'second', 'third', 'fourth', 'bench'];
     const TIER_LABELS_SHORT = {
-      elite: 'Elite', starter: 'Start', solid: 'Solid',
-      depth: 'Depth', bench: 'Bench',
+      firsts_2plus: '2+ 1sts', first_1: '1st', second: '2nd',
+      third: '3rd', fourth: '4th', bench: 'Bench',
     };
 
     function communityDiffEnabled() {
@@ -3026,7 +3053,7 @@
     const LS_SWIPE_HINT_SHOWN = 'ftf_tiers_swipe_hint_shown';
     const SWIPE_THRESHOLD_X = 40;
     const SWIPE_ABORT_Y = 30;
-    let _lastUsedTier = 'starter';  // tracks MRU tier for pool→tier swipe
+    let _lastUsedTier = 'second';  // tracks MRU tier for pool→tier swipe
 
     // Track the last tier the user explicitly assigned to so swipe-right on
     // a pool chip lands there.  Hook into BOTH assignToTier and the newer
@@ -3137,7 +3164,7 @@
         if (!inTier && dx > 0) {
           // Swipe right on pool card → assign to MRU tier
           reset(false);
-          assignToTier(pid, TIERS.includes(_lastUsedTier) ? _lastUsedTier : 'starter');
+          assignToTier(pid, TIERS.includes(_lastUsedTier) ? _lastUsedTier : 'second');
           return;
         }
         // Direction didn't match the chip's context — snap back

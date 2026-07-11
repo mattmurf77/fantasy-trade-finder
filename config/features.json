@@ -50,5 +50,8 @@
   "trade.preference_lists":          true,
   "trade.outlook_seed":             false,
   "trade.crown_asset":              false,
-  "trade.send_in_sleeper":          true
+  "trade.send_in_sleeper":          true,
+
+  "auth.accounts":                  false,
+  "auth.enforce_verified_writes":   false
 }

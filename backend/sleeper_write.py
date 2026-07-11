@@ -162,6 +162,38 @@ def is_expired(jwt: str, *, skew: int = 0) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Live-token oracle — the P1 verification probe (account-auth plan §2c).
+# ---------------------------------------------------------------------------
+
+def verify_token_live(token: str, *, _opener=None) -> dict:
+    """Prove a captured Sleeper JWT is REAL by exercising it once against
+    Sleeper's authenticated GraphQL endpoint.
+
+    Why: token_claims() decodes WITHOUT verifying the HS256 signature
+    (Sleeper's signing key is private), so a forged token can carry any
+    user_id claim. Sleeper itself is the signature oracle: its auth
+    middleware rejects an invalid token with 401 "Your token is invalid."
+    before the query even executes (verified 2026-07-08 — a well-formed
+    propose_trade body 401'd purely on a bad authorization header).
+
+    The probe is a schema-independent no-op query (`__typename` is valid
+    against any GraphQL schema), so it reads nothing and writes nothing.
+
+    Returns the parsed `_post_graphql` result dict when the token passed
+    auth (the only success condition that matters). Raises:
+      SleeperAuthError  → Sleeper rejected the token (forged / dead / revoked)
+      SleeperWriteError → transport/config problem — INCONCLUSIVE; callers
+                          must treat this as "not proven", never as forged.
+    """
+    body = {
+        "operationName": "ftf_token_probe",
+        "variables": {},
+        "query": "query ftf_token_probe { __typename }",
+    }
+    return _post_graphql("ftf_token_probe", token, body, _opener=_opener)
+
+
+# ---------------------------------------------------------------------------
 # propose_trade — payload construction (verbatim structure from the capture).
 # ---------------------------------------------------------------------------
 

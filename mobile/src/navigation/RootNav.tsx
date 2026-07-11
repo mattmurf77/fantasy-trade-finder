@@ -19,6 +19,7 @@ import FeedbackInboxScreen from '../screens/FeedbackInboxScreen';
 import SleeperConnectScreen from '../screens/SleeperConnectScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
+import VerifyAccountBanner from '../components/VerifyAccountBanner';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useLeagueFormatDefault } from '../hooks/useScoringFormat';
 import { getProgress } from '../api/rankings';
@@ -207,9 +208,16 @@ export default function RootNav({ booted }: { booted: boolean }) {
           )}
         </Stack.Screen>
         <Stack.Screen name="Main">
-          {() => (
+          {({ navigation }) => (
             <>
               <TabNav />
+              {/* Account-auth P1 — quiet "Verify your account" strip over
+                  the authed tabs. Renders null unless the server flagged
+                  this session (see VerifyAccountBanner's gate). Routes into
+                  the same SleeperConnect capture used by Send-in-Sleeper. */}
+              <VerifyAccountBanner
+                onVerify={() => navigation.navigate('SleeperConnect')}
+              />
               <PushPrimingModal />
               {/* In-app feedback capture (TestFlight). Floats above the
                   tab bar on every authed screen. Settings → Test feedback

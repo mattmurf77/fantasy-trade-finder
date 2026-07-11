@@ -17,9 +17,10 @@ Sleeper user identities + denormalized hot-read activity columns.
 | `created_at` | str | ISO timestamp |
 | `ranking_method` | str | `null` / `'trio'` / `'manual'` / `'tiers'` |
 | `tiers_saved` | JSON text | Per-format: `{"1qb_ppr": ["RB","WR"], "sf_tep": []}` |
-| `tier_overrides` | JSON text | Per-format: `{"1qb_ppr": {pid: elo}, "sf_tep": {pid: elo}}` |
+| `tier_overrides` | JSON text | Per-format: `{"1qb_ppr": {pid: elo}, "sf_tep": {pid: elo}}`. Values are raw Elo — tier keys are never stored, so the 2026-07-11 pick-value tier-ladder migration needed **no data pass**: existing overrides re-bucket through the new `tier_config.json` band walk on read. |
 | `invited_by` | str | Referrer's Sleeper username |
 | `unlocked_formats` | JSON text | Formats the user has unlocked Trade Finder in |
+| `anchor_scale` | JSON text | Per-format pick-value scale (1.5.4 #111): `{"1qb_ppr": 3, "sf_tep": 2}` — "a top-tier asset is worth N firsts" (N ∈ 2/3/4). Absent key = default 2 = legacy anchor math. Read/written by `load_anchor_scale` / `save_anchor_scale` via `/api/anchor/scale`. |
 | `last_active_at` | str | denormalized from `user_events` for hot reads |
 | `last_login_at` | str | |
 | `last_rank_at` | str | |
@@ -29,6 +30,8 @@ Sleeper user identities + denormalized hot-read activity columns.
 | `signup_at` | str | |
 | `events_count` | int | |
 | `last_device_type`, `last_os_version`, `last_app_version` | str | most recent client snapshot |
+| `verified_at` | str | ISO — when this user record was last proven controlled (account-auth plan P1/P2) |
+| `verified_via` | str | `'sleeper'` / `'apple'` / `'google'` — the proof source; NULL = never verified (username-only) |
 
 ---
 
@@ -395,6 +398,33 @@ Expo push tokens. Composite uniqueness via `device_token` PK + indexed `user_id`
 | `created_at`, `updated_at` | str | |
 
 Interim home; folds into the auth epic's `linked_sources` when that lands.
+
+---
+
+## `accounts`
+
+Identity-anchor layer above the app's working key (`sleeper_user_id`) — account-auth plan P2 (docs/plans/account-auth-plan-2026-07-11.md). One row per durable account; provider identities hang off it via `linked_identities`. Managed by `backend/accounts.py` (`find_or_create_account`, `bind_sleeper_user`, `delete_user_data`).
+
+| Column | Type | Notes |
+|---|---|---|
+| `account_id` | str PK | Opaque hex id (`secrets.token_hex(16)`) |
+| `sleeper_user_id` | str | Bound working key — NULL until first bind. Binding is **sticky**: never silently rebound; a conflicting bind attempt is refused (see `bind_sleeper_user`) |
+| `created_at` | str | ISO UTC |
+
+---
+
+## `linked_identities`
+
+One row per provider identity. Keyed on the provider's stable `sub` claim — **never** on email (Apple only returns email on first authorization).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `account_id` | str, not null | → `accounts.account_id` |
+| `provider` | str, not null | `'apple'` / `'google'` |
+| `provider_subject` | str, not null | Provider's stable `sub`; unique per provider (`uq_linked_identity`) |
+| `email_hash` | str | SHA-256 hex of the normalized provider email; raw email is never stored |
+| `linked_at` | str | ISO UTC |
 
 ---
 

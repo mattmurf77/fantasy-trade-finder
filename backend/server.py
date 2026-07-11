@@ -16,10 +16,12 @@ data is fetched from the Sleeper public API (no OAuth required).
 
 import collections
 import concurrent.futures
+import functools
 import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import pathlib
 import random
@@ -101,6 +103,7 @@ from .database import (
     set_ranking_method, get_ranking_method,
     save_tiers_position, get_tiers_saved,
     save_tier_overrides, load_tier_overrides,
+    save_anchor_scale, load_anchor_scale,
     mark_format_unlocked, get_unlocked_formats,
     set_league_scoring, get_league_scoring, get_league_summary,
     set_league_total_rosters,
@@ -350,7 +353,11 @@ log.info("✅ Model config loaded from DB")
 # ---------------------------------------------------------------------------
 
 CACHE_DIR          = pathlib.Path(__file__).parent.parent / "data"
-PLAYERS_CACHE_FILE = CACHE_DIR / ".sleeper_players_cache.json"
+# FTF_PLAYERS_CACHE_FILE: UI-test harness redirect. The default path is shared
+# with real dev usage, so test runs must never write it (docs/plans/mobile-testing/prd.md R-06).
+_players_cache_override = os.environ.get("FTF_PLAYERS_CACHE_FILE")
+PLAYERS_CACHE_FILE = (pathlib.Path(_players_cache_override) if _players_cache_override
+                      else CACHE_DIR / ".sleeper_players_cache.json")
 _sleeper_cache: dict | None = None   # in-memory cache
 
 
@@ -400,10 +407,70 @@ def _make_ssl_context() -> ssl.SSLContext:
 # Build once at import time; reused for every Sleeper call
 _SSL_CTX = _make_ssl_context()
 
+# ---------------------------------------------------------------------------
+# UI-test harness seams (docs/plans/mobile-testing/lld.md §4.3). Every branch
+# below is dead unless the FTF_* env vars are set; backend/tests/
+# test_test_support.py asserts inertness (guardrail G5).
+# ---------------------------------------------------------------------------
+_TEST_MODE            = os.environ.get("FTF_TEST_MODE") == "1"
+_SLEEPER_FIXTURES_DIR = os.environ.get("FTF_SLEEPER_FIXTURES_DIR")
+_SLEEPER_RECORD       = os.environ.get("FTF_SLEEPER_RECORD") == "1"
+
+if _TEST_MODE and not (_SLEEPER_FIXTURES_DIR and _players_cache_override
+                       and os.environ.get("FTF_DP_VALUES_FILE")):
+    raise SystemExit(
+        "FTF_TEST_MODE=1 requires FTF_SLEEPER_FIXTURES_DIR, FTF_PLAYERS_CACHE_FILE and "
+        "FTF_DP_VALUES_FILE — a test-mode backend that can reach live Sleeper/DynastyProcess "
+        "or write the real players cache is a rails hole (prd.md R-12).")
+if _SLEEPER_RECORD and _TEST_MODE:
+    raise SystemExit("FTF_SLEEPER_RECORD is deliberately live — it cannot run with FTF_TEST_MODE=1.")
+if _SLEEPER_RECORD and _SLEEPER_FIXTURES_DIR and any(
+        pathlib.Path(_SLEEPER_FIXTURES_DIR).glob("**/*.json")):
+    raise SystemExit(
+        "FTF_SLEEPER_RECORD=1 refuses a fixtures dir that already contains cassettes — "
+        "never silently overwrite; move or delete them first.")
+
+
+def _sleeper_fixture_path(url: str) -> pathlib.Path:
+    rel = url.split("api.sleeper.app/v1/", 1)[1].split("?", 1)[0].strip("/")
+    return pathlib.Path(_SLEEPER_FIXTURES_DIR) / f"{rel}.json"
+
+
+def _sleeper_record(url: str, data) -> None:
+    """Record-mode cassette write, with token-bearing fields scrubbed by key name."""
+    def scrub(obj):
+        if isinstance(obj, dict):
+            return {k: ("__scrubbed__" if "token" in k.lower() else scrub(v))
+                    for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [scrub(v) for v in obj]
+        return obj
+    path = _sleeper_fixture_path(url)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(scrub(data), indent=1))
+    log.info("sleeper-record WROTE %s", path)
+
 
 def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
     """Fetch JSON from Sleeper API with full request/response logging."""
     global _SSL_CTX  # may be replaced on first SSL failure
+    if _SLEEPER_FIXTURES_DIR and not _SLEEPER_RECORD:
+        # Fixture seam: serve canned JSON; a miss is a test bug, never a live call.
+        from . import test_support as _ts
+        fpath = _sleeper_fixture_path(url)
+        if not fpath.exists():
+            _ts.counters["vcr_misses"] += 1
+            log.error("sleeper-fixture MISS %s (wanted %s)", url, fpath)
+            raise urllib.error.HTTPError(url, 599, "ftf-fixture-miss", None, None)
+        doc = json.loads(fpath.read_text())
+        log.info("sleeper-fixture HIT %s", url)
+        if isinstance(doc, dict) and "__http_error__" in doc:
+            raise urllib.error.HTTPError(url, int(doc["__http_error__"]), "fixture", None, None)
+        return doc
+    if _TEST_MODE:
+        # Unreachable given the startup rules; belt-and-braces rail counter.
+        from . import test_support as _ts
+        _ts.counters["sleeper_live_egress_attempts"] += 1
     log.info("→ Sleeper GET  %s", url)
     req = urllib.request.Request(url, headers={"User-Agent": "FantasyTradeFinder/1.0"})
     try:
@@ -414,6 +481,8 @@ def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
         log.info("← Sleeper %s  body_preview=%r  body_len=%d", status, preview, len(raw))
         data = json.loads(raw)
         log.debug("   parsed type=%s", type(data).__name__)
+        if _SLEEPER_RECORD and _SLEEPER_FIXTURES_DIR:
+            _sleeper_record(url, data)
         return data
     except ssl.SSLCertVerificationError as e:
         # Verified context failed at runtime — retry once with unverified
@@ -424,7 +493,10 @@ def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
             raw    = r.read()
         preview = raw[:200].decode("utf-8", errors="replace")
         log.info("← Sleeper (unverified) %s  body_preview=%r  body_len=%d", status, preview, len(raw))
-        return json.loads(raw)
+        data = json.loads(raw)
+        if _SLEEPER_RECORD and _SLEEPER_FIXTURES_DIR:
+            _sleeper_record(url, data)
+        return data
     except urllib.error.HTTPError as e:
         body_preview = e.read(200).decode("utf-8", errors="replace")
         log.warning("← Sleeper HTTPError %s %s  body=%r", e.code, e.reason, body_preview)
@@ -704,9 +776,33 @@ VALID_ANCHORS = (
     set(_ANCHOR_FIRST_MULTIPLES) | set(_ANCHOR_SINGLE_PICK) | {"no_value"}
 )
 
+# Per-user pick-value scale (#111): "a top-tier asset is worth N firsts".
+# The default math implies N = 2 — a "2 firsts" answer pins to Elo ≈ 1789,
+# which is where the consensus board's top players sit (elite in every
+# band). A user who says N = 3 (or 4) believes firsts are cheaper relative
+# to elite players, so their multi-first answers are re-spaced along a
+# power curve:  m firsts → value(Mid 1st) × m^γ  with  γ = log 2 / log N.
+# The curve is exact at both ends the user can see: m = 1 is still the
+# actual generic Mid 1st asset in their pool (Elo 1650), and m = N — the
+# user's own definition of a top-tier asset — lands on the same Elo the
+# default math gives "2 firsts". N = 2 → γ = 1 → byte-identical to the
+# original m × base mapping. Applies ONLY to the anchor wizard's
+# multi-first keys: single-pick anchors, the generic pick assets in the
+# pool, and the public calculator gap line stay consensus-denominated.
+ANCHOR_TOP_TIER_FIRSTS_DEFAULT = 2.0
+ANCHOR_TOP_TIER_FIRSTS_CHOICES = (2.0, 3.0, 4.0)
 
-def _anchor_target_elo(anchor: str) -> float | None:
-    """Map an anchor key to its target Elo. None for unknown keys."""
+
+def _anchor_target_elo(
+    anchor: str,
+    top_tier_firsts: float = ANCHOR_TOP_TIER_FIRSTS_DEFAULT,
+) -> float | None:
+    """Map an anchor key to its target Elo. None for unknown keys.
+
+    `top_tier_firsts` is the user's pick-value scale (see the comment on
+    ANCHOR_TOP_TIER_FIRSTS_DEFAULT); it re-spaces the multi-first anchors
+    only. The default reproduces the original mapping exactly.
+    """
     if anchor == "no_value":
         return ANCHOR_NO_VALUE_ELO
     if anchor in _ANCHOR_SINGLE_PICK:
@@ -715,7 +811,8 @@ def _anchor_target_elo(anchor: str) -> float | None:
     if mult is None:
         return None
     base_val = _trade_service_mod.elo_to_value(GENERIC_PICK_SEEDS[(1, "Mid")])
-    return _trade_service_mod.value_to_elo(mult * base_val)
+    gamma = math.log(2.0) / math.log(top_tier_firsts)
+    return _trade_service_mod.value_to_elo((mult ** gamma) * base_val)
 
 
 def build_universal_pool(
@@ -983,6 +1080,11 @@ app = Flask(__name__, static_folder=str(_PROJECT_ROOT / "web"), static_url_path=
 
 _sessions: dict[str, dict] = {}  # token → per-session dict
 _sessions_lock = threading.Lock()  # guards all _sessions reads/writes
+
+if _TEST_MODE:
+    # UI-test harness blueprint (/__test__/*) — see backend/test_support.py.
+    from . import test_support as _test_support_mod
+    _test_support_mod.install(app, sessions=_sessions, sessions_lock=_sessions_lock)
 _player_sync_lock = threading.Lock()  # serialises concurrent player DB syncs
 
 # ─── Trade-generation jobs (streaming + pre-gen cache) ────────────────────
@@ -1107,6 +1209,166 @@ def _require_initialized_session() -> dict:
 def _active_format(sess: dict) -> str:
     """Return the format that `_require_session` resolved for this request."""
     return sess.get("_effective_format") or sess.get("active_format") or "1qb_ppr"
+
+
+# ---------------------------------------------------------------------------
+# Verified-session write gate — account-auth plan P1
+# (docs/plans/account-auth-plan-2026-07-11.md §3-P1)
+#
+# A session becomes VERIFIED when the mobile app captures a Sleeper JWT
+# whose user_id claim matches the session's user_id AND the token is proven
+# live against Sleeper's authenticated API (POST /api/sleeper/link — the
+# oracle probe closes the unverified-signature gap in plan §2c). Verified
+# state is stamped on the session (sess["verified"]) and persisted on the
+# users row (verified_at / verified_via='sleeper', shared with P2's
+# Apple/Google anchors via backend/accounts.py).
+#
+# Decision matrix for a mutating request (also in docs/api-reference.md):
+#   session verified                    → allow
+#   unverified + user has a verified
+#     controller (users.verified_via)   → 403 verification_required
+#                                         (first-verified-controller-wins,
+#                                         even during grace)
+#   unverified, no controller, grace
+#     (auth.enforce_verified_writes=F)  → allow + one AUTH-GRACE log line
+#   unverified, no controller, enforce  → 403 verification_required
+#
+# The two highest-blast-radius routes never use this gate's grace path:
+# POST /api/sleeper/link carries its own proof inline, and POST
+# /api/trades/propose requires sess["verified"] outright.
+# ---------------------------------------------------------------------------
+
+_MUTATING_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+
+
+def _verified_controller_via(user_id: str) -> str | None:
+    """users.verified_via for this user_id — the persisted "someone proved
+    control of this account" marker. Shared by the write and read gates.
+
+    Returns None on a DB hiccup (fail open + log): both gates treat an
+    unreadable marker as no-controller rather than locking every session
+    out on a transient DB error.
+    """
+    try:
+        from . import accounts as _accounts
+        return _accounts.get_user_verified_via(user_id)
+    except Exception as e:
+        log.warning("verified-controller lookup failed for %s: %s", user_id, e)
+        return None
+
+
+def _verified_write_denial(sess: dict):
+    """Return a Flask (response, status) to DENY this write, or None to allow.
+
+    Assumes `sess` is a live session dict. Reads users.verified_via for
+    unverified sessions so a squatter loses write access the moment the real
+    owner verifies — no restart or session expiry needed.
+    """
+    if sess.get("verified"):
+        return None
+    user_id = sess.get("user_id") or ""
+    controller_via = _verified_controller_via(user_id)
+    if controller_via:
+        log.warning("AUTH-DENY unverified_write user_id=%s method=%s path=%s "
+                    "reason=verified_controller_exists via=%s",
+                    user_id, request.method, request.path, controller_via)
+        return jsonify({"error": "verification_required"}), 403
+    if is_enabled("auth.enforce_verified_writes"):
+        log.warning("AUTH-DENY unverified_write user_id=%s method=%s path=%s "
+                    "reason=enforcement", user_id, request.method, request.path)
+        return jsonify({"error": "verification_required"}), 403
+    # Grace: allowed but instrumented. ONE stable line format — the runbook's
+    # grace-funnel monitoring greps for "AUTH-GRACE" (docs/runbook.md).
+    log.info("AUTH-GRACE unverified_write user_id=%s method=%s path=%s",
+             user_id, request.method, request.path)
+    return None
+
+
+def _gate_unverified_write(fn):
+    """Route decorator applying `_verified_write_denial` to mutating methods.
+
+    Stack UNDER @app.route (so Flask registers the wrapped function). Reads
+    the session directly by token; a missing/expired session falls through
+    to the route's own _require_session → 401, keeping error contracts
+    unchanged. GETs on mixed-method routes pass through untouched.
+    """
+    @functools.wraps(fn)
+    def _wrapper(*args, **kwargs):
+        if request.method in _MUTATING_METHODS:
+            with _sessions_lock:
+                sess = _sessions.get(request.headers.get("X-Session-Token", ""))
+            if sess is not None:
+                denial = _verified_write_denial(sess)
+                if denial is not None:
+                    return denial
+        return fn(*args, **kwargs)
+    return _wrapper
+
+
+# ---------------------------------------------------------------------------
+# Verified-session READ gate — account-auth plan P2.5 (read privacy)
+# (docs/plans/account-auth-plan-2026-07-11.md §"P2.5")
+#
+# "Ranks hidden behind an account" (#102) means reads too: without this, an
+# attacker with just a username can mint a session and VIEW the victim's
+# board even though the write gate blocks mutation. The read rule mirrors
+# the write rule's verified-controller branch ONLY:
+#
+#   session verified                    → allow
+#   unverified + user has a verified
+#     controller (users.verified_via)   → 403 verification_required
+#                                         (no grace — the owner has proven
+#                                         control; squatters get nothing)
+#   unverified, no controller           → allow (grace-era behavior:
+#                                         onboarding users must be able to
+#                                         see their own board)
+#
+# auth.enforce_verified_writes is deliberately NOT consulted here:
+# enforcement hard-denies writes, but a user mid-onboarding (no controller
+# anywhere) must still see their own board or nobody could ever onboard.
+# ---------------------------------------------------------------------------
+
+
+def _verified_read_denial(sess: dict):
+    """Return a Flask (response, status) to DENY this board-content read,
+    or None to allow. Same per-request users.verified_via check as the
+    write gate, so a squatter loses read access the moment the real owner
+    verifies — no restart or session expiry needed.
+    """
+    if sess.get("verified"):
+        return None
+    user_id = sess.get("user_id") or ""
+    controller_via = _verified_controller_via(user_id)
+    if controller_via:
+        log.warning("AUTH-DENY unverified_read user_id=%s method=%s path=%s "
+                    "reason=verified_controller_exists via=%s",
+                    user_id, request.method, request.path, controller_via)
+        return jsonify({"error": "verification_required"}), 403
+    return None
+
+
+def _gate_unverified_read(fn):
+    """Route decorator applying `_verified_read_denial` to non-mutating
+    methods. Board-content READ routes only (gated-read matrix in
+    docs/api-reference.md) — global/public data (/api/players,
+    /api/trade/values, /api/tier-config, share pages) and league-shared
+    aggregates stay open. Stack UNDER @app.route; on mixed GET+POST routes
+    stack alongside @_gate_unverified_write (each filters to its own
+    methods, so nothing is double-checked or double-logged). A missing or
+    expired session falls through to the route's own _require_session →
+    401, keeping error contracts unchanged.
+    """
+    @functools.wraps(fn)
+    def _wrapper(*args, **kwargs):
+        if request.method not in _MUTATING_METHODS:
+            with _sessions_lock:
+                sess = _sessions.get(request.headers.get("X-Session-Token", ""))
+            if sess is not None:
+                denial = _verified_read_denial(sess)
+                if denial is not None:
+                    return denial
+        return fn(*args, **kwargs)
+    return _wrapper
 
 
 def _cleanup_loop() -> None:
@@ -2207,6 +2469,7 @@ def get_leaderboard():
 
 
 @app.route("/api/me/streak", methods=["GET"])
+@_gate_unverified_read
 def get_me_streak():
     """GET /api/me/streak → {current, longest, last_rank_local_date}.
 
@@ -2219,6 +2482,7 @@ def get_me_streak():
 
 
 @app.route("/api/rank3", methods=["POST"])
+@_gate_unverified_write
 def post_rank3():
     """POST /api/rank3  {ranked: [id1, id2, id3]}  →  updated progress"""
     sess = _require_initialized_session()
@@ -2352,6 +2616,7 @@ def post_rank3():
 
 
 @app.route("/api/rankings")
+@_gate_unverified_read
 def get_rankings():
     """GET /api/rankings?position=RB  →  ordered player list"""
     sess = _require_session()
@@ -2427,6 +2692,7 @@ def get_rankings():
 
 
 @app.route("/api/progress")
+@_gate_unverified_read
 def get_progress():
     """GET /api/progress?position=RB  →  completion status"""
     sess = _require_session()
@@ -2441,6 +2707,7 @@ def get_progress():
 
 
 @app.route("/api/rankings/progress")
+@_gate_unverified_read
 def get_rankings_progress():
     """
     GET /api/rankings/progress
@@ -2604,6 +2871,7 @@ def get_rankings_progress():
 
 
 @app.route("/api/ranking-method", methods=["POST"])
+@_gate_unverified_write
 def set_ranking_method_route():
     """POST /api/ranking-method {method: 'trio'|'manual'|'tiers'|'anchor'}
 
@@ -2638,6 +2906,7 @@ def set_ranking_method_route():
 
 
 @app.route("/api/scoring/switch", methods=["POST"])
+@_gate_unverified_write
 def switch_scoring_format():
     """POST /api/scoring/switch {format: '1qb_ppr'|'sf_tep'}
 
@@ -2676,10 +2945,10 @@ def get_tier_config():
 
     Response shape:
       {
-        "tiers": ["elite","starter","solid","depth","bench"],   # display order
+        "tiers": ["firsts_2plus","first_1","second","third","fourth","bench"],   # display order
         "config": {
           "1qb_ppr": {
-            "QB": { "elite": {"min": 1600, "max": 1680}, ... },
+            "QB": { "firsts_2plus": {"min": 1789, "max": 1870}, ... },
             "RB": {...}, "WR": {...}, "TE": {...}
           },
           "sf_tep": { ...same shape... }
@@ -2693,6 +2962,7 @@ def get_tier_config():
 
 
 @app.route("/api/tiers/copy-from-format", methods=["POST"])
+@_gate_unverified_write
 def copy_tiers_from_format_route():
     """POST /api/tiers/copy-from-format {from_format: '1qb_ppr'}
 
@@ -2873,6 +3143,7 @@ def copy_tiers_from_format_route():
 
 
 @app.route("/api/feedback", methods=["POST"])
+@_gate_unverified_write
 def submit_feedback_route():
     """POST /api/feedback — in-app feedback capture from mobile.
 
@@ -3028,6 +3299,7 @@ def set_feedback_status_route(feedback_id: int):
 
 
 @app.route("/api/feedback/mine", methods=["GET"])
+@_gate_unverified_read
 def my_feedback_route():
     """GET /api/feedback/mine — the caller's own feedback notes with their
     lifecycle status (newest first). Read side of the in-app feedback
@@ -3045,8 +3317,9 @@ def my_feedback_route():
 
 
 @app.route("/api/tiers/save", methods=["POST"])
+@_gate_unverified_write
 def save_tiers_route():
-    """POST /api/tiers/save {position: 'RB', tiers: {elite: [...ids], ...}, cleared_pids: [...]}
+    """POST /api/tiers/save {position: 'RB', tiers: {first_1: [...ids], ...}, cleared_pids: [...]}
 
     Converts tier assignments into ELO overrides and marks the position as saved.
 
@@ -3136,6 +3409,7 @@ def save_tiers_route():
 
 
 @app.route("/api/anchor/save", methods=["POST"])
+@_gate_unverified_write
 def save_anchor_route():
     """POST /api/anchor/save {player_id: '4046', anchor: '2_firsts'}
 
@@ -3162,7 +3436,16 @@ def save_anchor_route():
         return jsonify({"error": f"Invalid anchor: {anchor!r}",
                         "valid_anchors": sorted(VALID_ANCHORS)}), 400
 
-    target_elo = _anchor_target_elo(anchor)
+    # #111 — the user's pick-value scale re-spaces the multi-first anchors.
+    # Best-effort read: any DB hiccup falls back to the legacy default.
+    try:
+        top_tier_firsts = (load_anchor_scale(g_user_id, scoring_format=fmt)
+                           or ANCHOR_TOP_TIER_FIRSTS_DEFAULT)
+    except Exception as db_err:
+        log.warning("load_anchor_scale failed (using default): %s", db_err)
+        top_tier_firsts = ANCHOR_TOP_TIER_FIRSTS_DEFAULT
+
+    target_elo = _anchor_target_elo(anchor, top_tier_firsts=top_tier_firsts)
 
     try:
         player = service.apply_anchor(player_id, target_elo)
@@ -3199,20 +3482,66 @@ def save_anchor_route():
                  fmt, player_id, anchor, target_elo, tier, g_user_id)
 
         return jsonify({
-            "ok":             True,
-            "player_id":      player_id,
-            "anchor":         anchor,
-            "elo":            round(target_elo, 1),
-            "value":          round(_trade_service_mod.elo_to_value(target_elo), 1),
-            "tier":           tier,
-            "scoring_format": fmt,
+            "ok":              True,
+            "player_id":       player_id,
+            "anchor":          anchor,
+            "elo":             round(target_elo, 1),
+            "value":           round(_trade_service_mod.elo_to_value(target_elo), 1),
+            "tier":            tier,
+            "scoring_format":  fmt,
+            "top_tier_firsts": top_tier_firsts,
         })
     except Exception as e:
         log.error("anchor/save error: %s", e)
         return jsonify({"error": "internal_error"}), 500
 
 
+@app.route("/api/anchor/scale", methods=["GET", "POST"])
+@_gate_unverified_write
+@_gate_unverified_read
+def anchor_scale_route():
+    """GET/POST /api/anchor/scale — per-user pick-value scale (#111).
+
+    {top_tier_firsts: 2|3|4} = "a top-tier dynasty asset is worth N firsts".
+    Persisted per user + scoring format (users.anchor_scale). Recalibrates
+    ONLY the anchor wizard's multi-first keys (see _anchor_target_elo);
+    single-pick anchors, the generic pick assets in the pool, and the
+    public calculator gap line stay consensus-denominated. Default 2 ==
+    the legacy mapping, so users who never touch it see identical behavior.
+    """
+    sess = _require_session()
+    g_user_id = sess["user_id"]
+    fmt = _active_format(sess)
+
+    if request.method == "GET":
+        try:
+            n = (load_anchor_scale(g_user_id, scoring_format=fmt)
+                 or ANCHOR_TOP_TIER_FIRSTS_DEFAULT)
+        except Exception as db_err:
+            log.warning("anchor/scale read failed (using default): %s", db_err)
+            n = ANCHOR_TOP_TIER_FIRSTS_DEFAULT
+        return jsonify({"top_tier_firsts": n, "scoring_format": fmt})
+
+    body = request.get_json(force=True) or {}
+    try:
+        n = float(body.get("top_tier_firsts"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "top_tier_firsts must be a number",
+                        "valid_values": list(ANCHOR_TOP_TIER_FIRSTS_CHOICES)}), 400
+    if n not in ANCHOR_TOP_TIER_FIRSTS_CHOICES:
+        return jsonify({"error": f"Invalid top_tier_firsts: {n!r}",
+                        "valid_values": list(ANCHOR_TOP_TIER_FIRSTS_CHOICES)}), 400
+    try:
+        save_anchor_scale(g_user_id, n, scoring_format=fmt)
+    except Exception as e:
+        log.error("anchor/scale save error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+    log.info("anchor/scale [%s] top_tier_firsts=%s for %s", fmt, n, g_user_id)
+    return jsonify({"ok": True, "top_tier_firsts": n, "scoring_format": fmt})
+
+
 @app.route("/api/tiers/status")
+@_gate_unverified_read
 def tiers_status_route():
     """GET /api/tiers/status — which positions have saved tiers for the active format."""
     sess = _require_session()
@@ -3253,6 +3582,7 @@ def tiers_status_route():
 # ---------------------------------------------------------------------------
 
 @app.route("/api/tiers/community-diff")
+@_gate_unverified_read
 def tiers_community_diff_route():
     """GET /api/tiers/community-diff?position=RB
     → { position, scoring_format, diffs: {player_id: {user_tier, community_tier}} }
@@ -3316,6 +3646,7 @@ def tiers_community_diff_route():
 
 
 @app.route("/api/tiers/stability")
+@_gate_unverified_read
 def tiers_stability_route():
     """GET /api/tiers/stability?position=RB
     → { position, scoring_format, stability: {player_id: "stable" | "volatile"} }
@@ -3401,6 +3732,7 @@ def tiers_stability_route():
 
 
 @app.route("/api/reset", methods=["POST"])
+@_gate_unverified_write
 def reset():
     """POST /api/reset  {position: "RB"}"""
     sess = _require_session()
@@ -3412,6 +3744,7 @@ def reset():
 
 
 @app.route("/api/rankings/reorder", methods=["POST"])
+@_gate_unverified_write
 def reorder_rankings():
     """POST /api/rankings/reorder {position, ordered_ids}
 
@@ -3473,6 +3806,18 @@ def reorder_rankings():
 @app.route("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
+
+
+@app.route("/privacy")
+def privacy_page():
+    """Clean URL for the privacy policy (also the App Store Connect URL)."""
+    return send_from_directory(app.static_folder, "privacy.html")
+
+
+@app.route("/terms")
+def terms_page():
+    """Clean URL for the terms of use."""
+    return send_from_directory(app.static_folder, "terms.html")
 
 
 # ---------------------------------------------------------------------------
@@ -3648,7 +3993,16 @@ def trade_evaluate_route():
     league_id = str(body.get("league_id") or "").strip()
     opponent_user_id = str(body.get("opponent_user_id") or "").strip()
     mode_b = bool(league_id and opponent_user_id)
-    caller_user_id = _require_session().get("user_id") if mode_b else None
+    caller_user_id = None
+    if mode_b:
+        # Mode B prices by the CALLER's board — board-derived content, so the
+        # read gate applies inline (the route can't take @_gate_unverified_read
+        # wholesale because Mode A is public by design).
+        _mode_b_sess = _require_session()
+        _read_denial = _verified_read_denial(_mode_b_sess)
+        if _read_denial is not None:
+            return _read_denial
+        caller_user_id = _mode_b_sess.get("user_id")
 
     try:
         _pool_players, seed = _get_universal_pool(fmt)
@@ -4024,6 +4378,7 @@ def trade_card_to_dict(card, players: dict) -> dict:
 
 
 @app.route("/api/trades/generate", methods=["POST"])
+@_gate_unverified_write
 def generate_trades():
     """POST /api/trades/generate
     Spawns (or reuses) a background trade-generation job and returns a
@@ -4128,6 +4483,7 @@ def generate_trades():
 
 
 @app.route("/api/trades/status")
+@_gate_unverified_read
 def trade_job_status():
     """GET /api/trades/status?job_id=X
     Cheap dict lookup. Used by the mobile app to poll an in-flight
@@ -4147,6 +4503,7 @@ def trade_job_status():
 
 
 @app.route("/api/trades")
+@_gate_unverified_read
 def get_trades():
     """GET /api/trades?league_id=...  →  pending trade cards"""
     sess = _require_initialized_session()
@@ -4198,6 +4555,7 @@ def _reconstruct_swipe_card(trade_service, body: dict, user_id: str, league_id: 
 
 
 @app.route("/api/trades/swipe", methods=["POST"])
+@_gate_unverified_write
 def swipe_trade():
     """POST /api/trades/swipe  {trade_id, decision: 'like'|'pass'}
 
@@ -4449,6 +4807,7 @@ def _flag_num(value) -> float | None:
 
 
 @app.route("/api/trades/flag", methods=["POST"])
+@_gate_unverified_write
 def flag_bad_trade():
     """POST /api/trades/flag — flag a generated trade card as a bad trade.
 
@@ -4612,8 +4971,17 @@ def sleeper_link():
     """Manage the caller's stored Sleeper write token.
 
     POST   {token}  → validate the JWT + store it encrypted (link/re-link).
+                      DOUBLES AS SESSION VERIFICATION (account-auth P1):
+                      the token's user_id claim must match the session's
+                      user_id (403 token_user_mismatch otherwise) and the
+                      token is exercised once against Sleeper's authed API
+                      — the signature oracle (401 token_rejected on a
+                      forged/dead token). On proof the session is marked
+                      verified and users.verified_via='sleeper' persisted.
+                      If the oracle is unreachable (network/config) the
+                      link still stores, but `verified` stays false.
     GET             → {connected, sleeper_user_id, expires_at, expired}. No token.
-    DELETE          → drop the stored token (disconnect).
+    DELETE          → drop the stored token (disconnect). Standard write gate.
     """
     if not is_enabled("trade.send_in_sleeper"):
         return jsonify({"error": "feature_disabled"}), 404
@@ -4623,6 +4991,9 @@ def sleeper_link():
         return jsonify({"error": "no_user"}), 401
 
     if request.method == "DELETE":
+        denial = _verified_write_denial(sess)
+        if denial is not None:
+            return denial
         delete_sleeper_credential(user_id)
         return jsonify({"connected": False})
 
@@ -4653,6 +5024,33 @@ def sleeper_link():
     if _sleeper_write.is_expired(token):
         return jsonify({"error": "token_expired"}), 400
     sleeper_user_id = _sleeper_write.token_sleeper_user_id(token)
+
+    # ── P1 hard gate #1: the claim must name the session's user ──────────
+    # Without this, any session could park an arbitrary Sleeper login under
+    # this user_id. This is also half of the verification predicate.
+    if str(sleeper_user_id or "") != str(user_id):
+        log.warning("AUTH-DENY sleeper_link claim mismatch: session=%s claim=%s",
+                    user_id, sleeper_user_id)
+        return jsonify({"error": "token_user_mismatch"}), 403
+
+    # ── P1 oracle probe: prove the token is REAL, not just well-formed ───
+    # token_sleeper_user_id() decodes without checking the HS256 signature,
+    # so we exercise the token once against Sleeper's authenticated GraphQL
+    # endpoint. Sleeper rejecting it (401/403) ⇒ forged or dead ⇒ deny.
+    # A transport/config failure is INCONCLUSIVE: store the link (existing
+    # best-effort behavior) but do not verify.
+    proven_live = False
+    try:
+        _sleeper_write.verify_token_live(token)
+        proven_live = True
+    except _sleeper_write.SleeperAuthError as e:
+        log.warning("AUTH-DENY sleeper_link oracle rejected token for %s: %s",
+                    user_id, getattr(e, "detail", None))
+        return jsonify({"error": "token_rejected"}), 403
+    except _sleeper_write.SleeperWriteError as e:
+        log.warning("sleeper_link oracle inconclusive [%s] for %s: %s — "
+                    "linking unverified", e.kind, user_id, getattr(e, "detail", None))
+
     exp = _sleeper_write.token_expiry(token)
     expires_at = datetime.fromtimestamp(exp, tz=timezone.utc).isoformat() if exp else None
     try:
@@ -4663,7 +5061,35 @@ def sleeper_link():
     except Exception:
         log.exception("sleeper_link store failed")
         return jsonify({"error": "store_failed"}), 500
-    return jsonify({"connected": True, "sleeper_user_id": sleeper_user_id, "expires_at": expires_at})
+
+    if proven_live:
+        # Claim matches + oracle passed → this session controls the account.
+        sess["verified"] = True
+        sess["verified_via"] = "sleeper"
+        try:
+            from . import accounts as _accounts
+            first_time = _accounts.get_user_verified_via(user_id) is None
+            if not user_exists(user_id):
+                # Link can beat session_init's background user upsert; make
+                # sure the row exists so the marker isn't dropped.
+                upsert_user(sleeper_user_id=user_id)
+            _accounts.mark_user_verified(user_id, "sleeper")
+            if first_time:
+                # Support trail for the squatter transition (plan §2d):
+                # from this moment unverified sessions for this user_id
+                # lose write access.
+                log.info("AUTH-VERIFIED first verified controller user_id=%s "
+                         "via=sleeper", user_id)
+        except Exception:
+            log.exception("persisting verified marker failed (session still "
+                          "verified in memory)")
+
+    return jsonify({
+        "connected": True,
+        "sleeper_user_id": sleeper_user_id,
+        "expires_at": expires_at,
+        "verified": bool(sess.get("verified")),
+    })
 
 
 @app.route("/api/trades/propose", methods=["POST"])
@@ -4674,15 +5100,32 @@ def propose_trade_to_sleeper():
            receive_player_ids[], draft_picks?[]}  (players-only v1; picks pre-encoded).
     Success → {status:"proposed", transaction_id}. Structured errors the client
     maps to the deep-link fallback / reconnect prompt:
-      404 feature_disabled | 409 sleeper_not_linked | 409 sleeper_expired
-      503 sleeper_unconfigured | 502 sleeper_write_failed | 400 bad_request
+      404 feature_disabled | 403 verification_required | 409 sleeper_not_linked
+      409 sleeper_expired | 503 sleeper_unconfigured | 502 sleeper_write_failed
+      400 bad_request
     """
+    if _TEST_MODE:
+        # Fail closed: there is no legitimate automated send. Route-hit
+        # accounting happens in test_support's request hook so injected and
+        # fail-closed requests count identically (lld.md §4.3c).
+        return jsonify({"error": "test_mode_propose_disabled"}), 599
     if not is_enabled("trade.send_in_sleeper"):
         return jsonify({"error": "feature_disabled"}), 404
     sess = _require_session()
     user_id = sess.get("user_id")
     if not user_id:
         return jsonify({"error": "no_user"}), 401
+
+    # ── P1 hard gate #2 (account-auth plan §3): highest blast radius —
+    # this route writes into the victim's REAL Sleeper league. Only a
+    # session that proved control of this user_id (Sleeper-JWT capture +
+    # oracle, i.e. POST /api/sleeper/link in THIS session) may fire it.
+    # No grace period. The client routes 403 verification_required back
+    # into the SleeperConnect flow, which re-verifies in one tap.
+    if not sess.get("verified"):
+        log.warning("AUTH-DENY unverified_write user_id=%s method=%s path=%s "
+                    "reason=hard_route", user_id, request.method, request.path)
+        return jsonify({"error": "verification_required"}), 403
 
     body = request.get_json(force=True) or {}
     league_id = str(body.get("league_id") or "").strip()
@@ -4749,13 +5192,67 @@ def propose_trade_to_sleeper():
             "kind": e.kind,
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
         }), 502
+    # A real outbound Sleeper send happened — the gating guardrail counter.
+    # Unreachable under FTF_TEST_MODE (fail-closed above); the import is lazy
+    # so normal operation never touches test_support.
+    if _TEST_MODE:  # pragma: no cover — defense-in-depth, structurally dead
+        from . import test_support as _ts
+        _ts.counters["completed_proposes"] += 1
     return jsonify({
         "status": result.get("status") or "proposed",
         "transaction_id": result.get("transaction_id"),
     })
 
 
+@app.route("/api/account/reset-rankings", methods=["POST"])
+def account_reset_rankings():
+    """Wipe every persisted ranking artifact for the caller (all formats).
+
+    Account-auth P1 squatter remedy (plan §2d "first verified controller
+    wins"): a user who just VERIFIED may be inheriting rankings/tiers a
+    username-squatter authored before verification shipped. This offers a
+    clean slate: deletes swipe history + published member_rankings and
+    clears tier overrides / saved-tier markers / ranking method, then
+    resets this session's in-memory ranking services so the wipe is
+    immediate (not next-login).
+
+    VERIFIED-ONLY — 403 verification_required otherwise, no grace: the
+    reset destroys data, so it demands the same proof-of-control bar as
+    the hard-gated routes. UI entry point lands with P2's Settings
+    account section. Response: {ok, counts:{...}}.
+    """
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+    if not sess.get("verified"):
+        log.warning("AUTH-DENY unverified_write user_id=%s method=%s path=%s "
+                    "reason=hard_route", user_id, request.method, request.path)
+        return jsonify({"error": "verification_required"}), 403
+
+    from .database import reset_user_rankings
+    try:
+        counts = reset_user_rankings(user_id)
+    except Exception:
+        log.exception("account reset-rankings DB wipe failed")
+        return jsonify({"error": "reset_failed"}), 500
+
+    # In-memory: reset every format's ranking service for THIS session so
+    # the board reflects the wipe without a re-login. Other live sessions
+    # for this user_id rebuild from the (now empty) DB on their next
+    # session_init.
+    for svc in (sess.get("services") or {}).values():
+        try:
+            svc.reset(position=None)
+            svc._elo_overrides = {}
+        except Exception:
+            log.exception("account reset-rankings in-memory reset failed")
+    log.info("AUTH-VERIFIED reset-rankings user_id=%s counts=%s", user_id, counts)
+    return jsonify({"ok": True, "counts": counts})
+
+
 @app.route("/api/trades/liked")
+@_gate_unverified_read
 def get_liked_trades():
     """GET /api/trades/liked  →  trades the user has liked"""
     sess = _require_initialized_session()
@@ -4769,6 +5266,7 @@ def get_liked_trades():
 
 
 @app.route("/api/trades/matches")
+@_gate_unverified_read
 def get_trade_matches():
     """
     GET /api/trades/matches  →  all trade matches for the current user
@@ -4819,6 +5317,7 @@ def get_trade_matches():
 
 
 @app.route("/api/trades/matches/all")
+@_gate_unverified_read
 def get_trade_matches_all():
     """
     GET /api/trades/matches/all
@@ -4919,6 +5418,7 @@ def get_trade_matches_all():
 
 
 @app.route("/api/trades/awaiting")
+@_gate_unverified_read
 def get_awaiting_trades():
     """
     GET /api/trades/awaiting
@@ -5001,6 +5501,7 @@ def get_awaiting_trades():
 
 
 @app.route("/api/trades/matches/<int:match_id>/dismiss", methods=["POST"])
+@_gate_unverified_write
 def dismiss_trade_match(match_id):
     """
     POST /api/trades/matches/<match_id>/dismiss
@@ -5036,6 +5537,7 @@ def dismiss_trade_match(match_id):
 
 
 @app.route("/api/trades/matches/<int:match_id>/disposition", methods=["POST"])
+@_gate_unverified_write
 def disposition_trade_match(match_id):
     """
     POST /api/trades/matches/<match_id>/disposition
@@ -5356,6 +5858,7 @@ def get_portfolio():
 
 
 @app.route("/api/rankings/submit", methods=["POST"])
+@_gate_unverified_write
 def submit_rankings():
     """
     POST /api/rankings/submit
@@ -5402,6 +5905,7 @@ def submit_rankings():
 
 
 @app.route("/api/league/preferences", methods=["GET"])
+@_gate_unverified_read
 def get_league_preferences():
     """
     GET /api/league/preferences?league_id=...
@@ -5444,6 +5948,7 @@ def get_league_preferences():
 
 
 @app.route("/api/league/preferences", methods=["POST"])
+@_gate_unverified_write
 def set_league_preferences():
     """
     POST /api/league/preferences
@@ -5508,6 +6013,7 @@ def set_league_preferences():
 
 
 @app.route("/api/league/asset-prefs", methods=["GET"])
+@_gate_unverified_read
 def get_asset_prefs():
     """GET /api/league/asset-prefs?league_id=... — the caller's untouchables +
     targets for a league (backlog #2).
@@ -5527,6 +6033,7 @@ def get_asset_prefs():
 
 
 @app.route("/api/league/asset-prefs", methods=["POST"])
+@_gate_unverified_write
 def set_asset_prefs():
     """POST /api/league/asset-prefs — tag/untag one player for a league (#2).
 
@@ -5605,6 +6112,7 @@ def league_summary_route():
 
 
 @app.route("/api/league/scoring", methods=["POST"])
+@_gate_unverified_write
 def league_scoring_route():
     """POST /api/league/scoring {league_id, format}
 
@@ -6353,6 +6861,13 @@ def _ensure_sleeper_cache_populated() -> dict:
     if cached is not None:
         return cached
 
+    if _TEST_MODE:
+        # This bulk fetch uses raw urllib (not _sleeper_get), so the fixture
+        # seam can't intercept it. In test mode the seeded warm-cache file IS
+        # the data source — a miss here means the seeder output is missing.
+        raise RuntimeError(
+            f"players cache missing in test mode (expected seeded file at {PLAYERS_CACHE_FILE})")
+
     log.info("  📡 cache miss — fetching from Sleeper (~5MB)…")
     req = urllib.request.Request(
         "https://api.sleeper.app/v1/players/nfl",
@@ -6752,10 +7267,19 @@ def session_init():
     with _sessions_lock:
         if existing_sess:
             token = incoming_token
+            # Verified state (account-auth P1) survives a same-user re-init
+            # (league switch, revalidate) — the Sleeper-JWT proof bound the
+            # SESSION to the user, not to a league. It must NOT survive the
+            # token being re-pointed at a different user_id.
+            if existing_sess.get("user_id") != user_id:
+                existing_sess.pop("verified", None)
+                existing_sess.pop("verified_via", None)
             existing_sess.update(session_payload)
+            session_verified = bool(existing_sess.get("verified"))
         else:
             token = secrets.token_urlsafe(32)
             _sessions[token] = session_payload
+            session_verified = False
 
     # ── Defer DB upserts + push fanout + Sleeper meta to a daemon ────────
     # Everything below this point that isn't required for the response
@@ -7021,6 +7545,19 @@ def session_init():
         # Pre-gen is best-effort. Never let it break session_init.
         log.warning("session/init: pre-gen kickoff failed: %s", pregen_err)
 
+    # ── Verified-session state (account-auth P1, additive field) ─────────
+    # The mobile "Verify your account" banner keys off this:
+    #   session_verified — THIS session proved control (Sleeper-JWT + oracle)
+    #   user_verified    — SOME controller has verified this user_id; an
+    #                      unverified session for a verified user_id has
+    #                      already lost write access (squatter case)
+    #   enforced         — grace is over (auth.enforce_verified_writes)
+    verified_via = None
+    try:
+        from . import accounts as _accounts
+        verified_via = _accounts.get_user_verified_via(user_id)
+    except Exception as verif_err:
+        log.warning("session/init: verified_via lookup failed: %s", verif_err)
     return jsonify({
         "ok":           True,
         "token":        token,
@@ -7029,6 +7566,12 @@ def session_init():
         "user_roster":  [player_to_dict(players_dict[pid]) for pid in new_user_roster if pid in players_dict],
         "league_id":    league_id,
         "opponents":    len(members),
+        "verification": {
+            "session_verified": session_verified,
+            "user_verified":    bool(verified_via),
+            "verified_via":     verified_via,
+            "enforced":         is_enabled("auth.enforce_verified_writes"),
+        },
     })
 
 
@@ -7056,6 +7599,7 @@ def session_ping():
 # ---------------------------------------------------------------------------
 
 @app.route("/api/notifications")
+@_gate_unverified_read
 def list_notifications():
     """
     GET /api/notifications?user_id=<uid>
@@ -7085,6 +7629,7 @@ def list_notifications():
 
 
 @app.route("/api/notifications/read", methods=["POST"])
+@_gate_unverified_write
 def read_notifications():
     """
     POST /api/notifications/read  { "user_id": "...", "ids": [1, 2, 3] }
@@ -7122,6 +7667,7 @@ def read_notifications():
 
 
 @app.route("/api/notifications/read-all", methods=["POST"])
+@_gate_unverified_write
 def read_all_notifications():
     """
     POST /api/notifications/read-all  { "user_id": "..." }
@@ -7366,6 +7912,7 @@ def _send_typed_push(
 
 
 @app.route("/api/notifications/register-device", methods=["POST"])
+@_gate_unverified_write
 def register_device_for_push():
     """Register an Expo push token for the authenticated user.
 
@@ -7410,6 +7957,7 @@ def get_notification_prefs_route():
 
 
 @app.route("/api/notifications/prefs", methods=["PUT"])
+@_gate_unverified_write
 def update_notification_prefs_route():
     """PUT /api/notifications/prefs — partial update. Body keys (all optional):
       trade_matches, weekly_digest, reengagement, quiet_hours_enabled (bool/0/1),
@@ -7785,6 +8333,7 @@ def _players_by_id_for(session_players) -> dict[str, dict]:
 
 
 @app.route("/api/trends/risers-fallers")
+@_gate_unverified_read
 def trends_risers_fallers_route():
     """
     GET /api/trends/risers-fallers?window_days=30&top_n=5
@@ -7834,6 +8383,7 @@ def trends_risers_fallers_route():
 
 
 @app.route("/api/trends/contrarian")
+@_gate_unverified_read
 def trends_contrarian_route():
     """
     GET /api/trends/contrarian?league_id=...
@@ -7883,6 +8433,7 @@ def trends_contrarian_route():
 
 
 @app.route("/api/trends/consensus-gap")
+@_gate_unverified_read
 def trends_consensus_gap_route():
     """
     GET /api/trends/consensus-gap?league_id=...&top_n=5
@@ -8003,6 +8554,7 @@ def post_trio_skip():
 
 
 @app.route("/api/tiers/dismiss", methods=["POST"])
+@_gate_unverified_write
 def post_tiers_dismiss():
     """POST /api/tiers/dismiss
     Body: { player_id: str }  OR  { player_ids: [str, ...] }
@@ -8408,6 +8960,7 @@ def extension_auth():
 
 
 @app.route("/api/extension/rankings")
+@_gate_unverified_read
 def extension_rankings():
     """Return a compact tier + pos_rank map for the authenticated user.
 
@@ -8957,6 +9510,224 @@ def session_demo():
     except Exception as e:
         log.error("session/demo failed: %s\n%s", e, traceback.format_exc())
         return jsonify({"error": "internal_error"}), 500
+
+
+# ─── Account auth — Apple/Google identity anchors + in-app deletion ────────
+# Account-auth plan P2 (docs/plans/account-auth-plan-2026-07-11.md §3-P2).
+# Thin wrappers over backend/accounts.py. The sign-in surface is gated on
+# the `auth.accounts` flag (ships dark); DELETE /api/account is deliberately
+# ungated — App Store Guideline 5.1.1(v) requires in-app account deletion.
+
+from . import accounts as _accounts
+
+
+def _account_session() -> dict | None:
+    """Best-effort session lookup for the auth routes — no 401 on miss.
+
+    Demo sessions don't persist anything, so they never bind to an account.
+    """
+    token = request.headers.get("X-Session-Token", "")
+    with _sessions_lock:
+        sess = _sessions.get(token)
+    if sess is None:
+        return None
+    if sess.get("is_demo") or str(sess.get("user_id", "")).startswith("demo_user_"):
+        return None
+    return sess
+
+
+def _provider_auth_response(provider: str, claims: dict):
+    """Shared find-or-create + bind + verify flow for /api/auth/<provider>.
+
+    Binding rules (see accounts.bind_sleeper_user — binding is sticky):
+      * session present, account unbound      → bind to session's user_id
+      * session present, same binding         → no-op
+      * session present, DIFFERENT binding    → keep existing binding, flag
+        `conflict` (identity anchor wins; no silent rebinding)
+      * no session, account bound             → device-loss restore: mint a
+        session for the bound user
+      * no session, account unbound           → linked=false; client links a
+        Sleeper username, then re-posts the same identity token to bind
+    """
+    sub = claims.get("sub")
+    if not sub:
+        return jsonify({"error": "invalid_token", "reason": "missing_sub"}), 401
+    acct = _accounts.find_or_create_account(
+        provider, sub, _accounts.hash_email(claims.get("email"))
+    )
+    sess = _account_session()
+
+    out: dict = {
+        "ok": True,
+        "provider": provider,
+        "account_id": acct["account_id"],
+        "linked": False,
+        "sleeper_user_id": None,
+        "conflict": False,
+    }
+
+    bound_uid = acct["sleeper_user_id"]
+    if sess is not None:
+        bind = _accounts.bind_sleeper_user(acct["account_id"], sess["user_id"])
+        out["linked"] = True
+        out["sleeper_user_id"] = bind["sleeper_user_id"]
+        out["conflict"] = bind["conflict"]
+        if not bind["conflict"]:
+            # Session's user is now anchored to this provider identity.
+            sess["verified"] = True
+            sess["verified_via"] = provider
+            sess["account_id"] = acct["account_id"]
+            out["verified_via"] = provider
+            try:
+                _accounts.mark_user_verified(sess["user_id"], provider)
+            except Exception as e:
+                log.warning("auth/%s: mark_user_verified failed: %s", provider, e)
+    elif bound_uid:
+        # Device-loss restore: no session, but this identity already anchors
+        # a Sleeper-keyed user. Mint a user-scoped session (same shape the
+        # extension auth builds) and mark it verified.
+        profile = _accounts.get_user_profile(bound_uid) or {}
+        try:
+            token, payload = _extension_build_session(
+                user_id=bound_uid,
+                username=profile.get("username") or "",
+                display_name=profile.get("display_name") or profile.get("username") or "",
+                avatar=profile.get("avatar"),
+            )
+        except Exception as e:
+            log.exception("auth/%s: restore session build failed", provider)
+            return jsonify({"error": "session_build_failed", "message": str(e)}), 500
+        payload["verified"] = True
+        payload["verified_via"] = provider
+        payload["account_id"] = acct["account_id"]
+        try:
+            _accounts.mark_user_verified(bound_uid, provider)
+        except Exception as e:
+            log.warning("auth/%s: mark_user_verified failed: %s", provider, e)
+        out.update({
+            "linked": True,
+            "sleeper_user_id": bound_uid,
+            "username": profile.get("username"),
+            "display_name": profile.get("display_name"),
+            "avatar": profile.get("avatar"),
+            "session_token": token,
+            "verified_via": provider,
+        })
+    # else: brand-new identity with no session — client shows the
+    # "Link your Sleeper username" step, then re-posts the token.
+
+    return jsonify(out)
+
+
+@app.route("/api/auth/apple", methods=["POST"])
+def auth_apple():
+    """Sign in with Apple — verify the identity token, find-or-create the
+    account, bind/restore per the rules on _provider_auth_response."""
+    if not is_enabled("auth.accounts"):
+        return jsonify({"error": "not_found"}), 404
+    body = request.get_json(force=True, silent=True) or {}
+    token = (body.get("identity_token") or "").strip()
+    if not token:
+        return jsonify({"error": "missing_token",
+                        "message": "identity_token required."}), 400
+    try:
+        claims = _accounts.verify_apple_token(token)
+    except _accounts.TokenVerificationError as e:
+        log.info("auth/apple: token rejected (%s)", e.reason)
+        return jsonify({"error": "invalid_token", "reason": e.reason}), 401
+    return _provider_auth_response("apple", claims)
+
+
+@app.route("/api/auth/google", methods=["POST"])
+def auth_google():
+    """Google ID-token sign-in — same code path as Apple, different issuer.
+
+    Requires GOOGLE_OAUTH_CLIENT_ID in the environment (the token `aud`);
+    returns 503 not_configured until the operator sets it. The mobile
+    surface for Google is stubbed for now — Apple is the App-Store-mandatory
+    anchor (Guideline 4.8)."""
+    if not is_enabled("auth.accounts"):
+        return jsonify({"error": "not_found"}), 404
+    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+    if not client_id:
+        return jsonify({"error": "not_configured",
+                        "message": "Google sign-in is not configured."}), 503
+    body = request.get_json(force=True, silent=True) or {}
+    token = (body.get("id_token") or body.get("identity_token") or "").strip()
+    if not token:
+        return jsonify({"error": "missing_token",
+                        "message": "id_token required."}), 400
+    try:
+        claims = _accounts.verify_google_token(token, client_id)
+    except _accounts.TokenVerificationError as e:
+        log.info("auth/google: token rejected (%s)", e.reason)
+        return jsonify({"error": "invalid_token", "reason": e.reason}), 401
+    return _provider_auth_response("google", claims)
+
+
+@app.route("/api/account")
+def get_account_route():
+    """Current account: linked identities + bound Sleeper id + verified state."""
+    if not is_enabled("auth.accounts"):
+        return jsonify({"error": "not_found"}), 404
+    sess = _require_session()
+    user_id = sess["user_id"]
+    acct = None
+    if sess.get("account_id"):
+        acct = _accounts.get_account(sess["account_id"])
+    if acct is None:
+        acct = _accounts.get_account_for_user(user_id)
+    verified_via = sess.get("verified_via")
+    if verified_via is None:
+        try:
+            verified_via = _accounts.get_user_verified_via(user_id)
+        except Exception:
+            verified_via = None
+    return jsonify({
+        "ok": True,
+        "sleeper_user_id": user_id,
+        "verified_via": verified_via,
+        "account": acct,   # null when no identity is linked yet
+    })
+
+
+@app.route("/api/account", methods=["DELETE"])
+def delete_account_route():
+    """In-app account deletion (App Store 5.1.1(v)) — NOT flag-gated.
+
+    Deletes/anonymizes per the matrix documented in accounts.delete_user_data
+    (honors web/privacy.html §6). When the user record has been verified
+    (users.verified_via set), the calling session must itself be verified —
+    a username-only squatter session cannot delete a verified user's data.
+    Also evicts every live session for the user (server-side sign-out).
+    """
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if sess.get("is_demo") or str(user_id or "").startswith("demo_user_"):
+        return jsonify({"error": "demo_session",
+                        "message": "Demo sessions have no stored data."}), 400
+    try:
+        verified_via = _accounts.get_user_verified_via(user_id)
+    except Exception:
+        verified_via = None
+    if verified_via and not sess.get("verified"):
+        return jsonify({
+            "error": "verification_required",
+            "message": "This account is verified — verify this session "
+                       "before deleting it.",
+        }), 403
+    try:
+        counts = _accounts.delete_user_data(user_id,
+                                            account_id=sess.get("account_id"))
+    except Exception as e:
+        log.exception("delete_account: deletion failed for %s", user_id)
+        return jsonify({"error": "deletion_failed", "message": str(e)}), 500
+    with _sessions_lock:
+        for t in [t for t, s in _sessions.items()
+                  if s.get("user_id") == user_id]:
+            _sessions.pop(t, None)
+    log.info("delete_account: user %s deleted (%s)", user_id, counts)
+    return jsonify({"ok": True, "deleted": counts})
 
 
 if __name__ == "__main__":

@@ -64,6 +64,10 @@ users_table = Table("users", metadata,
     Column("invited_by",      String),   # sleeper username of referrer (null = direct)
     Column("unlocked_formats", Text),    # JSON list — which formats the user has
                                           # unlocked trade finder in, e.g. ["1qb_ppr"]
+    Column("anchor_scale",    Text),     # JSON — per-format pick-value scale (#111):
+                                          #   {"1qb_ppr": 3, "sf_tep": 2}
+                                          # value = "a top-tier asset is worth N firsts";
+                                          # absent format key = default (2, legacy math)
     # ── User-event denormalized hot-read columns (see user_events_table) ──
     Column("last_active_at",        String),
     Column("last_login_at",         String),
@@ -85,6 +89,11 @@ users_table = Table("users", metadata,
     Column("longest_streak",        Integer),
     Column("last_rank_local_date",  String),
     Column("last_rank_tz",          String),
+    # ── Verified session persistence (account-auth plan P1/P2) ───────────
+    # verified_via: 'sleeper' | 'apple' | 'google' — the source that proved
+    # control of this user record. NULL = never verified (username-only).
+    Column("verified_at",           String),
+    Column("verified_via",          String),
 )
 
 leagues_table = Table("leagues", metadata,
@@ -679,6 +688,39 @@ sleeper_credentials_table = Table("sleeper_credentials", metadata,
     Column("updated_at",      String,  nullable=False),
 )
 
+# ---------------------------------------------------------------------------
+# accounts + linked_identities — identity anchor layer (account-auth plan P2)
+# ---------------------------------------------------------------------------
+#
+# Thin identity layer above the app's working key (`sleeper_user_id`) — see
+# docs/plans/account-auth-plan-2026-07-11.md §2d / §3-P2. Engine/ranking/match
+# tables stay keyed on sleeper_user_id; an account is the durable anchor a
+# provider identity (Sign in with Apple / Google) hangs off, and it *binds*
+# to at most one sleeper_user_id (accounts.sleeper_user_id, nullable until
+# the first bind). Binding is sticky — see backend/accounts.py bind rules.
+#
+# linked_identities: one row per (provider, provider_subject). We key on the
+# provider's stable `sub` claim — NEVER on email (Apple only returns email on
+# first authorization). email_hash is an optional SHA-256 of the provider
+# email for support lookups; the raw email is never stored.
+# ---------------------------------------------------------------------------
+
+accounts_table = Table("accounts", metadata,
+    Column("account_id",      String, primary_key=True),   # opaque hex id
+    Column("sleeper_user_id", String),                     # bound working key (nullable)
+    Column("created_at",      String, nullable=False),
+)
+
+linked_identities_table = Table("linked_identities", metadata,
+    Column("id",               Integer, primary_key=True, autoincrement=True),
+    Column("account_id",       String,  nullable=False),
+    Column("provider",         String,  nullable=False),   # 'apple' | 'google'
+    Column("provider_subject", String,  nullable=False),   # provider's stable `sub`
+    Column("email_hash",       String),                    # SHA-256 hex of email, nullable
+    Column("linked_at",        String,  nullable=False),
+    UniqueConstraint("provider", "provider_subject", name="uq_linked_identity"),
+)
+
 # Default values seeded on first run.  Only inserted if the key doesn't
 # already exist (INSERT OR IGNORE) so manual overrides survive re-deploys.
 _MODEL_CONFIG_DEFAULTS = [
@@ -832,6 +874,8 @@ def _migrate_db() -> None:
         ("leagues",            "total_rosters",         "INTEGER"),
         ("users",              "invited_by",            "VARCHAR"),
         ("users",              "unlocked_formats",      "TEXT"),
+        # #111 — per-user pick-value scale for the anchor wizard
+        ("users",              "anchor_scale",          "TEXT"),
         # Agent 4 additions — referral receipt feature reuses the existing
         # `notifications` table (no new columns needed). The new notification
         # `type` value is 'referral_joined'; see push_notification() below.
@@ -857,6 +901,13 @@ def _migrate_db() -> None:
         ("users",              "last_rank_tz",          "VARCHAR"),
         # PR3 — dedup_key threading on quiet-hours queue
         ("notification_queue", "dedup_key",             "VARCHAR"),
+        # Account-auth plan (docs/plans/account-auth-plan-2026-07-11.md) —
+        # verified-session persistence. Written by P1 (Sleeper-JWT proof,
+        # verified_via='sleeper') and P2 (identity anchors,
+        # verified_via='apple'|'google'). Guards are idempotent, so it is
+        # safe for both phases to declare the same columns.
+        ("users",              "verified_at",           "VARCHAR"),
+        ("users",              "verified_via",          "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -1922,6 +1973,98 @@ def load_tier_overrides(
         return {k: float(v) for k, v in fmt_overrides.items()}
     except (TypeError, ValueError):
         return {}
+
+
+def reset_user_rankings(user_id: str) -> dict[str, int]:
+    """Wipe every persisted ranking artifact for one user (all formats).
+
+    The account-auth P1 "reset my rankings" action (POST
+    /api/account/reset-rankings): a newly VERIFIED owner inheriting
+    squatter-authored data gets a clean slate. Unlike /api/reset (in-memory
+    service state only), this deletes the PERSISTED inputs that session_init
+    replays — swipe history, tier/reorder overrides, saved-tier markers,
+    ranking method — plus the published member_rankings other members' trade
+    math reads. elo_history snapshots are kept (telemetry trail, not
+    replayed into rankings).
+
+    Returns row/field counts for the route's response + support log.
+    """
+    counts: dict[str, int] = {}
+    with engine.begin() as conn:
+        res = conn.execute(
+            delete(swipe_decisions_table)
+            .where(swipe_decisions_table.c.user_id == user_id)
+        )
+        counts["swipe_decisions_deleted"] = res.rowcount or 0
+        res = conn.execute(
+            delete(member_rankings_table)
+            .where(member_rankings_table.c.user_id == user_id)
+        )
+        counts["member_rankings_deleted"] = res.rowcount or 0
+        res = conn.execute(
+            update(users_table)
+            .where(users_table.c.sleeper_user_id == user_id)
+            .values(tier_overrides=None, tiers_saved=None, ranking_method=None)
+        )
+        counts["user_rows_cleared"] = res.rowcount or 0
+    return counts
+
+
+def save_anchor_scale(
+    user_id: str,
+    top_tier_firsts: float,
+    scoring_format: str = DEFAULT_SCORING,
+) -> None:
+    """
+    Persist the user's pick-value scale (#111) for one scoring format:
+    "a top-tier asset is worth N firsts". Other formats' values are left
+    untouched. Stored as JSON on users.anchor_scale, e.g. {"1qb_ppr": 3}.
+    """
+    is_postgres = not DATABASE_URL.startswith("sqlite")
+    with engine.begin() as conn:
+        if is_postgres:
+            row = conn.execute(
+                text("SELECT anchor_scale FROM users WHERE sleeper_user_id = :uid FOR UPDATE"),
+                {"uid": user_id},
+            ).fetchone()
+        else:
+            row = conn.execute(
+                select(users_table.c.anchor_scale).where(
+                    users_table.c.sleeper_user_id == user_id
+                )
+            ).fetchone()
+        try:
+            all_scales = json.loads(row.anchor_scale) if row and row.anchor_scale else {}
+        except (json.JSONDecodeError, TypeError):
+            all_scales = {}
+        if not isinstance(all_scales, dict):
+            all_scales = {}
+        all_scales[scoring_format] = float(top_tier_firsts)
+        conn.execute(
+            update(users_table)
+            .where(users_table.c.sleeper_user_id == user_id)
+            .values(anchor_scale=json.dumps(all_scales))
+        )
+
+
+def load_anchor_scale(
+    user_id: str,
+    scoring_format: str = DEFAULT_SCORING,
+) -> float | None:
+    """Return the user's pick-value scale for this format, or None when
+    the user never set one (caller applies the legacy default)."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.anchor_scale).where(
+                users_table.c.sleeper_user_id == user_id
+            )
+        ).fetchone()
+    try:
+        all_scales = json.loads(row.anchor_scale) if row and row.anchor_scale else {}
+        val = all_scales.get(scoring_format) if isinstance(all_scales, dict) else None
+        return float(val) if val is not None else None
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
 
 
 def mark_format_unlocked(user_id: str, scoring_format: str) -> dict:

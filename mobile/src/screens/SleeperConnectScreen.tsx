@@ -4,12 +4,20 @@ import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { useNavigation } from '@react-navigation/native';
 import { ink, chalk, ice, space, type } from '../theme/chalkline';
 import { linkSleeperToken } from '../api/sendInSleeper';
+import { useSession } from '../state/useSession';
 
 // Slice 2 of "Send in Sleeper" (docs/plans/sleeper-write-capture-runbook.md §C1).
 // The user logs into Sleeper's OWN page in an in-app WebView — we never handle
 // the password. Once logged in, Sleeper drops a 365-day JWT in
 // localStorage['token']; we read it out and hand it to POST /api/sleeper/link,
 // which stores it encrypted. From then on, sends need no re-login.
+//
+// Account-auth P1: this capture DOUBLES AS ACCOUNT VERIFICATION. The backend
+// checks the token's user_id claim against the session user and proves the
+// token live against Sleeper (the signature oracle); on success the session
+// is VERIFIED (link response `verified: true`) and write access is
+// protected. We surface that in the success state and mirror it into
+// useSession.verification so the "Verify your account" banner clears.
 
 const SLEEPER_LOGIN_URL = 'https://sleeper.com/login';
 
@@ -39,7 +47,8 @@ true;
 
 export default function SleeperConnectScreen() {
   const navigation = useNavigation<any>();
-  const [phase, setPhase] = useState<'browsing' | 'linking' | 'error'>('browsing');
+  const [phase, setPhase] = useState<'browsing' | 'linking' | 'done' | 'error'>('browsing');
+  const [verified, setVerified] = useState(false);
   const capturedRef = useRef(false);
 
   const onMessage = useCallback(
@@ -56,10 +65,29 @@ export default function SleeperConnectScreen() {
       capturedRef.current = true;
       setPhase('linking');
       try {
-        await linkSleeperToken(payload.token);
-        navigation.goBack();
+        const res = await linkSleeperToken(payload.token);
+        const isVerified = res?.verified === true;
+        setVerified(isVerified);
+        if (isVerified) {
+          // The capture just proved control of this account — clear the
+          // "Verify your account" banner without waiting for the next
+          // session_init round-trip.
+          const prev = useSession.getState().verification;
+          useSession.getState().setVerification({
+            session_verified: true,
+            user_verified: true,
+            verified_via: 'sleeper',
+            enforced: prev?.enforced ?? false,
+          });
+        }
+        // Brief success beat so the user sees the connected/verified state
+        // before the modal closes under them.
+        setPhase('done');
+        setTimeout(() => navigation.goBack(), 1200);
       } catch {
         // Let them retry — the token is still in the webview's localStorage.
+        // (A 403 token_user_mismatch / token_rejected also lands here: the
+        // Sleeper login doesn't control this FTF account.)
         capturedRef.current = false;
         setPhase('error');
       }
@@ -72,11 +100,13 @@ export default function SleeperConnectScreen() {
       <View style={styles.banner}>
         <Text style={type.bodySm}>
           Log in to Sleeper below. We never see your password — once you’re in,
-          we securely connect your account so you can send trades from FTF.
+          we securely connect and verify your account so you can send trades
+          from FTF.
         </Text>
         {phase === 'error' && (
           <Text style={[type.bodySm, styles.error]}>
-            Couldn’t connect — try logging in again.
+            Couldn’t connect — try again, and make sure you log in to the same
+            Sleeper account you use here.
           </Text>
         )}
       </View>
@@ -96,6 +126,19 @@ export default function SleeperConnectScreen() {
         <View style={styles.overlay} pointerEvents="auto">
           <ActivityIndicator color={ice.base} />
           <Text style={[type.label, styles.overlayText]}>Connecting…</Text>
+        </View>
+      )}
+
+      {phase === 'done' && (
+        <View style={styles.overlay} pointerEvents="auto" testID="sleeperconnect.done">
+          <Text style={[type.label, styles.overlayText]}>
+            {verified ? 'Account verified' : 'Sleeper connected'}
+          </Text>
+          <Text style={[type.bodySm, styles.overlaySub]}>
+            {verified
+              ? 'Your ranks are now protected and trades can send from FTF.'
+              : 'Connected — verification will complete next time you send.'}
+          </Text>
         </View>
       )}
     </View>
@@ -122,4 +165,5 @@ const styles = StyleSheet.create({
     gap: space.sm,
   },
   overlayText: { color: chalk.base },
+  overlaySub: { color: chalk.dim, textAlign: 'center', paddingHorizontal: space.xl },
 });

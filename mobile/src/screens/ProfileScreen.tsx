@@ -52,7 +52,9 @@ type Position = 'QB' | 'RB' | 'WR' | 'TE';
 type Tier = keyof typeof tier;
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
-const TIER_ORDER: Tier[] = ['elite', 'starter', 'solid', 'depth', 'bench'];
+const TIER_ORDER: Tier[] = [
+  'firsts_2plus', 'first_1', 'second', 'third', 'fourth', 'bench',
+];
 
 export default function ProfileScreen({ route }: Props) {
   const username = (route?.params?.username || '').trim();

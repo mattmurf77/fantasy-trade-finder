@@ -14,19 +14,20 @@ import backend.ranking_service as rs
 from backend.ranking_service import Player, RankingService
 
 
-# WR 1qb_ppr bands (2026-07-10 consensus recalibration): elite 1700–1800,
-# starter 1505–1695, solid 1360–1500, depth 1220–1355, bench 1150–1215.
+# Pick-value ladder bands (2026-07-11, uniform in Elo space):
+# firsts_2plus 1788–1870, first_1 1580–1785, second 1400–1575,
+# third 1280–1395, fourth 1220–1275, bench 1150–1215.
 # Seed players so several edges are contested within the ±60 margin
-# (e.g. the starter/elite edge at 1700).
+# (e.g. the second/first_1 edge at 1580).
 _SEEDS = {
-    "elite_a":   1755,   # elite
-    "elite_b":   1710,   # elite (just above the 1700 edge)
-    "star_a":    1690,   # starter (just below the 1700 edge)
-    "star_b":    1600,   # starter
-    "star_c":    1515,   # starter (just above the 1505 edge)
-    "solid_a":   1495,   # solid (just below the 1505 edge)
-    "solid_b":   1400,   # solid
-    "depth_a":   1300,   # depth
+    "first_a":   1690,   # first_1
+    "first_b":   1600,   # first_1 (just above the 1580 edge)
+    "sec_a":     1560,   # second (just below the 1580 edge)
+    "sec_b":     1480,   # second
+    "sec_c":     1410,   # second (just above the 1400 edge)
+    "third_a":   1390,   # third (just below the 1400 edge)
+    "third_b":   1300,   # third
+    "fourth_a":  1240,   # fourth
 }
 
 
@@ -82,7 +83,7 @@ def test_boundary_trio_none_for_overall_mode(svc):
 def test_boundary_trio_none_when_single_tier(monkeypatch):
     # All players packed inside one band → no contested edge → None (caller
     # falls back to the tightest-trio selector).
-    seeds = {f"s{i}": 1400 + i for i in range(6)}  # all 'solid' (1360–1500)
+    seeds = {f"s{i}": 1450 + i for i in range(6)}  # all 'second' (1400–1575)
     players = [Player(id=pid, name=pid, position="WR", team="A", age=25) for pid in seeds]
     s = RankingService(players=players, seed_ratings=seeds)
     s._scoring_format = "1qb_ppr"
