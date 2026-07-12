@@ -17,4 +17,5 @@ One file per top-level route.
 | `TradeCalculatorScreen` | Manual trade builder — "Calculator" pill in Trades. Live mode: real consensus values via /api/trade/*; Demo mode: mock dual-board league |
 | `MatchesScreen` | Mutual trade matches inbox |
 | `SleeperConnectScreen` | WebView login to Sleeper → captures the JWT for "Send in Sleeper" (flagged beta). Doubles as account **verification** (account-auth P1): the backend proves the captured token live + claim-matched, marks the session verified, and the screen surfaces "Account verified" on success |
+| `SettingsScreen` | Settings modal (gear icon): leagues, ranking pref, notifications, and the **Account** section — renders meaningful state for every session type (P2.7): linked identities, an Apple-link button for any session without an Apple identity (binds via `POST /api/auth/apple` on the live session and flips `useSession.verification`), Sleeper source row, link-Sleeper card for account-only users (P2.6 merge flow), verification status, Verify account (Sleeper sessions), Delete account |
 | `PlaceholderScreen` | Stub for unfinished routes |

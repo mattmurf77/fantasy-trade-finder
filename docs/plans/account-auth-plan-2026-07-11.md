@@ -263,3 +263,17 @@ Settings → Account lists linked sources (provider identities + the bound Sleep
 - [x] Tests: `backend/tests/test_account_first.py` (account-only lifecycle, merge matrix, gate composition, flag-off parity).
 - [ ] Operator prerequisite unchanged from P2: **ASC Sign in with Apple capability is not enabled yet** — everything stays behind `auth.accounts` (dark). Google mobile flow still stubbed.
 - [ ] P3 additions from P2.6: support path for "JWT-verified Sleeper owner wants to link to a fresh account" (`sleeper_already_claimed` today); persistent sessions matter more now (account-only users can't revalidate via league handshake — a backend restart requires a fresh Apple tap).
+
+---
+
+## P2.7 — Settings surfacing fix (2026-07-12, post-1.7.1 / build 40)
+
+> **Operator (build 40, flags live):** "I didn't see the option for either apple sign in or sleeper linking."
+
+Diagnosis: both affordances existed but were invisible to the operator's session type. The Apple button lived only on `SignInScreen` (never seen by signed-in users), and Settings → Account's "Link Sleeper username" card rendered only for `account_only` sessions. A Sleeper-session user with no account row saw just "Linked sign-in — None" + Verify + Delete.
+
+Fix (mobile-only; the backend session-bind path in `_provider_auth_response` already handled Sleeper-session callers and was fully tested):
+
+- [x] Settings → Account now renders the official `AppleAuthenticationButton` (same HIG construction as SignInScreen; gated on `auth.accounts` + `isAvailableAsync` + resolved `GET /api/account` with no Apple identity). Tap → `signInAsync` → `POST /api/auth/apple` with the live session → bind + session verified. `conflict: true` (sticky binding — identity anchors a different Sleeper user) surfaces an honest toast; success mirrors `verified_via='apple'` into `useSession.verification` (no re-launch needed) and invalidates the account query.
+- [x] Account section always renders meaningful state per session type: identities list, Apple-link card (or "Linked sign-in — None" where Apple is unavailable), Sleeper row (bound username, falling back to the session's own username for Sleeper sessions with no account row), link-Sleeper card (account-only, unchanged), Verification status row (P1 state, not flag-gated), Verify-account row (Sleeper sessions only, unchanged), Delete account. Demo sessions get a "Demo session — sign in to save your data" row instead of an empty header.
+- No API contract changes; no backend changes.

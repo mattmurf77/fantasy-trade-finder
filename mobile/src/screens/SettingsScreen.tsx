@@ -6,6 +6,7 @@ import {
   Switch,
   ScrollView,
   ActivityIndicator,
+  Platform,
   Pressable,
   TextInput,
   Linking,
@@ -13,12 +14,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import * as AppleAuthentication from 'expo-apple-authentication';
 
 import { ink, chalk, ice, semantic, space, radii, type } from '../theme/chalkline';
 import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
-import { deleteAccount, getAccount, linkSleeperUsername } from '../api/auth';
+import { appleSignIn, deleteAccount, getAccount, linkSleeperUsername } from '../api/auth';
 import { ApiError } from '../api/client';
 import { setRankingMethod } from '../api/rankings';
 import SteerSlider from '../components/SteerSlider';
@@ -65,6 +67,8 @@ export default function SettingsScreen({ navigation }: any) {
   const user = useSession((s) => s.user);
   const setUser = useSession((s) => s.setUser);
   const setLeague = useSession((s) => s.setLeague);
+  const verification = useSession((s) => s.verification);
+  const setVerification = useSession((s) => s.setVerification);
   const [deleting, setDeleting] = useState(false);
   const accountQuery = useQuery({
     queryKey: ['account'],
@@ -72,6 +76,87 @@ export default function SettingsScreen({ navigation }: any) {
     enabled: accountsEnabled && !isDemo,
     staleTime: 60_000,
   });
+  const identities = accountQuery.data?.account?.identities ?? [];
+  const hasAppleIdentity = identities.some((i) => i.provider === 'apple');
+
+  // ── Link Apple from an existing session (feedback: build 40) ───────────
+  // The bind path (POST /api/auth/apple with a live session) shipped in P2
+  // but its only button lived on SignInScreen — invisible to anyone already
+  // signed in. Surface it here for every session with no Apple identity.
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  const [appleBusy, setAppleBusy] = useState(false);
+
+  useEffect(() => {
+    if (!accountsEnabled || isDemo || Platform.OS !== 'ios') return;
+    AppleAuthentication.isAvailableAsync()
+      .then(setAppleAvailable)
+      .catch(() => setAppleAvailable(false));
+  }, [accountsEnabled, isDemo]);
+
+  async function handleLinkApple() {
+    if (appleBusy) return;
+    setAppleBusy(true);
+    try {
+      const cred = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      if (!cred.identityToken) throw new Error('Apple did not return an identity token.');
+      const res = await appleSignIn(cred.identityToken);
+      if (res.conflict) {
+        // Sticky binding: this Apple ID's account is already bound to a
+        // DIFFERENT Sleeper user; the server refuses to rebind (200 +
+        // conflict=true). Honest copy, nothing changed server-side.
+        setToast({
+          msg: 'That Apple ID is already linked to a different account.',
+          tone: 'warn',
+        });
+      } else if (res.linked) {
+        // Bound to this session's user; the server marked the session
+        // verified (verified_via='apple'). Mirror it into the store so the
+        // verify banner / status row react without a re-launch.
+        setVerification({
+          session_verified: true,
+          user_verified: true,
+          verified_via: res.verified_via || 'apple',
+          enforced: verification?.enforced ?? false,
+        });
+        queryClient.invalidateQueries({ queryKey: ['account'] });
+        setToast({ msg: 'Apple ID linked — your account is verified.', tone: 'success' });
+      } else {
+        // No live session server-side (restart/expiry) — the backend
+        // treated this as a fresh sign-in instead of a link.
+        setToast({
+          msg: "Couldn't link — your session expired. Sign out and back in, then retry.",
+          tone: 'warn',
+        });
+      }
+    } catch (err: any) {
+      if (err?.code !== 'ERR_REQUEST_CANCELED') {
+        setToast({ msg: err?.message || "Couldn't link Apple — try again.", tone: 'warn' });
+      }
+    } finally {
+      setAppleBusy(false);
+    }
+  }
+
+  // Verification status label — user-level state. GET /api/account reports
+  // the session's verified_via (falling back to the users-row marker); when
+  // the flag is off the query never runs, so fall back to the P1 store state
+  // (session_init reports it regardless of auth.accounts).
+  const verifiedVia =
+    accountQuery.data?.verified_via ??
+    (verification?.session_verified || verification?.user_verified
+      ? verification?.verified_via
+      : null);
+  const verificationLabel =
+    verifiedVia === 'apple' ? 'Verified via Apple'
+    : verifiedVia === 'google' ? 'Verified via Google'
+    : verifiedVia === 'sleeper' ? 'Verified via Sleeper'
+    : verifiedVia ? 'Verified'
+    : 'Not verified';
 
   // ── Link Sleeper username (account-first P2.6) ─────────────────────────
   // Shown for account-only users (Apple/Google account, no Sleeper source).
@@ -417,34 +502,67 @@ export default function SettingsScreen({ navigation }: any) {
         <View style={styles.section}>
           <TickLabel>Account</TickLabel>
         </View>
+        {isDemo ? (
+          <View style={styles.kvRow}>
+            <Text style={styles.rowKey}>Demo session</Text>
+            <Text style={styles.kvValue}>Sign in to save your data</Text>
+          </View>
+        ) : null}
         {accountsEnabled && !isDemo ? (
           <>
-            {accountQuery.data?.account?.identities?.length ? (
-              accountQuery.data.account.identities.map((ident) => (
-                <View key={ident.provider} style={styles.kvRow}>
-                  <Text style={styles.rowKey}>
-                    {ident.provider === 'apple' ? 'Signed in with Apple' : 'Signed in with Google'}
+            {identities.map((ident) => (
+              <View key={ident.provider} style={styles.kvRow}>
+                <Text style={styles.rowKey}>
+                  {ident.provider === 'apple' ? 'Signed in with Apple' : 'Signed in with Google'}
+                </Text>
+                <Text style={styles.kvValue}>
+                  {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
+                </Text>
+              </View>
+            ))}
+            {/* Link Apple — shown for any session with no Apple identity
+                (Sleeper sessions included). Official HIG component, white
+                variant on dark, same construction as SignInScreen. Gated on
+                the resolved account query so it never flashes for users who
+                already have an Apple identity. */}
+            {accountQuery.data && !hasAppleIdentity && appleAvailable ? (
+              <Card>
+                <View style={styles.connectBody}>
+                  <Text style={styles.connectHelp}>
+                    Link Apple to verify your account and restore it if you
+                    ever lose this device.
                   </Text>
-                  <Text style={styles.kvValue}>
-                    {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
-                  </Text>
+                  <AppleAuthentication.AppleAuthenticationButton
+                    testID="settings.link-apple-btn"
+                    buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                    buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                    cornerRadius={radii.sm}
+                    style={styles.appleButton}
+                    onPress={() => void handleLinkApple()}
+                  />
+                  {appleBusy ? <ActivityIndicator color={chalk.dim} /> : null}
                 </View>
-              ))
-            ) : (
+              </Card>
+            ) : null}
+            {accountQuery.data && !identities.length && !appleAvailable ? (
               <View style={styles.kvRow}>
                 <Text style={styles.rowKey}>Linked sign-in</Text>
                 <Text style={styles.kvValue}>None</Text>
               </View>
-            )}
+            ) : null}
             {/* Linked league sources (P2.6). Sleeper today; linked ESPN
-                leagues will list here alongside it. */}
-            {accountQuery.data?.account?.sleeper_user_id ? (
+                leagues will list here alongside it. A Sleeper-keyed session
+                shows its own identity even before any account exists — the
+                section must never read as empty for signed-in users. */}
+            {!user?.account_only || accountQuery.data?.account?.sleeper_user_id ? (
               <View style={styles.kvRow}>
                 <Text style={styles.rowKey}>Sleeper</Text>
                 <Text style={styles.kvValue}>
                   {accountQuery.data?.sleeper_username
                     ? `@${accountQuery.data.sleeper_username}`
-                    : 'Linked'}
+                    : user?.username
+                      ? `@${user.username}`
+                      : 'Linked'}
                 </Text>
               </View>
             ) : null}
@@ -478,6 +596,12 @@ export default function SettingsScreen({ navigation }: any) {
         ) : null}
         {!isDemo ? (
           <>
+            {/* Verification status (P1) — always rendered so the section
+                reads meaningfully for every session type. */}
+            <View style={styles.kvRow}>
+              <Text style={styles.rowKey}>Verification</Text>
+              <Text style={styles.kvValue}>{verificationLabel}</Text>
+            </View>
             {/* SleeperConnect verification requires a Sleeper-keyed session
                 (the JWT claim must match the session user) — hidden for
                 account-only users, whose Apple sign-in IS the verification. */}
@@ -654,6 +778,11 @@ const styles = StyleSheet.create({
   },
   connectBody: { gap: space.md },
   connectHelp: type.bodySm,
+  // Official Sign in with Apple button (Settings → Account link card).
+  appleButton: {
+    alignSelf: 'stretch',
+    height: 44,
+  },
   rankingHint: { ...type.bodySm, color: chalk.faint, marginTop: space.sm },
   connectInput: {
     ...type.body,
