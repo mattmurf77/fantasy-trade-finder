@@ -108,7 +108,7 @@ def build_pool(scoring_format: str) -> tuple[dict[str, Player], dict[str, float]
     if scoring_format in _pool_cache:
         return _pool_cache[scoring_format]
 
-    elo_map, value_map = _fetch_dynasty_process(scoring=scoring_format)
+    elo_map, value_map, pos_map = _fetch_dynasty_process(scoring=scoring_format)
     players: dict[str, Player] = {}
     seeds: dict[str, float] = {}
 
@@ -124,6 +124,8 @@ def build_pool(scoring_format: str) -> tuple[dict[str, Player], dict[str, float]
         normed = normalise_name(name)
         if normed not in value_map:
             continue
+        if pos_map.get(normed) != pos:
+            continue  # #127 — never name-match across positions
         pid = str(row["player_id"])
         players[pid] = Player(
             id=pid,

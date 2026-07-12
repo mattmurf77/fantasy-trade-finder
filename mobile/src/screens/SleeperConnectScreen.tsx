@@ -3,7 +3,7 @@ import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { useNavigation } from '@react-navigation/native';
 import { ink, chalk, ice, space, type } from '../theme/chalkline';
-import { linkSleeperToken } from '../api/sendInSleeper';
+import { linkSleeperToken, persistSleeperToken } from '../api/sendInSleeper';
 import { useSession } from '../state/useSession';
 
 // Slice 2 of "Send in Sleeper" (docs/plans/sleeper-write-capture-runbook.md §C1).
@@ -66,6 +66,15 @@ export default function SleeperConnectScreen() {
       setPhase('linking');
       try {
         const res = await linkSleeperToken(payload.token);
+        // #126: persist the captured JWT to the device Keychain so future
+        // fresh sessions re-verify via silent replay instead of another
+        // manual capture. Any 200 means the claim matched the session user
+        // (mismatches 403 before storing) — keep the token even when
+        // `verified` is false (inconclusive oracle; worth replaying later).
+        const uid = useSession.getState().user?.user_id;
+        if (uid) {
+          persistSleeperToken(uid, payload.token).catch(() => {});
+        }
         const isVerified = res?.verified === true;
         setVerified(isVerified);
         if (isVerified) {

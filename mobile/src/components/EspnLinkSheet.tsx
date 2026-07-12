@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { ink, chalk, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
 import { Button, Icon } from './chalkline';
+import { ApiError } from '../api/client';
 import {
   linkEspnLeague,
   isEspnPreview,
@@ -93,7 +94,14 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
         setStep('done');
       }
     } catch (e: any) {
-      setError(e?.message || "Couldn't reach ESPN — try again shortly.");
+      // #126 R-7: the write gate's 403 carries the raw code
+      // `verification_required` as its message — map it to human copy.
+      // The central _onVerificationRequired listener still raises the banner.
+      if (e instanceof ApiError && e.isVerificationRequired) {
+        setError('Verify your account to link a league.');
+      } else {
+        setError(e?.message || "Couldn't reach ESPN — try again shortly.");
+      }
     } finally {
       setBusy(false);
     }
@@ -116,7 +124,12 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
         setStep('done');
       }
     } catch (e: any) {
-      setError(e?.message || 'Import failed — try again.');
+      // #126 R-7: same verification_required mapping as fetchPreview.
+      if (e instanceof ApiError && e.isVerificationRequired) {
+        setError('Verify your account to link a league.');
+      } else {
+        setError(e?.message || 'Import failed — try again.');
+      }
     } finally {
       setBusyTeamId(null);
     }

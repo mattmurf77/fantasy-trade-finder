@@ -1,0 +1,77 @@
+appId: com.fantasytradefinder.app
+# tc: TC-131-APPLE-01 (feedback #131 — Apple sign-in entitlement regression guard)
+# profile: standard
+# flags: release
+# Failure copy pinned from expo-apple-authentication@8.0.8
+# (ios/AppleAuthenticationExceptions.swift) — re-verify the strings there on
+# any package upgrade (package.json floats ~8.0.8). See PRD R-4.
+tags: [smoke, signin, settings]
+---
+# ── Part 1: Sign-In screen (SignInScreen.tsx ~L276) — REGRESSION SENSOR ──
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.apple-btn"
+    timeout: 15000
+- assertNotVisible:
+    id: "signin.error-text"
+- tapOn:
+    id: "signin.apple-btn"
+# SETTLE — DO NOT REMOVE. Pre-fix, the native rejection takes ~200-400 ms to
+# reach setError and re-render; asserting immediately after the tap would
+# pass green on a broken build. This optional probe IS the mandated >=2 s
+# bounded settle (PRD R-5): it returns early if the error copy appears
+# (making the assertNotVisible below fail = regression caught) and waits the
+# full 3 s when it never appears (fixed entitlement = green). A native Apple
+# sheet appearing during the window = PASS (Maestro cannot drive it further).
+- extendedWaitUntil:
+    visible:
+      text: ".*The authorization attempt failed.*"
+    timeout: 3000
+    optional: true
+- assertNotVisible:
+    text: ".*The authorization attempt failed.*"
+- assertNotVisible:
+    id: "signin.error-text"
+- takeScreenshot: smoke-11a-apple-signin-no-error
+
+# ── Part 2: Settings link row (SettingsScreen.tsx ~L535) ────────────────
+# REACHABILITY ONLY — no failure-copy asserts here: the Settings failure
+# surface is a warn toast that auto-dismisses in ~1.7 s (Toast.tsx holdMs
+# default 1500), so a notVisible assert can never catch a regression on
+# this surface. The entitlement is binary-wide; Part 1 is the sensor.
+# Relaunch (state kept — still signed out) to dismiss any native sheet.
+- launchApp:
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "topbar.settings"
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "settings.link-apple-btn"
+    timeout: 15000
+- tapOn:
+    id: "settings.link-apple-btn"
+- takeScreenshot: smoke-11b-apple-settings-link-reachable

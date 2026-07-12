@@ -22,11 +22,14 @@ import type { LeagueSummary } from '../shared/types';
 interface Props {
   onLeaguePicked: () => void;
   onSignOut: () => void;
+  /** #130 — open the ESPN link sheet on mount (Settings CTA). Honored only
+   *  while the `espn.link` flag is on. */
+  autoOpenEspnLink?: boolean;
 }
 
 // Show user's leagues → tap one → run sessionInit against it → done.
 // Matches the web app's selectLeague flow but without the overlay modals.
-export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props) {
+export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpenEspnLink }: Props) {
   const user = useSession((s) => s.user);
   const cached = useSession((s) => s.leagues);
   const setLeagues = useSession((s) => s.setLeagues);
@@ -39,6 +42,13 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
   // ESPN league linking (flag `espn.link`) — read-only import by league ID.
   const espnEnabled = useFlag('espn.link');
   const [espnOpen, setEspnOpen] = useState(false);
+
+  // #130 — Settings' ESPN CTA lands here with `espnLink: true`; open the
+  // sheet once the flag confirms. Effect (not initial state) because the
+  // flag store may hydrate after mount.
+  useEffect(() => {
+    if (autoOpenEspnLink && espnEnabled) setEspnOpen(true);
+  }, [autoOpenEspnLink, espnEnabled]);
 
   // Render free-tier cold starts run 30–60s. Hold the friendly default for
   // the first 4s so warm requests never show the alarming "waking up" copy.

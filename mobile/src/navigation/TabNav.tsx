@@ -14,6 +14,7 @@ import RankHomeScreen from '../screens/RankHomeScreen';
 import PickAnchorScreen from '../screens/PickAnchorScreen';
 import TiersScreen from '../screens/TiersScreen';
 import QuickSetTiersScreen from '../screens/QuickSetTiersScreen';
+import QuickRankScreen from '../screens/QuickRankScreen';
 import ManualRanksScreen from '../screens/ManualRanksScreen';
 import TrendsScreen from '../screens/TrendsScreen';
 import TradesScreen from '../screens/TradesScreen';
@@ -40,6 +41,7 @@ export type RankRoute =
   | 'Anchors'
   | 'Tiers'
   | 'QuickSetTiers'
+  | 'QuickRank'
   | 'ManualRanks'
   | 'Trends';
 export type TradesRoute = 'TradesHome' | 'Portfolio' | 'TradeCalculator';
@@ -143,6 +145,15 @@ function RankStackNav() {
         name="QuickSetTiers"
         component={QuickSetTiersScreen}
         options={subScreenOptions('Quick Set Tiers', 'Tiers')}
+      />
+      {/* #136 — within-tier ordering pass, the polish step after Quick set.
+          Offered when the quick-set walk finishes and from the Rank menu.
+          NOT a launch-routable pref (that's #122, unselected). Back fallback
+          stays the Tiers board it writes to, same as Quick set. */}
+      <RankStack.Screen
+        name="QuickRank"
+        component={QuickRankScreen}
+        options={subScreenOptions('Quick Rank', 'Tiers')}
       />
       <RankStack.Screen
         name="ManualRanks"
@@ -346,10 +357,10 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
         queryFn: () => getRankings(null),
         staleTime: 30_000,
       });
-    } else if (screen === 'QuickSetTiers') {
+    } else if (screen === 'QuickSetTiers' || screen === 'QuickRank') {
       // #119 — QuickSetTiersScreen opens on position 'QB' and reads through
       // a format-scoped key (QuickSetTiersScreen.tsx:72), unlike TiersScreen's
-      // flat key above.
+      // flat key above. #136 — QuickRankScreen shares the same key.
       const fmt = useSession.getState().activeFormat;
       void queryClient.prefetchQuery({
         queryKey: ['rankings', fmt, 'QB'],
@@ -382,6 +393,8 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
   const items: { route: RankRoute; label: string; sub: string; testID: string; recommended?: boolean }[] = [
     // #119 — Quick set is a first-class method: lowest effort, recommended.
     { route: 'QuickSetTiers', label: 'Quick set',     sub: 'Tap players into pick-value tiers, one tier at a time — the fastest board', testID: 'rankmenu.quickset', recommended: true },
+    // #136 — the polish pass after Quick set: order players inside each tier.
+    { route: 'QuickRank',     label: 'Quick rank',    sub: 'Order players within each tier — tap them best-first, tier by tier', testID: 'rankmenu.quickrank' },
     { route: 'Trios',         label: 'Trios',         sub: '3-at-a-time swipe ranking', testID: 'rankmenu.trios' },
     { route: 'Anchors',       label: 'Pick Anchors',  sub: 'Say what each player is worth in draft picks — 4 1sts down to no value', testID: 'rankmenu.anchors' },
     { route: 'Tiers',         label: 'Tiers',         sub: 'Drag players into pick-value tiers (4+ 1sts down to Waivers)', testID: 'rankmenu.tiers' },

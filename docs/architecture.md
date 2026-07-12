@@ -72,7 +72,7 @@ flowchart LR
 | `trade_optimizer.py` | new | Tier 3 engine module (flag `trade_engine.v3`): exact per-pair package search + sweetener pass + 3-team cycle clearing (`trade.three_team`). Flag-selectable — off falls back to v2, then legacy |
 | `trade_narrative.py` | ~100 | Deterministic template-based rationale strings for trade cards. No LLM. Used by `trade_service.generate_trades()` to fill `TradeCard.narrative` |
 | `smart_matchup_generator.py` | ~530 | Claude-assisted matchup picker + algorithmic fallback. Includes `community_trio_signal` + `find_qc_trio` for QC checks |
-| `data_loader.py` | ~280 | Pulls DynastyProcess CSV; maps consensus values → seed Elo (KTC curve) |
+| `data_loader.py` | ~280 | Pulls DynastyProcess CSV; maps consensus values → seed Elo (KTC curve). `load_consensus_maps` also returns a per-name DP position map — the DP↔Sleeper name join is position-strict (#127: never name-match across positions; two NFL players can share a normalised name, e.g. Kenneth Walker WR vs Kenneth Walker III RB) |
 | `espn_service.py` | ~400 | ESPN league-linking adapter (flag `espn.link`): unofficial v3 API reads (browser-signature headers, injected `_opener`), payload parsing, and the DP `db_playerids` crosswalk (24h-TTL in-memory cache, snapshot fallback) that maps ESPN rosters → Sleeper player ids. Consumed by the `/api/espn/*` routes in `server.py`; live smoke CLI: `python3 -m backend.espn_service <league_id> [season]` |
 | `trends_service.py` | ~420 | Risers/fallers, contrarian, consensus-gap; reads `elo_history` |
 | `wrapped_collector.py` | ~70 | Exposes `record_event()` — dual-write into `user_events` + denormalized `users.last_*_at` |
@@ -95,10 +95,11 @@ flowchart LR
 
 ### Skills (development tooling)
 
-- `feature-evaluator/` — Claude Code skill that reviews a feature area and emits an improvement report.
-- `project-reorganizer/` — Claude Code skill that reorganizes a flat project into a conventional layout.
+- `.claude/skills/feature-evaluator/` — Claude Code skill that reviews a feature area and emits an improvement report.
+- `.claude/skills/project-reorganizer/` — Claude Code skill that reorganizes a flat project into a conventional layout.
+- `.claude/skills/project-architect/` — Claude Code skill that generates and maintains the reference-docs layer.
 
-Both are exercised in `*-workspace/` sibling folders (throwaway eval output).
+Throwaway eval workspaces and packaged `.skill` bundles are archived in `archive/skill-workspaces/`.
 
 ## Request lifecycle (typical ranking flow)
 

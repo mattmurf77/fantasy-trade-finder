@@ -82,6 +82,7 @@ export default function TopBar() {
               ]}
               accessibilityRole="button"
               accessibilityLabel="Settings"
+              testID="topbar.settings"
             >
               <Icon name="settings" color={chalk.dim} />
             </Pressable>

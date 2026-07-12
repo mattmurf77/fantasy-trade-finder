@@ -190,7 +190,7 @@ def load_consensus_elo(
 
     Returns an empty dict (falls back to flat 1500) if the fetch fails.
     """
-    elo_map, _ = _fetch_dynasty_process(scoring=scoring, timeout=timeout)
+    elo_map, _, _ = _fetch_dynasty_process(scoring=scoring, timeout=timeout)
     return elo_map
 
 
@@ -206,20 +206,41 @@ def load_consensus_values(
     Used to determine which Sleeper players should be in the universal
     ranking pool (any player with a positive dynasty trade value).
     """
-    _, value_map = _fetch_dynasty_process(scoring=scoring, timeout=timeout)
+    _, value_map, _ = _fetch_dynasty_process(scoring=scoring, timeout=timeout)
     return value_map
+
+
+def load_consensus_maps(
+    scoring: str = "1qb",
+    timeout: int = 10,
+) -> tuple[dict[str, float], dict[str, float], dict[str, str]]:
+    """
+    Fetch DynastyProcess values ONCE and return all three name-keyed maps:
+        (elo_map, value_map, pos_map)
+
+    pos_map = { normalised_player_name: DP position (QB/RB/WR/TE) } and
+    exists so joins against the Sleeper pool can be position-strict
+    (feedback #127): two different NFL players can share a normalised name
+    (e.g. Kenneth Walker the veteran WR vs Kenneth Walker III the RB), and
+    a name-only join pulls both into the pool under one DP value.
+    """
+    return _fetch_dynasty_process(scoring=scoring, timeout=timeout)
 
 
 def _fetch_dynasty_process(
     scoring: str = "1qb",
     timeout: int = 10,
-) -> tuple[dict[str, float], dict[str, float]]:
+) -> tuple[dict[str, float], dict[str, float], dict[str, str]]:
     """
-    Internal: fetch DynastyProcess CSV and return both:
-        (elo_map, value_map)
+    Internal: fetch DynastyProcess CSV and return:
+        (elo_map, value_map, pos_map)
     where:
         elo_map   = { normalised_name: initial_elo }
         value_map = { normalised_name: raw_value }  (only for value > 0)
+        pos_map   = { normalised_name: DP position (QB/RB/WR/TE) }
+
+    pos_map lets consumers join by name AND position — a name-only join
+    can cross positions when two NFL players share a name (#127).
 
     Accepts either DP's raw column suffix ("1qb" / "2qb") OR our internal
     format keys ("1qb_ppr" / "sf_tep").
@@ -250,10 +271,11 @@ def _fetch_dynasty_process(
                 raw = resp.read().decode("utf-8")
         except Exception as e:
             print(f"⚠️  DynastyProcess fetch failed ({e}) — using flat Elo baseline")
-            return {}, {}
+            return {}, {}, {}
 
     elo_map: dict[str, float] = {}
     value_map: dict[str, float] = {}
+    pos_map: dict[str, str] = {}
 
     reader = csv.DictReader(io.StringIO(raw))
     for row in reader:
@@ -282,26 +304,33 @@ def _fetch_dynasty_process(
         lookup_key = DP_TO_SLEEPER_NAME.get(normed, normed)
 
         elo_map[lookup_key] = round(elo, 1)
+        pos_map[lookup_key] = pos
         if value > 0:
             value_map[lookup_key] = value
 
     print(f"✅ Loaded {len(elo_map)} player values from DynastyProcess "
           f"({len(value_map)} with value > 0)")
-    return elo_map, value_map
+    return elo_map, value_map, pos_map
 
 
 def seed_elo_for_players(
     players,                        # list[Player]
     elo_map: dict[str, float],
     fallback_elo: float = 1500.0,
+    pos_map: dict[str, str] | None = None,
 ) -> dict[str, float]:
     """
     Match your Player objects against the DynastyProcess elo_map and
     return a dict of { player.id: initial_elo }.
 
-    Matching is by exact normalised name only.  The DP_TO_SLEEPER_NAME
+    Matching is by exact normalised name.  The DP_TO_SLEEPER_NAME
     reference table (applied in _fetch_dynasty_process) has already
     translated DP names into Sleeper names, so no fuzzy fallback is needed.
+
+    When `pos_map` is provided (load_consensus_maps), the match is also
+    position-strict: a name hit whose DP position differs from the
+    player's position is treated as unmatched (#127 — never name-match
+    across positions; two NFL players can share a name).
 
     Unmatched players receive fallback_elo (1500 by default).
     """
@@ -311,7 +340,9 @@ def seed_elo_for_players(
     for player in players:
         key = normalise_name(player.name)
 
-        if key in elo_map:
+        if key in elo_map and (
+            pos_map is None or pos_map.get(key) == player.position
+        ):
             seeded[player.id] = elo_map[key]
         else:
             seeded[player.id] = fallback_elo

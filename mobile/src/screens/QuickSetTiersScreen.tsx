@@ -6,6 +6,7 @@ import {
   Pressable,
   ActivityIndicator,
   FlatList,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -120,14 +121,30 @@ export default function QuickSetTiersScreen() {
         // #119 — with 'quickset' as a launch route this screen can be the
         // stack's first mount (no history); fall through to the Tiers board
         // it just wrote, same fallback as the header back control.
-        if (navigation.canGoBack()) navigation.goBack();
-        else navigation.navigate('Tiers');
+        const exit = () => {
+          if (navigation.canGoBack()) navigation.goBack();
+          else navigation.navigate('Tiers');
+        };
+        // #136 — offer Quick Rank as the natural next step: order the
+        // players inside the tiers the user just set.
+        Alert.alert(
+          'Tiers set',
+          'Rank within your tiers? Tap players best-first, one tier at a ' +
+            'time, to fine-tune the order inside each tier.',
+          [
+            { text: 'Not now', style: 'cancel', onPress: exit },
+            {
+              text: 'Quick rank',
+              onPress: () => navigation.navigate('QuickRank', { position }),
+            },
+          ],
+        );
         return;
       }
       setTierIdx(idx);
       setSelected(new Set(savedMap[TIERS[idx]] ?? []));
     },
-    [navigation],
+    [navigation, position],
   );
 
   const saveMutation = useMutation({

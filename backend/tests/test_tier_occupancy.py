@@ -247,3 +247,40 @@ def test_reorder_respects_requested_order():
     elo = svc._compute_elo(pool)
     ranked = sorted(ordered, key=lambda pid: -elo[pid])
     assert ranked == ordered, "reorder must produce strictly the requested order"
+
+
+def test_subset_reorder_within_tier_preserves_tier_membership():
+    """#136 Quick Rank's save contract: one tier's players POSTed to
+    /api/rankings/reorder as a SUBSET of the position. apply_reorder permutes
+    the Elos of exactly the submitted ids (same multiset), so (a) untouched
+    players keep their Elo, (b) every reordered player stays in its tier,
+    and (c) the requested within-tier order holds after an elo-desc sort."""
+    fmt, pos = "1qb_ppr", "RB"
+    svc, _players = _service_from_snapshot(fmt, pos)
+    pool = svc._pool(pos)
+    elo_before = dict(svc._compute_elo(pool))
+
+    tier_ids = [
+        p.id for p in pool
+        if RankingService.tier_for_elo(elo_before[p.id], pos, fmt) == "second"
+    ]
+    assert len(tier_ids) >= 3, "snapshot must populate the 2nd tier"
+
+    # Maximal within-tier shuffle: reverse the tier (worst-first).
+    requested = list(reversed(tier_ids))
+    svc.apply_reorder(pos, requested)
+    elo_after = svc._compute_elo(pool)
+
+    # (a) subset-safe: ids not submitted are untouched.
+    for p in pool:
+        if p.id not in tier_ids:
+            assert elo_after[p.id] == elo_before[p.id], (
+                f"{p.id}: Elo changed by a reorder that didn't include it")
+
+    # (b) tier membership invariant under a within-tier permutation.
+    for pid in tier_ids:
+        assert RankingService.tier_for_elo(elo_after[pid], pos, fmt) == "second"
+
+    # (c) the requested order is exactly what an elo-desc sort now yields.
+    ranked = sorted(tier_ids, key=lambda pid: -elo_after[pid])
+    assert ranked == requested

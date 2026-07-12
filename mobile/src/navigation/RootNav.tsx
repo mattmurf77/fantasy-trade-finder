@@ -5,10 +5,11 @@ import {
   createNavigationContainerRef,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet, Pressable } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
-import { ink, chalk, ice, fonts } from '../theme/chalkline';
+import { ink, chalk, ice, fonts, radii } from '../theme/chalkline';
+import { Icon } from '../components/chalkline';
 import { useSession } from '../state/useSession';
 import SignInScreen from '../screens/SignInScreen';
 import LeaguePickerScreen from '../screens/LeaguePickerScreen';
@@ -27,7 +28,8 @@ import { navigationIntegration } from '../observability/sentry';
 
 type AuthStack = {
   SignIn: undefined;
-  LeaguePicker: undefined;
+  // #130 — `espnLink: true` auto-opens the ESPN link sheet (Settings CTA).
+  LeaguePicker: { espnLink?: boolean } | undefined;
   Main: undefined;
   Settings: undefined;
   Profile: { username: string };
@@ -46,6 +48,25 @@ function HeaderTitle({ children }: { children: string }) {
     <Text numberOfLines={1} style={styles.headerTitle}>
       {children}
     </Text>
+  );
+}
+
+// #130 — explicit close control for modal screens. Modal presentations only
+// offered swipe-to-dismiss, which testers didn't discover on Settings. Icon
+// Button construction per components.md (32×32, radius sm, chalk-dim glyph,
+// pressed = ink-3 fill; no emoji).
+function HeaderClose({ onPress, testID }: { onPress: () => void; testID: string }) {
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel="Close"
+      onPress={onPress}
+      hitSlop={8}
+      style={({ pressed }) => [styles.headerClose, pressed && { backgroundColor: ink.ink3 }]}
+    >
+      <Icon name="x" size={20} color={chalk.dim} />
+    </Pressable>
   );
 }
 
@@ -200,13 +221,16 @@ export default function RootNav({ booted }: { booted: boolean }) {
           )}
         </Stack.Screen>
         <Stack.Screen name="LeaguePicker">
-          {({ navigation }) => (
+          {({ navigation, route }) => (
             <LeaguePickerScreen
               onLeaguePicked={() => navigation.replace('Main')}
               onSignOut={async () => {
                 await useSession.getState().signOut();
                 navigation.replace('SignIn');
               }}
+              // #130 — Settings' "Link an ESPN league" row lands here with
+              // the sheet already open (flag-gated inside the screen).
+              autoOpenEspnLink={route.params?.espnLink === true}
             />
           )}
         </Stack.Screen>
@@ -234,14 +258,19 @@ export default function RootNav({ booted }: { booted: boolean }) {
         <Stack.Screen
           name="Settings"
           component={SettingsScreen}
-          options={{
+          options={({ navigation }) => ({
             presentation: 'modal',
             headerShown: true,
             title: 'Settings',
             headerTitle: () => <HeaderTitle>Settings</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
-          }}
+            // #130 — swipe-dismiss was the only exit; give the modal an
+            // explicit close control.
+            headerRight: () => (
+              <HeaderClose testID="settings.close-btn" onPress={() => navigation.goBack()} />
+            ),
+          })}
         />
         <Stack.Screen
           name="Profile"
@@ -303,5 +332,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.54,
     textTransform: 'uppercase',
     color: chalk.base,
+  },
+  // #130 — Icon Button spec (components.md): 32×32, radius sm, not circular.
+  headerClose: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

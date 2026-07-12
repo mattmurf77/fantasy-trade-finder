@@ -63,6 +63,9 @@ export default function SettingsScreen({ navigation }: any) {
   // the flag is off); "Verify account" and "Delete account" always show —
   // in-app deletion is App Store Guideline 5.1.1(v), not a flagged feature.
   const accountsEnabled = useFlag('auth.accounts');
+  // #130 — ESPN-link CTA row (flag `espn.link`): routes to the LeaguePicker
+  // with the EspnLinkSheet auto-opened (the one place the import flow lives).
+  const espnLinkEnabled = useFlag('espn.link');
   const isDemo = useSession((s) => s.isDemo);
   const user = useSession((s) => s.user);
   const setUser = useSession((s) => s.setUser);
@@ -433,6 +436,24 @@ export default function SettingsScreen({ navigation }: any) {
             />
           </View>
         </Card>
+        {/* #130 — flag-gated ESPN link entry. Reuses the LeaguePicker's
+            EspnLinkSheet flow (espnLink param auto-opens it) rather than
+            re-hosting the sheet here. */}
+        {espnLinkEnabled ? (
+          <Pressable
+            testID="settings.link-espn"
+            onPress={() => navigation.navigate?.('LeaguePicker', { espnLink: true })}
+            style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowKey}>Link an ESPN league</Text>
+              <Text style={styles.rowSub}>
+                Read-only import: rankings, tiers, and trios work today.
+              </Text>
+            </View>
+            <Icon name="chevron-right" color={chalk.dim} size={16} />
+          </Pressable>
+        ) : null}
 
         <View style={styles.section}>
           <TickLabel>Ranking</TickLabel>

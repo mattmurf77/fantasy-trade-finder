@@ -41,8 +41,11 @@ export default function VerifyAccountBanner({ onVerify }: Props) {
     return null;
   }
 
+  // #126: post-replay this banner appears only when the silent replay
+  // couldn't succeed (no stored token on this device, dead/expired token,
+  // or Sleeper unreachable) — the copy covers all three truthfully.
   const copy = verification.user_verified
-    ? 'This account was verified on another device. Reconnect Sleeper here to keep editing your ranks.'
+    ? "We couldn't confirm your Sleeper login on this device. Reconnect to keep editing your ranks."
     : 'Verify with your Sleeper login to keep editing your ranks.';
 
   return (

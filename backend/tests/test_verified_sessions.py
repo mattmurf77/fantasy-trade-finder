@@ -199,6 +199,44 @@ def test_link_success_verifies_session_and_persists_marker(client):
     assert accounts.get_user_verified_via(UID) == "sleeper"
 
 
+def test_link_expired_token_denied_before_oracle(client):
+    """#126 pin (PRD §4.6): a past-`exp` token replays to 400 token_expired —
+    denied before the claim check and the oracle, session stays unverified,
+    nothing stored. Client contract: this is one of the four closed-rule
+    conditions that delete the Keychain copy (R-2.4)."""
+    c, token, _ = client
+    with patch.object(server._sleeper_write, "verify_token_live",
+                      MagicMock(return_value={"raw": {}})) as probe:
+        r = c.post("/api/sleeper/link", headers=_h(token),
+                   data=json.dumps({"token": _token(exp_offset=-3600)}))
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "token_expired"
+    probe.assert_not_called()                     # denied before the oracle
+    assert not _sess(token).get("verified")
+    assert c.get("/api/sleeper/link", headers=_h(token)).get_json()["connected"] is False
+
+
+def test_link_delete_then_get_reports_disconnected(client):
+    """#126 pin (PRD §4.7, revocation stickiness R-2.2): after link+verify,
+    DELETE /api/sleeper/link → 200, and GET reports connected:false — the
+    exact server read the client's replay pre-check depends on to skip the
+    replay and delete its local copy instead of resurrecting the credential."""
+    c, token, _ = client
+    with patch.object(server._sleeper_write, "verify_token_live",
+                      MagicMock(return_value={"raw": {}})):
+        r = c.post("/api/sleeper/link", headers=_h(token),
+                   data=json.dumps({"token": _token()}))
+    assert r.status_code == 200 and r.get_json()["verified"] is True
+
+    r = c.delete("/api/sleeper/link", headers=_h(token))
+    assert r.status_code == 200
+    assert r.get_json()["connected"] is False
+
+    r = c.get("/api/sleeper/link", headers=_h(token))
+    assert r.status_code == 200
+    assert r.get_json()["connected"] is False
+
+
 # ---------------------------------------------------------------------------
 # 3. Write-gate matrix (representative gated route: /api/ranking-method)
 # ---------------------------------------------------------------------------

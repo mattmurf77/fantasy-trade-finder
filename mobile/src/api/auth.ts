@@ -1,4 +1,5 @@
 import { api, apiRequest, setSessionToken } from './client';
+import { maybeReplaySleeperVerification } from './sendInSleeper';
 import { getLeagueRosters, getLeagueUsers, warmPlayerCache, resetWarmedFlag } from './sleeper';
 import { isEspnLeague, buildEspnSessionInitBody } from './espn';
 import type {
@@ -31,6 +32,12 @@ export async function signIn(username: string): Promise<AuthResponse> {
   );
   if (res?.session_token) {
     await setSessionToken(res.session_token);
+    // #126 warm-up (fire-and-forget): the session just minted is fresh and
+    // therefore unverified — start the silent verification replay now so it
+    // usually completes during league pick, and sessionInit's awaited race
+    // below resolves instantly off the single-flight promise. Safe: verified
+    // state survives the same-user re-init sessionInit performs later.
+    maybeReplaySleeperVerification(res.user_id).catch(() => {});
   }
   return res;
 }
@@ -209,10 +216,67 @@ export async function sessionInit(body: SessionInitBody): Promise<SessionInitRes
   // Mirror the server's verified-session state into the store so the
   // verify banner reacts to every init/revalidate. Loaded inline to avoid
   // a circular import (same pattern as consumeInvitedBy below).
+  //
+  // #126 replay choke point: every session-establishment path (sign-in →
+  // league pick, revalidateSession, switchLeague, ESPN init) funnels
+  // through here. When the fresh session is unverified, race the
+  // single-flight silent replay (persisted Sleeper JWT → the existing
+  // hard-verified POST /api/sleeper/link) against a 4 s cap, and mirror
+  // exactly once AFTER the race so the banner never flashes. acct_*
+  // sessions are verified at mint (guard skips them); demo/no-token users
+  // return 'none' with no network.
   if (res?.verification) {
+    let verification = res.verification;
+    if (!verification.session_verified) {
+      const replay = maybeReplaySleeperVerification(body.user_id);
+      const outcome = await Promise.race([
+        replay,
+        new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 4000)),
+      ]);
+      if (outcome === 'verified') {
+        // The replay stamped the live server session — no re-init needed.
+        // Full success-mirror shape (same as SleeperConnectScreen's).
+        verification = {
+          session_verified: true,
+          user_verified: true,
+          verified_via: 'sleeper',
+          enforced: verification.enforced,
+        };
+      } else if (outcome === 'timeout') {
+        // Cap elapsed — mirror the server's values now (truthful banner);
+        // the in-flight replay keeps running and late-applies on a
+        // 'verified', guarded so it never clobbers newer state or a
+        // different signed-in user.
+        replay
+          .then((late) => {
+            if (late !== 'verified') return;
+            try {
+              const { useSession } = require('../state/useSession');
+              const state = useSession.getState();
+              const cur = state.verification;
+              if (
+                cur &&
+                !cur.session_verified &&
+                state.user?.user_id === body.user_id
+              ) {
+                state.setVerification({
+                  session_verified: true,
+                  user_verified: true,
+                  verified_via: 'sleeper',
+                  enforced: cur.enforced,
+                });
+              }
+            } catch {
+              /* require may fail in test contexts; non-fatal */
+            }
+          })
+          .catch(() => {});
+      }
+      // 'rejected' / 'inconclusive' / 'none' → mirror server values unchanged.
+    }
     try {
       const { useSession } = require('../state/useSession');
-      useSession.getState().setVerification(res.verification);
+      useSession.getState().setVerification(verification);
     } catch {
       /* require may fail in test contexts; non-fatal */
     }

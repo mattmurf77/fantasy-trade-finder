@@ -58,8 +58,8 @@ def _mock_fetch(monkeypatch):
 
 def test_each_format_reads_its_own_value_column(monkeypatch):
     _mock_fetch(monkeypatch)
-    _, v1 = _fetch_dynasty_process(scoring="1qb_ppr")
-    _, v2 = _fetch_dynasty_process(scoring="sf_tep")
+    _, v1, _ = _fetch_dynasty_process(scoring="1qb_ppr")
+    _, v2, _ = _fetch_dynasty_process(scoring="sf_tep")
 
     # 1qb_ppr → value_1qb column, sf_tep → value_2qb column
     assert v1["drake maye"] == 5438
@@ -73,8 +73,8 @@ def test_each_format_reads_its_own_value_column(monkeypatch):
 
 def test_raw_dp_suffixes_accepted_too(monkeypatch):
     _mock_fetch(monkeypatch)
-    _, via_internal = _fetch_dynasty_process(scoring="sf_tep")
-    _, via_raw = _fetch_dynasty_process(scoring="2qb")
+    _, via_internal, _ = _fetch_dynasty_process(scoring="sf_tep")
+    _, via_raw, _ = _fetch_dynasty_process(scoring="2qb")
     assert via_internal == via_raw
 
 

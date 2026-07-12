@@ -104,7 +104,7 @@ def spearman(x: list[float], y: list[float]) -> float:
 def load_pool_with_seeds(scoring: str = "1qb_ppr") -> list[tuple[Player, float]]:
     """Return [(player, seed_elo)] for every synced player that has a
     DynastyProcess value > 0 (the server's universal-pool membership rule)."""
-    elo_map, value_map = _fetch_dynasty_process(scoring=scoring)
+    elo_map, value_map, pos_map = _fetch_dynasty_process(scoring=scoring)
     if not elo_map:
         raise SystemExit(
             "DynastyProcess fetch failed — cannot derive consensus seed Elo. "
@@ -122,6 +122,8 @@ def load_pool_with_seeds(scoring: str = "1qb_ppr") -> list[tuple[Player, float]]
         normed = normalise_name(name)
         if normed not in value_map:  # no DP value > 0 → not in universal pool
             continue
+        if pos_map.get(normed) != pos:
+            continue  # #127 — never name-match across positions
         player = Player(
             id=str(row["player_id"]),
             name=name,

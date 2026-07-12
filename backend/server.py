@@ -66,7 +66,7 @@ _bh = _BufferHandler()
 _bh.setFormatter(logging.Formatter("%(levelname)s  %(message)s"))
 log.addHandler(_bh)
 from .ranking_service import RankingService, Player, TIER_CONFIG, ORDERED_TIERS
-from .data_loader import load_consensus_elo, load_consensus_values, seed_elo_for_players, normalise_name
+from .data_loader import load_consensus_maps, seed_elo_for_players, normalise_name
 from .database import (
     init_db,
     upsert_user, upsert_league,
@@ -232,10 +232,12 @@ if api_key:
 else:
     print("ℹ️  No ANTHROPIC_API_KEY — using algorithmic matchup selection")
 
-# Load DynastyProcess consensus values as Elo seed
+# Load DynastyProcess consensus values as Elo seed. Position-strict name
+# matching (#127): the pos map keeps a shared name from seeding across
+# positions (Kenneth Walker WR vs Kenneth Walker III RB).
 scoring  = os.environ.get("SCORING_FORMAT", "1qb")
-elo_map  = load_consensus_elo(scoring=scoring)
-seed     = seed_elo_for_players(DEMO_PLAYERS, elo_map) if elo_map else {}
+elo_map, _demo_vals, _demo_pos = load_consensus_maps(scoring=scoring)
+seed     = seed_elo_for_players(DEMO_PLAYERS, elo_map, pos_map=_demo_pos) if elo_map else {}
 
 service = RankingService(players=g_players, matchup_generator=matchup_gen, seed_ratings=seed)
 
@@ -690,6 +692,7 @@ def _maybe_sync_players() -> None:
 # always point to the 1qb_ppr pool so existing references keep working.
 dp_values_by_format: dict[str, dict[str, float]] = {}   # {fmt: {name: value}}
 dp_elo_by_format:    dict[str, dict[str, float]] = {}   # {fmt: {name: elo}}
+dp_pos_by_format:    dict[str, dict[str, str]]   = {}   # {fmt: {name: DP pos}} (#127)
 g_universal_by_format: dict[str, dict] = {}             # {fmt: {'players': [...], 'seed': {...}}}
 
 # Backwards-compat aliases (default format). These reference the same lists
@@ -823,6 +826,7 @@ def build_universal_pool(
     dp_elo: dict[str, float] | None = None,
     dp_vals: dict[str, float] | None = None,
     all_db_players: list | None = None,
+    dp_pos: dict[str, str] | None = None,
 ) -> tuple[list[Player], dict[str, float]]:
     """
     Build the universal ranking pool: every Sleeper player that has a
@@ -834,6 +838,13 @@ def build_universal_pool(
     caller so it is read once and reused across both format builds (instead of
     re-querying the full table per format). When None, falls back to loading it
     here so direct callers still work.
+
+    ``dp_pos`` ({normalised name: DP position}, from load_consensus_maps)
+    makes the DP↔Sleeper name join position-strict (#127): several NFL
+    players share a normalised name (Kenneth Walker WR vs Kenneth Walker III
+    RB), and without the position check every Sleeper namesake inherited the
+    one DP row's value and entered the pool — a duplicate at the wrong
+    position. When None (legacy callers), the join stays name-only.
     """
     if not sleeper_cache or not dp_vals:
         return [], {}
@@ -871,6 +882,13 @@ def build_universal_pool(
         normed = normalise_name(full_name)
         if normed not in dp_vals:
             continue  # no DP value → skip
+
+        # #127 — never name-match across positions: the DP row's position
+        # must agree with the Sleeper player's, or a namesake at another
+        # position (Kenneth Walker WR) silently inherits the value meant
+        # for the real asset (Kenneth Walker III, RB).
+        if dp_pos is not None and dp_pos.get(normed) != pos:
+            continue
 
         seen_ids.add(pid_str)
 
@@ -975,16 +993,17 @@ def _ensure_universal_pools() -> None:
     # data_loader (returns {} → flat-Elo baseline), so a failing format yields
     # empty maps rather than raising; we still guard the future result here so
     # one format's failure can never block or break the other.
-    def _load_format_dp(fmt: str) -> tuple[dict[str, float], dict[str, float]]:
-        return (
-            load_consensus_values(scoring=fmt),
-            load_consensus_elo(scoring=fmt),
-        )
+    def _load_format_dp(fmt: str) -> tuple[dict[str, float], dict[str, float], dict[str, str]]:
+        # Single fetch per format via load_consensus_maps — also yields the
+        # DP position map that makes the pool join position-strict (#127).
+        elo, vals, pos = load_consensus_maps(scoring=fmt)
+        return vals, elo, pos
 
     pending = [
         fmt for fmt in DL_SCORING_FORMATS
         if fmt not in g_universal_by_format
-        and (fmt not in dp_values_by_format or fmt not in dp_elo_by_format)
+        and (fmt not in dp_values_by_format or fmt not in dp_elo_by_format
+             or fmt not in dp_pos_by_format)
     ]
     if pending:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(pending)) as ex:
@@ -992,12 +1011,13 @@ def _ensure_universal_pools() -> None:
             for future in concurrent.futures.as_completed(future_to_fmt):
                 fmt = future_to_fmt[future]
                 try:
-                    vals, elo = future.result()
+                    vals, elo, pos = future.result()
                 except Exception as e:
                     log.warning("  DP fetch failed for %s (%s) — flat-Elo baseline", fmt, e)
-                    vals, elo = {}, {}
+                    vals, elo, pos = {}, {}, {}
                 dp_values_by_format.setdefault(fmt, vals)
                 dp_elo_by_format.setdefault(fmt, elo)
+                dp_pos_by_format.setdefault(fmt, pos)
 
     for fmt in DL_SCORING_FORMATS:
         if fmt in g_universal_by_format:
@@ -1007,6 +1027,7 @@ def _ensure_universal_pools() -> None:
             dp_elo=dp_elo_by_format.get(fmt, {}),
             dp_vals=dp_values_by_format.get(fmt, {}),
             all_db_players=all_db_players,
+            dp_pos=dp_pos_by_format.get(fmt),
         )
         g_universal_by_format[fmt] = {"players": players, "seed": seed}
         log.info("  universal pool built for %s: %d players", fmt, len(players))

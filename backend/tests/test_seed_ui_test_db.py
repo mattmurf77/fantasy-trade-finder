@@ -373,7 +373,7 @@ def test_dp_values_csv_feeds_the_data_loader_seam(seeded, monkeypatch):
     cache_names = {normalise_name(p["full_name"]) for p in cache.values()}
 
     for scoring in ("1qb_ppr", "sf_tep"):
-        elo_map, value_map = _fetch_dynasty_process(scoring=scoring)
+        elo_map, value_map, _pos_map = _fetch_dynasty_process(scoring=scoring)
         assert value_map, f"{scoring}: empty value map"
         assert set(value_map) == cache_names, f"{scoring}: pool/CSV name drift"
         assert all(v > 0 for v in value_map.values())

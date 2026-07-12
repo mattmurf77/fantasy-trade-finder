@@ -825,7 +825,9 @@ export default function TiersScreen() {
       {/* #81 — header + chrome hidden while the board is expanded. */}
       {expanded ? null : (
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Positional Tiers</Text>
+        {/* #135 — "Positional Tiers" wrapped to two lines next to the header
+            actions; the stack header (TabNav) already says "Tiers". */}
+        <Text style={styles.title}>Tiers</Text>
         <View style={styles.headerActions}>
           {/* Multi-select toggle. While ON, chip tap toggles selection
               (drag is suppressed); tapping again here cancels and clears

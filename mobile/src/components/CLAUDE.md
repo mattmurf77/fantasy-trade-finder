@@ -46,8 +46,18 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 - Calculator: `calc.mode-tab.<league|live|demo>` · `calc.side-a-add` · `calc.side-b-add` · `calc.picker.search` · `calc.picker.row.<player_id>` · `calc.verdict` · `calc.clear-btn`
 - Matches: `matches.segment.<mutual|awaiting>` · `matches.empty-text` · League: `league.hero` · Tiers (minimal): `tiers.list` · `tiers.pos-tab.<pos>` · `tiers.save-btn`
 - Pass-through props added: chalkline `Button.testID`, `PlayerCard.testID`, `TradeSide.addTestID`
+- OutlookSheet: `outlook.save-btn` (the sheet AUTO-OPENS on first Trades visit — flows dismiss it conditionally) · Picker: `calc.picker.done` (onPick adds without closing; Done closes — flows must tap it)
 
 **ESPN league linking tranche (2026-07-12, flag `espn.link`):**
 - LeaguePicker: `leagues.link-espn` · EspnLinkSheet: `espn-link.input` · `espn-link.private-toggle` · `espn-link.s2-input` · `espn-link.swid-input` · `espn-link.continue` · `espn-link.team.<team_id>` · `espn-link.open` · `espn-link.error` · League tab: `league.espn-resync`
 
-Smoke flows: `mobile/.maestro/flows/smoke/01–10` (headers carry the TC ids). Full planned list: lld.md Appendix A (~90 IDs).
+**Apple entitlement tranche (2026-07-12, feedback #131):**
+- SignIn: `signin.apple-btn` (Apple sign-in button)
+- Settings: `settings.link-apple-btn` (Link Apple card button)
+- TopBar: `topbar.settings` (Settings gear — shared chrome, sibling of reserved `topbar.bell`/`topbar.bell-badge`)
+
+**Feedback batch tranche (2026-07-12, #130/#136):**
+- Settings: `settings.close-btn` (modal header close Icon Button, #130) · `settings.link-espn` (flag `espn.link` CTA row → LeaguePicker with the ESPN sheet auto-opened, #130)
+- Quick Rank (#136): `rankmenu.quickrank` (Rank action-sheet row) · `quick-rank.pos-tab.<pos>` · `quick-rank.chip.<player_id>` · `quick-rank.save-btn`
+
+Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). Full planned list: lld.md Appendix A (~90 IDs).
