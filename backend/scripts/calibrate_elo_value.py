@@ -10,7 +10,8 @@ player pool must be ≥ 0.98.
 What this script does (read-only — never writes to the DB):
   1. Rebuilds the player pool + consensus seed Elo the same way the server
      does (DynastyProcess values fetched live, matched by normalised name
-     against the synced ``players`` table; elo = 1200 + value/10000 * 600).
+     against the synced ``players`` table; data_loader.seed_elo_for_value —
+     the #117 value-affine map, DP 10000 → the 4-firsts rung ≈ Elo 1927).
   2. For every player with BOTH a seed Elo and a search_rank, computes
      ``dynasty_value(player)`` and ``elo_to_value(seed_elo)``.
   3. Reports Spearman correlation (implemented locally — no scipy), anchor

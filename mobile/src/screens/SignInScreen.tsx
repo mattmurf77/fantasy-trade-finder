@@ -16,7 +16,7 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { TickLabel } from '../components/chalkline';
 import { appleSignIn, resolveSmartStart, signIn } from '../api/auth';
-import { useSession } from '../state/useSession';
+import { NO_LEAGUE_ID, useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import { getLastUsername, setLastUsername } from '../api/client';
@@ -26,11 +26,20 @@ interface Props {
   /** Called when the user opts into the seeded demo session. Bundle 8 sends
    *  them straight into the Main tabs (no league picker). */
   onDemoStarted?: () => void;
+  /** P2.6 account-first: called after an Apple sign-in that has no linked
+   *  Sleeper source — the account-keyed session + sentinel league are
+   *  already pinned, so the caller routes straight into Main (no league
+   *  picker). Falls back to onSignedIn when unset. */
+  onAccountSignedIn?: () => void;
 }
 
-// Sign-in: Sleeper username → POST /api/extension/auth.
-// Same one-shot auth flow the Chrome extension uses. After success we
-// prefetch the user's leagues so the next screen has data ready.
+// Sign-in (P2.6 account-first): Sign in with Apple is the PRIMARY portal
+// (behind auth.accounts); the Sleeper-username flow is demoted to a
+// "Continue with Sleeper" secondary — the flow itself is unchanged
+// (POST /api/extension/auth, the same one-shot auth the extension uses).
+// A brand-new Apple identity lands in an account-only session (rank/tiers/
+// anchors work; league features show link-a-league states) and can link a
+// Sleeper username later from Settings → Account.
 //
 // Bundle 8 layers two growth-loop CTAs on top, each behind a flag:
 //   • landing.smart_start_cta   — accept a Sleeper league URL as well as a
@@ -39,7 +48,7 @@ interface Props {
 //   • landing.try_before_sync   — "Try the app on a sample league →" link
 //     under the primary button that calls /api/session/demo and skips the
 //     league picker entirely.
-export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
+export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSignedIn }: Props) {
   const [username, setUsername] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -47,18 +56,16 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
   const [hint, setHint] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
   const setUser = useSession((s) => s.setUser);
+  const setLeague = useSession((s) => s.setLeague);
   const setLeagues = useSession((s) => s.setLeagues);
   const startDemoSession = useSession((s) => s.startDemoSession);
   const smartStartEnabled = useFlag('landing.smart_start_cta');
   const tryDemoEnabled    = useFlag('landing.try_before_sync');
   const accountsEnabled   = useFlag('auth.accounts');
 
-  // ── Sign in with Apple (auth.accounts flag; account-auth plan P2) ──────
-  // appleToken holds the verified identity token while the account still
-  // needs a Sleeper username bound to it — the username submit re-posts it.
+  // ── Sign in with Apple (auth.accounts flag; account-auth plan P2/P2.6) ─
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [appleBusy, setAppleBusy] = useState(false);
-  const [appleToken, setAppleToken] = useState<string | null>(null);
 
   useEffect(() => {
     getLastUsername().then((u) => {
@@ -88,7 +95,12 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
         ],
       });
       if (!cred.identityToken) throw new Error('Apple did not return an identity token.');
-      const res = await appleSignIn(cred.identityToken);
+      // Apple sends the name only on FIRST authorization — forward it so
+      // a brand-new account's users row has a display name.
+      const appleName = [cred.fullName?.givenName, cred.fullName?.familyName]
+        .filter(Boolean)
+        .join(' ');
+      const res = await appleSignIn(cred.identityToken, appleName || undefined);
       if (res.linked && res.sleeper_user_id && res.session_token) {
         // Returning account — the backend restored a session for the bound
         // Sleeper user. Same post-auth steps as the username path.
@@ -106,10 +118,25 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
           // Non-fatal; picker will fetch its own copy
         }
         onSignedIn();
+      } else if (res.account_only && res.user_id && res.session_token) {
+        // ACCOUNT-FIRST (P2.6): no Sleeper source linked — the backend
+        // minted an account-keyed session with an empty sentinel league.
+        // Pin both locally and go straight to Main; a Sleeper username can
+        // be linked later from Settings → Account.
+        await setUser({
+          user_id:      res.user_id,
+          username:     '',
+          display_name: res.display_name || 'Manager',
+          avatar_id:    null,
+          account_only: true,
+        });
+        await setLeague({
+          league_id:   res.league_id || NO_LEAGUE_ID,
+          league_name: res.league_name || 'No league linked',
+        });
+        (onAccountSignedIn ?? onSignedIn)();
       } else {
-        // New Apple account with no Sleeper user bound yet — keep the token
-        // and ask for the Sleeper username; handleSubmit re-posts it to bind.
-        setAppleToken(cred.identityToken);
+        throw new Error('Apple sign-in did not return a usable session.');
       }
     } catch (err: any) {
       if (err?.code !== 'ERR_REQUEST_CANCELED') {
@@ -181,18 +208,6 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
 
     try {
       const auth = await signIn(usernameToAuth);
-      // Apple-first flow: a verified Apple identity is waiting for a Sleeper
-      // user to bind to. Now that the session exists, re-post the identity
-      // token so the backend links + verifies. Best-effort — a failure here
-      // never blocks Sleeper sign-in (the link can be redone next launch).
-      if (appleToken) {
-        try {
-          await appleSignIn(appleToken);
-        } catch {
-          /* non-fatal */
-        }
-        setAppleToken(null);
-      }
       await setUser({
         user_id: auth.user_id,
         username: auth.username,
@@ -253,10 +268,11 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
           </View>
 
           <View style={styles.form}>
-            {appleAvailable && !appleToken ? (
+            {appleAvailable ? (
               <>
-                {/* Official Apple button (HIG-required component). White
-                    variant — the HIG mandates it on dark backgrounds. */}
+                {/* P2.6 — Apple is the PRIMARY portal. Official Apple button
+                    (HIG-required component). White variant — the HIG
+                    mandates it on dark backgrounds. */}
                 <AppleAuthentication.AppleAuthenticationButton
                   testID="signin.apple-btn"
                   buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
@@ -265,17 +281,11 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
                   style={styles.appleButton}
                   onPress={handleAppleSignIn}
                 />
-                <Text style={styles.orDivider}>or continue with your Sleeper username</Text>
+                {appleBusy ? (
+                  <ActivityIndicator color={chalk.dim} style={styles.appleBusy} />
+                ) : null}
+                <Text style={styles.orDivider}>or continue with Sleeper</Text>
               </>
-            ) : null}
-            {appleToken ? (
-              <View style={styles.appleLinkBlock}>
-                <Text style={styles.appleLinkTitle}>Link your Sleeper username</Text>
-                <Text style={styles.fieldHint}>
-                  You're signed in with Apple — connect your Sleeper username
-                  to load your leagues.
-                </Text>
-              </View>
             ) : null}
             {hint ? (
               <Pressable
@@ -322,16 +332,19 @@ export default function SignInScreen({ onSignedIn, onDemoStarted }: Props) {
               accessibilityRole="button"
               style={({ pressed }) => [
                 styles.button,
-                pressed && !submitDisabled && styles.buttonPressed,
+                appleAvailable && styles.buttonSecondary,
+                pressed && !submitDisabled && (appleAvailable ? styles.buttonSecondaryPressed : styles.buttonPressed),
                 submitDisabled && styles.buttonDisabled,
               ]}
               onPress={() => handleSubmit()}
               disabled={submitDisabled}
             >
               {busy ? (
-                <ActivityIndicator color={ice.on} />
+                <ActivityIndicator color={appleAvailable ? chalk.base : ice.on} />
               ) : (
-                <Text style={styles.buttonText}>Connect →</Text>
+                <Text style={[styles.buttonText, appleAvailable && styles.buttonSecondaryText]}>
+                  {appleAvailable ? 'Continue with Sleeper →' : 'Connect →'}
+                </Text>
               )}
             </Pressable>
 
@@ -456,10 +469,13 @@ const styles = StyleSheet.create({
     marginTop: -space.xs,
     marginBottom: space.sm,
   },
-  // ── Sign in with Apple (auth.accounts) ─────────────────────────────────
+  // ── Sign in with Apple (auth.accounts; P2.6 primary portal) ────────────
   appleButton: {
     alignSelf: 'stretch',
     height: 44,
+    marginBottom: space.md,
+  },
+  appleBusy: {
     marginBottom: space.md,
   },
   orDivider: {
@@ -468,13 +484,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: space.md,
   },
-  appleLinkBlock: {
-    marginBottom: space.md,
+  // Sleeper demoted to a secondary (outline) action when Apple is shown.
+  buttonSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
   },
-  appleLinkTitle: {
-    ...type.title,
-    marginBottom: space.xs,
-  },
+  buttonSecondaryPressed: { backgroundColor: ink.ink3 },
+  buttonSecondaryText: { color: chalk.base },
   tryDemoBtn: {
     alignSelf: 'stretch',
     alignItems: 'center',

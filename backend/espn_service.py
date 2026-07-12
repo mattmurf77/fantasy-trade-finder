@@ -1,13 +1,13 @@
 """
-espn_service.py — ESPN league-linking SPIKE (#101)
-===================================================
+espn_service.py — ESPN league linking (#101 / feedback #115)
+=============================================================
 Read-only adapter for ESPN Fantasy Football's unofficial v3 API
 (`lm-api-reads.fantasy.espn.com`) plus the DynastyProcess player-ID
 crosswalk that maps ESPN rosters into the app's Sleeper `player_id` space.
 
-Status: **isolated spike** — nothing in `server.py` imports this yet. See
-docs/plans/espn-league-linking-plan-2026-07-11.md for the phased plan and
-the go/no-go recommendation this module supports.
+Status: **Phase 1 wired** — `server.py`'s `/api/espn/*` routes import this
+module, gated by the `espn.link` feature flag (default OFF). See
+docs/plans/espn-league-linking-plan-2026-07-11.md for the phased plan.
 
 Design notes
 ------------
@@ -28,7 +28,11 @@ Design notes
 from __future__ import annotations
 
 import csv
+import io
 import json
+import os
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -200,27 +204,95 @@ class Crosswalk:
     by_name_pos: dict[tuple[str, str], str]        # (normalised name, pos) → sleeper_id
 
 
+def _parse_crosswalk_rows(reader) -> Crosswalk:
+    """Build a Crosswalk from an iterable of DP db_playerids dict rows."""
+    by_espn: dict[str, str] = {}
+    by_name: dict[tuple[str, str], str] = {}
+    for row in reader:
+        sid = (row.get("sleeper_id") or "").strip()
+        eid = (row.get("espn_id") or "").strip()
+        if sid in ("", "NA"):
+            continue
+        if eid not in ("", "NA"):
+            by_espn[eid] = sid
+        nm = normalise_name(row.get("merge_name") or row.get("name") or "")
+        pos = (row.get("position") or "").strip().upper()
+        if nm and pos:
+            by_name.setdefault((nm, pos), sid)
+    return Crosswalk(by_espn_id=by_espn, by_name_pos=by_name)
+
+
 def load_crosswalk(csv_path: str) -> Crosswalk:
     """Load a DynastyProcess db_playerids CSV (full or trimmed snapshot).
 
     Needs columns: sleeper_id, espn_id, merge_name (or name), position.
     'NA' cells are treated as missing.
     """
-    by_espn: dict[str, str] = {}
-    by_name: dict[tuple[str, str], str] = {}
     with open(csv_path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            sid = (row.get("sleeper_id") or "").strip()
-            eid = (row.get("espn_id") or "").strip()
-            if sid in ("", "NA"):
-                continue
-            if eid not in ("", "NA"):
-                by_espn[eid] = sid
-            nm = normalise_name(row.get("merge_name") or row.get("name") or "")
-            pos = (row.get("position") or "").strip().upper()
-            if nm and pos:
-                by_name.setdefault((nm, pos), sid)
-    return Crosswalk(by_espn_id=by_espn, by_name_pos=by_name)
+        return _parse_crosswalk_rows(csv.DictReader(f))
+
+
+# ---------------------------------------------------------------------------
+# Live crosswalk with cache — Phase 1 wiring
+# ---------------------------------------------------------------------------
+# The plan (§3) calls for the DP crosswalk to be refreshed "nightly + boot",
+# mirroring how values-players.csv already works. We implement that as a
+# lazy 24h TTL: the first import after boot fetches db_playerids.csv from
+# the same DynastyProcess repo data_loader.py already trusts; subsequent
+# imports reuse the in-memory copy until it is a day old. If the fetch
+# fails we fall back to (a) the last good in-memory copy, then (b) the
+# bundled snapshot fixture — an import is always possible, just possibly
+# with a slightly stale crosswalk (new rookies may report as unmatched).
+
+PLAYERIDS_URL = (
+    "https://raw.githubusercontent.com/dynastyprocess/data/master/files/db_playerids.csv"
+)
+_SNAPSHOT_PATH = os.path.join(
+    os.path.dirname(__file__), "tests", "fixtures",
+    "dp_playerids_snapshot_2026-07-11.csv",
+)
+_CROSSWALK_TTL_SECONDS = 24 * 3600
+
+_xwalk_lock = threading.Lock()
+_xwalk_cache: Crosswalk | None = None
+_xwalk_fetched_at: float = 0.0
+_xwalk_is_snapshot: bool = False   # True when serving the bundled fallback
+
+
+def fetch_crosswalk(timeout: int = 15, _opener=None) -> Crosswalk:
+    """Fetch the live DP db_playerids CSV and parse it. Raises on failure."""
+    req = urllib.request.Request(
+        PLAYERIDS_URL, headers={"User-Agent": "FantasyTradeFinder/1.0"}
+    )
+    opener = _opener or urllib.request.urlopen
+    with opener(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8")
+    return _parse_crosswalk_rows(csv.DictReader(io.StringIO(raw)))
+
+
+def get_crosswalk(_opener=None) -> Crosswalk:
+    """Return the cached crosswalk, refreshing from DynastyProcess when the
+    cache is empty or older than 24h. Never raises — falls back to the last
+    good copy, then to the bundled snapshot fixture."""
+    global _xwalk_cache, _xwalk_fetched_at, _xwalk_is_snapshot
+    with _xwalk_lock:
+        now = time.time()
+        # Snapshot fallback retries hourly; a live copy is good for 24h.
+        ttl = 3600 if _xwalk_is_snapshot else _CROSSWALK_TTL_SECONDS
+        if _xwalk_cache is not None and (now - _xwalk_fetched_at) < ttl:
+            return _xwalk_cache
+        try:
+            _xwalk_cache = fetch_crosswalk(_opener=_opener)
+            _xwalk_fetched_at = now
+            _xwalk_is_snapshot = False
+        except Exception as e:
+            print(f"⚠️  DP crosswalk fetch failed ({e}) — "
+                  f"{'keeping previous copy' if _xwalk_cache else 'using bundled snapshot'}")
+            if _xwalk_cache is None:
+                _xwalk_cache = load_crosswalk(_SNAPSHOT_PATH)
+                _xwalk_is_snapshot = True
+            _xwalk_fetched_at = now   # don't hammer on every request; retry after TTL
+        return _xwalk_cache
 
 
 def map_rosters(teams: list[EspnTeam], xwalk: Crosswalk) -> dict:

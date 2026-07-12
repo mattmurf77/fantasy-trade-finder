@@ -222,9 +222,15 @@
       margin-top: 2px;
     }
 
-    /* Tier colour accents */
-    .tier-row[data-tier="firsts_2plus"] .tier-label-area { background: rgba(251,191,36,0.06); }
-    .tier-row[data-tier="firsts_2plus"] .tier-label-name { color: #fbbf24; }
+    /* Tier colour accents — 8-tier pick-value ladder (#117) */
+    .tier-row[data-tier="firsts_4plus"] .tier-label-area { background: rgba(248,113,113,0.06); }
+    .tier-row[data-tier="firsts_4plus"] .tier-label-name { color: #f87171; }
+
+    .tier-row[data-tier="firsts_3"] .tier-label-area { background: rgba(232,121,249,0.06); }
+    .tier-row[data-tier="firsts_3"] .tier-label-name { color: #e879f9; }
+
+    .tier-row[data-tier="firsts_2"] .tier-label-area { background: rgba(251,191,36,0.06); }
+    .tier-row[data-tier="firsts_2"] .tier-label-name { color: #fbbf24; }
 
     .tier-row[data-tier="first_1"] .tier-label-area { background: rgba(45,212,191,0.06); }
     .tier-row[data-tier="first_1"] .tier-label-name { color: #2dd4bf; }
@@ -238,8 +244,8 @@
     .tier-row[data-tier="fourth"]  .tier-label-area { background: rgba(163,230,53,0.06); }
     .tier-row[data-tier="fourth"]  .tier-label-name { color: #a3e635; }
 
-    .tier-row[data-tier="bench"]   .tier-label-area { background: rgba(122,127,150,0.03); }
-    .tier-row[data-tier="bench"]   .tier-label-name { color: #7a7f96; }
+    .tier-row[data-tier="waivers"] .tier-label-area { background: rgba(122,127,150,0.03); }
+    .tier-row[data-tier="waivers"] .tier-label-name { color: #7a7f96; }
 
     /* Drop zone within each tier row */
     .tier-drop-zone {
@@ -574,20 +580,24 @@
     @media (pointer: coarse) {
       .tier-assign-btn { min-height: 40px; font-size: 10px; }
     }
-    /* Always show tier colors on buttons */
-    .tier-assign-btn[data-tier="firsts_2plus"] { border-color: rgba(251,191,36,0.3); color: #fbbf24; background: rgba(251,191,36,0.06); }
+    /* Always show tier colors on buttons — 8-tier ladder (#117) */
+    .tier-assign-btn[data-tier="firsts_4plus"] { border-color: rgba(248,113,113,0.3); color: #f87171; background: rgba(248,113,113,0.06); }
+    .tier-assign-btn[data-tier="firsts_3"] { border-color: rgba(232,121,249,0.3); color: #e879f9; background: rgba(232,121,249,0.06); }
+    .tier-assign-btn[data-tier="firsts_2"] { border-color: rgba(251,191,36,0.3); color: #fbbf24; background: rgba(251,191,36,0.06); }
     .tier-assign-btn[data-tier="first_1"] { border-color: rgba(45,212,191,0.3); color: #2dd4bf; background: rgba(45,212,191,0.06); }
     .tier-assign-btn[data-tier="second"]  { border-color: rgba(56,189,248,0.3); color: #38bdf8; background: rgba(56,189,248,0.06); }
     .tier-assign-btn[data-tier="third"]   { border-color: rgba(244,114,182,0.3); color: #f472b6; background: rgba(244,114,182,0.06); }
     .tier-assign-btn[data-tier="fourth"]  { border-color: rgba(163,230,53,0.3); color: #a3e635; background: rgba(163,230,53,0.06); }
-    .tier-assign-btn[data-tier="bench"]   { border-color: rgba(122,127,150,0.3); color: #7a7f96; background: rgba(122,127,150,0.04); }
+    .tier-assign-btn[data-tier="waivers"] { border-color: rgba(122,127,150,0.3); color: #7a7f96; background: rgba(122,127,150,0.04); }
     /* Hover — intensify */
-    .tier-assign-btn[data-tier="firsts_2plus"]:hover { background: rgba(251,191,36,0.18); border-color: #fbbf24; }
+    .tier-assign-btn[data-tier="firsts_4plus"]:hover { background: rgba(248,113,113,0.18); border-color: #f87171; }
+    .tier-assign-btn[data-tier="firsts_3"]:hover { background: rgba(232,121,249,0.18); border-color: #e879f9; }
+    .tier-assign-btn[data-tier="firsts_2"]:hover { background: rgba(251,191,36,0.18); border-color: #fbbf24; }
     .tier-assign-btn[data-tier="first_1"]:hover  { background: rgba(45,212,191,0.18); border-color: #2dd4bf; }
     .tier-assign-btn[data-tier="second"]:hover   { background: rgba(56,189,248,0.18); border-color: #38bdf8; }
     .tier-assign-btn[data-tier="third"]:hover    { background: rgba(244,114,182,0.18); border-color: #f472b6; }
     .tier-assign-btn[data-tier="fourth"]:hover   { background: rgba(163,230,53,0.18); border-color: #a3e635; }
-    .tier-assign-btn[data-tier="bench"]:hover    { background: rgba(122,127,150,0.14); border-color: #7a7f96; }
+    .tier-assign-btn[data-tier="waivers"]:hover  { background: rgba(122,127,150,0.14); border-color: #7a7f96; }
 
     /* ── Tier legend/key — sits in the pool-header to the right of the title ── */
     .tier-legend {
@@ -628,12 +638,14 @@
       border: 1.5px solid;
       text-shadow: 0 1px 4px rgba(0,0,0,0.5);
     }
-    .tier-legend-swatch[data-tier="firsts_2plus"] { border-color: #fbbf24; color: #fcd34d; background: rgba(251,191,36,0.2); box-shadow: 0 0 8px rgba(251,191,36,0.25); }
+    .tier-legend-swatch[data-tier="firsts_4plus"] { border-color: #f87171; color: #fca5a5; background: rgba(248,113,113,0.2); box-shadow: 0 0 8px rgba(248,113,113,0.25); }
+    .tier-legend-swatch[data-tier="firsts_3"] { border-color: #e879f9; color: #f0abfc; background: rgba(232,121,249,0.2); box-shadow: 0 0 8px rgba(232,121,249,0.25); }
+    .tier-legend-swatch[data-tier="firsts_2"] { border-color: #fbbf24; color: #fcd34d; background: rgba(251,191,36,0.2); box-shadow: 0 0 8px rgba(251,191,36,0.25); }
     .tier-legend-swatch[data-tier="first_1"] { border-color: #2dd4bf; color: #5eead4; background: rgba(45,212,191,0.2); box-shadow: 0 0 8px rgba(45,212,191,0.25); }
     .tier-legend-swatch[data-tier="second"]  { border-color: #38bdf8; color: #7dd3fc; background: rgba(56,189,248,0.2); box-shadow: 0 0 8px rgba(56,189,248,0.25); }
     .tier-legend-swatch[data-tier="third"]   { border-color: #f472b6; color: #f9a8d4; background: rgba(244,114,182,0.2); box-shadow: 0 0 8px rgba(244,114,182,0.25); }
     .tier-legend-swatch[data-tier="fourth"]  { border-color: #a3e635; color: #bef264; background: rgba(163,230,53,0.2); box-shadow: 0 0 8px rgba(163,230,53,0.25); }
-    .tier-legend-swatch[data-tier="bench"]   { border-color: #7a7f96; color: #9ca3af; background: rgba(122,127,150,0.2); box-shadow: 0 0 8px rgba(122,127,150,0.15); }
+    .tier-legend-swatch[data-tier="waivers"] { border-color: #7a7f96; color: #9ca3af; background: rgba(122,127,150,0.2); box-shadow: 0 0 8px rgba(122,127,150,0.15); }
     .tier-legend-desc {
       color: rgba(255,255,255,0.6);
       font-size: 11px;
@@ -1328,8 +1340,16 @@
         <div class="tier-legend">
           <div class="tier-legend-inner">
             <span class="tier-legend-item">
-              <span class="tier-legend-swatch" data-tier="firsts_2plus">2+ 1sts</span>
-              <span class="tier-legend-desc">Worth 2+ firsts</span>
+              <span class="tier-legend-swatch" data-tier="firsts_4plus">4+ 1sts</span>
+              <span class="tier-legend-desc">Worth 4+ firsts</span>
+            </span>
+            <span class="tier-legend-item">
+              <span class="tier-legend-swatch" data-tier="firsts_3">3 1sts</span>
+              <span class="tier-legend-desc">Worth 3 firsts</span>
+            </span>
+            <span class="tier-legend-item">
+              <span class="tier-legend-swatch" data-tier="firsts_2">2 1sts</span>
+              <span class="tier-legend-desc">Worth 2 firsts</span>
             </span>
             <span class="tier-legend-item">
               <span class="tier-legend-swatch" data-tier="first_1">1st</span>
@@ -1348,7 +1368,7 @@
               <span class="tier-legend-desc">Worth a 4th</span>
             </span>
             <span class="tier-legend-item">
-              <span class="tier-legend-swatch" data-tier="bench">Bench</span>
+              <span class="tier-legend-swatch" data-tier="waivers">Waivers</span>
               <span class="tier-legend-desc">Below 4th value</span>
             </span>
           </div>
@@ -1364,17 +1384,43 @@
     <!-- Tier rows -->
     <div class="tier-rows" id="tier-rows">
 
-      <div class="tier-row" data-tier="firsts_2plus">
+      <div class="tier-row" data-tier="firsts_4plus">
         <div class="tier-label-area">
-          <div class="tier-label-name">2+ 1sts</div>
-          <div class="tier-label-desc">Worth 2+ firsts</div>
-          <div class="tier-label-count" id="count-firsts_2plus">0</div>
-          <button class="tier-multiselect-btn" id="ms-toggle-firsts_2plus"
-                  data-tier="firsts_2plus" onclick="toggleMultiSelectMode('firsts_2plus')"
+          <div class="tier-label-name">4+ 1sts</div>
+          <div class="tier-label-desc">Worth 4+ firsts</div>
+          <div class="tier-label-count" id="count-firsts_4plus">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-firsts_4plus"
+                  data-tier="firsts_4plus" onclick="toggleMultiSelectMode('firsts_4plus')"
                   title="Select multiple players to move together">Multi-select</button>
         </div>
-        <div class="tier-drop-zone empty" id="zone-firsts_2plus"
-             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'firsts_2plus')"></div>
+        <div class="tier-drop-zone empty" id="zone-firsts_4plus"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'firsts_4plus')"></div>
+      </div>
+
+      <div class="tier-row" data-tier="firsts_3">
+        <div class="tier-label-area">
+          <div class="tier-label-name">3 1sts</div>
+          <div class="tier-label-desc">Worth 3 firsts</div>
+          <div class="tier-label-count" id="count-firsts_3">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-firsts_3"
+                  data-tier="firsts_3" onclick="toggleMultiSelectMode('firsts_3')"
+                  title="Select multiple players to move together">Multi-select</button>
+        </div>
+        <div class="tier-drop-zone empty" id="zone-firsts_3"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'firsts_3')"></div>
+      </div>
+
+      <div class="tier-row" data-tier="firsts_2">
+        <div class="tier-label-area">
+          <div class="tier-label-name">2 1sts</div>
+          <div class="tier-label-desc">Worth 2 firsts</div>
+          <div class="tier-label-count" id="count-firsts_2">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-firsts_2"
+                  data-tier="firsts_2" onclick="toggleMultiSelectMode('firsts_2')"
+                  title="Select multiple players to move together">Multi-select</button>
+        </div>
+        <div class="tier-drop-zone empty" id="zone-firsts_2"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'firsts_2')"></div>
       </div>
 
       <div class="tier-row" data-tier="first_1">
@@ -1429,17 +1475,17 @@
              ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'fourth')"></div>
       </div>
 
-      <div class="tier-row" data-tier="bench">
+      <div class="tier-row" data-tier="waivers">
         <div class="tier-label-area">
-          <div class="tier-label-name">Bench</div>
+          <div class="tier-label-name">Waivers</div>
           <div class="tier-label-desc">Below 4th value</div>
-          <div class="tier-label-count" id="count-bench">0</div>
-          <button class="tier-multiselect-btn" id="ms-toggle-bench"
-                  data-tier="bench" onclick="toggleMultiSelectMode('bench')"
+          <div class="tier-label-count" id="count-waivers">0</div>
+          <button class="tier-multiselect-btn" id="ms-toggle-waivers"
+                  data-tier="waivers" onclick="toggleMultiSelectMode('waivers')"
                   title="Select multiple players to move together">Multi-select</button>
         </div>
-        <div class="tier-drop-zone empty" id="zone-bench"
-             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'bench')"></div>
+        <div class="tier-drop-zone empty" id="zone-waivers"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, 'waivers')"></div>
       </div>
 
     </div>
@@ -1562,9 +1608,10 @@
       ],
     };
 
-    // Pick-value tier ladder (2026-07-11) — keys read directly in draft-pick
-    // terms (docs/cross-client-invariants.md).
-    const TIERS = ['firsts_2plus', 'first_1', 'second', 'third', 'fourth', 'bench'];
+    // 8-tier pick-value ladder (2026-07-12, #117) — keys read directly in
+    // draft-pick terms (docs/cross-client-invariants.md).
+    const TIERS = ['firsts_4plus', 'firsts_3', 'firsts_2', 'first_1',
+                   'second', 'third', 'fourth', 'waivers'];
 
     // ── Tier band config — single source of truth ──
     // Populated from backend/tier_config.json via GET /api/tier-config (see
@@ -1579,20 +1626,21 @@
     // a player into tier T iff player.elo >= min_T (top-down walk),
     // matching how the backend's `tier_for_elo` maps ELOs to tier labels.
     let TIER_CONFIG = {
-      // 2026-07-11 pick-value tier ladder — mirrors backend/tier_config.json;
-      // see docs/cross-client-invariants.md. Bands are position- and
-      // format-uniform in Elo space (pick value is position-uniform).
+      // 2026-07-12 8-tier pick-value ladder (#117) — mirrors
+      // backend/tier_config.json; see docs/cross-client-invariants.md.
+      // Bands are position- and format-uniform in Elo space (pick value is
+      // position-uniform).
       "1qb_ppr": {
-        "QB": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
-        "RB": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
-        "WR": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
-        "TE": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
+        "QB": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "RB": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "WR": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "TE": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
       },
       "sf_tep": {
-        "QB": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
-        "RB": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
-        "WR": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
-        "TE": { firsts_2plus: {min:1788,max:1870}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, bench:{min:1150,max:1215} },
+        "QB": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "RB": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "WR": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
+        "TE": { firsts_4plus: {min:1927,max:1972}, firsts_3:{min:1869,max:1922}, firsts_2:{min:1788,max:1864}, first_1:{min:1580,max:1785}, second:{min:1400,max:1575}, third:{min:1280,max:1395}, fourth:{min:1220,max:1275}, waivers:{min:1150,max:1215} },
       },
     };
 
@@ -1641,7 +1689,7 @@
       // Walk tiers top-down. Use each band's `min` as the inclusive
       // threshold — first match wins. ELOs above the top tier's max (rare
       // but possible for boosted overrides) still register as the top tier
-      // because we walk top-down. ELOs below the bench min fall through
+      // because we walk top-down. ELOs below the waivers min fall through
       // to the unassigned pool (the function just doesn't push them
       // anywhere; the chip ends up in `pool-list`).
       players.forEach(p => {
@@ -1970,7 +2018,8 @@
 
     function createChip(player, tierName, rankInTier) {
       // tierName: null = in pool (unassigned), or one of TIERS
-      // ('firsts_2plus'/'first_1'/'second'/'third'/'fourth'/'bench')
+      // ('firsts_4plus'/'firsts_3'/'firsts_2'/'first_1'/'second'/'third'/
+      //  'fourth'/'waivers')
       // rankInTier: 0-based array index of this chip within its tier (in-tier only;
       //             ignored for pool chips). Rendered as 1-based "1." "2." etc.
       const inTier = !!tierName;
@@ -2061,7 +2110,7 @@
           <div class="tier-assign-row">
             ${TIERS.map(t => {
               // Short labels so all fit uniformly in the narrow card
-              const shortLabels = { firsts_2plus: '2+1st', first_1: '1st', second: '2nd', third: '3rd', fourth: '4th', bench: 'Bench' };
+              const shortLabels = { firsts_4plus: '4+1st', firsts_3: '3 1st', firsts_2: '2 1st', first_1: '1st', second: '2nd', third: '3rd', fourth: '4th', waivers: 'Wvrs' };
               const label = shortLabels[t] || (t.charAt(0).toUpperCase() + t.slice(1, 5));
               return `<button class="tier-assign-btn" data-tier="${t}" ${stopDrag}
                 onclick="event.stopPropagation(); assignToTier('${player.id}', '${t}')"
@@ -2278,9 +2327,10 @@
       const tierCounts = TIERS.map(t => ({ tier: t, count: state[t].length }));
 
       // Find the first tier that has room (fewer than others proportionally)
-      // Simple heuristic: fill the top tier up to ~2, then 1st up to ~4, etc.
-      const limits = { firsts_2plus: 2, first_1: 4, second: 5, third: 5, fourth: 5, bench: 999 };
-      let target = 'bench';
+      // Simple heuristic: fill the multi-first crown tiers sparsely (they
+      // hold the true elites), then 1st up to ~4, etc.
+      const limits = { firsts_4plus: 1, firsts_3: 1, firsts_2: 2, first_1: 4, second: 5, third: 5, fourth: 5, waivers: 999 };
+      let target = 'waivers';
       for (const t of TIERS) {
         if (state[t].length < limits[t]) {
           target = t;
@@ -2296,7 +2346,7 @@
     //     "kept moving up" intuition stays consistent across the boundary).
     //     At the top of the first tier, no-op.
     // Down: symmetric. At the bottom of a tier, move to the START of the
-    //      tier below. At the bottom of `bench`, send back to the pool.
+    //      tier below. At the bottom of `waivers`, send back to the pool.
     //
     // Trade-off vs. legacy "1 click = 1 tier promote": full tier promotes
     // now take N+1 clicks. Drag-drop is the fast path for tier-level moves;
@@ -2347,11 +2397,11 @@
       }
 
       // At bottom of current tier: spill to start of tier below — UNLESS
-      // we're already at the bottom of the bottom tier (bench), in which
+      // we're already at the bottom of the bottom tier (waivers), in which
       // case the move is a no-op. (Previously this called removeFromTier,
       // sending the chip to the pool; users found that confusing because
       // chips would disappear from the tiers entirely. Multi-select made
-      // the surprise more visible — a group-Down at the bench bottom
+      // the surprise more visible — a group-Down at the waivers bottom
       // would dump the whole group into the pool. Now they just sit.)
       const tierIdx = TIERS.indexOf(currentTier);
       if (tierIdx >= TIERS.length - 1) {
@@ -2654,11 +2704,11 @@
               // Earlier this slice was capped at 80, which silently
               // dropped any player whose ELO ranked outside the top 80.
               // For positions with > 80 ranked players (every position,
-              // really), tier placements in the bench band always fall
+              // really), tier placements in the waivers band always fall
               // in the tail — so they vanished from the rendered page
               // even though the override survived in the DB. The user
-              // moved a player to Bench, refreshed, and saw an empty
-              // Bench tier.
+              // moved a player to Waivers, refreshed, and saw an empty
+              // Waivers tier.
               //
               // The drop zones already have max-height + overflow-y:auto,
               // so a long tier just scrolls. Belt-and-suspenders cap at
@@ -2881,10 +2931,12 @@
     const LS_COMMUNITY_DIFF_ON = 'ftf_tiers_community_diff_on';
     const _communityDiffCache = {};   // pos → { player_id: {user_tier, community_tier} }
     const _communityDiffLoading = {}; // pos → bool
-    const TIER_ORDER = ['firsts_2plus', 'first_1', 'second', 'third', 'fourth', 'bench'];
+    const TIER_ORDER = ['firsts_4plus', 'firsts_3', 'firsts_2', 'first_1',
+                        'second', 'third', 'fourth', 'waivers'];
     const TIER_LABELS_SHORT = {
-      firsts_2plus: '2+ 1sts', first_1: '1st', second: '2nd',
-      third: '3rd', fourth: '4th', bench: 'Bench',
+      firsts_4plus: '4+ 1sts', firsts_3: '3 1sts', firsts_2: '2 1sts',
+      first_1: '1st', second: '2nd',
+      third: '3rd', fourth: '4th', waivers: 'Waivers',
     };
 
     function communityDiffEnabled() {

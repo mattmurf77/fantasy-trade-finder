@@ -34,10 +34,20 @@
   filter: brightness(1.15);
 }
 
-/* Tier variants — pick-value tier ladder (docs/cross-client-invariants.md);
+/* Tier variants — 8-tier pick-value ladder (docs/cross-client-invariants.md);
    rgba tint bases are the canonical tier hexes, borders/text the lighter
    same-hue accents the invariants rule allows per client. */
-.ftf-badge.ftf-tier-firsts_2plus {
+.ftf-badge.ftf-tier-firsts_4plus {
+  background: rgba(248, 113, 113, 0.15);
+  border-color: #fca5a5;
+  color: #fecaca;
+}
+.ftf-badge.ftf-tier-firsts_3 {
+  background: rgba(232, 121, 249, 0.15);
+  border-color: #f0abfc;
+  color: #f5d0fe;
+}
+.ftf-badge.ftf-tier-firsts_2 {
   background: rgba(251, 191, 36, 0.15);
   border-color: #fcd34d;
   color: #fde68a;
@@ -62,7 +72,7 @@
   border-color: #bef264;
   color: #d9f99d;
 }
-.ftf-badge.ftf-tier-bench {
+.ftf-badge.ftf-tier-waivers {
   background: rgba(122, 127, 150, 0.18);
   border-color: #7a7f96;
   color: #d6d9e4;

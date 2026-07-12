@@ -24,8 +24,8 @@ const SLG_KEY = 'sleeper_leagues';
 // Device-local; also POSTed to /api/ranking-method for analytics.
 const RM_KEY = 'ftf_rank_method_pref';
 
-export type RankMethodPref = 'trio' | 'anchor' | 'tiers' | 'manual';
-const RANK_METHOD_PREFS: readonly RankMethodPref[] = ['trio', 'anchor', 'tiers', 'manual'];
+export type RankMethodPref = 'quickset' | 'trio' | 'anchor' | 'tiers' | 'manual';
+const RANK_METHOD_PREFS: readonly RankMethodPref[] = ['quickset', 'trio', 'anchor', 'tiers', 'manual'];
 
 // FB-45 — revalidation bookkeeping (module-level: internal, not UI state).
 // The throttle keeps quick app-switches from re-running the full league
@@ -39,7 +39,18 @@ export interface SavedUser {
   username: string;
   display_name: string;
   avatar_id: string | null;
+  /** Account-first identity (P2.6): true when this user is an Apple/Google
+   *  account with NO linked Sleeper source — user_id is the synthetic
+   *  working key `acct_<account_id>`, the league is the "No league linked"
+   *  sentinel, and Sleeper-side flows (league picker handshake, revalidate,
+   *  connect-league, SleeperConnect verification) must not run. Cleared when
+   *  a Sleeper username is linked in Settings. */
+  account_only?: boolean;
 }
+
+/** Sentinel league pinned for account-only sessions — mirrors the backend's
+ *  ACCOUNT_NO_LEAGUE_ID empty league so RootNav routes into Main. */
+export const NO_LEAGUE_ID = 'no_league';
 
 /** Verified-session state from the backend (account-auth P1). Shape mirrors
  *  session_init's additive `verification` response field. */
@@ -218,6 +229,11 @@ export const useSession = create<SessionState>((set, get) => ({
   revalidateSession: async () => {
     const { user, league, isDemo } = get();
     if (!user || !league || isDemo) return;
+    // Account-only sessions (P2.6) have no Sleeper league to re-handshake
+    // with — identity tokens are one-shot, so a lost server session needs a
+    // fresh Apple tap at SignIn (documented limitation until P3 persists
+    // sessions server-side).
+    if (user.account_only || league.league_id === NO_LEAGUE_ID) return;
     const now = Date.now();
     if (_revalidating || now - _lastRevalidateMs < REVALIDATE_MIN_INTERVAL_MS) return;
     _revalidating = true;
@@ -371,7 +387,9 @@ export const useSession = create<SessionState>((set, get) => ({
 
   connectLeague: async (sleeperUrl) => {
     const state = get();
-    if (!state.user) {
+    // Account-only users (P2.6) have no Sleeper user_id to fetch leagues
+    // for — they link a Sleeper username in Settings → Account first.
+    if (!state.user || state.user.account_only) {
       return { ok: false, league_id: '', league_name: '', platform: '', supported: false };
     }
     // 1. Validate the URL with the backend. Sleeper-only is "supported";

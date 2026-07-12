@@ -143,6 +143,10 @@ def reset():
 @bp.route("/whoami", methods=["GET"])
 def whoami():
     return jsonify({
+        # pid lets the runner verify it reached the Flask it just started —
+        # a STALE instance on the same port answers the handshake identically
+        # otherwise (bit us 2026-07-12: smoke ran against yesterday's Flask).
+        "pid": os.getpid(),
         "profile": os.environ.get("FTF_TEST_PROFILE"),
         "test_mode": True,
         "fixtures": bool(os.environ.get("FTF_SLEEPER_FIXTURES_DIR")),

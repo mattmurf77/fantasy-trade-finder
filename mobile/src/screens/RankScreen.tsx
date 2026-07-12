@@ -368,6 +368,7 @@ export default function RankScreen() {
             return (
               <Pressable
                 key={p}
+                testID={`trios.pos-tab.${p.toLowerCase()}`}
                 onPress={() => {
                   if (p === position) return;
                   setSelectionOrder([]);
@@ -504,6 +505,7 @@ export default function RankScreen() {
 
         {/* I AM SPEED toggle — sits ABOVE the secondary action row per spec */}
         <Pressable
+          testID="trios.speed-toggle"
           onPress={toggleSpeedMode}
           style={({ pressed }) => [
             styles.speedTile,
@@ -531,6 +533,7 @@ export default function RankScreen() {
           <Button
             variant="primary"
             label="Confirm ranking"
+            testID="trios.confirm-btn"
             onPress={() => submitCurrent(selectionOrder)}
             disabled={!trio || submitMutation.isPending}
             style={styles.confirmBtn}
@@ -545,6 +548,7 @@ export default function RankScreen() {
           <Button
             variant="secondary"
             label="Skip"
+            testID="trios.skip-btn"
             onPress={handleSkipEntireTrio}
             disabled={!trio || isRefetchingTrio}
             style={styles.flex1}
@@ -607,6 +611,7 @@ function TrioPlayerCard({
   return (
     <PlayerCard
       player={player}
+      testID={`trios.card.${side}`}
       rank={rank}
       selected={rank !== null}
       onPress={onTap}

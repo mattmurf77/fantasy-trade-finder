@@ -377,7 +377,9 @@ def test_dp_values_csv_feeds_the_data_loader_seam(seeded, monkeypatch):
         assert value_map, f"{scoring}: empty value map"
         assert set(value_map) == cache_names, f"{scoring}: pool/CSV name drift"
         assert all(v > 0 for v in value_map.values())
-        assert all(1200.0 <= e <= 1800.0 for e in elo_map.values())
+        # Seed range under the #117 value-affine map: DP 0 → 1200, DP 10000
+        # (clamped) → the 4-firsts rung ≈ 1927.3.
+        assert all(1200.0 <= e <= 1927.5 for e in elo_map.values())
 
 
 # ---------------------------------------------------------------------------

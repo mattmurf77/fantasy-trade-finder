@@ -53,7 +53,8 @@ type Tier = keyof typeof tier;
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
 const TIER_ORDER: Tier[] = [
-  'firsts_2plus', 'first_1', 'second', 'third', 'fourth', 'bench',
+  'firsts_4plus', 'firsts_3', 'firsts_2', 'first_1',
+  'second', 'third', 'fourth', 'waivers',
 ];
 
 export default function ProfileScreen({ route }: Props) {

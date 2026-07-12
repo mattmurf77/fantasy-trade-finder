@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { ink, chalk, ice, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
-import { Button, Icon } from './chalkline';
+import { Badge, Button, Icon } from './chalkline';
 import { useSession } from '../state/useSession';
 
 interface Props {
@@ -98,7 +98,14 @@ export default function LeagueSwitcherSheet({ visible, onClose, onSwitched }: Pr
                   ]}
                 >
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={type.title} numberOfLines={1}>{lg.name}</Text>
+                    <View style={styles.rowNameRow}>
+                      <Text style={[type.title, styles.rowNameText]} numberOfLines={1}>
+                        {lg.name}
+                      </Text>
+                      {/* ESPN read-only import (flag `espn.link`) — text
+                          badge only, no logos. */}
+                      {lg.platform === 'espn' ? <Badge label="ESPN" /> : null}
+                    </View>
                     <Text style={[type.bodySm, styles.rowMeta]}>
                       {(lg.total_rosters as number | undefined) || 12} teams
                     </Text>
@@ -170,5 +177,11 @@ const styles = StyleSheet.create({
   rowPressed: { backgroundColor: ink.ink3 },
   rowDim: { opacity: 0.45 },
   rowMeta: { marginTop: 2 },
+  rowNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
+  rowNameText: { flexShrink: 1 },
   cancel: { marginTop: space.md },
 });

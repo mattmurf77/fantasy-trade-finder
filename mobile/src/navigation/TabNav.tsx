@@ -4,7 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainerRefContext, CommonActions } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
-import { ink, chalk, ice, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
+import { ink, chalk, ice, flare, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
 import { Icon, Button, type IconName } from '../components/chalkline';
 import { getNextTrio, getRankings, getTiersStatus } from '../api/rankings';
 import { getLikedTrades, getAllMatches } from '../api/trades';
@@ -108,10 +108,11 @@ const subScreenOptions = (title: string, fallback: string) =>
 // mid-session preference change (Settings slider) applies next launch,
 // while the chooser itself routes immediately via navigation.replace.
 const PREF_ROUTE: Record<string, RankRoute> = {
-  trio:   'Trios',
-  anchor: 'Anchors',
-  tiers:  'Tiers',
-  manual: 'ManualRanks',
+  quickset: 'QuickSetTiers',
+  trio:     'Trios',
+  anchor:   'Anchors',
+  tiers:    'Tiers',
+  manual:   'ManualRanks',
 };
 
 function RankStackNav() {
@@ -134,9 +135,10 @@ function RankStackNav() {
         component={TiersScreen}
         options={subScreenOptions('Tiers', 'Trios')}
       />
-      {/* 1.5.4 #104 — guided tier quick-set walk. Entered from the Tiers
-          header's "Quick set" action (not the Rank menu), so its back
-          fallback is the Tiers board. */}
+      {/* 1.5.4 #104 — guided tier quick-set walk. #119 promoted it to a
+          first-class method: reachable from the Tiers header, the Rank menu,
+          the rank-home chooser, and launch routing (rankingMethodPref
+          'quickset'). Back fallback stays the Tiers board it writes to. */}
       <RankStack.Screen
         name="QuickSetTiers"
         component={QuickSetTiersScreen}
@@ -344,6 +346,16 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
         queryFn: () => getRankings(null),
         staleTime: 30_000,
       });
+    } else if (screen === 'QuickSetTiers') {
+      // #119 — QuickSetTiersScreen opens on position 'QB' and reads through
+      // a format-scoped key (QuickSetTiersScreen.tsx:72), unlike TiersScreen's
+      // flat key above.
+      const fmt = useSession.getState().activeFormat;
+      void queryClient.prefetchQuery({
+        queryKey: ['rankings', fmt, 'QB'],
+        queryFn: () => getRankings('QB'),
+        staleTime: 30_000,
+      });
     } else if (screen === 'Anchors') {
       // PickAnchorScreen snapshots the pool under its own format-scoped key
       // (staleTime: Infinity — the wizard queue must not reshuffle mid-run).
@@ -367,12 +379,14 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
     );
   };
 
-  const items: { route: RankRoute; label: string; sub: string }[] = [
-    { route: 'Trios',         label: 'Trios',         sub: '3-at-a-time swipe ranking' },
-    { route: 'Anchors',       label: 'Pick Anchors',  sub: 'Say what each player is worth in draft picks — 4 1sts down to no value' },
-    { route: 'Tiers',         label: 'Tiers',         sub: 'Drag players into pick-value tiers (2+ 1sts / 1st / 2nd / 3rd / 4th / Bench)' },
-    { route: 'ManualRanks',   label: 'Overall Ranks', sub: 'Drag rows or tap a rank number to re-order your board by hand' },
-    { route: 'Trends',        label: 'Trends',        sub: 'See your biggest movers and how you differ from consensus' },
+  const items: { route: RankRoute; label: string; sub: string; testID: string; recommended?: boolean }[] = [
+    // #119 — Quick set is a first-class method: lowest effort, recommended.
+    { route: 'QuickSetTiers', label: 'Quick set',     sub: 'Tap players into pick-value tiers, one tier at a time — the fastest board', testID: 'rankmenu.quickset', recommended: true },
+    { route: 'Trios',         label: 'Trios',         sub: '3-at-a-time swipe ranking', testID: 'rankmenu.trios' },
+    { route: 'Anchors',       label: 'Pick Anchors',  sub: 'Say what each player is worth in draft picks — 4 1sts down to no value', testID: 'rankmenu.anchors' },
+    { route: 'Tiers',         label: 'Tiers',         sub: 'Drag players into pick-value tiers (4+ 1sts down to Waivers)', testID: 'rankmenu.tiers' },
+    { route: 'ManualRanks',   label: 'Overall Ranks', sub: 'Drag rows or tap a rank number to re-order your board by hand', testID: 'rankmenu.manual' },
+    { route: 'Trends',        label: 'Trends',        sub: 'See your biggest movers and how you differ from consensus', testID: 'rankmenu.trends' },
   ];
 
   return (
@@ -385,6 +399,7 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
         {items.map((it) => (
           <Pressable
             key={it.route}
+            testID={it.testID}
             onPress={() => go(it.route)}
             style={({ pressed }) => [
               styles.item,
@@ -392,7 +407,14 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
             ]}
           >
             <View style={{ flex: 1 }}>
-              <Text style={styles.itemLabel}>{it.label}</Text>
+              <View style={styles.itemLabelRow}>
+                <Text style={styles.itemLabel}>{it.label}</Text>
+                {/* #119 — flare label = informational highlight (ADR-005),
+                    same treatment as the rank-home chooser's tag. */}
+                {it.recommended ? (
+                  <Text style={styles.recommendedTag}>recommended</Text>
+                ) : null}
+              </View>
               <Text style={styles.itemSub}>{it.sub}</Text>
             </View>
             <Icon name="chevron-right" size={16} color={chalk.dim} />
@@ -462,6 +484,9 @@ const styles = StyleSheet.create({
     borderBottomColor: ink.line,
   },
   itemLabel: type.title,
+  itemLabelRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  // #119 — mirrors RankHomeScreen's recommended tag (flare, informational).
+  recommendedTag: { ...type.label, color: flare.base },
   itemSub: { ...type.bodySm, marginTop: 2 },
   cancel: { marginTop: space.md },
 });

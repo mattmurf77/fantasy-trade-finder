@@ -14,9 +14,10 @@ import backend.ranking_service as rs
 from backend.ranking_service import Player, RankingService
 
 
-# Pick-value ladder bands (2026-07-11, uniform in Elo space):
-# firsts_2plus 1788–1870, first_1 1580–1785, second 1400–1575,
-# third 1280–1395, fourth 1220–1275, bench 1150–1215.
+# Pick-value ladder bands (2026-07-12 8-tier ladder, uniform in Elo space):
+# firsts_4plus 1927–1972, firsts_3 1869–1922, firsts_2 1788–1864,
+# first_1 1580–1785, second 1400–1575, third 1280–1395, fourth 1220–1275,
+# waivers 1150–1215.
 # Seed players so several edges are contested within the ±60 margin
 # (e.g. the second/first_1 edge at 1580).
 _SEEDS = {

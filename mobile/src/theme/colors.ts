@@ -20,25 +20,29 @@ export const colors = {
     te: '#a855f7',
   },
   // Tier hues deliberately share no hue with position colors (docs/cross-client-invariants.md).
-  // Pick-value tier ladder (2026-07-11): keys read directly in draft-pick terms.
+  // 8-tier pick-value ladder (2026-07-12, #117): keys read directly in draft-pick terms.
   tier: {
-    firsts_2plus: '#fbbf24',
+    firsts_4plus: '#f87171',
+    firsts_3: '#e879f9',
+    firsts_2: '#fbbf24',
     first_1: '#2dd4bf',
     second: '#38bdf8',
     third: '#f472b6',
     fourth: '#a3e635',
-    bench: '#7a7f96',
+    waivers: '#7a7f96',
   },
 } as const;
 
 export type Position = 'QB' | 'RB' | 'WR' | 'TE';
 export type Tier =
-  | 'firsts_2plus'
+  | 'firsts_4plus'
+  | 'firsts_3'
+  | 'firsts_2'
   | 'first_1'
   | 'second'
   | 'third'
   | 'fourth'
-  | 'bench';
+  | 'waivers';
 
 export function tierColor(t: Tier) {
   return colors.tier[t];

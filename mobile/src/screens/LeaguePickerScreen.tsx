@@ -10,10 +10,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ink, chalk, ice, semantic, space, type } from '../theme/chalkline';
-import { Button, Icon } from '../components/chalkline';
+import { Badge, Button, Icon } from '../components/chalkline';
 import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
 import { getLeagues } from '../api/sleeper';
+import { getEspnLeagues } from '../api/espn';
 import { buildSessionInitBody, submitSessionInit } from '../api/auth';
+import EspnLinkSheet from '../components/EspnLinkSheet';
 import type { LeagueSummary } from '../shared/types';
 
 interface Props {
@@ -33,6 +36,9 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
   const [selectingId, setSelectingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [slowLoad, setSlowLoad] = useState(false);
+  // ESPN league linking (flag `espn.link`) — read-only import by league ID.
+  const espnEnabled = useFlag('espn.link');
+  const [espnOpen, setEspnOpen] = useState(false);
 
   // Render free-tier cold starts run 30–60s. Hold the friendly default for
   // the first 4s so warm requests never show the alarming "waking up" copy.
@@ -61,12 +67,53 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
     setError(null);
     try {
       const lgs = await getLeagues(user.user_id);
-      setLeagues(lgs);
+      // Merge in ESPN-imported leagues (flag-gated; backend 404s dark).
+      // Best-effort — an ESPN hiccup must not hide the Sleeper list.
+      let merged = lgs;
+      if (espnEnabled) {
+        try {
+          const espn = await getEspnLeagues();
+          const seen = new Set(lgs.map((lg) => lg.league_id));
+          merged = [
+            ...lgs,
+            ...espn
+              .filter((lg) => !seen.has(lg.league_id))
+              .map((lg) => ({
+                league_id: lg.league_id,
+                name: lg.name || `ESPN league ${lg.league_id}`,
+                total_rosters: lg.total_rosters ?? undefined,
+                platform: 'espn',
+              })),
+          ];
+        } catch {
+          /* non-fatal */
+        }
+      }
+      setLeagues(merged);
     } catch (e: any) {
       setError(e?.message || 'Could not load leagues');
     } finally {
       setLoading(false);
     }
+  }
+
+  // Post-import handler from the EspnLinkSheet: put the league in the
+  // cached list first (buildSessionInitBody's espn branch detects espn
+  // leagues via that cache), then run the normal pick flow.
+  async function espnLinked(lg: { league_id: string; name: string; total_rosters: number }) {
+    setEspnOpen(false);
+    const summary: LeagueSummary = {
+      league_id: lg.league_id,
+      name: lg.name,
+      total_rosters: lg.total_rosters,
+      platform: 'espn',
+    };
+    const merged = [
+      ...cached.filter((x) => x.league_id !== lg.league_id),
+      summary,
+    ];
+    await setLeagues(merged);
+    await pickLeague(summary);
   }
 
   async function pickLeague(lg: LeagueSummary) {
@@ -155,9 +202,12 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
                 disabled={!!selectingId}
               >
                 <View style={styles.rowBody}>
-                  <Text style={styles.rowName} numberOfLines={1}>
-                    {item.name}
-                  </Text>
+                  <View style={styles.rowNameRow}>
+                    <Text style={[styles.rowName, styles.rowNameText]} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    {item.platform === 'espn' ? <Badge label="ESPN" /> : null}
+                  </View>
                   <Text style={styles.rowMeta}>
                     {item.total_rosters || 12} teams
                   </Text>
@@ -172,6 +222,28 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut }: Props)
           }}
         />
       )}
+
+      {/* Flag-gated ESPN link affordance (feedback #115). Shown in every
+          non-loading state — including "no leagues found", where an
+          ESPN-only manager would otherwise dead-end. */}
+      {espnEnabled && !loading ? (
+        <View style={styles.espnFooter}>
+          <Button
+            testID="leagues.link-espn"
+            label="Link an ESPN league"
+            variant="secondary"
+            compact
+            onPress={() => setEspnOpen(true)}
+            disabled={!!selectingId}
+          />
+        </View>
+      ) : null}
+
+      <EspnLinkSheet
+        visible={espnOpen}
+        onClose={() => setEspnOpen(false)}
+        onLinked={espnLinked}
+      />
     </SafeAreaView>
   );
 }
@@ -213,5 +285,17 @@ const styles = StyleSheet.create({
   rowBusy: { opacity: 0.6 },
   rowBody: { flex: 1, minWidth: 0 },
   rowName: { ...type.title },
+  rowNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
+  rowNameText: { flexShrink: 1 },
   rowMeta: { ...type.bodySm, marginTop: 2 },
+  espnFooter: {
+    paddingHorizontal: space.xl,
+    paddingVertical: space.md,
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
+  },
 });

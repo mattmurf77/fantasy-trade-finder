@@ -77,10 +77,11 @@ export default function PlayerPickerModal({
             <View style={styles.grabber} />
             <View style={styles.header}>
               <Text style={type.heading}>{title}</Text>
-              <Button label="Done" variant="ghost" onPress={onClose} />
+              <Button label="Done" variant="ghost" testID="calc.picker.done" onPress={onClose} />
             </View>
 
             <TextInput
+              testID="calc.picker.search"
               style={styles.search}
               placeholder="Search players…"
               placeholderTextColor={chalk.faint}
@@ -118,6 +119,7 @@ export default function PlayerPickerModal({
               contentContainerStyle={{ paddingBottom: space.xl }}
               renderItem={({ item }) => (
                 <Pressable
+                  testID={`calc.picker.row.${item.id}`}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   onPress={() => onPick(item)}
                 >

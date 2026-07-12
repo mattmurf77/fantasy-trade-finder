@@ -8,19 +8,23 @@ sleeper.com. Pulls rankings from your Fantasy Trade Finder account.
 ## What it does
 
 Wherever Sleeper shows a player name — player popups, trade tabs, team
-rosters, draft boards — you'll see a small pill like `Elite · QB4`
+rosters, draft boards — you'll see a small pill like `1st · QB4`
 reflecting **your** ranking in the league you selected, not community
 consensus.
 
-Tier bands mirror the main app:
+Tier bands mirror the main app's 8-tier pick-value ladder
+(docs/cross-client-invariants.md):
 
-| Tier    | Color  |
-|---------|--------|
-| Elite   | gold   |
-| Starter | green  |
-| Solid   | blue   |
-| Depth   | purple |
-| Bench   | gray   |
+| Tier    | Color   |
+|---------|---------|
+| 4+ 1sts | red     |
+| 3 1sts  | fuchsia |
+| 2 1sts  | gold    |
+| 1st     | teal    |
+| 2nd     | sky     |
+| 3rd     | pink    |
+| 4th     | lime    |
+| Waivers | gray    |
 
 Hover the pill for format + league context.
 
@@ -152,7 +156,7 @@ extension/
 ├── popup.css           Popup styling
 ├── background.js       Service worker (alarm + message hub)
 ├── content.js          Sleeper DOM scanner + badge injector
-├── content.css         Badge styles (5 tier variants)
+├── content.css         Badge styles (8 tier variants)
 ├── icons/
 │   ├── 16.png
 │   ├── 48.png

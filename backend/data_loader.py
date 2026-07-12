@@ -13,11 +13,22 @@ CSV columns used:
   value_1qb   — dynasty trade value, 0-10000 scale (1QB scoring)
   value_2qb   — dynasty trade value, 0-10000 scale (Superflex/2QB)
 
-Elo seeding formula:
-  elo = ELO_MIN + (value / VALUE_MAX) * ELO_RANGE
-  → value 10000 ≈ Elo 1800  (elite dynasty asset)
-  → value  5000 ≈ Elo 1500  (solid starter)
-  → value     0 ≈ Elo 1200  (bench/depth)
+Elo seeding formula (recalibrated 2026-07-12, feedback #117 — see
+seed_elo_for_value below):
+  DP values are a trade-value scale, so they map AFFINELY onto the trade
+  engine's value space and only then back onto Elo through the inverse of
+  trade_service.elo_to_value (value = 1000·e^(0.005·(elo−1500))):
+
+      v(dp)  = V_FLOOR + (dp / VALUE_MAX) × (V_CEIL − V_FLOOR)
+      elo(dp) = 1500 + ln(v / 1000) / 0.005
+
+  anchored at both ends:
+  → value 10000 ≈ Elo 1927  (= value_to_elo(4 × value(Mid 1st)) — the top
+                              consensus asset is worth ≈ 4 firsts, matching
+                              dynasty-market pricing; pre-#117 the linear map
+                              capped at Elo 1800 ≈ 2.1 firsts, so top assets
+                              could never reach the multi-first tiers)
+  → value     0 ≈ Elo 1200  (waiver/depth floor — unchanged from the old map)
 
 This gives every player a cross-position baseline derived from community
 consensus. User swipes personalise the rankings from there.
@@ -25,6 +36,7 @@ consensus. User swipes personalise the rankings from there.
 
 import csv
 import io
+import math
 import os
 import pathlib
 import re
@@ -39,10 +51,38 @@ VALUES_URL = (
     "https://raw.githubusercontent.com/dynastyprocess/data/master/files/values-players.csv"
 )
 
-ELO_MIN   = 1200.0
-ELO_MAX   = 1800.0
-ELO_RANGE = ELO_MAX - ELO_MIN
+ELO_MIN   = 1200.0     # seed Elo at DP value 0 (the affine map's low anchor)
 VALUE_MAX = 10_000.0
+
+# Default elo_value_* curve constants (trade_service._DEFAULT_CFG). Hardcoded
+# here — like GENERIC_PICK_SEEDS in server.py — because seeds are baked at
+# pool build; the ≈-Elo anchors above assume this default curve.
+_SEED_VALUE_K    = 0.005
+_SEED_VALUE_REF  = 1500.0
+_SEED_VALUE_BASE = 1000.0
+_MID_FIRST_ELO   = 1650.0   # GENERIC_PICK_SEEDS[(1, "Mid")] — the base first
+
+# Value-space anchors: DP 0 → the old floor Elo 1200 (≈ 223), DP 10000 → the
+# 4-firsts rung (4 × value(Mid 1st) ≈ 8468 → Elo ≈ 1927.3).
+SEED_VALUE_FLOOR = _SEED_VALUE_BASE * math.exp(
+    _SEED_VALUE_K * (ELO_MIN - _SEED_VALUE_REF))
+SEED_VALUE_CEIL = 4.0 * _SEED_VALUE_BASE * math.exp(
+    _SEED_VALUE_K * (_MID_FIRST_ELO - _SEED_VALUE_REF))
+
+
+def seed_elo_for_value(value: float) -> float:
+    """Map a DynastyProcess value (0–10000, clamped) to a seed Elo.
+
+    DP values are read as a linear trade-value scale: they map affinely onto
+    the trade engine's value space (SEED_VALUE_FLOOR..SEED_VALUE_CEIL) and
+    then back onto Elo through the inverse of the exponential Elo↔value
+    curve. Monotone; DP 0 → Elo 1200, DP 10000 → Elo ≈ 1927.3 (the 4-firsts
+    anchor rung). See the module docstring for the recalibration rationale.
+    """
+    v = SEED_VALUE_FLOOR + (
+        min(float(value), VALUE_MAX) / VALUE_MAX
+    ) * (SEED_VALUE_CEIL - SEED_VALUE_FLOOR)
+    return _SEED_VALUE_REF + math.log(v / _SEED_VALUE_BASE) / _SEED_VALUE_K
 
 # Positions we care about
 VALID_POSITIONS = {"QB", "RB", "WR", "TE"}
@@ -231,7 +271,7 @@ def _fetch_dynasty_process(
         except ValueError:
             value = 0.0
 
-        elo = ELO_MIN + (min(value, VALUE_MAX) / VALUE_MAX) * ELO_RANGE
+        elo = seed_elo_for_value(value)
         normed = normalise_name(name_raw)
 
         # Skip DP players with no valid Sleeper counterpart

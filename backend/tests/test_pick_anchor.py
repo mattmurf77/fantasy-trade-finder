@@ -18,10 +18,12 @@ statement ("worth 2 firsts"). Covers:
       get_rankings(position=None) — serves players value-descending, so
       the highest-value unanchored player is always asked first and depth
       players only surface once the top of the board is anchored.
-  (f) per-user pick-value scale (#111): "top-tier asset = N firsts"
-      re-spaces the multi-first anchors (power curve), leaves single-pick
+  (f) per-user pick-value scale (#111, re-derived for the #117 8-tier
+      ladder): "top-tier asset = N firsts" re-spaces the multi-first
+      anchors (power curve, γ = log 4 / log N), leaves single-pick
       anchors + no_value untouched, persists per user + format, and is
-      byte-identical to the legacy mapping at the default N = 2.
+      byte-identical to the plain m × base mapping at the default N = 4
+      (the recalibrated consensus top asset sits at the 4-firsts rung).
 """
 import json
 import math
@@ -138,9 +140,9 @@ def test_anchor_save_pins_override_and_reports_tier(harness):
     assert d["ok"] is True and d["anchor"] == "2_firsts"
     # Override written with the mapped Elo.
     assert service._elo_overrides["rb1"] == pytest.approx(d["elo"], abs=0.1)
-    # 2 firsts ≈ Elo 1789 → firsts_2plus (floor 1789) — the anchor lands
+    # 2 firsts ≈ Elo 1789 → firsts_2 (floor 1788) — the anchor lands
     # in the tier that carries its name.
-    assert d["tier"] == "firsts_2plus"
+    assert d["tier"] == "firsts_2"
     assert d["value"] == pytest.approx(2 * _mid_first_value(), rel=1e-3)
     save_overrides.assert_called_once()
 
@@ -232,18 +234,19 @@ def test_default_scale_is_byte_identical_for_every_anchor_key():
     for key in server.VALID_ANCHORS:
         assert server._anchor_target_elo(key) == server._anchor_target_elo(
             key, top_tier_firsts=server.ANCHOR_TOP_TIER_FIRSTS_DEFAULT)
-    # And the default constant really is the legacy math (m × base first).
-    assert server.ANCHOR_TOP_TIER_FIRSTS_DEFAULT == 2.0
+    # And the default constant really is the plain math (m × base first) —
+    # N = 4 since the #117 ladder re-derivation (γ = log 4 / log 4 = 1).
+    assert server.ANCHOR_TOP_TIER_FIRSTS_DEFAULT == 4.0
     assert server._anchor_target_elo("3_firsts") == pytest.approx(
         ts.value_to_elo(3 * _mid_first_value()))
 
 
 def test_scale_respaces_multi_first_anchors_only():
-    top_tier_elo = server._anchor_target_elo("2_firsts")  # default top-tier pin
-    for n in (3.0, 4.0):
+    top_tier_elo = server._anchor_target_elo("4_firsts")  # default top-tier pin
+    for n in (2.0, 3.0):
         key = f"{int(n)}_firsts"
         # The user's own "top-tier = N firsts" answer lands exactly where
-        # the default math pins a top-tier asset.
+        # the default math pins a top-tier asset (the 4-firsts rung).
         assert server._anchor_target_elo(key, top_tier_firsts=n) == \
             pytest.approx(top_tier_elo)
         # Single-pick anchors + no_value are consensus assets — untouched.
@@ -279,8 +282,8 @@ def test_anchor_save_route_applies_user_scale(harness):
     with patch.object(server, "load_anchor_scale", return_value=3.0):
         d = _post(client, token, {"player_id": "rb1", "anchor": "3_firsts"}).get_json()
     # Under "top-tier = 3 firsts", a 3-firsts answer pins to the default
-    # top-tier Elo (what 2_firsts maps to at the default scale).
-    assert d["elo"] == pytest.approx(server._anchor_target_elo("2_firsts"), abs=0.1)
+    # top-tier Elo (what 4_firsts maps to at the default scale).
+    assert d["elo"] == pytest.approx(server._anchor_target_elo("4_firsts"), abs=0.1)
     assert d["top_tier_firsts"] == 3.0
     assert service._elo_overrides["rb1"] == pytest.approx(d["elo"], abs=0.1)
 
@@ -291,7 +294,7 @@ def test_anchor_save_route_default_scale_unchanged(harness):
         d = _post(client, token, {"player_id": "rb1", "anchor": "2_firsts"}).get_json()
     assert d["elo"] == pytest.approx(
         ts.value_to_elo(2 * _mid_first_value()), abs=0.1)
-    assert d["top_tier_firsts"] == 2.0
+    assert d["top_tier_firsts"] == 4.0
 
 
 def test_anchor_scale_route_get_post_and_validation(harness):
@@ -304,10 +307,10 @@ def test_anchor_scale_route_get_post_and_validation(harness):
     with patch.object(server, "load_anchor_scale",
                       side_effect=lambda uid, scoring_format: saved.get(scoring_format)), \
          patch.object(server, "save_anchor_scale", side_effect=_fake_save):
-        # GET before any save → default
+        # GET before any save → default (N = 4 since the #117 re-derivation)
         r = client.get("/api/anchor/scale", headers={"X-Session-Token": token})
         assert r.status_code == 200
-        assert r.get_json()["top_tier_firsts"] == 2.0
+        assert r.get_json()["top_tier_firsts"] == 4.0
 
         # POST a valid scale, GET reflects it
         r = client.post("/api/anchor/scale",

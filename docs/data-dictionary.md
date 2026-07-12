@@ -10,17 +10,17 @@ Sleeper user identities + denormalized hot-read activity columns.
 
 | Column | Type | Notes |
 |---|---|---|
-| `sleeper_user_id` | str PK | Sleeper's stable user ID |
-| `username` | str | Sleeper handle |
+| `sleeper_user_id` | str PK | The app's **working key** (historical column name). Usually Sleeper's stable user ID; account-only users (P2.6) use the synthetic `acct_<account_id>`; demo sessions `demo_user_*` |
+| `username` | str | Sleeper handle (empty for account-only users) |
 | `display_name` | str | |
 | `avatar` | str | Sleeper avatar hash |
 | `created_at` | str | ISO timestamp |
 | `ranking_method` | str | `null` / `'trio'` / `'manual'` / `'tiers'` |
 | `tiers_saved` | JSON text | Per-format: `{"1qb_ppr": ["RB","WR"], "sf_tep": []}` |
-| `tier_overrides` | JSON text | Per-format: `{"1qb_ppr": {pid: elo}, "sf_tep": {pid: elo}}`. Values are raw Elo — tier keys are never stored, so the 2026-07-11 pick-value tier-ladder migration needed **no data pass**: existing overrides re-bucket through the new `tier_config.json` band walk on read. |
+| `tier_overrides` | JSON text | Per-format: `{"1qb_ppr": {pid: elo}, "sf_tep": {pid: elo}}`. Values are raw Elo — tier keys are never stored, so neither the 2026-07-11 pick-value tier-ladder migration nor the 2026-07-12 8-tier revision (#117) needed **any data pass**: existing overrides re-bucket through the new `tier_config.json` band walk on read. |
 | `invited_by` | str | Referrer's Sleeper username |
 | `unlocked_formats` | JSON text | Formats the user has unlocked Trade Finder in |
-| `anchor_scale` | JSON text | Per-format pick-value scale (1.5.4 #111): `{"1qb_ppr": 3, "sf_tep": 2}` — "a top-tier asset is worth N firsts" (N ∈ 2/3/4). Absent key = default 2 = legacy anchor math. Read/written by `load_anchor_scale` / `save_anchor_scale` via `/api/anchor/scale`. |
+| `anchor_scale` | JSON text | Per-format pick-value scale (1.5.4 #111): `{"1qb_ppr": 3, "sf_tep": 2}` — "a top-tier asset is worth N firsts" (N ∈ 2/3/4). Absent key = default 4 since the #117 re-derivation (2026-07-12; = the plain `m × base` anchor math). Stored values keep their semantics across the re-derivation — only the neutral point moved. Read/written by `load_anchor_scale` / `save_anchor_scale` via `/api/anchor/scale`. |
 | `last_active_at` | str | denormalized from `user_events` for hot reads |
 | `last_login_at` | str | |
 | `last_rank_at` | str | |
@@ -55,6 +55,10 @@ per-`(league, user)` roster.
 | `opponent_data` | JSON text | `[{user_id, username, player_ids}]` — importer-owner's snapshot; write-once, not read back |
 | `default_scoring` | str | `'1qb_ppr'` / `'sf_tep'` (null → `'1qb_ppr'`) |
 | `total_rosters` | int | Sleeper's `total_rosters` (TRUE team count incl. ownerless rosters; FB #41). Written by session_init's meta fetch; null for local leagues / pre-migration rows |
+| `platform` | str | `'espn'` for ESPN-imported leagues (flag `espn.link`); NULL reads as `'sleeper'`. For ESPN rows the PK column holds the numeric **ESPN** league id — the plan chose a platform column over magic-prefix ids ([plan §2](plans/espn-league-linking-plan-2026-07-11.md)) |
+| `espn_season` | int | ESPN `seasonId` used at import — the re-sync key (`/api/espn/import`). NULL for non-ESPN rows |
+| `espn_auth` | str | `'public'` / `'cookie'` — how the league was read; `'cookie'` re-syncs decrypt the importer's `espn_credentials` row |
+| `espn_my_team_id` | int | The linking user's ESPN team id — binds their `league_members` row to their real FTF `user_id` across re-syncs |
 | `created_at`, `updated_at` | str | |
 
 ---
@@ -103,11 +107,13 @@ Indexes: `ix_trade_dec_user_league_decision` on `(user_id, league_id, decision)`
 
 Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`.
 
+For ESPN-imported leagues (`espn.link`), rows are written by `replace_espn_league_members` (delete-then-insert snapshot): the linking user's team carries their real FTF `user_id`; every other team gets a synthetic `espn:{SWID}` (fallback `espn:{league_id}.t{team_id}`) id. Synthetic ids must never reach push/notification paths (same class as unlinked Sleeper members). `roster_data` always holds **Sleeper** player ids — ESPN ids are crosswalked at import (`backend/espn_service.py`).
+
 | Column | Type | Notes |
 |---|---|---|
 | `id` | int PK | |
 | `league_id` | str | |
-| `user_id` | str | |
+| `user_id` | str | Real FTF id, or synthetic `espn:` id for ESPN counterparties |
 | `username`, `display_name` | str | |
 | `roster_data` | JSON text | |
 | `updated_at` | str | |
@@ -315,6 +321,8 @@ Daily **consensus** value snapshots (backlog #57 / player profiles #17). `elo_hi
 
 Constraint: `uq_value_snapshot` on `(player_id, scoring_format, snapshot_date)` — the daily upsert (INSERT OR REPLACE / ON CONFLICT DO UPDATE) is idempotent, so a same-day cron retry overwrites rather than duplicating. Written via `record_value_snapshots`; read via `load_value_history` / `load_value_extremes` / `load_value_snapshot_baseline` (FB4-61: oldest prior-day snapshot in the trailing 30d window — the baseline for the consensus positional-rank trend on `/api/rankings`). Retention: keep-forever in v1 (~700 players × 2 formats × 365 ≈ 0.5M rows/yr; revisit with a downsample-to-weekly policy after year one).
 
+**2026-07-12 (#117) scale migration:** rows written before the consensus seed recalibration stored old-scale (`elo = 1200 + dp/10000 × 600`) values; `database._migrate_db` rescaled them in place to the new value-affine scale (closed-form, invertible), guarded by the one-time `model_config` marker row `value_history_seed_scale = 2.0`. See docs/runbook.md → "8-tier ladder + consensus seed recalibration".
+
 ---
 
 ## `model_config`
@@ -401,6 +409,22 @@ Interim home; folds into the auth epic's `linked_sources` when that lands.
 
 ---
 
+## `espn_credentials`
+
+ESPN league linking (`espn.link`, [plan](plans/espn-league-linking-plan-2026-07-11.md)). Encrypted ESPN session cookies for private-league reads — one row per FTF `user_id`. Written by `upsert_espn_credential`; read/deleted by `get_espn_credential` / `delete_espn_credential`. Crypto reuses `backend/sleeper_write.py`'s Fernet helpers (same `SLEEPER_TOKEN_KEY` — one credential-encryption key per deployment).
+
+| Column | Type | Notes |
+|---|---|---|
+| `user_id` | str PK | FTF user_id (one ESPN cookie pair per user) |
+| `swid` | str | Braced GUID — doubles as the user's ESPN member id in league payloads; plaintext |
+| `espn_s2_encrypted` | text | **Fernet ciphertext** of the `espn_s2` cookie — never plaintext, never logged |
+| `expires_hint_at` | str | ISO UTC guess (~1yr community consensus; undocumented). NULL = unknown — 401s drive reconnect |
+| `created_at`, `updated_at` | str | |
+
+Interim home; folds into the auth epic's `linked_sources` when that lands.
+
+---
+
 ## `accounts`
 
 Identity-anchor layer above the app's working key (`sleeper_user_id`) — account-auth plan P2 (docs/plans/account-auth-plan-2026-07-11.md). One row per durable account; provider identities hang off it via `linked_identities`. Managed by `backend/accounts.py` (`find_or_create_account`, `bind_sleeper_user`, `delete_user_data`).
@@ -408,7 +432,7 @@ Identity-anchor layer above the app's working key (`sleeper_user_id`) — accoun
 | Column | Type | Notes |
 |---|---|---|
 | `account_id` | str PK | Opaque hex id (`secrets.token_hex(16)`) |
-| `sleeper_user_id` | str | Bound working key — NULL until first bind. Binding is **sticky**: never silently rebound; a conflicting bind attempt is refused (see `bind_sleeper_user`) |
+| `sleeper_user_id` | str | Bound Sleeper source — NULL until first bind (account-only users, P2.6, stay NULL and work under the derived `acct_<account_id>` key; synthetic keys are never bound here). Binding is **sticky**: never silently rebound; a conflicting bind attempt is refused (see `bind_sleeper_user`) |
 | `created_at` | str | ISO UTC |
 
 ---

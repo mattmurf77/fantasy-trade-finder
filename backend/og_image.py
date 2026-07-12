@@ -55,25 +55,30 @@ POS_COLORS = {
 }
 
 # Matches ranking_service.ORDERED_TIERS ordering (best → worst) — the
-# pick-value tier ladder (2026-07-11, docs/cross-client-invariants.md).
-TIER_ORDER = ["firsts_2plus", "first_1", "second", "third", "fourth", "bench"]
+# 8-tier pick-value ladder (2026-07-12, docs/cross-client-invariants.md).
+TIER_ORDER = ["firsts_4plus", "firsts_3", "firsts_2", "first_1",
+              "second", "third", "fourth", "waivers"]
 TIER_LABELS = {
-    "firsts_2plus": "2+ 1sts",
+    "firsts_4plus": "4+ 1sts",
+    "firsts_3":     "3 1sts",
+    "firsts_2":     "2 1sts",
     "first_1":      "1st",
     "second":       "2nd",
     "third":        "3rd",
     "fourth":       "4th",
-    "bench":        "Bench",
+    "waivers":      "Waivers",
 }
 TIER_TINTS = {
     # translucent band fill (R, G, B, A) — canonical tier hexes from
     # docs/cross-client-invariants.md at og-card alphas.
-    "firsts_2plus": (251, 191, 36,  235),
-    "first_1":      (45,  212, 191, 220),
+    "firsts_4plus": (248, 113, 113, 245),
+    "firsts_3":     (232, 121, 249, 235),
+    "firsts_2":     (251, 191, 36,  225),
+    "first_1":      (45,  212, 191, 215),
     "second":       (56,  189, 248, 210),
-    "third":        (244, 114, 182, 200),
+    "third":        (244, 114, 182, 205),
     "fourth":       (163, 230, 53,  200),
-    "bench":        (122, 127, 150, 190),
+    "waivers":      (122, 127, 150, 190),
 }
 
 FORMAT_LABELS = {

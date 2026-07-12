@@ -10,7 +10,7 @@ import { haptics } from '../utils/haptics';
 import type { RankRoute } from '../navigation/TabNav';
 
 // Build-your-board chooser — the Rank tab's first-run screen. Describes the
-// four ranking flows by PROCESS (how guided vs. hands-on), not feature name,
+// five ranking flows by PROCESS (how guided vs. hands-on), not feature name,
 // ordered most-guided → most-manual. Picking one saves the preference
 // (useSession.rankingMethodPref) so subsequent launches route straight to
 // that flow; the Settings steer slider changes it later. The intro carries
@@ -26,10 +26,25 @@ interface Method {
   time: string;
   /** Hands-on level, 1 (we steer) → 4 (you steer). Drives the meter. */
   level: 1 | 2 | 3 | 4;
-  easiest?: boolean;
+  /** #119 — the lowest-effort flow, tagged "recommended" (flare). */
+  recommended?: boolean;
 }
 
 const METHODS: Method[] = [
+  // #119 — Quick set promoted to a first-class method: the lowest-effort
+  // way to a usable board, so it leads the list and carries the tag.
+  {
+    pref: 'quickset',
+    route: 'QuickSetTiers',
+    icon: 'check',
+    title: 'Tap players into tiers',
+    body:
+      'We deal you one value tier at a time — tap the players who belong, ' +
+      'save, next. The fastest route to a board good enough to trade off.',
+    time: '~2 MIN PER POSITION',
+    level: 1,
+    recommended: true,
+  },
   {
     pref: 'trio',
     route: 'Trios',
@@ -40,7 +55,6 @@ const METHODS: Method[] = [
       'each, and your board builds itself from the pattern of your answers.',
     time: '30 SEC AT A TIME',
     level: 1,
-    easiest: true,
   },
   {
     pref: 'anchor',
@@ -116,7 +130,7 @@ export default function RankHomeScreen({ navigation }: any) {
               Every trade we suggest is priced off this board.{' '}
             </Text>
             The closer it matches what you really believe, the better the
-            deals we find — sharper targets, fairer offers, fewer duds. Four
+            deals we find — sharper targets, fairer offers, fewer duds. Five
             ways to build it; pick how hands-on you want to be.
           </Text>
         </View>
@@ -124,10 +138,11 @@ export default function RankHomeScreen({ navigation }: any) {
         {METHODS.map((m) => (
           <Pressable
             key={m.pref}
+            testID={`rank-home.card.${m.pref}`}
             onPress={() => choose(m)}
             style={({ pressed }) => [
               styles.card,
-              m.easiest && styles.cardFeatured,
+              m.recommended && styles.cardFeatured,
               pressed && { backgroundColor: ink.ink3 },
             ]}
           >
@@ -135,10 +150,12 @@ export default function RankHomeScreen({ navigation }: any) {
               <Icon
                 name={m.icon}
                 size={20}
-                color={m.easiest ? ice.base : chalk.dim}
+                color={m.recommended ? ice.base : chalk.dim}
               />
               <Text style={styles.cardTitle}>{m.title}</Text>
-              {m.easiest ? <Text style={styles.easiestTag}>easiest</Text> : null}
+              {m.recommended ? (
+                <Text style={styles.recommendedTag}>recommended</Text>
+              ) : null}
             </View>
             <Text style={styles.cardBody}>{m.body}</Text>
             <View style={styles.cardFoot}>
@@ -190,7 +207,9 @@ const styles = StyleSheet.create({
   cardFeatured: { borderColor: ice.base },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   cardTitle: { ...type.title, flex: 1 },
-  easiestTag: { ...type.label, color: flare.base },
+  // #119 — flare tag = informational highlight (ADR-005), never on the
+  // action itself; the card's featured state stays the ice border.
+  recommendedTag: { ...type.label, color: flare.base },
   cardBody: { ...type.bodySm, lineHeight: 19 },
   cardFoot: {
     flexDirection: 'row',

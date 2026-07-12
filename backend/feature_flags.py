@@ -115,6 +115,11 @@ FLAG_KEYS: tuple[str, ...] = (
     # /api/sleeper/link, POST /api/trades/propose) ignore this flag and
     # always require proof.
     "auth.enforce_verified_writes",
+    # ESPN league linking Phase 1 — read-only import of ESPN leagues via the
+    # unofficial v3 API (docs/plans/espn-league-linking-plan-2026-07-11.md).
+    # Gates /api/espn/* routes + the mobile link affordance. Also the kill
+    # switch if ESPN blocks reads or Apple objects (plan §4/§6).
+    "espn.link",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

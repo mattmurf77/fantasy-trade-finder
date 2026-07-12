@@ -1,74 +1,90 @@
 {
   "_comment": "Single source of truth for ELO tier bands. Read by the backend (ranking_service.tier_bands_for + apply_tiers) and by the web frontend (positional-tiers.html, via GET /api/tier-config); mobile caches the same JSON at boot (utils/tierBands.ts). Every (scoring_format, position, tier) row carries a [min, max] ELO band. The backend's apply_tiers spreads ELOs linearly inside [min, max]; bucketing walks tiers top-down and assigns the first tier whose min <= elo (tier_for_elo).",
-  "_calibration": "Recalibrated 2026-07-11 (pick-value tier ladder). Tiers now read directly in draft-pick terms: each tier's floor is a rung of the anchor/pick Elo ladder (GENERIC_PICK_SEEDS in backend/server.py + the multi-first anchor Elos). firsts_2plus floor = 1788, just under value_to_elo(2 x Mid 1st) = 1788.6 (all 2/3/4-firsts anchor pins land here); first_1 floor = Late 1st seed 1580 (worth a 1st-round pick); second floor = Late 2nd 1400; third floor = Late 3rd 1280; fourth floor = Late 4th 1220; bench = below 4th-round value down to 1150 (below 1150 = unranked, which keeps the no_value anchor at 1100 below every band). Because pick value is position-uniform by design (see docs/cross-client-invariants.md, Pick anchor keys), the bands are identical across positions AND scoring formats — the per-(format, position) shape is kept so consumers do not change; occupancy differs per position/format because the seed Elos do. Occupancy is pinned by backend/tests/test_tier_occupancy.py against a checked-in DP snapshot — re-run it after editing these numbers.",
+  "_calibration": "Recalibrated 2026-07-12 (#117/#118 — 8-tier pick-value ladder + consensus seed recalibration). Tiers read directly in draft-pick terms: each tier's floor is a rung of the anchor/pick Elo ladder (GENERIC_PICK_SEEDS in backend/server.py + the multi-first anchor Elos). firsts_4plus floor = 1927, just under value_to_elo(4 x Mid 1st) = 1927.3 (its max 1972 sits just under the 5-firsts rung 1972.3); firsts_3 floor = 1869, just under value_to_elo(3 x Mid 1st) = 1869.7; firsts_2 floor = 1788, just under value_to_elo(2 x Mid 1st) = 1788.6; first_1 floor = Late 1st seed 1580 (worth a 1st-round pick); second floor = Late 2nd 1400; third floor = Late 3rd 1280; fourth floor = Late 4th 1220; waivers = below 4th-round value down to 1150 (below 1150 = unranked, which keeps the no_value anchor at 1100 below every band). The consensus seed map was recalibrated in the same change (data_loader.seed_elo_for_value: DP values map affinely onto the trade-value scale, DP 10000 -> the 4-firsts rung) so consensus assets can actually reach the top tiers. Because pick value is position-uniform by design (see docs/cross-client-invariants.md, Pick anchor keys), the bands are identical across positions AND scoring formats — the per-(format, position) shape is kept so consumers do not change; occupancy differs per position/format because the seed Elos do. Occupancy is pinned by backend/tests/test_tier_occupancy.py against a checked-in DP snapshot — re-run it after editing these numbers.",
 
   "1qb_ppr": {
     "QB": {
-      "firsts_2plus": { "min": 1788, "max": 1870 },
+      "firsts_4plus": { "min": 1927, "max": 1972 },
+      "firsts_3":     { "min": 1869, "max": 1922 },
+      "firsts_2":     { "min": 1788, "max": 1864 },
       "first_1":      { "min": 1580, "max": 1785 },
       "second":       { "min": 1400, "max": 1575 },
       "third":        { "min": 1280, "max": 1395 },
       "fourth":       { "min": 1220, "max": 1275 },
-      "bench":        { "min": 1150, "max": 1215 }
+      "waivers":      { "min": 1150, "max": 1215 }
     },
     "RB": {
-      "firsts_2plus": { "min": 1788, "max": 1870 },
+      "firsts_4plus": { "min": 1927, "max": 1972 },
+      "firsts_3":     { "min": 1869, "max": 1922 },
+      "firsts_2":     { "min": 1788, "max": 1864 },
       "first_1":      { "min": 1580, "max": 1785 },
       "second":       { "min": 1400, "max": 1575 },
       "third":        { "min": 1280, "max": 1395 },
       "fourth":       { "min": 1220, "max": 1275 },
-      "bench":        { "min": 1150, "max": 1215 }
+      "waivers":      { "min": 1150, "max": 1215 }
     },
     "WR": {
-      "firsts_2plus": { "min": 1788, "max": 1870 },
+      "firsts_4plus": { "min": 1927, "max": 1972 },
+      "firsts_3":     { "min": 1869, "max": 1922 },
+      "firsts_2":     { "min": 1788, "max": 1864 },
       "first_1":      { "min": 1580, "max": 1785 },
       "second":       { "min": 1400, "max": 1575 },
       "third":        { "min": 1280, "max": 1395 },
       "fourth":       { "min": 1220, "max": 1275 },
-      "bench":        { "min": 1150, "max": 1215 }
+      "waivers":      { "min": 1150, "max": 1215 }
     },
     "TE": {
-      "firsts_2plus": { "min": 1788, "max": 1870 },
+      "firsts_4plus": { "min": 1927, "max": 1972 },
+      "firsts_3":     { "min": 1869, "max": 1922 },
+      "firsts_2":     { "min": 1788, "max": 1864 },
       "first_1":      { "min": 1580, "max": 1785 },
       "second":       { "min": 1400, "max": 1575 },
       "third":        { "min": 1280, "max": 1395 },
       "fourth":       { "min": 1220, "max": 1275 },
-      "bench":        { "min": 1150, "max": 1215 }
+      "waivers":      { "min": 1150, "max": 1215 }
     }
   },
 
   "sf_tep": {
     "QB": {
-      "firsts_2plus": { "min": 1788, "max": 1870 },
+      "firsts_4plus": { "min": 1927, "max": 1972 },
+      "firsts_3":     { "min": 1869, "max": 1922 },
+      "firsts_2":     { "min": 1788, "max": 1864 },
       "first_1":      { "min": 1580, "max": 1785 },
       "second":       { "min": 1400, "max": 1575 },
       "third":        { "min": 1280, "max": 1395 },
       "fourth":       { "min": 1220, "max": 1275 },
-      "bench":        { "min": 1150, "max": 1215 }
+      "waivers":      { "min": 1150, "max": 1215 }
     },
     "RB": {
-      "firsts_2plus": { "min": 1788, "max": 1870 },
+      "firsts_4plus": { "min": 1927, "max": 1972 },
+      "firsts_3":     { "min": 1869, "max": 1922 },
+      "firsts_2":     { "min": 1788, "max": 1864 },
       "first_1":      { "min": 1580, "max": 1785 },
       "second":       { "min": 1400, "max": 1575 },
       "third":        { "min": 1280, "max": 1395 },
       "fourth":       { "min": 1220, "max": 1275 },
-      "bench":        { "min": 1150, "max": 1215 }
+      "waivers":      { "min": 1150, "max": 1215 }
     },
     "WR": {
-      "firsts_2plus": { "min": 1788, "max": 1870 },
+      "firsts_4plus": { "min": 1927, "max": 1972 },
+      "firsts_3":     { "min": 1869, "max": 1922 },
+      "firsts_2":     { "min": 1788, "max": 1864 },
       "first_1":      { "min": 1580, "max": 1785 },
       "second":       { "min": 1400, "max": 1575 },
       "third":        { "min": 1280, "max": 1395 },
       "fourth":       { "min": 1220, "max": 1275 },
-      "bench":        { "min": 1150, "max": 1215 }
+      "waivers":      { "min": 1150, "max": 1215 }
     },
     "TE": {
-      "firsts_2plus": { "min": 1788, "max": 1870 },
+      "firsts_4plus": { "min": 1927, "max": 1972 },
+      "firsts_3":     { "min": 1869, "max": 1922 },
+      "firsts_2":     { "min": 1788, "max": 1864 },
       "first_1":      { "min": 1580, "max": 1785 },
       "second":       { "min": 1400, "max": 1575 },
       "third":        { "min": 1280, "max": 1395 },
       "fourth":       { "min": 1220, "max": 1275 },
-      "bench":        { "min": 1150, "max": 1215 }
+      "waivers":      { "min": 1150, "max": 1215 }
     }
   }
 }

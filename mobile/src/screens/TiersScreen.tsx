@@ -105,7 +105,7 @@ export default function TiersScreen() {
     haptics.selection();
   }, []);
 
-  // tiers[position] = { firsts_2plus: [player...], first_1: [...], ..., unassigned: [...] }
+  // tiers[position] = { firsts_4plus: [player...], firsts_3: [...], ..., unassigned: [...] }
   const [buckets, setBuckets] = useState<Record<Zone, RankedPlayer[]>>(() => emptyBuckets());
 
   // Players the user has dragged OUT of any tier (back to the pool) since
@@ -349,7 +349,7 @@ export default function TiersScreen() {
   // Collapse the selected chips into a CONTIGUOUS BLOCK and move the whole
   // block by ONE rank in `direction` (#32). Non-adjacent selections gather
   // together; the block crosses tier boundaries as a single unit; clamps
-  // at the top of the first tier / bottom of `bench`.
+  // at the top of the first tier / bottom of `waivers`.
   const bulkMove = useCallback(
     (direction: 'up' | 'down') => {
       if (selectedIds.size === 0) return;
@@ -622,7 +622,7 @@ export default function TiersScreen() {
         return (
           <View style={styles.tierHeader}>
             <View style={styles.tierHeaderLeft}>
-              {/* Tier labels ARE pick terms now ("2+ 1sts" / "1st" / …) —
+              {/* Tier labels ARE pick terms now ("4+ 1sts" / "1st" / …) —
                   the former #103 sublabel is folded into the name. */}
               <TickLabel color={accent}>{label}</TickLabel>
               <Text style={styles.tierHeaderCount}>{count}</Text>
@@ -892,6 +892,7 @@ export default function TiersScreen() {
           return (
             <Pressable
               key={p}
+              testID={`tiers.pos-tab.${p.toLowerCase()}`}
               onPress={() => {
                 if (p !== position) setPosition(p);
               }}
@@ -986,7 +987,7 @@ export default function TiersScreen() {
           />
         </View>
       ) : (
-        <View style={styles.boardWrap}>
+        <View testID="tiers.list" style={styles.boardWrap}>
         <DraggableFlatList
           data={listData}
           keyExtractor={keyExtractor}
@@ -1087,6 +1088,7 @@ export default function TiersScreen() {
           tokens) because the Button primitive has no in-flight spinner. */}
       <View style={styles.saveBar}>
         <Pressable
+          testID="tiers.save-btn"
           disabled={saving || loading}
           onPress={() => saveMutation.mutate()}
           style={({ pressed }) => [
@@ -1111,12 +1113,14 @@ export default function TiersScreen() {
 function emptyBuckets(): Record<Zone, RankedPlayer[]> {
   return {
     unassigned: [],
-    firsts_2plus: [],
+    firsts_4plus: [],
+    firsts_3: [],
+    firsts_2: [],
     first_1: [],
     second: [],
     third: [],
     fourth: [],
-    bench: [],
+    waivers: [],
   };
 }
 
@@ -1124,10 +1128,10 @@ function emptyBuckets(): Record<Zone, RankedPlayer[]> {
 // relative order. Placement inside the target tier: moving up appends to
 // the BOTTOM of the higher tier (they're its newest/weakest members);
 // moving down inserts at the TOP of the lower tier (its strongest).
-// Clamps at the top/bottom tiers (TIERS[0] / bench); `unassigned` is never
-// a source or target. Used by the multi-select "Tier up / Tier down" bar
-// (FB-73). Returns `prev` unchanged when every mover is already clamped
-// at the boundary (no re-render).
+// Clamps at the top/bottom tiers (TIERS[0] / waivers); `unassigned` is
+// never a source or target. Used by the multi-select "Tier up / Tier down"
+// bar (FB-73). Returns `prev` unchanged when every mover is already
+// clamped at the boundary (no re-render).
 function moveTierByOne(
   prev: Record<Zone, RankedPlayer[]>,
   ids: ReadonlySet<string>,
@@ -1137,7 +1141,8 @@ function moveTierByOne(
   next.unassigned = [...prev.unassigned];
   // Split each tier into keepers and movers, preserving order.
   const movers: Record<Tier, RankedPlayer[]> = {
-    firsts_2plus: [], first_1: [], second: [], third: [], fourth: [], bench: [],
+    firsts_4plus: [], firsts_3: [], firsts_2: [], first_1: [],
+    second: [], third: [], fourth: [], waivers: [],
   };
   for (const t of TIERS) {
     for (const p of prev[t]) {

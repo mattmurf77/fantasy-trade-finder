@@ -1,22 +1,34 @@
-"""Suggested-tier occupancy sanity for the pick-value tier ladder.
+"""Suggested-tier occupancy sanity for the 8-tier pick-value ladder (#117).
 
 The default/suggested tiers a user sees are the consensus seed Elos
-(data_loader: elo = 1200 + value/10000 * 600, DynastyProcess values)
-bucketed through tier_config.json via RankingService.tier_for_elo.
+(data_loader.seed_elo_for_value — DynastyProcess values mapped affinely
+onto the trade-value scale, then through the inverse of the exponential
+Elo↔value curve) bucketed through tier_config.json via
+RankingService.tier_for_elo.
 
-Tiers read directly in draft-pick terms (2026-07-11 ladder): each floor
-is a rung of the anchor/pick Elo ladder — firsts_2plus >= 1788 (just under the 2-mid-1sts Elo 1788.6, so a
-'2 firsts' anchor pin lands inside), first_1 >= 1580 (Late 1st), second >= 1400 (Late 2nd), third >=
-1280 (Late 3rd), fourth >= 1220 (Late 4th), bench = the sub-4th tail
-down to 1150 (below = unranked). Bands are position- and format-uniform
-in Elo space because pick value is position-uniform by design; occupancy
-differs per position/format because the seed Elos do (e.g. 1QB QBs are
-rarely worth a 1st — that asymmetry is the point of the ladder).
+Tiers read directly in draft-pick terms (2026-07-12 8-tier ladder): each
+floor is a rung of the anchor/pick Elo ladder — firsts_4plus >= 1927
+(just under the 4-mid-1sts Elo 1927.3), firsts_3 >= 1869 (3 firsts =
+1869.7), firsts_2 >= 1788 (2 firsts = 1788.6), first_1 >= 1580 (Late
+1st), second >= 1400 (Late 2nd), third >= 1280 (Late 3rd), fourth >=
+1220 (Late 4th), waivers = the sub-4th tail down to 1150 (below =
+unranked). Bands are position- and format-uniform in Elo space because
+pick value is position-uniform by design; occupancy differs per
+position/format because the seed Elos do.
+
+The #117 recalibration (seed_elo_for_value) fixed the pre-2026-07-12
+calibration artifact where the linear seed map capped at Elo 1800 ≈ 2.1
+firsts, so no consensus asset could ever reach a 3-firsts rung. Under
+the recalibrated map the top consensus asset per format lands at the
+4-firsts rung (DP 10000 → Elo ≈ 1927.3) and the elite shelf reads
+≈ 3–4 firsts, matching dynasty-market pricing (a mid 1st ≈ 25–30% of a
+top asset).
 
 These tests pin, per scoring format, that the resulting occupancy is
-dynasty-sane: "worth a 1st or more" stays a handful, the middle rounds
-are populated, zero-value players never rise above Bench, and every
-anchor-wizard rung lands in the tier that carries its name.
+dynasty-sane: "worth a 1st or more" is a real cohort but bounded, the
+top two tiers are reachable by consensus (not anchor-only), the middle
+rounds are populated, zero-value players never rise above Waivers, and
+every anchor-wizard rung lands in the tier that carries its name.
 
 They run against a checked-in snapshot of the DynastyProcess pool
 (fixtures/dp_values_snapshot_2026-07-10.json) so they are deterministic
@@ -37,7 +49,12 @@ from pathlib import Path
 
 import pytest
 
-from backend.data_loader import ELO_MIN, ELO_RANGE, VALUE_MAX
+from backend.data_loader import (
+    SEED_VALUE_CEIL,
+    SEED_VALUE_FLOOR,
+    VALUE_MAX,
+    seed_elo_for_value,
+)
 from backend.ranking_service import ORDERED_TIERS, Player, RankingService
 
 _FIXTURE = (
@@ -48,71 +65,113 @@ _POOL = json.loads(_FIXTURE.read_text())["values"]
 FORMATS = ("1qb_ppr", "sf_tep")
 POSITIONS = ("QB", "RB", "WR", "TE")
 
+# "Worth a 1st or more" = the four firsts-denominated tiers.
+_FIRST_OR_BETTER = ("firsts_4plus", "firsts_3", "firsts_2", "first_1")
 
-def _seed_elo(value: float) -> float:
-    """Mirror of data_loader's seed formula."""
-    return ELO_MIN + (min(value, VALUE_MAX) / VALUE_MAX) * ELO_RANGE
+# Value of one generic Mid 1st on the seed scale (the ceiling anchor is
+# 4 × Mid 1st by construction).
+_MID_FIRST_VALUE = SEED_VALUE_CEIL / 4.0
+
+
+def _seed_value(dp: float) -> float:
+    """DP value → trade-value scale (the affine leg of the seed map)."""
+    return SEED_VALUE_FLOOR + (
+        min(dp, VALUE_MAX) / VALUE_MAX
+    ) * (SEED_VALUE_CEIL - SEED_VALUE_FLOOR)
+
+
+def _firsts(dp: float) -> float:
+    """DP value → 'how many Mid 1sts is this worth' on the seed scale."""
+    return _seed_value(dp) / _MID_FIRST_VALUE
 
 
 def _occupancy(fmt: str, pos: str) -> dict:
     counts = {t: 0 for t in ORDERED_TIERS}
     counts[None] = 0
     for value in _POOL[fmt][pos]:
-        tier = RankingService.tier_for_elo(_seed_elo(value), pos, fmt)
+        tier = RankingService.tier_for_elo(seed_elo_for_value(value), pos, fmt)
         counts[tier] += 1
     return counts
 
 
 @pytest.mark.parametrize("fmt", FORMATS)
 @pytest.mark.parametrize("pos", POSITIONS)
-def test_first_round_value_is_a_small_handful(fmt, pos):
-    """'Worth a 1st or more' (firsts_2plus + first_1) must stay a handful
-    per position — the ladder's honesty check (the old FB-69 failure mode
-    was 44 'elite' QBs)."""
+def test_first_round_value_is_a_real_but_bounded_cohort(fmt, pos):
+    """'Worth a 1st or more' per position: a real cohort (the recalibrated
+    scale prices a mid 1st ≈ 25% of a top asset, so dozens of players
+    legitimately clear it — KTC-style) but bounded (the FB-69 failure mode
+    was tier inflation; snapshot max is 36, WR 1qb)."""
     occ = _occupancy(fmt, pos)
-    assert occ["firsts_2plus"] + occ["first_1"] <= 12, (
-        f"{fmt}/{pos}: {occ['firsts_2plus'] + occ['first_1']} players at "
-        f"first-round value or above — must stay a handful")
+    n = sum(occ[t] for t in _FIRST_OR_BETTER)
+    assert 2 <= n <= 40, (
+        f"{fmt}/{pos}: {n} players at first-round value or above — "
+        f"outside the dynasty-sane band")
 
 
 @pytest.mark.parametrize("fmt", FORMATS)
-def test_top_of_ladder_is_reachable_per_format(fmt):
-    """firsts_2plus is a legitimate consensus tier (not anchor-only): at
-    least one player per format sits at 2-firsts value, but never more
-    than a few (the seed scale caps at Elo 1800 = DP value 10000)."""
-    total = sum(_occupancy(fmt, pos)["firsts_2plus"] for pos in POSITIONS)
-    assert 1 <= total <= 5, f"{fmt}: firsts_2plus total {total}"
+def test_top_two_tiers_are_reachable_per_format(fmt):
+    """#117's core fix: the OVERALL top consensus assets must reach the top
+    two tiers (pre-recalibration the seed ceiling sat below the 3-firsts
+    rung, so firsts-tiers above 2 were unreachable). firsts_4plus stays a
+    crown reserved for the very top of the market."""
+    occ4 = sum(_occupancy(fmt, pos)["firsts_4plus"] for pos in POSITIONS)
+    occ3 = sum(_occupancy(fmt, pos)["firsts_3"] for pos in POSITIONS)
+    assert 1 <= occ4 <= 3, f"{fmt}: firsts_4plus total {occ4}"
+    assert 3 <= occ4 + occ3 <= 25, f"{fmt}: top-two-tier total {occ4 + occ3}"
 
 
 @pytest.mark.parametrize("fmt", FORMATS)
 @pytest.mark.parametrize("pos", POSITIONS)
 def test_middle_rounds_are_populated(fmt, pos):
     # The failure mode on the other end: bands so high that everyone
-    # below the very top falls straight to bench. Every position must
+    # below the very top falls straight to waivers. Every position must
     # keep real 2nd/3rd/4th-round-value cohorts.
     occ = _occupancy(fmt, pos)
-    assert 3 <= occ["second"] <= 20, f"{fmt}/{pos}: second occ {occ['second']}"
-    assert 3 <= occ["third"] <= 20, f"{fmt}/{pos}: third occ {occ['third']}"
-    assert 6 <= occ["fourth"] <= 40, f"{fmt}/{pos}: fourth occ {occ['fourth']}"
+    assert 3 <= occ["second"] <= 35, f"{fmt}/{pos}: second occ {occ['second']}"
+    assert 3 <= occ["third"] <= 30, f"{fmt}/{pos}: third occ {occ['third']}"
+    assert 5 <= occ["fourth"] <= 40, f"{fmt}/{pos}: fourth occ {occ['fourth']}"
 
 
 @pytest.mark.parametrize("fmt", FORMATS)
 @pytest.mark.parametrize("pos", POSITIONS)
-def test_zero_value_players_never_rise_above_bench(fmt, pos):
-    tier = RankingService.tier_for_elo(_seed_elo(0.0), pos, fmt)
-    assert tier == "bench"
+def test_zero_value_players_never_rise_above_waivers(fmt, pos):
+    tier = RankingService.tier_for_elo(seed_elo_for_value(0.0), pos, fmt)
+    assert tier == "waivers"
 
 
 @pytest.mark.parametrize("fmt", FORMATS)
 @pytest.mark.parametrize("pos", POSITIONS)
-def test_top_consensus_player_is_worth_a_second_or_better(fmt, pos):
-    """The consensus #1 at every position is worth at least a 2nd. (TEs
-    top out at 2nd-round value on the consensus seed scale in both
-    formats — an honest pick-value statement, not a bug.)"""
+def test_top_consensus_player_is_worth_a_first_or_better(fmt, pos):
+    """The consensus #1 at every position clears first-round value on the
+    recalibrated scale (even TEs: sf TE1 lands first_1, 1qb TE1 firsts_2)."""
     top = max(_POOL[fmt][pos])
-    tier = RankingService.tier_for_elo(_seed_elo(top), pos, fmt)
-    assert tier in ("firsts_2plus", "first_1", "second"), (
+    tier = RankingService.tier_for_elo(seed_elo_for_value(top), pos, fmt)
+    assert tier in _FIRST_OR_BETTER, (
         f"{fmt}/{pos}: the consensus #1 (value {top}) bucketed as {tier}")
+
+
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_top_assets_read_as_three_to_four_firsts(fmt):
+    """The recalibration's sanity anchor: the top-5 overall consensus
+    assets read ≈ 3–4 firsts (dynasty-market pricing), and the format's
+    #1 sits at the 4-firsts rung (DP clamps at 10000 → Elo ≈ 1927.3)."""
+    all_values = sorted(
+        (v for pos in POSITIONS for v in _POOL[fmt][pos]), reverse=True)
+    top5 = all_values[:5]
+    assert 3.8 <= _firsts(top5[0]) <= 4.05, (
+        f"{fmt}: #1 asset reads {_firsts(top5[0]):.2f} firsts")
+    for v in top5:
+        assert _firsts(v) >= 3.0, (
+            f"{fmt}: top-5 asset (dp {v}) reads {_firsts(v):.2f} firsts — "
+            f"elites must price at 3+ firsts")
+    # And they land in the ladder's top two tiers (position-uniform bands,
+    # so RB suffices for the walk).
+    top_tiers = {
+        RankingService.tier_for_elo(seed_elo_for_value(v), "RB", fmt)
+        for v in top5
+    }
+    assert top_tiers <= {"firsts_4plus", "firsts_3"}, (
+        f"{fmt}: top-5 tiers {top_tiers}")
 
 
 @pytest.mark.parametrize("fmt", FORMATS)
@@ -122,13 +181,14 @@ def test_anchor_rungs_land_in_matching_tiers(fmt, pos):
     lands in the tier that carries its name, for every position/format.
     Elo rungs per docs/cross-client-invariants.md → Pick anchor keys."""
     rungs = {
-        1927.0: "firsts_2plus",   # 4 firsts
-        1869.7: "firsts_2plus",   # 3 firsts
-        1788.6: "firsts_2plus",   # 2 firsts (value_to_elo(2 x Mid 1st))
+        1927.3: "firsts_4plus",   # 4 firsts (value_to_elo(4 x Mid 1st))
+        1869.7: "firsts_3",       # 3 firsts
+        1788.6: "firsts_2",       # 2 firsts
         1650.0: "first_1",        # Mid 1st seed
         1460.0: "second",         # Mid 2nd seed
         1320.0: "third",          # Mid 3rd seed
         1240.0: "fourth",         # Mid 4th seed
+        1200.0: "waivers",        # DP value 0 (the seed floor)
     }
     for elo, expected in rungs.items():
         assert RankingService.tier_for_elo(elo, pos, fmt) == expected, (
@@ -145,7 +205,7 @@ def _service_from_snapshot(fmt: str, pos: str):
     values = _POOL[fmt][pos]
     players = [Player(id=f"p{i}", name=f"P{i}", position=pos, team="AAA", age=25)
                for i in range(len(values))]
-    seeds = {f"p{i}": _seed_elo(v) for i, v in enumerate(values)}
+    seeds = {f"p{i}": seed_elo_for_value(v) for i, v in enumerate(values)}
     svc = RankingService(players=players, seed_ratings=seeds)
     svc._scoring_format = fmt
     return svc, players
@@ -176,7 +236,7 @@ def test_full_board_reorder_does_not_inflate_top_tiers(fmt):
 
     assert after == before, (
         f"reorder changed tier occupancy: {before} -> {after}")
-    assert after.get("firsts_2plus", 0) + after.get("first_1", 0) <= 12
+    assert sum(after.get(t, 0) for t in _FIRST_OR_BETTER) <= 40
 
 
 def test_reorder_respects_requested_order():

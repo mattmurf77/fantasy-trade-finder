@@ -13,5 +13,6 @@ Reference docs for the project. **Treat these as part of the codebase — keep t
 | `runbook.md` | You hit (or fix) an operational issue worth recording |
 | `coding-guidelines.md` | The team adopts a new behavioral rule worth codifying alongside the Karpathy four principles |
 | `adr/` | You make a non-obvious architectural choice |
+| `feedback/items/<id>-<slug>/` | You produce durable non-code output for a feedback item's fix (PRD, plan, status, QA findings) — see `feedback/items/README.md`; scratch goes to gitignored `feedback-workspace/<id>/` |
 
 If you can't tell whether a doc needs updating, scan the table above against your diff. If your change touches `backend/database.py`, the data dictionary is in scope; if it touches routes in `backend/server.py`, the API reference is in scope; etc.

@@ -6,15 +6,17 @@
 
 export type ScoringFormat = '1qb_ppr' | 'sf_tep';
 export type Position = 'QB' | 'RB' | 'WR' | 'TE';
-// Pick-value tier ladder (2026-07-11) — tier keys read directly in
-// draft-pick terms (docs/cross-client-invariants.md).
+// Pick-value tier ladder (2026-07-12 8-tier ladder, #117) — tier keys read
+// directly in draft-pick terms (docs/cross-client-invariants.md).
 export type Tier =
-  | 'firsts_2plus'
+  | 'firsts_4plus'
+  | 'firsts_3'
+  | 'firsts_2'
   | 'first_1'
   | 'second'
   | 'third'
   | 'fourth'
-  | 'bench';
+  | 'waivers';
 
 export interface Player {
   id: string;

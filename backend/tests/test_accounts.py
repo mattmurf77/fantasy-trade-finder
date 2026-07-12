@@ -417,16 +417,25 @@ def test_auth_apple_invalid_token_401(client, engine):
 
 
 def test_auth_apple_new_identity_without_session(client, engine):
-    """No session + unbound identity → linked=false, no session minted."""
+    """No session + unbound identity → ACCOUNT-FIRST (P2.6): an
+    account-keyed session is minted (working key acct_<account_id>) instead
+    of the old P2 dead-end. Full lifecycle coverage: test_account_first.py."""
     c, _token, _sess = client
     tok = _make_token(_apple_claims(sub="fresh-sub"))
-    with patch.object(server, "is_enabled", lambda k: k == "auth.accounts"):
+    with patch.object(server, "is_enabled", lambda k: k == "auth.accounts"), \
+         patch.object(server, "_account_build_session",
+                      lambda user_id, display_name: (
+                          "acct-first-tok",
+                          {"user_id": user_id, "display_name": display_name,
+                           "last_active": 0.0})):
         r = c.post("/api/auth/apple", data=json.dumps({"identity_token": tok}),
                    headers={"Content-Type": "application/json"})
     body = r.get_json()
     assert r.status_code == 200
     assert body["linked"] is False
-    assert "session_token" not in body
+    assert body["account_only"] is True
+    assert body["session_token"] == "acct-first-tok"
+    assert body["user_id"] == accounts.account_user_id(body["account_id"])
 
 
 def test_auth_apple_restore_session_for_bound_account(client, engine):

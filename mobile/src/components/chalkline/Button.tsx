@@ -11,6 +11,7 @@ interface Props {
   disabled?: boolean;
   compact?: boolean; // 36px instead of 40px
   style?: ViewStyle;
+  testID?: string;   // UI-test harness id (registry: mobile/src/components/CLAUDE.md)
 }
 
 // Chalkline button set (docs/design/components.md → Buttons).
@@ -22,12 +23,14 @@ export default function Button({
   disabled = false,
   compact = false,
   style,
+  testID,
 }: Props) {
   const v = VARIANTS[variant];
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      testID={testID}
       accessibilityRole="button"
       style={({ pressed }) => [
         styles.base,

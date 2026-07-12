@@ -116,3 +116,28 @@ Fixtures (`backend/tests/fixtures/`): `dp_playerids_snapshot_2026-07-11.csv` (tr
 ---
 
 *Sources: [stmorse — Using ESPN's new Fantasy API (v3)](https://stmorse.github.io/journal/espn-fantasy-v3.html) · [cwendt94/espn-api](https://github.com/cwendt94/espn-api) · [espn-api #539](https://github.com/cwendt94/espn-api/issues/539) · [espn-api discussion #150](https://github.com/cwendt94/espn-api/discussions/150) · [ffscrapr: ESPN authentication](https://ffscrapr.ffverse.com/articles/espn_authentication.html) · [ffscrapr: get endpoint](https://ffscrapr.ffverse.com/articles/espn_getendpoint.html) · [mkreiser/ESPN-Fantasy-Football-API](https://github.com/mkreiser/ESPN-Fantasy-Football-API) · [GameDayBot: espn_s2 & SWID](https://www.gamedaybot.com/help/espn_s2-and-swid/) · [zuplo: ESPN hidden API guide](https://zuplo.com/learning-center/espn-hidden-api-guide) · [dynastyprocess/data](https://github.com/dynastyprocess/data) · live endpoint probes + crosswalk measurement run 2026-07-11 (this repo, §1/§3).*
+
+---
+
+## 7. Phase 1 implementation record (2026-07-12)
+
+Built on branch `trade-engine-v2`, behind `espn.link` (default **false** — dark until the operator verifies).
+
+**Shipped:**
+- [x] Schema (additive): `leagues.platform/espn_season/espn_auth/espn_my_team_id`; `espn_credentials` table (Fernet, reuses `SLEEPER_TOKEN_KEY`); ESPN rosters persist into `league_members` as **Sleeper ids** post-crosswalk; counterparties get synthetic `espn:{SWID}` ids (fallback `espn:{league_id}.t{team_id}`).
+- [x] Routes (appended in `server.py`): `POST /api/espn/link` (preview → choose-team → import, idempotent re-link), `GET /api/espn/leagues`, `POST /api/espn/import` (manual re-sync). Error contract in [api-reference.md](../api-reference.md). Unmatched players: skipped + reported by name/count in `report.unmatched` — never placeholder-invented.
+- [x] Crosswalk fetch: `espn_service.get_crosswalk()` — lazy 24h TTL (≈ the plan's "nightly + boot", without a cron hook), live DP `db_playerids.csv`, fallback to last good copy then the bundled snapshot (hourly retry).
+- [x] Private leagues (backend complete): `espn_s2`+`SWID` accepted on link (manual paste), encrypted at rest, replayed on re-import; 401 → `espn_auth_required` reconnect contract.
+- [x] Mobile: flag-gated "Link an ESPN league" on LeaguePicker (`EspnLinkSheet`: ID/URL input → team pick → import summary w/ match rate + skipped names + read-only copy); "ESPN" text badge in picker/switcher/League hero; League-tab re-sync button; session activation reuses the standard `/api/session/init` with rosters sourced from `GET /api/espn/leagues` (`api/espn.ts`; espn branch in `api/auth.ts`'s builders keyed off the cached league list's `platform`).
+- [x] Tests: `backend/tests/test_espn_link_route.py` (flag-off 404s, preview persists nothing, import persistence + crosswalked ids, re-link idempotency, unmatched skip/report, cookie encryption, re-sync binding, snapshot fallback) + the Phase-0 spike suite.
+- [x] Docs: api-reference, data-dictionary, config-reference, glossary, cross-client-invariants (platform enum), architecture, runbook (fragility monitoring).
+
+**Deferred (Phase 1b / later):**
+- [ ] `EspnConnectScreen` WebView + native cookie capture — needs the `@react-native-cookies/cookies` native dep (new dev build); manual paste ships as the Phase-1 path. (§4 Option 1 → 1b.)
+- [ ] Sync cadence beyond manual: re-sync is the League-tab button + re-link only; re-sync-on-league-open + cron is Phase 2 as planned.
+- [ ] Live public-league smoke before flag-ON (operator step — fixture tests can't see endpoint churn): `python3 -m backend.espn_service <league_id> [season]`.
+- [ ] Trade features on ESPN leagues (Phase 2). Note: session_init's existing DB-member merge means imported members DO enter the trade pool with consensus-seed valuations once the league is active — UI copy says "trade features later", and no ESPN-specific trade surface was added; Phase 2 owns validating/blessing that path.
+
+**Seams:**
+- **Account-first identity (in-flight, parallel):** ESPN leagues bind to `sess["user_id"]` as identity works today — the same `leagues.user_id`/`league_members.user_id` seam every Sleeper league sits on, so the account-primary migration carries them for free. `espn_credentials` should fold into `linked_sources` alongside `sleeper_credentials` when that lands.
+- **`load_local_leagues_for_user` is untouched** (its non-numeric-id filter excludes ESPN leagues by construction); ESPN leagues reach clients via `GET /api/espn/leagues` merged client-side, keeping `server.py` changes append-only.

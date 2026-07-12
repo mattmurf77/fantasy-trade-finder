@@ -347,6 +347,7 @@ export default function TradeCalculatorScreen() {
             return (
               <Pressable
                 key={m.key}
+                testID={`calc.mode-tab.${m.key}`}
                 style={[styles.modeChip, active && styles.modeChipActive]}
                 onPress={() => switchMode(m.key)}
                 accessibilityRole="button"
@@ -443,6 +444,7 @@ export default function TradeCalculatorScreen() {
           players={activeSendIds.map((id) => activePlayerById[id]).filter(Boolean)}
           valueOf={(p) => activeBoard[p.id] ?? 0}
           accent={semantic.neg}
+          addTestID="calc.side-a-add"
           onAdd={() => setPicker('send')}
           onRemove={(id) => {
             haptics.warning();
@@ -462,6 +464,7 @@ export default function TradeCalculatorScreen() {
           players={activeReceiveIds.map((id) => activePlayerById[id]).filter(Boolean)}
           valueOf={(p) => activeBoard[p.id] ?? 0}
           accent={semantic.pos}
+          addTestID="calc.side-b-add"
           onAdd={() => setPicker('receive')}
           onRemove={(id) => {
             haptics.warning();
@@ -471,7 +474,7 @@ export default function TradeCalculatorScreen() {
 
         {isLive ? (
           anySide && evalQuery.data ? (
-            <ConsensusVerdictCard evaluation={evalQuery.data} stale={evalQuery.isFetching} />
+            <View testID="calc.verdict"><ConsensusVerdictCard evaluation={evalQuery.data} stale={evalQuery.isFetching} /></View>
           ) : anySide && evalQuery.isLoading ? (
             <Card>
               <View style={styles.loadingRow}>
@@ -481,7 +484,7 @@ export default function TradeCalculatorScreen() {
             </Card>
           ) : null
         ) : bothSides ? (
-          <VerdictPanel evaluation={demoEvaluation} />
+          <View testID="calc.verdict"><VerdictPanel evaluation={demoEvaluation} /></View>
         ) : anySide ? (
           <Card>
             <Text style={styles.oneSidedText}>
@@ -568,6 +571,7 @@ export default function TradeCalculatorScreen() {
             ) : null}
             <Button
               label="Clear trade"
+              testID="calc.clear-btn"
               variant="ghost"
               onPress={() => {
                 haptics.warning();

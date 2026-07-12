@@ -79,13 +79,15 @@ export default function PickAnchorScreen() {
   });
 
   // Pick-value scale (#111): "a top-tier asset = N firsts". Per user +
-  // format, default 2 (consensus math). Changing it only re-spaces how
-  // FUTURE multi-first answers pin — already-saved anchors keep their Elo.
+  // format, default 4 (consensus math since the #117 seed recalibration —
+  // the top consensus asset sits at the 4-firsts rung). Changing it only
+  // re-spaces how FUTURE multi-first answers pin — already-saved anchors
+  // keep their Elo.
   const scaleQuery = useQuery({
     queryKey: ['anchor-scale', activeFormat],
     queryFn: getAnchorScale,
   });
-  const topTierFirsts = scaleQuery.data?.top_tier_firsts ?? 2;
+  const topTierFirsts = scaleQuery.data?.top_tier_firsts ?? 4;
   const scaleMutation = useMutation({
     mutationFn: (n: TopTierFirsts) => setAnchorScale(n),
     onSuccess: (res) => {

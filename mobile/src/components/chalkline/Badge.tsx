@@ -27,12 +27,14 @@ export function PositionBadge({ pos }: { pos: 'QB' | 'RB' | 'WR' | 'TE' }) {
 // Pick-value tier ladder labels (docs/cross-client-invariants.md) — keys
 // are enums, so render the display label, not the raw key.
 const TIER_BADGE_LABEL: Record<keyof typeof tier, string> = {
-  firsts_2plus: '2+ 1sts',
+  firsts_4plus: '4+ 1sts',
+  firsts_3: '3 1sts',
+  firsts_2: '2 1sts',
   first_1: '1st',
   second: '2nd',
   third: '3rd',
   fourth: '4th',
-  bench: 'Bench',
+  waivers: 'Waivers',
 };
 
 export function TierChalkBadge({ t }: { t: keyof typeof tier }) {

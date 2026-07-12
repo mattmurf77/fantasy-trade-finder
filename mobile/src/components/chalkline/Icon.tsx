@@ -79,10 +79,13 @@ const GLYPHS: Record<IconName, React.ReactNode> = {
       <Path d="M13 13l4 4" />
     </>
   ),
+  // #120 — gear (hub + rim + 8 teeth). Replaced the old sun/spokes glyph,
+  // which read as brightness, not settings. Mirrored in web/style-guide.html.
   settings: (
     <>
       <Circle cx={10} cy={10} r={3} />
-      <Path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1" />
+      <Circle cx={10} cy={10} r={5.5} />
+      <Path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M15.7 4.3l-1.8 1.8M6.1 13.9l-1.8 1.8" />
     </>
   ),
   plus: <Path d="M10 4v12M4 10h12" />,

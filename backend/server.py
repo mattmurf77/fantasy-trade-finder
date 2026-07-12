@@ -776,21 +776,24 @@ VALID_ANCHORS = (
     set(_ANCHOR_FIRST_MULTIPLES) | set(_ANCHOR_SINGLE_PICK) | {"no_value"}
 )
 
-# Per-user pick-value scale (#111): "a top-tier asset is worth N firsts".
-# The default math implies N = 2 — a "2 firsts" answer pins to Elo ≈ 1789,
-# which is where the consensus board's top players sit (elite in every
-# band). A user who says N = 3 (or 4) believes firsts are cheaper relative
-# to elite players, so their multi-first answers are re-spaced along a
-# power curve:  m firsts → value(Mid 1st) × m^γ  with  γ = log 2 / log N.
+# Per-user pick-value scale (#111, re-derived 2026-07-12 for #117): "a
+# top-tier asset is worth N firsts". The #117 seed recalibration puts the
+# consensus board's top asset at the 4-firsts rung (Elo ≈ 1927), so the
+# default math now implies N = 4 — a "4 firsts" answer pins there. A user
+# who says N = 2 (or 3) believes firsts are more expensive relative to
+# elite players, so their multi-first answers are re-spaced along a power
+# curve:  m firsts → value(Mid 1st) × m^γ  with  γ = log 4 / log N.
 # The curve is exact at both ends the user can see: m = 1 is still the
 # actual generic Mid 1st asset in their pool (Elo 1650), and m = N — the
 # user's own definition of a top-tier asset — lands on the same Elo the
-# default math gives "2 firsts". N = 2 → γ = 1 → byte-identical to the
-# original m × base mapping. Applies ONLY to the anchor wizard's
-# multi-first keys: single-pick anchors, the generic pick assets in the
-# pool, and the public calculator gap line stay consensus-denominated.
-ANCHOR_TOP_TIER_FIRSTS_DEFAULT = 2.0
+# default math gives "4 firsts". N = 4 → γ = 1 → byte-identical to the
+# plain m × base mapping (so the default anchor Elos are unchanged by the
+# re-derivation). Applies ONLY to the anchor wizard's multi-first keys:
+# single-pick anchors, the generic pick assets in the pool, and the
+# public calculator gap line stay consensus-denominated.
+ANCHOR_TOP_TIER_FIRSTS_DEFAULT = 4.0
 ANCHOR_TOP_TIER_FIRSTS_CHOICES = (2.0, 3.0, 4.0)
+_ANCHOR_TOP_LADDER_FIRSTS = 4.0   # the ladder's top rung, in firsts
 
 
 def _anchor_target_elo(
@@ -811,7 +814,7 @@ def _anchor_target_elo(
     if mult is None:
         return None
     base_val = _trade_service_mod.elo_to_value(GENERIC_PICK_SEEDS[(1, "Mid")])
-    gamma = math.log(2.0) / math.log(top_tier_firsts)
+    gamma = math.log(_ANCHOR_TOP_LADDER_FIRSTS) / math.log(top_tier_firsts)
     return _trade_service_mod.value_to_elo((mult ** gamma) * base_val)
 
 
@@ -2751,7 +2754,9 @@ def get_rankings_progress():
 
     if ranking_method == "manual":
         unlocked = True
-    elif ranking_method == "tiers":
+    elif ranking_method in ("tiers", "quickset"):
+        # 'quickset' (#119) commits through the same /api/tiers/save
+        # contract as the Tiers board, so it unlocks the same way.
         try:
             saved = get_tiers_saved(g_user_id, scoring_format=fmt)
             unlocked = all(p in saved for p in POSITIONS)
@@ -2873,18 +2878,21 @@ def get_rankings_progress():
 @app.route("/api/ranking-method", methods=["POST"])
 @_gate_unverified_write
 def set_ranking_method_route():
-    """POST /api/ranking-method {method: 'trio'|'manual'|'tiers'|'anchor'}
+    """POST /api/ranking-method {method: 'trio'|'manual'|'tiers'|'anchor'|'quickset'}
 
     'anchor' (2026-07-10) = the Pick Anchor wizard — added alongside the
     mobile rank-home chooser, which records the user's preferred ranking
     flow here (the routing itself is client-side; see cross-client-
     invariants.md → Ranking method strings).
+    'quickset' (2026-07-12, #119) = the guided tier quick-set walk
+    (QuickSetTiersScreen) promoted to a first-class method. Saves flow
+    through /api/tiers/save, so unlock treats it like 'tiers'.
     """
     sess = _require_session()
     g_user_id = sess["user_id"]
     body   = request.get_json(force=True) or {}
     method = body.get("method", "")
-    if method not in ("trio", "manual", "tiers", "anchor"):
+    if method not in ("trio", "manual", "tiers", "anchor", "quickset"):
         return jsonify({"error": f"Invalid method: {method!r}"}), 400
     try:
         set_ranking_method(g_user_id, method)
@@ -2945,10 +2953,11 @@ def get_tier_config():
 
     Response shape:
       {
-        "tiers": ["firsts_2plus","first_1","second","third","fourth","bench"],   # display order
+        "tiers": ["firsts_4plus","firsts_3","firsts_2","first_1",
+                  "second","third","fourth","waivers"],   # display order
         "config": {
           "1qb_ppr": {
-            "QB": { "firsts_2plus": {"min": 1789, "max": 1870}, ... },
+            "QB": { "firsts_4plus": {"min": 1927, "max": 1972}, ... },
             "RB": {...}, "WR": {...}, "TE": {...}
           },
           "sf_tep": { ...same shape... }
@@ -9536,18 +9545,70 @@ def _account_session() -> dict | None:
     return sess
 
 
+# Sentinel league for account-only sessions (P2.6): a REAL empty league —
+# never session_init's simulated-opponent fallback — so league-scoped
+# features return empty states instead of 409s or fake demo opponents.
+ACCOUNT_NO_LEAGUE_ID = "no_league"
+ACCOUNT_NO_LEAGUE_NAME = "No league linked"
+
+
+def _account_build_session(user_id: str, display_name: str) -> tuple[str, dict]:
+    """Build a full session for an account-only user (P2.6).
+
+    Contract: upserts the users row for `user_id` and returns
+    (token, session_payload) with per-format Ranking + Trade services and an
+    EMPTY league, so `_require_initialized_session` routes (rank3,
+    tiers/save, anchor/save, reorder) work; trade generation yields zero
+    cards (no members) and match routes return empty — the honest
+    "link a league" state.
+    """
+    token, payload = _extension_build_session(
+        user_id=user_id,
+        username="",
+        display_name=display_name,
+        avatar=None,
+    )
+    empty_league = League(
+        league_id=ACCOUNT_NO_LEAGUE_ID,
+        name=ACCOUNT_NO_LEAGUE_NAME,
+        platform="none",
+        members=[],
+    )
+    default_pool, _ = _get_universal_pool(DEFAULT_SCORING)
+    trade_svcs: dict = {}
+    for fmt in SCORING_FORMATS:
+        fmt_pool, _ = _get_universal_pool(fmt)
+        tsvc = TradeService(players={p.id: p for p in fmt_pool},
+                            past_decision_keys=set())
+        tsvc.add_league(empty_league)
+        trade_svcs[fmt] = tsvc
+    payload.update({
+        "league":       empty_league,
+        "players":      list(default_pool),
+        "user_roster":  [],
+        "trade_svcs":   trade_svcs,
+        "trade_svc":    trade_svcs[DEFAULT_SCORING],
+        "account_only": True,
+    })
+    payload.pop("extension", None)
+    return token, payload
+
+
 def _provider_auth_response(provider: str, claims: dict):
     """Shared find-or-create + bind + verify flow for /api/auth/<provider>.
 
     Binding rules (see accounts.bind_sleeper_user — binding is sticky):
       * session present, account unbound      → bind to session's user_id
+        (never an acct_* working key — synthetic keys are not Sleeper
+        sources; those sessions get account-only re-auth instead)
       * session present, same binding         → no-op
       * session present, DIFFERENT binding    → keep existing binding, flag
         `conflict` (identity anchor wins; no silent rebinding)
       * no session, account bound             → device-loss restore: mint a
         session for the bound user
-      * no session, account unbound           → linked=false; client links a
-        Sleeper username, then re-posts the same identity token to bind
+      * no session, account unbound           → ACCOUNT-FIRST (P2.6): mint an
+        account-keyed session (working key acct_<account_id>); the user can
+        rank immediately and link a Sleeper username later from Settings
     """
     sub = claims.get("sub")
     if not sub:
@@ -9566,7 +9627,59 @@ def _provider_auth_response(provider: str, claims: dict):
         "conflict": False,
     }
 
+    def _mint_account_only_session():
+        """No linked Sleeper source: session under the synthetic acct_ key."""
+        acct_uid = _accounts.account_user_id(acct["account_id"])
+        # Apple sends the user's name only to the CLIENT (and only on first
+        # authorization) — the client forwards it as display_name.
+        body = request.get_json(force=True, silent=True) or {}
+        display = (body.get("display_name") or "").strip() or "Manager"
+        try:
+            token, payload = _account_build_session(acct_uid, display)
+        except Exception as e:
+            log.exception("auth/%s: account session build failed", provider)
+            return jsonify({"error": "session_build_failed",
+                            "message": str(e)}), 500
+        payload["verified"] = True
+        payload["verified_via"] = provider
+        payload["account_id"] = acct["account_id"]
+        try:
+            # The provider proof IS the identity proof for an account-keyed
+            # user (no Sleeper account exists to squat); persisting the
+            # marker also arms the P1/P2.5 gates against anyone else
+            # naming this key via /api/session/init.
+            _accounts.mark_user_verified(acct_uid, provider)
+        except Exception as e:
+            log.warning("auth/%s: mark_user_verified failed: %s", provider, e)
+        out.update({
+            "account_only": True,
+            "user_id": acct_uid,
+            "display_name": payload.get("display_name"),
+            "session_token": token,
+            "verified_via": provider,
+            "league_id": ACCOUNT_NO_LEAGUE_ID,
+            "league_name": ACCOUNT_NO_LEAGUE_NAME,
+        })
+        return jsonify(out)
+
     bound_uid = acct["sleeper_user_id"]
+    if sess is not None and _accounts.is_account_user_id(sess.get("user_id")):
+        # An account-keyed session re-authing with a provider: never bind the
+        # synthetic key into accounts.sleeper_user_id. Refresh the session's
+        # verified state instead (same-account case); a different account's
+        # token just returns that account's state untouched.
+        if sess.get("user_id") == _accounts.account_user_id(acct["account_id"]):
+            sess["verified"] = True
+            sess["verified_via"] = provider
+            sess["account_id"] = acct["account_id"]
+            out.update({
+                "account_only": True,
+                "user_id": sess["user_id"],
+                "verified_via": provider,
+                "league_id": ACCOUNT_NO_LEAGUE_ID,
+                "league_name": ACCOUNT_NO_LEAGUE_NAME,
+            })
+        return jsonify(out)
     if sess is not None:
         bind = _accounts.bind_sleeper_user(acct["account_id"], sess["user_id"])
         out["linked"] = True
@@ -9613,8 +9726,10 @@ def _provider_auth_response(provider: str, claims: dict):
             "session_token": token,
             "verified_via": provider,
         })
-    # else: brand-new identity with no session — client shows the
-    # "Link your Sleeper username" step, then re-posts the token.
+    else:
+        # ACCOUNT-FIRST (P2.6): brand-new identity, no session, no bound
+        # Sleeper source — the account itself is the primary identity.
+        return _mint_account_only_session()
 
     return jsonify(out)
 
@@ -9683,11 +9798,170 @@ def get_account_route():
             verified_via = _accounts.get_user_verified_via(user_id)
         except Exception:
             verified_via = None
+    # P2.6 additive: is this an account-keyed (no linked Sleeper) session,
+    # and — when a Sleeper source IS bound — its username for the Settings
+    # "linked sources" list. ESPN leagues will join this list later.
+    account_only = _accounts.is_account_user_id(user_id)
+    sleeper_username = None
+    if acct and acct.get("sleeper_user_id"):
+        profile = _accounts.get_user_profile(acct["sleeper_user_id"]) or {}
+        sleeper_username = profile.get("username") or None
     return jsonify({
         "ok": True,
         "sleeper_user_id": user_id,
         "verified_via": verified_via,
         "account": acct,   # null when no identity is linked yet
+        "account_only": account_only,
+        "sleeper_username": sleeper_username,
+    })
+
+
+@app.route("/api/account/link-sleeper", methods=["POST"])
+def link_sleeper_source():
+    """Link a Sleeper username as a source on the session's account (P2.6).
+
+    Body: {username, strategy?}. Requires an account-backed session (only
+    provider auth sets sess["account_id"], so a plain username squatter can
+    never reach the merge). Rules — full reasoning in the plan doc §P2.6:
+
+      * sticky binding: account bound to a DIFFERENT Sleeper id
+        → 409 sleeper_conflict (nothing touched)
+      * first-verified-wins: the target Sleeper id already has a verified
+        controller → 403 sleeper_already_claimed (no takeover)
+      * both boards have data and no `strategy`
+        → 409 merge_choice_required + both summaries
+      * strategy='keep_sleeper' → account board wiped (explicit choice)
+      * strategy='keep_account' → Sleeper board wiped, account board moved
+      * account board only → migrated; Sleeper board only / neither → adopt
+
+    On success: account bound, Sleeper user marked verified via the
+    account's provider, every acct_* session evicted, and a fresh session
+    for the Sleeper user returned (client re-runs the league picker).
+    """
+    if not is_enabled("auth.accounts"):
+        return jsonify({"error": "not_found"}), 404
+    sess = _require_session()
+    account_id = sess.get("account_id")
+    if not account_id:
+        return jsonify({"error": "no_account",
+                        "message": "Sign in with Apple or Google first."}), 400
+
+    body = request.get_json(force=True, silent=True) or {}
+    username = (body.get("username") or "").strip().lower()
+    strategy = (body.get("strategy") or "").strip() or None
+    if not username:
+        return jsonify({"error": "missing_username",
+                        "message": "Sleeper username required."}), 400
+    if strategy not in (None, "keep_sleeper", "keep_account"):
+        return jsonify({"error": "bad_strategy"}), 400
+
+    try:
+        user_data = _sleeper_get(
+            f"https://api.sleeper.app/v1/user/{urllib.parse.quote(username)}"
+        )
+    except Exception as e:
+        return jsonify({"error": "sleeper_error", "message": str(e)}), 502
+    if not isinstance(user_data, dict) or not user_data.get("user_id"):
+        return jsonify({"error": "user_not_found",
+                        "message": f"Sleeper user @{username} not found."}), 404
+    sleeper_uid = str(user_data["user_id"])
+    display_name = user_data.get("display_name") or username
+    avatar = user_data.get("avatar")
+
+    acct = _accounts.get_account(account_id)
+    if acct is None:
+        return jsonify({"error": "no_account"}), 400
+    bound = acct.get("sleeper_user_id")
+    if bound and bound != sleeper_uid:
+        return jsonify({"error": "sleeper_conflict",
+                        "message": "This account is already linked to a "
+                                   "different Sleeper username."}), 409
+    already_bound = bound == sleeper_uid
+
+    # First-verified-wins: an account cannot take over a Sleeper id whose
+    # control someone already proved (Sleeper-JWT owner or another account).
+    if not already_bound:
+        controller_via = _verified_controller_via(sleeper_uid)
+        if controller_via:
+            log.warning("link-sleeper: DENY account=%s target=%s "
+                        "reason=verified_controller via=%s",
+                        account_id, sleeper_uid, controller_via)
+            return jsonify({
+                "error": "sleeper_already_claimed",
+                "message": "That Sleeper account is already verified by "
+                           "another sign-in.",
+            }), 403
+
+    acct_uid = sess["user_id"]
+    provider = sess.get("verified_via") or next(
+        (i["provider"] for i in (acct.get("identities") or [])), "apple")
+
+    merged = None
+    if _accounts.is_account_user_id(acct_uid) and not already_bound:
+        from .database import reset_user_rankings
+        acct_board = _accounts.board_data_summary(acct_uid)
+        sleeper_board = _accounts.board_data_summary(sleeper_uid)
+        if acct_board["any"] and sleeper_board["any"] and strategy is None:
+            # Explicit user choice — never silently prefer a side.
+            return jsonify({
+                "error": "merge_choice_required",
+                "account_board": acct_board,
+                "sleeper_board": sleeper_board,
+            }), 409
+        if acct_board["any"] and sleeper_board["any"]:
+            if strategy == "keep_sleeper":
+                reset_user_rankings(acct_uid)
+                merged = "kept_sleeper"
+            else:  # keep_account
+                reset_user_rankings(sleeper_uid)
+                _accounts.migrate_board_data(acct_uid, sleeper_uid)
+                merged = "kept_account"
+        elif acct_board["any"]:
+            _accounts.migrate_board_data(acct_uid, sleeper_uid)
+            merged = "migrated"
+        else:
+            merged = "adopted_sleeper"
+
+    bind = _accounts.bind_sleeper_user(account_id, sleeper_uid)
+    if bind["conflict"]:  # raced binding — nothing more to do safely
+        return jsonify({"error": "sleeper_conflict"}), 409
+
+    try:
+        token, payload = _extension_build_session(
+            user_id=sleeper_uid,
+            username=username,
+            display_name=display_name,
+            avatar=avatar,
+        )
+    except Exception as e:
+        log.exception("link-sleeper: session build failed")
+        return jsonify({"error": "session_build_failed", "message": str(e)}), 500
+    payload["verified"] = True
+    payload["verified_via"] = provider
+    payload["account_id"] = account_id
+    try:
+        _accounts.mark_user_verified(sleeper_uid, provider)
+    except Exception as e:
+        log.warning("link-sleeper: mark_user_verified failed: %s", e)
+
+    # Evict the account-keyed sessions — their working key just migrated.
+    if _accounts.is_account_user_id(acct_uid):
+        with _sessions_lock:
+            for t in [t for t, s in _sessions.items()
+                      if s.get("user_id") == acct_uid]:
+                _sessions.pop(t, None)
+
+    log.info("link-sleeper: account=%s bound sleeper=%s merge=%s",
+             account_id, sleeper_uid, merged)
+    return jsonify({
+        "ok": True,
+        "sleeper_user_id": sleeper_uid,
+        "username": username,
+        "display_name": display_name,
+        "avatar": avatar,
+        "session_token": token,
+        "verified_via": provider,
+        "merge": merged,
     })
 
 
@@ -9728,6 +10002,362 @@ def delete_account_route():
             _sessions.pop(t, None)
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
     return jsonify({"ok": True, "deleted": counts})
+
+
+# ---------------------------------------------------------------------------
+# ESPN league linking — Phase 1 read-only import (#101 / feedback #115)
+# Flag: `espn.link` (default OFF — every route 404s dark).
+# Plan: docs/plans/espn-league-linking-plan-2026-07-11.md
+#
+# Flow: POST /api/espn/link without team_id → preview (teams + crosswalk
+# match report, nothing persisted) → the user picks their team → POST again
+# with team_id → league + members persisted (rosters as crosswalked SLEEPER
+# player ids). The mobile client then activates the league through the
+# standard /api/session/init using GET /api/espn/leagues as the roster
+# source (no session_init changes needed — its existing DB-member merge and
+# upsert paths treat the imported league like any other).
+#
+# Binding note (account-first seam): imported leagues bind to the session's
+# user_id as identity works TODAY (Sleeper-keyed users). When the
+# account-first model lands, this binding rides along automatically because
+# it lives in leagues.user_id / league_members.user_id — the same seam every
+# Sleeper league sits on. Counterparties get synthetic `espn:` user ids that
+# must never reach push/notification paths (same class as unlinked members).
+#
+# Private leagues: espn_s2+SWID cookies may be pasted with the link request;
+# they are Fernet-encrypted at rest (SLEEPER_TOKEN_KEY) and replayed on
+# re-imports. The in-app WebView cookie capture is Phase 1b.
+# ---------------------------------------------------------------------------
+
+_ESPN_DEFAULT_SEASON = 2026
+
+
+def _espn_member_id(league_id: str, team) -> str:
+    """Deterministic synthetic user_id for a non-FTF ESPN manager."""
+    if team.owner_swid:
+        return f"espn:{team.owner_swid}"
+    return f"espn:{league_id}.t{team.team_id}"
+
+
+def _espn_error_response(e):
+    """Map an EspnError to a (json, status) response."""
+    kind = getattr(e, "kind", "http")
+    if kind == "auth":
+        return jsonify({
+            "error": "espn_auth_required",
+            "message": "ESPN wouldn't share this league — it's private or the "
+                       "saved cookies expired. Paste fresh espn_s2 + SWID "
+                       "cookies to continue.",
+        }), 403
+    if kind == "not_found":
+        return jsonify({
+            "error": "espn_league_not_found",
+            "message": "ESPN has no league with that ID for that season. "
+                       "ESPN purges old leagues — check the ID and season.",
+        }), 404
+    if kind == "input":
+        return jsonify({"error": "espn_bad_league_id",
+                        "message": "ESPN league IDs are numeric."}), 400
+    log.warning("espn fetch failed [%s]: %s", kind, e)
+    return jsonify({"error": "espn_unavailable",
+                    "message": "Couldn't reach ESPN — try again shortly."}), 502
+
+
+def _espn_import_payload(league_id: str, season: int, espn_s2: str | None,
+                         swid: str | None):
+    """Fetch + parse + crosswalk one ESPN league. Returns (league, mapped)."""
+    from . import espn_service as _espn
+    raw = _espn.fetch_league(league_id, season, espn_s2=espn_s2, swid=swid)
+    league = _espn.parse_league(raw)
+    mapped = _espn.map_rosters(league["teams"], _espn.get_crosswalk())
+    return league, mapped
+
+
+def _espn_report_json(report: dict) -> dict:
+    """Client-facing crosswalk report — unmatched players are skipped from
+    rosters and reported by name (plan §3: never invent placeholders)."""
+    return {
+        "pool_players":    report["pool_players"],
+        "matched_by_id":   report["matched_by_id"],
+        "matched_by_name": report["matched_by_name"],
+        "match_rate":      round(report["match_rate"], 4),
+        "out_of_pool":     report["out_of_pool"],
+        "unmatched":       [
+            {"name": u["name"], "position": u["position"]}
+            for u in report["unmatched"]
+        ],
+    }
+
+
+@app.route("/api/espn/link", methods=["POST"])
+@_gate_unverified_write
+def espn_link():
+    """Link (import) an ESPN league for the session user.
+
+    Body: {espn_league_id, season?, team_id?, espn_s2?, swid?}
+      • no team_id  → PREVIEW: fetch + crosswalk, return the team list and
+        match report; nothing is persisted.
+      • team_id     → IMPORT: persist the league (platform='espn') + all
+        member rosters (Sleeper player ids); the chosen team binds to the
+        session's user_id. Idempotent — re-linking refreshes everything.
+      • espn_s2+swid (both or neither) → private-league cookies; encrypted
+        at rest and reused for future re-imports.
+    404 while the espn.link flag is off.
+    """
+    if not is_enabled("espn.link"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from . import espn_service as _espn
+    from .database import (get_espn_credential, upsert_espn_credential,
+                           upsert_espn_league, replace_espn_league_members)
+
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    body = request.get_json(force=True) or {}
+    league_id = str(body.get("espn_league_id") or "").strip()
+    if not league_id.isdigit():
+        return jsonify({"error": "espn_bad_league_id",
+                        "message": "ESPN league IDs are numeric."}), 400
+    try:
+        season = int(body.get("season") or _ESPN_DEFAULT_SEASON)
+    except (TypeError, ValueError):
+        return jsonify({"error": "espn_bad_season"}), 400
+
+    espn_s2 = (body.get("espn_s2") or "").strip() or None
+    swid    = (body.get("swid") or "").strip() or None
+    if bool(espn_s2) != bool(swid):
+        return jsonify({"error": "espn_cookies_incomplete",
+                        "message": "Private leagues need BOTH espn_s2 and SWID."}), 400
+
+    # Fall back to previously-stored cookies so re-links of a private league
+    # don't require a fresh paste.
+    pasted_cookie = bool(espn_s2)
+    if not espn_s2:
+        cred = get_espn_credential(user_id)
+        if cred:
+            try:
+                espn_s2 = _sleeper_write.decrypt_token(cred["espn_s2_encrypted"])
+                swid = cred.get("swid")
+            except _sleeper_write.SleeperWriteError as e:
+                log.warning("espn_link: stored cookie undecryptable for %s: %s",
+                            user_id, e)
+                espn_s2 = swid = None
+
+    try:
+        league, mapped = _espn_import_payload(league_id, season, espn_s2, swid)
+    except _espn.EspnError as e:
+        return _espn_error_response(e)
+
+    teams_json = [
+        {
+            "team_id":        t.team_id,
+            "name":           t.name,
+            "owner_display":  t.owner_display,
+            "mapped_players": len(mapped["rosters"].get(t.team_id, [])),
+        }
+        for t in league["teams"]
+    ]
+
+    team_id = body.get("team_id")
+    if team_id is None:
+        # Preview — the client renders "which team is yours?"
+        return jsonify({
+            "status": "choose_team",
+            "league": {
+                "espn_league_id": league["league_id"] or league_id,
+                "name":           league["name"],
+                "season":         league["season"] or season,
+                "total_teams":    league["total_teams"],
+            },
+            "teams":  teams_json,
+            "report": _espn_report_json(mapped["report"]),
+        })
+
+    try:
+        team_id = int(team_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "espn_bad_team_id"}), 400
+    if team_id not in {t.team_id for t in league["teams"]}:
+        return jsonify({"error": "espn_bad_team_id",
+                        "message": "That team isn't in this league."}), 400
+
+    # Persist cookies first (so a later re-import can reuse them), then the
+    # league + membership snapshot.
+    auth_mode = "cookie" if (espn_s2 and swid) else "public"
+    if pasted_cookie:
+        if not _sleeper_write.token_encryption_available():
+            return jsonify({"error": "espn_unconfigured",
+                            "message": "Credential encryption key missing."}), 503
+        try:
+            upsert_espn_credential(user_id, swid,
+                                   _sleeper_write.encrypt_token(espn_s2))
+        except Exception:
+            log.exception("espn_link: credential store failed")
+            return jsonify({"error": "store_failed"}), 500
+
+    members = []
+    for t in league["teams"]:
+        mid = user_id if t.team_id == team_id else _espn_member_id(league_id, t)
+        members.append({
+            "user_id":      mid,
+            "username":     t.owner_display or t.name,
+            "display_name": t.name,
+            "player_ids":   mapped["rosters"].get(t.team_id, []),
+        })
+    try:
+        upsert_espn_league(
+            league_id       = league_id,
+            user_id         = user_id,
+            name            = league["name"] or f"ESPN league {league_id}",
+            espn_season     = league["season"] or season,
+            espn_auth       = auth_mode,
+            espn_my_team_id = team_id,
+            total_rosters   = league["total_teams"],
+        )
+        replace_espn_league_members(league_id, members)
+    except Exception:
+        log.exception("espn_link: persistence failed")
+        return jsonify({"error": "store_failed"}), 500
+
+    r = mapped["report"]
+    log.info("espn_link: user=%s league=%s season=%s teams=%d auth=%s "
+             "match_rate=%.1f%% unmatched=%d",
+             user_id, league_id, season, len(members), auth_mode,
+             r["match_rate"] * 100, len(r["unmatched"]))
+    return jsonify({
+        "ok": True,
+        "league_id":      league_id,
+        "name":           league["name"],
+        "platform":       "espn",
+        "season":         league["season"] or season,
+        "auth":           auth_mode,
+        "total_teams":    league["total_teams"],
+        "teams_imported": len(members),
+        "my_team_id":     team_id,
+        "my_roster":      mapped["rosters"].get(team_id, []),
+        "report":         _espn_report_json(r),
+    })
+
+
+@app.route("/api/espn/leagues")
+def espn_leagues():
+    """ESPN leagues linked by the session user, with the full membership
+    snapshot (Sleeper player ids) so the client can build a standard
+    /api/session/init body. 404 while the espn.link flag is off."""
+    if not is_enabled("espn.link"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from .database import load_espn_leagues_for_user
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+    leagues = load_espn_leagues_for_user(user_id)
+    for lg in leagues:
+        lg["members"] = [
+            {
+                "user_id":      m["user_id"],
+                "username":     m.get("username") or "",
+                "display_name": m.get("display_name") or "",
+                "player_ids":   m.get("player_ids", []),
+            }
+            for m in lg["members"]
+        ]
+    return jsonify({"leagues": leagues})
+
+
+@app.route("/api/espn/import", methods=["POST"])
+@_gate_unverified_write
+def espn_import():
+    """Re-sync an already-linked ESPN league's rosters (manual refresh).
+
+    Body: {league_id}. Re-fetches from ESPN using the stored auth mode
+    (public, or the user's encrypted cookies), re-runs the crosswalk, and
+    replaces the membership snapshot while preserving the user's team
+    binding. 404 while the espn.link flag is off; 403 espn_auth_required
+    when a private league's cookies are missing/expired (reconnect UX).
+    """
+    if not is_enabled("espn.link"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from . import espn_service as _espn
+    from .database import (get_espn_league, get_espn_credential,
+                           replace_espn_league_members, upsert_espn_league)
+
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    body = request.get_json(force=True) or {}
+    league_id = str(body.get("league_id") or "").strip()
+    row = get_espn_league(league_id) if league_id else None
+    if not row:
+        return jsonify({"error": "espn_not_linked",
+                        "message": "Link this ESPN league first."}), 404
+
+    espn_s2 = swid = None
+    if row.get("espn_auth") == "cookie":
+        cred = get_espn_credential(user_id)
+        if not cred:
+            return jsonify({"error": "espn_auth_required",
+                            "message": "This private league needs your ESPN "
+                                       "cookies again."}), 403
+        try:
+            espn_s2 = _sleeper_write.decrypt_token(cred["espn_s2_encrypted"])
+            swid = cred.get("swid")
+        except _sleeper_write.SleeperWriteError:
+            return jsonify({"error": "espn_unconfigured"}), 503
+
+    season = row.get("espn_season") or _ESPN_DEFAULT_SEASON
+    try:
+        league, mapped = _espn_import_payload(league_id, season, espn_s2, swid)
+    except _espn.EspnError as e:
+        return _espn_error_response(e)
+
+    my_team_id = row.get("espn_my_team_id")
+    if my_team_id not in {t.team_id for t in league["teams"]}:
+        return jsonify({"error": "espn_team_missing",
+                        "message": "Your team is no longer in this ESPN "
+                                   "league — re-link to pick a team."}), 409
+
+    members = []
+    for t in league["teams"]:
+        mid = user_id if t.team_id == my_team_id else _espn_member_id(league_id, t)
+        members.append({
+            "user_id":      mid,
+            "username":     t.owner_display or t.name,
+            "display_name": t.name,
+            "player_ids":   mapped["rosters"].get(t.team_id, []),
+        })
+    try:
+        upsert_espn_league(
+            league_id       = league_id,
+            user_id         = row["user_id"],
+            name            = league["name"] or row.get("name") or "",
+            espn_season     = league["season"] or season,
+            espn_auth       = row.get("espn_auth") or "public",
+            espn_my_team_id = my_team_id,
+            total_rosters   = league["total_teams"],
+        )
+        replace_espn_league_members(league_id, members)
+    except Exception:
+        log.exception("espn_import: persistence failed")
+        return jsonify({"error": "store_failed"}), 500
+
+    return jsonify({
+        "ok": True,
+        "league_id":      league_id,
+        "name":           league["name"],
+        "platform":       "espn",
+        "season":         league["season"] or season,
+        "auth":           row.get("espn_auth") or "public",
+        "total_teams":    league["total_teams"],
+        "teams_imported": len(members),
+        "my_team_id":     my_team_id,
+        "my_roster":      mapped["rosters"].get(my_team_id, []),
+        "report":         _espn_report_json(mapped["report"]),
+    })
 
 
 if __name__ == "__main__":

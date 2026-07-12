@@ -298,9 +298,10 @@ def package_value(individual_values: list[float]) -> float:
 def elo_to_value(elo: float) -> float:
     """
     Map a personal/seed Elo rating onto the dynasty-value scale used for
-    ALL v2 trade math. Monotone increasing. Calibrated so the transform of
-    a typical elite Elo (~1790) ≈ the KTC value of a top-5 player and a
-    replacement-level Elo (~1300) ≈ a low-end bench value.
+    ALL v2 trade math. Monotone increasing. Since the #117 seed
+    recalibration (data_loader.seed_elo_for_value) the top consensus asset
+    seeds at ~Elo 1927 ≈ 4 × value(Mid 1st); a replacement-level Elo
+    (~1300) ≈ a low-end bench value.
 
         value = elo_value_base * exp(elo_value_k * (elo - elo_value_ref))
 
@@ -998,9 +999,11 @@ def star_tax_adjustment(
 
     Tiers from RankingService.tier_for_elo, ordered by ORDERED_TIERS
     (pick-value ladder, top→bottom):
-      firsts_2plus (0) → first_1 (1) → second (2) → third (3) →
-      fourth (4) → bench (5) → unranked (6)
-    Gap = |give_tier_idx - recv_tier_idx|.
+      firsts_4plus (0) → firsts_3 (1) → firsts_2 (2) → first_1 (3) →
+      second (4) → third (5) → fourth (6) → waivers (7) → unranked (8)
+    Gap = |give_tier_idx - recv_tier_idx|. (The 8-tier ladder, #117, has
+    finer rungs than the pre-2026-07-12 six — the same value distance now
+    spans more tier steps, so star-tax penalties bite sooner.)
     """
     if not FLAGS.trade_math_star_tax:
         return 1.0
@@ -1063,8 +1066,9 @@ def star_tax_adjustment(
             side_label = "Team 2 trades away"
             tier_label = recv_tier or "unranked"
         _tier_display = {
-            "firsts_2plus": "2+ 1sts", "first_1": "1st", "second": "2nd",
-            "third": "3rd", "fourth": "4th", "bench": "Bench",
+            "firsts_4plus": "4+ 1sts", "firsts_3": "3 1sts",
+            "firsts_2": "2 1sts", "first_1": "1st", "second": "2nd",
+            "third": "3rd", "fourth": "4th", "waivers": "Waivers",
         }
         tier_tag = ("Tier 1" if higher_is_elite
                     else _tier_display.get(tier_label, tier_label.capitalize()))

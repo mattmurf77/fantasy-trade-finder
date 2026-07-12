@@ -198,3 +198,68 @@ Implemented on `trade-engine-v2` (read-gate agent). Operator directive: "ranks *
 - [x] **Mobile:** `client.ts` exposes `ApiError.isVerificationRequired` + a central `setOnVerificationRequired` listener; `useSession` registers it and flips `verification` (user_verified=true, session_verified=false) so the existing `VerifyAccountBanner` appears — no per-screen toasts. Gated screens' load-error copy says "Verify your account to view your data." (shared `utils/verification.readErrorCopy`; applied to ManualRanks/Matches/Trends — TiersScreen owned by the tier-taxonomy thread, its generic error path is acceptable for now).
 - [x] Tests: `backend/tests/test_verified_reads.py` (full deny matrix across every gated route, no-controller allow, enforcement-doesn't-deny-reads, verified allow, Mode A/B split, two-session owner-verifies-squatter-dies) + updated the "reads are never gated" premise test in `test_verified_sessions.py`.
 - Known limitation (carry to P3): web + extension clients have no verification flow, so a verified owner's own username-only web/extension sessions read-403. The extension's `/api/extension/rankings` had to be gated regardless — it is the board, and leaving it open would have left a one-call bypass of the whole feature.
+
+---
+
+## P2.6 — Account-first identity (feedback #116, 2026-07-12)
+
+> **Operator (#116, 1.6.0):** "I don't want sleeper to be the primary auth method. My primary leagues are on espn so I want my account to be stored using apple or google."
+
+P2 built the Apple/Google anchor but still binds INTO a Sleeper-keyed world: a brand-new Apple identity with no Sleeper username was a dead end (`linked=false`, client forced the "Link your Sleeper username" step before anything worked). P2.6 inverts the model: **the account is the primary identity; league platforms (Sleeper username, ESPN league) are LINKED SOURCES on it.** A user can sign in with Apple and use the ranking product with no Sleeper id at all.
+
+### The keying decision — synthetic working key `acct_<account_id>`
+
+The engine keys *everything* on a single opaque `user_id` string (`users.sleeper_user_id` PK plus every user-keyed table by convention). Two options existed:
+
+1. **Re-key the engine on `account_id`** — a migration touching ~20 tables, every service (`RankingService._user_id`, trade matching, notifications, feedback), and every client. Rejected: massive churn for zero behavior gain, and Sleeper-first users (the entire current base) have no account row.
+2. **Synthetic namespaced working key** `acct_<account_id>` for account-only users — the engine keeps treating `user_id` as opaque (zero churn); precedent already exists for synthetic ids in the same keyspace (`demo_user_*`, `test_user_fp_*`, seeded `User1..5`). The `acct_` prefix cannot collide with Sleeper's numeric ids. **Chosen.**
+
+**Audit of `user_id` flows for Sleeper-id assumptions** (what actually assumes the key is a real Sleeper id):
+
+| Flow | Sleeper-id assumption? | Account-only behavior |
+|---|---|---|
+| swipes/Elo (`swipe_decisions`, `elo_history`), tier overrides/saved, anchors (`anchor_scale`), ranking method, prefs, streaks, feedback, notifications, user_events | none — opaque key | works under `acct_` key |
+| `POST /api/extension/auth` leagues fetch, mobile `getLeagues()` | yes — calls `api.sleeper.app/v1/user/<id>/leagues` | never called with an `acct_` key (account-only flow skips the league picker; `useSession.connectLeague`/`revalidateSession` guarded) |
+| `/api/session/init` | trusts body `user_id`; empty `opponent_rosters` triggers the **simulated-opponent demo fallback** | account-only sessions are built server-side (`_account_build_session`) with a real *empty* league — never via session_init, so no fake opponents |
+| trade generation / matches / league routes | league-scoped; members' ids are real Sleeper ids | empty league → zero cards / empty inbox / "link a league" states (ESPN agent's surface fills these) |
+| `POST /api/sleeper/link` + `/api/trades/propose` | JWT claim must equal session user_id | claim can never equal an `acct_` key → clean 403; propose additionally requires a stored credential that account-only users can't have |
+| P1/P2.5 gates | none — `users.verified_via` lookup by key | account-only users are born verified (`verified_via='apple'`), so a hostile `/api/session/init` naming an `acct_` key gets read/write-403'd by the existing gates (tested) |
+
+**Documented boundary:** league-scoped features (trades, matches, league screen, member unlocks) are structurally empty for account-only users until a source is linked — that is the honest product state, not a bug. Web + extension have no Apple flow (extends the P2.5 known limitation).
+
+### Session flow
+
+- `/api/auth/apple|google` with **no session + unbound account** now mints an **account-keyed session** instead of returning a dead `linked=false`: working key `acct_<account_id>`, users row upserted, `verified_via=<provider>` persisted (the provider proof IS the identity proof for an account-keyed user — there is no Sleeper account to squat), session marked verified. Response is additive: `account_only: true, session_token, user_id, league_id: "no_league", league_name: "No league linked"`.
+- `_account_build_session` = `_extension_build_session` (per-format RankingServices with replayed swipes/overrides) **plus** an empty `League(members=[])` + per-format TradeServices, so `_require_initialized_session` routes (rank3, tiers/save, anchor/save, reorder, rankings/submit) work instead of 409ing. Trades generate → 0 cards (no members), matches → empty. Re-auth with the same Apple sub restores the same `acct_` key → board persists across sign-out/sign-in and device loss.
+- **Sessions present:** a session already keyed `acct_*` never gets bound into `accounts.sleeper_user_id` (guard in `_provider_auth_response`) — the synthetic key must not masquerade as a linked Sleeper source.
+- Mobile: Apple is the **primary portal** on SignInScreen (flag-gated as before); Sleeper username demoted to "Continue with Sleeper" (flow unchanged). Account-only sign-in pins the sentinel league `{no_league, "No league linked"}` so RootNav routes to Main.
+
+### Linking + merge (`POST /api/account/link-sleeper`)
+
+Body `{username, strategy?}`; requires an account-backed session (`sess.account_id`). Resolves username → Sleeper `user_id` S via the public API, then:
+
+1. **Sticky binding (P2's rule):** account already bound to a different Sleeper id → 409 `sleeper_conflict`, nothing touched. Bound to S already → idempotent ok.
+2. **First-verified-wins:** S has a verified controller (`users.verified_via` set — the real owner proved control via Sleeper-JWT, or another account claimed it) → **403 `sleeper_already_claimed`**, nothing touched. An account-only user cannot take over a claimed Sleeper id in P2.6 — the anti-takeover property outranks the convenience edge case (owner of a JWT-verified id linking it to a fresh Apple account must contact support / P3).
+3. **Merge matrix** (A = account board has data, S = Sleeper board has data):
+   - !A, !S / !A, S → bind, adopt S (keep S's data).
+   - A, !S → bind, **migrate** account board → S.
+   - A, S → **explicit user choice** required: without `strategy` → 409 `merge_choice_required` + both boards' summaries (swipe counts, per-format tiers/overrides/anchors flags). `strategy='keep_sleeper'` → account board wiped (`reset_user_rankings`, the shipped explicit-consent wipe) then adopt S; `strategy='keep_account'` → S's board wiped, account board migrated in. **No silent data loss** — every destructive path is either the user's explicit strategy choice or a pure migration.
+   - Migration (`accounts.migrate_board_data`) re-keys `swipe_decisions`, `elo_history`, `user_player_skips` and copies the users-row board columns (`tiers_saved`, `tier_overrides`, `ranking_method`, `anchor_scale`, `unlocked_formats`); `member_rankings` under the `acct_` key are deleted (they reference the sentinel `no_league` and are meaningless under S); notifications/device tokens/events stay behind and die with the acct_ row (push re-registers on next launch under the new key).
+4. On success: bind, `mark_user_verified(S, provider)` (same posture as P2's bind — carries the documented P3 tighten note), evict all `acct_` sessions, mint a fresh full session for S, return `{session_token, user_id, username, ...}` → client routes to the league picker.
+
+Settings → Account lists linked sources (provider identities + the bound Sleeper username; ESPN leagues will append here — seam coordinated via report notes, not code) and shows "Link Sleeper username" for account-only users.
+
+### Gate composition (proved in tests)
+
+- Account-backed session ⇒ `sess.verified=True, verified_via='apple'` ⇒ passes P1 write gates + P2.5 read gates.
+- `users.verified_via='apple'` on the `acct_` row ⇒ any *other* session naming that key (e.g. hostile `/api/session/init`) hits the verified-controller branch ⇒ 403 on reads AND writes, even in grace.
+- Linked Sleeper id: `verified_via='apple'` on S composes with first-verified-wins — a later username-only session for S is read/write-403'd; and link-sleeper itself refuses ids that already have a controller.
+
+### Status (2026-07-12)
+
+- [x] `accounts.py`: `account_user_id`/`is_account_user_id`, `board_data_summary`, `migrate_board_data`.
+- [x] `server.py`: account-first branch in `_provider_auth_response` (+ acct-key bind guard), `_account_build_session`, `POST /api/account/link-sleeper`, `GET /api/account` additive `account_only`/`sleeper_username` fields.
+- [x] Mobile: SignInScreen restructure (Apple primary / "Continue with Sleeper" secondary), account-only landing (RootNav `onAccountSignedIn` → Main), Settings link-Sleeper row + merge-choice dialog, `useSession` account-only guards, `api/auth.ts` `linkSleeperUsername`.
+- [x] Tests: `backend/tests/test_account_first.py` (account-only lifecycle, merge matrix, gate composition, flag-off parity).
+- [ ] Operator prerequisite unchanged from P2: **ASC Sign in with Apple capability is not enabled yet** — everything stays behind `auth.accounts` (dark). Google mobile flow still stubbed.
+- [ ] P3 additions from P2.6: support path for "JWT-verified Sleeper owner wants to link to a fresh account" (`sleeper_already_claimed` today); persistent sessions matter more now (account-only users can't revalidate via league handshake — a backend restart requires a fresh Apple tap).

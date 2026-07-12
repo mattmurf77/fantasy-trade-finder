@@ -14,11 +14,13 @@ interface Props {
   accent: string;
   onAdd: () => void;
   onRemove: (id: string) => void;
+  /** UI-test harness id for the Add button (registry: components/CLAUDE.md). */
+  addTestID?: string;
 }
 
 // One side of a hand-built trade (You send / You receive) for the Trade
 // Calculator: selected players with their board values + an add button.
-export default function TradeSide({ title, teamName, players, valueOf, accent, onAdd, onRemove }: Props) {
+export default function TradeSide({ title, teamName, players, valueOf, accent, onAdd, onRemove, addTestID }: Props) {
   return (
     <Card>
       <View style={styles.inner}>
@@ -53,7 +55,7 @@ export default function TradeSide({ title, teamName, players, valueOf, accent, o
           ))
         )}
 
-        <Button label="Add player" variant="secondary" compact onPress={onAdd} style={styles.addBtn} />
+        <Button label="Add player" variant="secondary" compact testID={addTestID} onPress={onAdd} style={styles.addBtn} />
       </View>
     </Card>
   );

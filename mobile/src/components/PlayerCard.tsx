@@ -18,6 +18,7 @@ import type { Player, Tier } from '../shared/types';
 
 export interface PlayerCardProps {
   player: Player;
+  testID?: string;                 // UI-test harness id (registry: mobile/src/components/CLAUDE.md)
   // Ranking-state props — used by RankScreen's Trios loop
   rank?: 1 | 2 | 3 | null;         // which position the user has assigned
   selected?: boolean;              // any rank assigned at all
@@ -61,6 +62,7 @@ function injuryCode(status: string): 'Q' | 'D' | 'Out' | 'IR' | null {
 const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
   {
     player,
+    testID,
     rank = null,
     selected = false,
     onPress,
@@ -114,6 +116,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     return (
       <Pressable
         ref={ref as any}
+        testID={testID}
         onPress={onPress}
         onLongPress={onLongPress}
         disabled={disabled}
@@ -177,6 +180,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
   return (
     <Pressable
       ref={ref as any}
+      testID={testID}
       onPress={onPress}
       onLongPress={onLongPress}
       disabled={disabled}

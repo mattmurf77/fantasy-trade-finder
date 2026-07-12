@@ -2000,19 +2000,21 @@
       } catch (_) { /* ignore */ }
     }
 
-    // ELO → tier label, mirroring the pick-value tier ladder in
-    // backend/tier_config.json (2026-07-11) — bands are position- and
+    // ELO → tier label, mirroring the 8-tier pick-value ladder in
+    // backend/tier_config.json (2026-07-12, #117) — bands are position- and
     // format-uniform in Elo space (docs/cross-client-invariants.md).
-    // Returns one of '2+ 1sts' / '1st' / '2nd' / '3rd' / '4th' / 'Bench',
-    // or '' when ELO is missing.
+    // Returns one of '4+ 1sts' / '3 1sts' / '2 1sts' / '1st' / '2nd' /
+    // '3rd' / '4th' / 'Waivers', or '' when ELO is missing.
     function _eloToTierLabel(elo, position) {
       if (elo == null || isNaN(elo)) return '';
-      if (elo >= 1788) return '2+ 1sts';
+      if (elo >= 1927) return '4+ 1sts';
+      if (elo >= 1869) return '3 1sts';
+      if (elo >= 1788) return '2 1sts';
       if (elo >= 1580) return '1st';
       if (elo >= 1400) return '2nd';
       if (elo >= 1280) return '3rd';
       if (elo >= 1220) return '4th';
-      return 'Bench';
+      return 'Waivers';
     }
 
     function renderRankingsTable() {

@@ -53,5 +53,7 @@
   "trade.send_in_sleeper":          true,
 
   "auth.accounts":                  false,
-  "auth.enforce_verified_writes":   false
+  "auth.enforce_verified_writes":   false,
+
+  "espn.link":                      false
 }

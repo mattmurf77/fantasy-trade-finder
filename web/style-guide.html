@@ -16,7 +16,7 @@
     --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
     --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
     --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
-    --tier-firsts-2plus:#fbbf24; --tier-first-1:#2dd4bf; --tier-second:#38bdf8; --tier-third:#f472b6; --tier-fourth:#a3e635; --tier-bench:#7a7f96;
+    --tier-firsts-4plus:#f87171; --tier-firsts-3:#e879f9; --tier-firsts-2:#fbbf24; --tier-first-1:#2dd4bf; --tier-second:#38bdf8; --tier-third:#f472b6; --tier-fourth:#a3e635; --tier-waivers:#7a7f96;
     --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
     --shadow-sheet:0 12px 32px rgba(0,0,0,0.55);
     --t-fast:120ms ease-out; --t-base:180ms ease-out;
@@ -67,7 +67,7 @@
   /* badges */
   .badge { display:inline-block; padding:2px 6px; border-radius:var(--r-xs); font:600 11px/14px var(--font-ui); text-transform:uppercase; letter-spacing:.08em; border:1px solid var(--line-strong); color:var(--chalk); }
   .badge-qb{border-color:var(--qb)} .badge-rb{border-color:var(--rb)} .badge-wr{border-color:var(--wr)} .badge-te{border-color:var(--te)}
-  .badge-firsts-2plus{border-color:var(--tier-firsts-2plus)} .badge-first-1{border-color:var(--tier-first-1)} .badge-second{border-color:var(--tier-second)} .badge-third{border-color:var(--tier-third)} .badge-fourth{border-color:var(--tier-fourth)} .badge-bench{border-color:var(--tier-bench)}
+  .badge-firsts-4plus{border-color:var(--tier-firsts-4plus)} .badge-firsts-3{border-color:var(--tier-firsts-3)} .badge-firsts-2{border-color:var(--tier-firsts-2)} .badge-first-1{border-color:var(--tier-first-1)} .badge-second{border-color:var(--tier-second)} .badge-third{border-color:var(--tier-third)} .badge-fourth{border-color:var(--tier-fourth)} .badge-waivers{border-color:var(--tier-waivers)}
   .badge-rookie{border-color:var(--flare); color:var(--flare)}
   .badge-inj-q{border-color:var(--warn); color:var(--warn)} .badge-inj-out{border-color:var(--neg); color:var(--neg)}
   .badge-dc{color:var(--chalk-dim)}
@@ -216,12 +216,14 @@
       <span class="badge badge-inj-out">IR</span>
     </div>
     <div class="btn-row" style="margin-top:12px">
-      <span class="badge badge-firsts-2plus">2+ 1sts</span>
+      <span class="badge badge-firsts-4plus">4+ 1sts</span>
+      <span class="badge badge-firsts-3">3 1sts</span>
+      <span class="badge badge-firsts-2">2 1sts</span>
       <span class="badge badge-first-1">1st</span>
       <span class="badge badge-second">2nd</span>
       <span class="badge badge-third">3rd</span>
       <span class="badge badge-fourth">4th</span>
-      <span class="badge badge-bench">Bench</span>
+      <span class="badge badge-waivers">Waivers</span>
       <span class="pill-likes"><svg class="icon" style="width:14px;height:14px" viewBox="0 0 20 20"><path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="10" cy="10" r="2.5"/></svg>They're interested</span>
     </div>
   </div>
@@ -336,6 +338,7 @@
       <div class="icon-cell"><svg class="icon" viewBox="0 0 20 20"><path d="M4 12l6-6 6 6"/></svg><span class="label">chevron-up</span></div>
       <div class="icon-cell"><svg class="icon" viewBox="0 0 20 20"><path d="M11 3h6v6M17 3l-6 6M9 17H3v-6M3 17l6-6"/></svg><span class="label">expand</span></div>
       <div class="icon-cell"><svg class="icon" viewBox="0 0 20 20"><path d="M16 9h-5V4M17 3l-6 6M4 11h5v5M3 17l6-6"/></svg><span class="label">collapse</span></div>
+      <div class="icon-cell"><svg class="icon" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"/><circle cx="10" cy="10" r="5.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M15.7 4.3l-1.8 1.8M6.1 13.9l-1.8 1.8"/></svg><span class="label">settings</span></div>
     </div>
   </div>
 

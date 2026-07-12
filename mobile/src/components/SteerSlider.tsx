@@ -4,13 +4,20 @@ import { chalk, ice, ink, radii, space, type } from '../theme/chalkline';
 import { haptics } from '../utils/haptics';
 import type { RankMethodPref } from '../state/useSession';
 
-// "We steer ↔ You steer" ranking-method selector (Settings). Four dots on a
+// "We steer ↔ You steer" ranking-method selector (Settings). Five dots on a
 // track, one per ranking flow, ordered most-guided → most-manual — the same
 // axis the Build-your-board chooser (RankHomeScreen) presents as cards. The
 // selected dot names the flow by its process; changing it re-routes where
 // the Rank tab opens at next launch.
 
 const STOPS: { pref: RankMethodPref; title: string; sub: string }[] = [
+  // #119 — Quick set: the lowest-effort flow, leading the guided end in the
+  // same order as the rank-home chooser.
+  {
+    pref: 'quickset',
+    title: 'Tap players into tiers',
+    sub: 'One value tier at a time — tap who belongs, save, next. The fastest board.',
+  },
   {
     pref: 'trio',
     title: 'Answer quick head-to-heads',

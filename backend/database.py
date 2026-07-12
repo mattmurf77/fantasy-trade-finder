@@ -11,6 +11,7 @@ Default: SQLite file alongside server.py — zero configuration required.
 """
 
 import json
+import math
 import os
 from datetime import datetime, timezone
 
@@ -107,6 +108,14 @@ leagues_table = Table("leagues", metadata,
     Column("updated_at",        String),
     Column("default_scoring",   String), # '1qb_ppr' | 'sf_tep' (null → treated as '1qb_ppr')
     Column("total_rosters",     Integer),# Sleeper's total_rosters (all teams, owned or orphaned)
+    # ── ESPN league linking (Phase 1, flag `espn.link`) ───────────────────
+    # For platform='espn' rows the PK column holds the numeric ESPN league
+    # id (the plan chose a platform column over magic-prefix ids; the PK
+    # name is accepted as slightly a lie). NULL platform reads as 'sleeper'.
+    Column("platform",          String),  # 'sleeper' (default/NULL) | 'espn'
+    Column("espn_season",       Integer), # ESPN seasonId used at import (re-sync key)
+    Column("espn_auth",         String),  # 'public' | 'cookie' — how the league was read
+    Column("espn_my_team_id",   Integer), # the linking user's ESPN team id (binding)
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -689,6 +698,31 @@ sleeper_credentials_table = Table("sleeper_credentials", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# espn_credentials_table — encrypted ESPN session cookies (league linking #101)
+# ---------------------------------------------------------------------------
+#
+# Backs private-league reads for the `espn.link` feature (default OFF). One
+# row per FTF user_id who supplied the `espn_s2` + `SWID` cookies from a
+# logged-in espn.com session (Phase 1: manual paste; WebView capture is
+# Phase 1b). espn_s2 is a full-session credential: Fernet-encrypted at rest
+# using the SAME key as sleeper_credentials (SLEEPER_TOKEN_KEY — one
+# credential-encryption key per deployment), never logged. SWID doubles as
+# the user's ESPN member id in league payloads, so it is stored plaintext.
+# expires_hint_at: cookie lifetime is undocumented (~1 year community
+# consensus) — a NULL hint means "unknown"; 401s drive the reconnect UX.
+# Folds into the auth epic's `linked_sources` when that lands.
+# ---------------------------------------------------------------------------
+
+espn_credentials_table = Table("espn_credentials", metadata,
+    Column("user_id",           String, primary_key=True),  # FTF user_id (one link per user)
+    Column("swid",              String),                     # braced GUID — ESPN member id
+    Column("espn_s2_encrypted", Text,   nullable=False),     # Fernet ciphertext — never plaintext
+    Column("expires_hint_at",   String),                     # ISO UTC guess; NULL = unknown
+    Column("created_at",        String, nullable=False),
+    Column("updated_at",        String, nullable=False),
+)
+
+# ---------------------------------------------------------------------------
 # accounts + linked_identities — identity anchor layer (account-auth plan P2)
 # ---------------------------------------------------------------------------
 #
@@ -908,6 +942,13 @@ def _migrate_db() -> None:
         # safe for both phases to declare the same columns.
         ("users",              "verified_at",           "VARCHAR"),
         ("users",              "verified_via",          "VARCHAR"),
+        # ESPN league linking Phase 1 (flag `espn.link`; plan
+        # docs/plans/espn-league-linking-plan-2026-07-11.md) — see
+        # leagues_table column comments.
+        ("leagues",            "platform",              "VARCHAR"),
+        ("leagues",            "espn_season",           "INTEGER"),
+        ("leagues",            "espn_auth",             "VARCHAR"),
+        ("leagues",            "espn_my_team_id",       "INTEGER"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -1031,6 +1072,61 @@ def _migrate_db() -> None:
             ))
     except Exception:
         pass
+
+    # ── #117 consensus-seed recalibration: rescale player_value_history ────
+    # 2026-07-12: the DP→Elo consensus seed map changed from linear
+    # (elo = 1200 + dp/10000 × 600, ceiling 1800) to value-affine
+    # (data_loader.seed_elo_for_value: DP maps linearly onto the trade-value
+    # scale, DP 10000 → the 4-firsts rung ≈ Elo 1927). Rows written before
+    # the recalibration store OLD-scale consensus_elo/consensus_value; left
+    # alone, the FB-61 30d trend baseline and the profile tier timeline
+    # would compute garbage cross-scale deltas. The old map is invertible,
+    # so rescale in place: recover the DP value from the old linear map,
+    # re-apply the new map. Runs ONCE, guarded by a model_config marker row
+    # (re-running after the marker exists is a no-op; the whole rescale +
+    # marker write is a single transaction). See docs/runbook.md.
+    try:
+        with engine.begin() as conn:
+            # Atomic claim: whoever INSERTS the marker row does the rescale,
+            # inside the same transaction (a crash rolls back both; a
+            # concurrent booter conflicts on the key → rowcount 0 → skips).
+            _marker_params = {
+                "k": "value_history_seed_scale", "v": 2.0,
+                "d": ("Marker: player_value_history rows rescaled to the "
+                      "#117 value-affine consensus seed map"),
+            }
+            if DATABASE_URL.startswith("sqlite"):
+                claim = conn.execute(text(
+                    "INSERT OR IGNORE INTO model_config "
+                    "(key, value, description) VALUES (:k, :v, :d)"
+                ), _marker_params)
+            else:
+                claim = conn.execute(text(
+                    "INSERT INTO model_config (key, value, description) "
+                    "VALUES (:k, :v, :d) ON CONFLICT (key) DO NOTHING"
+                ), _marker_params)
+            if claim.rowcount == 1:
+                # Old-scale rows are bounded by the old formula's range
+                # [1200, 1800]; the BETWEEN guard is belt-and-braces only —
+                # the marker claim is the real protection.
+                rows = conn.execute(text(
+                    "SELECT id, consensus_elo FROM player_value_history "
+                    "WHERE consensus_elo BETWEEN 1200 AND 1800.5"
+                )).fetchall()
+                v_floor = 1000.0 * math.exp(0.005 * (1200.0 - 1500.0))
+                v_ceil  = 4.0 * 1000.0 * math.exp(0.005 * (1650.0 - 1500.0))
+                for r in rows:
+                    dp_frac = max(0.0, min(
+                        1.0, (float(r.consensus_elo) - 1200.0) / 600.0))
+                    v = v_floor + dp_frac * (v_ceil - v_floor)
+                    e = 1500.0 + math.log(v / 1000.0) / 0.005
+                    conn.execute(text(
+                        "UPDATE player_value_history "
+                        "SET consensus_elo = :e, consensus_value = :v "
+                        "WHERE id = :id"
+                    ), {"e": round(e, 1), "v": round(v, 1), "id": r.id})
+    except Exception as e:
+        print(f"[migrate] value-history seed rescale failed: {e}")
 
     # Seed model_config defaults in a single clean transaction.
     with engine.begin() as conn:
@@ -5712,6 +5808,213 @@ def delete_sleeper_credential(user_id: str) -> None:
             delete(sleeper_credentials_table)
             .where(sleeper_credentials_table.c.user_id == user_id)
         )
+
+
+# ---------------------------------------------------------------------------
+# ESPN league linking (#101, flag `espn.link`) — credentials + league/member
+# persistence. Rosters are stored as CROSSWALKED SLEEPER player ids (the
+# app's working key); ESPN-native ids never leave backend/espn_service.py.
+# ---------------------------------------------------------------------------
+
+def upsert_espn_credential(user_id: str, swid: str | None,
+                           espn_s2_encrypted: str,
+                           expires_hint_at: str | None = None) -> None:
+    """Insert or replace a user's ESPN cookie pair (one row per user_id).
+    Mirrors upsert_sleeper_credential — created_at survives re-links."""
+    if not user_id or not espn_s2_encrypted:
+        raise ValueError("user_id and espn_s2_encrypted are required")
+    now = _now()
+    payload = {
+        "user_id":           user_id,
+        "swid":              swid,
+        "espn_s2_encrypted": espn_s2_encrypted,
+        "expires_hint_at":   expires_hint_at,
+        "created_at":        now,
+        "updated_at":        now,
+    }
+    with engine.begin() as conn:
+        existing = conn.execute(
+            select(espn_credentials_table.c.created_at)
+            .where(espn_credentials_table.c.user_id == user_id)
+        ).fetchone()
+        if existing and existing[0]:
+            payload["created_at"] = existing[0]
+        if DATABASE_URL.startswith("sqlite"):
+            conn.execute(text(
+                "INSERT OR REPLACE INTO espn_credentials "
+                "(user_id, swid, espn_s2_encrypted, expires_hint_at, created_at, updated_at) "
+                "VALUES (:user_id, :swid, :espn_s2_encrypted, :expires_hint_at, :created_at, :updated_at)"
+            ), payload)
+        else:
+            conn.execute(text(
+                "INSERT INTO espn_credentials "
+                "(user_id, swid, espn_s2_encrypted, expires_hint_at, created_at, updated_at) "
+                "VALUES (:user_id, :swid, :espn_s2_encrypted, :expires_hint_at, :created_at, :updated_at) "
+                "ON CONFLICT (user_id) DO UPDATE SET "
+                "swid = EXCLUDED.swid, "
+                "espn_s2_encrypted = EXCLUDED.espn_s2_encrypted, "
+                "expires_hint_at = EXCLUDED.expires_hint_at, "
+                "updated_at = EXCLUDED.updated_at"
+            ), payload)
+
+
+def get_espn_credential(user_id: str) -> dict | None:
+    """Return {swid, espn_s2_encrypted, expires_hint_at, created_at,
+    updated_at} for a user, or None if they haven't linked ESPN cookies."""
+    if not user_id:
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(espn_credentials_table)
+            .where(espn_credentials_table.c.user_id == user_id)
+        ).fetchone()
+    if not row:
+        return None
+    d = dict(row._mapping)
+    d.pop("user_id", None)
+    return d
+
+
+def delete_espn_credential(user_id: str) -> None:
+    """Remove a user's stored ESPN cookies (disconnect / dead-cookie cleanup)."""
+    if not user_id:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            delete(espn_credentials_table)
+            .where(espn_credentials_table.c.user_id == user_id)
+        )
+
+
+def upsert_espn_league(league_id: str, user_id: str, name: str,
+                       espn_season: int, espn_auth: str,
+                       espn_my_team_id: int, total_rosters: int | None) -> None:
+    """Insert or refresh an ESPN-imported league row (platform='espn').
+
+    Same importer-owner keying rules as upsert_league; re-links refresh the
+    league metadata AND the ESPN binding columns (season / auth mode / the
+    linking user's team id). `league_id` is the numeric ESPN league id
+    stored in the sleeper_league_id PK column (see leagues_table comments).
+    """
+    now = _now()
+    row = {
+        "sleeper_league_id": str(league_id),
+        "user_id":           user_id,
+        "name":              name,
+        "season":            str(espn_season),
+        "roster_data":       "[]",
+        "opponent_data":     "[]",
+        "created_at":        now,
+        "updated_at":        now,
+        "platform":          "espn",
+        "espn_season":       int(espn_season),
+        "espn_auth":         espn_auth,
+        "espn_my_team_id":   int(espn_my_team_id),
+        "total_rosters":     total_rosters,
+    }
+    with engine.begin() as conn:
+        if DATABASE_URL.startswith("sqlite"):
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+        else:
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        stmt = dialect_insert(leagues_table).values(row)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["sleeper_league_id"],
+            set_={
+                "name":            stmt.excluded.name,
+                "updated_at":      stmt.excluded.updated_at,
+                "platform":        stmt.excluded.platform,
+                "espn_season":     stmt.excluded.espn_season,
+                "espn_auth":       stmt.excluded.espn_auth,
+                "espn_my_team_id": stmt.excluded.espn_my_team_id,
+                "total_rosters":   stmt.excluded.total_rosters,
+            },
+        )
+        conn.execute(stmt)
+
+
+def get_espn_league(league_id: str) -> dict | None:
+    """Return the leagues row for an ESPN-imported league, or None when the
+    id is unknown or the row isn't platform='espn'."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(leagues_table)
+            .where(leagues_table.c.sleeper_league_id == str(league_id))
+        ).fetchone()
+    if not row or (row._mapping.get("platform") or "sleeper") != "espn":
+        return None
+    return dict(row._mapping)
+
+
+def replace_espn_league_members(league_id: str, members: list[dict]) -> None:
+    """Replace the full membership snapshot for an ESPN league.
+
+    members: [{user_id, username, display_name, player_ids}] where user_id
+    is the linking user's real FTF id for their own team and a synthetic
+    `espn:` id for counterparties (never routable to push/notifications —
+    same class as unlinked Sleeper members). Delete-then-insert (one
+    transaction) so teams that vanish from ESPN don't leave stale rows —
+    unlike Sleeper leagues, ESPN membership has no other writer to
+    reconcile against.
+    """
+    now = _now()
+    rows = [
+        {
+            "league_id":    str(league_id),
+            "user_id":      str(m.get("user_id", "")),
+            "username":     m.get("username", ""),
+            "display_name": m.get("display_name") or m.get("username", ""),
+            "roster_data":  json.dumps(m.get("player_ids", [])),
+            "updated_at":   now,
+        }
+        for m in members
+        if m.get("user_id")
+    ]
+    with engine.begin() as conn:
+        conn.execute(
+            delete(league_members_table)
+            .where(league_members_table.c.league_id == str(league_id))
+        )
+        if rows:
+            conn.execute(insert(league_members_table), rows)
+
+
+def load_espn_leagues_for_user(user_id: str) -> list[dict]:
+    """Return every ESPN-imported league this user is bound to, with the
+    full membership snapshot (rosters already in Sleeper player-id space) so
+    the mobile client can build a standard /api/session/init payload.
+    """
+    if not user_id:
+        return []
+    with engine.connect() as conn:
+        member_rows = conn.execute(
+            select(league_members_table.c.league_id).where(
+                league_members_table.c.user_id == user_id
+            )
+        ).fetchall()
+        league_ids = sorted({r.league_id for r in member_rows})
+        if not league_ids:
+            return []
+        league_rows = conn.execute(
+            select(leagues_table).where(
+                (leagues_table.c.sleeper_league_id.in_(league_ids)) &
+                (leagues_table.c.platform == "espn")
+            )
+        ).fetchall()
+    out = []
+    for lg in league_rows:
+        m = dict(lg._mapping)
+        out.append({
+            "league_id":      m["sleeper_league_id"],
+            "name":           m.get("name"),
+            "platform":       "espn",
+            "season":         m.get("espn_season"),
+            "espn_auth":      m.get("espn_auth"),
+            "my_team_id":     m.get("espn_my_team_id"),
+            "total_rosters":  m.get("total_rosters"),
+            "members":        load_league_members(m["sleeper_league_id"]),
+        })
+    return out
 
 
 # ---------------------------------------------------------------------------

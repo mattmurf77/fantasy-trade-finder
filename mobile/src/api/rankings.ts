@@ -138,7 +138,7 @@ export async function reorderRankings(
 
 // POST /api/tiers/save — save a tier assignment for a position.
 // Body shape matches the web's save_tiers_route expectation:
-//   { position: 'RB', tiers: { firsts_2plus: [id,...], first_1: [...], ... },
+//   { position: 'RB', tiers: { firsts_4plus: [id,...], first_1: [...], ... },
 //     cleared_pids: ['12345', ...] }
 //
 // `clearedPids`: players the user dragged OUT of any tier (back to the
@@ -181,7 +181,8 @@ export interface AnchorSaveResponse {
   /** Tier the pinned Elo lands in — null = below every band (no value). */
   tier: string | null;
   scoring_format: string;
-  /** Pick-value scale applied to this save (#111). 2 = consensus default. */
+  /** Pick-value scale applied to this save (#111). 4 = consensus default
+   *  (re-derived for the #117 8-tier ladder — top asset = 4 firsts). */
   top_tier_firsts: number;
 }
 
@@ -201,7 +202,8 @@ export async function getAnchorPool() {
 // ── Pick-value scale (#111) ────────────────────────────────────────────
 // "A top-tier dynasty asset is worth N firsts." Persisted per user +
 // scoring format; recalibrates only the wizard's multi-first anchors
-// (backend _anchor_target_elo). 2 = the consensus default (legacy math).
+// (backend _anchor_target_elo). 4 = the consensus default since the #117
+// seed recalibration (the top consensus asset sits at the 4-firsts rung).
 export type TopTierFirsts = 2 | 3 | 4;
 
 export interface AnchorScaleResponse {
@@ -243,7 +245,8 @@ export async function saveAnchor(playerId: string, anchor: AnchorKey) {
 // with the backend without baking thresholds into the bundle.
 export interface TierBand { min: number; max: number; }
 export interface TierConfigResponse {
-  /** Display order: ['firsts_2plus','first_1','second','third','fourth','bench'] */
+  /** Display order: ['firsts_4plus','firsts_3','firsts_2','first_1',
+   *  'second','third','fourth','waivers'] */
   tiers:  string[];
   /** Nested: scoring_format → position → tier → {min, max}. */
   config: Record<string, Record<string, Record<string, TierBand>>>;
@@ -265,7 +268,7 @@ export async function dismissPlayer(playerId: string) {
 // POST /api/ranking-method — record the user's chosen method. Mirrors the
 // RankMethodPref union in state/useSession.ts (device-local routing pref);
 // the backend copy is analytics + leaguemate visibility (has_ranking_method).
-export async function setRankingMethod(method: 'trio' | 'manual' | 'tiers' | 'anchor') {
+export async function setRankingMethod(method: 'trio' | 'manual' | 'tiers' | 'anchor' | 'quickset') {
   return api.post<any>('/api/ranking-method', { method });
 }
 

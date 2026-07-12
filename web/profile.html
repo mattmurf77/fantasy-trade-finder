@@ -19,13 +19,15 @@
       --wr: #3b82f6;
       --te: #a855f7;
       --gold:   #f59e0b;
-      /* Pick-value tier ladder (docs/cross-client-invariants.md) */
-      --firsts-2plus: #fbbf24;
+      /* 8-tier pick-value ladder (docs/cross-client-invariants.md) */
+      --firsts-4plus: #f87171;
+      --firsts-3:     #e879f9;
+      --firsts-2:     #fbbf24;
       --first-1:      #2dd4bf;
       --second:       #38bdf8;
       --third:        #f472b6;
       --fourth:       #a3e635;
-      --bench:        #7a7f96;
+      --waivers:      #7a7f96;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -217,12 +219,14 @@
       text-transform: uppercase;
       padding-top: 3px;
     }
-    .pp-tier-label[data-tier="firsts_2plus"] { color: var(--firsts-2plus); }
+    .pp-tier-label[data-tier="firsts_4plus"] { color: var(--firsts-4plus); }
+    .pp-tier-label[data-tier="firsts_3"] { color: var(--firsts-3); }
+    .pp-tier-label[data-tier="firsts_2"] { color: var(--firsts-2); }
     .pp-tier-label[data-tier="first_1"] { color: var(--first-1); }
     .pp-tier-label[data-tier="second"]  { color: var(--second); }
     .pp-tier-label[data-tier="third"]   { color: var(--third); }
     .pp-tier-label[data-tier="fourth"]  { color: var(--fourth); }
-    .pp-tier-label[data-tier="bench"]   { color: var(--bench); }
+    .pp-tier-label[data-tier="waivers"] { color: var(--waivers); }
 
     .pp-tier-names {
       flex: 1;
@@ -284,10 +288,12 @@
   <script>
     (function () {
       const POS_LABELS = { qb: 'QB', rb: 'RB', wr: 'WR', te: 'TE' };
-      const TIER_ORDER = ['firsts_2plus', 'first_1', 'second', 'third', 'fourth', 'bench'];
+      const TIER_ORDER = ['firsts_4plus', 'firsts_3', 'firsts_2', 'first_1',
+                          'second', 'third', 'fourth', 'waivers'];
       const TIER_LABELS = {
-        firsts_2plus: '2+ 1sts', first_1: '1st', second: '2nd',
-        third: '3rd', fourth: '4th', bench: 'Bench',
+        firsts_4plus: '4+ 1sts', firsts_3: '3 1sts', firsts_2: '2 1sts',
+        first_1: '1st', second: '2nd',
+        third: '3rd', fourth: '4th', waivers: 'Waivers',
       };
 
       function esc(s) {

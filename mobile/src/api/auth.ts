@@ -1,5 +1,6 @@
 import { api, apiRequest, setSessionToken } from './client';
 import { getLeagueRosters, getLeagueUsers, warmPlayerCache, resetWarmedFlag } from './sleeper';
+import { isEspnLeague, buildEspnSessionInitBody } from './espn';
 import type {
   DemoSessionResponse,
   LeagueSummary,
@@ -34,7 +35,7 @@ export async function signIn(username: string): Promise<AuthResponse> {
   return res;
 }
 
-// ── Account auth (auth.accounts flag; account-auth plan P2) ─────────────
+// ── Account auth (auth.accounts flag; account-auth plan P2/P2.6) ────────
 //
 // POST /api/auth/apple — verify a Sign in with Apple identity token.
 // Backend behavior (see docs/api-reference.md):
@@ -42,9 +43,10 @@ export async function signIn(username: string): Promise<AuthResponse> {
 //     Apple account and verifies the session (linked=true)
 //   * called with NO session, account already bound → device-loss restore:
 //     returns a fresh session_token + the bound user's profile
-//   * called with NO session, brand-new Apple account → linked=false; the
-//     client shows the "Link your Sleeper username" step, signs in with
-//     the username, then re-posts the SAME identity token to bind.
+//   * called with NO session, brand-new Apple account → ACCOUNT-FIRST
+//     (P2.6): returns account_only=true + a session keyed to the synthetic
+//     acct_<account_id> working key — the user ranks immediately and links
+//     a Sleeper username later from Settings → Account.
 export interface AccountAuthResponse {
   ok: boolean;
   provider: 'apple' | 'google';
@@ -57,11 +59,63 @@ export interface AccountAuthResponse {
   avatar?: string | null;
   session_token?: string;
   verified_via?: 'apple' | 'google';
+  /** P2.6 account-first: session keyed to acct_<account_id>. */
+  account_only?: boolean;
+  user_id?: string;
+  league_id?: string;
+  league_name?: string;
 }
 
-export async function appleSignIn(identityToken: string): Promise<AccountAuthResponse> {
+export async function appleSignIn(
+  identityToken: string,
+  displayName?: string,
+): Promise<AccountAuthResponse> {
   const res = await api.post<AccountAuthResponse>('/api/auth/apple', {
     identity_token: identityToken,
+    // Apple sends the user's name only to the client, and only on first
+    // authorization — forward it so the account-first users row has one.
+    display_name: displayName || undefined,
+  });
+  if (res?.session_token) {
+    await setSessionToken(res.session_token);
+  }
+  return res;
+}
+
+// POST /api/account/link-sleeper — link a Sleeper username as a source on
+// the signed-in account (P2.6). 409 `merge_choice_required` carries both
+// board summaries; re-call with strategy 'keep_sleeper' | 'keep_account'.
+// 403 `sleeper_already_claimed` = that Sleeper id has a verified controller
+// (first-verified-wins — no takeover). On success the backend mints a fresh
+// session for the Sleeper user; the token is stored here and the caller
+// must update SavedUser + re-run the league picker.
+export interface BoardSummary {
+  swipes: number;
+  tiers_saved: boolean;
+  tier_overrides: boolean;
+  ranking_method: string | null;
+  anchor_scale: boolean;
+  any: boolean;
+}
+
+export interface LinkSleeperResponse {
+  ok: boolean;
+  sleeper_user_id: string;
+  username: string;
+  display_name: string;
+  avatar: string | null;
+  session_token: string;
+  verified_via: string;
+  merge: 'migrated' | 'adopted_sleeper' | 'kept_sleeper' | 'kept_account' | null;
+}
+
+export async function linkSleeperUsername(
+  username: string,
+  strategy?: 'keep_sleeper' | 'keep_account',
+): Promise<LinkSleeperResponse> {
+  const res = await api.post<LinkSleeperResponse>('/api/account/link-sleeper', {
+    username: username.trim().toLowerCase(),
+    strategy,
   });
   if (res?.session_token) {
     await setSessionToken(res.session_token);
@@ -81,6 +135,10 @@ export interface AccountInfo {
     created_at: string;
     identities: Array<{ provider: 'apple' | 'google'; linked_at: string }>;
   } | null;
+  /** P2.6 — session is keyed to an account with no linked Sleeper source. */
+  account_only?: boolean;
+  /** Username of the bound Sleeper source, for the linked-sources list. */
+  sleeper_username?: string | null;
 }
 
 export async function getAccount(): Promise<AccountInfo> {
@@ -188,6 +246,16 @@ export async function initLeagueSession(
   user: SavedUser,
   lg: LeagueLite,
 ): Promise<void> {
+  // ESPN-imported leagues (flag `espn.link`) have no Sleeper rosters — the
+  // proxy routes would 404 on their numeric ids. Build the init body from
+  // the backend's imported snapshot instead (api/espn.ts); the resulting
+  // /api/session/init call is identical from here on. Detection reads the
+  // cached league list's `platform` field (hydrated from AsyncStorage).
+  if (isEspnLeague(lg.league_id)) {
+    const espnBody = await buildEspnSessionInitBody(user, lg);
+    await submitSessionInit(espnBody);
+    return;
+  }
   // Warm the backend's Sleeper player-DB cache in parallel with the
   // roster/users fetches. session_init below errors with
   //   "Player database not cached — call GET /api/sleeper/players first"
@@ -281,6 +349,12 @@ export async function buildSessionInitBody(
   user: SavedUser,
   lg: LeagueLite,
 ): Promise<SessionInitBody> {
+  // ESPN-imported leagues: roster source is the backend snapshot, not
+  // Sleeper (see initLeagueSession's espn branch for the why).
+  if (isEspnLeague(lg.league_id)) {
+    await warmPlayerCache().catch(() => { /* best-effort */ });
+    return buildEspnSessionInitBody(user, lg);
+  }
   const [rosters, leagueUsers] = await Promise.all([
     getLeagueRosters(lg.league_id),
     getLeagueUsers(lg.league_id),

@@ -57,6 +57,22 @@ PROVIDERS = ("apple", "google")
 # the deleted user's key. Mirrored in docs/glossary.md.
 DELETED_USER_PLACEHOLDER = "deleted_user"
 
+# ── Account-first working key (P2.6) ────────────────────────────────────────
+# An account with no linked Sleeper source still needs a working key for the
+# engine (every user-keyed table treats user_id as opaque). The synthetic
+# namespaced key acct_<account_id> cannot collide with Sleeper's numeric ids;
+# precedent for synthetic ids in the same keyspace: demo_user_*, test_user_fp_*.
+ACCOUNT_USER_PREFIX = "acct_"
+
+
+def account_user_id(account_id: str) -> str:
+    """Working key for an account with no linked Sleeper source."""
+    return f"{ACCOUNT_USER_PREFIX}{account_id}"
+
+
+def is_account_user_id(user_id: str | None) -> bool:
+    return bool(user_id) and str(user_id).startswith(ACCOUNT_USER_PREFIX)
+
 _JWKS_TTL_SECONDS = 6 * 3600
 _CLOCK_LEEWAY_SECONDS = 60
 
@@ -382,6 +398,117 @@ def get_user_profile(sleeper_user_id: str) -> dict | None:
         return None
     return {"username": row.username, "display_name": row.display_name,
             "avatar": row.avatar}
+
+
+# ---------------------------------------------------------------------------
+# Board data — merge support for link-sleeper (P2.6)
+# ---------------------------------------------------------------------------
+# "Board data" = the user-authored ranking artifacts a merge must not lose:
+# swipe history + the users-row board columns (tiers_saved, tier_overrides,
+# ranking_method, anchor_scale, unlocked_formats). Mirrors the scope of
+# database.reset_user_rankings (the shipped explicit-consent wipe).
+
+_USERS_BOARD_COLUMNS = ("tiers_saved", "tier_overrides", "ranking_method",
+                        "anchor_scale", "unlocked_formats")
+
+
+def board_data_summary(user_id: str) -> dict:
+    """Counts/flags of a user's board data, for the merge-choice response.
+
+    Returns {swipes, tiers_saved, tier_overrides, ranking_method,
+             anchor_scale, any}.
+    """
+    from sqlalchemy import func
+    with db.engine.connect() as conn:
+        swipes = conn.execute(
+            select(func.count()).select_from(db.swipe_decisions_table).where(
+                db.swipe_decisions_table.c.user_id == user_id
+            )
+        ).scalar() or 0
+        row = conn.execute(
+            select(
+                db.users_table.c.tiers_saved,
+                db.users_table.c.tier_overrides,
+                db.users_table.c.ranking_method,
+                db.users_table.c.anchor_scale,
+            ).where(db.users_table.c.sleeper_user_id == user_id)
+        ).fetchone()
+    out = {
+        "swipes":          int(swipes),
+        "tiers_saved":     bool(row and row.tiers_saved),
+        "tier_overrides":  bool(row and row.tier_overrides),
+        "ranking_method":  (row.ranking_method if row else None),
+        "anchor_scale":    bool(row and row.anchor_scale),
+    }
+    out["any"] = bool(out["swipes"] or out["tiers_saved"] or out["tier_overrides"]
+                      or out["ranking_method"] or out["anchor_scale"])
+    return out
+
+
+def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
+    """Re-key board data from one working key to another (link-sleeper merge).
+
+    Caller guarantees the destination board is empty or explicitly wiped —
+    users-row board columns are copied where the SOURCE value is non-null.
+    Re-keys swipe_decisions / elo_history / user_player_skips; deletes the
+    source's member_rankings (they reference the account sentinel league and
+    are meaningless under the destination key) and the source users row.
+    Notifications / device tokens / events stay behind by design (push
+    re-registers on next launch under the new key).
+    """
+    counts: dict[str, int] = {}
+    with db.engine.begin() as conn:
+        for name, tbl in (("swipe_decisions", db.swipe_decisions_table),
+                          ("elo_history", db.elo_history_table),
+                          ("user_player_skips", db.user_player_skips_table)):
+            res = conn.execute(
+                update(tbl).where(tbl.c.user_id == from_uid)
+                .values(user_id=to_uid)
+            )
+            counts[f"{name}_moved"] = res.rowcount or 0
+
+        res = conn.execute(
+            delete(db.member_rankings_table).where(
+                db.member_rankings_table.c.user_id == from_uid
+            )
+        )
+        counts["member_rankings_dropped"] = res.rowcount or 0
+
+        src = conn.execute(
+            select(db.users_table).where(
+                db.users_table.c.sleeper_user_id == from_uid
+            )
+        ).fetchone()
+        if src is not None:
+            board_values = {
+                col: getattr(src, col)
+                for col in _USERS_BOARD_COLUMNS
+                if getattr(src, col) is not None
+            }
+            if board_values:
+                dest = conn.execute(
+                    select(db.users_table.c.sleeper_user_id).where(
+                        db.users_table.c.sleeper_user_id == to_uid
+                    )
+                ).fetchone()
+                if dest is None:
+                    conn.execute(insert(db.users_table).values(
+                        sleeper_user_id=to_uid, created_at=_now_iso(),
+                        **board_values,
+                    ))
+                else:
+                    conn.execute(
+                        update(db.users_table)
+                        .where(db.users_table.c.sleeper_user_id == to_uid)
+                        .values(**board_values)
+                    )
+            counts["users_board_columns_copied"] = len(board_values)
+            conn.execute(
+                delete(db.users_table).where(
+                    db.users_table.c.sleeper_user_id == from_uid
+                )
+            )
+    return counts
 
 
 # ---------------------------------------------------------------------------

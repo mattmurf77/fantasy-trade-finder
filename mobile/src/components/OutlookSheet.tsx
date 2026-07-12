@@ -152,6 +152,7 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
         {/* Composed primary button: the chalkline Button has no loading/spinner
             state, and we keep the in-flight spinner behavior. */}
         <Pressable
+          testID="outlook.save-btn"
           disabled={submitting}
           onPress={handleSubmit}
           style={({ pressed }) => [

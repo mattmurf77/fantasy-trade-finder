@@ -37,11 +37,13 @@ def _load_tier_config() -> dict:
     return {k: v for k, v in raw.items() if not k.startswith("_")}
 
 TIER_CONFIG: dict = _load_tier_config()
-# Pick-value tier ladder (2026-07-11) — tier keys read directly in draft-pick
-# terms; each tier's floor is a rung of the anchor/pick Elo ladder (see
-# tier_config.json _calibration + docs/cross-client-invariants.md).
+# Pick-value tier ladder (2026-07-12, #117 — 8 tiers) — tier keys read
+# directly in draft-pick terms; each tier's floor is a rung of the anchor/pick
+# Elo ladder (see tier_config.json _calibration +
+# docs/cross-client-invariants.md).
 ORDERED_TIERS: tuple[str, ...] = (
-    "firsts_2plus", "first_1", "second", "third", "fourth", "bench",
+    "firsts_4plus", "firsts_3", "firsts_2", "first_1",
+    "second", "third", "fourth", "waivers",
 )
 
 
@@ -1116,9 +1118,9 @@ class RankingService:
     ) -> Optional[str]:
         """Inverse of `tier_bands_for` — bucket a raw ELO into a tier name.
 
-        Returns one of ORDERED_TIERS ('firsts_2plus', 'first_1', 'second',
-        'third', 'fourth', 'bench'), or None when the ELO falls below the
-        lowest band (unranked).
+        Returns one of ORDERED_TIERS ('firsts_4plus', 'firsts_3', 'firsts_2',
+        'first_1', 'second', 'third', 'fourth', 'waivers'), or None when the
+        ELO falls below the lowest band (unranked).
 
         This is the source of truth for the browser extension's tier badge
         and for anywhere the backend needs to label a player without going

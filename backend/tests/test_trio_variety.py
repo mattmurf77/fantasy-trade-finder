@@ -22,18 +22,21 @@ from collections import Counter
 import pytest
 
 import backend.ranking_service as rs
+from backend.data_loader import seed_elo_for_value
 from backend.ranking_service import Player, RankingService
 
-# Pick-value ladder bands (2026-07-11, uniform in Elo space). Pack ~6 players
-# into each band so within-tier trios have >=3 members and the pool is large
-# enough for anti-repeat to breathe.
+# Pick-value ladder bands (2026-07-12 8-tier ladder, uniform in Elo space).
+# Pack ~6 players into each band so within-tier trios have >=3 members and
+# the pool is large enough for anti-repeat to breathe.
 _BANDS = {
-    "firsts_2plus": (1788, 1870),
+    "firsts_4plus": (1927, 1972),
+    "firsts_3":     (1869, 1922),
+    "firsts_2":     (1788, 1864),
     "first_1":      (1580, 1785),
     "second":       (1400, 1575),
     "third":        (1280, 1395),
     "fourth":       (1220, 1275),
-    "bench":        (1150, 1215),
+    "waivers":      (1150, 1215),
 }
 
 
@@ -121,10 +124,11 @@ _FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures",
 
 def _dp_rb_service(fmt="1qb_ppr", top_n=60):
     """Realistic pool: top-N RBs seeded from the checked-in DP snapshot
-    (data_loader scale: elo = 1200 + value/10000 * 600)."""
+    through the real seed map (data_loader.seed_elo_for_value — the #117
+    value-affine recalibration)."""
     with open(_FIXTURE) as f:
         vals = json.load(f)["values"][fmt]["RB"][:top_n]
-    seeds = {f"RB{i+1:02d}": 1200 + v / 10000 * 600 for i, v in enumerate(vals)}
+    seeds = {f"RB{i+1:02d}": seed_elo_for_value(v) for i, v in enumerate(vals)}
     players = [Player(id=p, name=p, position="RB", team="T", age=24) for p in seeds]
     s = RankingService(players=players, seed_ratings=seeds)
     s._scoring_format = fmt
@@ -204,7 +208,7 @@ def test_within_tier_avoid_relaxes_partially_not_fully():
 
     random.seed(3)
     s._within_tier_cursor = 0  # walk starts at the top; first_1 is the
-    # highest occupied tier (firsts_2plus is empty in this pool)
+    # highest occupied tier (the firsts_* tiers are empty in this pool)
     first = s._within_tier_trio("WR", avoid=s._trio_avoid_ids())
     s._remember_trio(first)
     s._within_tier_cursor = 0  # aim at the same tier again, all 3 now in avoid

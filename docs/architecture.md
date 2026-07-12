@@ -73,6 +73,7 @@ flowchart LR
 | `trade_narrative.py` | ~100 | Deterministic template-based rationale strings for trade cards. No LLM. Used by `trade_service.generate_trades()` to fill `TradeCard.narrative` |
 | `smart_matchup_generator.py` | ~530 | Claude-assisted matchup picker + algorithmic fallback. Includes `community_trio_signal` + `find_qc_trio` for QC checks |
 | `data_loader.py` | ~280 | Pulls DynastyProcess CSV; maps consensus values → seed Elo (KTC curve) |
+| `espn_service.py` | ~400 | ESPN league-linking adapter (flag `espn.link`): unofficial v3 API reads (browser-signature headers, injected `_opener`), payload parsing, and the DP `db_playerids` crosswalk (24h-TTL in-memory cache, snapshot fallback) that maps ESPN rosters → Sleeper player ids. Consumed by the `/api/espn/*` routes in `server.py`; live smoke CLI: `python3 -m backend.espn_service <league_id> [season]` |
 | `trends_service.py` | ~420 | Risers/fallers, contrarian, consensus-gap; reads `elo_history` |
 | `wrapped_collector.py` | ~70 | Exposes `record_event()` — dual-write into `user_events` + denormalized `users.last_*_at` |
 | `og_image.py` | ~690 | Open Graph share images (1200×630 PNG) for tiers and trades |

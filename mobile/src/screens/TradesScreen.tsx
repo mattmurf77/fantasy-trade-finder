@@ -1041,13 +1041,14 @@ export default function TradesScreen({ navigation }: any) {
             reachable — it needs no league. Chalkline chip construction:
             1px border + label type on ink; active = ink-3 well + chalk. */}
         <View style={styles.subnavRow}>
-          <View style={[styles.subnavPill, styles.subnavPillActive]}>
+          <View testID="trades.subnav.trades" style={[styles.subnavPill, styles.subnavPillActive]}>
             <Text style={[styles.subnavPillText, styles.subnavPillTextActive]}>
               Trades
             </Text>
           </View>
           {showPortfolioPill ? (
             <Pressable
+              testID="trades.subnav.portfolio"
               onPress={() => navigation?.navigate?.('Portfolio')}
               style={({ pressed }) => [
                 styles.subnavPill,
@@ -1058,6 +1059,7 @@ export default function TradesScreen({ navigation }: any) {
             </Pressable>
           ) : null}
           <Pressable
+            testID="trades.subnav.calculator"
             onPress={() => navigation?.navigate?.('TradeCalculator')}
             style={({ pressed }) => [
               styles.subnavPill,
@@ -1241,6 +1243,7 @@ export default function TradesScreen({ navigation }: any) {
               POST round-trip; after that, status flows through `job`. */}
           <Button
             variant="primary"
+            testID="trades.find-btn"
             label={deck.length > 0 && job?.status === 'complete' ? 'Find more trades' : 'Find a Trade'}
             disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
             onPress={() => generateMutation.mutate()}
@@ -1251,7 +1254,7 @@ export default function TradesScreen({ navigation }: any) {
               streaming into the deck above; this just narrates the work.
               Opponent coverage renders as a ice Meter with mono counts. */}
           {job?.status === 'running' && (
-            <View style={styles.progressStrip}>
+            <View testID="trades.progress-strip" style={styles.progressStrip}>
               <View style={styles.progressInfo}>
                 <ActivityIndicator color={chalk.dim} size="small" />
                 <Text style={styles.progressText}>
@@ -1373,6 +1376,7 @@ export default function TradesScreen({ navigation }: any) {
                   while a swipe mutation is in flight to prevent double-firing. */}
               <View style={styles.dispositionRow}>
                 <Pressable
+                  testID="trades.pass-btn"
                   onPress={() => advance('pass')}
                   disabled={swipeMutation.isPending}
                   style={({ pressed }) => [
@@ -1389,6 +1393,7 @@ export default function TradesScreen({ navigation }: any) {
                   )}
                 </Pressable>
                 <Pressable
+                  testID="trades.like-btn"
                   onPress={() => advance('like')}
                   disabled={swipeMutation.isPending}
                   style={({ pressed }) => [
@@ -1455,7 +1460,7 @@ export default function TradesScreen({ navigation }: any) {
           ) : (
             <Card>
               <View style={styles.emptyInner}>
-                <Text style={styles.emptyTitle}>Hit "Find a Trade" to start</Text>
+                <Text testID="trades.empty-text" style={styles.emptyTitle}>Hit "Find a Trade" to start</Text>
                 <Text style={styles.emptyBody}>
                   We'll pull trade ideas from your league and show them one at a time.
                 </Text>
@@ -1705,7 +1710,7 @@ function SwipableTopCard({
 
   return (
     <GestureDetector gesture={pan}>
-      <Animated.View style={[styles.cardStack, animatedStyle]} onLayout={onCardLayout}>
+      <Animated.View testID="trades.card-top" style={[styles.cardStack, animatedStyle]} onLayout={onCardLayout}>
         <TradeCardComp
           data={card}
           untouchableIds={untouchableIds}

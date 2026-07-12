@@ -193,6 +193,9 @@ export default function RootNav({ booted }: { booted: boolean }) {
               // Demo flow already pinned a synthetic league + token in
               // useSession.startDemoSession, so we jump straight to Main.
               onDemoStarted={() => navigation.replace('Main')}
+              // Account-first (P2.6): account-only sessions have no leagues
+              // to pick — the sentinel league is already pinned.
+              onAccountSignedIn={() => navigation.replace('Main')}
             />
           )}
         </Stack.Screen>

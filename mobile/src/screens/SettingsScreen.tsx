@@ -18,7 +18,8 @@ import { ink, chalk, ice, semantic, space, radii, type } from '../theme/chalklin
 import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
-import { deleteAccount, getAccount } from '../api/auth';
+import { deleteAccount, getAccount, linkSleeperUsername } from '../api/auth';
+import { ApiError } from '../api/client';
 import { setRankingMethod } from '../api/rankings';
 import SteerSlider from '../components/SteerSlider';
 import { useSession, type RankMethodPref } from '../state/useSession';
@@ -61,6 +62,9 @@ export default function SettingsScreen({ navigation }: any) {
   // in-app deletion is App Store Guideline 5.1.1(v), not a flagged feature.
   const accountsEnabled = useFlag('auth.accounts');
   const isDemo = useSession((s) => s.isDemo);
+  const user = useSession((s) => s.user);
+  const setUser = useSession((s) => s.setUser);
+  const setLeague = useSession((s) => s.setLeague);
   const [deleting, setDeleting] = useState(false);
   const accountQuery = useQuery({
     queryKey: ['account'],
@@ -68,6 +72,66 @@ export default function SettingsScreen({ navigation }: any) {
     enabled: accountsEnabled && !isDemo,
     staleTime: 60_000,
   });
+
+  // ── Link Sleeper username (account-first P2.6) ─────────────────────────
+  // Shown for account-only users (Apple/Google account, no Sleeper source).
+  // Merge rules live server-side; a 409 merge_choice_required means both
+  // the account board AND the Sleeper username's board have data — the
+  // user must pick a side explicitly (no silent data loss).
+  const [linkUsername, setLinkUsername] = useState('');
+  const [linkBusy, setLinkBusy] = useState(false);
+
+  async function handleLinkSleeper(strategy?: 'keep_sleeper' | 'keep_account') {
+    const uname = linkUsername.trim();
+    if (!uname || linkBusy) return;
+    setLinkBusy(true);
+    try {
+      const res = await linkSleeperUsername(uname, strategy);
+      // Session is now keyed to the real Sleeper user — update the saved
+      // user, drop the sentinel league, and send them to the league picker.
+      await setUser({
+        user_id:      res.sleeper_user_id,
+        username:     res.username,
+        display_name: res.display_name || res.username,
+        avatar_id:    res.avatar ?? null,
+      });
+      await setLeague(null);
+      queryClient.invalidateQueries({ queryKey: ['account'] });
+      navigation.replace?.('LeaguePicker');
+    } catch (e: any) {
+      const body = e instanceof ApiError ? (e.body as any) : null;
+      if (body?.error === 'merge_choice_required') {
+        const acctSwipes = body.account_board?.swipes ?? 0;
+        const slpSwipes = body.sleeper_board?.swipes ?? 0;
+        Alert.alert(
+          'Two boards found',
+          `Your account has rankings here (${acctSwipes} comparisons) and ` +
+            `@${uname} already has rankings too (${slpSwipes} comparisons). ` +
+            'Which board do you want to keep? The other is deleted.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Keep this board',
+              onPress: () => void handleLinkSleeper('keep_account'),
+            },
+            {
+              text: `Keep @${uname}'s board`,
+              onPress: () => void handleLinkSleeper('keep_sleeper'),
+            },
+          ],
+        );
+      } else if (body?.error === 'sleeper_already_claimed') {
+        setToast({
+          msg: 'That Sleeper account is already verified by another sign-in.',
+          tone: 'warn',
+        });
+      } else {
+        setToast({ msg: e?.message || "Couldn't link that username.", tone: 'warn' });
+      }
+    } finally {
+      setLinkBusy(false);
+    }
+  }
 
   async function performDeleteAccount() {
     if (deleting) return;
@@ -166,6 +230,14 @@ export default function SettingsScreen({ navigation }: any) {
   async function handleConnect() {
     const url = connectUrl.trim();
     if (!url || connectBusy) return;
+    if (user?.account_only) {
+      // Account-first (P2.6): no Sleeper user to attach leagues to yet.
+      setToast({
+        msg: 'Link your Sleeper username under Account first.',
+        tone: 'warn',
+      });
+      return;
+    }
     setConnectBusy(true);
     try {
       const result = await connectLeague(url);
@@ -346,38 +418,83 @@ export default function SettingsScreen({ navigation }: any) {
           <TickLabel>Account</TickLabel>
         </View>
         {accountsEnabled && !isDemo ? (
-          accountQuery.data?.account?.identities?.length ? (
-            accountQuery.data.account.identities.map((ident) => (
-              <View key={ident.provider} style={styles.kvRow}>
-                <Text style={styles.rowKey}>
-                  {ident.provider === 'apple' ? 'Signed in with Apple' : 'Signed in with Google'}
-                </Text>
+          <>
+            {accountQuery.data?.account?.identities?.length ? (
+              accountQuery.data.account.identities.map((ident) => (
+                <View key={ident.provider} style={styles.kvRow}>
+                  <Text style={styles.rowKey}>
+                    {ident.provider === 'apple' ? 'Signed in with Apple' : 'Signed in with Google'}
+                  </Text>
+                  <Text style={styles.kvValue}>
+                    {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <View style={styles.kvRow}>
+                <Text style={styles.rowKey}>Linked sign-in</Text>
+                <Text style={styles.kvValue}>None</Text>
+              </View>
+            )}
+            {/* Linked league sources (P2.6). Sleeper today; linked ESPN
+                leagues will list here alongside it. */}
+            {accountQuery.data?.account?.sleeper_user_id ? (
+              <View style={styles.kvRow}>
+                <Text style={styles.rowKey}>Sleeper</Text>
                 <Text style={styles.kvValue}>
-                  {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
+                  {accountQuery.data?.sleeper_username
+                    ? `@${accountQuery.data.sleeper_username}`
+                    : 'Linked'}
                 </Text>
               </View>
-            ))
-          ) : (
-            <View style={styles.kvRow}>
-              <Text style={styles.rowKey}>Linked sign-in</Text>
-              <Text style={styles.kvValue}>None</Text>
-            </View>
-          )
+            ) : null}
+            {accountQuery.data?.account_only ? (
+              <Card>
+                <View style={styles.connectBody}>
+                  <Text style={styles.connectHelp}>
+                    Link your Sleeper username to load your leagues. Your
+                    rankings come with you.
+                  </Text>
+                  <TextInput
+                    testID="settings.link-sleeper-input"
+                    value={linkUsername}
+                    onChangeText={setLinkUsername}
+                    placeholder="Sleeper username"
+                    placeholderTextColor={chalk.faint}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!linkBusy}
+                    style={styles.connectInput}
+                  />
+                  <Button
+                    label={linkBusy ? 'Linking…' : 'Link Sleeper username'}
+                    onPress={() => void handleLinkSleeper()}
+                    disabled={!linkUsername.trim() || linkBusy}
+                  />
+                </View>
+              </Card>
+            ) : null}
+          </>
         ) : null}
         {!isDemo ? (
           <>
-            <Pressable
-              onPress={() => navigation.navigate?.('SleeperConnect')}
-              style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowKey}>Verify account</Text>
-                <Text style={styles.rowSub}>
-                  Prove you own this Sleeper account to protect your ranks.
-                </Text>
-              </View>
-              <Icon name="chevron-right" color={chalk.dim} size={16} />
-            </Pressable>
+            {/* SleeperConnect verification requires a Sleeper-keyed session
+                (the JWT claim must match the session user) — hidden for
+                account-only users, whose Apple sign-in IS the verification. */}
+            {!user?.account_only ? (
+              <Pressable
+                onPress={() => navigation.navigate?.('SleeperConnect')}
+                style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowKey}>Verify account</Text>
+                  <Text style={styles.rowSub}>
+                    Prove you own this Sleeper account to protect your ranks.
+                  </Text>
+                </View>
+                <Icon name="chevron-right" color={chalk.dim} size={16} />
+              </Pressable>
+            ) : null}
             <Pressable
               onPress={confirmDeleteAccount}
               disabled={deleting}

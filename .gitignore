@@ -39,3 +39,7 @@ qa/**/scratch*/
 # Staged subagent implementations pending 1-by-1 validation (never auto-commit)
 staged-work/
 mobile/test-artifacts/
+
+# Feedback-pipeline scratch (durable outputs go to docs/feedback/items/)
+feedback-workspace/*
+!feedback-workspace/README.md

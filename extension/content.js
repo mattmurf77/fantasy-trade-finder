@@ -29,14 +29,16 @@
   const BADGE_ATTR  = 'data-ftf-pid';
   const CACHE_STALE_MS = 10 * 60 * 1000;  // refetch if cache older than 10 min
 
-  // Pick-value tier ladder (docs/cross-client-invariants.md).
+  // 8-tier pick-value ladder (docs/cross-client-invariants.md).
   const TIER_LABELS = {
-    firsts_2plus: '2+ 1sts',
+    firsts_4plus: '4+ 1sts',
+    firsts_3:     '3 1sts',
+    firsts_2:     '2 1sts',
     first_1:      '1st',
     second:       '2nd',
     third:        '3rd',
     fourth:       '4th',
-    bench:        'Bench',
+    waivers:      'Waivers',
   };
 
   // Ranking state (per active league)

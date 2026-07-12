@@ -263,11 +263,13 @@ export default function MatchesScreen() {
           label="Mutual matches"
           active={segment === 'mutual'}
           onPress={() => setSegment('mutual')}
+          testID="matches.segment.mutual"
         />
         <SegmentBtn
           label="Awaiting them"
           active={segment === 'awaiting'}
           onPress={() => setSegment('awaiting')}
+          testID="matches.segment.awaiting"
         />
       </View>
 
@@ -330,7 +332,7 @@ export default function MatchesScreen() {
       ) : segment === 'mutual' ? (
         visibleMatches.length === 0 ? (
           <View style={styles.centered}>
-            <Text style={styles.emptyTitle}>
+            <Text testID="matches.empty-text" style={styles.emptyTitle}>
               {filterLeagueId === 'all'
                 ? 'No matches in any of your leagues yet'
                 : `No matches in ${filteredLeagueName} yet`}
@@ -460,13 +462,16 @@ function SegmentBtn({
   label,
   active,
   onPress,
+  testID,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
+  testID?: string;
 }) {
   return (
     <Pressable
+      testID={testID}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}

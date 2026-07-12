@@ -34,7 +34,8 @@ import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/type
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
 
 // 1.5.4 #104 — guided tier quick-set. One position at a time, walking the
-// tiers top → bottom ("2+ 1sts" → Bench): each step shows a grid of small tappable player
+// tiers top → bottom ("4+ 1sts" → Waivers, 8 steps since the #117 ladder):
+// each step shows a grid of small tappable player
 // chips (name + position + the tier they're CURRENTLY in); tapping toggles
 // membership in the tier being set; Save commits that one tier via the
 // standard /api/tiers/save contract and advances. Players claimed by an
@@ -116,7 +117,11 @@ export default function QuickSetTiersScreen() {
   const goTo = useCallback(
     (idx: number, savedMap: Partial<Record<Tier, string[]>>) => {
       if (idx >= TIERS.length) {
-        navigation.goBack();
+        // #119 — with 'quickset' as a launch route this screen can be the
+        // stack's first mount (no history); fall through to the Tiers board
+        // it just wrote, same fallback as the header back control.
+        if (navigation.canGoBack()) navigation.goBack();
+        else navigation.navigate('Tiers');
         return;
       }
       setTierIdx(idx);

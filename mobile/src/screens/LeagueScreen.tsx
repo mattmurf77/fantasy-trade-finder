@@ -40,6 +40,8 @@ import {
   getActivityFeed,
   getContrarianLeaderboard,
 } from '../api/league';
+import { importEspnLeague } from '../api/espn';
+import { initLeagueSession } from '../api/auth';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
@@ -63,6 +65,37 @@ export default function LeagueScreen() {
   const [membersOpen, setMembersOpen] = useState(false);
   // FB-37 — Matches tiles deep-link to the Matches tab.
   const navigation = useNavigation<any>();
+
+  // ESPN read-only import (flag `espn.link`) — platform comes from the
+  // cached league list (set at link time / picker refresh). ESPN leagues
+  // get a text badge, read-only expectation copy, and a re-sync action.
+  const user = useSession((s) => s.user);
+  const cachedLeagues = useSession((s) => s.leagues);
+  const isEspn = cachedLeagues.some(
+    (lg) => lg.league_id === leagueId && lg.platform === 'espn',
+  );
+  const [resyncing, setResyncing] = useState(false);
+  const [resyncMsg, setResyncMsg] = useState<string | null>(null);
+
+  async function resyncEspn() {
+    if (!leagueId || !user || resyncing) return;
+    setResyncing(true);
+    setResyncMsg(null);
+    try {
+      const res = await importEspnLeague(leagueId);
+      // Rebuild the server session so the refreshed rosters are live.
+      await initLeagueSession(user, {
+        league_id: leagueId,
+        name: res.name || league?.league_name || '',
+      });
+      setResyncMsg(`Re-synced ${res.teams_imported} rosters from ESPN.`);
+      refetchAll();
+    } catch (e: any) {
+      setResyncMsg(e?.message || 'Re-sync failed — try again shortly.');
+    } finally {
+      setResyncing(false);
+    }
+  }
 
   // `placeholderData: (prev) => prev` keeps the previous value visible
   // across refetches so the screen doesn't blank when re-entered.
@@ -205,6 +238,7 @@ export default function LeagueScreen() {
             the affordance; the existing "Switch league" button at the
             bottom remains for users who scroll past the hero. */}
         <Pressable
+          testID="league.hero"
           onPress={() => setSwitcherOpen(true)}
           accessibilityRole="button"
           accessibilityLabel="Switch league"
@@ -219,6 +253,8 @@ export default function LeagueScreen() {
                 {summary?.league_name || league?.league_name || 'Loading…'}
               </Text>
               <View style={styles.heroChips}>
+                {/* ESPN read-only import — text badge, no logos. */}
+                {isEspn ? <Badge label="ESPN" /> : null}
                 <Badge label={fmtScoring(summary?.default_scoring)} />
                 {/* FB #41 — show the league's TRUE team count (backend
                     total_teams = Sleeper total_rosters). Deriving it as
@@ -250,6 +286,12 @@ export default function LeagueScreen() {
                   <Icon name="chevron-right" size={12} color={chalk.dim} />
                 </Pressable>
               </View>
+              {isEspn ? (
+                <Text style={[type.bodySm, styles.espnNote]}>
+                  ESPN read-only import — rankings, tiers, and trios fully
+                  work; trade features for ESPN leagues come later.
+                </Text>
+              ) : null}
             </Card>
           )}
         </Pressable>
@@ -323,6 +365,23 @@ export default function LeagueScreen() {
         <View style={styles.divider} />
         <TickLabel>Leaderboards</TickLabel>
         <LeaderboardsSection leagueId={leagueId} />
+
+        {/* ESPN leagues: manual roster re-sync (POST /api/espn/import). */}
+        {isEspn ? (
+          <>
+            <Button
+              testID="league.espn-resync"
+              label={resyncing ? 'Re-syncing from ESPN…' : 'Re-sync ESPN rosters'}
+              variant="secondary"
+              onPress={resyncEspn}
+              disabled={resyncing}
+              style={styles.switchBtn}
+            />
+            {resyncMsg ? (
+              <Text style={[type.bodySm, styles.espnNote]}>{resyncMsg}</Text>
+            ) : null}
+          </>
+        ) : null}
 
         {/* Switch league — opens an in-app sheet rather than nuking the
             session and bouncing back to the LeaguePicker stack. */}
@@ -570,6 +629,7 @@ const styles = StyleSheet.create({
   },
 
   switchBtn: { marginTop: space.lg },
+  espnNote: { color: chalk.dim, marginTop: space.sm },
 
   center: {
     flex: 1,
