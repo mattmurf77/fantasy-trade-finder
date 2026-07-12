@@ -39,7 +39,7 @@
   "trade.outlook_seed": false,
   "trade.crown_asset": false,
   "trade.send_in_sleeper": true,
-  "auth.accounts": false,
+  "auth.accounts": true,
   "auth.enforce_verified_writes": false,
   "espn.link": true
 }

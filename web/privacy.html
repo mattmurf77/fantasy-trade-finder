@@ -81,6 +81,16 @@
         read-only API — signing in never involves a password.
       </li>
       <li>
+        <strong>Sign-in identity (Apple or Google).</strong> If you sign in with
+        Apple (or, in the future, Google), we store the stable anonymous
+        identifier the provider issues for our app (Apple/Google
+        <code>sub</code>), the provider name, and — if the provider shares an
+        email address — a one-way SHA-256 hash of it. We never store your email
+        address itself, your name from the provider beyond an optional display
+        name you can change, or any provider password. This identifier exists
+        only to recognize your account across devices and sign-ins.
+      </li>
+      <li>
         <strong>Your rankings and in-app activity.</strong> Every ranking
         comparison you make (three-player matchups, tier saves, manual reorders,
         pick-anchor answers), the per-player ratings computed from them, rating
