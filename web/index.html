@@ -631,6 +631,14 @@
         <span class="coverage-label" id="coverage-label"></span>
       </div>
 
+      <!-- Phase-2 — lane filter: hidden until at least one rendered card
+           carries a `lane`; toggled by _updateLaneFilterRow() -->
+      <div class="lane-filter-row" id="lane-filter-row" style="display:none">
+        <button class="lane-filter-btn active" data-lane="all"    onclick="setLaneFilter('all')">All</button>
+        <button class="lane-filter-btn"        data-lane="window" onclick="setLaneFilter('window')">Window moves</button>
+        <button class="lane-filter-btn"        data-lane="value"  onclick="setLaneFilter('value')">Value moves</button>
+      </div>
+
       <div id="trades-list">
         <div class="trades-empty">
           <strong>No trades yet</strong>

@@ -147,6 +147,10 @@ def _knife_fixture():
 
 def test_one_for_one_gate_knife_edge():
     _set_flags(**{"trade_engine.v2": True})
+    # Pin the divergence floor above the sweep range so the passed
+    # threshold governs — the interview-2026-07-17 loosening (0.55) would
+    # otherwise floor the "above" sweep below the card's own fairness.
+    ts._cfg["fairness_floor_divergence"] = 1.0
     svc, ue, ur, seed = _knife_fixture()
     # Calibrate: read the card's own fairness at a permissive threshold.
     cards = _gen(svc, ue, ur, seed, fairness_threshold=0.05, max_per_opponent=5)

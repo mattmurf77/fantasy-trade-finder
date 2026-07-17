@@ -1,0 +1,68 @@
+appId: com.fantasytradefinder.app
+# tc: TC-TRD-03
+# profile: standard
+# flags: release
+# Deck order is server-chosen: structural asserts only. 60s budget covers the
+# trade-job poll backoff (800→4000ms). Like via the Check button (gestures NA).
+# First Trades visit auto-opens the team-outlook sheet (first-run prompt) —
+# dismissed conditionally via outlook.save-btn (Contender pre-selected).
+tags: [smoke, trades]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.trades"
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 20000
+- tapOn:
+    id: "trades.find-btn"
+- extendedWaitUntil:
+    visible:
+      id: "trades.card-top"
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      id: "trades.like-btn"
+    direction: DOWN
+- tapOn:
+    id: "trades.like-btn"
+- extendedWaitUntil:
+    visible:
+      id: "trades.find-btn"
+    timeout: 10000
+- takeScreenshot: smoke-06-trades-deck

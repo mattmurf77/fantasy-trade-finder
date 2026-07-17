@@ -1,0 +1,28 @@
+appId: com.fantasytradefinder.app
+# tc: TC-SGN-01
+# profile: standard
+# flags: release
+tags: [smoke, signin]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- assertNotVisible:
+    id: "signin.error-text"
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- assertNotVisible:
+    id: "signin.error-text"
+- takeScreenshot: smoke-01-signin

@@ -153,6 +153,10 @@ export default function TradesScreen({ navigation }: any) {
   const [fairnessOn, setFairnessOn] = useState(true);
   const [deck, setDeck] = useState<TradeCard[]>([]);
   const [deckIdx, setDeckIdx] = useState(0);
+  // Phase-2 lane filter: null = All. Tapping a lane pill filters the deck
+  // to that lane; tapping the active pill again clears back to All. The
+  // pill row only renders when at least one deck card carries a lane.
+  const [laneFilter, setLaneFilter] = useState<'window' | 'value' | null>(null);
   // #107/#110 — measured layout height of the TOP card. The behind-card
   // peek is clipped to this so a taller next card (e.g. 2 player tiles
   // behind a 1-player top) can't leak its extra tile out from under the
@@ -228,6 +232,7 @@ export default function TradesScreen({ navigation }: any) {
     // Also avoids visual shuffle if streaming cards were still arriving.
     setDeck([]);
     setDeckIdx(0);
+    setLaneFilter(null);
     setJob(null);
     setEdits({});
     setSwapTarget(null);
@@ -243,11 +248,45 @@ export default function TradesScreen({ navigation }: any) {
     placeholderData: (prev) => prev,
   });
 
+  // Phase-2: when the backend inferred an outlook from the roster, don't
+  // force-open the sheet — the inline confirm banner (above the deck)
+  // offers one-tap confirm instead. No outlook AND no inference keeps the
+  // original force-open behavior.
   useEffect(() => {
-    if (prefsQuery.data && !prefsQuery.data.team_outlook) {
+    if (
+      prefsQuery.data &&
+      !prefsQuery.data.team_outlook &&
+      !prefsQuery.data.inferred_outlook
+    ) {
       setOutlookOpen(true);
     }
   }, [prefsQuery.data]);
+
+  // Phase-2 inferred outlook — set only while no outlook is declared;
+  // drives the one-tap confirm banner and the sheet's preselection.
+  const inferredOutlook =
+    prefsQuery.data && !prefsQuery.data.team_outlook
+      ? prefsQuery.data.inferred_outlook ?? null
+      : null;
+
+  // One-tap confirm: persist the inferred outlook with empty position
+  // arrays, then refetch prefs so the banner clears and the control card
+  // shows the saved value.
+  const confirmOutlookMutation = useMutation({
+    mutationFn: (outlook: NonNullable<Outlook>) =>
+      saveLeaguePreferences(leagueId!, {
+        team_outlook: outlook,
+        acquire_positions: [],
+        trade_away_positions: [],
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
+      setToast({ msg: 'Outlook saved', tone: 'success' });
+    },
+    onError: (e: Error) => {
+      setToast({ msg: e.message || 'Could not save outlook', tone: 'warn' });
+    },
+  });
 
   // ── Untouchables (feedback #95, flag trade.preference_lists) ─────────
   // Long-press a player on the YOU SEND side to mark/unmark them
@@ -550,6 +589,7 @@ export default function TradesScreen({ navigation }: any) {
   useEffect(() => {
     setDeck([]);
     setDeckIdx(0);
+    setLaneFilter(null);
     setJob(null);
     setEdits({});
     setSwapTarget(null);
@@ -723,6 +763,7 @@ export default function TradesScreen({ navigation }: any) {
   function resetDeckForNewTargets() {
     setDeck([]);
     setDeckIdx(0);
+    setLaneFilter(null);
     setJob(null);
     setEdits({});
     setSwapTarget(null);
@@ -820,14 +861,27 @@ export default function TradesScreen({ navigation }: any) {
   // counterparty already liked the mirror trade) — never let the client
   // re-sort bury them. Keep them first in server order; only the rest
   // get the mismatch re-sort.
+  // Phase-2 lane filter applies BEFORE the sort so the likes-you pinning
+  // below operates on the filtered pool (pinned lane cards stay pinned).
   const sortedDeck = useMemo(() => {
-    if (fairnessOn) return deck;
-    const pinned = deck.filter((c) => c.likesYou);
-    const rest = deck
+    const pool = laneFilter ? deck.filter((c) => c.lane === laneFilter) : deck;
+    if (fairnessOn) return pool;
+    const pinned = pool.filter((c) => c.likesYou);
+    const rest = pool
       .filter((c) => !c.likesYou)
       .sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
     return [...pinned, ...rest];
-  }, [deck, fairnessOn]);
+  }, [deck, fairnessOn, laneFilter]);
+
+  // Lane pills render only when the engine actually laned this deck.
+  const deckHasLanes = useMemo(() => deck.some((c) => !!c.lane), [deck]);
+
+  function handleLaneFilter(lane: 'window' | 'value') {
+    haptics.selection();
+    setLaneFilter((prev) => (prev === lane ? null : lane));
+    // The filtered deck is a different list — restart from its top.
+    setDeckIdx(0);
+  }
 
   // Player-swap (feedback #86): overlay the user's edited variant of the
   // top card, if any. Everything downstream — swipe/like, bad-trade flag,
@@ -981,7 +1035,9 @@ export default function TradesScreen({ navigation }: any) {
 
       <OutlookSheet
         visible={outlookOpen}
-        initial={prefsQuery.data?.team_outlook}
+        // Phase-2: with no saved outlook, preselect the backend's
+        // roster-inferred guess so "Change" opens on the right option.
+        initial={prefsQuery.data?.team_outlook ?? inferredOutlook}
         onClose={() => setOutlookOpen(false)}
         onSubmit={handleOutlookSubmit}
       />
@@ -1143,6 +1199,45 @@ export default function TradesScreen({ navigation }: any) {
             </Pressable>
           </View>
 
+          {/* Phase-2 lane filter — Window moves / Value moves pills with an
+              implicit All state (tap the active pill to clear). Mirrors the
+              FB-47 direction-toggle construction; renders only when the
+              deck actually carries lanes. */}
+          {deckHasLanes && (
+            <View style={styles.targetDirRow}>
+              {(
+                [
+                  ['window', 'Window moves'],
+                  ['value', 'Value moves'],
+                ] as const
+              ).map(([lane, label]) => {
+                const active = laneFilter === lane;
+                return (
+                  <Pressable
+                    key={lane}
+                    onPress={() => handleLaneFilter(lane)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    style={({ pressed }) => [
+                      styles.targetDirPill,
+                      active && styles.targetDirPillActive,
+                      pressed && styles.subnavPillPressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.subnavPillText,
+                        active && styles.subnavPillTextActive,
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+
           {/* FB-47 — finder targeting (flag trade.finder_targeting).
               Direction toggle (Trade away / Acquire) + player picker.
               Position-level targeting stays in OutlookSheet's chips; this
@@ -1293,6 +1388,36 @@ export default function TradesScreen({ navigation }: any) {
           )}
           </View>
         </Card>
+
+        {/* Phase-2 one-tap outlook confirm — replaces the force-opened
+            OutlookSheet when the backend inferred an outlook from the
+            roster. Confirm saves the inference with empty position prefs;
+            Change opens the sheet (preselected) as before. Bordered-chalk
+            (secondary) Confirm — the screen's ice budget is already spent
+            (fairness thumb, Find a Trade, queued state). */}
+        {inferredOutlook && (
+          <View style={styles.inferredBanner}>
+            <Text style={type.body}>
+              Your roster reads as {cap(inferredOutlook)}.
+            </Text>
+            <View style={styles.inferredActions}>
+              <Button
+                variant="secondary"
+                compact
+                label="Confirm"
+                disabled={confirmOutlookMutation.isPending || !leagueId}
+                onPress={() => confirmOutlookMutation.mutate(inferredOutlook)}
+              />
+              <Button
+                variant="ghost"
+                compact
+                label="Change"
+                disabled={confirmOutlookMutation.isPending}
+                onPress={() => setOutlookOpen(true)}
+              />
+            </View>
+          </View>
+        )}
 
         <View style={styles.deckWrap}>
           {topCard ? (
@@ -1866,6 +1991,21 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 0.5,
     color: chalk.dim,
+  },
+  // Phase-2 inferred-outlook confirm banner — card construction (ink-1 +
+  // hairline + md radius), sits between the controls card and the deck.
+  inferredBanner: {
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.md,
+    padding: space.lg,
+    gap: space.sm,
+  },
+  inferredActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
   },
   progressStrip: {
     marginTop: space.sm,

@@ -8,6 +8,8 @@ import {
   ScrollView,
   TextInput,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { ink, chalk, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
 import { Button, Icon } from './chalkline';
@@ -151,6 +153,13 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
       <Pressable style={styles.backdrop} onPress={close} />
+      {/* #129: keyboard-avoiding wrapper (FeedbackSheet pattern) — without it
+          the absolutely-positioned sheet's content is hidden behind the iOS
+          keyboard, leaving Continue unreachable while typing the league ID. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.kav}
+      >
       <View style={styles.sheet}>
         <View style={styles.grabber} />
         <Text style={type.heading}>Link an ESPN league</Text>
@@ -306,15 +315,15 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
           style={styles.cancel}
         />
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: scrim },
+  kav: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
-    position: 'absolute',
-    left: 0, right: 0, bottom: 0,
     maxHeight: '88%',
     backgroundColor: ink.ink2,
     borderWidth: 1,

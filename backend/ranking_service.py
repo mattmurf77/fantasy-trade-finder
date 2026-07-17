@@ -81,6 +81,11 @@ _DEFAULT_CFG: dict[str, float] = {
     #   within_tier  — top-vs-bottom of the SAME tier (nails intra-tier order)
     #   tightest     — legacy near-equal fine ordering
     "trio_within_tier_rate":      0.35,
+    # Cross-position tier check (#132): a trio of SAME-TIER players from
+    # DIFFERENT positions — the comparison the cross-position trade finder
+    # leans on. Served only once the user has met all four positional
+    # thresholds (see _trade_unlocked). Deliberately a small share; 0 = off.
+    "trio_cross_pos_rate":        0.15,
     # Don't reuse a player who appeared in the last N served trios (anti-repeat;
     # fixes "2 of the same players 10 trios in a row"). Relaxes gracefully
     # (oldest-seen first) when the pool is too small to honour it. Raised
@@ -235,6 +240,10 @@ class RankingService:
         # opened every session. The cursor still rotates deterministically
         # from here.
         self._within_tier_cursor: int = random.randrange(len(ORDERED_TIERS))
+        # #132 cross-position lane: separate cursor (same random-start
+        # rationale) so cross-position trios rotate tiers independently of
+        # the within-tier lane.
+        self._cross_pos_cursor: int = random.randrange(len(ORDERED_TIERS))
 
         # INIT-03: instance-level memo for _compute_elo / _compute_stats.
         # Both methods re-iterate the full swipe history and are called 3-4x
@@ -400,6 +409,12 @@ class RankingService:
             trio = self._boundary_trio(position, skipped=_skipped, avoid=avoid)
         elif variety == "within_tier":
             trio = self._within_tier_trio(position, skipped=_skipped, avoid=avoid)
+        elif variety == "cross_pos":
+            # #132 — reaches across the FULL pool (all positions), like the
+            # boundary lane reaches past the tiered pool. Post-unlock only
+            # (gated in _pick_trio_variety), so serving off-position faces
+            # under a positional request can't stall pre-unlock progress.
+            trio = self._cross_position_trio(skipped=_skipped, avoid=avoid)
 
         # Whatever actually produced the trio is the "effective" variety — a
         # boundary/within lane that found nothing degrades to tightest, and the
@@ -456,6 +471,17 @@ class RankingService:
                 return i
         return -1
 
+    def _trade_unlocked(self) -> bool:
+        """All four positional interaction thresholds met — the trio-method
+        trade-finder unlock. Gates the #132 cross-position lane. The service
+        only sees interaction counts, so users who unlocked via the tiers/
+        manual methods stay gated here until their swipe counts catch up:
+        a conservative under-serve, never a pre-unlock leak."""
+        return all(
+            self._interactions.get(p, 0) >= self.POSITION_THRESHOLDS.get(p, 10)
+            for p in ("QB", "RB", "WR", "TE")
+        )
+
     def _pick_trio_variety(self, position: Optional[str]) -> str:
         """Weighted choice of trio strategy, avoiding an immediate repeat.
 
@@ -466,9 +492,14 @@ class RankingService:
             return "tightest"
         w_b = max(0.0, _c("trio_boundary_rate"))
         w_w = max(0.0, _c("trio_within_tier_rate"))
-        w_t = max(0.0, 1.0 - w_b - w_w)
+        # #132 — cross-position lane joins the mix only post-unlock; its
+        # share comes out of the tightest remainder, so the boundary /
+        # within-tier calibration lanes keep their tuned rates.
+        w_x = max(0.0, _c("trio_cross_pos_rate")) if self._trade_unlocked() else 0.0
+        w_t = max(0.0, 1.0 - w_b - w_w - w_x)
         choices = {k: v for k, v in
-                   (("boundary", w_b), ("within_tier", w_w), ("tightest", w_t))
+                   (("boundary", w_b), ("within_tier", w_w),
+                    ("cross_pos", w_x), ("tightest", w_t))
                    if v > 0.0}
         if not choices:
             return "tightest"
@@ -549,6 +580,89 @@ class RankingService:
             return MatchupTrio(
                 player_a=top, player_b=middle, player_c=bottom,
                 reasoning=f"Within-tier spread: {tier}",
+            )
+        return None
+
+    def _cross_position_trio(
+        self,
+        skipped: Optional[set] = None,
+        avoid: Optional[set] = None,
+    ) -> Optional[MatchupTrio]:
+        """#132 — same-tier players from DIFFERENT positions.
+
+        Post-unlock only (gated in _pick_trio_variety): probes how the user
+        values equally-tiered assets across position groups — exactly the
+        comparison the cross-position trade finder relies on. Buckets the
+        FULL pool by each player's own positional bands (bands are uniform
+        by design, but going through each player's position keeps this
+        honest if they ever diverge), rotates a cursor over the tiers, and
+        serves 3 same-tier players spanning as many positions as possible
+        (>= 2). Returns None when no tier holds 3+ members across 2+
+        positions — the caller falls back to tightest.
+        """
+        _skip = skipped or set()
+        _avoid = avoid or set()
+        full = [p for p in self._pool(None) if p.id not in _skip]
+        if len(full) < 3:
+            return None
+        elo = self._compute_elo(full)
+        stats = self._compute_stats(full)
+
+        by_tier: dict = {t: [] for t in ORDERED_TIERS}
+        try:
+            for p in full:
+                t = self.tier_for_elo(elo[p.id], p.position, self._scoring_format)
+                if t in by_tier:
+                    by_tier[t].append(p)
+        except Exception:
+            return None
+
+        n = len(ORDERED_TIERS)
+        for off in range(n):
+            tier = ORDERED_TIERS[(self._cross_pos_cursor + off) % n]
+            members = by_tier.get(tier, [])
+            if len(members) < 3 or len({p.position for p in members}) < 2:
+                continue
+            # Anti-repeat with the FB #97 partial-relaxation pattern: prefer
+            # unseen members; re-admit only the longest-unseen avoided ones,
+            # and never let relaxation collapse the position spread below 2.
+            picks = [p for p in members if p.id not in _avoid]
+            if len(picks) < 3 or len({p.position for p in picks}) < 2:
+                stale_first = sorted(
+                    (p for p in members if p.id in _avoid),
+                    key=lambda p: self._last_seen_at(p.id),
+                )
+                for p in stale_first:
+                    picks.append(p)
+                    if len(picks) >= 3 and len({q.position for q in picks}) >= 2:
+                        break
+            if len(picks) < 3 or len({p.position for p in picks}) < 2:
+                continue
+            # One player per position first (up to 3 distinct positions,
+            # random position order so the same pairing doesn't headline
+            # every serve), freshest (least-compared) within each position;
+            # when only 2 positions are present the third slot fills from
+            # the remaining picks by freshness.
+            by_pos: dict[str, list[Player]] = {}
+            for p in picks:
+                by_pos.setdefault(p.position, []).append(p)
+            for plist in by_pos.values():
+                plist.sort(key=lambda p: (len(stats[p.id]["compared"]), -elo[p.id]))
+            pos_order = list(by_pos.keys())
+            random.shuffle(pos_order)
+            chosen: list[Player] = [by_pos[pos][0] for pos in pos_order[:3]]
+            if len(chosen) < 3:
+                taken = {c.id for c in chosen}
+                rest = [p for p in picks if p.id not in taken]
+                rest.sort(key=lambda p: (len(stats[p.id]["compared"]), -elo[p.id]))
+                chosen += rest[:3 - len(chosen)]
+            if len(chosen) < 3:
+                continue
+            chosen.sort(key=lambda p: elo[p.id], reverse=True)
+            self._cross_pos_cursor = (self._cross_pos_cursor + off + 1) % n
+            return MatchupTrio(
+                player_a=chosen[0], player_b=chosen[1], player_c=chosen[2],
+                reasoning=f"Cross-position tier check: {tier}",
             )
         return None
 
@@ -1246,3 +1360,49 @@ class RankingService:
             self._elo_overrides[pid] = target_elo
 
         self._version += 1
+
+    def apply_value_map(self, position: Optional[str], ordered_ids: list[str]) -> int:
+        """
+        Cross-format value mapping for the copy-from-format flow (#124).
+
+        ``ordered_ids`` is a rank order established in ANOTHER scoring
+        format (best first). Write ELO overrides that preserve that order
+        while re-expressing each player's VALUE on THIS service's
+        consensus curve: the group's own seed Elos in this format are
+        sorted desc and dealt out to the given order (rank 1 gets the
+        group's highest seed, rank 2 the next, ...).
+
+        This is `apply_reorder`'s permutation trick pointed at the seed
+        distribution instead of the current Elos — order comes from the
+        user (the source format's board), magnitudes come from this
+        format's consensus. Tier labels then land wherever this format's
+        consensus puts the group: a QB worth "4+ firsts" in SF maps to
+        whatever the top of the 1QB QB seed curve is worth (≈2 firsts),
+        which is the #124 fix — copying a tier LABEL across formats
+        overvalues (SF→1QB) or undervalues (1QB→SF) QBs. Permuting real
+        seed values (not interpolating a band) keeps the convex value
+        curve intact, so tier occupancy matches consensus occupancy —
+        same rationale as apply_reorder's "44 elite QBs" note above.
+
+        Exact seed ties get a hair of descending epsilon so the user's
+        order survives an elo-desc re-sort. Returns the number of
+        overrides written.
+        """
+        pool_ids = {p.id for p in self._pool(position)}
+        valid_ids = [pid for pid in ordered_ids if pid in pool_ids]
+        if not valid_ids:
+            return 0
+
+        target_elos = sorted(
+            (self._seed.get(pid, self.ELO_INITIAL) for pid in valid_ids),
+            reverse=True,
+        )
+        for i in range(1, len(target_elos)):
+            if target_elos[i] >= target_elos[i - 1]:
+                target_elos[i] = target_elos[i - 1] - 0.001
+
+        for pid, target_elo in zip(valid_ids, target_elos):
+            self._elo_overrides[pid] = target_elo
+
+        self._version += 1
+        return len(valid_ids)

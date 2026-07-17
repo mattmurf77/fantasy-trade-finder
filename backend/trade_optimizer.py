@@ -54,11 +54,12 @@ from .trade_service import (
     _starters_at,
     _value_uncertainty,
     elo_to_value,
+    filler_ok,
+    fit_premium_1for1,
     marginal_value,
     outlook_blend_mult,
     package_value_v2,
     replacement_levels,
-    user_gain_ok_1for1,
 )
 
 __all__ = ["generate_pair_trades_v3", "find_three_team_cycles"]
@@ -203,6 +204,7 @@ def generate_pair_trades_v3(
     untouchable_ids: set | None = None,
     target_ids: set | None = None,
     raw_user_elo: dict[str, float] | None = None,
+    user_needs: set | None = None,
 ) -> list[TradeCard]:
     """Exact v3 generation for one (user, opponent) pair.
 
@@ -252,6 +254,15 @@ def generate_pair_trades_v3(
     MULT_CAP     = _c("pos_multiplier_cap")
     _targets     = target_ids or set()
 
+    # Interview 2026-07-17 ("loosen it") — divergence cards are already
+    # gated by both-sides surplus on the members' REAL boards, so the
+    # consensus fairness check here is only an extreme-case veto. All
+    # downstream uses (gate, sweetener band, sweetener target) inherit
+    # the loosened bar. Consensus-basis cards (other generator) keep the
+    # caller's full threshold.
+    fairness_threshold = min(fairness_threshold,
+                             _c("fairness_floor_divergence"))
+
     # --- per-player value accessors (cached), same spaces as v2 ----------
     _def_uval = elo_to_value(1500.0)
 
@@ -299,7 +310,8 @@ def generate_pair_trades_v3(
         def _user_val(pid: str) -> float:
             v = _mu_cache.get(pid)
             if v is None:
-                v = marginal_value(pid, _uv, user_repl, players)
+                v = marginal_value(pid, _uv, user_repl, players,
+                                   scoring_format)
                 _mu_cache[pid] = v
             return v
 
@@ -308,7 +320,8 @@ def generate_pair_trades_v3(
         def _opp_val(pid: str) -> float:
             v = _mo_cache.get(pid)
             if v is None:
-                v = marginal_value(pid, _vo, opp_repl, players)
+                v = marginal_value(pid, _vo, opp_repl, players,
+                                   scoring_format)
                 _mo_cache[pid] = v
             return v
     else:
@@ -442,7 +455,16 @@ def generate_pair_trades_v3(
             # ranks above the received player on their own raw board
             # (mirrors the v2 _consider gate; the shrunk surplus below can
             # be inverted by consensus pull on lightly-sampled players).
-            if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
+            # Phase 2 exception (flag trade.fit_premium): a small raw-board
+            # loss that fills a positional need survives, flagged.
+            _allowed, _fit_paid = fit_premium_1for1(
+                give_ids, recv_ids, raw_user_elo, players, user_needs)
+            if not _allowed:
+                continue
+            # #141 — junk-filler gate: any piece beyond a side's headliner
+            # must clear filler_min_frac of that headliner on the MAX of
+            # the two raw boards (mirrors the v2 _consider gate).
+            if not filler_ok(give_ids, recv_ids, _uv, _vo):
                 continue
             if not _both_feasible(give_ids, recv_ids):    # 3.2 hard gate
                 continue
@@ -463,12 +485,14 @@ def generate_pair_trades_v3(
             hm = _harmonic_mean(user_surplus, opp_surplus)
             order -= 1   # earlier combos win composite ties (desc sort)
             scored.append((_composite(hm, fairness, give_ids + recv_ids, recv_ids),
-                           order, hm, fairness, give_ids, recv_ids))
+                           order, hm, fairness, give_ids, recv_ids,
+                           _fit_paid))
 
     scored.sort(key=lambda e: (e[0], e[1]), reverse=True)
 
-    def _card(composite, hm, fairness, give_ids, recv_ids) -> TradeCard:
-        return TradeCard(
+    def _card(composite, hm, fairness, give_ids, recv_ids,
+              fit_paid=None) -> TradeCard:
+        card = TradeCard(
             trade_id           = str(uuid.uuid4())[:8],
             league_id          = league_id,
             proposing_user_id  = user_id,
@@ -481,6 +505,13 @@ def generate_pair_trades_v3(
             composite_score    = round(composite, 3),
             basis              = "divergence",
         )
+        if fit_paid is not None:
+            p = players.get(recv_ids[0])
+            card.fit_premium = {
+                "value_paid": fit_paid,
+                "position": getattr(p, "position", None) if p else None,
+            }
+        return card
 
     # Diverse top-K (greedy): exact enumeration surfaces every sibling of a
     # strong core (same trade ± one bench throw-in), so a plain scored[:K]
@@ -501,8 +532,8 @@ def generate_pair_trades_v3(
             for p in picked
         ):
             picked.append(entry)
-    cards = [_card(comp, hm, fair, g, r)
-             for comp, _o, hm, fair, g, r in picked]
+    cards = [_card(comp, hm, fair, g, r, fp)
+             for comp, _o, hm, fair, g, r, fp in picked]
 
     # --- 3.4 sweetener pass -------------------------------------------------
     if len(cards) < max_cards and near_misses and SW_MAX > 0:
@@ -520,6 +551,7 @@ def generate_pair_trades_v3(
                 min_side=MIN_SIDE, surpluses=_surpluses, gap_ok=_gap_ok,
                 both_feasible=_both_feasible, players=players,
                 untouchable_ids=untouchable_ids,
+                filler_ok_fn=lambda g, r: filler_ok(g, r, _uv, _vo),  # #141
             )
             if sweet is None:
                 continue
@@ -540,7 +572,8 @@ def generate_pair_trades_v3(
 
 def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
                  fairness_threshold, min_side, surpluses, gap_ok,
-                 both_feasible, players, untouchable_ids=None):
+                 both_feasible, players, untouchable_ids=None,
+                 filler_ok_fn=None):
     """3.4 — close a near-miss by adding ONE cheap player from the
     under-paying side's roster.
 
@@ -548,8 +581,11 @@ def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
     lower. Candidates are that roster's players outside the trade, tried
     cheapest-consensus-value first; the first one whose addition (a) lifts
     the consensus point ratio to >= fairness_threshold, (b) keeps BOTH
-    surpluses >= the gate, and (c) keeps both lineups feasible, wins.
-    Sweeteners are players only — picks/FAAB are not roster assets here.
+    surpluses >= the gate, (c) keeps both lineups feasible, and (d) clears
+    the #141 junk-filler bar (filler_ok_fn — a sweetener is by definition
+    an added piece, so it must be a meaningful asset, not roster junk),
+    wins. Sweeteners are players only — picks/FAAB are not roster assets
+    here.
 
     Returns (sweetener_pid, side, new_give, new_recv, user_surplus,
     opp_surplus, point_ratio) or None.
@@ -570,6 +606,8 @@ def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
             new_give, new_recv = give_ids + [s_pid], recv_ids
         else:
             new_give, new_recv = give_ids, recv_ids + [s_pid]
+        if filler_ok_fn is not None and not filler_ok_fn(new_give, new_recv):
+            continue                                     # #141 junk sweetener
         n_gv, n_rv = _consensus_packages(new_give, new_recv, seed_value)
         if n_gv <= 0 or n_rv <= 0:
             continue
@@ -662,7 +700,8 @@ def find_three_team_cycles(
 
         def _marg(uid: str, pid: str) -> float:
             """Marginal value of pid on uid's roster, in uid's own space."""
-            return marginal_value(pid, value_of[uid], repl[uid], players)
+            return marginal_value(pid, value_of[uid], repl[uid], players,
+                                  scoring_format)
     else:
         def _marg(uid: str, pid: str) -> float:
             return value_of[uid](pid)

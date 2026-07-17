@@ -1,0 +1,39 @@
+appId: com.fantasytradefinder.app
+# tc: S1-spike part B — full hermetic sign-in → Main tabs via id selectors.
+# profile: standard (Flask must be running on :5001 with the standard profile)
+# Note: the league-row tap uses leagues.row.<league_id> — the text-assert variant
+# failed because the row Pressable swallows child Text from the accessibility
+# tree (the exact hazard LLD Appendix A budgets; id selectors are the fix).
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- assertVisible:
+    id: "tab.rank"
+- assertVisible:
+    id: "tab.matches"
+- assertVisible:
+    id: "tab.league"
+- tapOn:
+    id: "tab.league"
+- takeScreenshot: s1-part-b-league-tab

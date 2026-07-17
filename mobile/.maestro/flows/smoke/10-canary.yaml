@@ -1,0 +1,21 @@
+appId: com.fantasytradefinder.app
+# tc: TC-XC-07
+# profile: standard
+# flags: release
+# State-pollution canary: after any prior flow, a cleared launch must show a
+# virgin SignIn — no session leak (would land Main), no Keychain hint leak.
+tags: [smoke, canary]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- assertNotVisible:
+    id: "signin.hint-btn"
+- assertNotVisible:
+    id: "signin.error-text"
+- takeScreenshot: smoke-10-canary

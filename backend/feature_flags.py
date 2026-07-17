@@ -101,6 +101,10 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.outlook_seed",
     # Backlog #10 — crown-asset package premium (docs/plans/competitor-top20/10-*)
     "trade.crown_asset",
+    # Trade-logic interview phase 2 (docs/plans/trade-logic-interview-2026-07-17.md)
+    "trade.lanes",           # stamp cards window_move/value_move from the user's window
+    "trade.fit_premium",     # surface flagged need-fill cards that pay a small raw-value premium
+    "trade.aggression_ab",   # A/B opening-offer aggression buckets (light/fair/generous)
     # "Send in Sleeper" — undocumented Sleeper write API (FLAGGED-BETA / ToS-adverse)
     "trade.send_in_sleeper",  # docs/plans/sleeper-write-capture-runbook.md
     # Account-auth P2 — Apple/Google identity anchors (docs/plans/account-auth-plan-2026-07-11.md)

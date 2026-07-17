@@ -45,7 +45,7 @@ import {
   getTiersStatus,
 } from '../api/rankings';
 import { copyTiersFromFormat } from '../api/league';
-import { autoBucket, TIERS, TIER_LABEL } from '../utils/tierBands';
+import { autoBucket, autoBucketMixed, TIERS, TIER_LABEL } from '../utils/tierBands';
 import { valueForElo } from '../utils/playerValue';
 import { useSession } from '../state/useSession';
 import { useScoringFormat } from '../hooks/useScoringFormat';
@@ -60,6 +60,15 @@ const FORMAT_LABELS: Record<ScoringFormat, string> = {
 const FORMAT_KEYS: ScoringFormat[] = ['1qb_ppr', 'sf_tep'];
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
+
+// #132 — the board can show a single position OR the merged cross-position
+// "All" board. 'ALL' is a VIEW, not a server-side position: reads come from
+// the unfiltered /api/rankings payload and every mutation is routed to the
+// owning position's per-position pathway (see saveMutation/resetMutation) —
+// /api/tiers/save only accepts QB/RB/WR/TE and silently drops foreign pids,
+// so a merged board must never be posted to a single position.
+type BoardTab = Position | 'ALL';
+const BOARD_TABS: BoardTab[] = [...POSITIONS, 'ALL'];
 
 /** Which zone a card sits in.  "unassigned" is a first-class zone — you
  *  can drag a player out of a tier back to the pool. */
@@ -86,7 +95,8 @@ export default function TiersScreen() {
   // mirrors and marks the choice explicit so the league-default applier
   // (RootNav) won't override it this session.
   const { setFormat, switching: formatSwitching } = useScoringFormat();
-  const [position, setPosition] = useState<Position>('QB');
+  const [position, setPosition] = useState<BoardTab>('QB');
+  const isAllView = position === 'ALL';
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
 
   // FB4-63 — zone of the topmost VISIBLE player row, driven by the list's
@@ -150,9 +160,12 @@ export default function TiersScreen() {
   );
 
   // ── Data ────────────────────────────────────────────────────────────
+  // #132 — the All view reads the UNFILTERED rankings payload. Query key
+  // deliberately matches ManualRanksScreen's overall board
+  // (['rankings', fmt, 'all'] ⇄ getRankings(null)) so the two share a cache.
   const rankingsQuery = useQuery({
-    queryKey: ['rankings', activeFormat, position],
-    queryFn: () => getRankings(position),
+    queryKey: ['rankings', activeFormat, isAllView ? 'all' : position],
+    queryFn: () => getRankings(isAllView ? null : position),
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
@@ -223,15 +236,32 @@ export default function TiersScreen() {
     [trendByPid],
   );
 
+  // #132 — positional ranks for the All board. The unfiltered payload's
+  // `rank` is the OVERALL rank, so the per-position rank (QB4, WR12, …)
+  // is derived client-side: 1-based index among same-position players in
+  // Elo order. Mirrors ManualRanksScreen's posRanks map. Null when a
+  // single position is shown (the payload's rank is already positional).
+  const allPosRanks = useMemo(() => {
+    if (position !== 'ALL') return null;
+    const map = new Map<string, number>();
+    const data = rankingsQuery.data?.rankings as RankedPlayer[] | undefined;
+    if (!data) return map;
+    const counts: Partial<Record<string, number>> = {};
+    const sorted = [...data].sort((a, b) => (b.elo ?? 0) - (a.elo ?? 0));
+    for (const p of sorted) {
+      const n = (counts[p.position] ?? 0) + 1;
+      counts[p.position] = n;
+      map.set(p.id, n);
+    }
+    return map;
+  }, [position, rankingsQuery.data]);
+
   const saveMutation = useMutation({
     // Wrap the tier save in a Sentry span — measures end-to-end latency
     // including the per-position payload build + the network round-trip.
     // No-op when Sentry isn't initialized.
     mutationFn: () =>
       startSpan({ name: 'tiers.save', op: 'mutation' }, () => {
-        // Only send the real tiers — `unassigned` isn't a tier on the server.
-        const payload: Record<string, string[]> = {};
-        for (const t of TIERS) payload[t] = buckets[t].map((p) => p.id);
         // Pass the accumulated clearedPids so the backend can DELETE the
         // matching tier_overrides rows for this position. Filter out any
         // ID that's currently sitting in a tier (defensive — the user
@@ -241,7 +271,54 @@ export default function TiersScreen() {
         const stillAssigned = new Set<string>();
         for (const t of TIERS) for (const p of buckets[t]) stillAssigned.add(p.id);
         const cleared = Array.from(clearedPids).filter((id) => !stillAssigned.has(id));
-        return saveTiers(position, payload, cleared);
+
+        if (!isAllView) {
+          // Only send the real tiers — `unassigned` isn't a tier on the server.
+          const payload: Record<string, string[]> = {};
+          for (const t of TIERS) payload[t] = buckets[t].map((p) => p.id);
+          return saveTiers(position, payload, cleared);
+        }
+
+        // #132 All view — /api/tiers/save is per-position (QB/RB/WR/TE
+        // only, and apply_tiers drops pids outside that position's pool),
+        // so the merged board is SPLIT by each player's own position and
+        // routed as one save per position. Tier membership + per-position
+        // within-tier order round-trip exactly; the cross-position
+        // interleave WITHIN a tier is re-derived from the band Elos on
+        // reload (each position's list spreads across the same uniform
+        // band independently) — a documented All-view limitation, never
+        // data loss.
+        const perPos: Record<Position, Record<string, string[]>> = {
+          QB: {}, RB: {}, WR: {}, TE: {},
+        };
+        for (const pos of POSITIONS) {
+          for (const t of TIERS) perPos[pos][t] = [];
+        }
+        for (const t of TIERS) {
+          // Player.position is `Position | string`; an off-enum value has
+          // no per-position save pathway, so the `?.` guard drops it
+          // rather than mis-routing (the pool only holds QB/RB/WR/TE).
+          for (const p of buckets[t]) perPos[p.position as Position]?.[t]?.push(p.id);
+        }
+        // Route cleared pids by owning position (looked up from the loaded
+        // payload + the pool) — a cleared pid posted to the wrong position
+        // would be silently ignored server-side.
+        const posById = new Map<string, Position>();
+        for (const p of (rankingsQuery.data?.rankings as RankedPlayer[] | undefined) ?? []) {
+          posById.set(p.id, p.position as Position);
+        }
+        for (const p of buckets.unassigned) posById.set(p.id, p.position as Position);
+        const clearedByPos: Record<Position, string[]> = { QB: [], RB: [], WR: [], TE: [] };
+        for (const id of cleared) {
+          const pos = posById.get(id);
+          if (pos) clearedByPos[pos]?.push(id);
+        }
+        const calls = POSITIONS.filter(
+          (pos) =>
+            TIERS.some((t) => perPos[pos][t].length > 0) ||
+            clearedByPos[pos].length > 0,
+        ).map((pos) => saveTiers(pos, perPos[pos], clearedByPos[pos]));
+        return Promise.all(calls);
       }),
     onSuccess: () => {
       setToast({ msg: 'Tiers saved', tone: 'success' });
@@ -250,9 +327,14 @@ export default function TiersScreen() {
       // Tier saves rewrite per-position ELO overrides on the backend,
       // which the Overall / Manual / Tiers screens all read via the
       // `['rankings', ...]` family. Scope to the saved format+position
-      // + 'all' to avoid evicting unrelated caches.
-      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, position] });
-      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, 'all'] });
+      // + 'all' to avoid evicting unrelated caches. An All-view save
+      // touched every position, so it invalidates the whole format prefix.
+      if (isAllView) {
+        queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat] });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, position] });
+        queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, 'all'] });
+      }
       // Reset the clearedPids set — the backend just absorbed them.
       setClearedPids(new Set());
       // Local edits are now server truth — let the refetch rebuild buckets.
@@ -264,12 +346,15 @@ export default function TiersScreen() {
   });
 
   // ── Copy tiers from the OTHER scoring format ───────────────────────
-  // Pulls the user's tier assignments from the other format (e.g. SF TEP
-  // when currently on 1QB PPR) and re-stamps them onto the active format
-  // with format-appropriate ELOs. Destructive: replaces existing target-
-  // format tier overrides wholesale, so we confirm via Alert first. On
-  // success we refetch the per-position rankings + tier-status caches so
-  // the screen re-renders with the new state.
+  // Pulls the user's board from the other format (e.g. SF TEP when
+  // currently on 1QB PPR) and value-maps it onto the active format
+  // (#124): players keep the user's per-position rank order, but each
+  // player's value (and therefore tier label) is re-seeded from the
+  // TARGET format's consensus at that rank — QBs shift most, by design.
+  // Destructive: replaces existing target-format tier overrides
+  // wholesale, so we confirm via Alert first (#139). On success we
+  // refetch the per-position rankings + tier-status caches so the
+  // screen re-renders with the new state.
   const copyMutation = useMutation({
     mutationFn: ({ from, to }: { from: ScoringFormat; to: ScoringFormat }) =>
       copyTiersFromFormat(from, to),
@@ -279,7 +364,7 @@ export default function TiersScreen() {
         return;
       }
       const n = data.total ?? 0;
-      setToast({ msg: `Copied ${n} tier placements`, tone: 'success' });
+      setToast({ msg: `Copied ${n} players — values adjusted`, tone: 'success' });
       // Invalidate rankings/tier caches so the per-position load picks up
       // the new override ELOs. Same pattern as saveMutation.onSuccess.
       // A format copy affects all positions; use the broad prefix so the
@@ -336,7 +421,13 @@ export default function TiersScreen() {
     bucketKeyRef.current = bucketKey;
     bucketsDirtyRef.current = false;
 
-    const bucketed = autoBucket(players, position, fmt);
+    // #132 — the All board buckets each player by ITS OWN position's
+    // thresholds (bands are uniform today; autoBucketMixed keeps the merged
+    // board honest if they ever diverge).
+    const bucketed =
+      position === 'ALL'
+        ? autoBucketMixed(players, fmt)
+        : autoBucket(players, position, fmt);
     setBuckets({ ...bucketed, unassigned: [] });
     // The clearedPids set is per-position (the saved snapshot is too).
     // Position switch or rankings-refetch invalidates the previous
@@ -655,10 +746,11 @@ export default function TiersScreen() {
       // the drag / selection Pressable. Since #58 (cozy density) the strip
       // sits on line 2 of the dense PlayerCard via its statsSlot.
       const stats = tileStatsFor(item.player);
-      // #53 — positional rank for the right cluster. /api/rankings is
-      // queried per-position, so `rank` IS the positional rank.
-      const posRank =
-        item.player.rank != null ? `${item.player.position}${item.player.rank}` : undefined;
+      // #53 — positional rank for the right cluster. Per-position queries
+      // return `rank` AS the positional rank; the All board (#132) derives
+      // it client-side (the unfiltered payload's rank is overall).
+      const posRankN = allPosRanks ? allPosRanks.get(item.player.id) : item.player.rank;
+      const posRank = posRankN != null ? `${item.player.position}${posRankN}` : undefined;
       const tileValue = valueForElo(item.player.elo);
 
       if (multiSelect) {
@@ -725,7 +817,7 @@ export default function TiersScreen() {
         </Pressable>
       );
     },
-    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor],
+    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor, allPosRanks],
   );
 
   // ── Copy-from-format button derivation ─────────────────────────────
@@ -737,16 +829,21 @@ export default function TiersScreen() {
     FORMAT_KEYS.find((f) => f !== copyTargetFormat) || 'sf_tep';
 
   const onCopyFromOtherFormat = useCallback(() => {
-    // Destructive — confirm before firing. Copy preserves tier label +
-    // within-tier rank; only the underlying ELO bands change to fit the
-    // target format. Matches web's Alert copy verbatim where practical.
+    // Destructive — confirm before firing (#139). Since #124 the copy is
+    // VALUE-AWARE: it keeps the user's rank order at each position but
+    // re-seeds values (and tier labels) from the target format's
+    // consensus at those ranks — a player worth 4+ firsts in SF is not
+    // worth 4+ firsts in 1QB, and QBs shift the most. No "copy as-is"
+    // option: a verbatim tier-label copy is exactly the mispricing #124
+    // reported.
     Alert.alert(
       `Copy tier list from ${FORMAT_LABELS[otherFormat]}?`,
-      `This will REPLACE your current ${FORMAT_LABELS[copyTargetFormat]} tiers. ` +
-        `Each player keeps their tier and within-tier rank from ` +
-        `${FORMAT_LABELS[otherFormat]}; only the underlying ELO values ` +
-        `change to fit ${FORMAT_LABELS[copyTargetFormat]}'s bands.\n\n` +
-        `Cannot be undone.`,
+      `Values will be adjusted to ${FORMAT_LABELS[copyTargetFormat]} pick values: ` +
+        `players keep your ${FORMAT_LABELS[otherFormat]} rank order at each ` +
+        `position, but tiers are re-set to what each rank is worth in ` +
+        `${FORMAT_LABELS[copyTargetFormat]} — QBs shift the most.\n\n` +
+        `This REPLACES your current ${FORMAT_LABELS[copyTargetFormat]} tiers ` +
+        `and cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -774,10 +871,18 @@ export default function TiersScreen() {
   const resetMutation = useMutation({
     mutationFn: () => {
       const data = rankingsQuery.data;
-      const pids = data?.rankings
-        ? (data.rankings as RankedPlayer[]).map((p) => p.id)
-        : [];
-      return saveTiers(position, {}, pids);
+      const players = (data?.rankings as RankedPlayer[] | undefined) ?? [];
+      if (!isAllView) {
+        return saveTiers(position, {}, players.map((p) => p.id));
+      }
+      // #132 All view — clear-only saves routed per position (the save
+      // endpoint is per-position; see saveMutation).
+      const byPos: Record<Position, string[]> = { QB: [], RB: [], WR: [], TE: [] };
+      for (const p of players) byPos[p.position as Position]?.push(p.id);
+      const calls = POSITIONS.filter((pos) => byPos[pos].length > 0).map(
+        (pos) => saveTiers(pos, {}, byPos[pos]),
+      );
+      return Promise.all(calls);
     },
     onSuccess: () => {
       setToast({ msg: 'Tiers reset to suggested', tone: 'success' });
@@ -786,8 +891,12 @@ export default function TiersScreen() {
       bucketsDirtyRef.current = false;
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
       queryClient.invalidateQueries({ queryKey: ['progress'] });
-      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, position] });
-      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, 'all'] });
+      if (isAllView) {
+        queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat] });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, position] });
+        queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat, 'all'] });
+      }
       haptics.success();
     },
     onError: (e: Error) => {
@@ -798,9 +907,12 @@ export default function TiersScreen() {
   const onResetToSuggested = useCallback(() => {
     if (!rankingsQuery.data?.rankings) return;
     Alert.alert(
-      `Reset ${position} tiers to suggested?`,
-      `Your manual placements for ${position} will be cleared and replaced ` +
-        `with the app's suggested tiers. This takes effect immediately.`,
+      isAllView
+        ? 'Reset ALL tiers to suggested?'
+        : `Reset ${position} tiers to suggested?`,
+      `Your manual placements for ${isAllView ? 'every position' : position} ` +
+        `will be cleared and replaced with the app's suggested tiers. ` +
+        `This takes effect immediately.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -859,14 +971,17 @@ export default function TiersScreen() {
           {/* #104 — guided quick-set walk (top tier → Bench, tap-to-assign).
               Occupies the slot the Anchors link held (#99 — the Pick
               Anchor wizard stays reachable from the Rank tab's menu and
-              the Build-your-board chooser). */}
-          <Button
-            variant="ghost"
-            compact
-            label="Quick set"
-            onPress={() => navigation.navigate('QuickSetTiers', { position })}
-            style={styles.headerBtn}
-          />
+              the Build-your-board chooser). Hidden on the All board
+              (#132) — QuickSetTiers is a per-position walk. */}
+          {!isAllView && (
+            <Button
+              variant="ghost"
+              compact
+              label="Quick set"
+              onPress={() => navigation.navigate('QuickSetTiers', { position })}
+              style={styles.headerBtn}
+            />
+          )}
         </View>
       </View>
       )}
@@ -887,9 +1002,12 @@ export default function TiersScreen() {
 
       {/* Position switcher — PositionTabs spec: segmented group, active
           segment gets an ink-3 fill + 2px underline in that position's
-          color (position hexes are cross-client invariants). */}
+          color (position hexes are cross-client invariants). #132 adds the
+          cross-position "All" board as the last tab — per the PositionTabs
+          spec, the Overall/All tab underlines in ice (it's not a position,
+          so no position hex applies). */}
       <View style={styles.switcher}>
-        {POSITIONS.map((p) => {
+        {BOARD_TABS.map((p) => {
           const isActive = p === position;
           return (
             <Pressable
@@ -903,7 +1021,9 @@ export default function TiersScreen() {
                 isActive && styles.switcherBtnActive,
                 isActive && {
                   borderBottomColor:
-                    positionColors[p.toLowerCase() as keyof typeof positionColors],
+                    p === 'ALL'
+                      ? ice.base
+                      : positionColors[p.toLowerCase() as keyof typeof positionColors],
                 },
                 pressed && !isActive && { backgroundColor: ink.ink3 },
               ]}
@@ -911,7 +1031,7 @@ export default function TiersScreen() {
               <Text
                 style={[styles.switcherText, isActive && styles.switcherTextActive]}
               >
-                {p}
+                {p === 'ALL' ? 'All' : p}
               </Text>
             </Pressable>
           );
@@ -1102,7 +1222,9 @@ export default function TiersScreen() {
           {saving ? (
             <ActivityIndicator color={ice.on} />
           ) : (
-            <Text style={styles.saveBtnText}>Save {position} tiers</Text>
+            <Text style={styles.saveBtnText}>
+              {isAllView ? 'Save all tiers' : `Save ${position} tiers`}
+            </Text>
           )}
         </Pressable>
       </View>

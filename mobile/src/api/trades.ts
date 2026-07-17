@@ -92,6 +92,26 @@ function normalizeTradeCard(raw: any): TradeCard {
             : undefined,
         }
       : undefined;
+  // Phase-2 lane — only the two known enum values pass; anything else
+  // (missing, typo, legacy) degrades to undefined and hides the lane UI.
+  const lane: 'window' | 'value' | undefined =
+    raw?.lane === 'window' || raw?.lane === 'value' ? raw.lane : undefined;
+  // Phase-2 fit premium — validated so a malformed payload degrades to
+  // "no badge" rather than rendering bogus numbers.
+  const rawFitPremium = raw?.fit_premium;
+  const fitPremium =
+    rawFitPremium && typeof rawFitPremium.value_paid === 'number'
+      ? {
+          value_paid: rawFitPremium.value_paid,
+          position:
+            typeof rawFitPremium.position === 'string'
+              ? rawFitPremium.position
+              : undefined,
+        }
+      : undefined;
+  // Phase-2 aggression variant — opaque string, passed through as-is.
+  const aggressionVariant =
+    typeof raw?.aggression_variant === 'string' ? raw.aggression_variant : undefined;
 
   return {
     trade_id:           String(raw?.trade_id ?? ''),
@@ -121,6 +141,9 @@ function normalizeTradeCard(raw: any): TradeCard {
     sweetener,
     partner_fit:        partnerFit,
     match_context:      matchContext,
+    lane,
+    fitPremium,
+    aggressionVariant,
   };
 }
 

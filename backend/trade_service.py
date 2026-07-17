@@ -16,6 +16,7 @@ Core algorithm:
   (prevents surfacing wildly imbalanced trades that nobody would accept)
 """
 
+import hashlib
 import heapq
 import math
 import time
@@ -61,6 +62,12 @@ _DEFAULT_CFG: dict[str, float] = {
     # share<=floor to crown_rate at share=1.0. See package_value_v2.
     "crown_rate":            0.12,
     "crown_share_floor":     0.50,
+    # Interview 2026-07-17 ("depends on stud") — the consolidation premium
+    # scales with the crown asset's ABSOLUTE value: a true tier-1 stud
+    # (value >= crown_elite_value) earns the full crown_rate, a mid-tier
+    # headliner earns proportionally less. <= 0 disables the scaling
+    # (flat crown_rate for any crown asset).
+    "crown_elite_value":  6000.0,
     # Positional preference multipliers
     "pos_acquire_bonus":     0.20,
     "pos_tradeaway_bonus":   0.15,
@@ -114,6 +121,13 @@ _DEFAULT_CFG: dict[str, float] = {
     # True mutual gain (Change 3 + amendment A1)
     "min_side_surplus":    150.0,     # min per-side value gain to surface a trade
     "mutual_gain_cap":    1500.0,     # normalization ceiling for the harmonic mean
+    # Interview 2026-07-17 ("loosen it") — for DIVERGENCE cards (both
+    # members have real boards) the consensus fairness check is only an
+    # extreme-case veto: the both-sides surplus gate already proves mutual
+    # gain on the boards that matter. Effective divergence gate =
+    # min(fairness_threshold, this). Consensus-basis cards keep the full
+    # fairness_threshold (consensus IS the board there).
+    "fairness_floor_divergence":  0.55,
     # Waiver/roster-slot cost (amendment A3, FantasyCalc-derived ≈ rank-300 value)
     "waiver_slot_cost":    425.0,     # value cost per extra player received
     # Confidence shrinkage + range-overlap fairness (Change 4 + amendment A4)
@@ -123,7 +137,19 @@ _DEFAULT_CFG: dict[str, float] = {
     # Tier 2 — work item 2.1: marginal (over-replacement) valuation
     # (flag: trade.marginal_value — docs/plans/trade-engine-tier2-models.md)
     # ------------------------------------------------------------------
-    "bench_credit_rate":         0.15,   # fraction of raw value depth keeps
+    "bench_credit_rate":         0.15,   # fallback fraction of raw value depth keeps
+    # Interview 2026-07-17 — the depth discount is position- and
+    # format-dependent: RB/WR depth is precious in 1QB (injuries/byes make
+    # it near-startable), QB/TE depth is fungible there; superflex makes
+    # QB depth startable capital and TE-premium does the same for TE.
+    # marginal_value picks the per-position rate, with the _sf/_tep
+    # overrides replacing the base rate in those formats.
+    "bench_credit_qb":           0.10,
+    "bench_credit_rb":           0.30,
+    "bench_credit_wr":           0.30,
+    "bench_credit_te":           0.10,
+    "bench_credit_qb_sf":        0.35,
+    "bench_credit_te_tep":       0.25,
     "waiver_baseline_value":   250.0,    # replacement floor when a position is thin
     # min_side_surplus replacement when the marginal flag is ON: marginal
     # values are systematically smaller than raw values (a package collapses
@@ -140,6 +166,25 @@ _DEFAULT_CFG: dict[str, float] = {
     # give. Multi-asset divergence packages are exempt from the raw-board
     # check (the aggregate surplus gate is the compensation test).
     "user_gain_epsilon":         0.0,
+    # #141 — junk-filler gate. In any multi-asset side, every piece beyond
+    # the side's headliner (its best asset) must be worth at least this
+    # FRACTION of that headliner, where each player is priced at the MAX
+    # of the two boards (user's and opponent's raw value) — a filler one
+    # side genuinely values is a legitimate piece; junk BOTH boards value
+    # low never pads a suggestion. 0.25 ≈ a 277-Elo window below the
+    # headliner (DP snapshot 2026-06-13: a Chase-headlined side [≈8470]
+    # only accepts pieces ≥ ~2100 ≈ a mid 1st; a rank-100-headlined side
+    # [≈1000] accepts ≥ ~250 ≈ rank 250, so depth-for-depth trades are
+    # untouched). 0 disables (pre-#141 behavior). Applies to v2 pair,
+    # v3 optimizer (incl. sweeteners) and consensus paths.
+    "filler_min_frac":           0.25,
+    # Interview 2026-07-17 ("both floors") — absolute companion to the
+    # relative filler gate: every non-headliner piece must ALSO clear this
+    # value-space floor on the same max-of-boards metric. ~450 = bottom of
+    # the depth tier (Elo 1350); pure roster-clogger bodies below it never
+    # pad a package. 0 disables. Headliners are exempt (deep-league 1-for-1
+    # swaps of cheap players stay legal).
+    "asset_floor_abs":         450.0,
     # ------------------------------------------------------------------
     # Tier 2 — work item 2.2: outlook as now/future valuation blend
     # (flag: trade.outlook_blend). α = weight on NOW value; 1−α on FUTURE.
@@ -191,7 +236,23 @@ _DEFAULT_CFG: dict[str, float] = {
     # composite *= 1 + w * (need_fit - 0.5), need_fit ∈ [0,1]. Bounded
     # multiplier applied AFTER all gates — reorders acceptable trades,
     # never rescues gated ones. 0 disables the reordering entirely.
-    "need_fit_weight":            0.30,
+    # 0.30 → 0.15 per interview 2026-07-17: need counting (bodies vs
+    # slots) is right but should stay a LIGHT multiplier (±7.5%).
+    "need_fit_weight":            0.15,
+    # ------------------------------------------------------------------
+    # Interview phase 2 (docs/plans/trade-logic-interview-2026-07-17.md)
+    # ------------------------------------------------------------------
+    # trade.lanes — a card is a "window" move when the value-weighted mean
+    # now/future lean of what changes hands, signed by the user's window
+    # direction, clears this fraction. Below it (or with no window) the
+    # card is a "value" move.
+    "lane_shift_frac":            0.10,
+    # trade.fit_premium — max raw-board value the user may PAY on a
+    # flagged 1-for-1 that fills a positional need from a non-need spot.
+    "fit_premium_max_loss":     300.0,
+    # trade.aggression_ab — composite reweight strength for the
+    # light/fair/generous opening-offer buckets (± at full ±45% tilt).
+    "aggression_weight":          0.20,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -371,6 +432,13 @@ def package_value_v2(values: list[float], v_max: float,
             floor = _c("crown_share_floor")
             if share > floor:
                 premium = _c("crown_rate") * (share - floor) / max(1.0 - floor, 1e-9)
+                # Interview 2026-07-17 ("depends on stud"): scale the
+                # premium by the crown asset's absolute value — a true
+                # tier-1 commands the full rate, a mid-tier headliner
+                # earns proportionally less.
+                elite_ref = _c("crown_elite_value")
+                if elite_ref > 0:
+                    premium *= min(1.0, v_top / elite_ref)
                 top_contrib = v_top * (0.15 + 0.85 * (v_top / v_max) ** gamma)
                 total += premium * top_contrib
     return round(total, 1)
@@ -443,6 +511,42 @@ def user_gain_ok_1for1(
         return True
     return (elo_to_value(recv_e) - elo_to_value(give_e)
             >= _c("user_gain_epsilon"))
+
+
+def filler_ok(give_ids: list[str], recv_ids: list[str],
+              user_val, opp_val) -> bool:
+    """
+    #141 — junk-filler gate ("suggestions add low-value players to both
+    sides"). For each side with 2+ assets, every piece except the
+    headliner (the side's best asset) must be worth at least
+    filler_min_frac of that headliner. Per-player metric:
+    max(user_val(pid), opp_val(pid)) — a filler EITHER board values
+    highly survives; only a player both boards agree is junk is gated.
+    Single-asset sides (the 1-for-1 core) pass untouched;
+    filler_min_frac <= 0 disables the gate entirely (pre-#141 behavior).
+
+    user_val / opp_val are RAW board-value accessors (pid → value), never
+    marginal values — marginal valuation deliberately collapses depth
+    pieces, but "does this look like junk?" is a board-value judgment.
+
+    Interview 2026-07-17 ("both floors"): non-headliner pieces must clear
+    BOTH the relative bar and the absolute asset_floor_abs — a stud deal
+    can't include lottery scratchers (relative) and no deal includes pure
+    roster-clogger bodies (absolute), even when the relative bar is tiny.
+    """
+    frac = _c("filler_min_frac")
+    if frac <= 0:          # master kill-switch: pre-#141 behavior exactly
+        return True
+    abs_floor = _c("asset_floor_abs")
+    for side in (give_ids, recv_ids):
+        if len(side) < 2:
+            continue
+        vals = sorted((max(user_val(p), opp_val(p)) for p in side),
+                      reverse=True)
+        bar = max(vals[0] * frac, abs_floor)
+        if any(v < bar for v in vals[1:]):
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -675,19 +779,44 @@ def replacement_levels(
     return levels
 
 
+def bench_credit_rate(pos: str | None, scoring_format: str = "1qb_ppr") -> float:
+    """
+    Position/format-aware bench credit (interview 2026-07-17): how much of
+    a depth player's raw value survives the over-replacement collapse.
+
+    RB/WR depth is near-startable insurance in every format (high rate);
+    QB/TE depth is fungible in 1QB (low rate) but becomes startable
+    capital in superflex (QB) / TE-premium (TE), where the override rates
+    apply. Unknown positions fall back to the flat bench_credit_rate.
+    """
+    if pos == "QB":
+        return _c("bench_credit_qb_sf") if scoring_format.startswith("sf") \
+            else _c("bench_credit_qb")
+    if pos == "TE":
+        return _c("bench_credit_te_tep") if "tep" in scoring_format \
+            else _c("bench_credit_te")
+    if pos == "RB":
+        return _c("bench_credit_rb")
+    if pos == "WR":
+        return _c("bench_credit_wr")
+    return _c("bench_credit_rate")
+
+
 def marginal_value(
     pid: str,
     value_of,                            # callable pid → value (same space)
     repl_levels: dict[str, float],       # from replacement_levels()
     players: dict,
+    scoring_format: str = "1qb_ppr",
 ) -> float:
     """
     Value of a player OVER the roster's replacement at his position, plus
-    a small bench credit so depth keeps some worth (byes, injuries):
+    a bench credit so depth keeps some worth (byes, injuries):
 
         marginal(p, R) = max(0, value(p) - replacement(R, pos(p)))
-                         + bench_credit_rate * value(p)
+                         + bench_credit_rate(pos, format) * value(p)
 
+    The bench credit is position/format-aware (see bench_credit_rate).
     Positions without a replacement concept (picks, unknown, anything
     outside QB/RB/WR/TE) keep their raw value.
     """
@@ -696,7 +825,8 @@ def marginal_value(
     pos = getattr(p, "position", None) if p else None
     if pos not in repl_levels:
         return v
-    return max(0.0, v - repl_levels[pos]) + _c("bench_credit_rate") * v
+    return (max(0.0, v - repl_levels[pos])
+            + bench_credit_rate(pos, scoring_format) * v)
 
 
 # ---------------------------------------------------------------------------
@@ -775,6 +905,105 @@ def outlook_blend_mult(pos: str | None, age, alpha: float) -> float:
     Players with no age data get exactly 1.0 from both curves."""
     return (alpha * age_now_mult(pos, age)
             + (1.0 - alpha) * age_future_mult(pos, age))
+
+
+# ---------------------------------------------------------------------------
+# Interview phase 2 — two-lane deck (flag: trade.lanes)
+# Window/age steer LABELS, not values ("age = tiebreak"): the classifier
+# reuses the now/future age curves purely to describe what a trade does to
+# roster composition, on consensus values, and never touches scoring.
+# ---------------------------------------------------------------------------
+
+_LANE_SIGN = {"championship": 1.0, "contender": 1.0,
+              "rebuilder": -1.0, "jets": -1.0}
+
+
+def _now_lean(pos: str | None, age) -> float:
+    """How win-now an asset is, in [-,+]: positive = present production,
+    negative = future capital. Picks are pure future capital; players with
+    no age data are neutral."""
+    if pos == "PICK":
+        return -0.25
+    if not age or age <= 0:
+        return 0.0
+    return age_now_mult(pos, age) - age_future_mult(pos, age)
+
+
+def classify_lane(give_ids: list[str], recv_ids: list[str], players: dict,
+                  outlook: str | None, value_of) -> str | None:
+    """Label a card "window" or "value" for the two-lane deck.
+
+    The lane shift is the value-weighted mean now-lean of what changes
+    hands (received counts +, given counts −), signed by the user's window
+    direction (contending: acquiring now-value = window move; rebuilding:
+    acquiring future capital = window move). Clears lane_shift_frac →
+    "window"; otherwise "value". No declared/inferred window (None or
+    not_sure) → None: the deck has no lanes to show.
+
+    value_of: pid → CONSENSUS value — lanes describe the trade's shape,
+    not either member's private board.
+    """
+    sign = _LANE_SIGN.get(outlook or "")
+    if sign is None:
+        return None
+    shift = 0.0
+    total = 0.0
+    for direction, ids in ((1.0, recv_ids), (-1.0, give_ids)):
+        for pid in ids:
+            p = players.get(pid)
+            v = value_of(pid)
+            total += v
+            shift += direction * v * _now_lean(
+                getattr(p, "position", None) if p else None,
+                getattr(p, "age", None) if p else None)
+    if total <= 0:
+        return "value"
+    return "window" if sign * shift / total >= _c("lane_shift_frac") \
+        else "value"
+
+
+def aggression_variant(user_id: str) -> str:
+    """Interview phase 2 (flag trade.aggression_ab) — stable opening-offer
+    bucket per user: "light" (open a touch light, room to add), "fair"
+    (balanced offers lead), "generous" (optimize acceptance rate). MD5 so
+    the bucket is deterministic across processes and restarts."""
+    h = int(hashlib.md5(user_id.encode("utf-8")).hexdigest(), 16)
+    return ("light", "fair", "generous")[h % 3]
+
+
+def fit_premium_1for1(
+    give_ids: list[str],
+    recv_ids: list[str],
+    raw_user_elo: dict[str, float] | None,
+    players: dict,
+    user_needs: set | None,
+) -> tuple[bool, float | None]:
+    """Interview phase 2 (flag trade.fit_premium) — the honest exception
+    to the #108 raw-board gate: a 1-for-1 the user LOSES a little raw
+    value on is allowed when it fills a positional need from a non-need
+    spot, and the card is flagged with the price paid.
+
+    Returns (allowed, value_paid): (True, None) when the plain #108 gate
+    passes (no premium), (True, loss) for a flagged fit-premium card,
+    (False, None) when the combo stays blocked. Never rescues losses
+    beyond fit_premium_max_loss — "a little value" only.
+    """
+    if user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
+        return True, None
+    if not FLAGS.trade_fit_premium or not user_needs:
+        return False, None
+    # The #108 gate only fails on known 1-for-1s, so shapes are 1x1 here.
+    give_p = players.get(give_ids[0])
+    recv_p = players.get(recv_ids[0])
+    give_pos = getattr(give_p, "position", None) if give_p else None
+    recv_pos = getattr(recv_p, "position", None) if recv_p else None
+    if recv_pos not in user_needs or give_pos in user_needs:
+        return False, None
+    loss = (elo_to_value(raw_user_elo[give_ids[0]])
+            - elo_to_value(raw_user_elo[recv_ids[0]]))
+    if loss > _c("fit_premium_max_loss"):
+        return False, None
+    return True, round(loss, 1)
 
 
 def infer_team_outlook(
@@ -1201,6 +1430,18 @@ class TradeCard:
     # the flag is off or no traded asset has a positional profile.
     # Serialized when set.
     need_fit: Optional[float] = None
+    # Interview phase 2 (flag trade.lanes) — "window" | "value" | None:
+    # which deck lane the card belongs to, from the user's resolved
+    # window (declared or seeded). None = user has no window → no lanes.
+    lane: Optional[str] = None
+    # Interview phase 2 (flag trade.fit_premium) — set on a 1-for-1 that
+    # fills a positional need at a small raw-board value loss:
+    # {"value_paid": float, "position": str}. Honest flag, never silent.
+    fit_premium: Optional[dict] = None
+    # Interview phase 2 (flag trade.aggression_ab) — the user's stable
+    # opening-offer bucket ("light" | "fair" | "generous") that reweighted
+    # this deck. Serialized for event joins; not user-facing copy.
+    aggression_variant: Optional[str] = None
 
 
 @dataclass
@@ -1546,15 +1787,22 @@ class TradeService:
         total = len(eligible)
         global_target = max(30, max_per_opponent * 6)
 
-        # Backlog #1 — opponent outlook resolution. Active only when BOTH the
-        # infer flag and the blend machinery are on (the blend supplies the
-        # multiplier; without it the user side is unblended too and a one-sided
-        # opponent blend would be inconsistent). Resolution order per opponent:
-        # declared league preference → inferred from roster shape → not_sure.
-        _infer_outlook = FLAGS.trade_outlook_infer and FLAGS.trade_outlook_blend
+        # Backlog #1 — opponent outlook resolution, decoupled (phase 2) into
+        # LABEL vs VALUE roles. The label (declared league preference →
+        # inferred from roster shape → not_sure) is resolved whenever the
+        # infer flag is on and feeds match_context / narrative framing /
+        # lanes — "their team story". The VALUE blend (alpha_opp) additionally
+        # requires trade.outlook_blend, which the 2026-07-17 interview turned
+        # off ("age = tiebreak"): labels stay, value edits don't.
+        _infer_outlook = FLAGS.trade_outlook_infer
+        _blend_values = FLAGS.trade_outlook_blend
         _declared = opponent_outlooks or {}
         _pick_shares = opponent_pick_shares or {}
         _num_teams = len(league.members)
+        # Interview phase 2 — fit-premium cards need the user's positional
+        # needs at gate time (both divergence generators).
+        _user_needs = (set(user_profile.get("position_needs", []))
+                       if FLAGS.trade_fit_premium else None)
 
         for idx, member in enumerate(eligible):
             opp_profile = analyze_roster_strengths(member.roster, self._players, scoring_format)
@@ -1570,7 +1818,8 @@ class TradeService:
                         member.roster, self._players,
                         _pick_shares.get(member.user_id, 0.0), _num_teams)
                     source = "inferred"
-                alpha_opp = outlook_alpha(resolved)
+                if _blend_values:
+                    alpha_opp = outlook_alpha(resolved)
                 match_ctx["opponent_outlook"] = {"value": resolved, "source": source}
 
             if member.has_rankings and member.elo_ratings:
@@ -1602,6 +1851,7 @@ class TradeService:
                         untouchable_ids      = untouchable_ids,
                         target_ids           = target_ids,
                         raw_user_elo         = user_elo,
+                        user_needs           = _user_needs,
                     )
                 else:
                     cards = self._generate_for_pair_v2(
@@ -1624,6 +1874,7 @@ class TradeService:
                         untouchable_ids      = untouchable_ids,
                         target_ids           = target_ids,
                         raw_user_elo         = user_elo,
+                        user_needs           = _user_needs,
                     )
             else:
                 cards = self._generate_consensus_for_pair(
@@ -1674,6 +1925,41 @@ class TradeService:
                         c.need_fit = nf
                         c.composite_score = round(
                             c.composite_score * (1.0 + w_nf * (nf - 0.5)), 3)
+            # Interview phase 2 — two-lane labels (flag trade.lanes): stamp
+            # each card "window" / "value" from the user's resolved window.
+            # Pure label on consensus values; never touches gates/scores.
+            if FLAGS.trade_lanes:
+                for c in cards:
+                    c.lane = classify_lane(
+                        c.give_player_ids, c.receive_player_ids,
+                        self._players, outlook, _vs)
+            # Interview phase 2 — aggression A/B (flag trade.aggression_ab):
+            # the user's stable bucket nudges which acceptable offers lead
+            # the deck. tilt > 0 = consensus favors the user (they open
+            # light); "light" boosts those, "generous" the reverse, "fair"
+            # prefers balance. Bounded reorder AFTER all gates — the
+            # fairness veto still bounds |tilt| at 1 − floor.
+            if FLAGS.trade_aggression_ab:
+                _variant = aggression_variant(user_id)
+                w_ab = _c("aggression_weight")
+                for c in cards:
+                    gvals = [_vs(p) for p in c.give_player_ids]
+                    rvals = [_vs(p) for p in c.receive_player_ids]
+                    v_max = max(gvals + rvals)
+                    gv = package_value_v2(gvals, v_max,
+                                          n_other=len(rvals))
+                    rv = package_value_v2(rvals, v_max,
+                                          n_other=len(gvals))
+                    tilt = ((rv - gv) / max(gv, rv)) if max(gv, rv) > 0 else 0.0
+                    if _variant == "light":
+                        mult = 1.0 + w_ab * tilt
+                    elif _variant == "generous":
+                        mult = 1.0 - w_ab * tilt
+                    else:   # fair — prefer balanced offers
+                        mult = 1.0 - w_ab * abs(tilt)
+                    c.aggression_variant = _variant
+                    c.composite_score = round(
+                        c.composite_score * max(mult, 0.0), 3)
             for c in cards:
                 c.match_context = match_ctx
                 c.narrative = build_narrative(c, match_ctx, self._players)
@@ -1716,6 +2002,7 @@ class TradeService:
         untouchable_ids: set | None = None,
         target_ids: set | None = None,
         raw_user_elo: dict[str, float] | None = None,
+        user_needs: set | None = None,
     ) -> list[TradeCard]:
         """Divergence-based v2 generation for one (user, opponent) pair.
 
@@ -1753,6 +2040,13 @@ class TradeService:
         TARGET_BONUS = _c("target_acquire_bonus")   # #2 per-target composite reward
         MULT_CAP     = _c("pos_multiplier_cap")
 
+        # Interview 2026-07-17 ("loosen it") — both members have real
+        # boards here and the both-sides surplus gate already proves
+        # mutual gain, so the consensus fairness check is only an
+        # extreme-case veto. Consensus-basis cards keep the full bar.
+        fairness_threshold = min(fairness_threshold,
+                                 _c("fairness_floor_divergence"))
+
         _vo_cache: dict[str, float] = {}
         def _vo(pid: str) -> float:
             v = _vo_cache.get(pid)
@@ -1772,6 +2066,13 @@ class TradeService:
                 _vo_cache[pid] = v
             return v
 
+        # Raw user-board value accessor — used by the marginal setup below
+        # and by the #141 junk-filler gate (which judges on raw boards even
+        # when the surplus math runs marginal).
+        _def_uval = elo_to_value(1500.0)
+        def _uv(pid: str) -> float:
+            return user_value.get(pid, _def_uval)
+
         if MARGINAL:
             # Replacement levels computed ONCE per pair from the PRE-trade
             # rosters, in each side's own value space — the two (roster,
@@ -1779,9 +2080,6 @@ class TradeService:
             # side values an incoming player at his marginal over THEIR
             # roster, and the shedding side's loss is his marginal on their
             # own roster. (Exact post-trade re-optimization is Tier 3.)
-            _def_uval = elo_to_value(1500.0)
-            def _uv(pid: str) -> float:
-                return user_value.get(pid, _def_uval)
             user_repl = replacement_levels(
                 user_roster, _uv, players, scoring_format)
             opp_repl = replacement_levels(
@@ -1792,7 +2090,8 @@ class TradeService:
                 """Marginal value of pid on the USER's roster, user's space."""
                 v = _mu_cache.get(pid)
                 if v is None:
-                    v = marginal_value(pid, _uv, user_repl, players)
+                    v = marginal_value(pid, _uv, user_repl, players,
+                                       scoring_format)
                     _mu_cache[pid] = v
                 return v
 
@@ -1801,7 +2100,8 @@ class TradeService:
                 """Marginal value of pid on the OPPONENT's roster, opp space."""
                 v = _mo_cache.get(pid)
                 if v is None:
-                    v = marginal_value(pid, _vo, opp_repl, players)
+                    v = marginal_value(pid, _vo, opp_repl, players,
+                                       scoring_format)
                     _mo_cache[pid] = v
                 return v
 
@@ -1863,10 +2163,12 @@ class TradeService:
         K = max(int(max_cards) * 4, 1)
         heap: list[tuple] = []
         _tb = 0
-        def _offer(composite, hm, fairness, give_ids, recv_ids):
+        def _offer(composite, hm, fairness, give_ids, recv_ids,
+                   fit_paid=None):
             nonlocal _tb
             _tb += 1
-            entry = (composite, _tb, hm, fairness, give_ids, recv_ids)
+            entry = (composite, _tb, hm, fairness, give_ids, recv_ids,
+                     fit_paid)
             if len(heap) < K:
                 heapq.heappush(heap, entry)
             elif composite > heap[0][0]:
@@ -1884,7 +2186,18 @@ class TradeService:
             # #108 — never offer a 1-for-1 that sends a player the user
             # ranks above the received player on their own raw board (the
             # shrunk surplus below can be inverted by consensus pull).
-            if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
+            # Phase 2 exception (flag trade.fit_premium): a small raw-board
+            # loss that fills a positional need survives, flagged with the
+            # price paid.
+            _allowed, _fit_paid = fit_premium_1for1(
+                give_ids, recv_ids, raw_user_elo, players, user_needs)
+            if not _allowed:
+                return
+            # #141 — junk-filler gate: any piece beyond a side's headliner
+            # must clear filler_min_frac of that headliner on the MAX of
+            # the two raw boards. Junk both sides value low never pads a
+            # package; headliners are exempt (1-for-1 shapes untouched).
+            if not filler_ok(give_ids, recv_ids, _uv, _vo):
                 return
 
             # Package values in EACH side's own value space (Change 2).
@@ -1942,7 +2255,7 @@ class TradeService:
                 n_t = len(set(recv_ids) & target_ids)
                 if n_t:
                     composite *= min(1.0 + TARGET_BONUS * n_t, MULT_CAP)
-            _offer(composite, hm, fairness, give_ids, recv_ids)
+            _offer(composite, hm, fairness, give_ids, recv_ids, _fit_paid)
 
         # ------------------------------------------------------------------
         # Candidate pools — same prune idea as legacy but in value space and
@@ -2027,8 +2340,9 @@ class TradeService:
         # returns + the waiver-slot cost; QB/star reconciliation is Tier 2.
         ranked = sorted(heap, key=lambda e: (e[0], e[1]), reverse=True)
         cards: list[TradeCard] = []
-        for composite, _t, hm, fairness, give_ids, recv_ids in ranked[:max_cards]:
-            cards.append(TradeCard(
+        for composite, _t, hm, fairness, give_ids, recv_ids, fit_paid \
+                in ranked[:max_cards]:
+            card = TradeCard(
                 trade_id          = str(uuid.uuid4())[:8],
                 league_id         = league_id,
                 proposing_user_id = user_id,
@@ -2040,7 +2354,14 @@ class TradeService:
                 fairness_score    = round(fairness, 3),
                 composite_score   = round(composite, 3),
                 basis             = "divergence",
-            ))
+            )
+            if fit_paid is not None:
+                p = players.get(recv_ids[0])
+                card.fit_premium = {
+                    "value_paid": fit_paid,
+                    "position": getattr(p, "position", None) if p else None,
+                }
+            cards.append(card)
         return cards
 
     def _generate_consensus_for_pair(
@@ -2079,6 +2400,13 @@ class TradeService:
         def _pos(pid: str) -> Optional[str]:
             p = players.get(pid)
             return getattr(p, "position", None) if p else None
+
+        def _uval_raw(pid: str) -> float:
+            """#141 — user raw-board value where the board knows the
+            player, else consensus (the opponent has no board here, so
+            consensus stands in for their arm of the max rule too)."""
+            e = raw_user_elo.get(pid) if raw_user_elo else None
+            return elo_to_value(e) if e is not None else seed_value(pid)
 
         # Explicit user preferences win; otherwise fall back to the roster
         # profiles already computed by generate_trades.
@@ -2137,6 +2465,11 @@ class TradeService:
             # #108 — and when the user DOES have both players on their own
             # raw board, a 1-for-1 must respect that ordering too.
             if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
+                return
+            # #141 — junk-filler gate (2-for-1 shape): the added give piece
+            # must clear filler_min_frac of the side's headliner on
+            # max(user raw board, consensus).
+            if not filler_ok(give_ids, recv_ids, _uval_raw, seed_value):
                 return
             fairness = min(gv, rv) / max(gv, rv)
             if fairness < fairness_threshold:

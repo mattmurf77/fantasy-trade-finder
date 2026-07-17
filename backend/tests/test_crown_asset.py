@@ -71,10 +71,25 @@ def test_smaller_count_top_asset_gets_premium():
     _set(**{"trade.crown_asset": True})
     base = package_value_v2([5000.0], 5000.0)          # lone elite, no context
     crowned = package_value_v2([5000.0], 5000.0, n_other=3)  # 1-for-3 consolidation
-    # share = 1.0 > floor 0.5 ⇒ premium = crown_rate * (1-.5)/(1-.5) = 0.12.
-    # base for a lone asset == its value (contribution factor 1.0), so crowned
-    # ≈ value * 1.12.
-    assert crowned == pytest.approx(base * 1.12, rel=1e-6)
+    # share = 1.0 > floor 0.5 ⇒ raw premium = crown_rate = 0.12, then the
+    # interview-2026-07-17 stud scaling multiplies by
+    # min(1, v_top / crown_elite_value) = 5000/6000.
+    assert crowned == pytest.approx(base * (1 + 0.12 * 5000.0 / 6000.0),
+                                    rel=1e-6)
+
+
+def test_premium_scales_with_stud_value():
+    # Interview 2026-07-17 ("depends on stud"): a true tier-1 crown asset
+    # (>= crown_elite_value) earns the full crown_rate; a mid-tier
+    # headliner earns proportionally less; the scaling caps at 1.0.
+    _set(**{"trade.crown_asset": True})
+    elite = package_value_v2([6000.0], 6000.0, n_other=3)
+    assert elite == pytest.approx(6000.0 * 1.12, rel=1e-6)   # full rate
+    huge = package_value_v2([9000.0], 9000.0, n_other=3)
+    assert huge == pytest.approx(9000.0 * 1.12, rel=1e-6)    # capped at 1.0
+    mid = package_value_v2([1500.0], 1500.0, n_other=3)
+    assert mid == pytest.approx(1500.0 * (1 + 0.12 * 1500.0 / 6000.0),
+                                rel=1e-6)                    # barely any
 
 
 def test_premium_zero_below_floor():

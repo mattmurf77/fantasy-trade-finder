@@ -1,0 +1,45 @@
+appId: com.fantasytradefinder.app
+# tc: TC-TIR-02
+# profile: standard
+# flags: release
+# Render-only smoke: no drags (gestures are NOT-AUTOMATE; chevrons/bulk-move carry semantics elsewhere).
+tags: [smoke, tiers]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.tiers"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.tiers"
+- extendedWaitUntil:
+    visible:
+      id: "tiers.list"
+    timeout: 20000
+- assertVisible:
+    id: "tiers.save-btn"
+- takeScreenshot: smoke-04-tiers

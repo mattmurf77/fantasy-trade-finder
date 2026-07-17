@@ -53,13 +53,46 @@ def _has_picks(card, players: dict) -> bool:
     return False
 
 
+def _give_side_now_lean(card, players: dict) -> float:
+    """Mean now-lean of what the user sends (interview phase 2 framing).
+    Positive = proven production leaving; negative = youth/picks leaving."""
+    from .trade_service import _now_lean   # lazy: avoids circular import
+
+    leans = []
+    for pid in card.give_player_ids:
+        p = players.get(pid)
+        if p is None:
+            continue
+        leans.append(_now_lean(getattr(p, "position", None),
+                               getattr(p, "age", None)))
+    return sum(leans) / len(leans) if leans else 0.0
+
+
+def _opponent_frame(card, match_context: Optional[dict],
+                    players: dict) -> Optional[str]:
+    """Interview phase 2 — acceptance framing: pitch the trade in the
+    counterparty's window terms ("their team story") when what the user
+    sends actually fits it. None when there's no story to tell."""
+    opp = (match_context or {}).get("opponent_outlook") or {}
+    outlook = opp.get("value")
+    if outlook not in ("rebuilder", "jets", "contender", "championship"):
+        return None
+    lean = _give_side_now_lean(card, players)
+    if outlook in ("rebuilder", "jets") and lean <= -0.05:
+        return "They're rebuilding — the youth going back fits their timeline."
+    if outlook in ("contender", "championship") and lean >= 0.05:
+        return "They're pushing to win now — your proven pieces fit their window."
+    return None
+
+
 def build_narrative(card, match_context: Optional[dict], players: dict) -> str:
     """
     Compose ≤2 sentences explaining why this trade fits the user.
 
-    Sentence 1: positional fit (when there's a clear need overlap) OR a
-                fairness statement.
-    Sentence 2: dynasty / pick context (only when picks are involved).
+    Sentence 1: the honest fit-premium note (when the card pays one) OR
+                positional fit OR a fairness statement.
+    Sentence 2: counterparty-window framing (when their story fits) OR
+                dynasty / pick context (only when picks are involved).
     """
     sentences: list[str] = []
 
@@ -68,7 +101,14 @@ def build_narrative(card, match_context: Optional[dict], players: dict) -> str:
     overlap = [p for p in needs if p in surplus]
     target  = _top_received_name(card, players)
 
-    if overlap and target:
+    fit_prem = getattr(card, "fit_premium", None)
+    if fit_prem and target:
+        pos = fit_prem.get("position") or (needs[0] if needs else "a need")
+        sentences.append(
+            f"Fills your {pos} hole with {target} — you pay a little on "
+            f"your own board for the fit."
+        )
+    elif overlap and target:
         sentences.append(
             f"You shore up {overlap[0]} by acquiring {target}."
         )
@@ -86,7 +126,10 @@ def build_narrative(card, match_context: Optional[dict], players: dict) -> str:
     if not sentences:
         sentences.append(f"Trade looks {fair}.")
 
-    if _has_picks(card, players):
+    frame = _opponent_frame(card, match_context, players)
+    if frame:
+        sentences.append(frame)
+    elif _has_picks(card, players):
         settings = (match_context or {}).get("league_settings", {})
         if settings.get("dynasty"):
             sentences.append("Includes a dynasty pick — value scales with your league size.")

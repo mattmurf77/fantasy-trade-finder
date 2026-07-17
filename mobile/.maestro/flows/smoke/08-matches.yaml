@@ -1,0 +1,39 @@
+appId: com.fantasytradefinder.app
+# tc: TC-MAT-01
+# profile: standard
+# flags: release
+# standard seeds matches_seed {mutual: 2} — the empty state must NOT render.
+tags: [smoke, matches]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.matches"
+- extendedWaitUntil:
+    visible:
+      id: "matches.segment.mutual"
+    timeout: 20000
+- assertNotVisible:
+    id: "matches.empty-text"
+- takeScreenshot: smoke-08-matches

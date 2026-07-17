@@ -23,12 +23,21 @@ import {
 } from '../data/tradeCalcMock';
 import {
   CALC_VERDICT_LABEL,
+  CalcSuggestion,
+  evalFromConsensus,
   evaluateTrade as evaluateTradeLocal,
   formatDelta,
+  rankAddOnCandidates,
+  rankPackageCandidates,
   suggestAddOns,
   suggestPackages,
 } from '../utils/tradeCalcMath';
-import { evaluateTrade as evaluateTradeApi, getTradeValues } from '../api/calc';
+import {
+  evaluateTrade as evaluateTradeApi,
+  evaluateTrades,
+  getTradeValues,
+  type TradeProbe,
+} from '../api/calc';
 import TradeSide from '../components/TradeSide';
 import VerdictPanel from '../components/VerdictPanel';
 import ConsensusVerdictCard from '../components/ConsensusVerdictCard';
@@ -219,6 +228,98 @@ export default function TradeCalculatorScreen() {
       .map((p) => p.id);
   }, [livePlayers, liveSendIds, liveReceiveIds]);
 
+  // ── Live-mode suggestions (#78) ──────────────────────────────────────
+  // The verdict above is server-authoritative, so suggestions must be too:
+  // candidates are shortlisted by a local mirror of the server's package
+  // math (rank heuristic only), then every shortlisted combo is CONFIRMED
+  // through the same POST /api/trade/evaluate before it can render. Add-ons
+  // additionally must strictly improve the server's point_ratio — a card
+  // can never propose an add the evaluator scores as less fair.
+  const liveEval = mode === 'live' ? evalQuery.data : undefined;
+  const liveAddOnPlan = useMemo(() => {
+    if (mode !== 'live' || !liveEval || debSendIds.length === 0 || debReceiveIds.length === 0)
+      return null;
+    if (liveEval.verdict !== 'unfair' || !liveEval.gap?.add_to) return null;
+    const forSide: 'send' | 'receive' = liveEval.gap.add_to === 'give' ? 'send' : 'receive';
+    const cands = rankAddOnCandidates(debSendIds, debReceiveIds, forSide, livePoolIds, liveBoard);
+    return { forSide, cands };
+  }, [mode, liveEval, debSendIds, debReceiveIds, livePoolIds, liveBoard]);
+
+  const livePkgForSide: 'send' | 'receive' | null =
+    debSendIds.length > 0 ? 'receive' : debReceiveIds.length > 0 ? 'send' : null;
+  const livePkgPlan = useMemo(() => {
+    if (mode !== 'live' || !livePkgForSide) return null;
+    const fixed = livePkgForSide === 'receive' ? debSendIds : debReceiveIds;
+    return {
+      forSide: livePkgForSide,
+      cands: rankPackageCandidates(fixed, livePkgForSide, livePoolIds, liveBoard),
+    };
+  }, [mode, livePkgForSide, debSendIds, debReceiveIds, livePoolIds, liveBoard]);
+
+  const suggestQuery = useQuery({
+    queryKey: [
+      'calc-suggest',
+      format,
+      debSendIds.join('+'),
+      debReceiveIds.join('+'),
+      liveAddOnPlan?.cands.map((c) => c.ids.join('.')).join('+') ?? '',
+      livePkgPlan?.cands.map((c) => c.ids.join('.')).join('+') ?? '',
+    ],
+    enabled:
+      mode === 'live' &&
+      // Wait for the base evaluation to settle so add-on improvement is
+      // judged against the CURRENT trade's server ratio, never a stale one.
+      !evalQuery.isFetching &&
+      ((liveAddOnPlan?.cands.length ?? 0) > 0 || (livePkgPlan?.cands.length ?? 0) > 0),
+    staleTime: 60_000,
+    // No placeholderData: a suggestion confirmed for a DIFFERENT trade must
+    // never linger on screen while the new confirmation is in flight.
+    queryFn: async ({ signal }) => {
+      const addCands = liveAddOnPlan?.cands ?? [];
+      const pkgCands = livePkgPlan?.cands ?? [];
+      const addProbes: TradeProbe[] = addCands.map((c) =>
+        liveAddOnPlan!.forSide === 'send'
+          ? { give: [...debSendIds, ...c.ids], receive: debReceiveIds }
+          : { give: debSendIds, receive: [...debReceiveIds, ...c.ids] },
+      );
+      const pkgProbes: TradeProbe[] = pkgCands.map((c) =>
+        livePkgPlan!.forSide === 'receive'
+          ? { give: debSendIds, receive: c.ids }
+          : { give: c.ids, receive: debReceiveIds },
+      );
+      const evals = await evaluateTrades([...addProbes, ...pkgProbes], format, signal);
+      const currentRatio = liveEval?.point_ratio ?? null;
+
+      const toSuggestion = (ids: string[], e: { give_value: number; receive_value: number; point_ratio: number | null }): CalcSuggestion => ({
+        players: ids.map((id) => livePlayerById[id]).filter(Boolean),
+        evaluation: evalFromConsensus(e),
+        score: e.point_ratio ?? 0,
+      });
+
+      const addOns = addCands
+        .map((c, i) => ({ c, e: evals[i] }))
+        .filter(
+          ({ e }) =>
+            e !== null &&
+            (e.verdict === 'fair' || e.verdict === 'even') &&
+            e.point_ratio !== null &&
+            (currentRatio === null || e.point_ratio > currentRatio),
+        )
+        .sort((a, b) => (b.e!.point_ratio ?? 0) - (a.e!.point_ratio ?? 0))
+        .slice(0, 3)
+        .map(({ c, e }) => toSuggestion(c.ids, e!));
+
+      const packages = pkgCands
+        .map((c, i) => ({ c, e: evals[addCands.length + i] }))
+        .filter(({ e }) => e !== null && (e.verdict === 'fair' || e.verdict === 'even'))
+        .sort((a, b) => (b.e!.point_ratio ?? 0) - (a.e!.point_ratio ?? 0))
+        .slice(0, 4)
+        .map(({ c, e }) => toSuggestion(c.ids, e!));
+
+      return { addOns, packages };
+    },
+  });
+
   // ── Demo mode: seeded dual boards ────────────────────────────────────
   const partner = CALC_PARTNERS.find((o) => o.id === partnerId)!;
   const theirBoard = PARTNER_BOARDS[partnerId];
@@ -231,43 +332,60 @@ export default function TradeCalculatorScreen() {
   const activeBoard = isLive ? liveBoard : MY_BOARD;
   const activeOtherBoard = isLive ? liveBoard : theirBoard;
   const activePlayerById = isLive ? livePlayerById : CALC_PLAYER_BY_ID;
-  const activeMyPool = isLive ? livePoolIds : CALC_MY_TEAM.rosterIds;
-  const activeTheirPool = isLive ? livePoolIds : partner.rosterIds;
 
   const demoEvaluation = useMemo(
     () => evaluateTradeLocal(sendIds, receiveIds, MY_BOARD, theirBoard),
     [sendIds, receiveIds, theirBoard],
   );
 
-  // Fair-package + balance-add-on suggestions. In live mode both "boards"
-  // are the one consensus board, so the same dual-board math degrades to
-  // pure consensus fairness — suggestions still rank by closeness.
-  const suggested = useMemo(
+  // Demo-mode fair-package + balance-add-on suggestions: the demo verdict
+  // panel IS the local dual-board math, so local suggestions agree with it
+  // by construction. Live mode instead renders the server-confirmed
+  // suggestions from suggestQuery (#78) — never these local rankings.
+  const demoSuggested = useMemo(
     () =>
-      suggestPackages(
-        activeSendIds,
-        activeReceiveIds,
-        activeMyPool,
-        activeTheirPool,
-        activeBoard,
-        activeOtherBoard,
-        activePlayerById,
-      ),
-    [activeSendIds, activeReceiveIds, activeMyPool, activeTheirPool, activeBoard, activeOtherBoard, activePlayerById],
+      isLive
+        ? null
+        : suggestPackages(
+            sendIds,
+            receiveIds,
+            CALC_MY_TEAM.rosterIds,
+            partner.rosterIds,
+            MY_BOARD,
+            theirBoard,
+            CALC_PLAYER_BY_ID,
+          ),
+    [isLive, sendIds, receiveIds, partner, theirBoard],
   );
-  const addOns = useMemo(
+  const demoAddOns = useMemo(
     () =>
-      suggestAddOns(
-        activeSendIds,
-        activeReceiveIds,
-        activeMyPool,
-        activeTheirPool,
-        activeBoard,
-        activeOtherBoard,
-        activePlayerById,
-      ),
-    [activeSendIds, activeReceiveIds, activeMyPool, activeTheirPool, activeBoard, activeOtherBoard, activePlayerById],
+      isLive
+        ? null
+        : suggestAddOns(
+            sendIds,
+            receiveIds,
+            CALC_MY_TEAM.rosterIds,
+            partner.rosterIds,
+            MY_BOARD,
+            theirBoard,
+            CALC_PLAYER_BY_ID,
+          ),
+    [isLive, sendIds, receiveIds, partner, theirBoard],
   );
+
+  // What the sections below render, in either mode: {forSide, suggestions}.
+  const addOns = isLive
+    ? liveAddOnPlan && (suggestQuery.data?.addOns.length ?? 0) > 0
+      ? { forSide: liveAddOnPlan.forSide, suggestions: suggestQuery.data!.addOns }
+      : null
+    : demoAddOns;
+  const suggested = isLive
+    ? livePkgForSide
+      ? { forSide: livePkgForSide, suggestions: suggestQuery.data?.packages ?? [] }
+      : null
+    : demoSuggested;
+  // Live empty-state only once confirmation has settled (no flicker mid-probe).
+  const suggestSettled = !isLive || (!!valuesQuery.data && !suggestQuery.isFetching);
 
   const bothSides = activeSendIds.length > 0 && activeReceiveIds.length > 0;
   const anySide = activeSendIds.length > 0 || activeReceiveIds.length > 0;
@@ -557,7 +675,7 @@ export default function TradeCalculatorScreen() {
               />
             ))}
           </View>
-        ) : anySide && suggested && (!isLive || liveReady) ? (
+        ) : anySide && suggested && suggestSettled ? (
           <Text style={styles.noSuggestions}>
             No fair {suggested.forSide === 'receive' ? 'return' : 'offer'} found for that package —
             try adding or removing a piece.

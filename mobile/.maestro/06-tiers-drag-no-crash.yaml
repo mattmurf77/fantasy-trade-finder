@@ -4,20 +4,30 @@ appId: com.fantasytradefinder.app
 # (worklet/JS boundary in Gesture.Pan().onEnd — see commit f5c8bc3).
 # The smoke we want: long-press a chip, drag, release, and the app is
 # still alive on the same screen.
+# Needs `landing.try_before_sync` overridden ON (see 02-demo-session.yaml).
+# Selectors moved to testIDs 2026-07-12 (QA F-2); the stale "RB" default-
+# position assert became `tiers.list` (see 03-tiers-render.yaml).
 - launchApp:
     clearState: true
     stopApp: true
-- tapOn: "Try the app on a sample league"
-- extendedWaitUntil:
-    visible: "Trades"
-    timeout: 20000
-- tapOn: "Rank"
 - tapOn:
-    text: "Tiers"
-    index: 0
+    id: "signin.demo-link"
 - extendedWaitUntil:
-    visible: "RB"
+    visible:
+      id: "tab.trades"
+    timeout: 20000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.tiers"
     timeout: 10000
+- tapOn:
+    id: "rankmenu.tiers"
+- extendedWaitUntil:
+    visible:
+      id: "tiers.list"
+    timeout: 20000
 # Long-press + drag a player chip. Coordinates target the middle of the
 # screen where a chip almost certainly sits in the Solid/Depth band; the
 # drag goes ~200px up which should land it in a different tier. Maestro's
@@ -27,6 +37,7 @@ appId: com.fantasytradefinder.app
     end: 50%, 30%
     duration: 1200
 # If the worklet bug regressed, the app would crash here. Asserting the
-# Tiers screen header is still visible proves we survived.
-- assertVisible: "RB"
+# Tiers screen is still mounted proves we survived.
+- assertVisible:
+    id: "tiers.list"
 - takeScreenshot: 06-tiers-after-drag

@@ -2793,17 +2793,19 @@
         <button class="copy-tiers-btn" id="copy-tiers-btn"
                 data-from="${otherFmt}"
                 onclick="onCopyTiersFromOtherFormat(this)"
-                title="Copy your ${FORMAT_LABELS[otherFmt]} tier list into ${FORMAT_LABELS[active]}, preserving each player's tier and within-tier rank.">
+                title="Copy your ${FORMAT_LABELS[otherFmt]} tier list into ${FORMAT_LABELS[active]}: rank order is kept, values are adjusted to ${FORMAT_LABELS[active]} pick values.">
           ⇆ Copy tier list from ${FORMAT_LABELS[otherFmt]}
         </button>`;
     }
 
-    // Copy tier ASSIGNMENTS (tier label + within-tier rank) from the
-    // other scoring format into the active one. The backend handles the
-    // band-translation: a player at QB1 Elite in 1QB PPR (override 1680)
-    // becomes QB1 Elite in SF TEP (override 1790), so the on-screen tier
-    // and rank are preserved across formats with the appropriate ELO
-    // values for each format's band.
+    // Copy tiers from the other scoring format into the active one.
+    // Since #124 the copy is VALUE-AWARE: the backend keeps the user's
+    // per-position rank order but re-seeds ELOs (and tier labels) from
+    // the target format's consensus seed curve at those ranks
+    // (RankingService.apply_value_map; response mapping: 'value_rank').
+    // A player worth 4+ firsts in SF is not worth 4+ firsts in 1QB, and
+    // QBs shift the most — a verbatim tier-label copy is exactly the
+    // mispricing #124 reported, so there is no "copy as-is" option.
     //
     // Destructive: replaces the active format's existing tier overrides
     // wholesale. We confirm before firing.
@@ -2814,10 +2816,11 @@
 
       const ok = window.confirm(
         `Copy your ${FORMAT_LABELS[fromFmt]} tier list into ${FORMAT_LABELS[toFmt]}?\n\n` +
-        `This will REPLACE your current ${FORMAT_LABELS[toFmt]} tiers. Each player ` +
-        `keeps their tier and within-tier rank from ${FORMAT_LABELS[fromFmt]}; only ` +
-        `the underlying ELO values change to fit ${FORMAT_LABELS[toFmt]}'s bands.\n\n` +
-        `Cannot be undone via the Undo button.`
+        `Values will be adjusted to ${FORMAT_LABELS[toFmt]} pick values: players ` +
+        `keep your ${FORMAT_LABELS[fromFmt]} rank order at each position, but tiers ` +
+        `are re-set to what each rank is worth in ${FORMAT_LABELS[toFmt]} — QBs ` +
+        `shift the most.\n\n` +
+        `This REPLACES your current ${FORMAT_LABELS[toFmt]} tiers and cannot be undone.`
       );
       if (!ok) return;
 

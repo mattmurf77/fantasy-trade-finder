@@ -3350,6 +3350,31 @@
       return 'Weak fit for your targets';
     }
 
+    // Phase-2 lanes — module-level copy of the last unfiltered card set plus
+    // the active lane filter, so switching filters re-renders without a refetch.
+    let _allTradeCards = [];
+    let _laneFilter    = 'all';   // 'all' | 'window' | 'value'
+
+    function _updateLaneFilterRow() {
+      const row = document.getElementById('lane-filter-row');
+      if (!row) return;
+      const hasLane = _allTradeCards.some(c => c && c.lane);
+      if (!hasLane) {
+        _laneFilter = 'all';
+        row.style.display = 'none';
+        return;
+      }
+      row.style.display = '';
+      row.querySelectorAll('.lane-filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.lane === _laneFilter);
+      });
+    }
+
+    function setLaneFilter(lane) {
+      _laneFilter = lane;
+      renderTrades(_allTradeCards);   // re-render from the unfiltered copy
+    }
+
     function renderTrades(cards) {
       // Feature flags: run diff against previous snapshot + surface queue controls.
       // Both are additive and inert unless their flag is on.
@@ -3363,16 +3388,32 @@
         }
       } catch (_) { /* non-fatal */ }
 
+      // Keep the unfiltered set + show/hide the lane filter row.
+      _allTradeCards = Array.isArray(cards) ? cards : [];
+      _updateLaneFilterRow();
+
       // Cache latest cards so queue-add can look up player metadata.
-      _lastRenderedTrades = Array.isArray(cards) ? cards : [];
+      // Deliberately the FULL set, so queue chips resolve even when the
+      // corresponding card is hidden by the lane filter.
+      _lastRenderedTrades = _allTradeCards;
+
+      // Apply the client-side lane filter to what actually renders.
+      const visible = _laneFilter === 'all'
+        ? _allTradeCards
+        : _allTradeCards.filter(c => c && c.lane === _laneFilter);
 
       const list = document.getElementById('trades-list');
-      if (!cards.length) {
-        list.innerHTML = `<div class="trades-empty">
-          <strong>No trades yet</strong>
-          Hit "Find a Trade" to generate personalised trade suggestions<br>
-          based on your rankings vs your leaguemates.
-        </div>`;
+      if (!visible.length) {
+        list.innerHTML = _allTradeCards.length
+          ? `<div class="trades-empty">
+              <strong>No ${_laneFilter} moves in these results</strong>
+              Switch back to "All" to see every suggestion.
+            </div>`
+          : `<div class="trades-empty">
+              <strong>No trades yet</strong>
+              Hit "Find a Trade" to generate personalised trade suggestions<br>
+              based on your rankings vs your leaguemates.
+            </div>`;
         return;
       }
 
@@ -3385,7 +3426,7 @@
       const _queueFlagOn = !!(window.FTF_FLAG && window.FTF_FLAG('trades.queue_2k'));
       const _queueIds    = _queueFlagOn ? new Set(_loadTradeQueue().map(e => e.trade_id)) : null;
 
-      list.innerHTML = cards.map(card => {
+      list.innerHTML = visible.map(card => {
         const givePlayers  = card.give.map(p => tradePlayerHTML(p)).join('');
         const recvPlayers  = card.receive.map(p => tradePlayerHTML(p)).join('');
         const decided      = card.decision !== null;
@@ -3418,6 +3459,33 @@
         // trade. Backend serializes the field only when true.
         const likesYouHTML = card.likes_you === true
           ? `<div class="likes-you-pill"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square" style="vertical-align:-2px;margin-right:4px;"><path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="10" cy="10" r="2.5"/></svg>They're interested</div>`
+          : '';
+
+        // Phase-2 — lane chip: which strategic lane this trade serves.
+        // "window" = contention-window move (flare/gold), "value" = pure
+        // value accumulation (ice/accent). Rendered only when backend
+        // supplies `lane`.
+        const laneChipHTML = card.lane === 'window'
+          ? `<span class="lane-chip lane-chip--window">WINDOW MOVE</span>`
+          : card.lane === 'value'
+          ? `<span class="lane-chip lane-chip--value">VALUE MOVE</span>`
+          : '';
+
+        // Phase-2 — fit premium: this deal pays extra value to fill a
+        // positional need. Bordered gold pill, tooltip carries the numbers.
+        let fitPremiumHTML = '';
+        if (card.fit_premium && typeof card.fit_premium.value_paid === 'number') {
+          const fp  = card.fit_premium;
+          const tip = fp.position
+            ? `Pays a ${fp.value_paid} value premium to fill ${escapeHtml(fp.position)}`
+            : `Pays a ${fp.value_paid} value premium for positional fit`;
+          fitPremiumHTML = `<span class="fit-premium-pill" title="${tip}">Pays for fit</span>`;
+        }
+
+        // Row wrapper keeps the pills from stretching full-width in the
+        // card's column-flex layout (same reason likes-you-pill self-starts).
+        const headerPillsHTML = (laneChipHTML || fitPremiumHTML)
+          ? `<div class="trade-header-pills">${laneChipHTML}${fitPremiumHTML}</div>`
           : '';
 
         // v2 — consensus basis: fair-value idea vs an opponent who hasn't
@@ -3477,6 +3545,7 @@
 
         return `<div class="trade-card ${cls}" id="tc-${card.trade_id}">
           ${likesYouHTML}
+          ${headerPillsHTML}
           <div class="trade-meta">
             <span>vs <span class="trade-league">${escapeHtml(card.target_username)}</span>${dataTag}${consensusTag}</span>
             <span class="score-pill">Match score ${score}</span>
@@ -4251,6 +4320,11 @@
     let currentTradeAwayPositions  = [];  // e.g. ["QB"]
     let _pendingOutlookValue       = null; // holds step-1 selection until step-2 saved
 
+    // Phase-2 — backend-inferred outlook (additive fields on
+    // GET /api/league/preferences, only meaningful when no declared outlook).
+    let _inferredOutlook = null;
+    let _inferredSignals = [];
+
     async function checkOutlookPrompt() {
       // Skip for demo league or no session
       if (!currentLeagueId || currentLeagueId === 'league_demo') return;
@@ -4260,6 +4334,8 @@
         currentOutlook             = data.team_outlook || null;
         currentAcquirePositions    = data.acquire_positions    || [];
         currentTradeAwayPositions  = data.trade_away_positions || [];
+        _inferredOutlook = (!currentOutlook && data.inferred_outlook) ? data.inferred_outlook : null;
+        _inferredSignals = Array.isArray(data.inferred_signals) ? data.inferred_signals : [];
         updateOutlookBadge();
         if (!currentOutlook) {
           showOutlookModal(true);   // required — no dismiss
@@ -4308,9 +4384,27 @@
       const dismissBtn = document.getElementById('outlook-dismiss-btn');
       if (dismissBtn) dismissBtn.style.display = required ? 'none' : '';
 
-      // Highlight currently selected option (if re-opening)
+      // Highlight currently selected option (if re-opening). Phase-2: when
+      // no outlook is declared but the backend inferred one, preselect the
+      // inferred option and tag it "Suggested" (highlight only — the user
+      // still clicks through, flow unchanged).
+      const suggested = currentOutlook ? null : _inferredOutlook;
       document.querySelectorAll('.outlook-option-btn').forEach(btn => {
-        btn.classList.toggle('selected', btn.dataset.value === currentOutlook);
+        btn.classList.toggle('selected', btn.dataset.value === (currentOutlook || suggested));
+        const oldTag = btn.querySelector('.outlook-suggested-tag');
+        if (oldTag) oldTag.remove();
+        if (suggested && btn.dataset.value === suggested) {
+          const nameEl = btn.querySelector('.outlook-option-name');
+          if (nameEl) {
+            const tag = document.createElement('span');
+            tag.className = 'consensus-tag outlook-suggested-tag';
+            tag.textContent = 'Suggested';
+            tag.title = _inferredSignals.length
+              ? _inferredSignals.join(' · ')
+              : 'Suggested from your roster and league standing';
+            nameEl.appendChild(tag);
+          }
+        }
       });
 
       // Always start at step 1

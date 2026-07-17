@@ -317,6 +317,26 @@ export default function LeagueScreen() {
           />
         </View>
 
+        {/* #142/#144 (League rankings) + FA finder — league-wide explore
+            rows, LeagueRow construction (hairline list rows, not cards).
+            Both destinations are ROOT-stack routes (see RootNav), so
+            navigate() bubbles up from the tab navigator. */}
+        <TickLabel>Explore</TickLabel>
+        <View>
+          <ExploreRow
+            testID="league.rankings-row"
+            label="League rankings"
+            sub="Every team ranked by total roster value"
+            onPress={() => navigation.navigate('LeagueSummary')}
+          />
+          <ExploreRow
+            testID="league.free-agents-row"
+            label="Free agents"
+            sub="Best available players in this league"
+            onPress={() => navigation.navigate('FreeAgents')}
+          />
+        </View>
+
         {/* Recent activity — flag-gated. Backend already short-circuits to
             an empty list when the flag is off, but we also gate the section
             header to avoid showing an empty "Recent activity" stub. */}
@@ -467,6 +487,28 @@ function fmtScoring(s?: string | null) {
   return map[s] || s.toUpperCase();
 }
 
+// League-wide explore rows (#142/#144 + FA finder) — LeagueRow construction:
+// hairline-separated list row, title + body-sm chalk-dim meta + chevron.
+function ExploreRow({ label, sub, onPress, testID }: {
+  label: string; sub: string; onPress: () => void; testID: string;
+}) {
+  return (
+    <Pressable
+      testID={testID}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.exploreRow, pressed && { backgroundColor: ink.ink3 }]}
+    >
+      <View style={styles.exploreMain}>
+        <Text style={type.title}>{label}</Text>
+        <Text style={[type.bodySm, styles.exploreSub]}>{sub}</Text>
+      </View>
+      <Icon name="chevron-right" size={16} color={chalk.dim} />
+    </Pressable>
+  );
+}
+
 // Chalkline badge construction (1px encode-color border + label type on ink)
 // with an optional leading check icon — the shared Badge primitive doesn't
 // take an icon, so this composes the same tokens inline.
@@ -583,6 +625,18 @@ const styles = StyleSheet.create({
   joinedChipPressed: { backgroundColor: ink.ink3 },
 
   statRow: { flexDirection: 'row', gap: space.md },
+
+  // #142/#144 — explore rows (LeagueRow list construction)
+  exploreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingVertical: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
+  },
+  exploreMain: { flex: 1, gap: 2 },
+  exploreSub: { color: chalk.dim },
   statFlex: { flex: 1 },
   statCard: { flex: 1 },
   statCardPressed: { flex: 1, backgroundColor: ink.ink3 },

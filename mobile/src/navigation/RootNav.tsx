@@ -18,6 +18,8 @@ import SettingsScreen from '../screens/SettingsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import FeedbackInboxScreen from '../screens/FeedbackInboxScreen';
 import SleeperConnectScreen from '../screens/SleeperConnectScreen';
+import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
+import FreeAgentsScreen from '../screens/FreeAgentsScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import VerifyAccountBanner from '../components/VerifyAccountBanner';
@@ -35,6 +37,10 @@ type AuthStack = {
   Profile: { username: string };
   FeedbackInbox: undefined;
   SleeperConnect: undefined;
+  // #142/#144 — League rankings (power rankings) + FA finder, entered from
+  // the League tab's Explore rows.
+  LeagueSummary: undefined;
+  FreeAgents: undefined;
 };
 
 const Stack = createNativeStackNavigator<AuthStack>();
@@ -297,6 +303,32 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerShown: true,
             title: 'Test feedback',
             headerTitle: () => <HeaderTitle>Test feedback</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+          }}
+        />
+        {/* #142/#144 — League rankings, pushed from the League tab's
+            "League rankings" Explore row. Standard (non-modal) push, so the
+            native back control applies. */}
+        <Stack.Screen
+          name="LeagueSummary"
+          component={LeagueSummaryScreen}
+          options={{
+            headerShown: true,
+            title: 'League rankings',
+            headerTitle: () => <HeaderTitle>League rankings</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+          }}
+        />
+        {/* FA finder — pushed from the League tab's "Free agents" row. */}
+        <Stack.Screen
+          name="FreeAgents"
+          component={FreeAgentsScreen}
+          options={{
+            headerShown: true,
+            title: 'Free agents',
+            headerTitle: () => <HeaderTitle>Free agents</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
           }}

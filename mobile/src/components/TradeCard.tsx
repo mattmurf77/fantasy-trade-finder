@@ -174,10 +174,20 @@ function TradeCardComp({
             )}
           </View>
         </View>
-        {/* Player-swap (feedback #86): the user modified this package, so
-            the engine's original numbers no longer describe it. Flare =
-            informational accent (ADR-005). */}
-        {data.edited && <Badge label="EDITED" color={flare.base} colorText />}
+        {/* Header badges — flare = informational accent (ADR-005).
+            PAYS FOR FIT (phase-2): the package overpays consensus value to
+            land a positional fit; the narrative already explains the
+            tradeoff, so the badge is the whole callout. EDITED (feedback
+            #86): the user modified this package, so the engine's original
+            numbers no longer describe it. */}
+        {(data.fitPremium || data.edited) && (
+          <View style={styles.headerBadges}>
+            {data.fitPremium && (
+              <Badge label="PAYS FOR FIT" color={flare.base} colorText />
+            )}
+            {data.edited && <Badge label="EDITED" color={flare.base} colorText />}
+          </View>
+        )}
       </View>
 
       {/* FB-47 — partner-fit line. Muted, hint-tier: it narrates why this
@@ -375,6 +385,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
+  },
+  // Header badge cluster (PAYS FOR FIT / EDITED) — right side of the
+  // header row; wraps if both render on a narrow card.
+  headerBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space.xs,
+    flexShrink: 1,
   },
   // Opponent-confidence chip: 6px square dot + micro label next to @handle.
   // Filled pos-green square = real (their actual saved rankings); hollow

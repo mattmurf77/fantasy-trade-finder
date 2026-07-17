@@ -6,11 +6,21 @@ import { getLeagueRosters } from '../api/sleeper';
 import { getLeagueCoverage } from '../api/league';
 import {
   evaluateTradeInLeague,
+  evaluateTradesInLeague,
   getTradeValues,
   type CalcEvaluationInLeague,
+  type TradeProbe,
 } from '../api/calc';
+import {
+  evalFromBoards,
+  evalFromConsensus,
+  rankAddOnCandidates,
+  rankGapCandidates,
+  type CalcSuggestion,
+} from '../utils/tradeCalcMath';
 import TradeSide from './TradeSide';
 import PlayerPickerModal from './PlayerPickerModal';
+import SuggestionCard from './SuggestionCard';
 import SendInSleeperButton from './SendInSleeperButton';
 import { Button, Card, Icon, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
@@ -128,6 +138,118 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
     placeholderData: (prev) => prev,
   });
 
+  // ── Balance suggestions (#78/#88) ────────────────────────────────────
+  // When the evaluator above says the trade isn't agreeable, propose 1–2
+  // piece add-ons from the lighter side's ACTUAL roster. Candidates are
+  // shortlisted on the consensus board (heuristic), then CONFIRMED through
+  // the same Mode B evaluate call that renders the verdict — a card only
+  // survives if the evaluator itself scores the sweetened trade as fairer.
+  const ev = evalQ.data;
+  const balancePlan = useMemo(() => {
+    if (!ev || debGive.length === 0 || debReceive.length === 0) return null;
+    const agreeable =
+      ev.basis === 'divergence'
+        ? ev.mutual_gain
+        : ev.verdict === 'fair' || ev.verdict === 'even';
+    if (agreeable) return null;
+    // Which side needs sweetening: the owner whose board reads the trade as
+    // the bigger loss (divergence) or the lighter package (consensus read).
+    const addTo: 'give' | 'receive' | null =
+      ev.basis === 'divergence'
+        ? ev.your_value_delta <= ev.their_value_delta
+          ? 'receive' // you're down → more comes your way, from THEIR roster
+          : 'give' //    they're down → sweeten what you send, from YOURS
+        : ev.gap?.add_to ?? null;
+    if (!addTo) return null;
+    const inTrade = new Set([...debGive, ...debReceive]);
+    const roster =
+      addTo === 'receive' ? (opponentId ? rosterByOwner[opponentId] ?? [] : []) : rosterByOwner[userId] ?? [];
+    const pool = roster.filter((id) => !inTrade.has(id) && board[id] !== undefined);
+    const cands: string[][] =
+      ev.basis === 'divergence'
+        ? rankGapCandidates(
+            pool,
+            board,
+            Math.abs(Math.min(ev.your_value_delta, ev.their_value_delta)),
+          )
+        : rankAddOnCandidates(
+            debGive,
+            debReceive,
+            addTo === 'give' ? 'send' : 'receive',
+            pool,
+            board,
+          ).map((c) => c.ids);
+    return cands.length > 0 ? { addTo, cands, basis: ev.basis } : null;
+  }, [ev, debGive, debReceive, opponentId, userId, rosterByOwner, board]);
+
+  const balanceQ = useQuery({
+    queryKey: [
+      'calc-balance-league',
+      leagueId,
+      opponentId,
+      format,
+      debGive.join('+'),
+      debReceive.join('+'),
+      balancePlan?.cands.map((c) => c.join('.')).join('+') ?? '',
+    ],
+    // evalQ must be settled: improvement is judged against the CURRENT
+    // trade's evaluation, never a stale placeholder.
+    enabled: !!opponentId && !!balancePlan && !evalQ.isFetching,
+    staleTime: 60_000,
+    queryFn: async ({ signal }): Promise<CalcSuggestion[]> => {
+      const plan = balancePlan!;
+      const probes: TradeProbe[] = plan.cands.map((ids) =>
+        plan.addTo === 'give'
+          ? { give: [...debGive, ...ids], receive: debReceive }
+          : { give: debGive, receive: [...debReceive, ...ids] },
+      );
+      const evals = await evaluateTradesInLeague(probes, format, leagueId, opponentId!, signal);
+      const curMin = ev ? Math.min(ev.your_value_delta ?? 0, ev.their_value_delta ?? 0) : 0;
+      const curRatio = ev?.point_ratio ?? null;
+      return plan.cands
+        .map((ids, i) => ({ ids, e: evals[i] }))
+        .filter(({ e }) => {
+          if (!e) return false;
+          if (plan.basis === 'divergence') {
+            // Strictly better for the worse-off board AND fair on consensus.
+            const newMin = Math.min(e.your_value_delta, e.their_value_delta);
+            return newMin > curMin && (e.verdict === 'fair' || e.verdict === 'even');
+          }
+          return (
+            (e.verdict === 'fair' || e.verdict === 'even') &&
+            e.point_ratio !== null &&
+            (curRatio === null || e.point_ratio > curRatio)
+          );
+        })
+        .sort((a, b) => {
+          if (plan.basis === 'divergence') {
+            // Win-wins first, then by how well the worse board does.
+            const mg = Number(b.e!.mutual_gain) - Number(a.e!.mutual_gain);
+            if (mg !== 0) return mg;
+            return (
+              Math.min(b.e!.your_value_delta, b.e!.their_value_delta) -
+              Math.min(a.e!.your_value_delta, a.e!.their_value_delta)
+            );
+          }
+          return (b.e!.point_ratio ?? 0) - (a.e!.point_ratio ?? 0);
+        })
+        .slice(0, 3)
+        .map(({ ids, e }) => ({
+          players: ids.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[],
+          evaluation:
+            e!.basis === 'divergence' ? evalFromBoards(e!) : evalFromConsensus(e!),
+          score: e!.point_ratio ?? 0,
+        }));
+    },
+  });
+
+  const applyBalance = (s: CalcSuggestion) => {
+    haptics.selection();
+    const ids = s.players.map((p) => p.id);
+    if (balancePlan?.addTo === 'give') setGiveIds((cur) => [...cur, ...ids]);
+    else setReceiveIds((cur) => [...cur, ...ids]);
+  };
+
   const bothSides = giveIds.length > 0 && receiveIds.length > 0;
   const anySide = giveIds.length > 0 || receiveIds.length > 0;
   const clear = () => {
@@ -215,6 +337,7 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
         players={giveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]}
         valueOf={(p) => board[p.id] ?? 0}
         accent={semantic.neg}
+        addTestID="calc.league-give-add"
         onAdd={() => setPicker('give')}
         onRemove={(id) => {
           haptics.warning();
@@ -234,6 +357,7 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
         players={receiveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]}
         valueOf={(p) => board[p.id] ?? 0}
         accent={semantic.pos}
+        addTestID="calc.league-receive-add"
         onAdd={() => setPicker('receive')}
         onRemove={(id) => {
           haptics.warning();
@@ -250,6 +374,23 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
             <Text style={type.bodySm}>Evaluating…</Text>
           </View>
         </Card>
+      ) : null}
+
+      {balancePlan && balanceQ.data && balanceQ.data.length > 0 ? (
+        <View style={styles.suggestions}>
+          <TickLabel color={semantic.warn}>
+            {balancePlan.addTo === 'give'
+              ? 'To balance — add from your roster'
+              : `To balance — ask @${opponent?.username ?? 'them'} to add`}
+          </TickLabel>
+          {balanceQ.data.map((s) => (
+            <SuggestionCard
+              key={'bal:' + s.players.map((p) => p.id).join('+')}
+              suggestion={s}
+              onApply={() => applyBalance(s)}
+            />
+          ))}
+        </View>
       ) : null}
 
       {anySide ? (
@@ -376,6 +517,7 @@ const styles = StyleSheet.create({
   chipTextActive: { color: chalk.base },
   unranked: { width: 6, height: 6, borderRadius: 3, backgroundColor: flare.base },
   note: { ...type.bodySm },
+  suggestions: { gap: space.sm },
   swap: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   rule: { flex: 1, height: 1, backgroundColor: ink.line },
   actions: { gap: space.sm, alignItems: 'stretch' },

@@ -237,6 +237,80 @@ def test_link_delete_then_get_reports_disconnected(client):
     assert r.get_json()["connected"] is False
 
 
+def test_replay_end_to_end_unlocks_write_read_and_espn_link(client):
+    """#126 pin (PRD §4.1, operator repro end-to-end): verified controller +
+    fresh unverified session → everything gated 403s; one replay through
+    POST /api/sleeper/link (oracle OK) → the same gated write, a P2.5-gated
+    read, and POST /api/espn/link preview all 200 — never
+    verification_required."""
+    c, token, flags_on = client
+    flags_on.add("espn.link")
+    db_module.upsert_user(sleeper_user_id=UID)
+    accounts.mark_user_verified(UID, "sleeper")
+
+    # Fresh session for a verified user: write and read both gated.
+    assert _post_method(c, token).status_code == 403
+    assert c.get("/api/anchor/scale", headers=_h(token)).status_code == 403
+
+    with patch.object(server._sleeper_write, "verify_token_live",
+                      MagicMock(return_value={"raw": {}})):
+        r = c.post("/api/sleeper/link", headers=_h(token),
+                   data=json.dumps({"token": _token()}))
+    assert r.status_code == 200 and r.get_json()["verified"] is True
+
+    assert _post_method(c, token).status_code == 200            # gated write
+    assert c.get("/api/anchor/scale",
+                 headers=_h(token)).status_code == 200          # P2.5 read
+
+    league = {"league_id": "11896", "name": "QA League", "season": 2026,
+              "total_teams": 2, "teams": []}
+    mapped = {"rosters": {}, "report": {
+        "pool_players": 0, "matched_by_id": 0, "matched_by_name": 0,
+        "match_rate": 1.0, "out_of_pool": 0, "unmatched": []}}
+    with patch.object(server, "_espn_import_payload",
+                      MagicMock(return_value=(league, mapped))):
+        r = c.post("/api/espn/link", headers=_h(token),
+                   data=json.dumps({"espn_league_id": "11896"}))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["status"] == "choose_team"
+    assert body.get("error") != "verification_required"
+
+
+def test_replay_inconclusive_then_heals_on_retry(client):
+    """#126 pin (PRD §4.4): transport failure during the replay probe links
+    but does NOT verify (200 connected:true verified:false) and the gated
+    write still 403s (controller exists — gate not weakened); a second
+    replay with the oracle healthy verifies. Client-side Keychain retention
+    (R-2.4 'inconclusive' → retain) is what enables the retry; the server
+    credential is intact throughout."""
+    c, token, _ = client
+    db_module.upsert_user(sleeper_user_id=UID)
+    accounts.mark_user_verified(UID, "sleeper")
+
+    with patch.object(server._sleeper_write, "verify_token_live",
+                      MagicMock(side_effect=sw.SleeperWriteError("net", kind="network"))):
+        r = c.post("/api/sleeper/link", headers=_h(token),
+                   data=json.dumps({"token": _token()}))
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["connected"] is True and body["verified"] is False
+    assert not _sess(token).get("verified")
+    assert _post_method(c, token).status_code == 403            # not weakened
+
+    # Server credential survived the inconclusive outcome.
+    assert c.get("/api/sleeper/link",
+                 headers=_h(token)).get_json()["connected"] is True
+
+    with patch.object(server._sleeper_write, "verify_token_live",
+                      MagicMock(return_value={"raw": {}})):
+        r = c.post("/api/sleeper/link", headers=_h(token),
+                   data=json.dumps({"token": _token()}))
+    assert r.status_code == 200 and r.get_json()["verified"] is True
+    assert _sess(token).get("verified") is True
+    assert _post_method(c, token).status_code == 200            # healed
+
+
 # ---------------------------------------------------------------------------
 # 3. Write-gate matrix (representative gated route: /api/ranking-method)
 # ---------------------------------------------------------------------------
@@ -455,6 +529,45 @@ def test_session_init_verified_carryover_and_controller_flag(init_client):
     v = r.get_json()["verification"]
     assert v["session_verified"] is False
     assert v["user_verified"] is False
+
+
+def test_session_init_reports_verified_after_link_replay(init_client):
+    """#126 pin (PRD §4.2): session becomes verified via the actual replay
+    route (POST /api/sleeper/link, oracle OK) — not a direct session stamp —
+    and session_init then reports verification.session_verified: true."""
+    c, token, _ = init_client
+    db_module.upsert_user(sleeper_user_id=UID)
+    accounts.mark_user_verified(UID, "sleeper")
+
+    with patch.object(server._sleeper_write, "verify_token_live",
+                      MagicMock(return_value={"raw": {}})):
+        r = c.post("/api/sleeper/link", headers=_h(token),
+                   data=json.dumps({"token": _token()}))
+    assert r.status_code == 200 and r.get_json()["verified"] is True
+
+    r = c.post("/api/session/init", headers=_h(token), data=_init_body())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    v = r.get_json()["verification"]
+    assert v["session_verified"] is True
+    assert v["user_verified"] is True and v["verified_via"] == "sleeper"
+
+
+def test_session_init_reports_banner_state_for_unverified_session(init_client):
+    """#126 pin (PRD §4.3, verification-report half): an unverified session
+    of a verified user (dead/absent token — no replay succeeded) reports
+    user_verified: true / session_verified: false — the exact state that
+    shows the R-6 banner. The 403/nothing-stored half of §4.3 is pinned by
+    test_link_dead_token_denied_by_oracle +
+    test_gate_denies_unverified_when_controller_exists."""
+    c, token, _ = init_client
+    db_module.upsert_user(sleeper_user_id=UID)
+    accounts.mark_user_verified(UID, "sleeper")
+
+    r = c.post("/api/session/init", headers=_h(token), data=_init_body())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    v = r.get_json()["verification"]
+    assert v["session_verified"] is False
+    assert v["user_verified"] is True and v["verified_via"] == "sleeper"
 
 
 def test_session_init_reports_enforcement(init_client):

@@ -2,19 +2,40 @@ appId: com.fantasytradefinder.app
 ---
 # Cycle through every main tab — smoke check that each screen renders
 # without a crash.
+# Needs `landing.try_before_sync` overridden ON (see 02-demo-session.yaml).
+# Selectors moved to testIDs 2026-07-12 (QA F-2): tab bar buttons carry
+# `tab.<name>` ids (tabBarButtonTestID).
 - launchApp:
     clearState: true
     stopApp: true
-- tapOn: "Try the app on a sample league"
+- tapOn:
+    id: "signin.demo-link"
 - extendedWaitUntil:
-    visible: "Trades"
+    visible:
+      id: "tab.trades"
     timeout: 20000
-# Trades tab — already focused after demo bootstrap.
-- tapOn: "Trades"
+# Trades tab — already focused after demo bootstrap. First visit can auto-
+# open the team-outlook sheet — dismiss it conditionally (smoke-05 pattern).
+- tapOn:
+    id: "tab.trades"
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
 - takeScreenshot: 04-tab-trades
 # Matches tab.
-- tapOn: "Matches"
+- tapOn:
+    id: "tab.matches"
 - takeScreenshot: 04-tab-matches
 # League tab.
-- tapOn: "League"
+- tapOn:
+    id: "tab.league"
 - takeScreenshot: 04-tab-league

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -55,6 +55,14 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
   const [outlook, setOutlook] = useState<NonNullable<Outlook>>(
     (initial as NonNullable<Outlook>) || 'contender',
   );
+
+  // Re-seed the selection each time the sheet opens: `initial` (saved
+  // outlook, or the phase-2 inferred_outlook fallback) usually arrives
+  // from the prefs query AFTER first mount, so the useState seed alone
+  // would preselect a stale default.
+  useEffect(() => {
+    if (visible) setOutlook((initial as NonNullable<Outlook>) || 'contender');
+  }, [visible, initial]);
   const [acquire, setAcquire] = useState<string[]>([]);
   const [away, setAway] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);

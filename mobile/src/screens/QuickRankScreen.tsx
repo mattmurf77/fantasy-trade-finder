@@ -6,6 +6,9 @@ import {
   Pressable,
   ActivityIndicator,
   FlatList,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -26,9 +29,11 @@ import {
 } from '../theme/chalkline';
 import { TickLabel, Button } from '../components/chalkline';
 import Toast from '../components/Toast';
+import FormatToggle from '../components/FormatToggle';
 import { getRankings, reorderRankings } from '../api/rankings';
 import { TIERS, TIER_LABEL, tierForElo } from '../utils/tierBands';
 import { useSession } from '../state/useSession';
+import { useScoringFormat } from '../hooks/useScoringFormat';
 import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/types';
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
@@ -58,6 +63,8 @@ export default function QuickRankScreen() {
   const queryClient = useQueryClient();
   const activeFormat = useSession((s) => s.activeFormat);
   const fmt: ScoringFormat = activeFormat || '1qb_ppr';
+  // #137 — SF/1QB toggle in the walk header, same wiring as Quick set's.
+  const { setFormat, switching: formatSwitching } = useScoringFormat();
 
   const [position, setPosition] = useState<Position>(
     route.params?.position ?? 'QB',
@@ -65,6 +72,9 @@ export default function QuickRankScreen() {
   const [stepIdx, setStepIdx] = useState(0);
   // Ordered click sequence — index IS the rank (0-based).
   const [clicked, setClicked] = useState<string[]>([]);
+  // #138 — per-step player-name filter over the chip grid.
+  const [search, setSearch] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
 
   const rankingsQuery = useQuery({
@@ -101,6 +111,18 @@ export default function QuickRankScreen() {
   const isLastTier = stepIdx >= steps.length - 1;
   const members = (tier ? membersByTier.get(tier) : undefined) ?? [];
 
+  // #138 — what the grid RENDERS. Click order lives in the pid list and
+  // save reads the full member set, so filtering the view can never drop
+  // an already-stamped player from the submit.
+  const query = search.trim().toLowerCase();
+  const visibleMembers = useMemo(
+    () =>
+      query.length === 0
+        ? members
+        : members.filter((p) => p.name.toLowerCase().includes(query)),
+    [members, query],
+  );
+
   const rankOf = useCallback(
     (pid: string) => {
       const i = clicked.indexOf(pid);
@@ -130,6 +152,7 @@ export default function QuickRankScreen() {
       }
       setStepIdx(Math.max(idx, 0));
       setClicked([]);
+      setSearch(''); // #138 — the filter is per step
     },
     [steps.length, finish],
   );
@@ -170,8 +193,28 @@ export default function QuickRankScreen() {
     setPosition(p);
     setStepIdx(0);
     setClicked([]);
+    setSearch('');
     haptics.selection();
   }, [position]);
+
+  // #137 — format switch restarts the walk on the other format's board
+  // (the step list is derived from that format's live tier membership,
+  // read through the format-scoped ['rankings', activeFormat, position]
+  // key once the switch lands).
+  const onFormat = useCallback(
+    async (f: ScoringFormat) => {
+      haptics.selection();
+      const ok = await setFormat(f);
+      if (!ok) {
+        setToast({ msg: 'Could not switch format', tone: 'warn' });
+        return;
+      }
+      setStepIdx(0);
+      setClicked([]);
+      setSearch('');
+    },
+    [setFormat],
+  );
 
   const renderChip = useCallback(
     ({ item }: { item: RankedPlayer }) => {
@@ -215,12 +258,31 @@ export default function QuickRankScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      {/* #138 — keyboard-avoiding wrapper (EspnLinkSheet pattern): the
+          walk's footer is pinned absolute-bottom, so without this the iOS
+          keyboard covers Back / Skip / Save while the search input has
+          focus. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.kav}
+      >
       <Toast
         visible={!!toast}
         message={toast?.msg || ''}
         tone={toast?.tone}
         onDismiss={() => setToast(null)}
       />
+
+      {/* #137 — SF/1QB scoring-format toggle, same slot convention as the
+          quick-set walk (format row above the position switcher).
+          Switching restarts the walk on the other format's board. */}
+      <View style={styles.formatRow} testID="quick-rank.format-toggle">
+        <FormatToggle
+          value={activeFormat}
+          onChange={onFormat}
+          disabled={formatSwitching || saving}
+        />
+      </View>
 
       {/* Position switcher — PositionTabs spec, same construction as the
           quick-set walk's. */}
@@ -292,14 +354,41 @@ export default function QuickRankScreen() {
             </Text>
           </View>
 
+          {/* #138 — compact name filter over the grid (Input construction,
+              same as Quick set's). Clears per step; view-only narrowing —
+              stamped ranks survive the filter. */}
+          <TextInput
+            testID="quick-rank.search"
+            style={[styles.search, searchFocused && styles.searchFocused]}
+            placeholder={`Search ${position}s…`}
+            placeholderTextColor={chalk.faint}
+            value={search}
+            onChangeText={setSearch}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="done"
+            clearButtonMode="while-editing"
+            accessibilityLabel="Search players in this step"
+          />
+
           <FlatList
-            data={members}
+            data={visibleMembers}
             keyExtractor={(p) => p.id}
             renderItem={renderChip}
             extraData={clicked}
             numColumns={3}
             columnWrapperStyle={styles.gridRow}
             contentContainerStyle={styles.grid}
+            keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={
+              query.length > 0 ? (
+                <Text style={styles.emptyText}>
+                  {`No ${position} here matches “${search.trim()}”.`}
+                </Text>
+              ) : null
+            }
           />
 
           {/* Walk controls pinned to the bottom: Back / Skip / Save-and-next. */}
@@ -340,12 +429,36 @@ export default function QuickRankScreen() {
           </View>
         </>
       )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
+  kav: { flex: 1 },
+  // #137 — row hosting the SF/1QB FormatToggle, above the position
+  // switcher (consistent slot with the quick-set walk's).
+  formatRow: {
+    marginHorizontal: space.lg,
+    marginTop: space.sm,
+  },
+  // #138 — Input construction per the design system (same as Quick set's
+  // search): line-strong border, ink-2 fill, radius sm, faint placeholder,
+  // ice focus border.
+  search: {
+    ...type.body,
+    height: 40,
+    marginHorizontal: space.lg,
+    marginBottom: space.sm,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: 0,
+  },
+  searchFocused: { borderColor: ice.base },
   switcher: {
     flexDirection: 'row',
     marginHorizontal: space.lg,

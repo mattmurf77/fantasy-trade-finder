@@ -99,6 +99,56 @@ export interface CalcEvaluationInLeague extends CalcEvaluation {
   mutual_gain: boolean;
 }
 
+// ── Suggestion confirmation (#78) ────────────────────────────────────────
+// Suggestions are pre-ranked client-side by a mirror of the server math, but
+// every candidate shown next to a server verdict is CONFIRMED through the
+// same /api/trade/evaluate endpoint first, so a suggestion can never
+// disagree with the evaluator. Chunked to keep the request burst small; a
+// failed probe resolves to null (that candidate is simply dropped).
+
+const EVAL_CHUNK = 4;
+
+export interface TradeProbe {
+  give: string[];
+  receive: string[];
+}
+
+async function chunked<T>(
+  probes: TradeProbe[],
+  run: (p: TradeProbe) => Promise<T>,
+): Promise<(T | null)[]> {
+  const out: (T | null)[] = [];
+  for (let i = 0; i < probes.length; i += EVAL_CHUNK) {
+    const results = await Promise.all(
+      probes.slice(i, i + EVAL_CHUNK).map((p) => run(p).catch(() => null)),
+    );
+    out.push(...results);
+  }
+  return out;
+}
+
+/** Mode A confirmation: evaluate several hand-built trades on consensus. */
+export function evaluateTrades(
+  probes: TradeProbe[],
+  format: ScoringFormat,
+  signal?: AbortSignal,
+): Promise<(CalcEvaluation | null)[]> {
+  return chunked(probes, (p) => evaluateTrade(p.give, p.receive, format, signal));
+}
+
+/** Mode B confirmation: same, priced by both owners' real boards. */
+export function evaluateTradesInLeague(
+  probes: TradeProbe[],
+  format: ScoringFormat,
+  leagueId: string,
+  opponentUserId: string,
+  signal?: AbortSignal,
+): Promise<(CalcEvaluationInLeague | null)[]> {
+  return chunked(probes, (p) =>
+    evaluateTradeInLeague(p.give, p.receive, format, leagueId, opponentUserId, signal),
+  );
+}
+
 export async function evaluateTradeInLeague(
   givePlayerIds: string[],
   receivePlayerIds: string[],

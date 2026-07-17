@@ -43,13 +43,17 @@ Screenshots land in `.maestro/screenshots/` (Maestro's default).
 | `02-demo-session.yaml` | Demo bootstrap → main tabs visible. |
 | `03-tiers-render.yaml` | Rank → Tiers menu, screen renders. |
 | `04-tabs-navigation.yaml` | Trades / Matches / League tabs render. |
-| `05-feedback-capture.yaml` | Floating 📝 → compose note → save. |
+| `05-feedback-capture.yaml` | Floating feedback FAB → compose note → save. |
 | `06-tiers-drag-no-crash.yaml` | Regression for the worklet crash fixed in `f5c8bc3`. |
+
+Flows 02–06 start from the demo CTA, which only renders when the
+`landing.try_before_sync` flag is ON — it is OFF in the release flag set,
+so run the backend with it overridden (e.g. `sim-run.sh --flags`).
 
 ## Selectors
 
-The app currently has no `testID`s on most components, so flows match
-against visible text. Brittle to copy changes — when a flow flakes after
-a UI tweak, update the matcher, don't loosen it. Adding `testID` props
-to high-traffic chips (Tiers chip, FAB, trade cards) is the obvious
-follow-up.
+Flows match on `testID`s from the registry in
+`mobile/src/components/CLAUDE.md` wherever one exists (repaired 2026-07-12
+after the 1.7.x copy changes); text matchers are the fallback for
+elements without an id. When a flow flakes after a UI tweak, update the
+matcher, don't loosen it.

@@ -842,7 +842,9 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── FB-47 finder targeting (flag trade.finder_targeting) ─────────────
     ("fit_consensus_weight",     0.5,   "FB-47: partner-fit blend weight on consensus-card composites"),
     ("fit_divergence_weight",    0.15,  "FB-47: partner-fit blend weight on divergence-card composites (tiebreak strength)"),
-    ("need_fit_weight",          0.30,  "FB-96: composite blend weight for automatic positional-need fit (0 disables the reordering)"),
+    # 0.30 → 0.15 per interview 2026-07-17 ("light multiplier"); existing
+    # DB rows still at the old default are updated by the seeding pass.
+    ("need_fit_weight",          0.15,  "FB-96: composite blend weight for automatic positional-need fit (0 disables the reordering)"),
     ("diversity_window_days",    7.0,   "A6: lookback window for league impression saturation counts"),
     ("diversity_user_cap",       3.0,   "A6: other-member count at which a target player is 'saturated'"),
     ("diversity_penalty",        0.6,   "A6: ordering-key multiplier applied to saturated targets"),
@@ -867,6 +869,22 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── Backlog #10 crown-asset premium (flag trade.crown_asset) ──
     ("crown_rate",               0.12,  "#10: max consolidation premium on a smaller-count side's top asset (at 100% share)"),
     ("crown_share_floor",        0.50,  "#10: top-asset share below which the crown premium is zero"),
+    # ── #141 junk-filler gate (trade engine v2 / v3 / consensus paths) ───
+    ("filler_min_frac",          0.25,  "#141: min added-piece value as a fraction of its side's headliner, on max(user board, opp board); 0 disables"),
+    # ── Interview 2026-07-17 — trade-logic recalibration ─────────────────
+    ("asset_floor_abs",        450.0,   "interview: absolute value floor for non-headliner pieces (max-of-boards); 0 disables"),
+    ("crown_elite_value",     6000.0,   "interview: crown-asset value earning the full crown_rate; premium scales linearly below it; <=0 disables scaling"),
+    ("fairness_floor_divergence", 0.55, "interview: consensus fairness gate for divergence cards = min(fairness_threshold, this) — extreme-case veto only"),
+    ("bench_credit_qb",          0.10,  "interview: bench credit for QB depth in 1QB formats"),
+    ("bench_credit_rb",          0.30,  "interview: bench credit for RB depth (near-startable insurance)"),
+    ("bench_credit_wr",          0.30,  "interview: bench credit for WR depth (near-startable insurance)"),
+    ("bench_credit_te",          0.10,  "interview: bench credit for TE depth in non-TEP formats"),
+    ("bench_credit_qb_sf",       0.35,  "interview: bench credit for QB depth in superflex formats"),
+    ("bench_credit_te_tep",      0.25,  "interview: bench credit for TE depth in TE-premium formats"),
+    # ── Interview phase 2 — lanes / fit premium / aggression A/B ─────────
+    ("lane_shift_frac",          0.10,  "phase2: min value-weighted now-lean shift for a card to label as a window move"),
+    ("fit_premium_max_loss",   300.0,   "phase2: max raw-board value a flagged need-fill 1-for-1 may pay"),
+    ("aggression_weight",        0.20,  "phase2: composite reweight strength for the light/fair/generous offer buckets"),
 ]
 
 
@@ -1130,6 +1148,14 @@ def _migrate_db() -> None:
 
     # Seed model_config defaults in a single clean transaction.
     with engine.begin() as conn:
+        # Interview 2026-07-17: need_fit_weight default dropped 0.30 → 0.15.
+        # INSERT OR IGNORE can't retune an already-seeded row, so migrate
+        # rows still sitting at the OLD default; operator-tuned values
+        # (anything ≠ 0.30) are left alone. Idempotent.
+        conn.execute(text(
+            "UPDATE model_config SET value = 0.15 "
+            "WHERE key = 'need_fit_weight' AND value = 0.30"
+        ))
         for key, value, description in _MODEL_CONFIG_DEFAULTS:
             if DATABASE_URL.startswith("sqlite"):
                 conn.execute(text(

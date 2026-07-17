@@ -146,6 +146,15 @@ export interface TradeCard {
     user_needs?: string[];
     opponent_surplus?: string[];
   };
+  /** Phase-2 lane: 'window' = contention-window (win-now) move, 'value' =
+   *  pure value-accumulation move. Backend serializes conditionally;
+   *  absent on legacy cards. */
+  lane?: 'window' | 'value';
+  /** Phase-2: the user pays a consensus-value premium to land a positional
+   *  fit. `value_paid` = value conceded; `position` = the fit position. */
+  fitPremium?: { value_paid: number; position?: string };
+  /** Phase-2: which engine aggression variant built this card. */
+  aggressionVariant?: string;
 }
 
 export interface TradeMatch {

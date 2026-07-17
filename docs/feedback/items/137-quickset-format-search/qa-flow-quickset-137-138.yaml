@@ -1,0 +1,91 @@
+appId: com.fantasytradefinder.app
+# Scratch verification flow for feedback #137 (format toggle) + #138 (search)
+# on the Quick set / Quick rank walks. profile: standard, flags: release.
+tags: [scratch, quickset]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.quickset"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.quickset"
+# --- Quick set walk: toggle + search present -------------------------------
+- extendedWaitUntil:
+    visible:
+      id: "quick-set.search"
+    timeout: 20000
+- assertVisible: "1QB PPR scoring format"
+- assertVisible: "SF TEP scoring format"
+- assertVisible: "Tier 1 of 8"
+- takeScreenshot: 137-quickset-toggle-tier1
+# --- #137: advance a step, then switch format -> walk restarts -------------
+- tapOn: "Skip"
+- extendedWaitUntil:
+    visible: "Tier 2 of 8"
+    timeout: 10000
+- tapOn: "SF TEP scoring format"
+- extendedWaitUntil:
+    visible: "Tier 1 of 8"
+    timeout: 20000
+- takeScreenshot: 137-quickset-sf-restarted
+# --- #138: search filters the chip grid ------------------------------------
+- tapOn:
+    id: "quick-set.search"
+- inputText: "ja"
+- takeScreenshot: 138-quickset-search-filtered
+- hideKeyboard
+- assertVisible:
+    id: "quick-set.save-btn"
+- takeScreenshot: 138-quickset-actionrow-visible
+# Switch back to the 1QB board so Quick rank has ranked tiers to walk.
+- tapOn: "1QB PPR scoring format"
+- extendedWaitUntil:
+    visible: "Tier 1 of 8"
+    timeout: 20000
+# --- Quick rank: toggle + search present -----------------------------------
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.quickrank"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.quickrank"
+- extendedWaitUntil:
+    visible:
+      id: "quick-rank.search"
+    timeout: 20000
+- assertVisible: "1QB PPR scoring format"
+- assertVisible: "SF TEP scoring format"
+- tapOn:
+    id: "quick-rank.search"
+- inputText: "ja"
+- takeScreenshot: 137-138-quickrank-toggle-search
+- hideKeyboard
+- assertVisible:
+    id: "quick-rank.save-btn"

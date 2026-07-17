@@ -44,7 +44,7 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 - Trios: `trios.card.a|b|c` (fixed trio slots — stable domain qualifier) · `trios.pos-tab.<pos>` · `trios.speed-toggle` · `trios.confirm-btn` · `trios.skip-btn`
 - Trades: `trades.find-btn` · `trades.card-top` · `trades.like-btn` · `trades.pass-btn` · `trades.subnav.<trades|portfolio|calculator>` · `trades.progress-strip` · `trades.empty-text`
 - Calculator: `calc.mode-tab.<league|live|demo>` · `calc.side-a-add` · `calc.side-b-add` · `calc.picker.search` · `calc.picker.row.<player_id>` · `calc.verdict` · `calc.clear-btn`
-- Matches: `matches.segment.<mutual|awaiting>` · `matches.empty-text` · League: `league.hero` · Tiers (minimal): `tiers.list` · `tiers.pos-tab.<pos>` · `tiers.save-btn`
+- Matches: `matches.segment.<mutual|awaiting>` · `matches.empty-text` · League: `league.hero` · Tiers (minimal): `tiers.list` · `tiers.pos-tab.<pos|all>` (`all` = the #132 cross-position All board) · `tiers.save-btn`
 - Pass-through props added: chalkline `Button.testID`, `PlayerCard.testID`, `TradeSide.addTestID`
 - OutlookSheet: `outlook.save-btn` (the sheet AUTO-OPENS on first Trades visit — flows dismiss it conditionally) · Picker: `calc.picker.done` (onPick adds without closing; Done closes — flows must tap it)
 
@@ -59,5 +59,23 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 **Feedback batch tranche (2026-07-12, #130/#136):**
 - Settings: `settings.close-btn` (modal header close Icon Button, #130) · `settings.link-espn` (flag `espn.link` CTA row → LeaguePicker with the ESPN sheet auto-opened, #130)
 - Quick Rank (#136): `rankmenu.quickrank` (Rank action-sheet row) · `quick-rank.pos-tab.<pos>` · `quick-rank.chip.<player_id>` · `quick-rank.save-btn`
+
+**Legacy-smoke repair tranche (2026-07-12, QA F-1..F-3):**
+- FeedbackFAB: `feedback.fab` (floating capture button — its accessibilityLabel "Capture feedback" also text-matches in Maestro, so flows must use the id)
+- FeedbackSheet: `feedback.severity.<bug|polish|idea>` · `feedback.note-input` · `feedback.save-btn`
+
+**Free-agent finder tranche (2026-07-17, #143):**
+- FreeAgentsScreen: `free-agents.pos-tab.<all|qb|rb|wr|te>` (filter pills) · `free-agents.list` (FlatList) · `free-agents.row.<player_id>` (dense PlayerCard) · `free-agents.empty-text` (no-league AND empty-list states)
+
+**Quick-walk format + search tranche (2026-07-17, #137/#138):**
+- QuickSetTiersScreen: `quick-set.format-toggle` (View hosting the SF/1QB FormatToggle — the segments themselves carry accessibilityLabel "<1QB PPR|SF TEP> scoring format", which is what Maestro text-matches) · `quick-set.search` (per-step name filter TextInput)
+- QuickRankScreen: `quick-rank.format-toggle` · `quick-rank.search` (same pair, same semantics)
+
+**Calculator suggestions tranche (2026-07-17, #78):**
+- InLeagueCalculator: `calc.league-give-add` · `calc.league-receive-add` (TradeSide add buttons in the In-league mode; the picker/verdict IDs are shared with the calc screen)
+
+**League rankings tranche (2026-07-17, #142/#144):**
+- LeagueSummaryScreen: `league-summary.basis.<consensus|personal|redraft>` (basis chips — redraft is permanently disabled "(soon)") · `league-summary.team.<user_id>` (ranked team row → roster overlay) · `league-summary.roster-close` (overlay close Icon Button)
+- LeagueScreen Explore rows: `league.rankings-row` (→ root-stack `LeagueSummary`) · `league.free-agents-row` (→ root-stack `FreeAgents`)
 
 Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). Full planned list: lld.md Appendix A (~90 IDs).

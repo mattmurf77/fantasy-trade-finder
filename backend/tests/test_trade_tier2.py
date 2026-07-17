@@ -173,7 +173,9 @@ def test_marginal_value_units():
                            "pk": ("PICK", 0)})
     vals = {"q1": 3000.0, "q2": 2000.0, "pk": 1200.0}
     levels = {"QB": 2000.0, "RB": 250.0, "WR": 250.0, "TE": 250.0}
-    rate = ts._cfg["bench_credit_rate"]
+    # Interview 2026-07-17 — bench credit is position/format-aware: QB in
+    # the default 1QB format uses the (low) QB rate; superflex bumps it.
+    rate = ts._cfg["bench_credit_qb"]
 
     # Over-replacement + bench credit.
     assert marginal_value("q1", vals.__getitem__, levels, players) == \
@@ -184,6 +186,10 @@ def test_marginal_value_units():
     # No replacement concept (PICK) -> raw value untouched.
     assert marginal_value("pk", vals.__getitem__, levels, players) == \
         pytest.approx(1200.0)
+    # Superflex: the QB bench credit switches to the SF override rate.
+    sf_rate = ts._cfg["bench_credit_qb_sf"]
+    assert marginal_value("q1", vals.__getitem__, levels, players,
+                          "sf_tep") == pytest.approx(1000.0 + sf_rate * 3000.0)
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +267,12 @@ def test_need_filling_outranks_depth_stacking():
     raw value). The user is WR-empty but three deep at RB, so receiving W
     must outscore receiving B under marginal valuation."""
     _set_flags("trade.marginal_value")
+    # Pin the divergence floor at the original 0.75 gate: this minimal
+    # fixture runs the v2 path (no lineup-feasibility gate — that's v3),
+    # where the interview-2026-07-17 loosening would admit a roster-
+    # gutting 3-for-2 whose elite tier multiplier tops the deck. The
+    # test's subject is marginal-valuation ordering, not the gate.
+    ts._cfg["fairness_floor_divergence"] = 0.75
     players = _players_of({
         "RB1": ("RB", 24), "RB2": ("RB", 24), "G": ("RB", 24),
         "W": ("WR", 24), "B": ("RB", 24),

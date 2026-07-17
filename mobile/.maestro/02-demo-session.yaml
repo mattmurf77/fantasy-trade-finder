@@ -1,15 +1,21 @@
 appId: com.fantasytradefinder.app
 ---
 # Demo session bootstrap: should land in main tabs with no Sleeper auth.
-# Requires the `landing.try_before_sync` flag to be enabled (it is in
-# config/features.json).
+# Requires the `landing.try_before_sync` flag — OFF in the shipped release
+# flag set (config/features.json + backend/tests/fixtures/flags/release.json),
+# so run the backend with it overridden ON (sim-run.sh --flags, or FTF_FLAGS).
+# Selectors moved to testIDs 2026-07-12 (QA F-2): the demo CTA text gained a
+# trailing arrow ("… →"), which Maestro's full-regex text match missed.
 - launchApp:
     clearState: true
     stopApp: true
-- assertVisible: "Try the app on a sample league"
-- tapOn: "Try the app on a sample league"
+- assertVisible:
+    id: "signin.demo-link"
+- tapOn:
+    id: "signin.demo-link"
 # Demo bootstrap hits /api/session/demo on the backend — give it room.
 - extendedWaitUntil:
-    visible: "Trades"
+    visible:
+      id: "tab.trades"
     timeout: 20000
 - takeScreenshot: 02-main-tabs

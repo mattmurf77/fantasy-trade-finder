@@ -1,0 +1,84 @@
+appId: com.fantasytradefinder.app
+# tc: TC-CLC-01
+# profile: standard
+# flags: release
+# Player 6770 = Joe Burrow — a fixture-pool member (real Sleeper id; present in
+# players-cache/standard.json and the DP values CSV). Verdict waits cover the
+# 250ms evaluate debounce + round-trip.
+# First Trades visit auto-opens the team-outlook sheet (first-run prompt) —
+# dismissed conditionally via outlook.save-btn (Contender pre-selected).
+tags: [smoke, calc]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.trades"
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "trades.subnav.calculator"
+    timeout: 20000
+- tapOn:
+    id: "trades.subnav.calculator"
+- extendedWaitUntil:
+    visible:
+      id: "calc.mode-tab.live"
+    timeout: 15000
+- tapOn:
+    id: "calc.mode-tab.live"
+- tapOn:
+    id: "calc.side-a-add"
+- extendedWaitUntil:
+    visible:
+      id: "calc.picker.search"
+    timeout: 10000
+- tapOn:
+    id: "calc.picker.search"
+- inputText: "Burrow"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "calc.picker.row.6770"
+    timeout: 15000
+- tapOn:
+    id: "calc.picker.row.6770"
+- tapOn:
+    id: "calc.picker.done"
+- scrollUntilVisible:
+    element:
+      id: "calc.verdict"
+    direction: DOWN
+    timeout: 15000
+- takeScreenshot: smoke-07-calculator

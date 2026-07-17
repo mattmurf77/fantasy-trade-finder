@@ -145,5 +145,27 @@ export function autoBucket<T extends { id: string; elo: number }>(
   return buckets;
 }
 
+/** #132 All-players board — bucket a MIXED-position list into the eight
+ *  tier buckets, judging each player by ITS OWN position's thresholds.
+ *  Bands are position-uniform by design, so today this matches a
+ *  single-position walk; routing through each player's position keeps the
+ *  merged board honest if per-position bands ever diverge. */
+export function autoBucketMixed<T extends { id: string; elo: number; position: Position | string }>(
+  players: T[],
+  scoringFormat: ScoringFormat = '1qb_ppr',
+): Record<Tier, T[]> {
+  const buckets: Record<Tier, T[]> = {
+    firsts_4plus: [], firsts_3: [], firsts_2: [], first_1: [],
+    second: [], third: [], fourth: [], waivers: [],
+  };
+  for (const p of players) {
+    // Player.position is `Position | string` in shared/types; an unknown
+    // value simply misses the live-band lookup and walks the uniform
+    // fallback thresholds — same bands, so bucketing stays correct.
+    buckets[tierForElo(p.elo, p.position as Position, scoringFormat)].push(p);
+  }
+  return buckets;
+}
+
 /** Re-export for screens that want raw band info (min + max). */
 export type { TierBand, TierConfigResponse };

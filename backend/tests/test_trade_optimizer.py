@@ -380,6 +380,9 @@ def _sweetener_fixture(uA_seed: float):
 
 def test_sweetener_rescues_near_miss_pair():
     # uA seed 1494 -> consensus ratio ~0.624: inside [0.60, 0.75) band.
+    # Pin the divergence floor so 0.75 still governs — the interview
+    # 2026-07-17 loosening (0.55) would pass this ratio organically.
+    ts._cfg["fairness_floor_divergence"] = 1.0
     players, user_roster, opponent, user_elo, seed_elo = _sweetener_fixture(1494.0)
     cards = _v3(user_elo=user_elo, user_roster=user_roster, opponent=opponent,
                 seed_elo=seed_elo, players=players)

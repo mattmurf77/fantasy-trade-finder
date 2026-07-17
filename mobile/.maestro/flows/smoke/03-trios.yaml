@@ -1,0 +1,61 @@
+appId: com.fantasytradefinder.app
+# tc: TC-TRI-01
+# profile: standard
+# flags: release
+# Server-chosen trio contents: structural asserts only (slots a/b/c), never names.
+tags: [smoke, trios]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "rank-home.card.trio"
+    timeout: 15000
+- tapOn:
+    id: "rank-home.card.trio"
+- extendedWaitUntil:
+    visible:
+      id: "trios.card.a"
+    timeout: 20000
+- assertVisible:
+    id: "trios.card.b"
+- assertVisible:
+    id: "trios.card.c"
+- tapOn:
+    id: "trios.card.a"
+- tapOn:
+    id: "trios.card.b"
+- tapOn:
+    id: "trios.card.c"
+- extendedWaitUntil:
+    visible:
+      id: "trios.confirm-btn"
+    timeout: 10000
+- tapOn:
+    id: "trios.confirm-btn"
+- extendedWaitUntil:
+    visible:
+      id: "trios.card.a"
+    timeout: 20000
+- takeScreenshot: smoke-03-trios

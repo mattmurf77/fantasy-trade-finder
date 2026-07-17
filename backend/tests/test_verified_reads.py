@@ -48,6 +48,7 @@ GATED_READS = [
     "/api/trades/awaiting",
     "/api/league/preferences",
     "/api/league/asset-prefs",
+    "/api/league/free-agents",
     "/api/feedback/mine",
     "/api/notifications",
     "/api/trends/risers-fallers",

@@ -1,23 +1,49 @@
 appId: com.fantasytradefinder.app
 ---
-# In-app feedback capture: tap the floating 📝 button -> compose a note ->
-# save. Verifies the FeedbackSheet flow + that hydrate() doesn't crash
-# on prior captures.
+# In-app feedback capture: tap the floating feedback button -> compose a
+# note -> save. Verifies the FeedbackSheet flow + that hydrate() doesn't
+# crash on prior captures.
+# Needs `landing.try_before_sync` overridden ON (see 02-demo-session.yaml).
+# Selectors repaired 2026-07-12 (QA F-2/F-3): the FAB is no longer the "📝"
+# emoji (now an Icon Pressable with testID `feedback.fab`); category chips
+# dropped their emoji ("Idea"); the open/closed checks moved off "Capture
+# feedback" — that text is also the FAB's accessibilityLabel, so it would
+# stay "visible" after the sheet closes. The sheet's sub-copy is unique.
 - launchApp:
     clearState: true
     stopApp: true
-- tapOn: "Try the app on a sample league"
+- tapOn:
+    id: "signin.demo-link"
 - extendedWaitUntil:
-    visible: "Trades"
+    visible:
+      id: "tab.trades"
     timeout: 20000
+# First Trades visit can auto-open the team-outlook sheet — dismiss it so
+# the FAB is tappable (smoke-05 pattern).
+- runFlow:
+    when:
+      visible:
+        id: "outlook.save-btn"
+    commands:
+      - tapOn:
+          id: "outlook.save-btn"
+      - extendedWaitUntil:
+          notVisible:
+            id: "outlook.save-btn"
+          timeout: 5000
+      - waitForAnimationToEnd
 # Floating feedback button (FeedbackFAB).
-- tapOn: "📝"
-- assertVisible: "Capture feedback"
-- tapOn: "💡 Idea"
-- tapOn: "What did you notice?"
+- tapOn:
+    id: "feedback.fab"
+- assertVisible: "Saved on this device.*"
+- tapOn:
+    id: "feedback.severity.idea"
+- tapOn:
+    id: "feedback.note-input"
 - inputText: "Maestro smoke test note — please ignore."
-- tapOn: "Save"
-# Modal should dismiss. We don't have a definitive post-save text, so
-# just verify the sheet's title is gone.
-- assertNotVisible: "Capture feedback"
+- tapOn:
+    id: "feedback.save-btn"
+# Modal should dismiss. The sheet's sub-copy is the definitive sheet-only
+# text ("Capture feedback" would false-match the FAB's a11y label).
+- assertNotVisible: "Saved on this device.*"
 - takeScreenshot: 05-feedback-saved

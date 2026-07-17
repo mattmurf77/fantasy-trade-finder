@@ -1,0 +1,27 @@
+appId: com.fantasytradefinder.app
+# tc: S1-spike (plan.md §3) — Maestro × RN New Arch testID visibility, part A.
+# profile: none (backend-less — SignIn renders without network)
+# flags: n/a
+# Proves: id: selectors resolve on a Release build (testID → accessibilityIdentifier),
+# text input works through an id-selected TextInput, clearState resets the Keychain hint.
+# Part B (tab bar ids) needs a signed-in session → runs after the seeder lands.
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- assertVisible:
+    id: "signin.continue-btn"
+- assertNotVisible:
+    id: "signin.hint-btn"          # clearKeychain must have wiped the last-username hint
+- assertNotVisible:
+    id: "signin.error-text"
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- assertVisible: "qa_standard"      # copy assert (load-bearing): typed text landed
+- takeScreenshot: s1-signin-ids

@@ -28,6 +28,12 @@ export interface LeaguePreferences {
   team_outlook: Outlook;
   acquire_positions: string[];
   trade_away_positions: string[];
+  /** Phase-2: backend's roster-derived outlook guess. Additive — present
+   *  on GET only when no team_outlook is declared. Never POSTed back. */
+  inferred_outlook?: Outlook;
+  /** Phase-2: the per-signal scores behind inferred_outlook (additive,
+   *  GET-only, same condition). Keys are backend signal names. */
+  inferred_signals?: Record<string, number>;
 }
 
 export async function getLeaguePreferences(leagueId: string) {
@@ -166,10 +172,12 @@ export async function getLeagueFormatStats(leagueId: string) {
 // ── Copy tiers from one scoring format to the other ───────────────────
 // POST /api/tiers/copy-from-format
 //
-// Copies the user's tier assignments (tier label + within-tier rank) from
-// `fromFormat` into `toFormat`. Backend handles the per-format band
-// translation: a player at QB1 in the top tier in 1QB PPR keeps tier + rank in SF
-// TEP, with new ELO values appropriate to SF TEP's bands.
+// VALUE-AWARE copy (#124): the backend keeps the user's per-position
+// rank order from `fromFormat` but re-seeds each player's value (and
+// therefore tier label) from `toFormat`'s consensus at that rank —
+// tier labels are pick-denominated and the formats' value curves
+// differ, so labels do NOT carry over verbatim (QBs shift most).
+// Response carries `mapping: 'value_rank'`.
 //
 // Sends X-Scoring-Format: toFormat so the backend's `_active_format`
 // resolves to the target format explicitly — without this, a user who
@@ -185,6 +193,7 @@ export interface CopyTiersResponse {
   ok: boolean;
   from_format?: ScoringFormat;
   to_format?: ScoringFormat;
+  mapping?: string; // 'value_rank' since #124
   position_counts?: Record<string, number>;
   total?: number;
   error?: string;
@@ -434,6 +443,54 @@ export interface ConnectLeagueResult {
    *  yet (ESPN / MFL today). UI should keep the user where they are. */
   supported: boolean;
 }
+// ── League power rankings (#142/#144) ─────────────────────────────
+// Backend: GET /api/league/power-rankings. Every team in the league
+// ranked by summed roster value; each team carries its full roster
+// (grouped by position, value-desc within group) so the drill-in needs
+// no second call. basis 'consensus' = universal-pool values;
+// 'personal' = the caller's own board with consensus fallback for
+// unranked players; 'redraft' is a reserved probe — the backend answers
+// 501 not_available (dynasty values only today), so the UI renders it
+// as a disabled "(soon)" chip and never actually requests it.
+export type PowerRankingsBasis = 'consensus' | 'personal' | 'redraft';
+
+export interface PowerRankedPlayer {
+  player_id: string;
+  name: string;
+  position: string;
+  team: string | null;
+  age: number | null;
+  value: number;
+}
+
+export interface PowerRankedTeam {
+  rank: number;
+  user_id: string;
+  username: string;
+  display_name: string;
+  is_you: boolean;
+  total_value: number;
+  positions: Record<'QB' | 'RB' | 'WR' | 'TE', { count: number; value: number }>;
+  /** Grouped QB→RB→WR→TE→other, value-desc within each group (#144). */
+  roster: PowerRankedPlayer[];
+}
+
+export interface PowerRankingsResponse {
+  league_id: string;
+  basis: PowerRankingsBasis;
+  scoring_format: string;
+  teams: PowerRankedTeam[];
+}
+
+export async function getPowerRankings(
+  leagueId: string,
+  basis: Exclude<PowerRankingsBasis, 'redraft'> = 'consensus',
+) {
+  return api.get<PowerRankingsResponse>(
+    `/api/league/power-rankings?league_id=${encodeURIComponent(leagueId)}&basis=${basis}`,
+  );
+}
+
 export async function connectLeague(sleeperUrl: string): Promise<ConnectLeagueResult> {
   const res = await api.post<{
     platform: string;
@@ -448,4 +505,48 @@ export async function connectLeague(sleeperUrl: string): Promise<ConnectLeagueRe
     platform: res?.platform || '',
     supported: !!res?.supported,
   };
+}
+
+// ── Free-agent finder (#143) ──────────────────────────────────────────────
+// Backend: GET /api/league/free-agents?league_id=...&position=RB
+// FA pool = universal pool minus every rostered player in the league,
+// ranked by the CALLER'S board value (consensus fallback for unranked
+// players — `user_has_rankings: false` means the whole list is consensus).
+// `drop_suggestion` = the caller's lowest-valued same-position rostered
+// player strictly below the FA's value (null when none); `delta` is the
+// add/drop value gain. `pos_rank` is the FA's rank within its position
+// across ALL free agents, so it's stable under position filters.
+// Read-gated like /api/rankings (priced by the caller's board).
+export interface FreeAgentDropSuggestion {
+  player_id: string;
+  name: string;
+  position: string;
+  value: number;
+  delta: number;
+}
+export interface FreeAgentRow {
+  player_id: string;
+  name: string;
+  position: string;
+  team: string | null;
+  age: number | null;
+  value: number;
+  pos_rank: number;
+  drop_suggestion: FreeAgentDropSuggestion | null;
+}
+export interface FreeAgentsResponse {
+  league_id: string;
+  scoring_format: ScoringFormat;
+  position: 'QB' | 'RB' | 'WR' | 'TE' | 'ALL';
+  user_has_rankings: boolean;
+  free_agents: FreeAgentRow[];
+}
+export async function getFreeAgents(
+  leagueId: string,
+  position?: 'QB' | 'RB' | 'WR' | 'TE' | 'ALL',
+) {
+  const qs =
+    `league_id=${encodeURIComponent(leagueId)}` +
+    (position && position !== 'ALL' ? `&position=${position}` : '');
+  return api.get<FreeAgentsResponse>(`/api/league/free-agents?${qs}`);
 }

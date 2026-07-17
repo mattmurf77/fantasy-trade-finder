@@ -869,6 +869,74 @@
       font-weight: 700;
     }
 
+    /* Phase-2 — lane chip: strategic-lane label on a trade card. Same
+       pill construction as .score-pill; window = flare/gold (informational),
+       value = ice/accent. */
+    .lane-chip {
+      padding: 3px 10px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+    }
+    .lane-chip--window {
+      background: rgba(245,158,11,0.15);
+      color: var(--gold);
+    }
+    .lane-chip--value {
+      background: rgba(79,124,255,0.15);
+      color: var(--accent);
+    }
+
+    /* Phase-2 — fit-premium pill: deal pays extra value for positional
+       fit. Same bordered construction as .likes-you-pill, recolored to
+       the flare/gold informational accent. */
+    .fit-premium-pill {
+      background: rgba(245,158,11,0.15);
+      border: 1px solid var(--gold);
+      color: var(--gold);
+      padding: 4px 12px;
+      border-radius: 99px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: help;
+    }
+
+    /* Phase-2 — row wrapper so header pills don't stretch full-width in
+       the card's column-flex layout. */
+    .trade-header-pills {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    /* Phase-2 — lane filter row above the trades list. Same tab pattern
+       as .rookie-filter-tab (bordered 6px-radius toggles). */
+    .lane-filter-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .lane-filter-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+      letter-spacing: 0.4px;
+    }
+    .lane-filter-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(79,124,255,0.08);
+    }
+    .lane-filter-btn:hover:not(.active) { border-color: #3a3d4a; color: var(--text); }
+
     /* v2 — consensus-basis tag: muted caveat, hint text via title attr. */
     .consensus-tag {
       font-size: 10px;

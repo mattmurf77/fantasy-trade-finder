@@ -104,6 +104,7 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
                 return (
                   <Pressable
                     key={opt.value}
+                    testID={`feedback.severity.${opt.value}`}
                     onPress={() => setSeverity(opt.value)}
                     style={({ pressed }) => [
                       styles.sevChip,
@@ -132,6 +133,7 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
 
             <Text style={styles.label}>Note</Text>
             <TextInput
+              testID="feedback.note-input"
               ref={inputRef}
               value={text}
               onChangeText={setText}
@@ -151,6 +153,7 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
               style={styles.actionBtn}
             />
             <Button
+              testID="feedback.save-btn"
               variant="primary"
               label="Save"
               onPress={onSave}

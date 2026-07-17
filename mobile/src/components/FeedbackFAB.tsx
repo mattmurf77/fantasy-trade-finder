@@ -40,6 +40,7 @@ export default function FeedbackFAB({ activeScreen }: Props) {
         ]}
       >
         <Pressable
+          testID="feedback.fab"
           onPress={() => setSheetOpen(true)}
           style={({ pressed }) => [styles.fab, pressed && styles.pressed]}
           accessibilityLabel="Capture feedback"

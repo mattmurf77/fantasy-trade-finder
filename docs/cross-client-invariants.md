@@ -141,6 +141,14 @@ Canonical set: `championship`, `contender`, `rebuilder`, `jets`, `not_sure`.
 
 ---
 
+## Trade-card lane enum (phase 2, 2026-07-17)
+
+Canonical set: `window`, `value` — the optional `lane` field on trade cards (flag `trade.lanes`; absent when the user has no declared/seeded window). `window` = the trade moves roster composition toward the user's contend/rebuild window; `value` = pure value play. Classified by `trade_service.classify_lane`; also logged in swipe `user_events` props for A/B joins.
+
+**Locations to update together:** `backend/trade_service.py` (`classify_lane`, `_LANE_SIGN`), `backend/server.py` (`trade_card_to_dict` + swipe event props), `mobile/src/shared/types.ts` + `mobile/src/screens/TradesScreen.tsx` (lane filter), `web/js/app.js` `renderTrades` (`lane-chip--window` / `lane-chip--value` chips).
+
+---
+
 ## Ranking method strings
 
 `users.ranking_method`: null, `'trio'`, `'manual'`, `'tiers'`, `'anchor'` (added 2026-07-10 with the Pick Anchor wizard + rank-home chooser), `'quickset'` (added 2026-07-12, #119 — the guided tier quick-set walk promoted to a first-class method; unlocks like `'tiers'` since it writes through `/api/tiers/save`).

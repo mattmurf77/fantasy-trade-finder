@@ -1,0 +1,79 @@
+appId: com.fantasytradefinder.app
+# tc: TC-TIR (feature flow — #132 All-players board)
+# profile: standard
+# flags: release
+# #132: the Tiers position switcher gains an "All" tab rendering the merged
+# cross-position board. This flow: open Tiers → switch to All → drag a chip
+# across the merged board (slow swipe triggers the 220ms long-press
+# activation; the drag-hazard regression class from builds #11/#12 would
+# crash here) → save (routed per position under the hood) → assert the
+# success toast. Server-chosen content → structural asserts only; the save
+# button label + toast copy are load-bearing and asserted literally.
+tags: [tiers, all-board]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.tiers"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.tiers"
+- extendedWaitUntil:
+    visible:
+      id: "tiers.list"
+    timeout: 20000
+# ── Switch to the All board ─────────────────────────────────────────────
+- tapOn:
+    id: "tiers.pos-tab.all"
+# The unfiltered rankings query is heavier than a positional one — wait on
+# the save bar's All-mode label (load-bearing copy) before proceeding.
+- extendedWaitUntil:
+    visible: "Save all tiers"
+    timeout: 20000
+- assertVisible:
+    id: "tiers.list"
+- takeScreenshot: tiers-all-board
+# ── Cross-position drag on the merged board ─────────────────────────────
+# Same technique as 06-tiers-drag-no-crash: a slow swipe (>=250ms) triggers
+# Gesture.Pan().activateAfterLongPress(220). On the All board the rows
+# interleave positions, so a ~30% upward drag crosses players of other
+# positions (and usually a tier boundary). Surviving the release is the
+# crash-regression assert.
+- swipe:
+    start: 50%, 60%
+    end: 50%, 30%
+    duration: 1200
+- assertVisible:
+    id: "tiers.list"
+- takeScreenshot: tiers-all-after-drag
+# ── Save (routed per position client-side) ──────────────────────────────
+- tapOn:
+    id: "tiers.save-btn"
+- extendedWaitUntil:
+    visible: "Tiers saved"
+    timeout: 15000
+- takeScreenshot: tiers-all-saved

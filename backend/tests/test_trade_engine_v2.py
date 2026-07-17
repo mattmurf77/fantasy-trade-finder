@@ -405,6 +405,11 @@ def test_range_overlap_fairness():
     User personal Elo == seed Elo so confidence-driven SHRINKAGE is a no-op
     in both runs — only the fairness gate differs between them."""
     _set_v2(True)
+    # Pin the divergence floor so the 0.75 threshold governs — the
+    # interview-2026-07-17 loosening (0.55) would pass this fixture's
+    # 0.713 ratio even with point ranges, defeating the test's subject
+    # (the range-overlap machinery).
+    ts._cfg["fairness_floor_divergence"] = 1.0
     user_elo = {"G": 1500, "R": 1530}          # == seeds -> shrink no-op
     seeds = {"G": 1500, "R": 1530}
     opp_elo = {"G": 1650, "R": 1450}           # opp overvalues G, dumps R

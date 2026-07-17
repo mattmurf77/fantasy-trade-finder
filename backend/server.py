@@ -2996,33 +2996,47 @@ def get_tier_config():
 def copy_tiers_from_format_route():
     """POST /api/tiers/copy-from-format {from_format: '1qb_ppr'}
 
-    Copy the user's tier ASSIGNMENTS (tier label + within-tier rank) from
-    one scoring format to the active scoring format. The raw ELO values
-    differ between formats because the bands differ — copying ELOs
-    directly would re-bucket players incorrectly. So we:
+    VALUE-AWARE copy (#124/#139) of the user's board from one scoring
+    format to the active scoring format. Until 2026-07-17 this preserved
+    each player's tier LABEL — but the tier labels are pick-denominated
+    ("worth 4+ firsts"), and a player worth 4+ firsts in SF is NOT worth
+    4+ firsts in 1QB: the formats' value distributions differ, QBs most
+    of all. Label-preserving copy therefore systematically overvalued
+    QBs on SF→1QB and undervalued them on 1QB→SF.
 
-      1) Read source overrides
-      2) For each pid, determine which tier it sits in under the SOURCE
-         format using tier_for_elo(elo, position, source_format).
-      3) Group by (position, tier) and sort each group by source ELO desc
-         (this preserves within-tier rank — Josh Allen at QB1 Elite stays
-         at QB1 Elite).
-      4) For each position, call to_svc.apply_tiers(position, tiers,
-         scoring_format=to_format) — which writes new override ELOs in
-         the TARGET format's band.
-      5) Wholesale-replace the target's _elo_overrides dict (i.e. clear
-         first) so leftover overrides not present in the source aren't
-         retained — the user asked to "copy", which implies overwrite.
-      6) Persist + mark all touched positions as saved + republish to
+    Now the copy preserves the user's RANK ORDER per position and
+    re-seeds the value magnitudes from the TARGET format's consensus
+    curve at those ranks (RankingService.apply_value_map — a permutation
+    of the copied group's own target-format seed Elos):
+
+      1) For each position, read the source board via
+         from_svc.get_rankings() — every VISIBLY-TIERED player (source
+         tier_for_elo non-None), override or not, in elo-desc order.
+         (get_rankings, not _elo_overrides: seed-tiered players without
+         an explicit override render on the board too and must copy —
+         the Kyler Murray bug.)
+      2) Wholesale-replace the target's _elo_overrides (clear first) so
+         leftover target overrides not present in the source aren't
+         retained — "copy" means overwrite.
+      3) to_svc.apply_value_map(position, ordered_pids): rank i gets the
+         group's i-th largest TARGET-format seed Elo. Order is the
+         user's; magnitudes (and hence tier labels) are the target
+         consensus — QBs shift most, by design. A player may fall below
+         the target waivers floor and render unranked (correct: e.g. a
+         board-worthy SF QB2x can be waiver fodder in 1QB).
+      4) Persist + mark all touched positions as saved + republish to
          member_rankings.
+
+    Deterministic and idempotent for an unchanged source board:
+    re-copying reproduces the same target overrides.
 
     Body:
       from_format: '1qb_ppr' or 'sf_tep' — which format to copy FROM.
       The TO format is the user's currently active format.
 
     Response:
-      { ok: true, from_format, to_format, position_counts: {QB: N, ...},
-        total: N }
+      { ok: true, from_format, to_format, mapping: 'value_rank',
+        position_counts: {QB: N, ...}, total: N }
     """
     sess = _require_initialized_session()
     g_user_id = sess["user_id"]
@@ -3053,29 +3067,20 @@ def copy_tiers_from_format_route():
     if not from_svc or not to_svc:
         return jsonify({"error": "Per-format services not initialised — please refresh"}), 500
 
-    # Group by (position, tier_in_source_format), sorted by source ELO desc.
-    # The sort preserves within-tier rank — top of source-Elite ends up at
-    # top of target-Elite, etc.
+    # Collect each position's source board as an ordered pid list (source
+    # effective ELO desc — get_rankings is already sorted).
     #
     # CRITICAL: iterate every player's EFFECTIVE rendered ELO via
     # get_rankings(), NOT just from_svc._elo_overrides. The override dict
     # only contains players the user has EXPLICITLY tier-saved or
     # manual-reordered. Players whose default-DP seed ELO happens to land
-    # inside a tier band ALSO render in that tier on the page (per
-    # autoAssignTiers) — but they don't have an explicit override.
-    #
-    # Real bug example: Kyler Murray's seed ELO in 1QB PPR is 1227.2,
-    # which falls in the 1QB QB depth band [1200, 1330], so the page
-    # renders him at "Depth QB20." But he has no override entry. The
-    # previous version of this code iterated from_overrides only, so
-    # Kyler was silently skipped during the copy. After the wholesale-
-    # clear of the target's overrides, he had no SF TEP override either,
-    # fell back to his SF TEP seed (~1300), and that seed landed in the
-    # SF TEP bench band [1200, 1330] → he showed up as "Bench QB1" in
-    # the target view, dropping a full tier from where he was supposed
-    # to be. With get_rankings() iteration we capture every visibly-
-    # tiered player, override or not.
-    grouped: dict[tuple[str, str], list[tuple[str, float]]] = {}
+    # inside a tier band ALSO render on the board (per autoAssignTiers) —
+    # but they don't have an override entry. (Real bug: Kyler Murray's
+    # 1QB seed rendered him "Depth QB20" with no override; an overrides-
+    # only copy silently skipped him and the wholesale clear then dropped
+    # him a tier in the target view.) get_rankings captures every
+    # visibly-tiered player, override or not.
+    by_position: dict[str, list[str]] = {}
     seen_anything = False
     for position in ("QB", "RB", "WR", "TE"):
         try:
@@ -3083,15 +3088,18 @@ def copy_tiers_from_format_route():
         except Exception as e:
             log.warning("copy-from-format: get_rankings(%s) failed: %s", position, e)
             continue
+        ordered: list[str] = []
         for rp in rank_set.rankings:
             seen_anything = True
-            elo = rp.elo
-            if elo is None:
+            if rp.elo is None:
                 continue
-            tier = RankingService.tier_for_elo(elo, position, from_format)
-            if not tier:
+            # Only players on the visible source board (in some tier under
+            # the SOURCE format) are part of the copied list.
+            if not RankingService.tier_for_elo(rp.elo, position, from_format):
                 continue
-            grouped.setdefault((position, tier), []).append((rp.player.id, float(elo)))
+            ordered.append(rp.player.id)
+        if ordered:
+            by_position[position] = ordered
 
     if not seen_anything:
         return jsonify({
@@ -3099,26 +3107,19 @@ def copy_tiers_from_format_route():
             "error": f"No data to copy from {from_format}",
         }), 400
 
-    for key in grouped:
-        grouped[key].sort(key=lambda pe: -pe[1])  # ELO desc
-
-    # Build per-position {tier_name: [pids in rank order]} dicts.
-    by_position: dict[str, dict[str, list[str]]] = {}
-    for (position, tier), pid_elo_list in grouped.items():
-        by_position.setdefault(position, {})[tier] = [pid for pid, _ in pid_elo_list]
-
-    # Wholesale replace: clear target overrides FIRST. The apply_tiers calls
-    # below then rewrite each position's slice fresh, in the target format's
-    # bands. Any pre-existing target override for a pid not in the source
-    # is dropped — that's what "copy" means here.
+    # Wholesale replace: clear target overrides FIRST. The apply_value_map
+    # calls below rewrite each position's slice fresh, on the target
+    # format's consensus value curve. Any pre-existing target override for
+    # a pid not in the source is dropped — that's what "copy" means here.
     to_svc._elo_overrides = {}
 
-    for position, tiers in by_position.items():
-        to_svc.apply_tiers(
-            position=position,
-            tiers=tiers,
-            scoring_format=to_format,
-        )
+    position_counts: dict[str, int] = {}
+    for position, ordered_pids in by_position.items():
+        # Value-aware mapping (#124): keep the user's rank order, deal out
+        # the group's own TARGET-format seed Elos to those ranks. Tier
+        # labels land wherever the target consensus puts them — QBs shift
+        # most between SF and 1QB, which is the point.
+        position_counts[position] = to_svc.apply_value_map(position, ordered_pids)
 
     # Persist override dict.
     try:
@@ -3158,15 +3159,14 @@ def copy_tiers_from_format_route():
     except Exception:
         pass
 
-    position_counts = {pos: sum(len(pids) for pids in tiers.values())
-                       for pos, tiers in by_position.items()}
-    log.info("tiers/copy %s → %s for %s — copied %d overrides across %d positions",
+    log.info("tiers/copy %s → %s for %s — value-mapped %d overrides across %d positions",
              from_format, to_format, g_user_id,
              sum(position_counts.values()), len(position_counts))
     return jsonify({
         "ok":              True,
         "from_format":     from_format,
         "to_format":       to_format,
+        "mapping":         "value_rank",
         "position_counts": position_counts,
         "total":           sum(position_counts.values()),
     })
@@ -4387,6 +4387,19 @@ def trade_card_to_dict(card, players: dict) -> dict:
     need_fit = getattr(card, "need_fit", None)
     if need_fit is not None:
         out["need_fit"] = need_fit
+    # Interview phase 2 — two-lane label ("window" | "value"), only when
+    # trade.lanes stamped it (user has a resolved window).
+    lane = getattr(card, "lane", None)
+    if lane:
+        out["lane"] = lane
+    # Interview phase 2 — honest fit-premium flag: {value_paid, position}.
+    fit_premium = getattr(card, "fit_premium", None)
+    if fit_premium:
+        out["fit_premium"] = fit_premium
+    # Interview phase 2 — aggression A/B bucket, for event joins.
+    aggression_variant = getattr(card, "aggression_variant", None)
+    if aggression_variant:
+        out["aggression_variant"] = aggression_variant
     # Agent A8 — expose human-readable reasons only when the flag is on
     # AND the card actually has some. Keeps legacy JSON identical when off.
     reasons = getattr(card, "reasons", None)
@@ -4674,6 +4687,11 @@ def swipe_trade():
                         "give":       card.give_player_ids,
                         "receive":    card.receive_player_ids,
                         "target":     card.target_user_id,
+                        # Interview phase 2 — join swipe outcomes to the
+                        # aggression bucket / lane / fit-premium flag.
+                        "aggression_variant": getattr(card, "aggression_variant", None),
+                        "lane":               getattr(card, "lane", None),
+                        "fit_premium":        bool(getattr(card, "fit_premium", None)),
                     },
                     **(getattr(g, "device_info", {}) or {}),
                 )
@@ -10379,6 +10397,216 @@ def espn_import():
         "my_roster":      mapped["rosters"].get(my_team_id, []),
         "report":         _espn_report_json(mapped["report"]),
     })
+
+
+# ---------------------------------------------------------------------------
+# League power rankings (#142/#144) — math in backend/power_rankings.py
+# ---------------------------------------------------------------------------
+
+@app.route("/api/league/power-rankings")
+def league_power_rankings_route():
+    """GET /api/league/power-rankings?league_id=...&basis=consensus|personal|redraft
+
+    Ranks every team in the league by summed roster value; each team carries
+    its full roster (grouped by position, value-desc within group — #144) so
+    the client's team drill-in needs no second call.
+
+    basis:
+      - consensus (default): universal-pool consensus values (elo_to_value
+        over the pool seed) — the same numbers /api/trade/values serves.
+        League-shared aggregate, open like /api/league/coverage.
+      - personal: the CALLER's live board for the active format (their Elo
+        starts at the consensus seed and diverges as they rank), consensus
+        fallback for players outside their board. Board-derived content →
+        the P2.5 read gate applies inline (mirrors /api/trade/evaluate
+        Mode B; the route can't take @_gate_unverified_read wholesale
+        because the consensus basis is league-shared by design).
+      - redraft: 501 not_available — FTF's value source (DynastyProcess) is
+        dynasty-only today. The parameter shape is reserved so clients can
+        probe; UI shows a disabled "(soon)" chip.
+
+    ESPN-imported leagues work unchanged: their members sit in league_members
+    with synthetic `espn:` user ids but Sleeper player ids (crosswalked at
+    import), so value resolution is identical.
+    """
+    from .power_rankings import compute_power_rankings
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess.get("league")
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+
+    basis = (request.args.get("basis") or "consensus").strip().lower()
+    if basis == "redraft":
+        return jsonify({
+            "error":   "not_available",
+            "message": ("Redraft rankings aren't available yet — FTF values "
+                        "are dynasty-only. Use basis=consensus or "
+                        "basis=personal."),
+        }), 501
+    if basis not in ("consensus", "personal"):
+        return jsonify({"error": "basis must be one of consensus, personal, redraft"}), 400
+
+    board_elo = None
+    if basis == "personal":
+        denial = _verified_read_denial(sess)
+        if denial is not None:
+            return denial
+        service = sess["service"]
+        board_elo = {
+            rp.player.id: rp.elo
+            for rp in service.get_rankings(position=None).rankings
+        }
+
+    fmt = _active_format(sess)
+    try:
+        members = load_league_members(league_id)
+        if not members and g_league and g_league.league_id == league_id:
+            # Fresh/demo leagues may not have a league_members snapshot yet —
+            # fall back to the in-session league (leaguemates) + the caller's
+            # own roster (session league members exclude the caller).
+            members = [{
+                "user_id":      m.user_id,
+                "username":     m.username,
+                "display_name": m.username,
+                "player_ids":   list(m.roster),
+            } for m in g_league.members]
+            members.append({
+                "user_id":      g_user_id,
+                "username":     sess.get("display_name") or g_user_id,
+                "display_name": sess.get("display_name") or g_user_id,
+                "player_ids":   list(sess.get("user_roster") or []),
+            })
+        if not members:
+            return jsonify({"error": "league_not_found"}), 404
+
+        pool_players, seed = _get_universal_pool(fmt)
+        # Demo-style sessions rank a synthetic player pool whose ids never
+        # appear in the universal pool; their consensus lives in the session
+        # service's seed ratings. Merge those in as a FALLBACK (pool seed
+        # wins) so demo consensus totals aren't all-zero. Real leagues are
+        # unaffected — their session ranking pool is the universal pool.
+        svc_seed = getattr(sess.get("service"), "_seed", None) or {}
+        if svc_seed:
+            seed = {**svc_seed, **seed}
+        # Metadata: universal pool first, session players filling any gaps
+        # (league roster players outside the pool still need name/position).
+        players_meta = {p.id: p for p in pool_players}
+        for p in (sess.get("players") or []):
+            players_meta.setdefault(p.id, p)
+
+        teams = compute_power_rankings(members, seed, players_meta, board_elo=board_elo)
+        for t in teams:
+            t["is_you"] = (t["user_id"] == g_user_id)
+        return jsonify({
+            "league_id":      league_id,
+            "basis":          basis,
+            "scoring_format": fmt,
+            "teams":          teams,
+        })
+    except Exception as e:
+        log.error("league/power-rankings error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+
+
+# ---------------------------------------------------------------------------
+# Free-agent finder (feedback #143) — logic in backend/free_agent_service.py
+# ---------------------------------------------------------------------------
+
+@app.route("/api/league/free-agents")
+@_gate_unverified_read
+def league_free_agents_route():
+    """GET /api/league/free-agents?league_id=...&position=RB
+
+    Best available free agents in the league, ranked by the CALLER'S board
+    value (personal Elo, consensus seed fallback for anything they haven't
+    ranked). FA pool = active format's universal pool minus every rostered
+    player in the league — session-league rosters when league_id matches the
+    session (Sleeper / ESPN-imported / demo alike), league_members snapshot
+    otherwise. Each row may carry a drop_suggestion: the caller's lowest-
+    valued same-position rostered player whose value is strictly below the
+    FA's, with the add/drop delta.
+
+    Query params:
+      league_id  — optional, defaults to the session league.
+      position   — optional QB|RB|WR|TE (or ALL/omitted for all positions).
+
+    Response:
+      {
+        "league_id":         str,
+        "scoring_format":    "1qb_ppr" | "sf_tep",
+        "position":          "QB"|"RB"|"WR"|"TE"|"ALL",
+        "user_has_rankings": bool,   # False = whole list is pure consensus
+        "free_agents": [
+          {"player_id", "name", "position", "team", "age",
+           "value": float,          # caller-board dynasty value
+           "pos_rank": int,         # 1-based rank within position among FAs
+           "drop_suggestion": {"player_id", "name", "position",
+                               "value", "delta"} | null}, ...
+        ]  # top 50 after the position filter
+      }
+
+    Read-gated (@_gate_unverified_read): the list is priced by the caller's
+    board, so it's board-derived content like /api/rankings.
+    """
+    from .free_agent_service import (
+        FA_POSITIONS, board_is_personalized, compute_free_agents,
+    )
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess.get("league")
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+
+    raw_pos  = (request.args.get("position") or "").strip().upper()
+    position = None if raw_pos in ("", "ALL") else raw_pos
+    if position is not None and position not in FA_POSITIONS:
+        return jsonify({"error": f"Invalid position: {raw_pos!r}"}), 400
+
+    fmt = _active_format(sess)
+    try:
+        pool_players, seed = _get_universal_pool(fmt)
+        service  = sess["service"]
+        user_elo = {rp.player.id: rp.elo
+                    for rp in service.get_rankings(position=None).rankings}
+
+        # Rosters: the in-session league object when it matches (covers
+        # Sleeper, ESPN-imported and demo leagues — session init builds all
+        # three); DB league_members snapshot for any other league_id.
+        if g_league and league_id == g_league.league_id:
+            member_rosters = [list(m.roster or []) for m in g_league.members]
+            user_roster    = list(sess.get("user_roster") or [])
+        else:
+            rows = load_league_members(league_id)
+            member_rosters = [r.get("player_ids") or [] for r in rows
+                              if r.get("user_id") != g_user_id]
+            user_roster    = next((r.get("player_ids") or [] for r in rows
+                                   if r.get("user_id") == g_user_id), [])
+        rostered = {pid for roster in member_rosters for pid in roster}
+
+        free_agents = compute_free_agents(
+            pool_players = pool_players,
+            seed_elo     = seed,
+            user_elo     = user_elo,
+            rostered_ids = rostered,
+            user_roster  = user_roster,
+            position     = position,
+        )
+        return jsonify({
+            "league_id":         league_id,
+            "scoring_format":    fmt,
+            "position":          position or "ALL",
+            "user_has_rankings": board_is_personalized(user_elo, seed),
+            "free_agents":       free_agents,
+        })
+    except Exception as e:
+        log.error("league/free-agents error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
 
 
 if __name__ == "__main__":

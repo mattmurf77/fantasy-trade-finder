@@ -1,9 +1,15 @@
 appId: com.fantasytradefinder.app
 ---
 # Smoke: app boots, sign-in screen visible, no early crash.
+# Selectors moved to testIDs 2026-07-12 (QA F-1): the old "Connect" copy
+# became "Sign in with Apple" / "Continue with Sleeper →" in the 1.7.x
+# account-first redesign.
 - launchApp:
     clearState: true
     stopApp: true
 - assertVisible: "Dynasty Fantasy Football"
-- assertVisible: "Connect"
+- assertVisible:
+    id: "signin.username-input"
+- assertVisible:
+    id: "signin.continue-btn"
 - takeScreenshot: 01-signin
