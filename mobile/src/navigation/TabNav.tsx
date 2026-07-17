@@ -397,7 +397,7 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
     { route: 'QuickRank',     label: 'Quick rank',    sub: 'Order players within each tier — tap them best-first, tier by tier', testID: 'rankmenu.quickrank' },
     { route: 'Trios',         label: 'Trios',         sub: '3-at-a-time swipe ranking', testID: 'rankmenu.trios' },
     { route: 'Anchors',       label: 'Pick Anchors',  sub: 'Say what each player is worth in draft picks — 4 1sts down to no value', testID: 'rankmenu.anchors' },
-    { route: 'Tiers',         label: 'Tiers',         sub: 'Drag players into pick-value tiers (4+ 1sts down to Waivers)', testID: 'rankmenu.tiers' },
+    { route: 'Tiers',         label: 'Tiers',         sub: 'Drag players into pick-value tiers (4+ 1sts down to FA)', testID: 'rankmenu.tiers' },
     { route: 'ManualRanks',   label: 'Overall Ranks', sub: 'Drag rows or tap a rank number to re-order your board by hand', testID: 'rankmenu.manual' },
     { route: 'Trends',        label: 'Trends',        sub: 'See your biggest movers and how you differ from consensus', testID: 'rankmenu.trends' },
   ];

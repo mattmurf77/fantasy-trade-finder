@@ -1297,7 +1297,7 @@ def star_tax_adjustment(
         _tier_display = {
             "firsts_4plus": "4+ 1sts", "firsts_3": "3 1sts",
             "firsts_2": "2 1sts", "first_1": "1st", "second": "2nd",
-            "third": "3rd", "fourth": "4th", "waivers": "Waivers",
+            "third": "3rd", "fourth": "4th", "waivers": "FA",
         }
         tier_tag = ("Tier 1" if higher_is_elite
                     else _tier_display.get(tier_label, tier_label.capitalize()))

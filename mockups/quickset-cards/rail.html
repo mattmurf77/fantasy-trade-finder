@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuickSet cards — 3 · Rail (FB #140)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ─────────
+     Position + tier hexes are the CANONICAL values from
+     docs/cross-client-invariants.md. Fonts render as Barlow Condensed /
+     Archivo / IBM Plex Mono when installed; offline fallbacks are
+     Arial Narrow / Helvetica / Menlo. Zero external requests. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#3D4654;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --on-ice:#071013;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --t4plus:#f87171; --t3:#e879f9; --t2:#fbbf24; --t1:#2dd4bf;
+    --t2nd:#38bdf8; --t3rd:#f472b6; --t4th:#a3e635; --twav:#7a7f96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:24px 16px 64px}
+
+  .note{max-width:640px;width:100%;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:8px;padding:16px 20px;margin-bottom:24px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.1;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note ul{margin:0;padding-left:18px;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .note li{margin-bottom:4px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note a{color:var(--ice);text-decoration:none;font-size:12px}
+  .note .back{display:inline-block;margin-bottom:10px}
+  .note .m{font-family:var(--mono)}
+
+  /* ── iPhone frame, 390×844, clipped at the fold ── */
+  .phone{position:relative;width:390px;height:844px;background:var(--ink-0);
+         border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;flex:none}
+  .statusbar{height:44px;display:flex;align-items:flex-end;justify-content:space-between;
+             padding:0 20px 6px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)}
+  .batt{display:inline-block;width:20px;height:10px;border:1px solid var(--chalk-dim);
+        border-radius:2px;position:relative}
+  .batt::after{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:70%;
+               background:var(--chalk-dim)}
+  .titlerow{display:flex;align-items:center;gap:8px;padding:4px 16px 2px}
+  .chev{width:16px;height:16px;fill:none;stroke:var(--chalk-dim);stroke-width:1.75;
+        stroke-linecap:square;flex:none}
+  .title{font-family:var(--cond);font-weight:600;font-size:22px;letter-spacing:.03em;
+         text-transform:uppercase}
+
+  .fmt{display:flex;margin:8px 16px 0;background:var(--ink-1);border:1px solid var(--line);
+       border-radius:4px;overflow:hidden}
+  .fseg{flex:1;min-height:36px;display:flex;align-items:center;justify-content:center;
+        font:600 11px var(--ui);letter-spacing:.08em;color:var(--chalk-dim);
+        border-bottom:2px solid transparent}
+  .fseg.active{background:var(--ink-3);color:var(--chalk);border-bottom-color:var(--ice)}
+  .fseg + .fseg{border-left:1px solid var(--line)}
+
+  .tabs{display:flex;margin:8px 16px 0;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:4px;overflow:hidden}
+  .tab{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;
+       font:600 11px var(--ui);letter-spacing:.08em;color:var(--chalk-dim);
+       border-bottom:2px solid transparent}
+  .tab.active{background:var(--ink-3);color:var(--chalk);border-bottom-color:var(--wr)}
+
+  .stephead{padding:12px 16px 8px}
+  .trow{display:flex;align-items:center;gap:8px}
+  .tick{width:14px;height:3px;background:var(--t2);flex:none}
+  .tlabel{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--t2)}
+  .prog{margin-left:auto;font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+        color:var(--chalk-dim)}
+  .hint{margin-top:4px;font:400 13px/1.4 var(--ui);color:var(--chalk-dim)}
+
+  .search{height:40px;margin:0 16px 8px;background:var(--ink-2);border:1px solid var(--line-strong);
+          border-radius:4px;display:flex;align-items:center;padding:0 12px;
+          font:400 14px var(--ui);color:var(--chalk-faint)}
+
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:0 16px 96px}
+
+  /* ── CHIP, VARIANT 3 "RAIL" — 48px unchanged; 14px position-colored
+     left rail carries the team abbrev vertically (8px Plex Mono, ink-0
+     text); age sits at the right end of the meta line, the corner
+     opposite the check / rank badge. Tier label unchanged. ── */
+  .chip{min-height:48px;background:var(--ink-1);border:1px solid var(--line);border-radius:4px;
+        display:flex;align-items:stretch;overflow:hidden;min-width:0}
+  .chip.sel{border-color:var(--ice)}
+  .rail{width:14px;flex:none;background:var(--wr);display:flex;align-items:center;
+        justify-content:center}
+  .rail span{writing-mode:vertical-rl;font:600 8px var(--mono);letter-spacing:1px;
+             color:var(--ink-0)}
+  .body{flex:1;min-width:0;padding:6px 8px 6px 6px;display:flex;flex-direction:column;
+        justify-content:center}
+  .top{display:flex;align-items:center;gap:4px;min-width:0}
+  .nm{font:600 12px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+      text-overflow:ellipsis;min-width:0}
+  .chk{flex:none;margin-left:auto;width:12px;height:12px;stroke:var(--ice);fill:none;
+       stroke-width:1.75;stroke-linecap:square}
+  .rb{flex:none;margin-left:auto;min-width:16px;height:16px;padding:0 2px;border:1px solid var(--ice);
+      border-radius:2px;display:flex;align-items:center;justify-content:center;
+      font:600 10px var(--mono);color:var(--ice)}
+  .meta{display:flex;align-items:center;gap:6px;margin-top:2px;min-width:0}
+  .ct{font:600 9px var(--ui);letter-spacing:.5px;text-transform:uppercase;flex:none}
+  .ct.t3{color:var(--t3)} .ct.t2{color:var(--t2)} .ct.t1{color:var(--t1)} .ct.t2nd{color:var(--t2nd)}
+  .age{margin-left:auto;font:500 9px var(--mono);color:var(--chalk-dim);flex:none}
+
+  .footer{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:8px;
+          padding:12px;background:var(--ink-0);border-top:1px solid var(--line)}
+  .ghost{height:36px;display:flex;align-items:center;padding:0 10px;
+         font:600 12px var(--ui);color:var(--chalk)}
+  .sec{height:36px;display:flex;align-items:center;padding:0 12px;border:1px solid var(--line-strong);
+       border-radius:4px;font:600 12px var(--ui);color:var(--chalk)}
+  .save{flex:1;height:40px;border-radius:4px;background:var(--ice);color:var(--on-ice);
+        display:flex;align-items:center;justify-content:center;font:600 14px var(--ui)}
+
+  .qr{width:390px;margin-top:16px}
+  .qrhead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .qrhead .tick{background:var(--t1)}
+  .qrhead .lab{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+               color:var(--t1)}
+  .qrhead .sub{margin-left:auto;font:600 10px var(--ui);letter-spacing:.06em;
+               text-transform:uppercase;color:var(--chalk-faint)}
+  .qr .grid{padding:0}
+  .cap{width:390px;margin-top:12px;font:400 12px/1.5 var(--ui);color:var(--chalk-faint)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <a class="back" href="index.html">&larr; All card variants</a>
+  <h1>3 &middot; Rail &mdash; vertical team tag, age in the far corner</h1>
+  <ul>
+    <li><strong>Chip: <span class="m">&asymp;117&times;48px</span> unchanged</strong> &mdash; pitch stays <span class="m">52px</span>, <strong>&asymp;9 rows / 27 chips per screenful</strong>. The most compact option that adds both fields.</li>
+    <li><strong>Team:</strong> a <span class="m">14px</span> position-colored left rail (WR <span class="m">#3B82F6</span>) carrying the abbrev vertically &mdash; 8px Plex Mono, ink-0 text (contrast &asymp;5.6:1 on WR blue; &asymp;8:1 on QB orange). <strong>Age:</strong> 9px Plex Mono chalk-dim at the right end of the meta line &mdash; the corner opposite the check / rank badge, so the two never collide.</li>
+    <li><strong>Name run: <span class="m">&asymp;99px &rarr; &asymp;87px</span></strong> (&minus;12px &asymp; 2 chars at 12px) &mdash; the rail + its 6px gap replace the old 8px left padding. &ldquo;Jaxon Smith-Njigba&rdquo;-class names ellipsize one word-part sooner than today; everything up to &asymp;13 chars still fits clean. <strong>Tier label unchanged</strong> on the meta line.</li>
+    <li><strong>Dropped:</strong> the on-chip <strong>position text</strong> &mdash; the rail's color plus the active tab's &ldquo;WR&rdquo; carry it. Flagged honestly against the accessibility floor (&ldquo;position color never the only encoding&rdquo;): on the chip itself the rail IS color-only; its text is the TEAM, not the position. The pairing survives only via the tab, one level up.</li>
+    <li><strong>States rendered:</strong> 5 selected (ice border + check); Quick Rank strip below the frame shows the rank-badge state (badge top-right, age still bottom-right &mdash; no collision by construction).</li>
+    <li><strong>Honest tradeoffs:</strong> 8px vertical type is at the legibility floor &mdash; readable held close, slow to scan across a 27-chip grid, and rotated Latin text is unusual in this design language (nothing else in Chalkline sets type vertically). The rail also makes the position color do double duty (encoding + chip edge), and 2-char teams (&ldquo;NO&rdquo;, &ldquo;KC&rdquo;) leave the rail half-empty while &ldquo;WAS&rdquo; fills it.</li>
+  </ul>
+</div>
+
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+  <div class="titlerow">
+    <svg class="chev" viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></svg>
+    <div class="title">Quick Set</div>
+  </div>
+  <div class="fmt"><div class="fseg active">1QB PPR</div><div class="fseg">SF TEP</div></div>
+  <div class="tabs">
+    <div class="tab">QB</div><div class="tab">RB</div>
+    <div class="tab active">WR</div><div class="tab">TE</div>
+  </div>
+  <div class="stephead">
+    <div class="trow"><span class="tick"></span><span class="tlabel">2 1sts</span>
+      <span class="prog">Tier 3 of 8</span></div>
+    <div class="hint">Tap every WR who belongs in 2 1sts, then save to move on.
+      Each card shows the tier the player is in now.</div>
+  </div>
+  <div class="search">Search WRs&hellip;</div>
+  <div class="grid" id="grid"></div>
+  <div class="footer">
+    <div class="ghost">Back</div>
+    <div class="sec">Skip</div>
+    <div class="save">Save 2 1sts (5)</div>
+  </div>
+</div>
+
+<div class="qr">
+  <div class="qrhead"><span class="tick"></span><span class="lab">1st</span>
+    <span class="sub">Same chip in Quick Rank (#136) &mdash; rank badge replaces the check</span></div>
+  <div class="grid" id="qrgrid"></div>
+  <div class="cap">Quick Rank is its own screen; this detached row shows the variant's other
+  selected state. Badge top-right, age bottom-right &mdash; opposite corners, so stamping a
+  rank never displaces the age.</div>
+</div>
+
+<div class="cap">Step shown: WR walk, tier 3 of 8 (&ldquo;2 1sts&rdquo; #fbbf24). 27-player pool
+(a realistic unclaimed-WR grid &mdash; the real list scrolls; the frame clips at the fold under
+the pinned footer). Teams and ages are real as of July 2026; age is a bare numeral per the
+spec. Rail color follows the player's position &mdash; uniform here because the grid is
+position-scoped (it would vary on a mixed-position surface).</div>
+
+<script>
+// [full name, team, age, current-tier key, selected]
+const P=[
+["Puka Nacua","LAR",25,"t3",1],["Nico Collins","HOU",27,"t2",1],["Drake London","ATL",24,"t2",1],
+["Brian Thomas Jr.","JAX",23,"t2",1],["A.J. Brown","PHI",29,"t2",0],["Jaxon Smith-Njigba","SEA",24,"t2",0],
+["Garrett Wilson","NYJ",25,"t1",1],["Marvin Harrison Jr.","ARI",23,"t1",0],["Tee Higgins","CIN",27,"t1",0],
+["DeVonta Smith","PHI",27,"t1",0],["Rome Odunze","CHI",24,"t1",0],["Ladd McConkey","LAC",24,"t1",0],
+["Tyreek Hill","MIA",32,"t1",0],["DJ Moore","CHI",29,"t1",0],["Davante Adams","LAR",33,"t1",0],
+["Zay Flowers","BAL",25,"t1",0],["George Pickens","DAL",25,"t1",0],["Jaylen Waddle","MIA",27,"t1",0],
+["Chris Olave","NO",26,"t1",0],["Jordan Addison","MIN",24,"t1",0],["Xavier Worthy","KC",23,"t1",0],
+["Jameson Williams","DET",25,"t1",0],["Terry McLaurin","WAS",30,"t2nd",0],["Rashee Rice","KC",26,"t1",0],
+["Keon Coleman","BUF",23,"t2nd",0],["Josh Downs","IND",24,"t2nd",0],["Marvin Mims Jr.","DEN",24,"t2nd",0]];
+const CT={t3:"3 1sts",t2:"2 1sts",t1:"1st",t2nd:"2nd"};
+const CHK='<svg class="chk" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg>';
+function chip(n,tm,age,ct,state){ // state: 0 none, 1 check, {r:n} rank badge, -1 unstamped QR
+  const sel=state===1||typeof state==="object";
+  const end=state===1?CHK:(typeof state==="object"?`<span class="rb">${state.r}</span>`:"");
+  const qr=typeof state==="object"||state===-1; // Quick Rank chips: no tier label
+  const tierBit=qr?"":`<span class="ct ${ct}">${CT[ct]}</span>`;
+  return `<div class="chip${sel?" sel":""}">
+    <div class="rail"><span>${tm}</span></div>
+    <div class="body">
+      <div class="top"><span class="nm">${n}</span>${end}</div>
+      <div class="meta">${tierBit}<span class="age">${age}</span></div>
+    </div>
+  </div>`;}
+document.getElementById("grid").innerHTML=
+  P.map(p=>chip(p[0],p[1],p[2],p[3],p[4])).join("");
+document.getElementById("qrgrid").innerHTML=
+  chip("Tee Higgins","CIN",27,"t1",{r:1})+
+  chip("DeVonta Smith","PHI",27,"t1",{r:2})+
+  chip("Rome Odunze","CHI",24,"t1",-1);
+</script>
+</body>
+</html>

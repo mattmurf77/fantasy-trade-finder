@@ -19,7 +19,9 @@ Color rule unchanged (re-canonicalized 2026-07-10 to de-collide from position co
 | `second` | 2nd | sky | `#38bdf8` | `56,189,248` | [1400, 1575] |
 | `third` | 3rd | pink | `#f472b6` | `244,114,182` | [1280, 1395] |
 | `fourth` | 4th | lime | `#a3e635` | `163,230,53` | [1220, 1275] |
-| `waivers` | Waivers | gray | `#7a7f96` | `122,127,150` | [1150, 1215] |
+| `waivers` | FA | gray | `#7a7f96` | `122,127,150` | [1150, 1215] |
+
+The `waivers` display label was renamed **"Waivers" → "FA"** on 2026-07-17 (label-only; the key, hex, and band are unchanged).
 
 **Locations (colors + labels):** `mobile/src/theme/colors.ts` (`colors.tier`), `mobile/src/components/TierBadge.tsx` + `chalkline/Badge.tsx` (`TierChalkBadge`) label maps, `mobile/src/utils/tierBands.ts` (`TIERS`/`TIER_LABEL`), `web/positional-tiers.html` (inline CSS: tier-row accents, tier-assign buttons, legend swatches; JS `TIERS`/`TIER_LABELS_SHORT`), `web/profile.html` (inline `:root` vars + `TIER_ORDER`/`TIER_LABELS`), `web/style-guide.html` (badge swatches), `extension/content.css` (`.ftf-badge.ftf-tier-*`) + `extension/content.js` (`TIER_LABELS`), `backend/og_image.py` (`TIER_ORDER`/`TIER_LABELS`/`TIER_TINTS`).
 

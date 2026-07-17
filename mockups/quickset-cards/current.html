@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB #140 — A — current card</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#3D4654;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-on:#071013;
+    --pos-wr:#3b82f6; --t-firsts2:#fbbf24;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#07090b;color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:32px 16px 64px}
+  .crumb{width:390px;font:500 11px var(--mono);color:var(--chalk-dim);margin:0 0 10px}
+  .crumb a{color:var(--ice);text-decoration:none}
+  .crumb a:hover{text-decoration:underline}
+  .desc{width:390px;font-size:12px;line-height:1.6;color:var(--chalk-dim);margin:14px 0 0;
+        border-left:2px solid var(--line-strong);padding-left:12px}
+  .desc strong{color:var(--chalk)}
+
+  /* ── 390px phone frame ─────────────────────────────────────────── */
+  .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:8px;overflow:hidden;display:flex;flex-direction:column;
+         height:760px;position:relative}
+  .topbar{display:flex;align-items:center;justify-content:space-between;
+          padding:14px 16px 10px;border-bottom:1px solid var(--line)}
+  .topbar h1{font-family:var(--cond);font-weight:700;font-size:22px;letter-spacing:.03em;
+            text-transform:uppercase;margin:0}
+  .topbar .back{font:500 12px var(--ui);color:var(--chalk-dim)}
+
+  .fmt-row{display:flex;padding:10px 16px 0;gap:0}
+  .fmt{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+       padding:5px 14px;border:1px solid var(--line-strong);color:var(--chalk-dim)}
+  .fmt.on{background:var(--ink-3);color:var(--chalk);border-color:var(--line-strong)}
+  .fmt:first-child{border-radius:4px 0 0 4px}
+  .fmt:last-child{border-radius:0 4px 4px 0;border-left:none}
+
+  .tabs{display:flex;margin-top:10px;border-bottom:1px solid var(--line)}
+  .tab{flex:1;text-align:center;padding:9px 0 7px;font:600 13px var(--ui);
+       letter-spacing:.04em;color:var(--chalk-dim);border-bottom:2px solid transparent}
+  .tab.on{color:var(--chalk);border-bottom-color:var(--pos-wr)}
+
+  .step{padding:14px 16px 0}
+  .step-row{display:flex;align-items:baseline;gap:10px}
+  .tick{display:flex;align-items:center;gap:7px;font-family:var(--cond);font-weight:600;
+        font-size:17px;letter-spacing:.05em;text-transform:uppercase;color:var(--t-firsts2)}
+  .tick::before{content:"";width:14px;height:3px;background:var(--t-firsts2)}
+  .step-prog{margin-left:auto;font:600 10px var(--ui);letter-spacing:.08em;
+             text-transform:uppercase;color:var(--chalk-dim)}
+  .hint{font-size:12px;line-height:1.45;color:var(--chalk-dim);margin:6px 0 0}
+
+  .search{margin:10px 16px 0;background:var(--ink-2);border:1px solid var(--line-strong);
+          border-radius:4px;padding:9px 12px;font-size:13px;color:var(--chalk-faint)}
+
+  .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:12px 16px 96px;
+        overflow:hidden;flex:1}
+  .chip{min-width:0;min-height:48px;background:var(--ink-1);border:1px solid var(--line);border-radius:4px;
+        padding:6px 8px;display:flex;flex-direction:column;justify-content:center}
+  .chip.sel{border-color:var(--ice)}
+  .top{display:flex;align-items:center;gap:4px}
+  .ck{flex:none}
+  .nm{font:600 12px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+      text-overflow:ellipsis;min-width:0}
+  .meta{display:flex;align-items:center;gap:5px;margin-top:2px;white-space:nowrap;min-width:0;overflow:hidden}
+  .pos{font:600 9px var(--ui);letter-spacing:.5px;color:var(--pos-wr)}
+  .ext{font:600 9px var(--ui);letter-spacing:.5px;color:var(--chalk-dim)}
+  .tier{font:600 9px var(--ui);letter-spacing:.5px;text-transform:uppercase;margin-left:auto;
+        overflow:hidden;text-overflow:ellipsis}
+
+  .footer{position:absolute;left:0;right:0;bottom:0;display:flex;gap:8px;
+          padding:12px 16px 18px;background:var(--ink-0);border-top:1px solid var(--line)}
+  .btn{flex:1;text-align:center;font:600 13px var(--ui);letter-spacing:.02em;
+       padding:12px 0;border-radius:4px}
+  .ghost{color:var(--chalk-dim);border:1px solid var(--line-strong)}
+  .primary{background:var(--ice);color:var(--ice-on);flex:1.6}
+</style>
+</head>
+<body>
+  <p class="crumb"><a href="index.html">&larr; #140 index</a> &nbsp;·&nbsp; A · current card (ships in 1.7.3)</p>
+  <div class="phone">
+    <div class="topbar"><h1>Quick set</h1><span class="back">Close</span></div>
+    <div class="fmt-row"><span class="fmt on">SF</span><span class="fmt">1QB</span></div>
+    <div class="tabs"><span class="tab">QB</span><span class="tab">RB</span><span class="tab on">WR</span><span class="tab">TE</span></div>
+    <div class="step">
+      <div class="step-row"><span class="tick">2 1sts</span><span class="step-prog">Tier 3 of 8</span></div>
+      <p class="hint">Tap every WR who belongs in 2 1sts, then save to move on. Each card shows the tier the player is in now.</p>
+    </div>
+    <div class="search">Search WRs&hellip;</div>
+    <div class="grid">
+      <div class="chip sel"><div class="top"><span class="nm">Puka Nacua</span><svg class="ck" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 6.5 5 9.5 10 3" fill="none" stroke="#56D9EC" stroke-width="1.8" stroke-linecap="square"/></svg></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#fbbf24">2 1STS</span></div></div>
+      <div class="chip sel"><div class="top"><span class="nm">Malik Nabers</span><svg class="ck" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 6.5 5 9.5 10 3" fill="none" stroke="#56D9EC" stroke-width="1.8" stroke-linecap="square"/></svg></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#fbbf24">2 1STS</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">Drake London</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#fbbf24">2 1STS</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">Brian Thomas Jr.</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#fbbf24">2 1STS</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">Nico Collins</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#2dd4bf">1ST</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">Garrett Wilson</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#2dd4bf">1ST</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">Marvin Harrison Jr.</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#2dd4bf">1ST</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">Jaxon Smith-Njigba</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#2dd4bf">1ST</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">Rome Odunze</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#38bdf8">2ND</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">Ladd McConkey</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#38bdf8">2ND</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">Tee Higgins</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#38bdf8">2ND</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">Jaylen Waddle</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#38bdf8">2ND</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">DeVonta Smith</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#38bdf8">2ND</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">Jordan Addison</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#f472b6">3RD</span></div></div>
+      <div class="chip"><div class="top"><span class="nm">Amari Cooper</span></div><div class="meta"><span class="pos">WR</span><span class="tier" style="color:#7a7f96">WAIVERS</span></div></div>
+    </div>
+    <div class="footer">
+      <span class="btn ghost">Back</span>
+      <span class="btn ghost">Skip tier</span>
+      <span class="btn primary">Save 2 1sts (2)</span>
+    </div>
+  </div>
+  <p class="desc"><strong>A — current card.</strong> Baseline: name on top, position + current-tier label below. The two colored texts are the existing data encodings — WR in the position hue, the tier label in its tier hue.</p>
+</body>
+</html>

@@ -34,7 +34,8 @@ export const TIERS: readonly Tier[] = [
 
 // Labels ARE pick terms (operator directive, supersedes the #103
 // sublabels): a tier name says what a player in it is worth in the Pick
-// Anchor wizard's vocabulary. Waivers = below 4th-round value.
+// Anchor wizard's vocabulary. FA = below 4th-round value (display label
+// renamed from "Waivers" 2026-07-17; the key stays `waivers`).
 export const TIER_LABEL: Record<Tier, string> = {
   firsts_4plus: '4+ 1sts',
   firsts_3:     '3 1sts',
@@ -43,11 +44,11 @@ export const TIER_LABEL: Record<Tier, string> = {
   second:       '2nd',
   third:        '3rd',
   fourth:       '4th',
-  waivers:      'Waivers',
+  waivers:      'FA',
 };
 
 /** Inclusive ELO lower bounds per tier — fallback only. Live values come
- *  from the cached backend config (TierConfigResponse.config). Waivers is
+ *  from the cached backend config (TierConfigResponse.config). `waivers` is
  *  implicit (everything below `fourth`). */
 interface Thresholds {
   firsts_4plus: number;

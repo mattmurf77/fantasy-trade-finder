@@ -19,7 +19,7 @@ const TIER_LABEL: Record<Tier, string> = {
   second: '2nd',
   third: '3rd',
   fourth: '4th',
-  waivers: 'Waivers',
+  waivers: 'FA',
 };
 
 // Chalkline badge construction (docs/design/components.md → Badges & chips):

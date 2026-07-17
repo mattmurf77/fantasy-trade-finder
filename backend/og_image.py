@@ -66,7 +66,7 @@ TIER_LABELS = {
     "second":       "2nd",
     "third":        "3rd",
     "fourth":       "4th",
-    "waivers":      "Waivers",
+    "waivers":      "FA",
 }
 TIER_TINTS = {
     # translucent band fill (R, G, B, A) — canonical tier hexes from

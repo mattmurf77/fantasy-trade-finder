@@ -76,7 +76,7 @@ Division of labor: **ice = what you can do** (CTAs, active states, focus, ticks,
 ### Preserved invariants (do not restyle — see `docs/cross-client-invariants.md`)
 
 Positions: QB `#F97316` · RB `#22C55E` · WR `#3B82F6` · TE `#A855F7`.
-Tiers (8-tier pick-value ladder, 2026-07-12): 4+ 1sts `#f87171` · 3 1sts `#e879f9` · 2 1sts `#fbbf24` · 1st `#2dd4bf` · 2nd `#38bdf8` · 3rd `#f472b6` · 4th `#a3e635` · Waivers `#7a7f96`. Tier hues never share a hue with a position color (tiers = bright 400-level family, positions = deeper 500-level; tier red-400 vs `--neg` red-500 and tier fuchsia-400 vs TE purple-500 rely on the same bright-vs-deep separation).
+Tiers (8-tier pick-value ladder, 2026-07-12): 4+ 1sts `#f87171` · 3 1sts `#e879f9` · 2 1sts `#fbbf24` · 1st `#2dd4bf` · 2nd `#38bdf8` · 3rd `#f472b6` · 4th `#a3e635` · FA `#7a7f96` (label renamed from "Waivers" 2026-07-17; key `waivers`). Tier hues never share a hue with a position color (tiers = bright 400-level family, positions = deeper 500-level; tier red-400 vs `--neg` red-500 and tier fuchsia-400 vs TE purple-500 rely on the same bright-vs-deep separation).
 These are data encodings rendered on ink surfaces (rails, badges, meter segments), never used as chrome/brand colors.
 
 ## Typography

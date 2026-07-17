@@ -39,10 +39,17 @@ import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/type
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
 
+// #140 — the walk is position-scoped (the active tab names the position),
+// so the chip's POS token is redundant here and its width is spent on
+// TEAM + AGE instead. Conditional, not deleted: any cross-position reuse
+// of this chip construction flips this on to get the POS token back.
+const SHOW_POSITION = false;
+
 // 1.5.4 #104 — guided tier quick-set. One position at a time, walking the
-// tiers top → bottom ("4+ 1sts" → Waivers, 8 steps since the #117 ladder):
+// tiers top → bottom ("4+ 1sts" → FA, 8 steps since the #117 ladder):
 // each step shows a grid of small tappable player
-// chips (name + position + the tier they're CURRENTLY in); tapping toggles
+// chips (name + team + age + the tier they're CURRENTLY in — #140);
+// tapping toggles
 // membership in the tier being set; Save commits that one tier via the
 // standard /api/tiers/save contract and advances. Players claimed by an
 // earlier tier drop out of later grids. Entered from the Tiers header
@@ -264,9 +271,15 @@ export default function QuickSetTiersScreen() {
             {isSelected ? <Icon name="check" size={12} color={ice.base} /> : null}
           </View>
           <View style={styles.chipMeta}>
-            <Text style={[styles.chipPos, { color: positionColors[posKey] ?? chalk.dim }]}>
-              {item.position}
-            </Text>
+            {SHOW_POSITION ? (
+              <Text style={[styles.chipPos, { color: positionColors[posKey] ?? chalk.dim }]}>
+                {item.position}
+              </Text>
+            ) : null}
+            <Text style={styles.chipTeam}>{item.team ?? 'FA'}</Text>
+            {item.age != null ? (
+              <Text style={styles.chipAge}>{item.age}</Text>
+            ) : null}
             <Text style={[styles.chipTier, { color: tierColors[currentTier] }]}>
               {TIER_LABEL[currentTier]}
             </Text>
@@ -547,10 +560,26 @@ const styles = StyleSheet.create({
   },
   // Position + current-tier micro-labels. Color is paired with the text
   // itself (the label IS the encoding), per the accessibility floor.
+  // #140: POS renders only when SHOW_POSITION; team + age (bottom-row
+  // mockup spec — team 9px uiSemi chalk-dim uppercase, age 9px Plex Mono
+  // data numeral, existing bare 6px gaps, no dot glyphs) sit before the
+  // tier label at the chip's unchanged dimensions.
   chipPos: {
     fontFamily: fonts.uiSemi,
     fontSize: 9,
     letterSpacing: 0.5,
+  },
+  chipTeam: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 9,
+    letterSpacing: 0.5,
+    color: chalk.dim,
+    textTransform: 'uppercase',
+  },
+  chipAge: {
+    fontFamily: fonts.data,
+    fontSize: 9,
+    color: chalk.dim,
   },
   chipTier: {
     fontFamily: fonts.uiSemi,

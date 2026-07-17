@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuickSet cards — 1 · Inline (FB #140)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ─────────
+     Position + tier hexes are the CANONICAL values from
+     docs/cross-client-invariants.md. Fonts render as Barlow Condensed /
+     Archivo / IBM Plex Mono when installed; offline fallbacks are
+     Arial Narrow / Helvetica / Menlo. Zero external requests. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#3D4654;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --on-ice:#071013;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --t4plus:#f87171; --t3:#e879f9; --t2:#fbbf24; --t1:#2dd4bf;
+    --t2nd:#38bdf8; --t3rd:#f472b6; --t4th:#a3e635; --twav:#7a7f96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:24px 16px 64px}
+
+  .note{max-width:640px;width:100%;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:8px;padding:16px 20px;margin-bottom:24px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.1;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note ul{margin:0;padding-left:18px;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .note li{margin-bottom:4px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note a{color:var(--ice);text-decoration:none;font-size:12px}
+  .note .back{display:inline-block;margin-bottom:10px}
+  .note .m{font-family:var(--mono)}
+
+  /* ── iPhone frame, 390×844, clipped at the fold ── */
+  .phone{position:relative;width:390px;height:844px;background:var(--ink-0);
+         border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;flex:none}
+  .statusbar{height:44px;display:flex;align-items:flex-end;justify-content:space-between;
+             padding:0 20px 6px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)}
+  .batt{display:inline-block;width:20px;height:10px;border:1px solid var(--chalk-dim);
+        border-radius:2px;position:relative}
+  .batt::after{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:70%;
+               background:var(--chalk-dim)}
+  .titlerow{display:flex;align-items:center;gap:8px;padding:4px 16px 2px}
+  .chev{width:16px;height:16px;fill:none;stroke:var(--chalk-dim);stroke-width:1.75;
+        stroke-linecap:square;flex:none}
+  .title{font-family:var(--cond);font-weight:600;font-size:22px;letter-spacing:.03em;
+         text-transform:uppercase}
+
+  /* #137 FormatToggle — PositionTabs construction, ice underline (action) */
+  .fmt{display:flex;margin:8px 16px 0;background:var(--ink-1);border:1px solid var(--line);
+       border-radius:4px;overflow:hidden}
+  .fseg{flex:1;min-height:36px;display:flex;align-items:center;justify-content:center;
+        font:600 11px var(--ui);letter-spacing:.08em;color:var(--chalk-dim);
+        border-bottom:2px solid transparent}
+  .fseg.active{background:var(--ink-3);color:var(--chalk);border-bottom-color:var(--ice)}
+  .fseg + .fseg{border-left:1px solid var(--line)}
+
+  /* Position switcher — active underline = position color (WR) */
+  .tabs{display:flex;margin:8px 16px 0;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:4px;overflow:hidden}
+  .tab{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;
+       font:600 11px var(--ui);letter-spacing:.08em;color:var(--chalk-dim);
+       border-bottom:2px solid transparent}
+  .tab.active{background:var(--ink-3);color:var(--chalk);border-bottom-color:var(--wr)}
+
+  /* Step header — tier tick-label + walk progress */
+  .stephead{padding:12px 16px 8px}
+  .trow{display:flex;align-items:center;gap:8px}
+  .tick{width:14px;height:3px;background:var(--t2);flex:none}
+  .tlabel{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--t2)}
+  .prog{margin-left:auto;font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+        color:var(--chalk-dim)}
+  .hint{margin-top:4px;font:400 13px/1.4 var(--ui);color:var(--chalk-dim)}
+
+  /* #138 search — Input construction */
+  .search{height:40px;margin:0 16px 8px;background:var(--ink-2);border:1px solid var(--line-strong);
+          border-radius:4px;display:flex;align-items:center;padding:0 12px;
+          font:400 14px var(--ui);color:var(--chalk-faint)}
+
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:0 16px 96px}
+
+  /* ── CHIP, VARIANT 1 "INLINE" — 48px unchanged; team+age appended to
+     the NAME line as 9px chalk-dim microtext. Name is the flexible run
+     (min-width:0 + ellipsis); the inline meta and check are flex:none,
+     exactly the RN flexbox behavior. ── */
+  .chip{min-height:48px;background:var(--ink-1);border:1px solid var(--line);border-radius:4px;
+        padding:6px 8px;display:flex;flex-direction:column;justify-content:center;min-width:0}
+  .chip.sel{border-color:var(--ice)}
+  .top{display:flex;align-items:center;gap:4px;min-width:0}
+  .nm{font:600 12px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+      text-overflow:ellipsis;min-width:0}
+  .inl{font:600 9px var(--ui);letter-spacing:.3px;color:var(--chalk-dim);white-space:nowrap;
+       flex:none}
+  .inl .age{font-family:var(--mono);font-weight:500}
+  .chk{flex:none;margin-left:auto;width:12px;height:12px;stroke:var(--ice);fill:none;
+       stroke-width:1.75;stroke-linecap:square}
+  .rb{flex:none;margin-left:auto;min-width:16px;height:16px;padding:0 2px;border:1px solid var(--ice);
+      border-radius:2px;display:flex;align-items:center;justify-content:center;
+      font:600 10px var(--mono);color:var(--ice)}
+  .meta{display:flex;align-items:center;gap:6px;margin-top:2px}
+  .pos{font:600 9px var(--ui);letter-spacing:.5px;color:var(--wr);flex:none}
+  .ct{font:600 9px var(--ui);letter-spacing:.5px;text-transform:uppercase;flex:none}
+  .ct.t3{color:var(--t3)} .ct.t2{color:var(--t2)} .ct.t1{color:var(--t1)} .ct.t2nd{color:var(--t2nd)}
+
+  /* Footer — Back / Skip / Save (ice) */
+  .footer{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:8px;
+          padding:12px;background:var(--ink-0);border-top:1px solid var(--line)}
+  .ghost{height:36px;display:flex;align-items:center;padding:0 10px;
+         font:600 12px var(--ui);color:var(--chalk)}
+  .sec{height:36px;display:flex;align-items:center;padding:0 12px;border:1px solid var(--line-strong);
+       border-radius:4px;font:600 12px var(--ui);color:var(--chalk)}
+  .save{flex:1;height:40px;border-radius:4px;background:var(--ice);color:var(--on-ice);
+        display:flex;align-items:center;justify-content:center;font:600 14px var(--ui)}
+
+  /* Quick Rank demo strip (separate screen in the app — shown detached) */
+  .qr{width:390px;margin-top:16px}
+  .qrhead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .qrhead .tick{background:var(--t1)}
+  .qrhead .lab{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+               color:var(--t1)}
+  .qrhead .sub{margin-left:auto;font:600 10px var(--ui);letter-spacing:.06em;
+               text-transform:uppercase;color:var(--chalk-faint)}
+  .qr .grid{padding:0}
+  .cap{width:390px;margin-top:12px;font:400 12px/1.5 var(--ui);color:var(--chalk-faint)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <a class="back" href="index.html">&larr; All card variants</a>
+  <h1>1 &middot; Inline &mdash; name-line microtext, chip unchanged</h1>
+  <ul>
+    <li><strong>Chip: unchanged</strong> &mdash; <span class="m">&asymp;117&times;48px</span> (3-per-row at 390px: (390&minus;32&minus;8)/3), interior text run <span class="m">&asymp;99px</span>, pitch <span class="m">52px</span>, <strong>&asymp;9 rows / 27 chips per screenful</strong> (grid viewport &asymp;480px) &mdash; zero density cost.</li>
+    <li><strong>What's added:</strong> <span class="m">&middot; LAR &middot; 25</span> appended to the name line &mdash; 9px chalk-dim, age numeral in Plex Mono. Meta line untouched (position + current tier, the walk's required signal).</li>
+    <li><strong>Measured truncation cost:</strong> the inline run is <span class="m">&asymp;45px</span>, cutting the name run from <span class="m">&asymp;99px</span> to <span class="m">&asymp;54px</span> (&asymp;8 chars at 12px) &mdash; <span class="m">&asymp;38px</span> (&asymp;6 chars) on selected chips once the check lands. Full two-word names (<span class="m">&asymp;95&ndash;110px</span>) never fit: display names must initialize (&ldquo;P.&nbsp;Nacua&rdquo;), and even initialized, &ldquo;J.&nbsp;Smith-Njigba&rdquo; / &ldquo;M.&nbsp;Harrison&nbsp;Jr.&rdquo; still ellipsize &mdash; watch rows 2, 3 and 9 below.</li>
+    <li><strong>Meta-line alternative</strong> (append to line 2: <span class="m">WR &middot; 2 1STS &middot; MIN &middot; 26</span>) measures <span class="m">&asymp;110px</span> against the same &asymp;99px budget &mdash; overflows outright on the two widest tier labels (&ldquo;4+ 1STS&rdquo;), so it isn't rendered.</li>
+    <li><strong>States rendered:</strong> 5 selected (ice border + check, two signals); the strip under the frame shows the same chip in the Quick Rank walk &mdash; rank badge (16px, radius 2px, ice border, Plex Mono numeral) replacing the check.</li>
+    <li><strong>Honest tradeoff:</strong> cheapest vertically, most expensive horizontally. The name &mdash; the one thing you scan a 27-chip grid for &mdash; pays for everything, and it pays most on exactly the chips you already selected.</li>
+  </ul>
+</div>
+
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+  <div class="titlerow">
+    <svg class="chev" viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></svg>
+    <div class="title">Quick Set</div>
+  </div>
+  <div class="fmt"><div class="fseg active">1QB PPR</div><div class="fseg">SF TEP</div></div>
+  <div class="tabs">
+    <div class="tab">QB</div><div class="tab">RB</div>
+    <div class="tab active">WR</div><div class="tab">TE</div>
+  </div>
+  <div class="stephead">
+    <div class="trow"><span class="tick"></span><span class="tlabel">2 1sts</span>
+      <span class="prog">Tier 3 of 8</span></div>
+    <div class="hint">Tap every WR who belongs in 2 1sts, then save to move on.
+      Each card shows the tier the player is in now.</div>
+  </div>
+  <div class="search">Search WRs&hellip;</div>
+  <div class="grid" id="grid"></div>
+  <div class="footer">
+    <div class="ghost">Back</div>
+    <div class="sec">Skip</div>
+    <div class="save">Save 2 1sts (5)</div>
+  </div>
+</div>
+
+<div class="qr">
+  <div class="qrhead"><span class="tick"></span><span class="lab">1st</span>
+    <span class="sub">Same chip in Quick Rank (#136) &mdash; rank badge replaces the check</span></div>
+  <div class="grid" id="qrgrid"></div>
+  <div class="cap">Quick Rank is its own screen; this detached row shows the variant's other
+  selected state. Tap order stamps the badge numeral; the inline name-line meta behaves
+  identically (and collides with the 16px badge sooner than with the 12px check).</div>
+</div>
+
+<div class="cap">Step shown: WR walk, tier 3 of 8 (&ldquo;2 1sts&rdquo; #fbbf24). 27-player pool
+(a realistic unclaimed-WR grid &mdash; the real list scrolls; the frame clips at the fold under
+the pinned footer). Teams and ages are real as of July 2026; age is a bare numeral per the
+spec. Names are pre-initialized &mdash; the only way this variant survives 3-per-row.</div>
+
+<script>
+// [initialized name, team, age, current-tier key, selected]
+const P=[
+["P. Nacua","LAR",25,"t3",1],["N. Collins","HOU",27,"t2",1],["D. London","ATL",24,"t2",1],
+["B. Thomas Jr.","JAX",23,"t2",1],["A.J. Brown","PHI",29,"t2",0],["J. Smith-Njigba","SEA",24,"t2",0],
+["G. Wilson","NYJ",25,"t1",1],["M. Harrison Jr.","ARI",23,"t1",0],["T. Higgins","CIN",27,"t1",0],
+["D. Smith","PHI",27,"t1",0],["R. Odunze","CHI",24,"t1",0],["L. McConkey","LAC",24,"t1",0],
+["T. Hill","MIA",32,"t1",0],["DJ Moore","CHI",29,"t1",0],["D. Adams","LAR",33,"t1",0],
+["Z. Flowers","BAL",25,"t1",0],["G. Pickens","DAL",25,"t1",0],["J. Waddle","MIA",27,"t1",0],
+["C. Olave","NO",26,"t1",0],["J. Addison","MIN",24,"t1",0],["X. Worthy","KC",23,"t1",0],
+["J. Williams","DET",25,"t1",0],["T. McLaurin","WAS",30,"t2nd",0],["R. Rice","KC",26,"t1",0],
+["K. Coleman","BUF",23,"t2nd",0],["J. Downs","IND",24,"t2nd",0],["M. Mims Jr.","DEN",24,"t2nd",0]];
+const CT={t3:"3 1sts",t2:"2 1sts",t1:"1st",t2nd:"2nd"};
+const CHK='<svg class="chk" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg>';
+function chip(n,tm,age,ct,state){ // state: 0 none, 1 check, {r:n} rank badge, -1 unstamped QR
+  const sel=state===1||typeof state==="object";
+  const end=state===1?CHK:(typeof state==="object"?`<span class="rb">${state.r}</span>`:"");
+  return `<div class="chip${sel?" sel":""}">
+    <div class="top"><span class="nm">${n}</span><span class="inl">&middot; ${tm} &middot; <span class="age">${age}</span></span>${end}</div>
+    <div class="meta"><span class="pos">WR</span><span class="ct ${ct}">${CT[ct]}</span></div>
+  </div>`;}
+document.getElementById("grid").innerHTML=
+  P.map(p=>chip(p[0],p[1],p[2],p[3],p[4])).join("");
+document.getElementById("qrgrid").innerHTML=
+  chip("T. Higgins","CIN",27,"t1",{r:1})+
+  chip("D. Smith","PHI",27,"t1",{r:2})+
+  chip("R. Odunze","CHI",24,"t1",-1);
+</script>
+</body>
+</html>

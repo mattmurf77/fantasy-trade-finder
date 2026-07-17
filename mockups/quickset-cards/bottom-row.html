@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuickSet cards — 4 · Bottom-row (operator direction, FB #140)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ─────────
+     Position + tier hexes are the CANONICAL values from
+     docs/cross-client-invariants.md. Fonts render as Barlow Condensed /
+     Archivo / IBM Plex Mono when installed; offline fallbacks are
+     Arial Narrow / Helvetica / Menlo. Zero external requests.
+
+     CHIP VALUES ARE THE SHIPPING ONES from QuickSetTiersScreen.tsx:
+     minHeight 48 · padding 6/8 · radius 4 · 1px line border ·
+     name 12px uiSemi (numberOfLines=1, ellipsis) ·
+     meta gap 6, marginTop 2 · pos/tier 9px uiSemi, tracking 0.5.
+     Nothing is resized in the main frame — only the meta row gains
+     TEAM + AGE. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#3D4654;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --on-ice:#071013;   --flare:#F0508C;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --t4plus:#f87171; --t3:#e879f9; --t2:#fbbf24; --t1:#2dd4bf;
+    --t2nd:#38bdf8; --t3rd:#f472b6; --t4th:#a3e635; --twav:#7a7f96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:24px 16px 64px}
+
+  .note{max-width:680px;width:100%;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:8px;padding:16px 20px;margin-bottom:24px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.1;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note ul{margin:0;padding-left:18px;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .note li{margin-bottom:4px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note a{color:var(--ice);text-decoration:none;font-size:12px}
+  .note .back{display:inline-block;margin-bottom:10px}
+  .note .m{font-family:var(--mono)}
+
+  .phone{position:relative;width:390px;height:844px;background:var(--ink-0);
+         border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;flex:none}
+  .statusbar{height:44px;display:flex;align-items:flex-end;justify-content:space-between;
+             padding:0 20px 6px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)}
+  .batt{display:inline-block;width:20px;height:10px;border:1px solid var(--chalk-dim);
+        border-radius:2px;position:relative}
+  .batt::after{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:70%;
+               background:var(--chalk-dim)}
+  .titlerow{display:flex;align-items:center;gap:8px;padding:4px 16px 2px}
+  .chev{width:16px;height:16px;fill:none;stroke:var(--chalk-dim);stroke-width:1.75;
+        stroke-linecap:square;flex:none}
+  .title{font-family:var(--cond);font-weight:600;font-size:22px;letter-spacing:.03em;
+         text-transform:uppercase}
+
+  .fmt{display:flex;margin:8px 16px 0;background:var(--ink-1);border:1px solid var(--line);
+       border-radius:4px;overflow:hidden}
+  .fseg{flex:1;min-height:36px;display:flex;align-items:center;justify-content:center;
+        font:600 11px var(--ui);letter-spacing:.08em;color:var(--chalk-dim);
+        border-bottom:2px solid transparent}
+  .fseg.active{background:var(--ink-3);color:var(--chalk);border-bottom-color:var(--ice)}
+  .fseg + .fseg{border-left:1px solid var(--line)}
+
+  .tabs{display:flex;margin:8px 16px 0;background:var(--ink-1);border:1px solid var(--line);
+        border-radius:4px;overflow:hidden}
+  .tab{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;
+       font:600 11px var(--ui);letter-spacing:.08em;color:var(--chalk-dim);
+       border-bottom:2px solid transparent}
+  .tab.active{background:var(--ink-3);color:var(--chalk);border-bottom-color:var(--wr)}
+
+  .stephead{padding:12px 16px 8px}
+  .trow{display:flex;align-items:center;gap:8px}
+  .tick{width:14px;height:3px;background:var(--t2);flex:none}
+  .tlabel{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--t2)}
+  .prog{margin-left:auto;font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+        color:var(--chalk-dim)}
+  .hint{margin-top:4px;font:400 13px/1.4 var(--ui);color:var(--chalk-dim)}
+
+  .search{height:40px;margin:0 16px 8px;background:var(--ink-2);border:1px solid var(--line-strong);
+          border-radius:4px;display:flex;align-items:center;padding:0 12px;
+          font:400 14px var(--ui);color:var(--chalk-faint)}
+
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:0 16px 96px}
+
+  /* ── CHIP — SHIPPING DIMENSIONS, unchanged. Only the meta row content
+     changes: POS · TEAM · AGE · TIER (gap-separated like today; no dot
+     glyphs — the current chip uses bare 6px gaps, and dots would add
+     ~12px the row doesn't have). ── */
+  .chip{min-height:48px;background:var(--ink-1);border:1px solid var(--line);border-radius:4px;
+        padding:6px 8px;display:flex;flex-direction:column;justify-content:center;min-width:0}
+  .chip.sel{border-color:var(--ice)}
+  .top{display:flex;align-items:center;gap:4px;min-width:0}
+  .nm{font:600 12px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+      text-overflow:ellipsis;min-width:0}
+  .chk{flex:none;margin-left:auto;width:12px;height:12px;stroke:var(--ice);fill:none;
+       stroke-width:1.75;stroke-linecap:square}
+  .rb{flex:none;margin-left:auto;min-width:16px;height:16px;padding:0 2px;border:1px solid var(--ice);
+      border-radius:2px;display:flex;align-items:center;justify-content:center;
+      font:600 10px var(--mono);color:var(--ice)}
+  .meta{display:flex;align-items:center;gap:6px;margin-top:2px;white-space:nowrap}
+  .meta > *{flex:none}
+  .pos{font:600 9px var(--ui);letter-spacing:.5px}
+  .pos.wr{color:var(--wr)} .pos.qb{color:var(--qb)} .pos.rbp{color:var(--rb)} .pos.te{color:var(--te)}
+  .tm{font:600 9px var(--ui);letter-spacing:.5px;color:var(--chalk-dim);text-transform:uppercase}
+  .age{font:500 9px var(--mono);color:var(--chalk-dim)}
+  .ct{font:600 9px var(--ui);letter-spacing:.5px;text-transform:uppercase}
+  .ct.t4plus{color:var(--t4plus)} .ct.t3{color:var(--t3)} .ct.t2{color:var(--t2)}
+  .ct.t1{color:var(--t1)} .ct.t2nd{color:var(--t2nd)} .ct.twav{color:var(--twav)}
+
+  /* Deviation-option chips (stress strip 2 only) */
+  .chip.g4 .meta{gap:4px}
+  .chip.shrinktier .meta .ct{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+
+  .footer{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:8px;
+          padding:12px;background:var(--ink-0);border-top:1px solid var(--line)}
+  .ghost{height:36px;display:flex;align-items:center;padding:0 10px;
+         font:600 12px var(--ui);color:var(--chalk)}
+  .sec{height:36px;display:flex;align-items:center;padding:0 12px;border:1px solid var(--line-strong);
+       border-radius:4px;font:600 12px var(--ui);color:var(--chalk)}
+  .save{flex:1;height:40px;border-radius:4px;background:var(--ice);color:var(--on-ice);
+        display:flex;align-items:center;justify-content:center;font:600 14px var(--ui)}
+
+  .strip{width:390px;margin-top:20px}
+  .striphead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .striphead .tick{flex:none}
+  .striphead.st .tick{background:var(--flare)}
+  .striphead.dev .tick{background:var(--ice)}
+  .striphead.qr .tick{background:var(--t1)}
+  .striphead .lab{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+                  color:var(--chalk)}
+  .striphead.qr .lab{color:var(--t1)}
+  .striphead .sub{margin-left:auto;font:600 10px var(--ui);letter-spacing:.06em;
+                  text-transform:uppercase;color:var(--chalk-faint);text-align:right}
+  /* Strip grids use FIXED 116px columns = the exact in-frame chip width
+     ((388 inner − 32 padding − 8 gaps) / 3), so measurements match the walk. */
+  .strip .grid{padding:0;grid-template-columns:repeat(3,116px);justify-content:start}
+  .cap{width:390px;margin-top:10px;font:400 12px/1.5 var(--ui);color:var(--chalk-faint)}
+
+  /* Live fit readout — measured from the rendered stress chips */
+  .fit{width:390px;margin-top:8px;border:1px solid var(--line);border-radius:4px;
+       font:500 11px var(--mono);color:var(--chalk-dim)}
+  .fit div{display:flex;justify-content:space-between;padding:5px 8px;
+           border-bottom:1px solid var(--line)}
+  .fit div:last-child{border-bottom:none}
+  .fit b{font-weight:600}
+  .fit .ok{color:var(--rb)} .fit .over{color:#EF4444}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <a class="back" href="index.html">&larr; All card variants</a>
+  <h1>4 &middot; Bottom-row &mdash; current chip, meta row extended</h1>
+  <ul>
+    <li><strong>Operator direction (FB #140):</strong> names already fit today, so nothing about
+    the chip changes &mdash; <strong>shipping dimensions and type sizes exactly</strong>
+    (<span class="m">QuickSetTiersScreen.tsx</span>: chip <span class="m">&asymp;117&times;48px</span>
+    at 3-per-row, padding 6/8, radius 4; name 12px Archivo semi, 1 line + ellipsis; meta row
+    9px, 6px gaps, tracking 0.5). The <strong>only</strong> change: the bottom meta row extends to
+    <strong>POS &middot; TEAM &middot; AGE &middot; TIER</strong> &mdash; team 9px chalk-dim uppercase,
+    age 9px Plex Mono (data-numeral rule), position and tier keeping their encode colors.
+    Separators are the chip's existing bare 6px gaps &mdash; adding literal dot glyphs would
+    spend ~12px the row doesn't have.</li>
+    <li><strong>The question this page answers:</strong> does the extended row fit the chip's
+    <span class="m">&asymp;98px</span> interior run at those exact sizes? The
+    <strong>live readout under the stress strip measures the rendered rows on this page</strong>,
+    and this machine has the real Archivo / IBM Plex Mono installed &mdash; the numbers below are
+    true app-font metrics, not fallback guesses.</li>
+    <li><strong>Measured verdict (real Archivo metrics):</strong> the operator's example
+    <span class="m">WR MIN 26 2 1STS</span> measures <span class="m">&asymp;97px</span> &mdash;
+    <strong>fits, but with only &asymp;1px to spare</strong> (razor-thin; same for
+    <span class="m">3 1STS</span> &mdash; the gap-4 fix below buys these &asymp;7px of margin);
+    1ST / 2ND / 3RD / 4TH fit comfortably (&asymp;15&ndash;25px of slack).
+    The two widest labels do NOT fit: <span class="m">4+ 1STS</span> with a 3-char team measures
+    <span class="m">&asymp;103px</span> (<strong>over by &asymp;5px</strong>) and
+    <span class="m">WAIVERS</span> measures <span class="m">&asymp;111px</span>
+    (<strong>over by &asymp;13px</strong>) &mdash; shown spilling honestly in stress chips 2&ndash;3,
+    no ellipsis applied.</li>
+    <li><strong>Smallest deviation (needed only for those two labels), in order:</strong>
+    (a) meta gap 6&rarr;4px &mdash; clears <span class="m">4+ 1STS</span> (&asymp;97px, &asymp;1px
+    spare) but <span class="m">WAIVERS</span> stays &asymp;7px over; (b) let the
+    <strong>tier label alone</strong> take <span class="m">flexShrink</span> + ellipsis &mdash;
+    name, team, age never truncate, and with (a) applied the ellipsis only ever fires on
+    WAIVERS-tier chips; both rendered in the deviation strip. (c) Bigger lever needing
+    sign-off: drop the on-chip POS token (the grid is position-scoped; the active tab names
+    it) &mdash; frees &asymp;19px, worst case measures &asymp;89px and everything fits with
+    &asymp;9px slack, but it removes text the operator specced onto this row, so it's shown
+    last, not assumed.</li>
+    <li><strong>States rendered:</strong> 5 selected in the walk (ice border + check &mdash;
+    line-1 state, meta row unaffected); Quick Rank strip below shows the rank-badge state
+    (line 2 = POS &middot; TEAM &middot; AGE, no tier &mdash; Quick Rank already ships POS + TEAM
+    today, so there #140 only adds the age numeral: &asymp;55px used, trivially fits).</li>
+  </ul>
+</div>
+
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+  <div class="titlerow">
+    <svg class="chev" viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></svg>
+    <div class="title">Quick Set</div>
+  </div>
+  <div class="fmt"><div class="fseg active">1QB PPR</div><div class="fseg">SF TEP</div></div>
+  <div class="tabs">
+    <div class="tab">QB</div><div class="tab">RB</div>
+    <div class="tab active">WR</div><div class="tab">TE</div>
+  </div>
+  <div class="stephead">
+    <div class="trow"><span class="tick"></span><span class="tlabel">2 1sts</span>
+      <span class="prog">Tier 3 of 8</span></div>
+    <div class="hint">Tap every WR who belongs in 2 1sts, then save to move on.
+      Each card shows the tier the player is in now.</div>
+  </div>
+  <div class="search">Search WRs&hellip;</div>
+  <div class="grid" id="grid"></div>
+  <div class="footer">
+    <div class="ghost">Back</div>
+    <div class="sec">Skip</div>
+    <div class="save">Save 2 1sts (5)</div>
+  </div>
+</div>
+<div class="cap">The walk, unchanged except the meta row: WR step, tier 3 of 8
+(&ldquo;2 1sts&rdquo; #fbbf24), 29-player pool sorted Elo-desc, 5 selected; the real list
+scrolls and the frame clips at the fold under the pinned footer. Teams and ages are real as
+of July 2026; age is a bare numeral; free agents render the standard FA fallback. Names
+behave exactly as today (single line, ellipsis) &mdash; the name line is untouched.</div>
+
+<div class="strip">
+  <div class="striphead st"><span class="tick"></span><span class="lab">Stress test</span>
+    <span class="sub">Widest meta combos at shipping sizes &mdash; no fixes applied</span></div>
+  <div class="grid" id="stress"></div>
+  <div class="fit" id="fitout"></div>
+  <div class="cap">Measured live from this page: meta-row content width vs the chip's interior
+  run. Chip 3 (WAIVERS + 3-char team) is left overflowing on purpose &mdash; that spill is the
+  honest picture at current sizes, not a rendering bug.</div>
+</div>
+
+<div class="strip">
+  <div class="striphead dev"><span class="tick"></span><span class="lab">Smallest deviation</span>
+    <span class="sub">Same worst case under each candidate fix</span></div>
+  <div class="grid" id="dev"></div>
+  <div class="cap">All three render the worst case (WAS &middot; 30 &middot; Waivers). Left:
+  meta gap 6&rarr;4px. Middle: tier label alone shrinks/ellipsizes (name, team, age intact).
+  Right: POS token dropped &mdash; fits with slack, but deviates from the directed row spec;
+  needs sign-off.</div>
+</div>
+
+<div class="strip">
+  <div class="striphead qr"><span class="tick"></span><span class="lab">1st</span>
+    <span class="sub">Same chip in Quick Rank (#136) &mdash; rank badge replaces the check</span></div>
+  <div class="grid" id="qrgrid"></div>
+  <div class="cap">Quick Rank is its own screen; this detached row shows the variant's other
+  selected state. Its chip already renders POS &middot; TEAM today &mdash; #140 only slots the
+  age between them; no tier label on Quick Rank chips (the step header owns the tier).</div>
+</div>
+
+<script>
+// [full name, pos key, team, age, current-tier key, selected]
+const P=[
+["Puka Nacua","wr","LAR",25,"t3",1],["Amon-Ra St. Brown","wr","DET",26,"t3",1],
+["Nico Collins","wr","HOU",27,"t2",1],["Drake London","wr","ATL",24,"t2",1],
+["A.J. Brown","wr","PHI",29,"t2",0],["Jaxon Smith-Njigba","wr","SEA",24,"t2",0],
+["Garrett Wilson","wr","NYJ",25,"t1",1],["Marvin Harrison Jr.","wr","ARI",23,"t1",0],
+["Tee Higgins","wr","CIN",27,"t1",0],["DeVonta Smith","wr","PHI",27,"t1",0],
+["Rome Odunze","wr","CHI",24,"t1",0],["Ladd McConkey","wr","LAC",24,"t1",0],
+["Tyreek Hill","wr","MIA",32,"t1",0],["DJ Moore","wr","CHI",29,"t1",0],
+["Davante Adams","wr","LAR",33,"t1",0],["Zay Flowers","wr","BAL",25,"t1",0],
+["George Pickens","wr","DAL",25,"t1",0],["Jaylen Waddle","wr","MIA",27,"t1",0],
+["Chris Olave","wr","NO",26,"t1",0],["Jordan Addison","wr","MIN",24,"t1",0],
+["Xavier Worthy","wr","KC",23,"t1",0],["Jameson Williams","wr","DET",25,"t1",0],
+["Terry McLaurin","wr","WAS",30,"t2nd",0],["Rashee Rice","wr","KC",26,"t1",0],
+["Keon Coleman","wr","BUF",23,"t2nd",0],["Josh Downs","wr","IND",24,"t2nd",0],
+["Jayden Reed","wr","GB",26,"t2nd",0],["Ricky Pearsall","wr","SF",25,"t2nd",0],
+["Marvin Mims Jr.","wr","DEN",24,"t2nd",0]];
+const CT={t4plus:"4+ 1sts",t3:"3 1sts",t2:"2 1sts",t1:"1st",t2nd:"2nd",twav:"Waivers"};
+const POSL={wr:"WR",qb:"QB",rbp:"RB",te:"TE"};
+const CHK='<svg class="chk" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg>';
+// state: 0 none, 1 check, {r:n} rank badge, -1 unstamped QR. cls: extra chip class.
+function chip(n,pos,tm,age,ct,state,cls){
+  const sel=state===1||typeof state==="object";
+  const end=state===1?CHK:(typeof state==="object"?`<span class="rb">${state.r}</span>`:"");
+  const qr=typeof state==="object"||state===-1;
+  const tierBit=qr?"":`<span class="ct ${ct}">${CT[ct]}</span>`;
+  return `<div class="chip${sel?" sel":""}${cls?" "+cls:""}">
+    <div class="top"><span class="nm">${n}</span>${end}</div>
+    <div class="meta"><span class="pos ${pos}">${POSL[pos]}</span><span class="tm">${tm}</span><span class="age">${age}</span>${tierBit}</div>
+  </div>`;}
+function chipNoPos(n,tm,age,ct){
+  return `<div class="chip">
+    <div class="top"><span class="nm">${n}</span></div>
+    <div class="meta"><span class="tm">${tm}</span><span class="age">${age}</span><span class="ct ${ct}">${CT[ct]}</span></div>
+  </div>`;}
+document.getElementById("grid").innerHTML=P.map(p=>chip(...p)).join("");
+// Stress: operator's example, widest pick label, widest label overall + wide team.
+document.getElementById("stress").innerHTML=
+  chip("Justin Jefferson","wr","MIN",27,"t2",0)+
+  chip("Jaxon Smith-Njigba","wr","SEA",24,"t4plus",0)+
+  chip("Terry McLaurin","wr","WAS",30,"twav",0);
+document.getElementById("dev").innerHTML=
+  chip("Terry McLaurin","wr","WAS",30,"twav",0,"g4")+
+  chip("Terry McLaurin","wr","WAS",30,"twav",0,"shrinktier")+
+  chipNoPos("Terry McLaurin","WAS",30,"twav");
+document.getElementById("qrgrid").innerHTML=
+  chip("Tee Higgins","wr","CIN",27,"t1",{r:1})+
+  chip("Amon-Ra St. Brown","wr","DET",26,"t1",{r:2})+
+  chip("Rome Odunze","wr","CHI",24,"t1",-1);
+// Live fit readout: content width of each stress meta row vs chip interior run.
+function measureFit(){
+  const labels=["WR MIN 26 2 1STS (operator example)","WR SEA 24 4+ 1STS (widest pick label)",
+                "WR WAS 30 WAIVERS (widest overall)"];
+  const out=[];
+  document.querySelectorAll("#stress .chip").forEach((c,i)=>{
+    const m=c.querySelector(".meta");
+    const avail=Math.round(m.clientWidth);
+    let used=0;const gap=parseFloat(getComputedStyle(m).gap)||6;
+    const kids=m.children;
+    for(const k of kids)used+=k.getBoundingClientRect().width;
+    used=Math.round(used+gap*(kids.length-1));
+    const d=used-avail;
+    const verdict=d<=0?("&mdash; fits ("+(-d)+"px spare)"):("&mdash; over by "+d+"px");
+    out.push('<div><span>'+labels[i]+'</span><b class="'+(d<=0?"ok":"over")+'">'
+      +used+'px / '+avail+'px '+verdict+'</b></div>');
+  });
+  document.getElementById("fitout").innerHTML=out.join("");
+}
+measureFit();
+window.addEventListener("load",measureFit); // re-measure once local fonts are in
+</script>
+</body>
+</html>

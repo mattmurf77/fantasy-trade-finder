@@ -2004,7 +2004,7 @@
     // backend/tier_config.json (2026-07-12, #117) — bands are position- and
     // format-uniform in Elo space (docs/cross-client-invariants.md).
     // Returns one of '4+ 1sts' / '3 1sts' / '2 1sts' / '1st' / '2nd' /
-    // '3rd' / '4th' / 'Waivers', or '' when ELO is missing.
+    // '3rd' / '4th' / 'FA', or '' when ELO is missing.
     function _eloToTierLabel(elo, position) {
       if (elo == null || isNaN(elo)) return '';
       if (elo >= 1927) return '4+ 1sts';
@@ -2014,7 +2014,7 @@
       if (elo >= 1400) return '2nd';
       if (elo >= 1280) return '3rd';
       if (elo >= 1220) return '4th';
-      return 'Waivers';
+      return 'FA';
     }
 
     function renderRankingsTable() {

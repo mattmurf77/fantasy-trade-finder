@@ -38,6 +38,12 @@ import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/type
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
 
+// #140 — same conditional-POS rule as the Quick set walk: this walk is
+// position-scoped (the active tab names the position), so the chip's POS
+// token is redundant and its width goes to TEAM + AGE. Conditional, not
+// deleted: cross-position reuse flips this on.
+const SHOW_POSITION = false;
+
 // #136 — Quick Rank: the within-tier polish pass after Quick Set. Same
 // guided construction as QuickSetTiersScreen (position tabs, tier-by-tier
 // walk down the 8-tier ladder, per-tier save), but instead of assigning
@@ -242,10 +248,15 @@ export default function QuickRankScreen() {
             ) : null}
           </View>
           <View style={styles.chipMeta}>
-            <Text style={[styles.chipPos, { color: positionColors[posKey] ?? chalk.dim }]}>
-              {item.position}
-            </Text>
+            {SHOW_POSITION ? (
+              <Text style={[styles.chipPos, { color: positionColors[posKey] ?? chalk.dim }]}>
+                {item.position}
+              </Text>
+            ) : null}
             <Text style={styles.chipTeam}>{item.team ?? 'FA'}</Text>
+            {item.age != null ? (
+              <Text style={styles.chipAge}>{item.age}</Text>
+            ) : null}
           </View>
         </Pressable>
       );
@@ -561,6 +572,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     color: chalk.dim,
     textTransform: 'uppercase',
+  },
+  // #140 — age numeral: 9px Plex Mono (data-numeral rule), chalk-dim,
+  // bare-gap separated like the rest of the meta row.
+  chipAge: {
+    fontFamily: fonts.data,
+    fontSize: 9,
+    color: chalk.dim,
   },
   emptyText: {
     ...type.bodySm,

@@ -38,7 +38,7 @@
     second:       '2nd',
     third:        '3rd',
     fourth:       '4th',
-    waivers:      'Waivers',
+    waivers:      'FA',
   };
 
   // Ranking state (per active league)

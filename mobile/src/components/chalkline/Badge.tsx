@@ -34,7 +34,7 @@ const TIER_BADGE_LABEL: Record<keyof typeof tier, string> = {
   second: '2nd',
   third: '3rd',
   fourth: '4th',
-  waivers: 'Waivers',
+  waivers: 'FA',
 };
 
 export function TierChalkBadge({ t }: { t: keyof typeof tier }) {

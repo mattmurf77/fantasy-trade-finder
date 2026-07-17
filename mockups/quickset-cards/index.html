@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB #140 — QuickSet card team + age mockups</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#3D4654;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --flare:#F0508C; --wr:#3B82F6;
+    --t2:#fbbf24; --t1:#2dd4bf;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;justify-content:center;
+       padding:32px 16px 64px}
+  .wrap{max-width:760px;width:100%}
+  h1{font-family:var(--cond);font-weight:700;font-size:30px;line-height:1.1;
+     letter-spacing:.02em;text-transform:uppercase;margin:0 0 8px;display:flex;
+     align-items:center;gap:12px}
+  h1::before{content:"";width:18px;height:3px;background:var(--ice);flex:none}
+  .sub{font-size:13px;line-height:1.6;color:var(--chalk-dim);margin:0 0 24px}
+  .sub strong{color:var(--chalk)}
+  .sub .m{font-family:var(--mono);font-size:12px}
+
+  a.card{display:block;background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+         padding:16px 20px;margin-bottom:12px;text-decoration:none;color:var(--chalk)}
+  a.card:hover{border-color:var(--line-strong);background:var(--ink-2)}
+  a.card.lead{border-color:var(--line-strong)}
+  .card h2{font-family:var(--cond);font-weight:600;font-size:20px;letter-spacing:.03em;
+           text-transform:uppercase;margin:0 0 4px;display:flex;align-items:baseline;gap:10px}
+  .card h2 .m{font:600 13px var(--mono);color:var(--ice)}
+  .card h2 .rec{font:600 10px var(--ui);letter-spacing:.08em;color:var(--flare);
+                border:1px solid var(--flare);border-radius:2px;padding:2px 5px;
+                margin-left:auto;text-transform:uppercase}
+  .card p{margin:0;font-size:13px;line-height:1.5;color:var(--chalk-dim)}
+  .exph{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+        color:var(--chalk-faint);margin:20px 0 8px}
+
+  table{width:100%;border-collapse:collapse;margin-top:24px;font-size:12px}
+  caption{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+          color:var(--chalk-dim);text-align:left;padding-bottom:8px}
+  th{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+     color:var(--chalk-dim);text-align:left;padding:6px 10px;
+     border-bottom:1px solid var(--line-strong)}
+  td{padding:7px 10px;border-bottom:1px solid var(--line);color:var(--chalk);
+     font-variant-numeric:tabular-nums;vertical-align:top}
+  td.n{font-family:var(--mono);font-size:12px;white-space:nowrap}
+  td.dim{color:var(--chalk-dim)}
+
+  .verdict{margin-top:24px;background:var(--ink-1);border:1px solid var(--line);
+           border-left:3px solid var(--ice);border-radius:8px;padding:14px 18px}
+  .verdict h3{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+              color:var(--ice);margin:0 0 6px}
+  .verdict p{margin:0 0 8px;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .verdict p:last-child{margin-bottom:0}
+  .verdict strong{color:var(--chalk)}
+  .verdict .m{font-family:var(--mono);font-size:12px}
+  .foot{margin-top:24px;font-size:12px;line-height:1.6;color:var(--chalk-faint)}
+  .foot .m{font-family:var(--mono)}
+  .foot a{color:var(--ice);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>QuickSet cards: team + age &mdash; FB #140</h1>
+  <p class="sub">Offline design mockups for feedback #140 (&ldquo;Add team abbreviations and
+  ages to player cards&rdquo;) on the Quick set / Quick rank chip grid. Everything renders the
+  same WR step &mdash; tier 3 of 8, &ldquo;2 1sts&rdquo; <span class="m">#fbbf24</span>, a realistic
+  scrolling player pool, 5 selected &mdash; in a 390&times;844 iPhone frame with Chalkline tokens and the
+  canonical position/tier hexes, plus a detached Quick Rank (#136) row showing the
+  rank-badge state. Baseline chip today: <strong><span class="m">&asymp;117&times;48px</span>,
+  3-per-row</strong> (name 12px + position/current-tier 9px meta row),
+  <span class="m">&asymp;98px</span> interior text run. Constraint set: chips stay &ge;48px touch
+  targets, 3-per-row survives, age is a bare numeral, team is the standard abbrev.</p>
+
+  <a class="card lead" href="bottom-row.html">
+    <h2>4 &middot; Bottom-row <span class="m">current chip &middot; meta row extended</span>
+      <span class="rec">Operator direction</span></h2>
+    <p>Per operator review: chip dimensions, fonts and the name line stay EXACTLY as shipped
+    &mdash; the only change is the bottom row extending to POS &middot; TEAM &middot; AGE &middot;
+    TIER at the existing 9px. Measured live with the real Archivo metrics: the directed example
+    (&ldquo;WR&nbsp;MIN&nbsp;26&nbsp;2&nbsp;1STS&rdquo;) fits &mdash; by a razor-thin &asymp;1px &mdash;
+    and the short labels fit comfortably; the two widest labels overflow (&ldquo;4+&nbsp;1STS&rdquo;
+    +&asymp;5px, &ldquo;WAIVERS&rdquo; +&asymp;13px) &mdash; shown spilling honestly, with the three
+    smallest-deviation fixes rendered alongside.</p>
+  </a>
+
+  <div class="exph">Earlier exploration (superseded by the operator direction; kept for the record)</div>
+
+  <a class="card" href="inline.html">
+    <h2>1 &middot; Inline <span class="m">48px chip &middot; name pays</span></h2>
+    <p>&ldquo;P.&nbsp;Nacua &middot; LAR &middot; 25&rdquo; &mdash; team + age as 9px microtext on the
+    name line. Rejected by direction: it initializes/truncates names (run drops
+    &asymp;98&rarr;&asymp;54px).</p>
+  </a>
+
+  <a class="card" href="two-line.html">
+    <h2>2 &middot; Two-line <span class="m">56px chip &middot; &minus;1 row</span></h2>
+    <p>Full-width name over a &ldquo;MIN &middot; 26 &middot; 2 1STS&rdquo; meta line, chip
+    48&rarr;56px (9&rarr;8 rows per screenful). The structural fallback if bottom-row's
+    widest-label overflow is unacceptable &mdash; but it grows the chip, which the direction
+    rules out.</p>
+  </a>
+
+  <a class="card" href="rail.html">
+    <h2>3 &middot; Rail <span class="m">48px chip &middot; vertical team</span></h2>
+    <p>14px position-colored rail carries the team vertically; age in the far corner. Densest,
+    but 8px rotated type and a color-only position encoding &mdash; not pursued.</p>
+  </a>
+
+  <table>
+    <caption>At a glance (chip &asymp;117px wide at 3-per-row; interior run &asymp;98px; grid viewport &asymp;480px)</caption>
+    <tr><th>Variant</th><th>Chip height</th><th>Rows / screenful</th><th>Name truncation</th>
+        <th>Meta-row fit (measured, real fonts)</th></tr>
+    <tr><td>Today (1.7.3)</td><td class="n">48px</td><td class="n">&asymp;9 (27 chips)</td>
+        <td class="dim">&ge;&asymp;15-char names ellipsize (shipped behavior)</td>
+        <td class="dim">POS + TIER &asymp;55&ndash;60px &mdash; slack</td></tr>
+    <tr><td><strong>4 &middot; Bottom-row</strong> (directed)</td><td class="n">48px (unchanged)</td>
+        <td class="n">&asymp;9 (27) (unchanged)</td>
+        <td><strong>NONE beyond today's</strong> &mdash; name line untouched</td>
+        <td>Fits through 3 1STS (example: 97/98px, razor-thin); 4+ 1STS +&asymp;5px, WAIVERS +&asymp;13px
+        &mdash; needs the gap-4 + tier-shrink micro-fix for those two labels</td></tr>
+    <tr><td class="dim">1 &middot; Inline</td><td class="n dim">48px</td><td class="n dim">&asymp;9 (27)</td>
+        <td class="dim">Heavy &mdash; names initialize + ellipsize</td>
+        <td class="dim">n/a (meta on name line)</td></tr>
+    <tr><td class="dim">2 &middot; Two-line</td><td class="n dim">56px</td><td class="n dim">&asymp;8 (24)</td>
+        <td class="dim">Same as today</td>
+        <td class="dim">Fits (own line, &asymp;95px worst)</td></tr>
+    <tr><td class="dim">3 &middot; Rail</td><td class="n dim">48px</td><td class="n dim">&asymp;9 (27)</td>
+        <td class="dim">&asymp;2 chars worse than today</td>
+        <td class="dim">Fits (tier + age only)</td></tr>
+  </table>
+
+  <div class="verdict">
+    <h3>Fit verdict &mdash; bottom-row at exact shipping sizes</h3>
+    <p><strong>Full names at 3-per-row: unchanged from today</strong> &mdash; the name line isn't
+    touched, so nothing new truncates. <strong>The extended meta row fits for 6 of the 8 ladder
+    labels</strong>, including the directed example (<span class="m">WR MIN 26 2 1STS</span> at
+    97px of the 98px run &mdash; &asymp;1px spare, measured with the real Archivo/Plex metrics on
+    this machine; &ldquo;2/3 1STS&rdquo; chips are razor-thin, the shorter labels comfortable).</p>
+    <p><strong>The honest exception:</strong> chips whose CURRENT tier is
+    <span class="m">4+ 1STS</span> (+&asymp;5px) or <span class="m">WAIVERS</span> (+&asymp;13px)
+    overflow at current sizes. Smallest deviation, rendered in the mockup: meta gap
+    6&rarr;4px (clears 4+ 1STS) plus flexShrink + ellipsis on the tier token only &mdash; name,
+    team and age never truncate, and the ellipsis fires solely on WAIVERS-tier chips with
+    3-char teams. The bigger lever (dropping the redundant on-chip POS, &asymp;9px slack even on
+    WAIVERS) is shown for comparison but deviates from the directed row content.</p>
+  </div>
+
+  <p class="foot">Feasibility note: <span class="m">team</span> and <span class="m">age</span>
+  already ride the player payload (<span class="m">mobile/src/shared/types.ts:25-26</span>,
+  both optional), and the Quick Rank chip already renders <span class="m">item.team ?? 'FA'</span>
+  &mdash; #140 is presentational; no backend change. Teams/ages are real as of July 2026;
+  free agents render the <span class="m">FA</span> fallback. Mockups only &mdash; no app code
+  touched. Self-contained files, zero external requests; Chalkline fonts are installed on this
+  machine, so the frames and measurements use the true app typefaces. Precedent:
+  <span class="m">mockups/tier-density/</span> (FB #58, &ldquo;cozy&rdquo; shipped).<br><br>
+  First pass (pre-direction, kept for reference): <a href="current.html">A&nbsp;&middot;&nbsp;current</a>
+  &middot; <a href="team.html">B&nbsp;&middot;&nbsp;+team</a> &middot;
+  <a href="team-age.html">C&nbsp;&middot;&nbsp;+team+age</a> &mdash; C independently hit the same
+  wall now quantified in bottom-row's stress strip (widest tier labels overflow the
+  &asymp;98px meta budget).</p>
+</div>
+</body>
+</html>

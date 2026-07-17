@@ -24,7 +24,7 @@ Tier bands mirror the main app's 8-tier pick-value ladder
 | 2nd     | sky     |
 | 3rd     | pink    |
 | 4th     | lime    |
-| Waivers | gray    |
+| FA      | gray    |
 
 Hover the pill for format + league context.
 
