@@ -2011,8 +2011,29 @@ class TradeService:
             # prefers balance. Bounded reorder AFTER all gates — the
             # fairness veto still bounds |tilt| at 1 − floor.
             if FLAGS.trade_aggression_ab:
-                _variant = aggression_variant(user_id)
-                w_ab = _c("aggression_weight")
+                # Aggression migration (analytics-platform P3, LLD §6.5): when
+                # the experiment engine is on AND a `trade.aggression` experiment
+                # is running AND this user is assigned, the EXPERIMENT drives the
+                # bucket (sha256, versioned) and can override aggression_weight
+                # via its variant model_overlay. Otherwise fall back to the
+                # legacy MD5 bucket — zero behaviour change until #1 launches.
+                _variant, _overlay = None, {}
+                try:
+                    from . import experiments as _X
+                    _variant, _overlay = _X.variant_overlay(user_id, "trade.aggression")
+                except Exception:
+                    pass
+                if _variant is None:
+                    _variant = aggression_variant(user_id)   # MD5 bridge
+                # A malformed model_overlay from a running experiment must NEVER
+                # break trade generation (fail-open, LLD §6.5): a non-numeric or
+                # non-dict overlay falls back to the config default. (Bad overlays
+                # are also rejected at launch — defense in depth in experiments.py.)
+                try:
+                    _ow = _overlay.get("aggression_weight") if isinstance(_overlay, dict) else None
+                    w_ab = float(_ow) if _ow is not None else _c("aggression_weight")
+                except (TypeError, ValueError):
+                    w_ab = _c("aggression_weight")
                 for c in cards:
                     gvals = [_vs(p) for p in c.give_player_ids]
                     rvals = [_vs(p) for p in c.receive_player_ids]

@@ -742,3 +742,24 @@ Quarterly accuracy-scoring output (plan §Accuracy engine). One row per (snapsho
 | `peer_zscore` / `peer_percentile` | float | Peer-relative within the scored window / 0–100 |
 | `sample_weight` | float | Relevance-weighted assets scored (min-sample gating input) |
 | `scored_at` | str, not null | |
+
+---
+
+## Experiment engine tables (analytics platform P3)
+
+`backend/experiments.py` + `backend/analytics_stats.py`. Append-only except `experiments.status`. Gated on `experiments.engine`.
+
+### `experiment_layers`
+Per-layer bucketing salt. `layer` PK ∈ `onboarding|ranking|trades_ui|engine|growth`; `salt` = `HMAC(EXPERIMENT_SALT_KEY, layer)` in prod (deterministic constant off-prod); `created_at`. Seeded once by `_seed_experiment_layers` — **never rotate a stored salt** (reshuffles every bucket in the layer).
+
+### `experiments`
+PK `(key, version)`. `layer`, `status` (draft|running|paused|stopped|decided), `unit_type` (account|device), `hypothesis`, `bucket_start`/`bucket_end` (half-open in-layer claim, 0..10000), `targeting_json`, `variants_json` (`[{name, weight_bp, model_overlay?, client_config?}]`, weights sum 10000), `primary_metric` (program-plan catalog), `guardrails_json` (PFO five auto-attached), `exposure_surface`, `scope_json` (FR-32 stamp scope), `mde`/`alpha`/`power`, `override_underpowered`, timestamps, `decision`/`decision_rationale`/`decided_at`. Edits to a running experiment mint a new version (`revise`).
+
+### `experiment_assignments`
+PK `(unit_id, experiment_key, version)`, conflict-ignore. `variant`, `assigned_at`, `context_json`. **Audit only** — the variant is always re-derivable from the deterministic two-stage hash (layer bucket + version-keyed variant bucket); concurrent first evals race benignly.
+
+### `experiment_transitions`
+Append-only status-change log: `id` PK, `experiment_key`, `version`, `from_status`/`to_status`, `actor`, `reason`, `at`.
+
+### `experiment_metric_snapshots`
+Daily rollup per `(experiment_key, version, variant, metric_key, window)`: `n` (exposed units), `numerator`/`denominator` (proportion), `mean`/`m2` (continuous, Welford), `computed_at`. On-request at beta scale; cron-ready for Postgres.

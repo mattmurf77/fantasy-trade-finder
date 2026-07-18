@@ -3499,6 +3499,102 @@ def analytics_report_route(report):
     return jsonify(result)
 
 
+# ---------------------------------------------------------------------------
+# Experiment admin API (analytics platform P3, LLD §2.4). All CRON-gated;
+# validation/state errors → 400/409, never a 500. Logic in experiments.py.
+# ---------------------------------------------------------------------------
+
+def _exp_err(e):
+    from .experiments import ExperimentError
+    if isinstance(e, ExperimentError):
+        msg = str(e)
+        code = 409 if ("illegal_transition" in msg or "not_stopped" in msg
+                       or "immutable" in msg) else 400
+        return jsonify({"error": "experiment_invalid", "detail": msg}), code
+    log.warning("experiment route error: %s", e)
+    return jsonify({"error": "internal"}), 500
+
+
+@app.route("/api/admin/experiments", methods=["GET", "POST"])
+def admin_experiments_route():
+    _require_cron_auth()
+    from . import experiments as X
+    if request.method == "GET":
+        return jsonify({"experiments": X.list_experiments()})
+    try:
+        return jsonify(X.create_experiment(request.get_json(force=True) or {})), 201
+    except Exception as e:
+        return _exp_err(e)
+
+
+@app.route("/api/admin/experiments/preview", methods=["POST"])
+def admin_experiment_preview_route():
+    _require_cron_auth()
+    from . import experiments as X
+    try:
+        return jsonify(X.preview(request.get_json(force=True) or {}))
+    except Exception as e:
+        return _exp_err(e)
+
+
+@app.route("/api/admin/experiments/<key>", methods=["GET"])
+def admin_experiment_get_route(key):
+    _require_cron_auth()
+    from . import experiments as X
+    v = request.args.get("version", type=int)
+    exp = X.get_experiment(key, v)
+    if not exp:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(exp)
+
+
+@app.route("/api/admin/experiments/<key>/transition", methods=["POST"])
+def admin_experiment_transition_route(key):
+    _require_cron_auth()
+    from . import experiments as X
+    b = request.get_json(force=True) or {}
+    try:
+        return jsonify(X.transition(
+            key, int(b.get("version", 1)), b.get("to"),
+            actor=b.get("actor", "operator"), reason=b.get("reason", ""),
+            override_underpowered=bool(b.get("override_underpowered"))))
+    except Exception as e:
+        return _exp_err(e)
+
+
+@app.route("/api/admin/experiments/<key>/decide", methods=["POST"])
+def admin_experiment_decide_route(key):
+    _require_cron_auth()
+    from . import experiments as X
+    b = request.get_json(force=True) or {}
+    try:
+        return jsonify(X.decide(key, int(b.get("version", 1)), b.get("decision"),
+                                rationale=b.get("rationale", "")))
+    except Exception as e:
+        return _exp_err(e)
+
+
+@app.route("/api/admin/experiments/<key>/revise", methods=["POST"])
+def admin_experiment_revise_route(key):
+    _require_cron_auth()
+    from . import experiments as X
+    try:
+        return jsonify(X.revise(key, request.get_json(force=True) or {})), 201
+    except Exception as e:
+        return _exp_err(e)
+
+
+@app.route("/api/admin/experiments/<key>/readout", methods=["GET"])
+def admin_experiment_readout_route(key):
+    _require_cron_auth()
+    from . import experiments as X
+    v = request.args.get("version", type=int)
+    try:
+        return jsonify(X.readout(key, v))
+    except Exception as e:
+        return _exp_err(e)
+
+
 def _link_device_identity(sleeper_user_id: str | None = None,
                           account_id: str | None = None) -> None:
     """Best-effort identity_links upsert on successful sign-in.
@@ -9569,7 +9665,7 @@ def feature_flags_route():
     # P3: resolve per-unit experiment assignments here (guarded import — the
     # evaluator module doesn't exist yet; fail-open to empty, never 500).
     try:
-        from . import experiments as _exp  # type: ignore  # noqa: F401
+        from . import experiments as _exp
         device_id = (request.headers.get("X-Device-Id") or "").strip() or None
         token = request.headers.get("X-Session-Token", "")
         unit_id = None
@@ -9580,7 +9676,18 @@ def feature_flags_route():
                 unit_id = sess.get("user_id")
         unit_id = unit_id or (f"device:{device_id}" if device_id else None)
         if unit_id:
-            experiments, configs = _exp.resolve_for_unit(unit_id)  # type: ignore[attr-defined]
+            # Header-derived attrs let device-unit (onboarding) experiments
+            # target platform/app_version/os — the only attrs available pre-auth.
+            info = getattr(g, "device_info", {}) or {}
+            header_attrs = {
+                "platform": (str(request.headers.get("X-Source") or "").strip()
+                             or ("ios" if (info.get("device_type") or "").lower()
+                                 in ("iphone", "ipad", "macos") else None)),
+                "app_version": info.get("app_version"),
+                "os_version": info.get("os_version"),
+                "device_type": info.get("device_type"),
+            }
+            experiments, configs = _exp.resolve_for_unit(unit_id, header_attrs)
     except Exception:
         experiments, configs = {}, {}
     return jsonify({

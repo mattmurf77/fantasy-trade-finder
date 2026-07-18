@@ -10,6 +10,8 @@ Switch to PostgreSQL for production by setting the DATABASE_URL env var:
 Default: SQLite file alongside server.py — zero configuration required.
 """
 
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -791,6 +793,92 @@ identity_links_table = Table("identity_links", metadata,
     # sleeper_user_id / account_id must be non-null.
     Index("ix_identity_links_device_linked", "device_id", "linked_at"),
     Index("ix_identity_links_user", "sleeper_user_id"),
+)
+
+# ── Experiment engine (analytics platform P3, LLD §3.2) ────────────────
+# Layered A/B + multivariate. All append-only except experiments.status.
+# The layer salt is minted once per layer and NEVER rotated while any
+# experiment in the layer is un-decided (rotating it reshuffles every bucket).
+experiment_layers_table = Table("experiment_layers", metadata,
+    Column("layer",      String, primary_key=True),   # onboarding|ranking|trades_ui|engine|growth
+    Column("salt",       String, nullable=False),      # secrets.token_hex(16), IMMUTABLE
+    Column("created_at", String, nullable=False),
+)
+
+# One row per (key, version). Edits to a running experiment mint a new version
+# (metrics reset); status is the only mutable field.
+experiments_table = Table("experiments", metadata,
+    Column("key",             String,  nullable=False),
+    Column("version",         Integer, nullable=False),
+    Column("layer",           String,  nullable=False),
+    Column("status",          String,  nullable=False),   # draft|running|paused|stopped|decided
+    Column("unit_type",       String,  nullable=False),   # account|device
+    Column("hypothesis",      Text),
+    Column("bucket_start",    Integer, nullable=False),    # in-layer claim [start,end), 0..10000
+    Column("bucket_end",      Integer, nullable=False),
+    Column("targeting_json",  Text),      # {"platform":["ios"],"app_version_gte":"1.9.0",…}
+    Column("variants_json",   Text),      # [{"name","weight_bp","model_overlay":{},"client_config":{}}]
+    Column("primary_metric",  String,  nullable=False),    # program-plan catalog key
+    Column("guardrails_json", Text),      # auto-seeded five PFO guardrails + bands
+    Column("exposure_surface",String,  nullable=False),    # event_type/screen naming the varied surface
+    Column("scope_json",      Text),      # FR-32 stamp scope {"event_types":[…],"screens":[…]}
+    Column("mde",             Float),
+    Column("alpha",           Float),
+    Column("power",           Float),
+    Column("override_underpowered", Integer),   # 0|1
+    Column("created_at",      String,  nullable=False),
+    Column("started_at",      String),
+    Column("ended_at",        String),
+    Column("decision",        String),   # ship|revert|iterate
+    Column("decision_rationale", Text),
+    Column("decided_at",      String),
+    UniqueConstraint("key", "version", name="uq_experiments_key_version"),
+)
+
+experiment_transitions_table = Table("experiment_transitions", metadata,
+    Column("id",              Integer, primary_key=True, autoincrement=True),
+    Column("experiment_key",  String,  nullable=False),
+    Column("version",         Integer, nullable=False),
+    Column("from_status",     String),
+    Column("to_status",       String,  nullable=False),
+    Column("actor",           String),
+    Column("reason",          Text),
+    Column("at",              String,  nullable=False),
+)
+
+# Assignment is AUDIT, not truth — the variant is always re-derivable from the
+# deterministic hash. PK (unit, key, version) + conflict-ignore makes concurrent
+# first evaluations race benignly.
+experiment_assignments_table = Table("experiment_assignments", metadata,
+    Column("unit_id",         String,  nullable=False),
+    Column("experiment_key",  String,  nullable=False),
+    Column("version",         Integer, nullable=False),
+    Column("variant",         String,  nullable=False),
+    Column("assigned_at",     String,  nullable=False),
+    Column("context_json",    Text),     # attrs at assignment (first-writer-wins)
+    UniqueConstraint("unit_id", "experiment_key", "version",
+                     name="uq_assignment_unit_key_ver"),
+    Index("ix_assignments_key_ver", "experiment_key", "version"),
+)
+
+# Daily rollup per (key, version, variant, metric, UTC-day window). On-request
+# at beta scale; the schema is cron-ready for Postgres scale.
+experiment_metric_snapshots_table = Table("experiment_metric_snapshots", metadata,
+    Column("id",              Integer, primary_key=True, autoincrement=True),
+    Column("experiment_key",  String,  nullable=False),
+    Column("version",         Integer, nullable=False),
+    Column("variant",         String,  nullable=False),
+    Column("metric_key",      String,  nullable=False),
+    Column("window_start",    String,  nullable=False),
+    Column("window_end",      String,  nullable=False),
+    Column("n",               Integer, nullable=False),   # exposed units in window
+    Column("numerator",       Float),   # proportion metrics
+    Column("denominator",     Float),
+    Column("mean",            Float),   # continuous: winsorized mean
+    Column("m2",              Float),   # continuous: Σ(x−x̄)² (Welford)
+    Column("computed_at",     String,  nullable=False),
+    Index("ix_snapshots_key_ver_metric",
+          "experiment_key", "version", "metric_key", "window_end"),
 )
 
 # ── M5 Push additions — device_tokens ─────────────────────────────────
@@ -1734,10 +1822,45 @@ def _backfill_dual_format() -> None:
         print(f"[backfill] users JSON rewrite failed: {e}")
 
 
+EXPERIMENT_LAYERS = ("onboarding", "ranking", "trades_ui", "engine", "growth")
+
+
+def _layer_salt(layer: str) -> str:
+    """Per-layer bucketing salt. **Prod:** HMAC(EXPERIMENT_SALT_KEY, layer) —
+    cryptographically strong AND stable across restarts/DR (a random per-init
+    salt would reshuffle every bucket on a fresh DB). **Dev/test/seed:** the env
+    is unset, so a fixed deterministic derivation — no cryptographic secrecy is
+    needed off-prod, and it keeps the UI-test seed DB byte-reproducible. Set
+    EXPERIMENT_SALT_KEY in Render + secrets.local.env before launching real
+    experiments (rotating it reshuffles every bucket — treat as launch-blocking
+    once an experiment runs)."""
+    base = os.environ.get("EXPERIMENT_SALT_KEY")
+    if base:
+        return hmac.new(base.encode(), layer.encode(), hashlib.sha256).hexdigest()[:32]
+    return hashlib.sha256(f"ftf-dev-layer-salt:{layer}".encode()).hexdigest()[:32]
+
+
+def _seed_experiment_layers() -> None:
+    """Seed the reserved layers with their derived salts (INSERT OR IGNORE —
+    never rotate a stored salt). Idempotent + deterministic given the env."""
+    try:
+        with engine.begin() as conn:
+            existing = {r[0] for r in conn.execute(
+                select(experiment_layers_table.c.layer)).fetchall()}
+            now = _now()
+            for layer in EXPERIMENT_LAYERS:
+                if layer not in existing:
+                    conn.execute(insert(experiment_layers_table).values(
+                        layer=layer, salt=_layer_salt(layer), created_at=now))
+    except Exception as e:   # never break boot on a seeding hiccup
+        print(f"[experiment_layers] seed skipped: {e}")
+
+
 def init_db() -> None:
     """Create all tables if they don't exist, then apply incremental migrations."""
     metadata.create_all(engine)
     _migrate_db()
+    _seed_experiment_layers()
 
 
 # ---------------------------------------------------------------------------

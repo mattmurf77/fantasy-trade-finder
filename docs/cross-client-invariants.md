@@ -201,7 +201,7 @@ See [data-dictionary.md](data-dictionary.md#user_events). When adding a new even
 
 ## Client analytics event contract (`POST /api/events`, flag `analytics.client_events`)
 
-Tracking plan v2 ([spec](business/analytics/2026-07-17-tracking-plan-v2.md) §S2/§S3) — the envelope shape and event names are shared verbatim by every client SDK (mobile `mobile/src/api/events.ts`, web/extension when built) and the backend allowlist (`backend/analytics_taxonomy.py:ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS`). Changing either side alone breaks ingestion silently (unknown types/props are dropped).
+Tracking plan v2 ([spec](business/analytics/2026-07-17-tracking-plan-v2.md) §S2/§S3) — the envelope shape and event names are shared verbatim by every client SDK (mobile `mobile/src/api/events.ts`, web `web/js/events.js` (`window.FTFTrack`), extension `extension/background.js` `emitAnalyticsEvent`) and the backend allowlist (`backend/analytics_taxonomy.py:ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS`). Changing either side alone breaks ingestion silently (unknown types/props are dropped). All three clients emit the versioned `{v:1, events:[…]}` queue shape and gate on `analytics.client_events` (default-dark); the extension emits only the taxonomy-legal `app_opened`/`signin_succeeded` (richer extension events need a tracking-plan addendum).
 
 **Envelope** (per event, batched ≤50):
 

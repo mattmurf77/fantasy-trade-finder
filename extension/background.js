@@ -110,6 +110,65 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+//  Analytics emitter (analytics platform P4) — first-party events to
+//  /api/events with the shared cross-client envelope. Fire-and-forget,
+//  gated on analytics.client_events (fetched once, default-dark). Only the
+//  taxonomy-legal client events (app_opened, signin_succeeded); richer
+//  extension events need a tracking-plan addendum first.
+// ─────────────────────────────────────────────────────────────────
+
+const DEVICE_ID_KEY = 'ftf_device_id';
+let _flagCache = { at: 0, on: false };   // client_events, cached 5 min, default-dark
+
+function _uuid() {
+  try { if (crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (_) {}
+  return 'loc-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e9).toString(36);
+}
+
+async function _deviceId() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get([DEVICE_ID_KEY], (res) => {
+        let d = res[DEVICE_ID_KEY];
+        if (d) return resolve(d);
+        d = 'dev_' + _uuid();
+        chrome.storage.local.set({ [DEVICE_ID_KEY]: d }, () => resolve(d));
+      });
+    } catch (_) { resolve('dev_ephemeral'); }
+  });
+}
+
+async function _clientEventsOn() {
+  if (Date.now() - _flagCache.at < 300000) return _flagCache.on;
+  try {
+    const res = await fetch(`${API_BASE}/api/feature-flags`);
+    const body = await res.json();
+    _flagCache = { at: Date.now(), on: !!(body.flags && body.flags['analytics.client_events']) };
+  } catch (_) { _flagCache = { at: Date.now(), on: false }; }   // default-dark
+  return _flagCache.on;
+}
+
+let _extSeq = 0;
+const _extSession = 'ext-' + _uuid();
+
+async function emitAnalyticsEvent(eventType, props) {
+  try {
+    if (!(await _clientEventsOn())) return;
+    const sess = await getSession();
+    const deviceId = await _deviceId();
+    _extSeq += 1;
+    const headers = { 'Content-Type': 'application/json', 'X-Device-Id': deviceId, 'X-Source': 'extension' };
+    if (sess && sess.token) headers['X-Session-Token'] = sess.token;
+    await fetch(`${API_BASE}/api/events`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ events: [{
+        event_id: _uuid(), event_type: eventType, client_ts: new Date().toISOString(),
+        session_id: _extSession, seq: _extSeq, props: props || null }] }),
+    });
+  } catch (_) { /* analytics must never break the extension */ }
+}
+
+// ─────────────────────────────────────────────────────────────────
 //  Message hub
 // ─────────────────────────────────────────────────────────────────
 
@@ -132,10 +191,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // Popup opened — extension DAU signal (taxonomy-legal app_opened).
+  if (msg.type === 'ftf:popup_opened') {
+    emitAnalyticsEvent('app_opened', { launch_type: 'extension' });
+    return false;
+  }
+
   // Popup emits these; rebroadcast to tabs
   if (msg.type === 'ftf:signed_in'
       || msg.type === 'ftf:signed_out'
       || msg.type === 'ftf:rankings_updated') {
+    if (msg.type === 'ftf:signed_in') emitAnalyticsEvent('signin_succeeded', { method: 'sleeper' });
     broadcast(msg);
     return false;
   }

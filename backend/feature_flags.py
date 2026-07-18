@@ -163,6 +163,10 @@ FLAG_KEYS: tuple[str, ...] = (
     "analytics.ingest",            # SERVER acceptance gate for POST /api/events.
                                    # Off → 200 {"disposition":"disabled"}; P1+ clients
                                    # retain their queue and back off (LLD §2.1/§4.6)
+    "experiments.engine",          # P3 experiment evaluator master gate. Off →
+                                   # resolve_for_unit/variant_for/stamp_for_event
+                                   # return empty/None, so the product runs exactly
+                                   # as if no experiment existed (analytics-platform LLD §4.3)
     "onboarding.v2",               # master kill-switch for every onboarding.* below
     "onboarding.landing",          # item 5 — username-first landing (also first consumer of landing.try_before_sync)
     "onboarding.trades_first",     # item 4 — trades-first hook screen (pregen at auth-return, skeleton deck, chrome collapse, provenance chip, identity strip)

@@ -286,6 +286,7 @@
 
     // ── Boot: check stored session ──────────────────────────────────
     async function boot() {
+      try { if (window.FTFTrack) window.FTFTrack('app_opened', { launch_type: 'web' }); } catch (e) {}
       logDrawer.info('Page loaded — checking localStorage…');
       const user   = getSavedUser();
       const league = getSavedLeague();
@@ -2797,6 +2798,9 @@
     }
 
     function switchView(view, btn) {
+      // Analytics P4 (web SDK) — screen view. Fire-and-forget, no-op when the
+      // analytics.client_events flag is off or the SDK didn't load.
+      try { if (window.FTFTrack) window.FTFTrack('screen_viewed', { screen: view }, view); } catch (e) {}
       _syncNavActive(view);
       document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
       document.getElementById('view-' + view).classList.add('active');
@@ -3176,6 +3180,7 @@
     // ── Trade generation ───────────────────────────────────────────────────
 
     async function generateTrades() {
+      try { if (window.FTFTrack) window.FTFTrack('find_trades_tapped', null, 'trades'); } catch (e) {}
       const btn = document.getElementById('gen-btn');
       btn.disabled = true;
       btn.textContent = '⏳ Generating…';

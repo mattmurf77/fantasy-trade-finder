@@ -176,7 +176,7 @@
       c.appendChild(meta);
 
       if(report==="health"){ renderHealth(c,b); return; }
-      if(report==="experiments"){ c.appendChild(el("div","card","No experiments running — the experiment engine ships in P3.")); return; }
+      if(report==="experiments"){ renderExperiments(c); return; }
 
       // Summary KPIs where present.
       if(b.summary){
@@ -209,6 +209,64 @@
       c.appendChild(table(keys, rows, keys));
     }
 
+    // ---- experiments tab: list + monitor cards + design calculator ----
+    function renderExperiments(c){
+      c.appendChild(el("div","meta","experiment engine (P3) · assignment is deterministic + persisted · verdicts withheld until horizon"));
+      // Design calculator.
+      var calc=el("div","card");
+      calc.appendChild(el("h3",null,"Design calculator")).style.cssText="font-size:11px;text-transform:uppercase;color:var(--chalk-dim);margin-bottom:8px;letter-spacing:.03em";
+      var row=el("div"); row.style.cssText="display:flex;gap:8px;flex-wrap:wrap;align-items:center";
+      function inp(id,ph,val){ var i=document.createElement("input"); i.id=id; i.placeholder=ph; i.value=val; i.style.width="130px"; return i; }
+      var bIn=inp("calc-base","baseline rate","0.30"), mIn=inp("calc-mde","MDE (abs)","0.05"),
+          aIn=inp("calc-arms","# arms","2"), eIn=inp("calc-elig","eligible/week","40");
+      var go=el("button","primary","Compute"); go.style.cssText="font-size:12px";
+      [bIn,mIn,aIn,eIn,go].forEach(function(x){ row.appendChild(x); });
+      calc.appendChild(row);
+      var out=el("div"); out.style.cssText="margin-top:10px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)";
+      calc.appendChild(out);
+      go.onclick=function(){
+        var body={baseline_rate:parseFloat(bIn.value)||0.3, mde:parseFloat(mIn.value)||0.05,
+                  variants:Array(Math.max(2,parseInt(aIn.value)||2)).fill(1), eligible_per_week:parseFloat(eIn.value)||0};
+        fetch("/api/admin/experiments/preview",{method:"POST",headers:{"X-Cron-Secret":secret(),"Content-Type":"application/json"},body:JSON.stringify(body)})
+          .then(function(r){return r.json();}).then(function(d){
+            clear(out);
+            out.appendChild(el("div",null,"n/arm: "+(d.n_per_arm!=null?d.n_per_arm.toLocaleString():"—")+"   ·   predicted weeks: "+(d.predicted_weeks!=null?Math.round(d.predicted_weeks):"—")));
+            var b=el("div",d.underpowered?"small":null,d.banner); b.style.marginTop="6px"; out.appendChild(b);
+          }).catch(function(){ clear(out); out.appendChild(el("div","err","preview failed")); });
+      };
+      c.appendChild(calc);
+      // Experiment list.
+      var listWrap=el("div"); c.appendChild(listWrap);
+      fetch("/api/admin/experiments",{headers:{"X-Cron-Secret":secret()}})
+        .then(function(res){ if(res.status>=400){signOut("Secret rejected.");throw 0;} return res.json(); })
+        .then(function(b){
+          var exps=(b&&b.experiments)||[];
+          if(!exps.length){ listWrap.appendChild(el("div","card","No experiments yet. Create one via the gated API (or the /an-experiment skill).")); return; }
+          exps.forEach(function(e){ renderExperimentCard(listWrap,e); });
+        }).catch(function(){});
+    }
+    function renderExperimentCard(wrap,e){
+      var card=el("div","card");
+      var head=el("div"); head.style.cssText="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap";
+      var name=el("span",null,e.key+" v"+e.version); name.style.cssText="font-weight:700;font-family:var(--mono)";
+      var st=el("span","small",e.status); st.style.color=(e.status==="running"?"var(--ice)":e.status==="decided"?"var(--pos)":"var(--chalk-dim)");
+      head.appendChild(name); head.appendChild(st);
+      head.appendChild(el("span",null,e.layer+" · "+e.primary_metric)).style.cssText="color:var(--chalk-faint);font-size:11px";
+      card.appendChild(head);
+      var ro=el("div"); ro.style.cssText="margin-top:8px"; ro.appendChild(el("div","meta","loading readout…")); card.appendChild(ro);
+      wrap.appendChild(card);
+      if(e.status==="draft") { clear(ro); ro.appendChild(el("div","meta","draft — not started")); return; }
+      fetch("/api/admin/experiments/"+encodeURIComponent(e.key)+"/readout?version="+e.version,{headers:{"X-Cron-Secret":secret()}})
+        .then(function(r){return r.json();}).then(function(d){
+          clear(ro);
+          if(d.banner){ var b=el("div","cav"); b.appendChild(el("b",null,"[verdict] ")); b.appendChild(document.createTextNode(d.banner)); ro.appendChild(b); }
+          if(d.verdict){ ro.appendChild(el("div",null,"verdict: "+d.verdict)).style.cssText="color:var(--pos);font-family:var(--mono);margin:4px 0"; }
+          if(d.srm && d.srm.red){ ro.appendChild(el("div","err","SRM red (p<.001) — verdict suppressed")); }
+          var arms=(d.arms||[]).map(function(a){ return {variant:a.variant, exposed_n:a.n, success:a.success==null?"—":a.success}; });
+          if(arms.length) ro.appendChild(table(["variant","exposed_n","success"], arms, ["variant","exposed_n","success"]));
+        }).catch(function(){ clear(ro); ro.appendChild(el("div","meta","readout unavailable")); });
+    }
+
     function renderHealth(c,b){
       var card=el("div","card");
       [["WAL",b.wal===null?"n/a (pg)":String(b.wal)],
@@ -232,7 +290,7 @@
       csv.href="/api/admin/analytics/"+report+"?format=csv&start="+$("start").value+"&end="+$("end").value;
       csv.style.display=(report==="health"||report==="experiments")?"none":"inline";
       if(report==="health"){ apiHealth(); return; }
-      if(report==="experiments"){ render(report,{status:200,body:{}}); return; }
+      if(report==="experiments"){ var cc=$("content"); clear(cc); renderExperiments(cc); return; }
       load();
     }
     function apiHealth(){

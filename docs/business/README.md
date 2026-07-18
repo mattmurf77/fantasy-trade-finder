@@ -27,6 +27,7 @@ through the `/feedback` pipeline (the E2E feature-builder loop) or an eng-* skil
 | `/an-market` | Macro/competitive analyst | Market size, competitor scale, seasonality, cited benchmarks |
 | `/an-funnel` | Funnel metrics owner | Metric definitions, funnel stages, KPIs, north star, dashboards |
 | `/an-data-architect` | Data architect | Event taxonomy, tracking plan, analytics storage, PII rules |
+| `/an-experiment` | Experimentation front door | Hypothesis→spec, power/duration calc, launch/monitor/decide via the experiment engine |
 
 ## Engineering
 

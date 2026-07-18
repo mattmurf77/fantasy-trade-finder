@@ -9,6 +9,10 @@ const API_BASE = 'https://fantasy-trade-finder.onrender.com';
 
 const STORAGE_KEY = 'ftf_session';
 
+// Analytics P4 — extension DAU signal (background emits app_opened, gated on
+// analytics.client_events server-side). Fire-and-forget.
+try { chrome.runtime.sendMessage({ type: 'ftf:popup_opened' }); } catch (_) {}
+
 const els = {
   stages: {
     signin:    document.getElementById('stage-signin'),
