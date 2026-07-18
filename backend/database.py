@@ -1856,6 +1856,29 @@ def _seed_experiment_layers() -> None:
         print(f"[experiment_layers] seed skipped: {e}")
 
 
+def reseed_experiment_layers() -> dict:
+    """Launch-enablement one-shot. `_seed_experiment_layers` runs at boot with
+    INSERT-OR-IGNORE, so if the platform first booted (seeding the layers)
+    BEFORE `EXPERIMENT_SALT_KEY` was set in the environment, the layers hold
+    the dev-fallback salt and setting the key later can't fix them. This
+    deletes + re-seeds the reserved layers so their salts derive from the
+    CURRENT env key — but ONLY while no experiment has ever assigned a unit
+    (a stored salt is immutable once an experiment runs; changing it would
+    reshuffle every bucket). Refuses (no-op) once assignments exist.
+    Idempotent; returns a non-secret status (never the salt itself)."""
+    key_present = bool(os.environ.get("EXPERIMENT_SALT_KEY"))
+    with engine.begin() as conn:
+        has_assignment = conn.execute(
+            select(experiment_assignments_table).limit(1)).first() is not None
+        if has_assignment:
+            return {"reseeded": False, "reason": "assignments_exist",
+                    "key_present": key_present}
+        conn.execute(experiment_layers_table.delete())
+    _seed_experiment_layers()
+    return {"reseeded": True, "layers": list(EXPERIMENT_LAYERS),
+            "key_present": key_present}
+
+
 def init_db() -> None:
     """Create all tables if they don't exist, then apply incremental migrations."""
     metadata.create_all(engine)

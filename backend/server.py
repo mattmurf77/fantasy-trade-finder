@@ -9668,26 +9668,36 @@ def feature_flags_route():
         from . import experiments as _exp
         device_id = (request.headers.get("X-Device-Id") or "").strip() or None
         token = request.headers.get("X-Session-Token", "")
-        unit_id = None
+        account_unit = None
         if token:
             with _sessions_lock:
                 sess = _sessions.get(token)
             if sess:
-                unit_id = sess.get("user_id")
-        unit_id = unit_id or (f"device:{device_id}" if device_id else None)
-        if unit_id:
-            # Header-derived attrs let device-unit (onboarding) experiments
-            # target platform/app_version/os — the only attrs available pre-auth.
-            info = getattr(g, "device_info", {}) or {}
-            header_attrs = {
-                "platform": (str(request.headers.get("X-Source") or "").strip()
-                             or ("ios" if (info.get("device_type") or "").lower()
-                                 in ("iphone", "ipad", "macos") else None)),
-                "app_version": info.get("app_version"),
-                "os_version": info.get("os_version"),
-                "device_type": info.get("device_type"),
-            }
-            experiments, configs = _exp.resolve_for_unit(unit_id, header_attrs)
+                account_unit = sess.get("user_id")
+        device_unit = f"device:{device_id}" if device_id else None
+        # Header-derived attrs let device-unit (onboarding) experiments
+        # target platform/app_version/os — the only attrs available pre-auth.
+        info = getattr(g, "device_info", {}) or {}
+        header_attrs = {
+            "platform": (str(request.headers.get("X-Source") or "").strip()
+                         or ("ios" if (info.get("device_type") or "").lower()
+                             in ("iphone", "ipad", "macos") else None)),
+            "app_version": info.get("app_version"),
+            "os_version": info.get("os_version"),
+            "device_type": info.get("device_type"),
+        }
+        # Resolve BOTH identities and merge. A device-unit experiment (the
+        # onboarding layer mandates them) must keep capturing the same device
+        # after its session validates — with either/or resolution, sign-in
+        # flipped the unit to account and the assignment evaporated mid-flow.
+        # Each experiment has exactly one unit_type (the evaluator skips the
+        # other identity), so the two maps are disjoint by construction.
+        for uid in (device_unit, account_unit):
+            if not uid:
+                continue
+            exp_map, cfg_map = _exp.resolve_for_unit(uid, header_attrs)
+            experiments.update(exp_map)
+            configs.update(cfg_map)
     except Exception:
         experiments, configs = {}, {}
     return jsonify({
@@ -11736,6 +11746,17 @@ def fleaflicker_import():
         "my_team_id": my_team, "my_roster": mapped["rosters"].get(my_team, []),
         "report": _platform_report_json(mapped["report"]),
     })
+
+
+@app.route("/api/admin/experiments/reseed-layers", methods=["POST"])
+def reseed_experiment_layers_route():
+    """CRON-gated launch-enablement one-shot: re-derive the reserved-layer
+    salts from the CURRENT EXPERIMENT_SALT_KEY when the platform seeded them
+    before the key was set. Refuses once any experiment has assigned a unit
+    (salt is immutable while an experiment runs). Never returns the salt."""
+    _require_cron_auth()
+    from .database import reseed_experiment_layers
+    return jsonify(reseed_experiment_layers())
 
 
 if __name__ == "__main__":
