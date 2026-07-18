@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -9,6 +10,8 @@ import {
   Dimensions,
   Modal,
   Alert,
+  Platform,
+  Share,
   type LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +20,10 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  withDelay,
+  withRepeat,
+  withSequence,
+  cancelAnimation,
   runOnJS,
   Easing,
 } from 'react-native-reanimated';
@@ -33,6 +40,7 @@ import {
   radii,
   type,
   fonts,
+  flare,
   shadowSheet,
   scrim,
 } from '../theme/chalkline';
@@ -71,11 +79,30 @@ import {
   type CalcValueRow,
 } from '../api/calc';
 import { getProgress } from '../api/rankings';
+import { track, msSinceOpen } from '../api/events';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import FormatGate, { formatLabel } from '../components/FormatGate';
+import ProvenanceChip from '../components/ProvenanceChip';
+import SkeletonTradeCard from '../components/SkeletonTradeCard';
+import CoachMark from '../components/CoachMark';
+import IdentityConfirmStrip from '../components/IdentityConfirmStrip';
+import QuickSetPromptCard from '../components/QuickSetPromptCard';
+import AppleSaveMomentSheet from '../components/AppleSaveMomentSheet';
+import { consumePendingQuicksetRegen } from '../state/onboardingBus';
 import { useSession } from '../state/useSession';
 import { useTradeQueue } from '../state/useTradeQueue';
-import { useFlag } from '../state/useFeatureFlags';
+import { useFlag, useOnboardingFeature, onboardingEnabled } from '../state/useFeatureFlags';
+import {
+  useOnboardingState,
+  getOnboardingState,
+  patchOnboardingState,
+} from '../state/useOnboardingState';
+import {
+  FAIRNESS_PREF_KEY,
+  FAIRNESS_ON_THRESHOLD,
+  FAIRNESS_OFF_THRESHOLD,
+} from '../api/tradePregen';
+import { navigationRef } from '../navigation/RootNav';
 import NewPartnersBanner from '../components/NewPartnersBanner';
 import type { Player, TradeCard, TradeJobSnapshot, ScoringFormat } from '../shared/types';
 
@@ -87,15 +114,11 @@ const SWIPE_THRESHOLD = 120;
 // loop in React via reference inequality).
 const EMPTY_QUEUE: never[] = [];
 
-// Persisted user pref: is the fairness filter on (recommended trades must
-// be reasonably balanced in consensus value) or off (recommend purely by
-// ranking mismatch between owners)?
-const FAIRNESS_PREF_KEY = 'ftf:trades:fairness_on';
-// When fairness ON, ask the backend for balanced trades — same default the
-// old slider opened to. When OFF, ask for the broadest pool the backend
-// will return so client-side sort-by-mismatch sees real candidates.
-const FAIRNESS_ON_THRESHOLD = 0.75;
-const FAIRNESS_OFF_THRESHOLD = 0.5;
+// Persisted fairness pref + thresholds now live in api/tradePregen.ts —
+// single source shared with the onboarding pregen hook so both request the
+// same server cache slot (the job cache keys on fairness_threshold).
+// Semantics unchanged: ON = balanced trades (old slider default), OFF =
+// broadest pool for the client-side sort-by-mismatch.
 
 // Player-swap (feedback #86): trade_id suffix marking a user-modified
 // package. Deliberately unknown to the server — a like/flag under this id
@@ -104,6 +127,26 @@ const FAIRNESS_OFF_THRESHOLD = 0.5;
 // the payload are what get recorded (Elo signal, persistence, and mutual-
 // match detection all run on the modified package).
 const EDITED_SUFFIX = '::edited';
+
+// Analytics: true once this screen has shown the "Waking up server" copy
+// (the >4s slow-switch overlay) at any point this app session. First-card
+// trade_card_viewed events carry it as `cold_start` so time-to-first-card
+// numbers can be split by Render cold starts.
+let sawServerWakeThisSession = false;
+
+// Onboarding item 4 (F5): the identity-confirm strip's X hides it for the
+// rest of the app session (module-level so a tab remount doesn't resurrect
+// it); it returns on the next cold start while first-run is still active.
+let identityStripDismissedThisSession = false;
+
+// Onboarding item 7 (F10/G8): the contextual Quick Set prompt shows at most
+// once per app session, whatever the trigger path (module-level so a tab
+// remount can't re-fire it).
+let quicksetPromptShownThisSession = false;
+
+// Onboarding item 8 (F4): at most one Apple save-moment ask per app session
+// across all trigger classes — asks never stack and never nag.
+let appleAskShownThisSession = false;
 
 export default function TradesScreen({ navigation }: any) {
   const queryClient = useQueryClient();
@@ -120,6 +163,82 @@ export default function TradesScreen({ navigation }: any) {
   const showPortfolioPill = (leagues?.length || 0) >= 2;
   const leagueId = league?.league_id || null;
   const userId   = user?.user_id || '';
+  const isDemo   = useSession((s) => s.isDemo);
+
+  // ── Onboarding item 4 (docs/plans/onboarding-conversion/plan.md) ─────
+  // Everything in this block is dark unless onboarding.v2 AND the feature
+  // flag are both on (useOnboardingFeature/onboardingEnabled) — flags off,
+  // this screen's behavior is unchanged.
+  const tradesFirstOn = useOnboardingFeature('onboarding.trades_first');
+  const guidedOn      = useOnboardingFeature('onboarding.guided_layer');
+  const quicksetPromptOn = useOnboardingFeature('onboarding.quickset_prompt');
+  const appleSaveOn  = useOnboardingFeature('onboarding.apple_save_moment');
+  const shareSheetOn = useOnboardingFeature('onboarding.share_sheet');
+  const rankRoutingOn = useOnboardingFeature('onboarding.rank_routing');
+  const demoBridgeOn = useOnboardingFeature('onboarding.demo_bridge');
+  // Item 10 (F12): redraft leagues get an honest values label — dynasty
+  // values are wrong for them by construction, and an unlabeled wrong
+  // number reads as a broken app.
+  const activeLeagueSummary = leagues?.find((lg) => lg.league_id === leagueId);
+  const isRedraftLeague = activeLeagueSummary?.settings_type === 0;
+  // Item 8 — save-moment Apple ask + session-2 banner + share affordance.
+  const verification = useSession((s) => s.verification);
+  const [appleAsk, setAppleAsk] =
+    useState<'like' | 'quickset_save' | 'session2_banner' | null>(null);
+  const [lastLikedCard, setLastLikedCard] = useState<TradeCard | null>(null);
+  const obSessionCount = useOnboardingState((s) => s.ob.sessionCount);
+  const obTotalSwipes = useOnboardingState((s) => s.ob.totalSwipes);
+  const session2BannerShown = useOnboardingState(
+    (s) => s.ob.appleSession2BannerShown,
+  );
+  // Item 7 — inline prompt card + post-Quick-Set regeneration diff banner.
+  const [quicksetPromptVisible, setQuicksetPromptVisible] = useState(false);
+  const [quicksetDiffBanner, setQuicksetDiffBanner] =
+    useState<{ position: string; count: number } | null>(null);
+  // Set when an onboarding-mode Quick Set completion posts a pending regen;
+  // holds the pre-regen deck ids so the banner can count NEW trades.
+  const pendingRegenRef = useRef<{ position: string; prevIds: Set<string> } | null>(null);
+  // Provenance chip flips CONSENSUS VALUES → YOUR BOARD once any position
+  // has been Quick-Set (item 7 writes quicksetCompletedPositions).
+  const quicksetPositions = useOnboardingState(
+    (s) => s.ob.quicksetCompletedPositions,
+  );
+  const swipeHintDone = useOnboardingState(
+    (s) => !!s.ob.coachMarksShown.swipe_hint,
+  );
+  const provenanceMarkDone = useOnboardingState(
+    (s) => !!s.ob.coachMarksShown.provenance_chip,
+  );
+  // First-run mode (accepted F11) LATCHES at mount: chrome stays collapsed
+  // for the rest of this mount even after the first swipe flips
+  // firstSwipeDone — normal chrome returns on the next mount, never as a
+  // jarring mid-session re-expand. Requires the onboarding store to be
+  // hydrated (App.tsx boot) so a returning user is never mis-read as
+  // first-run while AsyncStorage is still loading — fails toward normal.
+  const [firstRun] = useState(() => {
+    const st = useOnboardingState.getState();
+    return (
+      onboardingEnabled('onboarding.trades_first') &&
+      st.hydrated &&
+      !st.ob.firstSwipeDone
+    );
+  });
+  // Identity-confirm strip (F5) — first-run only, dismissible per session.
+  const [identityStripVisible, setIdentityStripVisible] = useState(
+    () => firstRun && !identityStripDismissedThisSession,
+  );
+  // Guided layer bookkeeping. Coach marks never stack: if the swipe hint
+  // shows on this mount, the provenance mark waits for the next mount.
+  const [swipeHintActive, setSwipeHintActive] = useState(false);
+  const swipeHintShownThisMountRef = useRef(false);
+  const [provenanceMarkVisible, setProvenanceMarkVisible] = useState(false);
+  const provenanceMarkShownRef = useRef(false);
+  // First-run auto-generation lifecycle: idle → kicked → (retrying →)
+  // failed. One silent retry ~4s later covers the LeaguePicker race where
+  // the background session_init hasn't landed when Trades mounts.
+  const autoGenRef = useRef<'idle' | 'kicked' | 'retrying' | 'failed'>('idle');
+  const autoRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [autoGenFailed, setAutoGenFailed] = useState(false);
 
   // B7 — new-partners banner. Flag-gated; query only fires when the flag
   // is on AND we have both a league and a user (the banner's dismissal
@@ -175,7 +294,10 @@ export default function TradesScreen({ navigation }: any) {
       setSlowSwitch(false);
       return;
     }
-    const t = setTimeout(() => setSlowSwitch(true), 4000);
+    const t = setTimeout(() => {
+      setSlowSwitch(true);
+      sawServerWakeThisSession = true;
+    }, 4000);
     return () => clearTimeout(t);
   }, [switching]);
 
@@ -252,7 +374,13 @@ export default function TradesScreen({ navigation }: any) {
   // force-open the sheet — the inline confirm banner (above the deck)
   // offers one-tap confirm instead. No outlook AND no inference keeps the
   // original force-open behavior.
+  //
+  // Onboarding item 4: on a first-run mount the deck is the whole show —
+  // never front it with a modal sheet (plan: no interruption before the
+  // first cards). The sheet resumes force-opening on the next mount; the
+  // Edit path and the inferred-outlook one-tap confirm stay available.
   useEffect(() => {
+    if (firstRun) return;
     if (
       prefsQuery.data &&
       !prefsQuery.data.team_outlook &&
@@ -260,7 +388,7 @@ export default function TradesScreen({ navigation }: any) {
     ) {
       setOutlookOpen(true);
     }
-  }, [prefsQuery.data]);
+  }, [prefsQuery.data, firstRun]);
 
   // Phase-2 inferred outlook — set only while no outlook is declared;
   // drives the one-tap confirm banner and the sheet's preselection.
@@ -454,10 +582,16 @@ export default function TradesScreen({ navigation }: any) {
   const [job, setJob] = useState<TradeJobSnapshot | null>(null);
 
   const generateMutation = useMutation({
-    mutationFn: () =>
+    // `auto` marks the onboarding first-run auto-start (item 4): its
+    // failures stay silent (retry below) instead of toasting. Manual taps
+    // pass {} and behave exactly as before. `force` (item 7) skips the
+    // server's complete-fresh job cache — used by the post-Quick-Set
+    // regeneration, whose board change doesn't alter the cache key.
+    mutationFn: (vars: { auto?: boolean; force?: boolean }) =>
       generateTrades({
         league_id: leagueId!,
         fairness_threshold: effectiveFairness,
+        force: vars.force || undefined,
         // FB-47 — omit (not []) when unset so untargeted payloads stay
         // byte-identical to the pre-targeting shape.
         pinned_give_players:
@@ -483,7 +617,24 @@ export default function TradesScreen({ navigation }: any) {
         });
       }
     },
-    onError: (e: Error) => {
+    onError: (e: Error, vars) => {
+      if (vars?.auto) {
+        // First-run auto-start failed — most likely the LeaguePicker
+        // background session_init hasn't landed yet. Retry once, quietly;
+        // a second failure surfaces the normal manual empty state (the
+        // Find a Trade button is the recovery path).
+        if (autoGenRef.current === 'kicked') {
+          autoGenRef.current = 'retrying';
+          autoRetryTimer.current = setTimeout(() => {
+            autoRetryTimer.current = null;
+            generateMutation.mutate({ auto: true });
+          }, 4000);
+        } else {
+          autoGenRef.current = 'failed';
+          setAutoGenFailed(true);
+        }
+        return;
+      }
       setToast({ msg: e.message || 'Generate failed', tone: 'warn' });
     },
   });
@@ -596,7 +747,39 @@ export default function TradesScreen({ navigation }: any) {
     setPinnedGive([]);
     setPinnedReceive([]);
     setTargetPickerOpen(false);
+    // Onboarding item 4 — reset the first-run auto-start lifecycle so a
+    // league switch mid-first-run can auto-start against the new league.
+    if (autoRetryTimer.current) {
+      clearTimeout(autoRetryTimer.current);
+      autoRetryTimer.current = null;
+    }
+    autoGenRef.current = 'idle';
+    setAutoGenFailed(false);
   }, [leagueId]);
+
+  // ── Onboarding item 4: first-run auto-start ──────────────────────────
+  // On a first-run mount with no deck, kick generation immediately (the
+  // pregen hook usually already warmed the server job — this call adopts
+  // it) and show the skeleton deck instead of the manual empty state.
+  // One kick per league; the silent retry lives in generateMutation.onError.
+  useEffect(() => {
+    if (!firstRun || !leagueId || gateState) return;
+    if (autoGenRef.current !== 'idle') return;
+    if (job || generateMutation.isPending || deck.length > 0) return;
+    autoGenRef.current = 'kicked';
+    generateMutation.mutate({ auto: true });
+    // generateMutation identity churns per render; keying on the inputs
+    // that matter keeps this a mount/league-scoped one-shot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstRun, leagueId, gateState, job, deck.length]);
+
+  // Clear any pending auto-retry on unmount.
+  useEffect(
+    () => () => {
+      if (autoRetryTimer.current) clearTimeout(autoRetryTimer.current);
+    },
+    [],
+  );
 
   const swipeMutation = useMutation({
     mutationFn: ({ card, decision }: { card: TradeCard; decision: 'like' | 'pass' }) =>
@@ -891,6 +1074,288 @@ export default function TradesScreen({ navigation }: any) {
   const topCard = rawTopCard ? edits[rawTopCard.trade_id] ?? rawTopCard : undefined;
   const nextCard = sortedDeck[deckIdx + 1];
 
+  // Analytics: one trade_card_viewed per card reaching the top of the
+  // deck (keyed on trade_id, so re-renders don't re-fire). The first card
+  // additionally carries time-from-app-open + the cold-start marker.
+  const topTradeId = rawTopCard?.trade_id;
+  useEffect(() => {
+    if (!topTradeId) return;
+    const props: Record<string, unknown> = {
+      card_index: deckIdx,
+      trade_id: topTradeId,
+    };
+    if (deckIdx === 0) {
+      props.ms_since_open = msSinceOpen();
+      props.cold_start = sawServerWakeThisSession;
+    }
+    track('trade_card_viewed', props, 'Trades');
+    // deckIdx intentionally omitted: a new top card always has a new
+    // trade_id, and index-only changes (lane filter resets) re-show a
+    // card that was already counted as viewed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topTradeId]);
+
+  // ── Onboarding guided layer (onboarding.guided_layer AND .trades_first,
+  // v2.1): coach marks 1–2. Each shows once ever (persisted at show time),
+  // never modal, never stacked — if the swipe hint claims this mount, the
+  // provenance mark waits for the next one.
+  useEffect(() => {
+    if (!guidedOn || !tradesFirstOn) return;
+    if (swipeHintDone || swipeHintShownThisMountRef.current) return;
+    if (!topTradeId || deckIdx !== 0) return;
+    swipeHintShownThisMountRef.current = true;
+    setSwipeHintActive(true);
+    patchOnboardingState({ coachMarksShown: { swipe_hint: true } });
+    track('coach_mark_shown', { mark: 'swipe_hint' }, 'Trades');
+  }, [guidedOn, tradesFirstOn, swipeHintDone, topTradeId, deckIdx]);
+
+  function dismissSwipeHint() {
+    if (!swipeHintActive) return;
+    setSwipeHintActive(false);
+    track('coach_mark_dismissed', { mark: 'swipe_hint' }, 'Trades');
+  }
+
+  useEffect(() => {
+    if (!guidedOn || !tradesFirstOn) return;
+    if (provenanceMarkDone || provenanceMarkShownRef.current) return;
+    // Never stack: yield this mount to the swipe hint if it ran.
+    if (swipeHintShownThisMountRef.current || swipeHintActive) return;
+    // The mark anchors near the provenance chip, which needs a card.
+    if (!topTradeId) return;
+    provenanceMarkShownRef.current = true;
+    setProvenanceMarkVisible(true);
+    patchOnboardingState({ coachMarksShown: { provenance_chip: true } });
+    track('coach_mark_shown', { mark: 'provenance_chip' }, 'Trades');
+  }, [guidedOn, tradesFirstOn, provenanceMarkDone, topTradeId, swipeHintActive]);
+
+  function dismissProvenanceMark() {
+    if (!provenanceMarkVisible) return;
+    setProvenanceMarkVisible(false);
+    track('coach_mark_dismissed', { mark: 'provenance_chip' }, 'Trades');
+  }
+
+  // ── Onboarding item 7: contextual Quick Set prompt + regen aha ───────
+  // Trigger (round-3 ruling D2): first pass after swipe 2, else after 3
+  // swipes. One show per session; snooze → one re-offer in session 2 →
+  // retired (the provenance chip stays as the evergreen entry, F10).
+  function maybeShowQuicksetPrompt(decision: 'like' | 'pass') {
+    if (!quicksetPromptOn || quicksetPromptShownThisSession || quicksetPromptVisible) return;
+    const ob = getOnboardingState();
+    if (ob.quicksetPromptRetired || ob.quicksetCompletedPositions.length > 0) return;
+    if (ob.quicksetPromptSnoozed && (ob.sessionCount < 2 || ob.quicksetPromptSession2Shown)) {
+      return;
+    }
+    const swipes = ob.totalSwipes; // includes the swipe that got us here
+    if (!((decision === 'pass' && swipes >= 2) || swipes >= 3)) return;
+    quicksetPromptShownThisSession = true;
+    setQuicksetPromptVisible(true);
+    patchOnboardingState({
+      quicksetPromptShows: ob.quicksetPromptShows + 1,
+      ...(ob.quicksetPromptSnoozed ? { quicksetPromptSession2Shown: true } : {}),
+    });
+    track('quickset_prompt_shown', { show_count: ob.quicksetPromptShows + 1 }, 'Trades');
+  }
+
+  function snoozeQuicksetPrompt() {
+    setQuicksetPromptVisible(false);
+    const ob = getOnboardingState();
+    // A snooze of the session-2 re-offer retires the auto-prompt for good.
+    const retire = ob.quicksetPromptSnoozed && ob.quicksetPromptSession2Shown;
+    patchOnboardingState(
+      retire ? { quicksetPromptRetired: true } : { quicksetPromptSnoozed: true },
+    );
+    track('quickset_prompt_snoozed', { retired: retire }, 'Trades');
+  }
+
+  function acceptQuicksetPrompt(via: 'prompt' | 'chip' = 'prompt') {
+    setQuicksetPromptVisible(false);
+    track('quickset_prompt_accepted', { via }, 'Trades');
+    // Unknown routes bubble from the Trades stack up to the tab navigator.
+    navigation.navigate('Rank', {
+      screen: 'QuickSetTiers',
+      params: { onboardingReturn: true },
+    });
+  }
+
+  // Consume the QuickSet→Trades handoff on focus: snapshot the old deck,
+  // force a fresh job (server cache key doesn't see board changes), and
+  // let the diff effect below count what's new.
+  useFocusEffect(
+    useCallback(() => {
+      const pos = consumePendingQuicksetRegen();
+      if (!pos || !leagueId) return;
+      pendingRegenRef.current = {
+        position: pos,
+        prevIds: new Set(deck.map((c) => c.trade_id)),
+      };
+      setDeckIdx(0);
+      generateMutation.mutate({ force: true });
+      // Item 8: first-Quick-Set-save celebration beat, then the Apple ask
+      // for this save-moment class (win-then-ask; the diff banner that
+      // follows is a passive receipt, not an ask).
+      if (guidedOn && !getOnboardingState().celebrationsShown.first_quickset_save) {
+        setToast({
+          msg: "That's your board now. The deck rebuilds around it.",
+          tone: 'success',
+        });
+        patchOnboardingState({ celebrationsShown: { first_quickset_save: true } });
+        track('celebration_fired', { beat: 'first_quickset_save' }, 'Trades');
+      }
+      maybeAskApple('quickset_save');
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [deck, leagueId]),
+  );
+
+  // Diff banner (F2 — the aha receipt): once the forced job completes,
+  // count cards that weren't in the pre-Quick-Set deck. Voice doc #9;
+  // suppressed when nothing changed.
+  useEffect(() => {
+    const pending = pendingRegenRef.current;
+    if (!pending || job?.status !== 'complete') return;
+    pendingRegenRef.current = null;
+    const fresh = deck.filter((c) => !pending.prevIds.has(c.trade_id)).length;
+    track(
+      'deck_regenerated',
+      { position: pending.position, new_trades: fresh },
+      'Trades',
+    );
+    if (fresh > 0) {
+      setQuicksetDiffBanner({ position: pending.position, count: fresh });
+      if (guidedOn && !getOnboardingState().coachMarksShown.diff_banner) {
+        patchOnboardingState({ coachMarksShown: { diff_banner: true } });
+        track('coach_mark_shown', { mark: 'diff_banner' }, 'Trades');
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.status, deck]);
+
+  // Banner auto-dismisses; it's a receipt, not a control.
+  useEffect(() => {
+    if (!quicksetDiffBanner) return;
+    const t = setTimeout(() => setQuicksetDiffBanner(null), 8000);
+    return () => clearTimeout(t);
+  }, [quicksetDiffBanner]);
+
+  // Deck exhausted (items 7+9): record it once per episode, and give the
+  // snoozed Quick Set prompt its F10 re-offer slot (the once-per-session
+  // cap inside maybeShowQuicksetPrompt still applies).
+  const deckExhausted =
+    !topCard &&
+    deck.length > 0 &&
+    job?.status !== 'running' &&
+    !generateMutation.isPending;
+  const exhaustedTrackedRef = useRef(false);
+  useEffect(() => {
+    if (!deckExhausted) {
+      exhaustedTrackedRef.current = false;
+      return;
+    }
+    if (exhaustedTrackedRef.current) return;
+    exhaustedTrackedRef.current = true;
+    track('deck_exhausted_viewed', { deck_size: deck.length }, 'Trades');
+    maybeShowQuicksetPrompt('like'); // swipes ≥3 path; pass-trigger n/a here
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deckExhausted]);
+
+  // ── Onboarding item 8: save-moment Apple ask (ADR-006 policy) ────────
+  // One auto-modal per save-moment class, ever; one ask per session across
+  // classes; only for unverified, non-demo, Sleeper-keyed iOS sessions.
+  function maybeAskApple(cls: 'like' | 'quickset_save') {
+    if (!appleSaveOn || appleAskShownThisSession || appleAsk) return;
+    if (Platform.OS !== 'ios' || isDemo || user?.account_only) return;
+    if (verification?.user_verified) return;
+    const ob = getOnboardingState();
+    if (ob.applePromptShownFor[cls]) return;
+    appleAskShownThisSession = true;
+    patchOnboardingState(
+      cls === 'like'
+        ? { applePromptShownFor: { like: true } }
+        : { applePromptShownFor: { quickset_save: true } },
+    );
+    // Win-then-ask: the celebration toast lands before the modal.
+    setTimeout(() => {
+      setAppleAsk(cls);
+      track('apple_prompt_shown', { trigger: cls }, 'Trades');
+    }, 700);
+  }
+
+  function closeAppleAsk(bound: boolean) {
+    const cls = appleAsk;
+    setAppleAsk(null);
+    if (bound) {
+      track('apple_prompt_accepted', { trigger: cls }, 'Trades');
+      setToast({ msg: 'Apple ID linked — your board follows you now.', tone: 'success' });
+    } else {
+      patchOnboardingState({ applePromptDeclined: true });
+      track('apple_prompt_declined', { trigger: cls }, 'Trades');
+    }
+  }
+
+  function openSession2Banner() {
+    patchOnboardingState({ appleSession2BannerShown: true });
+    appleAskShownThisSession = true;
+    setAppleAsk('session2_banner');
+    track('apple_prompt_shown', { trigger: 'session2_banner' }, 'Trades');
+  }
+
+  function dismissSession2Banner() {
+    patchOnboardingState({ appleSession2BannerShown: true });
+    track('apple_banner_dismissed', undefined, 'Trades');
+  }
+
+  // Item 8 (G4) — user-initiated share of the last liked trade. Text +
+  // link v1: rendering the card to an image needs a view-shot dependency,
+  // deliberately deferred.
+  async function shareLikedTrade() {
+    const c = lastLikedCard;
+    if (!c) return;
+    const give = c.give_players.map((p) => p.name).join(' + ');
+    const recv = c.receive_players.map((p) => p.name).join(' + ');
+    try {
+      const res = await Share.share({
+        message:
+          `Trade idea for our league: I send ${give}, get ${recv} from ` +
+          `@${c.opponent_username}. Found on Fantasy Trade Finder — ` +
+          'https://fantasy-trade-finder.onrender.com',
+      });
+      if (res.action !== Share.dismissedAction) {
+        track('trade_card_shared', { trade_id: c.trade_id }, 'Trades');
+      }
+    } catch {
+      /* share sheet canceled or unavailable — nothing to record */
+    }
+  }
+
+  // ── Onboarding item 4 (F5): identity-confirm strip actions ───────────
+  function handleIdentityNotYou() {
+    Alert.alert(
+      'Not your team?',
+      `You're trading as @${user?.username || ''}. Sign out and enter a ` +
+        'different Sleeper username?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign out',
+          style: 'destructive',
+          onPress: async () => {
+            await useSession.getState().signOut();
+            // Tab screens can't replace() on the root stack — reset via
+            // the exported container ref (same target LeaguePicker/Settings
+            // use for their sign-out paths).
+            if (navigationRef.isReady()) {
+              navigationRef.reset({ index: 0, routes: [{ name: 'SignIn' }] });
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  function handleIdentityDismiss() {
+    identityStripDismissedThisSession = true;
+    setIdentityStripVisible(false);
+  }
+
   // Swap-sheet candidates: the tapped side's roster (give → yours,
   // receive → the counterparty's), minus everyone already in the trade
   // and anyone the consensus pool doesn't price (K/DST).
@@ -953,11 +1418,40 @@ export default function TradesScreen({ navigation }: any) {
 
   function advance(decision: 'like' | 'pass') {
     if (!topCard) return;
+    // Onboarding item 4: persist first-swipe + lifetime swipe count
+    // (items 7/8 read these for the prompt-card and Apple-ask triggers).
+    // Gated on ANY consumer feature so each flag works independently
+    // (individual enablement); flags-off leaves no writes behind.
+    if (
+      onboardingEnabled('onboarding.trades_first') ||
+      onboardingEnabled('onboarding.quickset_prompt') ||
+      onboardingEnabled('onboarding.apple_save_moment')
+    ) {
+      patchOnboardingState({
+        firstSwipeDone: true,
+        totalSwipes: getOnboardingState().totalSwipes + 1,
+      });
+    }
+    maybeShowQuicksetPrompt(decision);
+    // Guided layer: any disposition (swipe or button) retires an active
+    // swipe hint — the card it pointed at is leaving.
+    if (swipeHintActive) dismissSwipeHint();
     swipeMutation.mutate({ card: topCard, decision });
     setDeckIdx((i) => i + 1);
     if (decision === 'like') {
       haptics.success();
-      setToast({ msg: 'Liked', tone: 'success' });
+      // Item 8: remember the liked card for the share affordance, fire the
+      // first-like celebration beat (guided layer), then the Apple ask —
+      // win-then-ask ordering, never two overlapping surfaces.
+      setLastLikedCard(topCard);
+      let likeToast = 'Liked';
+      if (guidedOn && !getOnboardingState().celebrationsShown.first_like) {
+        likeToast = 'First target logged. Your front office is open for business.';
+        patchOnboardingState({ celebrationsShown: { first_like: true } });
+        track('celebration_fired', { beat: 'first_like' }, 'Trades');
+      }
+      setToast({ msg: likeToast, tone: 'success' });
+      maybeAskApple('like');
     } else {
       haptics.swipe();
     }
@@ -969,6 +1463,9 @@ export default function TradesScreen({ navigation }: any) {
   // "the engine got this one wrong" for operator review.
   function handleFlagBadTrade() {
     if (!topCard) return;
+    // No reason field in the mobile flag flow (flagBadTrade's `reason`
+    // param is unused here), so the event carries the trade id only.
+    track('trade_flagged', { trade_id: topCard.trade_id }, 'Trades');
     flagMutation.mutate(topCard);
     advance('pass');
     setToast({ msg: 'Flagged — thanks, this trains the engine', tone: 'success' });
@@ -1069,10 +1566,23 @@ export default function TradesScreen({ navigation }: any) {
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!topCard || !generateMutation.isPending}
       >
+        {/* Onboarding item 4 (F5) — first-run identity confirm. A valid-
+            but-wrong username silently loads a stranger's team; this is
+            the escape hatch. Session-dismissible; demo sessions skip it. */}
+        {firstRun && identityStripVisible && !isDemo && user?.username ? (
+          <IdentityConfirmStrip
+            username={user.username}
+            avatarId={user.avatar_id}
+            onNotYou={handleIdentityNotYou}
+            onDismiss={handleIdentityDismiss}
+          />
+        ) : null}
+
         {/* B7 — new-partners alert. Banner self-dismisses via AsyncStorage
             keyed on the latest partner; renders null when the flag is off
-            (query is gated upstream) or there are no new partners. */}
-        {newPartnersFlag && leagueId && userId && (newPartnersQuery.data?.partners?.length ?? 0) > 0 ? (
+            (query is gated upstream) or there are no new partners.
+            First-run (onboarding item 4): pre-deck chrome — deferred. */}
+        {!firstRun && newPartnersFlag && leagueId && userId && (newPartnersQuery.data?.partners?.length ?? 0) > 0 ? (
           <NewPartnersBanner
             partners={newPartnersQuery.data!.partners}
             userId={userId}
@@ -1081,8 +1591,9 @@ export default function TradesScreen({ navigation }: any) {
         ) : null}
 
         {/* Cold-start invite nudge — no league-mate has ranked yet, so the
-            divergence engine has nothing to work with. */}
-        {showInviteBanner && leagueId ? (
+            divergence engine has nothing to work with. First-run: deferred
+            until after the first swipe (onboarding item 4 / F11). */}
+        {!firstRun && showInviteBanner && leagueId ? (
           <InviteLeaguematesBanner
             leagueId={leagueId}
             leagueName={league?.league_name}
@@ -1096,6 +1607,7 @@ export default function TradesScreen({ navigation }: any) {
             Calculator (manual trade builder, demo data) is always
             reachable — it needs no league. Chalkline chip construction:
             1px border + label type on ink; active = ink-3 well + chalk. */}
+        {!firstRun && (
         <View style={styles.subnavRow}>
           <View testID="trades.subnav.trades" style={[styles.subnavPill, styles.subnavPillActive]}>
             <Text style={[styles.subnavPillText, styles.subnavPillTextActive]}>
@@ -1125,12 +1637,17 @@ export default function TradesScreen({ navigation }: any) {
             <Text style={styles.subnavPillText}>Calculator</Text>
           </Pressable>
         </View>
+        )}
 
-        {/* League selector pill — opens LeagueSwitcherSheet on tap. */}
+        {/* League selector pill — opens LeagueSwitcherSheet on tap.
+            First-run: chrome-collapsed (LeagueSwitcherSheet stays reachable
+            post-first-run; league choice just happened at the picker). */}
+        {!firstRun && (
         <LeaguePill
           label="Trading in"
           onPress={() => setSwitcherOpen(true)}
         />
+        )}
 
         {/* FB4-59 — single-format gate. When the league resolves to only the
             OTHER scoring format, show the gate in place of the trade UI;
@@ -1145,8 +1662,13 @@ export default function TradesScreen({ navigation }: any) {
           />
         ) : (
         <>
+        {/* Onboarding item 4 (accepted F11): first-run collapses this card
+            to ONE control row — just Find a Trade + the progress strip.
+            Outlook editing stays reachable via the inferred-outlook banner;
+            everything else returns on the next mount after the first swipe. */}
         <Card>
           <View style={styles.controlInner}>
+          {!firstRun && (
           <View style={styles.controlRow}>
             <View style={{ flex: 1 }}>
               <TickLabel>Outlook</TickLabel>
@@ -1163,6 +1685,7 @@ export default function TradesScreen({ navigation }: any) {
               onPress={() => setOutlookOpen(true)}
             />
           </View>
+          )}
 
           {/* Trade-fairness toggle. ON: backend filters to balanced
               trades and sorts by composite_score (fairness-weighted).
@@ -1171,6 +1694,7 @@ export default function TradesScreen({ navigation }: any) {
               between owners on the swapped players). Rendered as the
               Chalkline slider construction: 4px ink-3 track, 16px square
               ice thumb — same boolean semantics as before. */}
+          {!firstRun && (
           <View style={styles.fairnessRow}>
             <View style={{ flex: 1 }}>
               <TickLabel>Trade fairness</TickLabel>
@@ -1198,12 +1722,13 @@ export default function TradesScreen({ navigation }: any) {
               </View>
             </Pressable>
           </View>
+          )}
 
           {/* Phase-2 lane filter — Window moves / Value moves pills with an
               implicit All state (tap the active pill to clear). Mirrors the
               FB-47 direction-toggle construction; renders only when the
               deck actually carries lanes. */}
-          {deckHasLanes && (
+          {!firstRun && deckHasLanes && (
             <View style={styles.targetDirRow}>
               {(
                 [
@@ -1243,7 +1768,7 @@ export default function TradesScreen({ navigation }: any) {
               Position-level targeting stays in OutlookSheet's chips; this
               is the player-level entry point. Chip construction mirrors
               the subnav pills. */}
-          {targetingEnabled && (
+          {!firstRun && targetingEnabled && (
             <View style={styles.targetSection}>
               <View style={styles.controlRow}>
                 <View style={{ flex: 1 }}>
@@ -1341,7 +1866,10 @@ export default function TradesScreen({ navigation }: any) {
             testID="trades.find-btn"
             label={deck.length > 0 && job?.status === 'complete' ? 'Find more trades' : 'Find a Trade'}
             disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
-            onPress={() => generateMutation.mutate()}
+            onPress={() => {
+              track('find_trades_tapped', undefined, 'Trades');
+              generateMutation.mutate({});
+            }}
             style={styles.findBtn}
           />
 
@@ -1380,7 +1908,7 @@ export default function TradesScreen({ navigation }: any) {
             </View>
           )}
 
-          {likedQuery.data && likedQuery.data.liked_count > 0 && (
+          {!firstRun && likedQuery.data && likedQuery.data.liked_count > 0 && (
             <Text style={styles.likedCount}>
               <Text style={type.data}>{likedQuery.data.liked_count}</Text>
               {` liked trade${likedQuery.data.liked_count === 1 ? '' : 's'} awaiting their swipe`}
@@ -1419,8 +1947,110 @@ export default function TradesScreen({ navigation }: any) {
           </View>
         )}
 
+        {/* Onboarding item 4 — provenance chip: which value basis built
+            this deck. Deck-level (state is global to every card); item 7
+            wires its tap-through to Quick Set. Coach mark 2 (guided layer)
+            anchors directly beneath it, once, never stacked with the
+            swipe hint. */}
+        {/* Item 10 — demo→real bridge: the one demo investment (Q6). */}
+        {demoBridgeOn && isDemo ? (
+          <Pressable
+            testID="trades.demo-bridge"
+            style={styles.demoBridge}
+            onPress={async () => {
+              track('demo_bridge_tapped', undefined, 'Trades');
+              // Landing is the username field — signing out routes there
+              // (same container-ref reset the identity strip uses).
+              await useSession.getState().signOut();
+              if (navigationRef.isReady()) {
+                navigationRef.reset({ index: 0, routes: [{ name: 'SignIn' }] });
+              }
+            }}
+          >
+            {({ pressed }) => (
+              <Text style={[styles.demoBridgeText, pressed && { color: chalk.base }]}>
+                Sample league. See this for YOUR team →
+              </Text>
+            )}
+          </Pressable>
+        ) : null}
+        {/* Item 10 (F12) — honest label for redraft leagues. */}
+        {demoBridgeOn && isRedraftLeague && !isDemo ? (
+          <View testID="trades.redraft-label" style={styles.redraftLabel}>
+            <Text style={styles.redraftLabelText}>Dynasty values shown</Text>
+          </View>
+        ) : null}
+        {tradesFirstOn && topCard ? (
+          <ProvenanceChip
+            personalized={quicksetPositions.length > 0}
+            // Item 7 (F10): the chip is the evergreen Quick Set entry once
+            // the auto-prompt retires. Tap-through only while the prompt
+            // feature is live and the board is still consensus.
+            onPress={
+              quicksetPromptOn && quicksetPositions.length === 0
+                ? () => acceptQuicksetPrompt('chip')
+                : undefined
+            }
+          />
+        ) : null}
+        {quicksetDiffBanner ? (
+          <View testID="trades.diff-banner" style={styles.diffBanner}>
+            <Text style={styles.diffBannerText}>
+              Re-ranked with your {quicksetDiffBanner.position} board —{' '}
+              {quicksetDiffBanner.count} new trade
+              {quicksetDiffBanner.count === 1 ? '' : 's'}.
+            </Text>
+          </View>
+        ) : null}
+        {/* Item 8 (round-3 D1): session-2 NON-MODAL Apple banner — the one
+            softer ask for unbound users with real swipe investment. Shown
+            until acted on or dismissed, then never again (persisted). */}
+        {appleSaveOn &&
+        !appleAsk &&
+        Platform.OS === 'ios' &&
+        !isDemo &&
+        !user?.account_only &&
+        !verification?.user_verified &&
+        obSessionCount >= 2 &&
+        obTotalSwipes >= 5 &&
+        !session2BannerShown ? (
+          <View testID="trades.apple-session2-banner" style={styles.appleBanner}>
+            <Pressable style={styles.appleBannerBody} onPress={openSession2Banner} hitSlop={4}>
+              <Text style={styles.appleBannerText}>
+                {obTotalSwipes} swipes on this board. Add Apple sign-in to
+                carry it across devices →
+              </Text>
+            </Pressable>
+            <Pressable
+              testID="trades.apple-session2-banner.dismiss"
+              onPress={dismissSession2Banner}
+              hitSlop={8}
+            >
+              {({ pressed }) => (
+                <Text style={[styles.appleBannerDismiss, pressed && { color: chalk.base }]}>
+                  Dismiss
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
+        {tradesFirstOn && guidedOn && provenanceMarkVisible && topCard ? (
+          <CoachMark
+            testID="trades.coach-mark.provenance"
+            text="These are consensus values. After Quick Set, they're yours."
+            onDismiss={dismissProvenanceMark}
+          />
+        ) : null}
+
         <View style={styles.deckWrap}>
-          {topCard ? (
+          {quicksetPromptVisible ? (
+            // Item 7 — inline prompt card holds the top-of-deck slot until
+            // answered; the deck resumes underneath on either action.
+            <QuickSetPromptCard
+              onAccept={() => acceptQuicksetPrompt('prompt')}
+              onDismiss={snoozeQuicksetPrompt}
+            />
+          ) : topCard ? (
             <>
               {/* Peek of the next card behind the top one. Clipped to the
                   TOP card's measured height (#107/#110): a taller next card
@@ -1445,6 +2075,8 @@ export default function TradesScreen({ navigation }: any) {
               <SwipableTopCard
                 key={topCard.trade_id}
                 card={topCard}
+                nudge={swipeHintActive}
+                onFirstTouch={dismissSwipeHint}
                 onCardLayout={(e) => setTopCardH(e.nativeEvent.layout.height)}
                 onLike={() => advance('like')}
                 onPass={() => advance('pass')}
@@ -1556,7 +2188,36 @@ export default function TradesScreen({ navigation }: any) {
                 <Icon name="flag" size={14} color={chalk.dim} />
                 <Text style={styles.badTradeText}>Bad trade?</Text>
               </Pressable>
+              {/* Item 8 (G4) — user-initiated share of the last liked trade.
+                  Appears only after a like, never alongside the Apple ask
+                  (prompt resolves first, ruling: never two CTAs at the peak
+                  moment). */}
+              {shareSheetOn && lastLikedCard && !appleAsk ? (
+                <Pressable
+                  testID="trades.share-liked"
+                  onPress={() => void shareLikedTrade()}
+                  style={styles.shareRow}
+                  hitSlop={8}
+                >
+                  {({ pressed }) => (
+                    <Text style={[styles.shareRowText, pressed && { color: chalk.base }]}>
+                      Share your last liked trade →
+                    </Text>
+                  )}
+                </Pressable>
+              ) : null}
             </>
+          ) : firstRun &&
+            deck.length === 0 &&
+            job?.status !== 'complete' &&
+            job?.status !== 'error' &&
+            !autoGenFailed ? (
+            // Onboarding item 4 — first-run skeleton deck: generation was
+            // auto-started (or pregenerated at auth-return) and cards are
+            // streaming in; the manual "Hit Find a Trade" empty state never
+            // shows on first run. Falls through to the normal states if the
+            // job completes empty or the silent auto-start gives up.
+            <SkeletonTradeCard />
           ) : generateMutation.isPending || job?.status === 'running' ? (
             // Job is running but no cards have arrived yet (first ~3s of
             // the first opponent). Show a placeholder so the deck doesn't
@@ -1576,10 +2237,31 @@ export default function TradesScreen({ navigation }: any) {
             <Card>
               <View style={styles.emptyInner}>
                 <Text style={styles.emptyTitle}>That's all for now</Text>
-                <Text style={styles.emptyBody}>
-                  You've swiped on every generated trade. Rank more players or
-                  invite leaguemates to unlock more.
-                </Text>
+                {rankRoutingOn ? (
+                  // Item 9 (F8): the dead-end becomes the trio-habit ramp —
+                  // the push-independent path to the daily sharpening loop.
+                  <>
+                    <Text style={styles.emptyBody}>
+                      You've seen every trade. Sharpen your board with quick
+                      head-to-heads →
+                    </Text>
+                    <Button
+                      testID="trades.trio-entry"
+                      label="Quick head-to-heads"
+                      variant="secondary"
+                      compact
+                      onPress={() => {
+                        track('trio_entry_tapped', { from: 'deck_exhausted' }, 'Trades');
+                        navigation.navigate('Rank', { screen: 'Trios' });
+                      }}
+                    />
+                  </>
+                ) : (
+                  <Text style={styles.emptyBody}>
+                    You've swiped on every generated trade. Rank more players or
+                    invite leaguemates to unlock more.
+                  </Text>
+                )}
               </View>
             </Card>
           ) : (
@@ -1733,6 +2415,13 @@ export default function TradesScreen({ navigation }: any) {
         onPick={handleAddTarget}
         onClose={() => setTargetPickerOpen(false)}
       />
+
+      {/* Item 8 — save-moment Apple ask (ADR-006 honest framing). */}
+      <AppleSaveMomentSheet
+        visible={!!appleAsk}
+        trigger={appleAsk ?? 'like'}
+        onClose={closeAppleAsk}
+      />
     </SafeAreaView>
   );
 }
@@ -1785,6 +2474,13 @@ interface SwipableProps {
   repricing?: boolean;
   // FB-47 — pass-through to TradeCard's partner-fit line copy.
   fitTargetPositions?: string[];
+  // Onboarding guided layer (v2.1): swipe-gesture hint. While `nudge` is
+  // true the card runs a subtle translateX nudge (twice, then rests);
+  // the first touch anywhere on the card calls `onFirstTouch` — the
+  // parent flips `nudge` off and the cleanup springs the card home. The
+  // swipe itself remains the tutorial; no overlay, no modal.
+  nudge?: boolean;
+  onFirstTouch?: () => void;
 }
 
 function SwipableTopCard({
@@ -1797,8 +2493,31 @@ function SwipableTopCard({
   onSwapPlayer,
   repricing,
   fitTargetPositions,
+  nudge,
+  onFirstTouch,
 }: SwipableProps) {
   const translateX = useSharedValue(0);
+
+  // Guided-layer nudge: two gentle right-and-back beats after a short
+  // settle delay. Any touch dismisses (see onTouchStart below); a live
+  // pan assignment overrides the animation frame-for-frame regardless.
+  useEffect(() => {
+    if (!nudge) return;
+    translateX.value = withDelay(
+      600,
+      withRepeat(
+        withSequence(
+          withTiming(28, { duration: 320, easing: Easing.out(Easing.cubic) }),
+          withTiming(0, { duration: 320, easing: Easing.out(Easing.cubic) }),
+        ),
+        2,
+      ),
+    );
+    return () => {
+      cancelAnimation(translateX);
+      translateX.value = withTiming(0, { duration: 120 });
+    };
+  }, [nudge, translateX]);
 
   const pan = useMemo(
     () =>
@@ -1835,7 +2554,12 @@ function SwipableTopCard({
 
   return (
     <GestureDetector gesture={pan}>
-      <Animated.View testID="trades.card-top" style={[styles.cardStack, animatedStyle]} onLayout={onCardLayout}>
+      <Animated.View
+        testID="trades.card-top"
+        style={[styles.cardStack, animatedStyle]}
+        onLayout={onCardLayout}
+        onTouchStart={nudge ? () => onFirstTouch?.() : undefined}
+      >
         <TradeCardComp
           data={card}
           untouchableIds={untouchableIds}
@@ -2070,6 +2794,86 @@ const styles = StyleSheet.create({
   emptyBody: {
     ...type.bodySm,
     textAlign: 'center',
+  },
+  // Onboarding item 7 — post-Quick-Set regeneration receipt. Flare =
+  // informational highlight per Chalkline (never an action color).
+  diffBanner: {
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: flare.base,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    marginBottom: space.md,
+  },
+  diffBannerText: {
+    ...type.bodySm,
+    color: chalk.base,
+    fontFamily: fonts.uiSemi,
+  },
+  // Item 8 — session-2 non-modal Apple banner (round-3 D1).
+  appleBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    marginBottom: space.md,
+  },
+  appleBannerBody: { flex: 1, minWidth: 0 },
+  appleBannerText: {
+    ...type.bodySm,
+    color: chalk.base,
+    fontFamily: fonts.uiSemi,
+  },
+  appleBannerDismiss: {
+    ...type.bodySm,
+    color: chalk.dim,
+    fontFamily: fonts.uiSemi,
+  },
+  // Item 10 — demo→real bridge bar + redraft honesty label.
+  demoBridge: {
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    marginBottom: space.md,
+  },
+  demoBridgeText: {
+    ...type.bodySm,
+    color: chalk.base,
+    fontFamily: fonts.uiSemi,
+  },
+  redraftLabel: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: 3,
+    marginBottom: space.sm,
+  },
+  redraftLabelText: {
+    ...type.bodySm,
+    color: chalk.dim,
+    fontFamily: fonts.uiSemi,
+  },
+  // Item 8 — share affordance under the disposition area.
+  shareRow: {
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shareRowText: {
+    ...type.bodySm,
+    color: chalk.dim,
+    fontFamily: fonts.uiSemi,
   },
 
   // Queue button — appears below the swipable card under the queue flag.

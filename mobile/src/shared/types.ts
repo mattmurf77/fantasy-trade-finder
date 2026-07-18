@@ -29,6 +29,9 @@ export interface Player {
   injury_status?: string | null;
   search_rank?: number | null;
   adp?: number | null;
+  // FB-147 — true when this player is on the Sleeper trade block in the
+  // card's league (flag sleeper.trade_block). Backend omits when absent.
+  on_block?: boolean;
 }
 
 export interface Trio {
@@ -73,6 +76,10 @@ export interface LeagueSummary {
   avatar?: string | null;
   total_rosters?: number;
   platform?: string;
+  // Sleeper settings.type: 0 = redraft, 1 = keeper, 2 = dynasty. Optional —
+  // local/ESPN leagues don't carry it. Onboarding item 10 (F12): redraft
+  // leagues get a "Dynasty values shown" label and a segment tag in events.
+  settings_type?: number;
 }
 
 export interface SessionInfo {
@@ -371,7 +378,7 @@ export interface SmartStartResolution {
   /** Lowercased Sleeper username when kind === 'username'. */
   username?: string;
   /** Detected platform when kind === 'league_url'. */
-  platform?: 'sleeper' | 'espn' | 'mfl';
+  platform?: 'sleeper' | 'espn' | 'mfl' | 'fleaflicker';
   league_id?: string;
   /** Resolved league name from /api/league/parse-url (Sleeper only). */
   league_name?: string;

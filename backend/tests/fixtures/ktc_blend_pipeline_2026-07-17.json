@@ -1,0 +1,5003 @@
+{
+"_comment": "Live DP (2026-07-17 values-players.csv) + KTC (dynasty-rankings top-500) matched consensus, for the #145/#148 blend pipeline tests. dp = per-format name->value; dp_pos = name->position; ktc = matched consensus in _ktc_consensus form.",
+"dp": {
+"1qb_ppr": {
+"jamarr chase": 10208.0,
+"jaxon smithnjigba": 9716.0,
+"bijan robinson": 9626.0,
+"justin jefferson": 9184.0,
+"jahmyr gibbs": 9141.0,
+"puka nacua": 9076.0,
+"amonra st brown": 8991.0,
+"ceedee lamb": 8991.0,
+"ashton jeanty": 8379.0,
+"malik nabers": 8070.0,
+"jeremiyah love": 7809.0,
+"drake london": 7329.0,
+"omarion hampton": 7192.0,
+"tetairoa mcmillan": 6878.0,
+"josh allen": 6814.0,
+"james cook": 6532.0,
+"garrett wilson": 6516.0,
+"breece hall": 6291.0,
+"jonathan taylor": 6217.0,
+"nico collins": 6159.0,
+"emeka egbuka": 6159.0,
+"devon achane": 6116.0,
+"chris olave": 6087.0,
+"brock bowers": 5904.0,
+"aj brown": 5659.0,
+"carnell tate": 5620.0,
+"trey mcbride": 5567.0,
+"drake maye": 5554.0,
+"kenneth walker": 5476.0,
+"ladd mcconkey": 4997.0,
+"devonta smith": 4973.0,
+"george pickens": 4824.0,
+"lamar jackson": 4801.0,
+"marvin harrison": 4712.0,
+"colston loveland": 4701.0,
+"jaylen waddle": 4602.0,
+"rome odunze": 4453.0,
+"luther burden": 4443.0,
+"jayden daniels": 4443.0,
+"jordyn tyson": 4401.0,
+"patrick mahomes": 4340.0,
+"christian mccaffrey": 4319.0,
+"zay flowers": 4239.0,
+"makai lemon": 4063.0,
+"chase brown": 3886.0,
+"sam laporta": 3787.0,
+"tyler warren": 3742.0,
+"joe burrow": 3742.0,
+"jalen hurts": 3681.0,
+"tee higgins": 3587.0,
+"rashee rice": 3579.0,
+"caleb williams": 3343.0,
+"treveyon henderson": 3328.0,
+"saquon barkley": 3320.0,
+"quinshon judkins": 3273.0,
+"travis etienne": 3175.0,
+"justin herbert": 3108.0,
+"tucker kraft": 3036.0,
+"jameson williams": 2994.0,
+"kyren williams": 2959.0,
+"harold fannin": 2783.0,
+"brian thomas": 2770.0,
+"kyle pitts": 2712.0,
+"trevor lawrence": 2516.0,
+"dj moore": 2295.0,
+"dk metcalf": 2290.0,
+"kc concepcion": 2164.0,
+"bucky irving": 2139.0,
+"cam skattebo": 2139.0,
+"jadarian price": 2041.0,
+"brock purdy": 2041.0,
+"christian watson": 2027.0,
+"jaxson dart": 2022.0,
+"javonte williams": 2012.0,
+"dalton kincaid": 1893.0,
+"michael pittman": 1823.0,
+"alec pierce": 1744.0,
+"terry mclaurin": 1744.0,
+"bo nix": 1711.0,
+"kenyon sadiq": 1667.0,
+"derrick henry": 1648.0,
+"josh jacobs": 1554.0,
+"jordan addison": 1507.0,
+"cj stroud": 1486.0,
+"bhayshul tuten": 1476.0,
+"dak prescott": 1458.0,
+"omar cooper": 1395.0,
+"dandre swift": 1252.0,
+"eli stowers": 1246.0,
+"michael wilson": 1243.0,
+"jordan love": 1208.0,
+"parker washington": 1158.0,
+"ricky pearsall": 1158.0,
+"wandale robinson": 1145.0,
+"jayden higgins": 1116.0,
+"oronde gadsden": 1064.0,
+"mike evans": 1064.0,
+"davante adams": 1047.0,
+"david montgomery": 1030.0,
+"isaiah likely": 1030.0,
+"josh downs": 1030.0,
+"jonathon brooks": 1011.0,
+"courtland sutton": 1008.0,
+"jake ferguson": 978.0,
+"denzel boston": 951.0,
+"george kittle": 916.0,
+"rj harvey": 886.0,
+"xavier worthy": 874.0,
+"brandon aiyuk": 832.0,
+"jared goff": 830.0,
+"matthew golden": 814.0,
+"jayden reed": 805.0,
+"jakobi meyers": 766.0,
+"chris godwin": 759.0,
+"quentin johnston": 746.0,
+"fernando mendoza": 731.0,
+"baker mayfield": 696.0,
+"brenton strange": 688.0,
+"jaylen warren": 672.0,
+"cam ward": 667.0,
+"travis hunter": 642.0,
+"kyle monangai": 633.0,
+"zach charbonnet": 596.0,
+"antonio williams": 579.0,
+"blake corum": 555.0,
+"tyler shough": 549.0,
+"chuba hubbard": 538.0,
+"romeo doubs": 520.0,
+"khalil shakir": 517.0,
+"kyler murray": 505.0,
+"chris bell": 495.0,
+"rhamondre stevenson": 490.0,
+"jalen coker": 488.0,
+"sam darnold": 454.0,
+"tyreek hill": 453.0,
+"rico dowdle": 451.0,
+"malik willis": 427.0,
+"chig okonkwo": 409.0,
+"mark andrews": 399.0,
+"dallas goedert": 395.0,
+"tank dell": 386.0,
+"tony pollard": 376.0,
+"matthew stafford": 372.0,
+"jonah coleman": 371.0,
+"bryce young": 345.0,
+"germie bernard": 338.0,
+"daniel jones": 326.0,
+"anthony richardson": 325.0,
+"jalen mcmillan": 314.0,
+"kenny gainwell": 308.0,
+"rashid shaheed": 303.0,
+"tre harris": 302.0,
+"jk dobbins": 300.0,
+"jaylin noel": 281.0,
+"dezhaun stribling": 278.0,
+"jacory croskeymerritt": 278.0,
+"aj barner": 264.0,
+"travis kelce": 264.0,
+"jauan jennings": 260.0,
+"ty simpson": 258.0,
+"rachaad white": 238.0,
+"terrance ferguson": 233.0,
+"ted hurst iii": 231.0,
+"juwan johnson": 215.0,
+"woody marks": 209.0,
+"tyler allgeier": 209.0,
+"elijah sarratt": 208.0,
+"tyrone tracy": 205.0,
+"stefon diggs": 203.0,
+"tj hockenson": 197.0,
+"jordan mason": 181.0,
+"chris brazzell": 171.0,
+"nicholas singleton": 170.0,
+"dylan sampson": 159.0,
+"eli raridon": 158.0,
+"kayshon boutte": 156.0,
+"michael penix": 156.0,
+"hunter henry": 155.0,
+"jerry jeudy": 155.0,
+"oscar delp": 154.0,
+"adonai mitchell": 154.0,
+"max klare": 151.0,
+"chris rodriguez": 150.0,
+"skyler bell": 143.0,
+"troy franklin": 135.0,
+"emmett johnson": 133.0,
+"gunnar helm": 132.0,
+"pat bryant": 131.0,
+"aaron jones": 126.0,
+"malachi fields": 125.0,
+"zachariah branch": 118.0,
+"deebo samuel": 118.0,
+"isaac teslaa": 117.0,
+"tua tagovailoa": 112.0,
+"dalton schultz": 107.0,
+"kaytron allen": 102.0,
+"tyjae spears": 98.0,
+"jj mccarthy": 96.0,
+"jack bech": 95.0,
+"mike washington": 93.0,
+"david njoku": 91.0,
+"pat freiermuth": 91.0,
+"jalen nailor": 91.0,
+"mason taylor": 89.0,
+"keaton mitchell": 89.0,
+"elic ayomanor": 88.0,
+"jakobi lane": 87.0,
+"chimere dike": 83.0,
+"bryce lance": 80.0,
+"cade otton": 80.0,
+"tank bigsby": 78.0,
+"greg dulcich": 76.0,
+"isiah pacheco": 73.0,
+"dontayvion wicks": 71.0,
+"braelon allen": 71.0,
+"kyle williams": 70.0,
+"shedeur sanders": 69.0,
+"brian robinson": 68.0,
+"tory horton": 66.0,
+"calvin ridley": 64.0,
+"elijah arroyo": 62.0,
+"geno smith": 62.0,
+"mac jones": 61.0,
+"darnell mooney": 60.0,
+"keon coleman": 58.0,
+"kaleb johnson": 57.0,
+"jacoby brissett": 54.0,
+"justin joly": 54.0,
+"alvin kamara": 51.0,
+"kimani vidal": 50.0,
+"malik washington": 49.0,
+"tre tucker": 46.0,
+"kevin coleman": 45.0,
+"aaron rodgers": 45.0,
+"michael mayer": 45.0,
+"marvin mims": 44.0,
+"brenen thompson": 43.0,
+"kaelon black": 42.0,
+"ryan flournoy": 41.0,
+"theo johnson": 39.0,
+"demond claiborne": 39.0,
+"deshaun watson": 38.0,
+"rashod bateman": 38.0,
+"ray davis": 34.0,
+"carson beck": 33.0,
+"ollie gordon": 32.0,
+"emanuel wilson": 32.0,
+"justin fields": 30.0,
+"xavier legette": 26.0,
+"trey benson": 26.0,
+"jaylen wright": 25.0,
+"kirk cousins": 24.0,
+"sean tucker": 24.0,
+"james conner": 23.0,
+"christian kirk": 22.0,
+"demario douglas": 22.0,
+"jalen milroe": 21.0,
+"tez johnson": 21.0,
+"adam randall": 20.0,
+"eli heidenreich": 19.0,
+"cole payton": 19.0,
+"cole kmet": 19.0,
+"cade klubnik": 19.0,
+"marshawn lloyd": 19.0,
+"devin neal": 18.0,
+"caleb douglas": 18.0,
+"taylen green": 17.0,
+"cedric tillman": 17.0,
+"jalen royals": 17.0,
+"darnell washington": 17.0,
+"sam roush": 17.0,
+"drew allar": 16.0,
+"marcus mariota": 16.0,
+"hollywood brown": 16.0,
+"jaydon blue": 15.0,
+"cooper kupp": 15.0,
+"colby parkinson": 15.0,
+"ben sinnott": 14.0,
+"chris brooks": 14.0,
+"keenan allen": 14.0,
+"jake tonges": 14.0,
+"mike gesicki": 14.0,
+"quinn ewers": 13.0,
+"spencer rattler": 13.0,
+"jordan james": 13.0,
+"charlie kolar": 13.0,
+"jameis winston": 13.0,
+"evan engram": 13.0,
+"konata mumpfield": 12.0,
+"seth mcgowan": 12.0,
+"jatavion sanders": 12.0,
+"devaughn vele": 12.0,
+"najee harris": 12.0,
+"jalen tolbert": 11.0,
+"will howard": 11.0,
+"tyquan thornton": 11.0,
+"isaiah bond": 11.0,
+"andrei iosivas": 10.0,
+"joe milton": 10.0,
+"darius slayton": 10.0,
+"isaiah davis": 10.0,
+"sam howell": 10.0,
+"garrett nussmeier": 9.0,
+"dj giddens": 9.0,
+"jarquez hunter": 9.0,
+"elijah moore": 9.0,
+"eric mcalister": 9.0,
+"deion burks": 8.0,
+"aaron anderson": 8.0,
+"malik benson": 8.0,
+"marlin klein": 7.0,
+"savion williams": 7.0,
+"devin singletary": 7.0,
+"brashard smith": 7.0,
+"robert henry": 7.0,
+"jonnu smith": 7.0,
+"calvin austin": 7.0,
+"tanner koziol": 7.0,
+"jaylin lane": 7.0,
+"tahj brooks": 7.0,
+"zach ertz": 7.0,
+"trevor etienne": 7.0,
+"donte thornton": 6.0,
+"roman hemby": 6.0,
+"jalynn polk": 6.0,
+"darren waller": 6.0,
+"kendre miller": 6.0,
+"luke mccaffrey": 6.0,
+"joe mixon": 6.0,
+"emari demercado": 6.0,
+"jalin hyatt": 6.0,
+"cj daniels": 6.0,
+"joe flacco": 6.0,
+"tyson bagent": 6.0,
+"matt hibner": 6.0,
+"jahan dotson": 6.0,
+"kareem hunt": 6.0,
+"jeff caldwell": 6.0,
+"kendrick law": 5.0,
+"nick chubb": 5.0,
+"samaje perine": 5.0,
+"jack endries": 5.0,
+"isaac guerendo": 5.0,
+"jawhar jordan": 5.0,
+"will shipley": 5.0,
+"dillon gabriel": 5.0,
+"tanner mckee": 5.0,
+"carson wentz": 5.0,
+"kavontae turpin": 5.0,
+"eric rivers jr": 5.0,
+"lequint allen": 5.0,
+"tutu atwell": 5.0,
+"jerome ford": 5.0,
+"colbie young": 5.0,
+"noah gray": 5.0,
+"riley leonard": 5.0,
+"tyler higbee": 5.0,
+"joshua palmer": 5.0,
+"xavier restrepo": 5.0,
+"noah fant": 5.0,
+"luke musgrave": 5.0,
+"jam miller": 4.0,
+"nate boerkircher": 4.0,
+"erick all": 4.0,
+"joe royer": 4.0,
+"dean connors": 4.0,
+"will levis": 4.0,
+"mack hollins": 4.0,
+"michael trigg": 4.0,
+"justice hill": 4.0,
+"riley nowakowski": 4.0,
+"reggie virgil": 4.0,
+"kaden wetjen": 4.0,
+"cyrus allen": 4.0,
+"jaleel mclaughlin": 4.0,
+"chase roberts": 4.0,
+"dawson knox": 4.0,
+"aidan oconnell": 4.0,
+"gabe davis": 4.0,
+"nick westbrookikhine": 4.0,
+"seydou traore": 4.0,
+"davis mills": 4.0,
+"xavier hutchinson": 4.0,
+"adam trautman": 4.0,
+"audric estime": 4.0,
+"jmari taylor": 4.0,
+"carsen ryan": 4.0,
+"elijah higgins": 4.0,
+"malik davis": 4.0,
+"mitchell evans": 4.0,
+"antonio gibson": 4.0,
+"jared wiley": 4.0,
+"josh cuevas": 4.0,
+"treylon burks": 4.0,
+"austin ekeler": 4.0,
+"will kacmarek": 4.0,
+"jeremy mcnichols": 4.0,
+"jaydn ott": 4.0,
+"daequan wright": 4.0,
+"olamide zaccheaus": 4.0,
+"josh cameron": 4.0,
+"ty chandler": 3.0,
+"jaren kanak": 3.0,
+"daniel bellinger": 3.0,
+"kendrick bourne": 3.0,
+"cade stover": 3.0,
+"taysom hill": 3.0,
+"deandre hopkins": 3.0,
+"jordan watkins": 3.0,
+"gardner minshew": 3.0,
+"jimmy horn": 3.0,
+"trey lance": 3.0,
+"efton chism": 3.0,
+"george holani": 3.0,
+"devontez walker": 3.0,
+"isaiah hodgins": 3.0,
+"dyami brown": 3.0,
+"tyler conklin": 3.0,
+"damien martinez": 3.0,
+"rj maryland": 3.0,
+"phil mafah": 3.0,
+"zavion thomas": 3.0,
+"miles sanders": 3.0,
+"keandre lambertsmith": 3.0,
+"dameon pierce": 3.0,
+"noah whittington": 3.0,
+"desmond reid": 3.0,
+"j michael sturdivant": 3.0,
+"raheim sanders": 3.0,
+"chip trayanum": 3.0,
+"john metchie": 3.0,
+"curtis samuel": 3.0,
+"michael carter": 3.0,
+"jahdae walker": 3.0,
+"tyler badie": 3.0,
+"ty johnson": 3.0,
+"trey palmer": 3.0,
+"jeremy ruckert": 3.0,
+"tyler lockett": 3.0,
+"tai felton": 3.0,
+"tyler huntley": 3.0,
+"jake bobo": 3.0,
+"jordan whittington": 3.0,
+"thomas fidone": 3.0,
+"raheem mostert": 3.0,
+"cj donaldson": 3.0,
+"brandin cooks": 3.0,
+"austin hooper": 3.0,
+"luke schoonmaker": 3.0,
+"grant calcaterra": 3.0,
+"jimmy garoppolo": 3.0,
+"roschon johnson": 3.0,
+"haynes king": 3.0,
+"john michael gyllenborg": 3.0,
+"kenny pickett": 3.0,
+"zach wilson": 3.0,
+"foster moreau": 3.0,
+"tommy tremble": 3.0,
+"josh oliver": 3.0,
+"roman wilson": 3.0,
+"elijah mitchell": 3.0,
+"mitch tinsley": 3.0,
+"brevin jordan": 3.0,
+"khalil herbert": 3.0,
+"kalif raymond": 3.0,
+"malachi corley": 3.0,
+"greg dortch": 3.0,
+"chris hilton jr": 3.0,
+"dylan laube": 3.0,
+"van jefferson": 3.0,
+"jackson hawes": 3.0,
+"dane key": 3.0,
+"jacob cowing": 3.0,
+"darius cooper": 3.0,
+"joey aguilar": 3.0,
+"rasheen ali": 3.0,
+"zack moss": 3.0,
+"zamir white": 3.0,
+"theo wease jr": 3.0,
+"mason rudolph": 3.0,
+"jarrett stidham": 3.0,
+"tyrod taylor": 3.0,
+"demarcus robinson": 3.0,
+"hunter long": 3.0,
+"bo melton": 3.0,
+"alexander mattison": 3.0,
+"noah thomas": 3.0,
+"hassan haskins": 3.0,
+"jake browning": 2.0,
+"aj dillon": 2.0,
+"mitchell trubisky": 2.0,
+"stone smartt": 2.0,
+"kenny mcintosh": 2.0,
+"trebor pena": 2.0,
+"luke altmyer": 2.0,
+"brady cook": 2.0,
+"jaheim bell": 2.0,
+"harrison bryant": 2.0,
+"andy dalton": 2.0,
+"kyle mccord": 2.0,
+"eric gray": 2.0,
+"juju smithschuster": 2.0,
+"kalel mullings": 2.0,
+"cam akers": 2.0,
+"davis allen": 2.0,
+"nick mullens": 2.0,
+"tanner hudson": 2.0,
+"arian smith": 2.0,
+"jelani woods": 2.0,
+"kylen granson": 2.0,
+"ameer abdullah": 2.0,
+"drew lock": 2.0,
+"hendon hooker": 2.0,
+"diontae johnson": 2.0,
+"stetson bennett iv": 2.0,
+"marquez valdesscantling": 2.0,
+"evan hull": 2.0,
+"sincere mccormick": 2.0,
+"noah brown": 2.0,
+"vinny anthony": 2.0,
+"max brosmer": 2.0,
+"jake briningstool": 2.0,
+"john bates": 2.0,
+"josh reynolds": 2.0,
+"jermaine burton": 2.0,
+"will dissly": 2.0,
+"jonathan mingo": 2.0,
+"kurtis rourke": 2.0,
+"sterling shepard": 2.0,
+"kyle allen": 2.0,
+"trey sermon": 2.0,
+"nick nash": 2.0,
+"bailey zappe": 2.0,
+"desmond ridder": 2.0,
+"dare ogunbowale": 2.0,
+"tyler goodson": 2.0,
+"jamari thrash": 2.0,
+"zay jones": 2.0,
+"brock wright": 2.0,
+"luke farrell": 2.0,
+"sam ehlinger": 2.0,
+"josh whyle": 2.0,
+"tip reiman": 2.0,
+"ashton dulin": 2.0,
+"tim patrick": 2.0,
+"javon baker": 2.0,
+"skylar thompson": 2.0,
+"julian hill": 2.0,
+"tylan wallace": 1.0,
+"deejay dallas": 1.0,
+"devin culp": 1.0,
+"josh johnson": 1.0,
+"craig reynolds": 1.0,
+"jalin conyers": 1.0,
+"gus edwards": 1.0,
+"skyy moore": 1.0,
+"lucas krull": 1.0,
+"tommy devito": 1.0,
+"moliki matavao": 1.0,
+"will mallory": 1.0,
+"jaret patterson": 1.0,
+"case keenum": 1.0,
+"drew ogletree": 1.0,
+"johnny mundt": 1.0,
+"marcus yarns": 1.0,
+"carson steele": 1.0,
+"payne durham": 1.0,
+"henry ruggs": 1.0,
+"drew sample": 1.0,
+"sean clifford": 1.0,
+"chase edmonds": 1.0,
+"brevyn spannford": 1.0,
+"mo aliecox": 1.0,
+"cody schrader": 1.0,
+"at perry": 1.0,
+"david moore": 1.0,
+"clyde edwardshelaire": 1.0,
+"johnny wilson": 1.0,
+"eric saubert": 1.0,
+"cordarrelle patterson": 1.0,
+"jack stoll": 1.0,
+"allen lazard": 1.0,
+"keaontay ingram": 1.0,
+"deneric prince": 1.0,
+"kendall milton": 1.0,
+"israel abanikanda": 1.0,
+"terrace marshall jr": 1.0,
+"ainias smith": 1.0,
+"durham smythe": 1.0,
+"dominic lovett": 1.0,
+"tyler johnson": 1.0,
+"pierre strong": 1.0,
+"rayray mccloud": 1.0,
+"blake watson": 1.0,
+"deuce vaughn": 1.0,
+"james mitchell": 1.0,
+"connor heyward": 1.0,
+"tyler scott": 1.0,
+"donald parham jr": 1.0,
+"cedrick wilson": 1.0,
+"charlie jones": 1.0,
+"shane zylstra": 1.0,
+"ian thomas": 1.0,
+"salvon ahmed": 1.0,
+"teagan quitoriano": 1.0,
+"derius davis": 1.0,
+"ronnie rivers": 1.0,
+"julius chestnut": 1.0,
+"keilan robinson": 1.0,
+"kene nwangwu": 1.0,
+"jeff wilson": 1.0,
+"dernest johnson": 1.0,
+"ben skowronek": 1.0,
+"hunter renfrow": 1.0,
+"justin watson": 1.0,
+"scotty miller": 1.0,
+"travis homer": 1.0,
+"braxton berrios": 1.0,
+"kj osborn": 1.0,
+"darrynton evans": 1.0,
+"bub means": 1.0,
+"velus jones": 1.0,
+"tahj washington": 1.0,
+"nyheim millerhines": 1.0,
+"xavier gipson": 1.0,
+"jamycal hasty": 1.0,
+"michael wiley": 1.0,
+"gary brightwell": 1.0,
+"devin duvernay": 1.0,
+"mecole hardman": 1.0,
+"quez watkins": 1.0,
+"trayveon williams": 1.0,
+"jason brownlee": 1.0
+},
+"sf_tep": {
+"jamarr chase": 9141.0,
+"jaxon smithnjigba": 8559.0,
+"bijan robinson": 8262.0,
+"justin jefferson": 8127.0,
+"jahmyr gibbs": 7503.0,
+"puka nacua": 7736.0,
+"amonra st brown": 7628.0,
+"ceedee lamb": 7700.0,
+"ashton jeanty": 6687.0,
+"malik nabers": 6174.0,
+"jeremiyah love": 6016.0,
+"drake london": 5862.0,
+"omarion hampton": 5593.0,
+"tetairoa mcmillan": 5164.0,
+"josh allen": 10208.0,
+"james cook": 4927.0,
+"garrett wilson": 4904.0,
+"breece hall": 4767.0,
+"jonathan taylor": 4602.0,
+"nico collins": 4474.0,
+"emeka egbuka": 4559.0,
+"devon achane": 4756.0,
+"chris olave": 4495.0,
+"brock bowers": 4581.0,
+"aj brown": 4239.0,
+"carnell tate": 4189.0,
+"trey mcbride": 4299.0,
+"drake maye": 6410.0,
+"kenneth walker": 4111.0,
+"ladd mcconkey": 3751.0,
+"devonta smith": 3647.0,
+"george pickens": 4474.0,
+"lamar jackson": 8970.0,
+"marvin harrison": 3858.0,
+"colston loveland": 3479.0,
+"jaylen waddle": 3479.0,
+"rome odunze": 3296.0,
+"luther burden": 3351.0,
+"jayden daniels": 7521.0,
+"jordyn tyson": 3266.0,
+"patrick mahomes": 8399.0,
+"christian mccaffrey": 3399.0,
+"zay flowers": 3289.0,
+"makai lemon": 2931.0,
+"chase brown": 2938.0,
+"sam laporta": 3058.0,
+"tyler warren": 2751.0,
+"joe burrow": 8185.0,
+"jalen hurts": 7754.0,
+"tee higgins": 2883.0,
+"rashee rice": 2731.0,
+"caleb williams": 7827.0,
+"treveyon henderson": 2475.0,
+"saquon barkley": 2323.0,
+"quinshon judkins": 2440.0,
+"travis etienne": 2378.0,
+"justin herbert": 7468.0,
+"tucker kraft": 2279.0,
+"jameson williams": 2237.0,
+"kyren williams": 1980.0,
+"harold fannin": 2154.0,
+"brian thomas": 2099.0,
+"kyle pitts": 1794.0,
+"trevor lawrence": 6044.0,
+"dj moore": 1276.0,
+"dk metcalf": 1132.0,
+"kc concepcion": 1640.0,
+"bucky irving": 1699.0,
+"cam skattebo": 1644.0,
+"jadarian price": 1532.0,
+"brock purdy": 5541.0,
+"christian watson": 1558.0,
+"jaxson dart": 5580.0,
+"javonte williams": 1543.0,
+"dalton kincaid": 1462.0,
+"michael pittman": 759.0,
+"alec pierce": 1334.0,
+"terry mclaurin": 1331.0,
+"bo nix": 5374.0,
+"kenyon sadiq": 1291.0,
+"derrick henry": 1231.0,
+"josh jacobs": 1180.0,
+"jordan addison": 1145.0,
+"cj stroud": 4063.0,
+"bhayshul tuten": 1113.0,
+"dak prescott": 4745.0,
+"omar cooper": 1037.0,
+"dandre swift": 905.0,
+"eli stowers": 971.0,
+"michael wilson": 933.0,
+"jordan love": 5476.0,
+"parker washington": 858.0,
+"ricky pearsall": 866.0,
+"wandale robinson": 849.0,
+"jayden higgins": 807.0,
+"oronde gadsden": 834.0,
+"mike evans": 797.0,
+"davante adams": 788.0,
+"david montgomery": 757.0,
+"isaiah likely": 797.0,
+"josh downs": 777.0,
+"jonathon brooks": 330.0,
+"courtland sutton": 764.0,
+"jake ferguson": 734.0,
+"denzel boston": 717.0,
+"george kittle": 707.0,
+"rj harvey": 681.0,
+"xavier worthy": 696.0,
+"brandon aiyuk": 704.0,
+"jared goff": 3094.0,
+"matthew golden": 617.0,
+"jayden reed": 626.0,
+"jakobi meyers": 589.0,
+"chris godwin": 570.0,
+"quentin johnston": 576.0,
+"fernando mendoza": 2790.0,
+"baker mayfield": 2594.0,
+"brenton strange": 550.0,
+"jaylen warren": 523.0,
+"cam ward": 2475.0,
+"travis hunter": 505.0,
+"kyle monangai": 494.0,
+"zach charbonnet": 463.0,
+"antonio williams": 448.0,
+"blake corum": 436.0,
+"tyler shough": 1952.0,
+"chuba hubbard": 413.0,
+"romeo doubs": 412.0,
+"khalil shakir": 415.0,
+"kyler murray": 3036.0,
+"chris bell": 392.0,
+"rhamondre stevenson": 391.0,
+"jalen coker": 381.0,
+"sam darnold": 1583.0,
+"tyreek hill": 388.0,
+"rico dowdle": 357.0,
+"malik willis": 1448.0,
+"chig okonkwo": 337.0,
+"mark andrews": 327.0,
+"dallas goedert": 315.0,
+"tank dell": 75.0,
+"tony pollard": 306.0,
+"matthew stafford": 1237.0,
+"jonah coleman": 301.0,
+"bryce young": 1116.0,
+"germie bernard": 279.0,
+"daniel jones": 1085.0,
+"anthony richardson": 903.0,
+"jalen mcmillan": 257.0,
+"kenny gainwell": 260.0,
+"rashid shaheed": 260.0,
+"tre harris": 244.0,
+"jk dobbins": 247.0,
+"jaylin noel": 234.0,
+"dezhaun stribling": 231.0,
+"jacory croskeymerritt": 231.0,
+"aj barner": 233.0,
+"travis kelce": 219.0,
+"jauan jennings": 226.0,
+"ty simpson": 786.0,
+"rachaad white": 197.0,
+"terrance ferguson": 200.0,
+"ted hurst iii": 197.0,
+"juwan johnson": 187.0,
+"woody marks": 181.0,
+"tyler allgeier": 184.0,
+"elijah sarratt": 175.0,
+"tyrone tracy": 176.0,
+"stefon diggs": 179.0,
+"tj hockenson": 170.0,
+"jordan mason": 160.0,
+"chris brazzell": 143.0,
+"nicholas singleton": 151.0,
+"dylan sampson": 137.0,
+"eli raridon": 139.0,
+"kayshon boutte": 137.0,
+"michael penix": 540.0,
+"hunter henry": 137.0,
+"jerry jeudy": 135.0,
+"oscar delp": 135.0,
+"adonai mitchell": 134.0,
+"max klare": 131.0,
+"chris rodriguez": 127.0,
+"skyler bell": 127.0,
+"troy franklin": 118.0,
+"emmett johnson": 122.0,
+"gunnar helm": 122.0,
+"pat bryant": 118.0,
+"aaron jones": 108.0,
+"malachi fields": 116.0,
+"zachariah branch": 111.0,
+"deebo samuel": 107.0,
+"isaac teslaa": 104.0,
+"tua tagovailoa": 916.0,
+"dalton schultz": 101.0,
+"kaytron allen": 97.0,
+"tyjae spears": 91.0,
+"jj mccarthy": 399.0,
+"jack bech": 84.0,
+"mike washington": 85.0,
+"david njoku": 80.0,
+"pat freiermuth": 82.0,
+"jalen nailor": 84.0,
+"mason taylor": 87.0,
+"keaton mitchell": 82.0,
+"elic ayomanor": 85.0,
+"jakobi lane": 86.0,
+"chimere dike": 75.0,
+"bryce lance": 70.0,
+"cade otton": 77.0,
+"tank bigsby": 73.0,
+"greg dulcich": 72.0,
+"isiah pacheco": 70.0,
+"dontayvion wicks": 62.0,
+"braelon allen": 68.0,
+"kyle williams": 68.0,
+"shedeur sanders": 267.0,
+"brian robinson": 66.0,
+"tory horton": 64.0,
+"calvin ridley": 59.0,
+"elijah arroyo": 60.0,
+"geno smith": 256.0,
+"mac jones": 167.0,
+"darnell mooney": 57.0,
+"keon coleman": 55.0,
+"kaleb johnson": 59.0,
+"jacoby brissett": 242.0,
+"justin joly": 58.0,
+"alvin kamara": 57.0,
+"kimani vidal": 48.0,
+"malik washington": 50.0,
+"tre tucker": 46.0,
+"kevin coleman": 41.0,
+"aaron rodgers": 200.0,
+"michael mayer": 43.0,
+"marvin mims": 42.0,
+"brenen thompson": 39.0,
+"kaelon black": 45.0,
+"ryan flournoy": 42.0,
+"theo johnson": 46.0,
+"demond claiborne": 46.0,
+"deshaun watson": 129.0,
+"rashod bateman": 37.0,
+"ray davis": 37.0,
+"carson beck": 173.0,
+"ollie gordon": 36.0,
+"emanuel wilson": 36.0,
+"justin fields": 89.0,
+"xavier legette": 29.0,
+"trey benson": 33.0,
+"jaylen wright": 29.0,
+"kirk cousins": 57.0,
+"sean tucker": 31.0,
+"james conner": 29.0,
+"christian kirk": 26.0,
+"demario douglas": 24.0,
+"jalen milroe": 16.0,
+"tez johnson": 26.0,
+"adam randall": 27.0,
+"eli heidenreich": 24.0,
+"cole payton": 19.0,
+"cole kmet": 25.0,
+"cade klubnik": 35.0,
+"marshawn lloyd": 27.0,
+"devin neal": 25.0,
+"caleb douglas": 24.0,
+"taylen green": 25.0,
+"cedric tillman": 21.0,
+"jalen royals": 21.0,
+"darnell washington": 21.0,
+"sam roush": 21.0,
+"drew allar": 59.0,
+"marcus mariota": 18.0,
+"hollywood brown": 21.0,
+"jaydon blue": 22.0,
+"cooper kupp": 19.0,
+"colby parkinson": 22.0,
+"ben sinnott": 20.0,
+"chris brooks": 17.0,
+"keenan allen": 17.0,
+"jake tonges": 22.0,
+"mike gesicki": 19.0,
+"quinn ewers": 25.0,
+"spencer rattler": 21.0,
+"jordan james": 22.0,
+"charlie kolar": 14.0,
+"jameis winston": 14.0,
+"evan engram": 18.0,
+"konata mumpfield": 16.0,
+"seth mcgowan": 21.0,
+"jatavion sanders": 19.0,
+"devaughn vele": 17.0,
+"najee harris": 18.0,
+"jalen tolbert": 13.0,
+"will howard": 15.0,
+"tyquan thornton": 18.0,
+"isaiah bond": 15.0,
+"andrei iosivas": 15.0,
+"joe milton": 13.0,
+"darius slayton": 16.0,
+"isaiah davis": 17.0,
+"sam howell": 2.0,
+"garrett nussmeier": 30.0,
+"dj giddens": 17.0,
+"jarquez hunter": 15.0,
+"elijah moore": 9.0,
+"eric mcalister": 6.0,
+"deion burks": 15.0,
+"aaron anderson": 8.0,
+"malik benson": 11.0,
+"marlin klein": 14.0,
+"savion williams": 11.0,
+"devin singletary": 13.0,
+"brashard smith": 13.0,
+"robert henry": 9.0,
+"jonnu smith": 13.0,
+"calvin austin": 12.0,
+"tanner koziol": 14.0,
+"jaylin lane": 12.0,
+"tahj brooks": 13.0,
+"zach ertz": 7.0,
+"trevor etienne": 13.0,
+"donte thornton": 11.0,
+"roman hemby": 11.0,
+"jalynn polk": 9.0,
+"darren waller": 9.0,
+"kendre miller": 12.0,
+"luke mccaffrey": 10.0,
+"joe mixon": 9.0,
+"emari demercado": 6.0,
+"jalin hyatt": 5.0,
+"cj daniels": 11.0,
+"joe flacco": 3.0,
+"tyson bagent": 30.0,
+"matt hibner": 11.0,
+"jahan dotson": 10.0,
+"kareem hunt": 8.0,
+"jeff caldwell": 5.0,
+"kendrick law": 6.0,
+"nick chubb": 3.0,
+"samaje perine": 9.0,
+"jack endries": 11.0,
+"isaac guerendo": 11.0,
+"jawhar jordan": 15.0,
+"will shipley": 11.0,
+"dillon gabriel": 3.0,
+"tanner mckee": 3.0,
+"carson wentz": 2.0,
+"kavontae turpin": 7.0,
+"eric rivers jr": 6.0,
+"lequint allen": 11.0,
+"tutu atwell": 9.0,
+"jerome ford": 9.0,
+"colbie young": 3.0,
+"noah gray": 6.0,
+"riley leonard": 3.0,
+"tyler higbee": 6.0,
+"joshua palmer": 8.0,
+"xavier restrepo": 3.0,
+"noah fant": 8.0,
+"luke musgrave": 6.0,
+"jam miller": 10.0,
+"nate boerkircher": 5.0,
+"erick all": 6.0,
+"joe royer": 5.0,
+"dean connors": 4.0,
+"will levis": 3.0,
+"mack hollins": 7.0,
+"michael trigg": 9.0,
+"justice hill": 9.0,
+"riley nowakowski": 4.0,
+"reggie virgil": 3.0,
+"kaden wetjen": 4.0,
+"cyrus allen": 9.0,
+"jaleel mclaughlin": 8.0,
+"chase roberts": 4.0,
+"dawson knox": 9.0,
+"aidan oconnell": 2.0,
+"gabe davis": 4.0,
+"nick westbrookikhine": 3.0,
+"seydou traore": 4.0,
+"davis mills": 3.0,
+"xavier hutchinson": 4.0,
+"adam trautman": 3.0,
+"audric estime": 8.0,
+"jmari taylor": 10.0,
+"carsen ryan": 3.0,
+"elijah higgins": 4.0,
+"malik davis": 8.0,
+"mitchell evans": 5.0,
+"antonio gibson": 4.0,
+"jared wiley": 4.0,
+"josh cuevas": 3.0,
+"treylon burks": 3.0,
+"austin ekeler": 4.0,
+"will kacmarek": 4.0,
+"jeremy mcnichols": 4.0,
+"jaydn ott": 4.0,
+"daequan wright": 3.0,
+"olamide zaccheaus": 4.0,
+"josh cameron": 8.0,
+"ty chandler": 3.0,
+"jaren kanak": 4.0,
+"daniel bellinger": 4.0,
+"kendrick bourne": 5.0,
+"cade stover": 3.0,
+"taysom hill": 3.0,
+"deandre hopkins": 3.0,
+"jordan watkins": 4.0,
+"gardner minshew": 2.0,
+"jimmy horn": 3.0,
+"trey lance": 3.0,
+"efton chism": 4.0,
+"george holani": 9.0,
+"devontez walker": 8.0,
+"isaiah hodgins": 3.0,
+"dyami brown": 7.0,
+"tyler conklin": 3.0,
+"damien martinez": 3.0,
+"rj maryland": 3.0,
+"phil mafah": 3.0,
+"zavion thomas": 8.0,
+"miles sanders": 3.0,
+"keandre lambertsmith": 6.0,
+"dameon pierce": 4.0,
+"noah whittington": 3.0,
+"desmond reid": 3.0,
+"j michael sturdivant": 3.0,
+"raheim sanders": 4.0,
+"chip trayanum": 3.0,
+"john metchie": 7.0,
+"curtis samuel": 4.0,
+"michael carter": 3.0,
+"jahdae walker": 3.0,
+"tyler badie": 3.0,
+"ty johnson": 6.0,
+"trey palmer": 4.0,
+"jeremy ruckert": 3.0,
+"tyler lockett": 3.0,
+"tai felton": 5.0,
+"tyler huntley": 2.0,
+"jake bobo": 3.0,
+"jordan whittington": 6.0,
+"thomas fidone": 3.0,
+"raheem mostert": 3.0,
+"cj donaldson": 3.0,
+"brandin cooks": 3.0,
+"austin hooper": 3.0,
+"luke schoonmaker": 3.0,
+"grant calcaterra": 3.0,
+"jimmy garoppolo": 2.0,
+"roschon johnson": 6.0,
+"haynes king": 2.0,
+"john michael gyllenborg": 3.0,
+"kenny pickett": 2.0,
+"zach wilson": 2.0,
+"foster moreau": 3.0,
+"tommy tremble": 3.0,
+"josh oliver": 3.0,
+"roman wilson": 3.0,
+"elijah mitchell": 3.0,
+"mitch tinsley": 3.0,
+"brevin jordan": 3.0,
+"khalil herbert": 3.0,
+"kalif raymond": 3.0,
+"malachi corley": 3.0,
+"greg dortch": 3.0,
+"chris hilton jr": 3.0,
+"dylan laube": 3.0,
+"van jefferson": 3.0,
+"jackson hawes": 3.0,
+"dane key": 3.0,
+"jacob cowing": 3.0,
+"darius cooper": 3.0,
+"joey aguilar": 2.0,
+"rasheen ali": 3.0,
+"zack moss": 3.0,
+"zamir white": 3.0,
+"theo wease jr": 3.0,
+"mason rudolph": 2.0,
+"jarrett stidham": 2.0,
+"tyrod taylor": 2.0,
+"demarcus robinson": 3.0,
+"hunter long": 3.0,
+"bo melton": 3.0,
+"alexander mattison": 3.0,
+"noah thomas": 3.0,
+"hassan haskins": 3.0,
+"jake browning": 2.0,
+"aj dillon": 2.0,
+"mitchell trubisky": 2.0,
+"stone smartt": 2.0,
+"kenny mcintosh": 2.0,
+"trebor pena": 2.0,
+"luke altmyer": 2.0,
+"brady cook": 2.0,
+"jaheim bell": 2.0,
+"harrison bryant": 2.0,
+"andy dalton": 2.0,
+"kyle mccord": 2.0,
+"eric gray": 2.0,
+"juju smithschuster": 2.0,
+"kalel mullings": 2.0,
+"cam akers": 2.0,
+"davis allen": 2.0,
+"nick mullens": 2.0,
+"tanner hudson": 2.0,
+"arian smith": 2.0,
+"jelani woods": 2.0,
+"kylen granson": 2.0,
+"ameer abdullah": 2.0,
+"drew lock": 2.0,
+"hendon hooker": 2.0,
+"diontae johnson": 2.0,
+"stetson bennett iv": 2.0,
+"marquez valdesscantling": 2.0,
+"evan hull": 2.0,
+"sincere mccormick": 2.0,
+"noah brown": 2.0,
+"vinny anthony": 2.0,
+"max brosmer": 2.0,
+"jake briningstool": 2.0,
+"john bates": 2.0,
+"josh reynolds": 2.0,
+"jermaine burton": 2.0,
+"will dissly": 2.0,
+"jonathan mingo": 2.0,
+"kurtis rourke": 1.0,
+"sterling shepard": 2.0,
+"kyle allen": 1.0,
+"trey sermon": 2.0,
+"nick nash": 2.0,
+"bailey zappe": 1.0,
+"desmond ridder": 1.0,
+"dare ogunbowale": 2.0,
+"tyler goodson": 2.0,
+"jamari thrash": 2.0,
+"zay jones": 2.0,
+"brock wright": 2.0,
+"luke farrell": 2.0,
+"sam ehlinger": 1.0,
+"josh whyle": 2.0,
+"tip reiman": 2.0,
+"ashton dulin": 2.0,
+"tim patrick": 2.0,
+"javon baker": 2.0,
+"skylar thompson": 1.0,
+"julian hill": 2.0,
+"tylan wallace": 1.0,
+"deejay dallas": 1.0,
+"devin culp": 1.0,
+"josh johnson": 1.0,
+"craig reynolds": 1.0,
+"jalin conyers": 1.0,
+"gus edwards": 1.0,
+"skyy moore": 1.0,
+"lucas krull": 1.0,
+"tommy devito": 1.0,
+"moliki matavao": 1.0,
+"will mallory": 1.0,
+"jaret patterson": 1.0,
+"case keenum": 1.0,
+"drew ogletree": 1.0,
+"johnny mundt": 1.0,
+"marcus yarns": 1.0,
+"carson steele": 1.0,
+"payne durham": 1.0,
+"henry ruggs": 1.0,
+"drew sample": 1.0,
+"sean clifford": 1.0,
+"chase edmonds": 1.0,
+"brevyn spannford": 1.0,
+"mo aliecox": 1.0,
+"cody schrader": 1.0,
+"at perry": 1.0,
+"david moore": 1.0,
+"clyde edwardshelaire": 1.0,
+"johnny wilson": 1.0,
+"eric saubert": 1.0,
+"cordarrelle patterson": 1.0,
+"jack stoll": 1.0,
+"allen lazard": 1.0,
+"keaontay ingram": 1.0,
+"deneric prince": 1.0,
+"kendall milton": 1.0,
+"israel abanikanda": 1.0,
+"terrace marshall jr": 1.0,
+"ainias smith": 1.0,
+"durham smythe": 1.0,
+"dominic lovett": 1.0,
+"tyler johnson": 1.0,
+"pierre strong": 1.0,
+"rayray mccloud": 1.0,
+"blake watson": 1.0,
+"deuce vaughn": 1.0,
+"james mitchell": 1.0,
+"connor heyward": 1.0,
+"tyler scott": 1.0,
+"donald parham jr": 1.0,
+"cedrick wilson": 1.0,
+"charlie jones": 1.0,
+"shane zylstra": 1.0,
+"ian thomas": 1.0,
+"salvon ahmed": 1.0,
+"teagan quitoriano": 1.0,
+"derius davis": 1.0,
+"ronnie rivers": 1.0,
+"julius chestnut": 1.0,
+"keilan robinson": 1.0,
+"kene nwangwu": 1.0,
+"jeff wilson": 1.0,
+"dernest johnson": 1.0,
+"ben skowronek": 1.0,
+"hunter renfrow": 1.0,
+"justin watson": 1.0,
+"scotty miller": 1.0,
+"travis homer": 1.0,
+"braxton berrios": 1.0,
+"kj osborn": 1.0,
+"darrynton evans": 1.0,
+"bub means": 1.0,
+"velus jones": 1.0,
+"tahj washington": 1.0,
+"nyheim millerhines": 1.0,
+"xavier gipson": 1.0,
+"jamycal hasty": 1.0,
+"michael wiley": 1.0,
+"gary brightwell": 1.0,
+"devin duvernay": 1.0,
+"mecole hardman": 1.0,
+"quez watkins": 1.0,
+"trayveon williams": 1.0,
+"jason brownlee": 1.0
+}
+},
+"dp_pos": {
+"jamarr chase": "WR",
+"jaxon smithnjigba": "WR",
+"bijan robinson": "RB",
+"justin jefferson": "WR",
+"jahmyr gibbs": "RB",
+"puka nacua": "WR",
+"amonra st brown": "WR",
+"ceedee lamb": "WR",
+"ashton jeanty": "RB",
+"malik nabers": "WR",
+"jeremiyah love": "RB",
+"drake london": "WR",
+"omarion hampton": "RB",
+"tetairoa mcmillan": "WR",
+"josh allen": "QB",
+"james cook": "RB",
+"garrett wilson": "WR",
+"breece hall": "RB",
+"jonathan taylor": "RB",
+"nico collins": "WR",
+"emeka egbuka": "WR",
+"devon achane": "RB",
+"chris olave": "WR",
+"brock bowers": "TE",
+"aj brown": "WR",
+"carnell tate": "WR",
+"trey mcbride": "TE",
+"drake maye": "QB",
+"kenneth walker": "RB",
+"ladd mcconkey": "WR",
+"devonta smith": "WR",
+"george pickens": "WR",
+"lamar jackson": "QB",
+"marvin harrison": "WR",
+"colston loveland": "TE",
+"jaylen waddle": "WR",
+"rome odunze": "WR",
+"luther burden": "WR",
+"jayden daniels": "QB",
+"jordyn tyson": "WR",
+"patrick mahomes": "QB",
+"christian mccaffrey": "RB",
+"zay flowers": "WR",
+"makai lemon": "WR",
+"chase brown": "RB",
+"sam laporta": "TE",
+"tyler warren": "TE",
+"joe burrow": "QB",
+"jalen hurts": "QB",
+"tee higgins": "WR",
+"rashee rice": "WR",
+"caleb williams": "QB",
+"treveyon henderson": "RB",
+"saquon barkley": "RB",
+"quinshon judkins": "RB",
+"travis etienne": "RB",
+"justin herbert": "QB",
+"tucker kraft": "TE",
+"jameson williams": "WR",
+"kyren williams": "RB",
+"harold fannin": "TE",
+"brian thomas": "WR",
+"kyle pitts": "TE",
+"trevor lawrence": "QB",
+"dj moore": "WR",
+"dk metcalf": "WR",
+"kc concepcion": "WR",
+"bucky irving": "RB",
+"cam skattebo": "RB",
+"jadarian price": "RB",
+"brock purdy": "QB",
+"christian watson": "WR",
+"jaxson dart": "QB",
+"javonte williams": "RB",
+"dalton kincaid": "TE",
+"michael pittman": "WR",
+"alec pierce": "WR",
+"terry mclaurin": "WR",
+"bo nix": "QB",
+"kenyon sadiq": "TE",
+"derrick henry": "RB",
+"josh jacobs": "RB",
+"jordan addison": "WR",
+"cj stroud": "QB",
+"bhayshul tuten": "RB",
+"dak prescott": "QB",
+"omar cooper": "WR",
+"dandre swift": "RB",
+"eli stowers": "TE",
+"michael wilson": "WR",
+"jordan love": "QB",
+"parker washington": "WR",
+"ricky pearsall": "WR",
+"wandale robinson": "WR",
+"jayden higgins": "WR",
+"oronde gadsden": "TE",
+"mike evans": "WR",
+"davante adams": "WR",
+"david montgomery": "RB",
+"isaiah likely": "TE",
+"josh downs": "WR",
+"jonathon brooks": "RB",
+"courtland sutton": "WR",
+"jake ferguson": "TE",
+"denzel boston": "WR",
+"george kittle": "TE",
+"rj harvey": "RB",
+"xavier worthy": "WR",
+"brandon aiyuk": "WR",
+"jared goff": "QB",
+"matthew golden": "WR",
+"jayden reed": "WR",
+"jakobi meyers": "WR",
+"chris godwin": "WR",
+"quentin johnston": "WR",
+"fernando mendoza": "QB",
+"baker mayfield": "QB",
+"brenton strange": "TE",
+"jaylen warren": "RB",
+"cam ward": "QB",
+"travis hunter": "WR",
+"kyle monangai": "RB",
+"zach charbonnet": "RB",
+"antonio williams": "WR",
+"blake corum": "RB",
+"tyler shough": "QB",
+"chuba hubbard": "RB",
+"romeo doubs": "WR",
+"khalil shakir": "WR",
+"kyler murray": "QB",
+"chris bell": "WR",
+"rhamondre stevenson": "RB",
+"jalen coker": "WR",
+"sam darnold": "QB",
+"tyreek hill": "WR",
+"rico dowdle": "RB",
+"malik willis": "QB",
+"chig okonkwo": "TE",
+"mark andrews": "TE",
+"dallas goedert": "TE",
+"tank dell": "WR",
+"tony pollard": "RB",
+"matthew stafford": "QB",
+"jonah coleman": "RB",
+"bryce young": "QB",
+"germie bernard": "WR",
+"daniel jones": "QB",
+"anthony richardson": "QB",
+"jalen mcmillan": "WR",
+"kenny gainwell": "RB",
+"rashid shaheed": "WR",
+"tre harris": "WR",
+"jk dobbins": "RB",
+"jaylin noel": "WR",
+"dezhaun stribling": "WR",
+"jacory croskeymerritt": "RB",
+"aj barner": "TE",
+"travis kelce": "TE",
+"jauan jennings": "WR",
+"ty simpson": "QB",
+"rachaad white": "RB",
+"terrance ferguson": "TE",
+"ted hurst iii": "WR",
+"juwan johnson": "TE",
+"woody marks": "RB",
+"tyler allgeier": "RB",
+"elijah sarratt": "WR",
+"tyrone tracy": "RB",
+"stefon diggs": "WR",
+"tj hockenson": "TE",
+"jordan mason": "RB",
+"chris brazzell": "WR",
+"nicholas singleton": "RB",
+"dylan sampson": "RB",
+"eli raridon": "TE",
+"kayshon boutte": "WR",
+"michael penix": "QB",
+"hunter henry": "TE",
+"jerry jeudy": "WR",
+"oscar delp": "TE",
+"adonai mitchell": "WR",
+"max klare": "TE",
+"chris rodriguez": "RB",
+"skyler bell": "WR",
+"troy franklin": "WR",
+"emmett johnson": "RB",
+"gunnar helm": "TE",
+"pat bryant": "WR",
+"aaron jones": "RB",
+"malachi fields": "WR",
+"zachariah branch": "WR",
+"deebo samuel": "WR",
+"isaac teslaa": "WR",
+"tua tagovailoa": "QB",
+"dalton schultz": "TE",
+"kaytron allen": "RB",
+"tyjae spears": "RB",
+"jj mccarthy": "QB",
+"jack bech": "WR",
+"mike washington": "RB",
+"david njoku": "TE",
+"pat freiermuth": "TE",
+"jalen nailor": "WR",
+"mason taylor": "TE",
+"keaton mitchell": "RB",
+"elic ayomanor": "WR",
+"jakobi lane": "WR",
+"chimere dike": "WR",
+"bryce lance": "WR",
+"cade otton": "TE",
+"tank bigsby": "RB",
+"greg dulcich": "TE",
+"isiah pacheco": "RB",
+"dontayvion wicks": "WR",
+"braelon allen": "RB",
+"kyle williams": "WR",
+"shedeur sanders": "QB",
+"brian robinson": "RB",
+"tory horton": "WR",
+"calvin ridley": "WR",
+"elijah arroyo": "TE",
+"geno smith": "QB",
+"mac jones": "QB",
+"darnell mooney": "WR",
+"keon coleman": "WR",
+"kaleb johnson": "RB",
+"jacoby brissett": "QB",
+"justin joly": "TE",
+"alvin kamara": "RB",
+"kimani vidal": "RB",
+"malik washington": "WR",
+"tre tucker": "WR",
+"kevin coleman": "WR",
+"aaron rodgers": "QB",
+"michael mayer": "TE",
+"marvin mims": "WR",
+"brenen thompson": "WR",
+"kaelon black": "RB",
+"ryan flournoy": "WR",
+"theo johnson": "TE",
+"demond claiborne": "RB",
+"deshaun watson": "QB",
+"rashod bateman": "WR",
+"ray davis": "RB",
+"carson beck": "QB",
+"ollie gordon": "RB",
+"emanuel wilson": "RB",
+"justin fields": "QB",
+"xavier legette": "WR",
+"trey benson": "RB",
+"jaylen wright": "RB",
+"kirk cousins": "QB",
+"sean tucker": "RB",
+"james conner": "RB",
+"christian kirk": "WR",
+"demario douglas": "WR",
+"jalen milroe": "QB",
+"tez johnson": "WR",
+"adam randall": "RB",
+"eli heidenreich": "RB",
+"cole payton": "QB",
+"cole kmet": "TE",
+"cade klubnik": "QB",
+"marshawn lloyd": "RB",
+"devin neal": "RB",
+"caleb douglas": "WR",
+"taylen green": "QB",
+"cedric tillman": "WR",
+"jalen royals": "WR",
+"darnell washington": "TE",
+"sam roush": "TE",
+"drew allar": "QB",
+"marcus mariota": "QB",
+"hollywood brown": "WR",
+"jaydon blue": "RB",
+"cooper kupp": "WR",
+"colby parkinson": "TE",
+"ben sinnott": "TE",
+"chris brooks": "RB",
+"keenan allen": "WR",
+"jake tonges": "TE",
+"mike gesicki": "TE",
+"quinn ewers": "QB",
+"spencer rattler": "QB",
+"jordan james": "RB",
+"charlie kolar": "TE",
+"jameis winston": "QB",
+"evan engram": "TE",
+"konata mumpfield": "WR",
+"seth mcgowan": "RB",
+"jatavion sanders": "TE",
+"devaughn vele": "WR",
+"najee harris": "RB",
+"jalen tolbert": "WR",
+"will howard": "QB",
+"tyquan thornton": "WR",
+"isaiah bond": "WR",
+"andrei iosivas": "WR",
+"joe milton": "QB",
+"darius slayton": "WR",
+"isaiah davis": "RB",
+"sam howell": "QB",
+"garrett nussmeier": "QB",
+"dj giddens": "RB",
+"jarquez hunter": "RB",
+"elijah moore": "WR",
+"eric mcalister": "WR",
+"deion burks": "WR",
+"aaron anderson": "WR",
+"malik benson": "WR",
+"marlin klein": "TE",
+"savion williams": "WR",
+"devin singletary": "RB",
+"brashard smith": "RB",
+"robert henry": "RB",
+"jonnu smith": "TE",
+"calvin austin": "WR",
+"tanner koziol": "TE",
+"jaylin lane": "WR",
+"tahj brooks": "RB",
+"zach ertz": "TE",
+"trevor etienne": "RB",
+"donte thornton": "WR",
+"roman hemby": "RB",
+"jalynn polk": "WR",
+"darren waller": "TE",
+"kendre miller": "RB",
+"luke mccaffrey": "WR",
+"joe mixon": "RB",
+"emari demercado": "RB",
+"jalin hyatt": "WR",
+"cj daniels": "WR",
+"joe flacco": "QB",
+"tyson bagent": "QB",
+"matt hibner": "TE",
+"jahan dotson": "WR",
+"kareem hunt": "RB",
+"jeff caldwell": "WR",
+"kendrick law": "WR",
+"nick chubb": "RB",
+"samaje perine": "RB",
+"jack endries": "TE",
+"isaac guerendo": "RB",
+"jawhar jordan": "RB",
+"will shipley": "RB",
+"dillon gabriel": "QB",
+"tanner mckee": "QB",
+"carson wentz": "QB",
+"kavontae turpin": "WR",
+"eric rivers jr": "WR",
+"lequint allen": "RB",
+"tutu atwell": "WR",
+"jerome ford": "RB",
+"colbie young": "WR",
+"noah gray": "TE",
+"riley leonard": "QB",
+"tyler higbee": "TE",
+"joshua palmer": "WR",
+"xavier restrepo": "WR",
+"noah fant": "TE",
+"luke musgrave": "TE",
+"jam miller": "RB",
+"nate boerkircher": "TE",
+"erick all": "TE",
+"joe royer": "TE",
+"dean connors": "RB",
+"will levis": "QB",
+"mack hollins": "WR",
+"michael trigg": "TE",
+"justice hill": "RB",
+"riley nowakowski": "TE",
+"reggie virgil": "WR",
+"kaden wetjen": "WR",
+"cyrus allen": "WR",
+"jaleel mclaughlin": "RB",
+"chase roberts": "WR",
+"dawson knox": "TE",
+"aidan oconnell": "QB",
+"gabe davis": "WR",
+"nick westbrookikhine": "WR",
+"seydou traore": "TE",
+"davis mills": "QB",
+"xavier hutchinson": "WR",
+"adam trautman": "TE",
+"audric estime": "RB",
+"jmari taylor": "RB",
+"carsen ryan": "TE",
+"elijah higgins": "TE",
+"malik davis": "RB",
+"mitchell evans": "TE",
+"antonio gibson": "RB",
+"jared wiley": "TE",
+"josh cuevas": "TE",
+"treylon burks": "WR",
+"austin ekeler": "RB",
+"will kacmarek": "TE",
+"jeremy mcnichols": "RB",
+"jaydn ott": "RB",
+"daequan wright": "TE",
+"olamide zaccheaus": "WR",
+"josh cameron": "WR",
+"ty chandler": "RB",
+"jaren kanak": "TE",
+"daniel bellinger": "TE",
+"kendrick bourne": "WR",
+"cade stover": "TE",
+"taysom hill": "TE",
+"deandre hopkins": "WR",
+"jordan watkins": "WR",
+"gardner minshew": "QB",
+"jimmy horn": "WR",
+"trey lance": "QB",
+"efton chism": "WR",
+"george holani": "RB",
+"devontez walker": "WR",
+"isaiah hodgins": "WR",
+"dyami brown": "WR",
+"tyler conklin": "TE",
+"damien martinez": "RB",
+"rj maryland": "TE",
+"phil mafah": "RB",
+"zavion thomas": "WR",
+"miles sanders": "RB",
+"keandre lambertsmith": "WR",
+"dameon pierce": "RB",
+"noah whittington": "RB",
+"desmond reid": "RB",
+"j michael sturdivant": "WR",
+"raheim sanders": "RB",
+"chip trayanum": "RB",
+"john metchie": "WR",
+"curtis samuel": "WR",
+"michael carter": "RB",
+"jahdae walker": "WR",
+"tyler badie": "RB",
+"ty johnson": "RB",
+"trey palmer": "WR",
+"jeremy ruckert": "TE",
+"tyler lockett": "WR",
+"tai felton": "WR",
+"tyler huntley": "QB",
+"jake bobo": "WR",
+"jordan whittington": "WR",
+"thomas fidone": "TE",
+"raheem mostert": "RB",
+"cj donaldson": "RB",
+"brandin cooks": "WR",
+"austin hooper": "TE",
+"luke schoonmaker": "TE",
+"grant calcaterra": "TE",
+"jimmy garoppolo": "QB",
+"roschon johnson": "RB",
+"haynes king": "QB",
+"john michael gyllenborg": "TE",
+"kenny pickett": "QB",
+"zach wilson": "QB",
+"foster moreau": "TE",
+"tommy tremble": "TE",
+"josh oliver": "TE",
+"roman wilson": "WR",
+"elijah mitchell": "RB",
+"mitch tinsley": "WR",
+"brevin jordan": "TE",
+"khalil herbert": "RB",
+"kalif raymond": "WR",
+"malachi corley": "WR",
+"greg dortch": "WR",
+"chris hilton jr": "WR",
+"dylan laube": "RB",
+"van jefferson": "WR",
+"jackson hawes": "TE",
+"dane key": "WR",
+"jacob cowing": "WR",
+"darius cooper": "WR",
+"joey aguilar": "QB",
+"rasheen ali": "RB",
+"zack moss": "RB",
+"zamir white": "RB",
+"theo wease jr": "WR",
+"mason rudolph": "QB",
+"jarrett stidham": "QB",
+"tyrod taylor": "QB",
+"demarcus robinson": "WR",
+"hunter long": "TE",
+"bo melton": "WR",
+"alexander mattison": "RB",
+"noah thomas": "WR",
+"hassan haskins": "RB",
+"jake browning": "QB",
+"aj dillon": "RB",
+"mitchell trubisky": "QB",
+"stone smartt": "TE",
+"kenny mcintosh": "RB",
+"trebor pena": "WR",
+"luke altmyer": "QB",
+"brady cook": "QB",
+"jaheim bell": "TE",
+"harrison bryant": "TE",
+"andy dalton": "QB",
+"kyle mccord": "QB",
+"eric gray": "RB",
+"juju smithschuster": "WR",
+"kalel mullings": "RB",
+"cam akers": "RB",
+"davis allen": "TE",
+"nick mullens": "QB",
+"tanner hudson": "TE",
+"arian smith": "WR",
+"jelani woods": "TE",
+"kylen granson": "TE",
+"ameer abdullah": "RB",
+"drew lock": "QB",
+"hendon hooker": "QB",
+"diontae johnson": "WR",
+"stetson bennett iv": "QB",
+"marquez valdesscantling": "WR",
+"evan hull": "RB",
+"sincere mccormick": "RB",
+"noah brown": "WR",
+"vinny anthony": "WR",
+"max brosmer": "QB",
+"jake briningstool": "TE",
+"john bates": "TE",
+"josh reynolds": "WR",
+"jermaine burton": "WR",
+"will dissly": "TE",
+"jonathan mingo": "WR",
+"kurtis rourke": "QB",
+"sterling shepard": "WR",
+"kyle allen": "QB",
+"trey sermon": "RB",
+"nick nash": "WR",
+"bailey zappe": "QB",
+"desmond ridder": "QB",
+"dare ogunbowale": "RB",
+"tyler goodson": "RB",
+"jamari thrash": "WR",
+"zay jones": "WR",
+"brock wright": "TE",
+"luke farrell": "TE",
+"sam ehlinger": "QB",
+"josh whyle": "TE",
+"tip reiman": "TE",
+"ashton dulin": "WR",
+"tim patrick": "WR",
+"javon baker": "WR",
+"skylar thompson": "QB",
+"julian hill": "TE",
+"tylan wallace": "WR",
+"deejay dallas": "RB",
+"devin culp": "TE",
+"josh johnson": "QB",
+"craig reynolds": "RB",
+"jalin conyers": "TE",
+"gus edwards": "RB",
+"skyy moore": "WR",
+"lucas krull": "TE",
+"tommy devito": "QB",
+"moliki matavao": "TE",
+"will mallory": "TE",
+"jaret patterson": "RB",
+"case keenum": "QB",
+"drew ogletree": "TE",
+"johnny mundt": "TE",
+"marcus yarns": "RB",
+"carson steele": "RB",
+"payne durham": "TE",
+"henry ruggs": "WR",
+"drew sample": "TE",
+"sean clifford": "QB",
+"chase edmonds": "RB",
+"brevyn spannford": "TE",
+"mo aliecox": "TE",
+"cody schrader": "RB",
+"at perry": "WR",
+"david moore": "WR",
+"clyde edwardshelaire": "RB",
+"johnny wilson": "WR",
+"eric saubert": "TE",
+"cordarrelle patterson": "RB",
+"jack stoll": "TE",
+"allen lazard": "WR",
+"keaontay ingram": "RB",
+"deneric prince": "RB",
+"kendall milton": "RB",
+"israel abanikanda": "RB",
+"terrace marshall jr": "WR",
+"ainias smith": "WR",
+"durham smythe": "TE",
+"dominic lovett": "WR",
+"tyler johnson": "WR",
+"pierre strong": "RB",
+"rayray mccloud": "WR",
+"blake watson": "RB",
+"deuce vaughn": "RB",
+"james mitchell": "TE",
+"connor heyward": "TE",
+"tyler scott": "WR",
+"donald parham jr": "TE",
+"cedrick wilson": "WR",
+"charlie jones": "WR",
+"shane zylstra": "TE",
+"ian thomas": "TE",
+"salvon ahmed": "RB",
+"teagan quitoriano": "TE",
+"derius davis": "WR",
+"ronnie rivers": "RB",
+"julius chestnut": "RB",
+"keilan robinson": "RB",
+"kene nwangwu": "RB",
+"jeff wilson": "RB",
+"dernest johnson": "RB",
+"ben skowronek": "WR",
+"hunter renfrow": "WR",
+"justin watson": "WR",
+"scotty miller": "WR",
+"travis homer": "RB",
+"braxton berrios": "WR",
+"kj osborn": "WR",
+"darrynton evans": "RB",
+"bub means": "WR",
+"velus jones": "WR",
+"tahj washington": "WR",
+"nyheim millerhines": "RB",
+"xavier gipson": "WR",
+"jamycal hasty": "RB",
+"michael wiley": "RB",
+"gary brightwell": "RB",
+"devin duvernay": "WR",
+"mecole hardman": "WR",
+"quez watkins": "WR",
+"trayveon williams": "RB",
+"jason brownlee": "WR",
+"tejhaun palmer": "WR",
+"danny gray": "WR",
+"lew nichols": "RB",
+"jashaun corbin": "RB"
+},
+"ktc": {
+"bijan robinson": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 9999,
+"sf_tep": 9999
+}
+},
+"jamarr chase": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 9998,
+"sf_tep": 9996
+}
+},
+"josh allen": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 7652,
+"sf_tep": 9993
+}
+},
+"jahmyr gibbs": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 9993,
+"sf_tep": 9977
+}
+},
+"jaxon smithnjigba": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 9649,
+"sf_tep": 9383
+}
+},
+"drake maye": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 6609,
+"sf_tep": 9343
+}
+},
+"puka nacua": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 8792,
+"sf_tep": 8755
+}
+},
+"brock bowers": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 8356,
+"sf_tep": 9000
+}
+},
+"caleb williams": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 5739,
+"sf_tep": 7943
+}
+},
+"amonra st brown": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 8008,
+"sf_tep": 7925
+}
+},
+"jayden daniels": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 6225,
+"sf_tep": 7760
+}
+},
+"ashton jeanty": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 7945,
+"sf_tep": 7668
+}
+},
+"lamar jackson": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 6267,
+"sf_tep": 7646
+}
+},
+"justin jefferson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 7795,
+"sf_tep": 7615
+}
+},
+"jeremiyah love": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 7798,
+"sf_tep": 7522
+}
+},
+"joe burrow": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 5732,
+"sf_tep": 7411
+}
+},
+"trey mcbride": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 7671,
+"sf_tep": 8156
+}
+},
+"malik nabers": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 7578,
+"sf_tep": 7326
+}
+},
+"ceedee lamb": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 7602,
+"sf_tep": 7228
+}
+},
+"drake london": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 7502,
+"sf_tep": 7120
+}
+},
+"omarion hampton": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 7517,
+"sf_tep": 7039
+}
+},
+"justin herbert": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 5469,
+"sf_tep": 7017
+}
+},
+"devon achane": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 7463,
+"sf_tep": 6969
+}
+},
+"patrick mahomes": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 5415,
+"sf_tep": 6480
+}
+},
+"tetairoa mcmillan": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 6982,
+"sf_tep": 6419
+}
+},
+"jaxson dart": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 5403,
+"sf_tep": 6392
+}
+},
+"trevor lawrence": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 5027,
+"sf_tep": 6322
+}
+},
+"colston loveland": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 6650,
+"sf_tep": 6956
+}
+},
+"emeka egbuka": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 6721,
+"sf_tep": 6208
+}
+},
+"jalen hurts": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 5503,
+"sf_tep": 6146
+}
+},
+"james cook": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 6771,
+"sf_tep": 6117
+}
+},
+"bo nix": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 4937,
+"sf_tep": 6082
+}
+},
+"george pickens": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 6609,
+"sf_tep": 6025
+}
+},
+"jonathan taylor": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 6637,
+"sf_tep": 5982
+}
+},
+"carnell tate": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 6473,
+"sf_tep": 5941
+}
+},
+"tyler warren": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 6445,
+"sf_tep": 6575
+}
+},
+"brock purdy": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 4700,
+"sf_tep": 5785
+}
+},
+"garrett wilson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 6292,
+"sf_tep": 5620
+}
+},
+"nico collins": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 6272,
+"sf_tep": 5565
+}
+},
+"ladd mcconkey": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 6318,
+"sf_tep": 5559
+}
+},
+"quinshon judkins": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 6290,
+"sf_tep": 5556
+}
+},
+"jordan love": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 4561,
+"sf_tep": 5544
+}
+},
+"devonta smith": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 6204,
+"sf_tep": 5510
+}
+},
+"chris olave": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 6237,
+"sf_tep": 5494
+}
+},
+"kenneth walker": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 6241,
+"sf_tep": 5488
+}
+},
+"fernando mendoza": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 4710,
+"sf_tep": 5480
+}
+},
+"treveyon henderson": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 6185,
+"sf_tep": 5420
+}
+},
+"breece hall": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 6254,
+"sf_tep": 5409
+}
+},
+"luther burden": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 6096,
+"sf_tep": 5377
+}
+},
+"cam ward": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 4432,
+"sf_tep": 5288
+}
+},
+"jordyn tyson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 6054,
+"sf_tep": 5268
+}
+},
+"chase brown": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 5975,
+"sf_tep": 5251
+}
+},
+"rome odunze": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 5946,
+"sf_tep": 5234
+}
+},
+"christian mccaffrey": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 5777,
+"sf_tep": 5068
+}
+},
+"makai lemon": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 5625,
+"sf_tep": 4973
+}
+},
+"saquon barkley": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 5692,
+"sf_tep": 4971
+}
+},
+"kyren williams": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 5696,
+"sf_tep": 4966
+}
+},
+"tucker kraft": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 5588,
+"sf_tep": 5538
+}
+},
+"dak prescott": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 4340,
+"sf_tep": 4960
+}
+},
+"zay flowers": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 5602,
+"sf_tep": 4945
+}
+},
+"aj brown": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 5677,
+"sf_tep": 4943
+}
+},
+"brian thomas": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 5534,
+"sf_tep": 4911
+}
+},
+"tee higgins": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 5599,
+"sf_tep": 4908
+}
+},
+"marvin harrison": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 5677,
+"sf_tep": 4907
+}
+},
+"jaylen waddle": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 5507,
+"sf_tep": 4877
+}
+},
+"harold fannin": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 5492,
+"sf_tep": 5419
+}
+},
+"tyler shough": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 3883,
+"sf_tep": 4847
+}
+},
+"cam skattebo": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 5606,
+"sf_tep": 4815
+}
+},
+"rashee rice": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 5543,
+"sf_tep": 4793
+}
+},
+"jared goff": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 3873,
+"sf_tep": 4774
+}
+},
+"jadarian price": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 5494,
+"sf_tep": 4758
+}
+},
+"cj stroud": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 4021,
+"sf_tep": 4694
+}
+},
+"bucky irving": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 5510,
+"sf_tep": 4694
+}
+},
+"baker mayfield": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 4071,
+"sf_tep": 4670
+}
+},
+"jameson williams": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 5480,
+"sf_tep": 4661
+}
+},
+"kyle pitts": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 5177,
+"sf_tep": 5045
+}
+},
+"sam laporta": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 5110,
+"sf_tep": 5030
+}
+},
+"javonte williams": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 5398,
+"sf_tep": 4474
+}
+},
+"travis etienne": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 5267,
+"sf_tep": 4472
+}
+},
+"sam darnold": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 3819,
+"sf_tep": 4454
+}
+},
+"kc concepcion": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 5218,
+"sf_tep": 4426
+}
+},
+"bhayshul tuten": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 5021,
+"sf_tep": 4166
+}
+},
+"bryce young": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 3564,
+"sf_tep": 4141
+}
+},
+"derrick henry": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 4955,
+"sf_tep": 4075
+}
+},
+"kyler murray": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 3807,
+"sf_tep": 4068
+}
+},
+"josh jacobs": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 4795,
+"sf_tep": 4050
+}
+},
+"kenyon sadiq": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 4733,
+"sf_tep": 4474
+}
+},
+"christian watson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4797,
+"sf_tep": 3941
+}
+},
+"alec pierce": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4823,
+"sf_tep": 3934
+}
+},
+"jordan addison": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4746,
+"sf_tep": 3916
+}
+},
+"matthew stafford": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 3654,
+"sf_tep": 3853
+}
+},
+"daniel jones": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 3553,
+"sf_tep": 3843
+}
+},
+"malik willis": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 3678,
+"sf_tep": 3805
+}
+},
+"parker washington": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4576,
+"sf_tep": 3716
+}
+},
+"josh downs": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4616,
+"sf_tep": 3641
+}
+},
+"dandre swift": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 4609,
+"sf_tep": 3635
+}
+},
+"omar cooper": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4572,
+"sf_tep": 3630
+}
+},
+"quentin johnston": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4503,
+"sf_tep": 3628
+}
+},
+"matthew golden": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4468,
+"sf_tep": 3619
+}
+},
+"ty simpson": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 3256,
+"sf_tep": 3566
+}
+},
+"michael wilson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4477,
+"sf_tep": 3554
+}
+},
+"oronde gadsden": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 4425,
+"sf_tep": 3994
+}
+},
+"dj moore": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4426,
+"sf_tep": 3532
+}
+},
+"eli stowers": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 4362,
+"sf_tep": 3971
+}
+},
+"terry mclaurin": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4367,
+"sf_tep": 3493
+}
+},
+"kyle monangai": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 4421,
+"sf_tep": 3475
+}
+},
+"ricky pearsall": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4402,
+"sf_tep": 3462
+}
+},
+"dk metcalf": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4320,
+"sf_tep": 3457
+}
+},
+"wandale robinson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4353,
+"sf_tep": 3451
+}
+},
+"denzel boston": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4331,
+"sf_tep": 3449
+}
+},
+"david montgomery": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 4306,
+"sf_tep": 3422
+}
+},
+"jayden reed": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4284,
+"sf_tep": 3412
+}
+},
+"jonathon brooks": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 4251,
+"sf_tep": 3412
+}
+},
+"davante adams": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4262,
+"sf_tep": 3409
+}
+},
+"michael pittman": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4213,
+"sf_tep": 3404
+}
+},
+"isaiah likely": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 4217,
+"sf_tep": 3854
+}
+},
+"jayden higgins": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4284,
+"sf_tep": 3387
+}
+},
+"george kittle": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 4118,
+"sf_tep": 3827
+}
+},
+"blake corum": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 4086,
+"sf_tep": 3344
+}
+},
+"travis hunter": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4089,
+"sf_tep": 3344
+}
+},
+"mike evans": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4096,
+"sf_tep": 3338
+}
+},
+"rj harvey": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 4153,
+"sf_tep": 3334
+}
+},
+"zach charbonnet": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 4168,
+"sf_tep": 3333
+}
+},
+"xavier worthy": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 4127,
+"sf_tep": 3308
+}
+},
+"jaylen warren": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 4052,
+"sf_tep": 3272
+}
+},
+"chuba hubbard": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3991,
+"sf_tep": 3233
+}
+},
+"jake ferguson": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 3878,
+"sf_tep": 3654
+}
+},
+"jonah coleman": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3894,
+"sf_tep": 3177
+}
+},
+"dalton kincaid": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 3829,
+"sf_tep": 3586
+}
+},
+"rico dowdle": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3861,
+"sf_tep": 3135
+}
+},
+"jalen coker": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3837,
+"sf_tep": 3112
+}
+},
+"antonio williams": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3626,
+"sf_tep": 3104
+}
+},
+"brenton strange": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 3655,
+"sf_tep": 3534
+}
+},
+"courtland sutton": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3754,
+"sf_tep": 3091
+}
+},
+"jalen mcmillan": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3796,
+"sf_tep": 3080
+}
+},
+"romeo doubs": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3866,
+"sf_tep": 3070
+}
+},
+"jakobi meyers": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3718,
+"sf_tep": 3053
+}
+},
+"chris bell": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3709,
+"sf_tep": 3020
+}
+},
+"chris godwin": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3665,
+"sf_tep": 3009
+}
+},
+"jacory croskeymerritt": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3639,
+"sf_tep": 2993
+}
+},
+"rhamondre stevenson": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3673,
+"sf_tep": 2985
+}
+},
+"jk dobbins": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3707,
+"sf_tep": 2975
+}
+},
+"germie bernard": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3591,
+"sf_tep": 2945
+}
+},
+"michael penix": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 2961,
+"sf_tep": 2919
+}
+},
+"nicholas singleton": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3548,
+"sf_tep": 2875
+}
+},
+"khalil shakir": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3592,
+"sf_tep": 2873
+}
+},
+"rachaad white": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3582,
+"sf_tep": 2871
+}
+},
+"tony pollard": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3572,
+"sf_tep": 2849
+}
+},
+"isaac teslaa": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3413,
+"sf_tep": 2806
+}
+},
+"rashid shaheed": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3445,
+"sf_tep": 2784
+}
+},
+"aj barner": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 3343,
+"sf_tep": 3197
+}
+},
+"dezhaun stribling": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3025,
+"sf_tep": 2767
+}
+},
+"terrance ferguson": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 3376,
+"sf_tep": 3153
+}
+},
+"dylan sampson": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3406,
+"sf_tep": 2740
+}
+},
+"mark andrews": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 3429,
+"sf_tep": 3139
+}
+},
+"tua tagovailoa": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 2285,
+"sf_tep": 2727
+}
+},
+"zachariah branch": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3332,
+"sf_tep": 2724
+}
+},
+"tre harris": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3360,
+"sf_tep": 2718
+}
+},
+"elijah sarratt": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3307,
+"sf_tep": 2717
+}
+},
+"tj hockenson": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 3213,
+"sf_tep": 3112
+}
+},
+"jaylin noel": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3344,
+"sf_tep": 2701
+}
+},
+"gunnar helm": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 3277,
+"sf_tep": 3102
+}
+},
+"shedeur sanders": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 2377,
+"sf_tep": 2676
+}
+},
+"mac jones": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 2279,
+"sf_tep": 2675
+}
+},
+"braelon allen": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3362,
+"sf_tep": 2674
+}
+},
+"chris rodriguez": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3245,
+"sf_tep": 2671
+}
+},
+"tyler allgeier": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3308,
+"sf_tep": 2669
+}
+},
+"jordan mason": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3341,
+"sf_tep": 2663
+}
+},
+"adonai mitchell": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3236,
+"sf_tep": 2650
+}
+},
+"malachi fields": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3290,
+"sf_tep": 2645
+}
+},
+"jj mccarthy": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 2599,
+"sf_tep": 2643
+}
+},
+"tyrone tracy": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3248,
+"sf_tep": 2636
+}
+},
+"woody marks": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3345,
+"sf_tep": 2630
+}
+},
+"keaton mitchell": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3230,
+"sf_tep": 2625
+}
+},
+"tory horton": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3286,
+"sf_tep": 2604
+}
+},
+"jacoby brissett": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1947,
+"sf_tep": 2600
+}
+},
+"dallas goedert": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 3211,
+"sf_tep": 3006
+}
+},
+"emmett johnson": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3239,
+"sf_tep": 2594
+}
+},
+"travis kelce": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 3153,
+"sf_tep": 2984
+}
+},
+"tyjae spears": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3193,
+"sf_tep": 2567
+}
+},
+"troy franklin": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3269,
+"sf_tep": 2567
+}
+},
+"tre tucker": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3116,
+"sf_tep": 2551
+}
+},
+"carson beck": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 121,
+"sf_tep": 2546
+}
+},
+"malik washington": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3122,
+"sf_tep": 2544
+}
+},
+"kaytron allen": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3148,
+"sf_tep": 2543
+}
+},
+"jalen nailor": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3072,
+"sf_tep": 2534
+}
+},
+"jerry jeudy": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3108,
+"sf_tep": 2533
+}
+},
+"jauan jennings": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3067,
+"sf_tep": 2503
+}
+},
+"tank bigsby": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 3018,
+"sf_tep": 2499
+}
+},
+"kayshon boutte": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3227,
+"sf_tep": 2495
+}
+},
+"pat bryant": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3100,
+"sf_tep": 2487
+}
+},
+"elic ayomanor": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3096,
+"sf_tep": 2481
+}
+},
+"chris brazzell": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3085,
+"sf_tep": 2463
+}
+},
+"jack bech": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3004,
+"sf_tep": 2457
+}
+},
+"tank dell": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3061,
+"sf_tep": 2444
+}
+},
+"dontayvion wicks": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2999,
+"sf_tep": 2437
+}
+},
+"elijah arroyo": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2928,
+"sf_tep": 2825
+}
+},
+"skyler bell": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 3016,
+"sf_tep": 2417
+}
+},
+"keon coleman": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2932,
+"sf_tep": 2399
+}
+},
+"jakobi lane": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2886,
+"sf_tep": 2395
+}
+},
+"juwan johnson": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2798,
+"sf_tep": 2761
+}
+},
+"chimere dike": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2898,
+"sf_tep": 2356
+}
+},
+"mason taylor": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2864,
+"sf_tep": 2752
+}
+},
+"max klare": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2742,
+"sf_tep": 2744
+}
+},
+"hunter henry": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2744,
+"sf_tep": 2744
+}
+},
+"ollie gordon": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2899,
+"sf_tep": 2336
+}
+},
+"aaron jones": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2801,
+"sf_tep": 2329
+}
+},
+"mike washington": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2871,
+"sf_tep": 2321
+}
+},
+"cade otton": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2726,
+"sf_tep": 2706
+}
+},
+"kaleb johnson": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2858,
+"sf_tep": 2303
+}
+},
+"isiah pacheco": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2819,
+"sf_tep": 2300
+}
+},
+"pat freiermuth": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2764,
+"sf_tep": 2695
+}
+},
+"brian robinson": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2784,
+"sf_tep": 2294
+}
+},
+"david njoku": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2728,
+"sf_tep": 2686
+}
+},
+"sean tucker": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2815,
+"sf_tep": 2280
+}
+},
+"kyle williams": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2804,
+"sf_tep": 2263
+}
+},
+"jaylen wright": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2778,
+"sf_tep": 2229
+}
+},
+"geno smith": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1450,
+"sf_tep": 2219
+}
+},
+"dalton schultz": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2635,
+"sf_tep": 2604
+}
+},
+"trey benson": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2731,
+"sf_tep": 2177
+}
+},
+"marshawn lloyd": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2679,
+"sf_tep": 2170
+}
+},
+"kimani vidal": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2740,
+"sf_tep": 2170
+}
+},
+"jalen milroe": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 2289,
+"sf_tep": 2169
+}
+},
+"anthony richardson": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 2150,
+"sf_tep": 2166
+}
+},
+"greg dulcich": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2479,
+"sf_tep": 2556
+}
+},
+"theo johnson": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2674,
+"sf_tep": 2547
+}
+},
+"jordan james": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2702,
+"sf_tep": 2149
+}
+},
+"jake tonges": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2631,
+"sf_tep": 2538
+}
+},
+"stefon diggs": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2674,
+"sf_tep": 2138
+}
+},
+"michael mayer": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2532,
+"sf_tep": 2529
+}
+},
+"jaydon blue": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2590,
+"sf_tep": 2137
+}
+},
+"deshaun watson": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 835,
+"sf_tep": 2120
+}
+},
+"demond claiborne": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2415,
+"sf_tep": 2090
+}
+},
+"marvin mims": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2602,
+"sf_tep": 2072
+}
+},
+"lequint allen": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2615,
+"sf_tep": 2072
+}
+},
+"tez johnson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2625,
+"sf_tep": 2064
+}
+},
+"dj giddens": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2560,
+"sf_tep": 2058
+}
+},
+"isaiah bond": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2529,
+"sf_tep": 2052
+}
+},
+"kevin coleman": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2319,
+"sf_tep": 2052
+}
+},
+"rashod bateman": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2571,
+"sf_tep": 2046
+}
+},
+"kaelon black": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2219,
+"sf_tep": 2036
+}
+},
+"alvin kamara": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2556,
+"sf_tep": 2024
+}
+},
+"darnell mooney": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2556,
+"sf_tep": 2010
+}
+},
+"jaylin lane": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2421,
+"sf_tep": 2005
+}
+},
+"trevor etienne": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2411,
+"sf_tep": 2004
+}
+},
+"eli raridon": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2135,
+"sf_tep": 2385
+}
+},
+"oscar delp": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1976,
+"sf_tep": 2364
+}
+},
+"justin fields": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 2092,
+"sf_tep": 1977
+}
+},
+"devin neal": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2537,
+"sf_tep": 1976
+}
+},
+"ray davis": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2447,
+"sf_tep": 1972
+}
+},
+"jatavion sanders": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2497,
+"sf_tep": 2355
+}
+},
+"ryan flournoy": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2329,
+"sf_tep": 1957
+}
+},
+"aaron rodgers": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1482,
+"sf_tep": 1955
+}
+},
+"drew allar": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 179,
+"sf_tep": 1946
+}
+},
+"christian kirk": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2430,
+"sf_tep": 1945
+}
+},
+"cole kmet": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2354,
+"sf_tep": 2330
+}
+},
+"emanuel wilson": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2397,
+"sf_tep": 1940
+}
+},
+"donte thornton": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2382,
+"sf_tep": 1919
+}
+},
+"darnell washington": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2288,
+"sf_tep": 2299
+}
+},
+"brandon aiyuk": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2389,
+"sf_tep": 1902
+}
+},
+"deebo samuel": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2374,
+"sf_tep": 1888
+}
+},
+"justin joly": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1933,
+"sf_tep": 2260
+}
+},
+"demario douglas": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2397,
+"sf_tep": 1874
+}
+},
+"colby parkinson": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2358,
+"sf_tep": 2256
+}
+},
+"cade klubnik": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1198,
+"sf_tep": 1864
+}
+},
+"kirk cousins": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1186,
+"sf_tep": 1843
+}
+},
+"xavier legette": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2377,
+"sf_tep": 1840
+}
+},
+"jalen tolbert": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2246,
+"sf_tep": 1834
+}
+},
+"ben sinnott": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2173,
+"sf_tep": 2199
+}
+},
+"evan engram": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2113,
+"sf_tep": 2197
+}
+},
+"will howard": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1595,
+"sf_tep": 1813
+}
+},
+"calvin ridley": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2270,
+"sf_tep": 1809
+}
+},
+"isaiah davis": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2249,
+"sf_tep": 1789
+}
+},
+"jalen royals": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2220,
+"sf_tep": 1781
+}
+},
+"quinn ewers": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1554,
+"sf_tep": 1774
+}
+},
+"tyreek hill": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2255,
+"sf_tep": 1772
+}
+},
+"tyquan thornton": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2149,
+"sf_tep": 1765
+}
+},
+"kendre miller": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2191,
+"sf_tep": 1758
+}
+},
+"brashard smith": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2239,
+"sf_tep": 1753
+}
+},
+"cedric tillman": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2238,
+"sf_tep": 1752
+}
+},
+"luke musgrave": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2069,
+"sf_tep": 2113
+}
+},
+"james conner": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2184,
+"sf_tep": 1731
+}
+},
+"cooper kupp": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1950,
+"sf_tep": 1704
+}
+},
+"tahj brooks": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2205,
+"sf_tep": 1702
+}
+},
+"caleb douglas": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1823,
+"sf_tep": 1695
+}
+},
+"jahan dotson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1999,
+"sf_tep": 1683
+}
+},
+"dawson knox": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 2033,
+"sf_tep": 2051
+}
+},
+"riley leonard": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1145,
+"sf_tep": 1673
+}
+},
+"bryce lance": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1801,
+"sf_tep": 1648
+}
+},
+"savion williams": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1998,
+"sf_tep": 1632
+}
+},
+"jarquez hunter": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 2066,
+"sf_tep": 1627
+}
+},
+"joe milton": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1410,
+"sf_tep": 1616
+}
+},
+"andrei iosivas": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2014,
+"sf_tep": 1603
+}
+},
+"zavion thomas": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1701,
+"sf_tep": 1589
+}
+},
+"xavier hutchinson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1951,
+"sf_tep": 1585
+}
+},
+"brenen thompson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1808,
+"sf_tep": 1585
+}
+},
+"eli heidenreich": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1715,
+"sf_tep": 1580
+}
+},
+"treylon burks": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1834,
+"sf_tep": 1579
+}
+},
+"garrett nussmeier": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1565,
+"sf_tep": 1574
+}
+},
+"tutu atwell": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1885,
+"sf_tep": 1569
+}
+},
+"luke mccaffrey": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 2026,
+"sf_tep": 1554
+}
+},
+"spencer rattler": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1299,
+"sf_tep": 1524
+}
+},
+"jimmy horn": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1840,
+"sf_tep": 1520
+}
+},
+"joshua palmer": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1878,
+"sf_tep": 1519
+}
+},
+"will shipley": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1871,
+"sf_tep": 1517
+}
+},
+"audric estime": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1897,
+"sf_tep": 1514
+}
+},
+"darius slayton": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1787,
+"sf_tep": 1505
+}
+},
+"noah gray": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1770,
+"sf_tep": 1877
+}
+},
+"george holani": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1840,
+"sf_tep": 1498
+}
+},
+"malik davis": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1754,
+"sf_tep": 1495
+}
+},
+"roman wilson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1904,
+"sf_tep": 1464
+}
+},
+"mike gesicki": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1746,
+"sf_tep": 1832
+}
+},
+"chris brooks": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1716,
+"sf_tep": 1455
+}
+},
+"isaac guerendo": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1840,
+"sf_tep": 1449
+}
+},
+"jerome ford": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1800,
+"sf_tep": 1437
+}
+},
+"devaughn vele": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1756,
+"sf_tep": 1436
+}
+},
+"keandre lambertsmith": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1751,
+"sf_tep": 1433
+}
+},
+"jordan whittington": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1834,
+"sf_tep": 1427
+}
+},
+"roschon johnson": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1675,
+"sf_tep": 1416
+}
+},
+"najee harris": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1759,
+"sf_tep": 1415
+}
+},
+"adam randall": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1457,
+"sf_tep": 1403
+}
+},
+"john metchie": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1741,
+"sf_tep": 1402
+}
+},
+"devontez walker": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1683,
+"sf_tep": 1401
+}
+},
+"noah fant": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1688,
+"sf_tep": 1765
+}
+},
+"calvin austin": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1718,
+"sf_tep": 1392
+}
+},
+"justice hill": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1748,
+"sf_tep": 1390
+}
+},
+"damien martinez": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1710,
+"sf_tep": 1386
+}
+},
+"daniel bellinger": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1685,
+"sf_tep": 1757
+}
+},
+"jalynn polk": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1717,
+"sf_tep": 1370
+}
+},
+"cade stover": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1588,
+"sf_tep": 1730
+}
+},
+"tyson bagent": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 278,
+"sf_tep": 1351
+}
+},
+"erick all": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1634,
+"sf_tep": 1707
+}
+},
+"tahj washington": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1517,
+"sf_tep": 1336
+}
+},
+"jaleel mclaughlin": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1612,
+"sf_tep": 1321
+}
+},
+"dyami brown": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1612,
+"sf_tep": 1320
+}
+},
+"konata mumpfield": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1654,
+"sf_tep": 1307
+}
+},
+"tyler higbee": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1533,
+"sf_tep": 1667
+}
+},
+"raheim sanders": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1548,
+"sf_tep": 1275
+}
+},
+"tai felton": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1530,
+"sf_tep": 1271
+}
+},
+"tommy tremble": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1617,
+"sf_tep": 1629
+}
+},
+"dillon gabriel": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1353,
+"sf_tep": 1252
+}
+},
+"davis mills": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 276,
+"sf_tep": 1247
+}
+},
+"kendrick bourne": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1528,
+"sf_tep": 1245
+}
+},
+"jameis winston": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 1071,
+"sf_tep": 1242
+}
+},
+"devin singletary": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1656,
+"sf_tep": 1240
+}
+},
+"tanner mckee": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 469,
+"sf_tep": 1240
+}
+},
+"malachi corley": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1429,
+"sf_tep": 1235
+}
+},
+"rasheen ali": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1468,
+"sf_tep": 1231
+}
+},
+"ty johnson": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1524,
+"sf_tep": 1224
+}
+},
+"phil mafah": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1489,
+"sf_tep": 1220
+}
+},
+"jalin hyatt": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1575,
+"sf_tep": 1217
+}
+},
+"olamide zaccheaus": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1499,
+"sf_tep": 1213
+}
+},
+"seth mcgowan": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1414,
+"sf_tep": 1204
+}
+},
+"keenan allen": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1570,
+"sf_tep": 1203
+}
+},
+"xavier restrepo": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1492,
+"sf_tep": 1203
+}
+},
+"efton chism": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1512,
+"sf_tep": 1200
+}
+},
+"marcus mariota": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 932,
+"sf_tep": 1199
+}
+},
+"emari demercado": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1508,
+"sf_tep": 1196
+}
+},
+"tyler huntley": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 615,
+"sf_tep": 1194
+}
+},
+"deion burks": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1296,
+"sf_tep": 1184
+}
+},
+"gardner minshew": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 389,
+"sf_tep": 1176
+}
+},
+"michael trigg": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1498,
+"sf_tep": 1535
+}
+},
+"will levis": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 526,
+"sf_tep": 1166
+}
+},
+"trey palmer": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1442,
+"sf_tep": 1158
+}
+},
+"mitchell evans": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1349,
+"sf_tep": 1526
+}
+},
+"greg dortch": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1367,
+"sf_tep": 1154
+}
+},
+"kavontae turpin": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1431,
+"sf_tep": 1149
+}
+},
+"jordan watkins": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1395,
+"sf_tep": 1147
+}
+},
+"elijah higgins": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1341,
+"sf_tep": 1512
+}
+},
+"elijah moore": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1359,
+"sf_tep": 1135
+}
+},
+"luke schoonmaker": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1396,
+"sf_tep": 1493
+}
+},
+"jacob cowing": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1367,
+"sf_tep": 1111
+}
+},
+"taylen green": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 168,
+"sf_tep": 1101
+}
+},
+"mack hollins": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1279,
+"sf_tep": 1086
+}
+},
+"kalel mullings": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1414,
+"sf_tep": 1081
+}
+},
+"javon baker": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1313,
+"sf_tep": 1072
+}
+},
+"cyrus allen": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1142,
+"sf_tep": 1053
+}
+},
+"jonathan mingo": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1339,
+"sf_tep": 1051
+}
+},
+"isaiah hodgins": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1172,
+"sf_tep": 1049
+}
+},
+"trey lance": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 633,
+"sf_tep": 1047
+}
+},
+"joe flacco": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 928,
+"sf_tep": 1045
+}
+},
+"sam howell": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 625,
+"sf_tep": 1032
+}
+},
+"jake bobo": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1251,
+"sf_tep": 1031
+}
+},
+"charlie kolar": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1146,
+"sf_tep": 1395
+}
+},
+"cj daniels": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1240,
+"sf_tep": 1026
+}
+},
+"israel abanikanda": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1213,
+"sf_tep": 1024
+}
+},
+"dameon pierce": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1277,
+"sf_tep": 1019
+}
+},
+"kenny pickett": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 593,
+"sf_tep": 1012
+}
+},
+"brevin jordan": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1229,
+"sf_tep": 1374
+}
+},
+"tyler goodson": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1241,
+"sf_tep": 1007
+}
+},
+"kenny mcintosh": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1214,
+"sf_tep": 1007
+}
+},
+"jared wiley": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1145,
+"sf_tep": 1376
+}
+},
+"tyler scott": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1140,
+"sf_tep": 976
+}
+},
+"bo melton": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1224,
+"sf_tep": 973
+}
+},
+"nick westbrookikhine": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1113,
+"sf_tep": 958
+}
+},
+"arian smith": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1207,
+"sf_tep": 955
+}
+},
+"michael carter": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1209,
+"sf_tep": 951
+}
+},
+"skyy moore": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1101,
+"sf_tep": 951
+}
+},
+"jmari taylor": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1119,
+"sf_tep": 946
+}
+},
+"brock wright": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1018,
+"sf_tep": 1313
+}
+},
+"drew lock": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 411,
+"sf_tep": 940
+}
+},
+"tyler badie": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1192,
+"sf_tep": 938
+}
+},
+"hassan haskins": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1063,
+"sf_tep": 935
+}
+},
+"jonnu smith": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1201,
+"sf_tep": 1300
+}
+},
+"zach wilson": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 597,
+"sf_tep": 928
+}
+},
+"kendall milton": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1071,
+"sf_tep": 897
+}
+},
+"xavier gipson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1063,
+"sf_tep": 888
+}
+},
+"joe mixon": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 1098,
+"sf_tep": 883
+}
+},
+"davis allen": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1165,
+"sf_tep": 1250
+}
+},
+"jamari thrash": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 976,
+"sf_tep": 855
+}
+},
+"demarcus robinson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 996,
+"sf_tep": 851
+}
+},
+"cole payton": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 163,
+"sf_tep": 839
+}
+},
+"zach ertz": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 1023,
+"sf_tep": 1183
+}
+},
+"sam roush": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 919,
+"sf_tep": 1182
+}
+},
+"bub means": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 1034,
+"sf_tep": 806
+}
+},
+"jawhar jordan": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 924,
+"sf_tep": 797
+}
+},
+"jam miller": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 976,
+"sf_tep": 780
+}
+},
+"ty chandler": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 876,
+"sf_tep": 726
+}
+},
+"alexander mattison": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 871,
+"sf_tep": 698
+}
+},
+"jack endries": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 830,
+"sf_tep": 1046
+}
+},
+"samaje perine": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 847,
+"sf_tep": 631
+}
+},
+"ainias smith": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 808,
+"sf_tep": 621
+}
+},
+"johnny wilson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 787,
+"sf_tep": 586
+}
+},
+"tyler johnson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 798,
+"sf_tep": 585
+}
+},
+"jeremy ruckert": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 657,
+"sf_tep": 916
+}
+},
+"kyle mccord": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 259,
+"sf_tep": 566
+}
+},
+"elijah mitchell": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 747,
+"sf_tep": 543
+}
+},
+"van jefferson": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 801,
+"sf_tep": 537
+}
+},
+"zay jones": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 641,
+"sf_tep": 532
+}
+},
+"tyrod taylor": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 244,
+"sf_tep": 529
+}
+},
+"derius davis": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 775,
+"sf_tep": 529
+}
+},
+"mason rudolph": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 413,
+"sf_tep": 526
+}
+},
+"aj dillon": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 765,
+"sf_tep": 524
+}
+},
+"carson wentz": {
+"pos": "QB",
+"values": {
+"1qb_ppr": 590,
+"sf_tep": 520
+}
+},
+"dylan laube": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 659,
+"sf_tep": 519
+}
+},
+"josh oliver": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 641,
+"sf_tep": 850
+}
+},
+"adam trautman": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 594,
+"sf_tep": 841
+}
+},
+"foster moreau": {
+"pos": "TE",
+"values": {
+"1qb_ppr": 589,
+"sf_tep": 834
+}
+},
+"trayveon williams": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 572,
+"sf_tep": 484
+}
+},
+"curtis samuel": {
+"pos": "WR",
+"values": {
+"1qb_ppr": 608,
+"sf_tep": 484
+}
+},
+"nick chubb": {
+"pos": "RB",
+"values": {
+"1qb_ppr": 579,
+"sf_tep": 484
+}
+}
+}
+}

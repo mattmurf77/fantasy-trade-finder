@@ -17,10 +17,17 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `SuggestionCard` | Calculator: tappable fair-package suggestion |
 | `PlayerPickerModal` | Calculator: search + position-filter player picker |
 | `OutlookSheet` | Bottom sheet for team outlook selection |
-| `SendInSleeperButton` | Flagged-beta ("Send in Sleeper"): propose a trade to Sleeper directly; routes to connect / deep-link fallback |
+| `SendInSleeperButton` | Flagged-beta ("Send in Sleeper"): propose a trade to Sleeper directly; routes to connect / deep-link fallback. Self-gates to Sleeper leagues (#146): renders null when its `leagueId` is an imported ESPN league (platform check against `useSession.leagues`) — mounts never need their own gate |
 | `VerifyAccountBanner` | Account-auth P1: quiet dismissible "Verify your account" strip floated above the tab bar (mounted once in RootNav → Main). Renders null unless the session is unverified AND (a verified controller exists OR enforcement is on); routes to SleeperConnect |
 | `SteerSlider` | Settings: "We steer ↔ You steer" 5-dot ranking-method selector (one dot per ranking flow, guided → manual; Quick set leads since #119) |
 | `EspnLinkSheet` | Flag-gated (`espn.link`) ESPN league link flow (feedback #115): league ID/URL input (+ manual espn_s2/SWID paste for private leagues) → "which team is yours?" → import summary (match rate, skipped players, read-only expectations). Opened from LeaguePicker's "Link an ESPN league" footer |
+| `PlatformLinkSheet` | Zero-auth platform-aware link flow for MFL (`mfl.link`) + Fleaflicker (`fleaflicker.link`): `platform` prop; league URL/ID input (MFL adds a season year; Fleaflicker adds an optional find-by-email lookup) → "which team is yours?" → import summary. Same three steps as EspnLinkSheet, no cookie paste. Opened from LeaguePicker's per-platform footer buttons |
+| `ProvenanceChip` | Onboarding item 4 (flag `onboarding.trades_first`): deck-level tick-label chip — "CONSENSUS VALUES" → "YOUR BOARD" once `ob.quicksetCompletedPositions` is non-empty (flare = informational highlight). `onPress` inert until item 7 wires the Quick Set tap-through |
+| `SkeletonTradeCard` | Onboarding item 4: static (shimmer-free) first-run deck placeholder with a one-line status while pregenerated cards stream in |
+| `CoachMark` | Onboarding guided layer (v2.1): one-time inline dismissible callout — never modal, never stacked; callers own shown-once persistence + `coach_mark_shown/dismissed` events |
+| `IdentityConfirmStrip` | Onboarding item 4 (F5): first-run "Trading as @user — not you?" strip (avatar + ice action → sign-out confirm; X = session dismiss) |
+| `QuickSetPromptCard` | Onboarding item 7 (flag `onboarding.quickset_prompt`): inline deck-slot prompt card ("These trades use consensus values.") — accept deep-links to onboarding-mode QuickSetTiers, dismiss = snooze (caller owns bookkeeping); explicit buttons, not swipeable (documented deviation) |
+| `AppleSaveMomentSheet` | Onboarding item 8 (flag `onboarding.apple_save_moment`, ADR-006): save-moment Apple ask modal — honest cross-device framing only, official Apple button, "Not now" decline; bind flow mirrors Settings' handleLinkApple (conflict/linked/no-session outcomes) |
 | `Toast` | Transient notification |
 | `TopBar` | Screen header |
 
@@ -49,7 +56,8 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 - OutlookSheet: `outlook.save-btn` (the sheet AUTO-OPENS on first Trades visit — flows dismiss it conditionally) · Picker: `calc.picker.done` (onPick adds without closing; Done closes — flows must tap it)
 
 **ESPN league linking tranche (2026-07-12, flag `espn.link`):**
-- LeaguePicker: `leagues.link-espn` · EspnLinkSheet: `espn-link.input` · `espn-link.private-toggle` · `espn-link.s2-input` · `espn-link.swid-input` · `espn-link.continue` · `espn-link.team.<team_id>` · `espn-link.open` · `espn-link.error` · League tab: `league.espn-resync`
+- LeaguePicker: `leagues.link-espn` · `leagues.link-mfl` · `leagues.link-fleaflicker` · EspnLinkSheet: `espn-link.input` · `espn-link.private-toggle` · `espn-link.s2-input` · `espn-link.swid-input` · `espn-link.continue` · `espn-link.team.<team_id>` · `espn-link.open` · `espn-link.error` · League tab: `league.espn-resync`
+- PlatformLinkSheet (MFL/Fleaflicker): `platform-link.input` · `platform-link.year` (MFL) · `platform-link.email-toggle`/`platform-link.email`/`platform-link.email-lookup`/`platform-link.discovered.<league_id>` (Fleaflicker) · `platform-link.continue` · `platform-link.team.<team_id>` · `platform-link.open` · `platform-link.error` · Settings: `settings.link-platform`
 
 **Apple entitlement tranche (2026-07-12, feedback #131):**
 - SignIn: `signin.apple-btn` (Apple sign-in button)
@@ -74,8 +82,16 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 **Calculator suggestions tranche (2026-07-17, #78):**
 - InLeagueCalculator: `calc.league-give-add` · `calc.league-receive-add` (TradeSide add buttons in the In-league mode; the picker/verdict IDs are shared with the calc screen)
 
+**Onboarding trades-first tranche (2026-07-17, plan item 4, flags `onboarding.v2` + `onboarding.trades_first` / `onboarding.guided_layer`):**
+- TradesScreen: `trades.provenance-chip` (deck-basis chip; disabled Pressable until item 7) · `trades.skeleton-card` (first-run streaming placeholder) · `trades.coach-mark.provenance` (guided-layer callout, tap dismisses) · `trades.identity-strip` (container) · `trades.identity-strip.switch` ("not you?" → sign-out confirm) · `trades.identity-strip.dismiss` (session hide)
+
 **League rankings tranche (2026-07-17, #142/#144):**
 - LeagueSummaryScreen: `league-summary.basis.<consensus|personal|redraft>` (basis chips — redraft is permanently disabled "(soon)") · `league-summary.team.<user_id>` (ranked team row → roster overlay) · `league-summary.roster-close` (overlay close Icon Button)
 - LeagueScreen Explore rows: `league.rankings-row` (→ root-stack `LeagueSummary`) · `league.free-agents-row` (→ root-stack `FreeAgents`)
+
+**Onboarding items 5–10 tranche (2026-07-17, flags `onboarding.*` per feature):**
+- SignIn (item 5, `onboarding.landing`): `signin.apple-link` (quiet Apple re-entry text link) · `signin.error-demo-escape` (Sleeper-down "browse the sample league" escape)
+- Trades (items 7/8/9/10): `trades.quickset-prompt` (+ `.accept` / `.dismiss`) · `trades.diff-banner` (post-Quick-Set regen receipt) · `trades.apple-sheet.<like|quickset_save|session2_banner>` (+ `trades.apple-sheet.signin` / `.decline`) · `trades.apple-session2-banner` (+ `.dismiss`) · `trades.share-liked` · `trades.trio-entry` (deck-exhausted CTA) · `trades.demo-bridge` · `trades.redraft-label`
+- Rank stack (item 9, `onboarding.rank_routing`): `rank.more-ways` (QuickSetTiers header link → demoted RankHome chooser)
 
 Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). Full planned list: lld.md Appendix A (~90 IDs).

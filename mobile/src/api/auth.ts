@@ -1,7 +1,13 @@
 import { api, apiRequest, setSessionToken } from './client';
+import { getDeviceId } from './events';
 import { maybeReplaySleeperVerification } from './sendInSleeper';
 import { getLeagueRosters, getLeagueUsers, warmPlayerCache, resetWarmedFlag } from './sleeper';
 import { isEspnLeague, buildEspnSessionInitBody } from './espn';
+import {
+  isMflLeague,
+  isFleaflickerLeague,
+  buildPlatformSessionInitBody,
+} from './platformLink';
 import type {
   DemoSessionResponse,
   LeagueSummary,
@@ -28,7 +34,9 @@ export async function signIn(username: string): Promise<AuthResponse> {
   const res = await api.post<AuthResponse>(
     '/api/extension/auth',
     { username: username.trim().toLowerCase() },
-    { skipAuth: true },
+    // X-Device-Id (analytics item 1): lets the backend write identity_links
+    // stitching pre-signin device events to the user. Additive header only.
+    { skipAuth: true, headers: { 'X-Device-Id': await getDeviceId() } },
   );
   if (res?.session_token) {
     await setSessionToken(res.session_token);
@@ -77,12 +85,17 @@ export async function appleSignIn(
   identityToken: string,
   displayName?: string,
 ): Promise<AccountAuthResponse> {
-  const res = await api.post<AccountAuthResponse>('/api/auth/apple', {
-    identity_token: identityToken,
-    // Apple sends the user's name only to the client, and only on first
-    // authorization — forward it so the account-first users row has one.
-    display_name: displayName || undefined,
-  });
+  const res = await api.post<AccountAuthResponse>(
+    '/api/auth/apple',
+    {
+      identity_token: identityToken,
+      // Apple sends the user's name only to the client, and only on first
+      // authorization — forward it so the account-first users row has one.
+      display_name: displayName || undefined,
+    },
+    // X-Device-Id → identity_links (see signIn). Additive header only.
+    { headers: { 'X-Device-Id': await getDeviceId() } },
+  );
   if (res?.session_token) {
     await setSessionToken(res.session_token);
   }
@@ -320,6 +333,16 @@ export async function initLeagueSession(
     await submitSessionInit(espnBody);
     return;
   }
+  // MFL / Fleaflicker imports work the same way — rosters come from the
+  // backend snapshot (api/platformLink.ts), not Sleeper proxies.
+  if (isMflLeague(lg.league_id)) {
+    await submitSessionInit(await buildPlatformSessionInitBody('mfl', user, lg));
+    return;
+  }
+  if (isFleaflickerLeague(lg.league_id)) {
+    await submitSessionInit(await buildPlatformSessionInitBody('fleaflicker', user, lg));
+    return;
+  }
   // Warm the backend's Sleeper player-DB cache in parallel with the
   // roster/users fetches. session_init below errors with
   //   "Player database not cached — call GET /api/sleeper/players first"
@@ -413,11 +436,19 @@ export async function buildSessionInitBody(
   user: SavedUser,
   lg: LeagueLite,
 ): Promise<SessionInitBody> {
-  // ESPN-imported leagues: roster source is the backend snapshot, not
+  // ESPN/MFL/Fleaflicker imports: roster source is the backend snapshot, not
   // Sleeper (see initLeagueSession's espn branch for the why).
   if (isEspnLeague(lg.league_id)) {
     await warmPlayerCache().catch(() => { /* best-effort */ });
     return buildEspnSessionInitBody(user, lg);
+  }
+  if (isMflLeague(lg.league_id)) {
+    await warmPlayerCache().catch(() => { /* best-effort */ });
+    return buildPlatformSessionInitBody('mfl', user, lg);
+  }
+  if (isFleaflickerLeague(lg.league_id)) {
+    await warmPlayerCache().catch(() => { /* best-effort */ });
+    return buildPlatformSessionInitBody('fleaflicker', user, lg);
   }
   const [rosters, leagueUsers] = await Promise.all([
     getLeagueRosters(lg.league_id),
@@ -502,7 +533,7 @@ function _looksLikeUrl(input: string): boolean {
 }
 
 interface ParseUrlResponse {
-  platform?: 'sleeper' | 'espn' | 'mfl';
+  platform?: 'sleeper' | 'espn' | 'mfl' | 'fleaflicker';
   league_id?: string;
   name?: string | null;
   supported?: boolean;
@@ -555,6 +586,8 @@ export async function resolveSmartStart(input: string): Promise<SmartStartResolu
 export async function startDemoSession(): Promise<DemoSessionResponse> {
   const res = await api.post<DemoSessionResponse>('/api/session/demo', undefined, {
     skipAuth: true,
+    // X-Device-Id → identity_links (see signIn). Additive header only.
+    headers: { 'X-Device-Id': await getDeviceId() },
   });
   if (res?.token) {
     await setSessionToken(res.token);

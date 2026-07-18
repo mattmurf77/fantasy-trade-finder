@@ -26,10 +26,16 @@ import {
 import RootNav from './src/navigation/RootNav';
 import { useSession } from './src/state/useSession';
 import { useFeatureFlags } from './src/state/useFeatureFlags';
+import {
+  useOnboardingState,
+  getOnboardingState,
+  patchOnboardingState,
+} from './src/state/useOnboardingState';
 import { useFeedback } from './src/state/useFeedback';
 import { queryClient } from './src/state/queryClient';
 import { initSentry, wrap as sentryWrap } from './src/observability/sentry';
 import { getTierConfig } from './src/api/rankings';
+import { initAnalytics, track } from './src/api/events';
 import { warmPlayerCache } from './src/api/sleeper';
 import { setTierConfigCache } from './src/utils/tierBands';
 import { handleDeepLink } from './src/utils/deepLinks';
@@ -83,6 +89,24 @@ function App() {
         // deploy; without this, a restored token 401s on all calls and
         // the app looks broken until a fresh sign-in.
         void useSession.getState().revalidateSession();
+        // Analytics (tracking plan v2): restore the offline event queue,
+        // then record the cold open. Fired AFTER loadCachedFlags so the
+        // analytics.client_events gate reads the hydrated flag map.
+        initAnalytics();
+        track('app_opened', { launch_type: 'cold' });
+        // Onboarding scaffold (plan item 4): hydrate the persisted
+        // ftf_onboarding_state off the critical path, then count this cold
+        // start. Inert while onboarding.* flags are dark — nothing reads
+        // the store unless a gate is open; sessionCount just accrues.
+        void useOnboardingState
+          .getState()
+          .hydrateOnboarding()
+          .then(() => {
+            patchOnboardingState({
+              sessionCount: getOnboardingState().sessionCount + 1,
+            });
+          })
+          .catch(() => {});
       });
 
     // Detached network legs — fire-and-forget. None of these gate the
@@ -137,12 +161,26 @@ function App() {
   //      separately so it owns its own subscription lifecycle (and gets
   //      handleFocus once at startup), per the TanStack RN guidance.
   useEffect(() => {
+    // Analytics: warm-open detection. Only a REAL background → active
+    // round-trip counts — brief 'inactive' interruptions (app switcher,
+    // control center) don't, and the initial launch (already 'active'
+    // when this listener registers) never sets the flag.
+    let wasBackgrounded = false;
     const onChange = (next: AppStateStatus) => {
+      if (next === 'background') wasBackgrounded = true;
       if (next === 'active') {
+        if (wasBackgrounded) {
+          wasBackgrounded = false;
+          track('app_opened', { launch_type: 'warm' });
+        }
         void useFeedback.getState().retrySync();
         // FB-45 — re-mint the server session on foreground resume (it may
         // have died with a deploy while backgrounded). Throttled inside.
         void useSession.getState().revalidateSession();
+        // Analytics §4.6b — throttled (≥30 min) config refetch: the client
+        // bound the analytics kill-switch + experiment pause ride on
+        // (FR-19/FR-38). No-op inside the throttle window.
+        void useFeatureFlags.getState().maybeRevalidateFlags();
       }
     };
     const sub = AppState.addEventListener('change', onChange);

@@ -128,10 +128,12 @@ export async function getRankings(position?: Position | null) {
 export async function reorderRankings(
   position: Position | null,
   orderedIds: string[],
+  via?: 'quickrank',   // marks Quick Rank saves so the backend fires
+                       // quickrank_completed (analytics FR-20, server.py)
 ) {
   return api.post<{ ok: true; count: number; scoring_format: string }>(
     '/api/rankings/reorder',
-    { position, ordered_ids: orderedIds },
+    { position, ordered_ids: orderedIds, ...(via ? { via } : {}) },
     { headers: await formatHeader() },
   );
 }

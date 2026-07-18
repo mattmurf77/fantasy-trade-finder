@@ -9,7 +9,9 @@ import { chalk, flare, ice, ink, radii, space, type } from '../theme/chalkline';
 import { haptics } from '../utils/haptics';
 import type { RankRoute } from '../navigation/TabNav';
 
-// Build-your-board chooser — the Rank tab's first-run screen. Describes the
+// Build-your-board chooser — reached from Quick Set's "More ways to rank"
+// header link (since #122 the Rank tab defaults no-pref users straight into
+// Quick Set, not here). Describes the
 // five ranking flows by PROCESS (how guided vs. hands-on), not feature name,
 // ordered most-guided → most-manual. Picking one saves the preference
 // (useSession.rankingMethodPref) so subsequent launches route straight to

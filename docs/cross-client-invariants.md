@@ -199,6 +199,36 @@ See [data-dictionary.md](data-dictionary.md#user_events). When adding a new even
 
 ---
 
+## Client analytics event contract (`POST /api/events`, flag `analytics.client_events`)
+
+Tracking plan v2 ([spec](business/analytics/2026-07-17-tracking-plan-v2.md) §S2/§S3) — the envelope shape and event names are shared verbatim by every client SDK (mobile `mobile/src/api/events.ts`, web/extension when built) and the backend allowlist (`backend/analytics_taxonomy.py:ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS`). Changing either side alone breaks ingestion silently (unknown types/props are dropped).
+
+**Envelope** (per event, batched ≤50):
+
+```
+{ event_id, event_type, client_ts, screen, props, session_id, seq }
+```
+
+- `event_id`: 8–64 chars `^[A-Za-z0-9_-]+$`, the idempotency/dedup key.
+- `session_id`: 8–64 chars; rotated after 30 min inactivity or cold start.
+- `seq`: **per-session monotonic integer from 1**, reset on session rotation — the signal that makes event loss measurable (gap analysis per `device_id`×`session_id`). Adding an event without `seq` breaks that.
+- Identity: `X-Device-Id` header (body `device_id` accepted for v0 binaries). Server stamps `occurred_at`, device headers, `source`. Per-event props are filtered to that event's allowed keys, then PII-scrubbed server-side (§S4/FR-47) — clients must not send tokens/emails/etc.
+
+**Client persistence:** the mobile SDK's offline queue lives at AsyncStorage key `ftf.events.queue.v1`, shape `{v:1, events:[…]}`. Any other shape (the pre-P1 plain array, corruption) is discarded on read, never crashed on. Web/extension SDKs (when built) must use the same envelope + a per-origin equivalent.
+
+**Allowed client event names** (default-deny; additions require a tracking-plan addendum first, then both the allowlist and the emitting client):
+
+- Lifecycle/nav: `app_opened`, `app_backgrounded`, `screen_viewed`, `client_error`
+- Pre-auth funnel: `signin_attempted`, `signin_succeeded`, `signin_failed`, `league_selected`, `demo_entered`
+- Ranking: `rank_method_selected`
+- Trades: `find_trades_tapped`, `trade_card_viewed`, `trade_flagged`, `match_opened`
+- Engagement: `push_opened`
+- Onboarding plan ([plan](plans/onboarding-conversion/plan.md)): `apple_prompt_shown`, `apple_prompt_accepted`, `apple_prompt_declined`, `apple_prompt_dismissed`, `quickset_prompt_shown`, `quickset_prompt_accepted`, `quickset_prompt_snoozed`, `trade_card_shared`, `coach_mark_shown`, `coach_mark_dismissed`, `celebration_shown`, `deck_exhausted_viewed`
+
+Sign-in requests may carry `device_id` (body) or `X-Device-Id` (header) on `/api/extension/auth`, `/api/auth/apple`, `/api/auth/google`, `/api/session/demo` — the backend stitches device→identity in `identity_links`.
+
+---
+
 ## Device platform / source enums
 
 - `device_tokens.platform`: `ios`, `android`
@@ -209,7 +239,7 @@ See [data-dictionary.md](data-dictionary.md#user_events). When adding a new even
 
 ## League platform enum
 
-`leagues.platform`: `sleeper` (NULL reads as `sleeper`) | `espn` (flag `espn.link`). Served on `/api/leagues`, `GET /api/espn/leagues`, and `/api/sleeper/leagues/<user_id>` league objects; mobile types it as `LeagueSummary.platform` (`mobile/src/shared/types.ts`) and branches session-init roster sourcing on it (`api/auth.ts` → `api/espn.ts`). UI rule: `espn` renders as a small **"ESPN" text badge** (chalkline `Badge`, no logos — App-Store/trademark posture, plan §4). `mfl` is parse-only today (`/api/league/parse-url`) and never persisted.
+`leagues.platform`: `sleeper` (NULL reads as `sleeper`) | `espn` (flag `espn.link`) | `mfl` (flag `mfl.link`) | `fleaflicker` (flag `fleaflicker.link`). Served on `/api/leagues`, `GET /api/{espn,mfl,fleaflicker}/leagues`, and `/api/sleeper/leagues/<user_id>` league objects; mobile types it as `LeagueSummary.platform` (`mobile/src/shared/types.ts`) and branches session-init roster sourcing on it (`api/auth.ts` → `api/espn.ts` / `api/platformLink.ts`). UI rule: imported platforms render as a small **text badge** (chalkline `Badge`, no logos — App-Store/trademark posture): `espn`→**"ESPN"**, `mfl`→**"MFL"**, `fleaflicker`→**"FLEA"** (map `PLATFORM_BADGE` in `LeaguePickerScreen`). A `mfl`/`fleaflicker`/`sleeper` value can also come back from `/api/league/parse-url` (parse-only, unpersisted) — the badge/enum rule is the same.
 
 ---
 

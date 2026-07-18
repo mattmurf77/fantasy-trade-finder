@@ -4,11 +4,16 @@ import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import Button from './chalkline/Button';
 import { useFlag } from '../state/useFeatureFlags';
+import { useSession } from '../state/useSession';
 import { proposeTradeToSleeper, getSleeperLinkStatus } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
 
 // "Send in Sleeper". Renders on any real trade surface (found / matched /
 // suggested). Flag-gated: returns null when `trade.send_in_sleeper` is off.
+// Platform-gated too (#146): returns null when `leagueId` is an imported
+// ESPN league — the button proposes a REAL Sleeper trade, which is
+// meaningless there. Gated centrally here (every mount passes leagueId)
+// so future mounts can't forget it.
 //
 // One button, two paths — chosen by whether the Sleeper account is linked in
 // this session (checked up front via GET /api/sleeper/link):
@@ -37,6 +42,13 @@ export default function SendInSleeperButton({
   style,
 }: Props) {
   const enabled = useFlag('trade.send_in_sleeper');
+  // #146 — reactive twin of api/espn.isEspnLeague: hide on imported ESPN
+  // leagues. Fail-open: a league id missing from the cached list (demo
+  // league, stale cache) keeps the button, matching pre-#146 behavior.
+  const leagues = useSession((s) => s.leagues);
+  const isEspn = leagues.some(
+    (lg) => lg.league_id === leagueId && lg.platform === 'espn',
+  );
   const navigation = useNavigation<any>();
   const [state, setState] = useState<State>('idle');
   // True while we're waiting for the user to come back from the connect
@@ -200,7 +212,7 @@ export default function SendInSleeperButton({
     }
   }, [state, leagueId, theirUserId, openInSleeper, confirmSend, goConnect]);
 
-  if (!enabled) return null;
+  if (!enabled || isEspn) return null;
 
   const label =
     state === 'sent' ? 'Proposal sent'

@@ -15,6 +15,9 @@ export async function getLeagues(userId: string): Promise<LeagueSummary[]> {
     avatar: lg.avatar ?? null,
     total_rosters: lg.total_rosters ?? undefined,
     platform: lg.platform ?? 'sleeper',
+    // Sleeper settings.type (0 redraft / 1 keeper / 2 dynasty) — F12
+    // redraft labeling + event segment tag. Absent on local leagues.
+    settings_type: typeof lg.settings?.type === 'number' ? lg.settings.type : undefined,
   }));
 }
 

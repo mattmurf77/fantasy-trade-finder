@@ -23,6 +23,18 @@
       "port": 8766
     },
     {
+      "name": "mockups-preview",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8767",
+        "--directory",
+        "mockups"
+      ],
+      "port": 8767
+    },
+    {
       "name": "ftf-mobile-web",
       "runtimeExecutable": "npx",
       "runtimeArgs": [

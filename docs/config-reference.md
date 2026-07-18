@@ -18,9 +18,13 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 | `FTF_SLEEPER_FIXTURES_DIR` | `backend/server.py` `_sleeper_get` | Fixture seam: serve Sleeper responses from canned JSON in this dir (path-keyed, e.g. `user/qa_standard.json`); a miss raises HTTP 599 (fail-closed, never live) |
 | `FTF_SLEEPER_RECORD` | `backend/server.py` `_sleeper_get` | `1` → live calls also write scrubbed cassettes into `FTF_SLEEPER_FIXTURES_DIR`. Refuses to start with `FTF_TEST_MODE` (record is deliberately live) or a non-empty fixtures dir |
 | `FTF_PLAYERS_CACHE_FILE` | `backend/server.py` | Redirects the players warm-cache path (default `data/.sleeper_players_cache.json`, shared with real dev) so test runs never clobber it |
+| `FTF_DP_VALUES_FILE` | `backend/data_loader.py` | Test seam: serve the DynastyProcess values CSV from this local path instead of the live GitHub egress (identical parse path). Under `FTF_TEST_MODE=1` it is **mandatory** (the silent flat-Elo fallback would otherwise reshape the pool mid-test) |
+| `FTF_KTC_VALUES_FILE` | `backend/data_loader.py` | Test seam: serve the KeepTradeCut dynasty-rankings **HTML** from this local path instead of the live fetch (#145). When unset under `FTF_TEST_MODE=1` (or when `FTF_DP_VALUES_FILE` is set), KTC is simply **off** — never a live egress from a hermetic run |
 | `FTF_TEST_PROFILE` | `backend/test_support.py` | Fixture profile name reported by `GET /__test__/whoami` (set by the seeder's `--print-env`) |
 | `FTF_ENV` / `FTF_API_BASE_URL` | `mobile/app.config.js` (build time) | `FTF_ENV=test` nulls the Sentry DSN + sets `extra.testMode`; `FTF_API_BASE_URL` overrides `extra.apiBaseUrl` (test builds → local Flask). Unset → identical to `app.json` |
 | `GOOGLE_OAUTH_CLIENT_ID` | `backend/server.py` (`/api/auth/google`) | Google OAuth client id — the expected `aud` of Google ID tokens (`auth.accounts`). Unset → the route fails closed (503 `not_configured`). Apple needs no equivalent (its `aud` is the app bundle id, hardcoded in `backend/accounts.py`). |
+| `REVENUECAT_WEBHOOK_SECRET` | `backend/server.py` (`/api/billing/revenuecat/webhook`) | Bearer token RevenueCat sends in `Authorization` on webhooks. Prod unset → the route fails closed (503); SQLite dev unset → check disabled (same posture as `CRON_SECRET`). Set in `secrets.local.env` + Render when RevenueCat is configured. |
+| `STRIPE_WEBHOOK_SECRET` | `backend/server.py` (`/api/billing/stripe/webhook`) | Stripe webhook signing secret (`whsec_…`) for `Stripe-Signature` v1 verification. Same fail-closed posture as above. |
 
 ---
 
@@ -56,6 +60,7 @@ Pre-existing flags (sprint UX + trade-math): see `config/features.json` directly
 | `trade.three_team` | 3-team cycle trades (kidney-exchange-style clearing) in `trade_optimizer.py` |
 | `trade.finder_targeting` | FB-47 ([plan](plans/trade-finder-targeting.md)): `pinned_receive_players` ("I want to acquire X") + counterparty positional-fit ranking (`partner_fit` on cards, `fit_consensus_weight` / `fit_divergence_weight` composite blend). Default **false**; **enabled in `config/features.json` since 2026-07-10** (Phase C: web picker direction toggle + mobile Target-players controls; both clients gate their targeting UI on this flag and render the `partner_fit` line on cards). |
 | `trade.need_fit` | FB-96 (feedback #96; kin of FB-47 but needs NO user input): every v2-orchestrated card (divergence, v3, consensus) gets an automatic **positional-need fit** in [0,1] from the two rosters' `analyze_roster_strengths` profiles — high when the card gives from the user's deepest position into the opponent's need AND receives at the user's thinnest position from the opponent's surplus (SF bumps the QB "loaded" bar by one). Composite ×= `1 + need_fit_weight · (need_fit − 0.5)`, applied in `_generate_trades_v2` AFTER all gates — reorders acceptable trades, never rescues gated ones; fairness/mismatch scores untouched. Cards carry `need_fit` (serialized when set). Default **false**; **enabled in `config/features.json` since 2026-07-09**. New `model_config` key: `need_fit_weight` (0.15 since the 2026-07-17 interview — "keep it a light multiplier", max ±7.5% composite swing; was 0.30, old-default DB rows are migrated on boot). |
+| `trade.block_boost` | FB-147 engine hook (kin of `need_fit`): a **SOFT, acquire-side** boost. Every v2-orchestrated card (divergence, v3, consensus) whose **acquire side** (`receive_player_ids`) holds ≥1 player the **counterparty** flagged "on the block" (`database.load_trade_block`, grouped by flagging owner via `trade_service._load_on_block_by_uid`) gets composite ×= `1 + block_boost_weight`, applied in `_generate_trades_v2` AFTER all gates — reorders acceptable trades, never rescues gated ones; fairness/mismatch untouched. Give-side / the user's own flagged players are out of scope (operator chose acquire-side only). Flat bump regardless of how many acquired assets are blocked. Cards carry the in-process `block_boosted` flag; client inspectability rides #147's existing per-player `on_block` receive-row flag (no separate serialization). Depends on `sleeper.trade_block` having synced block data (else no-op). Default **true** (bounded/kill-switchable); flag off or knob 0 ⇒ composite byte-identical, nothing stamped. New `model_config` key: `block_boost_weight` (0.15, max +15% composite bump; 0 disables). |
 | `trade.outlook_infer` | Backlog #1 ([plan](plans/competitor-top20/01-opponent-outlook-classifier.md)): price each opponent's side of a trade through *their* contend/rebuild α instead of the `not_sure` 0.50 default. Per opponent: declared `league_preferences.team_outlook` → `infer_team_outlook` (roster age/value/pick-share signals) → `not_sure`. Since phase 2 (2026-07-17) the flag is **decoupled into label vs value roles**: the label (declared → inferred → not_sure) is resolved whenever this flag is on and feeds `match_context.opponent_outlook`, narrative acceptance framing, and lanes; the VALUE blend of `_vo` additionally requires `trade.outlook_blend` (turned off by the interview — "age = tiebreak"). Consensus-basis cards stay market-neutral by design. Default **false**; **enabled in `config/features.json` 2026-07-17** for the label role. `model_config` keys: `infer_w_vet_share` (1.0), `infer_w_youth_share` (1.0), `infer_w_pick_share` (2.0), `infer_contender_cut` (0.08), `infer_rebuilder_cut` (-0.08). |
 | `trade.preference_lists` | Backlog #2 ([plan](plans/competitor-top20/02-asset-preference-lists.md)): per-player **untouchables** (hard give-side filter — dropped from `_known_user`/`known_user` pools + sweetener candidates in all gen paths; likes-you injections whose mirror would send an untouchable are skipped too) and **targets** (survive the divergence prune + a capped composite reward). Stored in `asset_preferences`; loaded into `_run_trade_job` and passed as `untouchable_ids`/`target_ids`. Default **false**; **enabled in `config/features.json` since 2026-07-09** (feedback #95 — mobile marks untouchables via long-press on the Matches tab). New `model_config` key: `target_acquire_bonus` (0.20), capped by `pos_multiplier_cap` (2.0). |
 | `trade.outlook_seed` | Backlog #8 ([plan](plans/competitor-top20/08-per-league-outlook.md)): leagues with **no declared `team_outlook`** are seeded with `infer_team_outlook` run on the *user's own* roster (`_infer_user_outlook` in `server.py`), resolved identically in the generate-route cache pre-read and the worker so the job-cache key agrees. `GET /api/league/preferences` adds `inferred_outlook` + `inferred_signals` (additive) for the one-tap confirm UI. Nothing is persisted — recomputed per request, so roster drift self-corrects. Declared rows always win. Default **false**; **enabled in `config/features.json` 2026-07-17** (phase 2 "infer + confirm"): the inferred window now powers lanes + the clients' one-tap confirm UI rather than a value blend. No new config keys (reuses #1's `infer_*`). |
@@ -76,6 +81,7 @@ Pre-existing flags (sprint UX + trade-math): see `config/features.json` directly
 | Flag | Default | Gates |
 |---|---|---|
 | `auth.accounts` | false | Apple/Google identity anchors ([plan](plans/account-auth-plan-2026-07-11.md) §3-P2): `POST /api/auth/apple`, `POST /api/auth/google`, `GET /api/account` (all 404 when off) + the mobile Sign in with Apple button (SignInScreen) and the Settings linked-identity display. **`DELETE /api/account` is deliberately NOT gated** — in-app account deletion is App Store Guideline 5.1.1(v). Logic: `backend/accounts.py`; tables: `accounts` + `linked_identities`. Before flipping ON: complete the ASC steps in the runbook (Sign in with Apple capability) and update `web/privacy.html` to cover Apple/Google `sub` storage (plan §4 / #114). |
+| `auth.email_capture` | false | Plaintext email storage on `accounts` ([spec](business/product/2026-07-17-email-capture-spec.md)). **Off (default)** = pre-spec behavior: Apple's first-auth email is SHA-256-hashed (`linked_identities.email_hash`), plaintext discarded. **On** = Apple first-auth email + the future Settings capture field store to `accounts.email` with `email_consent_at`. **Flip only in the same release as the capture UI + `web/privacy.html` update** — the policy currently states no email addresses are stored. Logic: `backend/accounts.py` (`_email_capture_enabled`, `set_account_email`, `find_or_create_account`). |
 | `auth.enforce_verified_writes` | false | Account-auth P1→P3 write-gate mode ([plan](plans/account-auth-plan-2026-07-11.md) §3). **false = GRACE**: unverified sessions' mutating requests are allowed but each logs one `AUTH-GRACE` line (funnel instrumentation — see [runbook](runbook.md)). **true = P3 enforcement**: unverified writes → 403 `verification_required`. Independent of grace, a user_id with a verified controller (`users.verified_via` set) always denies unverified writes, and the hard routes (`POST /api/sleeper/link`, `POST /api/trades/propose`, `POST /api/account/reset-rankings`) always require proof. Flip to true only after the P1 verification funnel looks healthy (plan §2d: ~2–4 weeks). |
 
 ### ESPN league linking (Phase 1 — ships dark)
@@ -83,6 +89,61 @@ Pre-existing flags (sprint UX + trade-math): see `config/features.json` directly
 | Flag | Default | Gates |
 |---|---|---|
 | `espn.link` | false | Read-only ESPN league import via the **unofficial** v3 API ([plan](plans/espn-league-linking-plan-2026-07-11.md)): `POST /api/espn/link`, `GET /api/espn/leagues`, `POST /api/espn/import` (all 404 when off) + the mobile "Link an ESPN league" affordance (LeaguePicker + League tab re-sync). Adapter: `backend/espn_service.py` (crosswalks rosters to Sleeper ids via DynastyProcess `db_playerids.csv`, 24h-TTL in-memory cache, snapshot fallback). Private-league cookie store: `espn_credentials` (Fernet — **reuses `SLEEPER_TOKEN_KEY`**; public leagues need no auth or key). Doubles as the **kill switch**: ESPN blocking reads or an App Store objection → flip off, feature goes fully dark (imported data stays inert in the DB). Before flipping ON: run the live public-league smoke via `python3 -m backend.espn_service <league_id> [season]` (plan §5 — the fixture tests can't see endpoint churn). |
+
+### Multi-platform league linking — MFL / Fleaflicker (Phase 1 — ships dark; [plan](plans/multi-platform-linking-plan-2026-07-17.md))
+
+Both are **zero-auth** public-read imports; no credentials table, no encryption key. Rosters crosswalk to Sleeper ids through the **same** DynastyProcess `db_playerids.csv` cache as ESPN (`espn_service.get_crosswalk`, now exposing per-platform id maps). Each flag gates its own `/api/{platform}/*` routes + the mobile link option and is the vendor/App-Store **kill switch** (imported data stays inert when off).
+
+| Flag | Default | Gates |
+|---|---|---|
+| `mfl.link` | false | MFL import via the **official** export API: `POST /api/mfl/link`, `GET /api/mfl/leagues`, `POST /api/mfl/import`. Adapter `backend/mfl_service.py` (crosswalk via `mfl_id`; per-league `wwwNN` host resolution; `futureDraftPicks` stored raw in `leagues.platform_future_picks`, **not** engine-wired). Env: optional `MFL_USER_AGENT` (registered-client UA after MFL client registration — see [plan §9](plans/multi-platform-linking-plan-2026-07-17.md)); optional `MFL_COOKIE` for the CLI private path. |
+| `fleaflicker.link` | false | Fleaflicker import via the **official** public JSON API: `POST /api/fleaflicker/link`, `GET /api/fleaflicker/leagues`, `POST /api/fleaflicker/discover` (email lookup), `POST /api/fleaflicker/import`. Adapter `backend/fleaflicker_service.py` (crosswalk via `sportradar_id` from roster `externalIds`). No env/keys. |
+
+**Before flipping either ON**, run the live public-league smoke (the fixture tests can't see endpoint churn):
+- MFL: `python3 -m backend.mfl_service <league_id_or_url> [year]` (host auto-resolves; e.g. `python3 -m backend.mfl_service 10005 2026` → 100% by id)
+- Fleaflicker: `python3 -m backend.fleaflicker_service <league_id>` (or an email to list leagues; e.g. `python3 -m backend.fleaflicker_service 312861` → 99.7% by id)
+
+### Onboarding & conversion redesign (ships dark; [plan](plans/onboarding-conversion/plan.md) v2.1)
+
+**Master/individual semantics:** every `onboarding.*` feature is live iff **`onboarding.v2` AND its own flag**. `onboarding.v2` false = whole redesign dark regardless of individual flags (kill switch). Individual flags allow feature-by-feature enablement/rollback. `analytics.client_events` is deliberately **outside** the master — it gates instrumentation only (tracking plan v2 §S2) and must run against the *current* flow first to capture the pre-redesign baseline.
+
+| Flag | Default | Gates |
+|---|---|---|
+| `analytics.client_events` | false (true in `features.json` — baseline capture) | `POST /api/events` ingestion (404 when off) + client event SDK emission (`mobile/src/api/events.ts`). Instrumentation only; no UX change. |
+| `onboarding.v2` | false | Master kill-switch for all `onboarding.*` features below. |
+| `onboarding.landing` | false | Item 5 — username-first landing on SignInScreen (primary username field, quiet Apple re-entry link, not-found copy, Sleeper-down demo escape). First consumer of `landing.try_before_sync`. |
+| `onboarding.trades_first` | false | Item 4 — trades-first hook: pregen at auth-return, skeleton/streamed first-run deck, first-run chrome collapse, provenance chip, identity-confirm strip. |
+| `onboarding.league_autoskip` | false | Item 6 — single-league LeaguePicker auto-skip + error fallback. |
+| `onboarding.quickset_prompt` | false | Item 7 — inline prompt card (first pass after swipe 2, else 3 swipes) + onboarding-mode QuickSet (suppress finish-prompt, return to Trades, force deck regen, diff banner). |
+| `onboarding.apple_save_moment` | false | Item 8 — save-moment Apple prompt (honest framing, decline policy, one auto-prompt per save-moment class), persisted-username silent re-init, session-2 non-modal banner. |
+| `onboarding.share_sheet` | false | Item 8 rider — native share sheet on liked trade card (user-initiated; appears only after the Apple prompt resolves). |
+| `onboarding.rank_routing` | false | Item 9 — RankHome chooser demoted to "More ways to rank", Rank tab defaults to QuickSet, deck-exhausted state → trio entry. |
+| `onboarding.demo_bridge` | false | Item 10 — persistent "See this for YOUR team →" bar in demo mode + redraft "Dynasty values shown" label/segment tag. |
+| `onboarding.guided_layer` | false | v2.1 guided layer — swipe-gesture hint (card 1), ≤4 coach marks, celebration beats (first like / first QuickSet save). |
+| `onboarding.keep_warm` | false | Item 3 — server-side keep-warm affordances for the Render cold-start cron ping. |
+
+### Monetization platform (ships dark; [foundation](plans/monetization/00-platform-foundation.md), [plan index](plans/monetization/README.md))
+
+One flag per monetization strategy — each independently flippable, ALL default false. **Rollout order** (foundation §1): `monetize.entitlements` first in observe mode (logs `ENTITLE-OBSERVE`, never blocks — enforcement needs `monetize.paywall` too), then `monetize.founder` + `monetize.paywall` for the TestFlight window, `monetize.pro`/`monetize.season_pass` at launch, `growth.*` after, ads last. The manual-grant admin routes (`/api/admin/entitlements/*`) and billing webhooks are deliberately **unflagged** — operator surface + provider traffic; grants written while dark sit dormant.
+
+| Flag | Default | Gates |
+|---|---|---|
+| `monetize.entitlements` | false | Master: entitlement checks become active (`entitlements.check_pro`). Off = every user implicitly pro. On without `monetize.paywall` = observe mode. |
+| `monetize.paywall` | false | Purchase UI surfaces (mobile + web) AND the enforce half of `check_pro` (both flags on → 402 on gated routes). |
+| `monetize.pro` | false | Pro subscription SKUs purchasable + Pro gate list ([plan](plans/monetization/pro-subscription/prd.md)). |
+| `monetize.season_pass` | false | Year-labeled season SKUs ([plan](plans/monetization/season-pass/prd.md)). |
+| `monetize.founder` | false | Founder Lifetime window — the flag flip IS the window open/close ([plan](plans/monetization/founder-lifetime/prd.md)). |
+| `monetize.affiliate` | false | Affiliate placements + partner registry ([plan](plans/monetization/affiliate/prd.md)); per-partner enables live in the (future) `config/affiliates.json`. |
+| `monetize.ads_web` | false | Web display ads ([plan](plans/monetization/ads/prd.md)). |
+| `monetize.ads_mobile` | false | Mobile AdMob banner + rewarded + ATT prompt. Independent kill switch from web. |
+| `growth.referral` | false | Give-get referral program (invite CTAs, reward granting). |
+| `growth.group_unlock` | false | League group-unlock experiment (A/B vs per-referrer rewards). |
+| `ranks.accuracy_scoring` | false | Passive board snapshots + quarterly scoring + leaderboard ([marketplace plan](../docs/business/product/2026-07-17-rankings-marketplace-plan.md) phase 1). |
+| `ranks.rank_sets` | false | Publish/adopt rank sets, free only (phase 2). |
+| `ranks.set_types_extended` | false | `redraft`/`bestball` set types (platform-thesis test; `dynasty`/`rookie` are unflagged launch types). |
+| `marketplace.publisher_sets` | false | Publisher IAP + subscriber account-linking (phase 3). |
+| `marketplace.contributor_sales` | false | Contributor credit-priced sales (phase 4). |
+| `marketplace.cash_payouts` | false | Stripe Connect cash-out rung (phase 5). |
 
 ---
 
@@ -94,6 +155,12 @@ Two layers, both read through `trade_service._cfg` at runtime:
 2. **Code-default keys** — the trade-engine v2/Tier-2 keys below are declared only in `trade_service._DEFAULT_CFG` (and `fuzzy_match_tau` inline in `server._fuzzy_match_tau`). They are **not yet seeded into the `model_config` table**, and `database.set_config` rejects unknown keys — so until they're added to `_MODEL_CONFIG_DEFAULTS`, the admin API cannot tune them and the code defaults below are what runs.
 
 Legacy keys (Elo K-factors, KTC curve, package weights, outlook multipliers, tier multipliers, trade-math taxes, tier-engine knobs) are documented in [glossary.md](glossary.md) and listed by `GET /api/admin/config`.
+
+### Analytics platform (P0, [ADR-007](adr/adr-007-first-party-analytics-experimentation.md))
+
+| Key | Default | Meaning |
+|---|---|---|
+| `analytics.wrapped_cutover_at` | *(stamped at first P0 boot)* | **Not a tunable** — the epoch-seconds instant of the `wrapped_events` → `user_events` writer cutover (LLD §6.4). Seeded once by `_migrate_db()` (INSERT-or-ignore; `model_config.value` is Float, hence epoch seconds rather than ISO text — `database.get_wrapped_cutover_iso()` converts). `load_league_activity()` splits its union read on it. Never edit after deploy: moving it double-counts or hides narrative rows. |
 
 ### Trios → tier calibration + variety — `ranking_service._DEFAULT_CFG`, DB-seeded
 
@@ -108,6 +175,15 @@ The trio loop rotates among three strategies (never repeating the previous one),
 | `trio_repeat_avoid` | 8.0 | Don't reuse a player seen in the last **N** served trios (fixes "same 2 players trio after trio"). Relaxes gracefully when a pool/tier is too small to honour it — the longest-unseen players are re-admitted first, never the whole avoid set at once. Default raised 3 → 8 (FB #97) to match the live prod tune; 3 was too short to keep the top value cluster from recurring. |
 
 > Backend-only and **behavioural for all users** once deployed (changes which trio the Rank screen serves; Elo/value math is unchanged). Fully revertible live via `PUT /api/admin/config`. See [trios-tier-calibration-plan-2026-07-08.md](plans/trios-tier-calibration-plan-2026-07-08.md).
+
+### Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded
+
+Both knobs shape the **baseline consensus seed values** (the DP→Elo pool seeds), applied once at pool build (`_apply_consensus_blend`, inside `_fetch_dynasty_process`). They are **not** live-hot: a change takes effect on the next boot / pool rebuild (the universal pool is built from the live DP CSV once per boot). Editable via `PUT /api/admin/config/<key>`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `ktc_blend_weight` | 0.5 | #145 — weight of KeepTradeCut in the consensus seed blend. Per matched player: `value = (1 − w)·dp + w·ktc_on_dp_curve`, where KTC values are **rank-normalized onto the DP value curve** per format (so the value distribution — and hence tier occupancy / the #117 affine calibration — stays DP-shaped while KTC's ordering opinion is imported). **`0` = DP-only kill switch** (with `tep_te_uplift = 1` the seed pipeline is byte-identical to pre-#145 — pinned by `test_ktc_blend.test_blend_off_is_byte_identical`, and weight 0 never even fetches KTC). `1` = KTC ordering only. Unmatched pool players keep pure DP; unmatched KTC players are ignored (pool universe unchanged). See [runbook → KTC consensus blend](runbook.md) for the fragility + kill-switch procedure. |
+| `tep_te_uplift` | 1.18 | #148 — TE value multiplier applied to **`sf_tep` TE seeds only** (after the blend). DP's `value_2qb` column is *plain* superflex with no tight-end premium, so plain-SF TE values sit ~25–30% below their 1QB analogs; a 1QB→SF-TEP board copy then demoted TEs. The uplift (calibrated 2026-07-17 so the top-8 `sf_tep` TE seeds clear their 1QB analogs at the default blend weight — KTC's own TEP effect is ≈ +11%, the rest offsets SF's non-QB compression) makes SF-TEP TEs read as *slightly upgraded*, matching the operator's expectation. `1` = off. Pinned by `test_ktc_blend.test_sf_tep_top_tes_beat_their_1qb_seed`. |
 
 ### Trade engine v2 (Tier 1) — `trade_service._DEFAULT_CFG`
 

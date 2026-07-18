@@ -78,6 +78,9 @@ from .database import (
     set_feedback_status, list_feedback_for_user, FEEDBACK_STATUSES, FEEDBACK_SEVERITIES,
     upsert_league_members, upsert_member_rankings,
     load_member_rankings, load_league_members, get_ranking_coverage,
+    # FB-147 — Sleeper trade-block snapshot (read side; sync lives in
+    # trade_block_service.py)
+    load_trade_block,
     check_for_match, match_already_exists,
     create_trade_match, load_matches,
     load_awaiting_trades,
@@ -121,6 +124,9 @@ from .database import (
     load_skips as _skip_load,
     # User-event logging
     record_event, touch_user_activity, load_user_events,
+    # Device→identity stitching (tracking plan v2). Client-event ingestion
+    # moved to backend/analytics_ingest.py in P1 (insert_client_events retired).
+    link_identity,
     # Streak — driven by record_event, read for the chip + leaderboard
     get_user_streak,
     # Notification prefs / send log / quiet-hours queue
@@ -2146,11 +2152,36 @@ def _run_trade_job(
 
         # Mark complete. Final card snapshot was already published by the
         # last on_opponent_done invocation (or the likes-you republish above).
+        gen_ms = None
         with _trade_jobs_lock:
             j = _trade_jobs.get(job_id)
             if j is not None:
                 j["status"]      = "complete"
                 j["finished_at"] = time.monotonic()
+                if j.get("started_at") is not None:
+                    gen_ms = int((j["finished_at"] - j["started_at"]) * 1000)
+
+        # FR-20 (analytics P0, LLD §6.4b): trades_generated — post-engine,
+        # once per completed job (never per /status poll). Worker thread, so
+        # no request context / device headers; never allowed to fail the job.
+        try:
+            _lanes: dict[str, int] = {}
+            for c in final_cards:
+                _lane = getattr(c, "lane", None)
+                if _lane:
+                    _lanes[_lane] = _lanes.get(_lane, 0) + 1
+            _engine_version = ("v3" if is_enabled("trade_engine.v3")
+                               else "v2" if is_enabled("trade_engine.v2")
+                               else "v1")
+            record_event(
+                g_user_id, "trades_generated",
+                league_id=league_id,
+                source="api",
+                props={"count": len(final_cards), "gen_ms": gen_ms,
+                       "engine_version": _engine_version, "lanes": _lanes},
+            )
+        except Exception as ev_err:
+            log.warning("record_event(trades_generated) failed: %s", ev_err)
 
     except Exception as e:
         log.exception("trade-job %s failed", job_id)
@@ -2918,6 +2949,16 @@ def set_ranking_method_route():
     try:
         set_ranking_method(g_user_id, method)
         log.info("ranking-method set for %s: %s", g_user_id, method)
+        # Tracking plan v2 §S3 — closes a documented-dark gap.
+        try:
+            record_event(
+                g_user_id, "ranking_method_changed",
+                league_id=getattr(sess.get("league"), "league_id", None),
+                source="api", props={"method": method},
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as ev_err:
+            log.warning("record_event(ranking_method_changed) failed: %s", ev_err)
         # `has_ranking_method` is one of the fields the league-members
         # loader projects; flip the cache so leaguemates see the update.
         try:
@@ -3252,6 +3293,19 @@ def submit_feedback_route():
         log.exception("save_feedback failed: %s", e)
         return jsonify({"error": "internal"}), 500
 
+    # Tracking plan v2 §S3 — feedback_submitted. NEVER the note text (§S4);
+    # anonymous submissions (no session) have no user to attribute to, and
+    # idempotent retries (duplicate) don't re-fire.
+    if user_id and not result.get("duplicate"):
+        try:
+            record_event(
+                user_id, "feedback_submitted",
+                source="api", props={"severity": severity, "screen": screen},
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as ev_err:
+            log.warning("record_event(feedback_submitted) failed: %s", ev_err)
+
     status = 200 if result.get("duplicate") else 201
     return jsonify({
         "ok":          True,
@@ -3346,6 +3400,124 @@ def my_feedback_route():
         return jsonify({"error": "internal_error"}), 500
 
 
+# ---------------------------------------------------------------------------
+# First-party client-event ingestion — tracking plan v2 §S2
+# (docs/business/analytics/2026-07-17-tracking-plan-v2.md)
+# ---------------------------------------------------------------------------
+# The pipeline (validation, dedupe, PII scrub, rate limit, single-txn insert
+# on the ingest engine) lives in backend/analytics_ingest.py per LLD §2.1/§4.1.
+# This route is a thin shim: it owns `_sessions`, so it resolves the session
+# identity and hands `analytics_ingest.ingest_request()` the user_id (or None
+# for no-token / dead-token → device fallback, E-15). Event names + envelope
+# are a cross-client contract — see docs/cross-client-invariants.md.
+
+from . import analytics_ingest as _analytics_ingest
+
+
+@app.route("/api/events", methods=["POST"])
+def ingest_client_events_route():
+    """POST /api/events — batched first-party client-event ingestion (LLD §2.1).
+
+    Always 200 for content: rate-limit / unknown-type / PII / oversize are
+    "accepted-and-dropped", never a 4xx/429. Response
+    {accepted, deduped, rejected, dropped, disposition} with the accounting
+    invariant accepted + deduped + len(rejected) == N on committed txns.
+    Flag gate `analytics.ingest` (server acceptance) — off → "disabled" 200,
+    clients retain their queue. `analytics.client_events` is the separate
+    CLIENT emission gate (P1 split).
+    """
+    # Resolve the session identity here (this module owns `_sessions`); the
+    # pipeline never sees the token. Dead/absent token → None → device fallback.
+    user_id = None
+    token = request.headers.get("X-Session-Token", "")
+    if token:
+        with _sessions_lock:
+            sess = _sessions.get(token)
+        if sess:
+            user_id = sess.get("user_id")
+    return _analytics_ingest.ingest_request(user_id)
+
+
+@app.route("/api/admin/analytics/health", methods=["GET"])
+def analytics_health_route():
+    """GET /api/admin/analytics/health — analytics plumbing health (LLD §2.3).
+
+    Operator-only (X-Cron-Secret, same as /api/cron/*). Dedicated static
+    route on purpose — `health` stays OUT of the future
+    /api/admin/analytics/<report> enum so two responses never claim one URL.
+
+    Returns the in-process ingest counters (reset on deploy — labeled
+    "since": "deploy"), the boot check ({wal, event_id_index_present};
+    wal=None means "n/a, postgres" and renders green), and the current
+    SQLite -wal file size (None on Postgres).
+    """
+    _require_cron_auth()
+    from .database import analytics_boot_status, wal_file_bytes
+    counters = _analytics_ingest.health_counters()
+    boot = analytics_boot_status()
+    return jsonify({
+        "since":                  "deploy",
+        "counters":               counters,
+        "wal":                    boot["wal"],
+        "event_id_index_present": boot["event_id_index_present"],
+        "wal_file_bytes":         wal_file_bytes(),
+    })
+
+
+@app.route("/api/admin/analytics/<report>", methods=["GET"])
+def analytics_report_route(report):
+    """GET /api/admin/analytics/<report> — the P2 report catalog (LLD §2.3;
+    SQL in backend/analytics_queries.py, computed on the read-only engine).
+
+    Operator-only (X-Cron-Secret). `report` ∈ waterfall|time|bottlenecks|churn|
+    releases|adoption|engagement|pfo|onepager. `health` is a SEPARATE static
+    route above (Flask matches it before this dynamic rule), never in this enum.
+
+    Query params: start,end (ISO date; default trailing 28d, window ≤90d),
+    format=json|csv, include_demo=0|1, segment=<dim>. Insufficiency renders as
+    null cells + caveats, never fabricated zeros; a bad param → 400, never 500.
+    """
+    _require_cron_auth()
+    from . import analytics_queries as aq
+    fmt = (request.args.get("format") or "json").lower()
+    try:
+        result, content_type = aq.run_report(
+            report,
+            start=request.args.get("start"),
+            end=request.args.get("end"),
+            include_demo=request.args.get("include_demo") in ("1", "true", "yes"),
+            fmt=fmt,
+            segment=request.args.get("segment"),
+        )
+    except aq.BadParam as e:
+        code = "unknown_report" if str(e) == "unknown_report" else "bad_param"
+        return jsonify({"error": code, "detail": str(e)}), 400
+    if content_type == "text/csv":
+        return app.response_class(
+            result, mimetype="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{report}.csv"'})
+    return jsonify(result)
+
+
+def _link_device_identity(sleeper_user_id: str | None = None,
+                          account_id: str | None = None) -> None:
+    """Best-effort identity_links upsert on successful sign-in.
+
+    Reads device_id from the request body or X-Device-Id header; no-op when
+    the client didn't send one. Never raises — sign-in must not break on
+    analytics stitching.
+    """
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+        device_id = (str(body.get("device_id") or "").strip()
+                     or (request.headers.get("X-Device-Id") or "").strip())
+        if device_id:
+            link_identity(device_id, sleeper_user_id=sleeper_user_id,
+                          account_id=account_id)
+    except Exception as e:
+        log.debug("identity link skipped: %s", e)
+
+
 @app.route("/api/tiers/save", methods=["POST"])
 @_gate_unverified_write
 def save_tiers_route():
@@ -3421,6 +3593,45 @@ def save_tiers_route():
         # Mark this position as saved for the active format
         saved = save_tiers_position(g_user_id, position, scoring_format=fmt)
         all_done = all(p in saved for p in ("QB", "RB", "WR", "TE"))
+
+        # Tracking plan v2 §S3 — tier_save into user_events. This is the ONLY
+        # tier_save writer since the analytics P0 cutover (the legacy
+        # wrapped_events hook inside save_tiers_position is gone; LLD §6.4).
+        # tier_save is now a rank-class streak event, so tz rides along for
+        # local-day streak math. `via` lets QuickSet saves self-identify;
+        # default 'tiers' keeps old clients honest.
+        via = body.get("via") if body.get("via") in ("tiers", "quickset") else "tiers"
+        try:
+            record_event(
+                g_user_id, "tier_save",
+                league_id=getattr(g_league, "league_id", None),
+                source="api",
+                props={"position": position, "changed_count": total_assigned,
+                       "via": via, "scoring_format": fmt},
+                tz=getattr(g, "user_tz", None),
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as ev_err:
+            log.warning("record_event(tier_save) failed: %s", ev_err)
+
+        # FR-20 (analytics P0, LLD §6.4b): QuickSet completion is a
+        # first-class funnel event — one per position committed through the
+        # QuickSet walk. duration_ms/skipped are client-passed (absent from
+        # old binaries → null).
+        if via == "quickset":
+            try:
+                record_event(
+                    g_user_id, "quickset_completed",
+                    league_id=getattr(g_league, "league_id", None),
+                    source="api",
+                    props={"position": position,
+                           "players_placed": total_assigned,
+                           "duration_ms": body.get("duration_ms"),
+                           "skipped": bool(body.get("skipped"))},
+                    **(getattr(g, "device_info", {}) or {}),
+                )
+            except Exception as ev_err:
+                log.warning("record_event(quickset_completed) failed: %s", ev_err)
 
         log.info("tiers/save [%s] %s for %s — saved: %s, all_done=%s",
                  fmt, position, g_user_id, saved, all_done)
@@ -3508,6 +3719,21 @@ def save_anchor_route():
             log.warning("member_rankings publish after anchor failed: %s", db_err)
 
         tier = service.tier_for_elo(target_elo, player.position, fmt)
+
+        # Tracking plan v2 §S3 — anchor_answered. Skips never reach this
+        # route (client-side only), so skipped is always False here.
+        try:
+            record_event(
+                g_user_id, "anchor_answered",
+                league_id=getattr(g_league, "league_id", None),
+                source="api",
+                props={"player_id": player_id, "pick_value": anchor,
+                       "skipped": False},
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as ev_err:
+            log.warning("record_event(anchor_answered) failed: %s", ev_err)
+
         log.info("anchor/save [%s] %s → %s (elo %.0f, tier %s) for %s",
                  fmt, player_id, anchor, target_elo, tier, g_user_id)
 
@@ -3796,13 +4022,37 @@ def reorder_rankings():
 
     try:
         service.apply_reorder(position=position, ordered_ids=ordered_ids)
+        # Tracking plan v2 §S3 — ranking_reorder into user_events. Sole
+        # writer since the analytics P0 cutover (the legacy wrapped_events
+        # hook that fired here is gone; LLD §6.4).
         try:
-            from .wrapped_collector import record_event
-            record_event(g_user_id, getattr(g_league, "league_id", None),
-                         "ranking_reorder",
-                         {"position": position, "count": len(ordered_ids),
-                          "scoring_format": fmt})
-        except Exception: pass
+            record_event(
+                g_user_id, "ranking_reorder",
+                league_id=getattr(g_league, "league_id", None),
+                source="api", props={"moves_count": len(ordered_ids)},
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as ev_err:
+            log.warning("record_event(ranking_reorder) failed: %s", ev_err)
+
+        # FR-20 (analytics P0, LLD §6.4b): Quick Rank routes its per-tier
+        # saves through this endpoint; a `via: 'quickrank'` body flag marks
+        # the completion of one Quick Rank step. duration_ms/skipped are
+        # client-passed (absent from old binaries → null).
+        if body.get("via") == "quickrank":
+            try:
+                record_event(
+                    g_user_id, "quickrank_completed",
+                    league_id=getattr(g_league, "league_id", None),
+                    source="api",
+                    props={"position": position,
+                           "players_ranked": len(ordered_ids),
+                           "duration_ms": body.get("duration_ms"),
+                           "skipped": bool(body.get("skipped"))},
+                    **(getattr(g, "device_info", {}) or {}),
+                )
+            except Exception as ev_err:
+                log.warning("record_event(quickrank_completed) failed: %s", ev_err)
 
         # Persist override dict for THIS format so it survives session rebuilds
         try:
@@ -4132,6 +4382,37 @@ def trade_evaluate_route():
                 "mutual_gain":           bool(your_delta > 0 and their_delta > 0),
             })
 
+        # FR-20 (analytics P0, LLD §6.4b): calc_trade_evaluated — load-bearing
+        # for the WAT north star (PRD FR-20). Mode A is a public route, so
+        # identity is best-effort: session user when a live token rode along,
+        # else the pre-auth 'device:<id>' lineage (stitched later via
+        # identity_links); no identity at all → skip, never fail the route.
+        try:
+            _ev_uid = caller_user_id
+            if not _ev_uid:
+                _tok = request.headers.get("X-Session-Token", "")
+                if _tok:
+                    with _sessions_lock:
+                        _tok_sess = _sessions.get(_tok)
+                    if _tok_sess:
+                        _ev_uid = _tok_sess.get("user_id")
+            if not _ev_uid:
+                _dev = (request.headers.get("X-Device-Id") or "").strip()
+                if _dev:
+                    _ev_uid = f"device:{_dev}"
+            if _ev_uid:
+                record_event(
+                    _ev_uid, "calc_trade_evaluated",
+                    league_id=league_id or None,
+                    source="api",
+                    props={"verdict": result.get("verdict"),
+                           "asset_count": len(give) + len(recv),
+                           "mode": "league" if mode_b else "consensus"},
+                    **(getattr(g, "device_info", {}) or {}),
+                )
+        except Exception as ev_err:
+            log.warning("record_event(calc_trade_evaluated) failed: %s", ev_err)
+
         return jsonify(result)
     except Exception as e:
         log.error("trade_evaluate error: %s", e)
@@ -4344,6 +4625,39 @@ def get_league_picks():
 # Trade API Routes
 # ---------------------------------------------------------------------------
 
+# FB-147 — per-league "on the block" player-id sets, TTL-cached so serving a
+# deck costs one DB read per league per 5 min, not one per card. Sync writes
+# happen in session_init's background daemon (trade_block_service); it calls
+# _invalidate_trade_block_cache so fresh flags show on the next serve.
+_TRADE_BLOCK_CACHE_TTL = 300.0
+_trade_block_cache: dict[str, tuple[float, frozenset]] = {}
+_trade_block_cache_lock = threading.Lock()
+
+
+def _league_on_block_ids(league_id: str) -> frozenset:
+    """Player ids currently on the Sleeper trade block in this league."""
+    if not league_id:
+        return frozenset()
+    now_ts = time.time()
+    with _trade_block_cache_lock:
+        hit = _trade_block_cache.get(league_id)
+        if hit and hit[0] > now_ts:
+            return hit[1]
+    try:
+        ids = frozenset(str(r["player_id"]) for r in load_trade_block(league_id))
+    except Exception as e:
+        log.warning("trade-block lookup failed for league=%s: %s", league_id, e)
+        ids = frozenset()
+    with _trade_block_cache_lock:
+        _trade_block_cache[league_id] = (now_ts + _TRADE_BLOCK_CACHE_TTL, ids)
+    return ids
+
+
+def _invalidate_trade_block_cache(league_id: str) -> None:
+    with _trade_block_cache_lock:
+        _trade_block_cache.pop(league_id, None)
+
+
 def trade_card_to_dict(card, players: dict) -> dict:
     def p(pid):
         pl = players.get(pid)
@@ -4417,6 +4731,17 @@ def trade_card_to_dict(card, players: dict) -> dict:
     match_context = getattr(card, "match_context", None)
     if match_context:
         out["match_context"] = match_context
+    # FB-147 — tag involved players the Sleeper trade block flags. Additive,
+    # omit-when-absent: rows gain `on_block: true` only when the flag is on
+    # AND the league has synced block data naming that player, so flag-off /
+    # no-data payloads stay byte-identical. Display + documented engine
+    # signal only — weighting is owned by the trade-logic thread.
+    if is_enabled("sleeper.trade_block"):
+        _blk = _league_on_block_ids(card.league_id)
+        if _blk:
+            for _row in out["give"] + out["receive"]:
+                if str(_row.get("id")) in _blk:
+                    _row["on_block"] = True
     return out
 
 
@@ -4463,6 +4788,11 @@ def generate_trades():
     default_fairness   = 0.50 if _any_pinned else 0.75
     fairness_threshold = float(body.get("fairness_threshold", default_fairness))
     fmt                = _active_format(sess)
+    # Onboarding item 7 (F2): a Quick Set save changes the board but not the
+    # cache key, so the post-quickset regeneration passes force=true to skip
+    # the complete-fresh cache hit. A running job is still shared (never two
+    # concurrent workers for one key), and pinned jobs already bypass.
+    force_fresh        = bool(body.get("force"))
 
     # Read current outlook for cache-freshness comparison. The actual job
     # worker reads it again; this is just for the cache hit decision. Must
@@ -4497,7 +4827,7 @@ def generate_trades():
 
         if existing and not _any_pinned:
             # Cache hit: complete + fresh + same params → return instantly.
-            if _trade_job_is_fresh(existing, fairness_threshold, outlook_value):
+            if not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value):
                 return jsonify(_trade_job_public_view(existing))
             # In-flight: share the current job. Note: if the request used
             # different fairness/outlook, the snapshot will reflect the
@@ -7411,6 +7741,23 @@ def session_init():
                 except Exception as _ev_err:
                     log.warning("  record_event failed: %s", _ev_err)
 
+                # Tracking plan v2 §S3 — league_synced into user_events.
+                # Sole writer since the analytics P0 cutover (the legacy
+                # wrapped_events 'league_sync' hook inside upsert_league is
+                # gone; LLD §6.4).
+                try:
+                    record_event(
+                        user_id, "league_synced",
+                        league_id  = league_id,
+                        session_id = token,
+                        source     = "api",
+                        props      = {"league_id": league_id,
+                                      "platform": "sleeper"},
+                        **_ev_info,
+                    )
+                except Exception as _ev_err:
+                    log.warning("  record_event(league_synced) failed: %s", _ev_err)
+
                 # ── Referral receipt notification ────────────────────
                 # Fires exactly once: on the NEW user's very first
                 # session_init when they arrived with an invited_by
@@ -7543,6 +7890,20 @@ def session_init():
                 _invalidate_league_members_cache(league_id)
             except Exception as db_err:
                 log.warning("  league_members upsert failed (continuing): %s", db_err)
+
+            # ── FB-147: Sleeper trade-block sync ─────────────────────
+            # One public GraphQL read + one v1 rosters read per session
+            # init, snapshot-replaced per league. Best-effort — a Sleeper
+            # flake just leaves the previous snapshot in place. No-op for
+            # non-Sleeper league ids (ESPN/demo) and when the flag is off.
+            try:
+                if is_enabled("sleeper.trade_block"):
+                    from .trade_block_service import sync_league_trade_block
+                    _n_blk = sync_league_trade_block(league_id)
+                    _invalidate_trade_block_cache(league_id)
+                    log.info("  ✅ trade block synced (%d assets on the block)", _n_blk)
+            except Exception as blk_err:
+                log.warning("  trade-block sync failed (continuing): %s", blk_err)
         except Exception:
             # Daemon top-level catch — see docstring. Never silently die.
             log.exception("session/init background writes crashed")
@@ -8994,6 +9355,9 @@ def extension_auth():
         log.exception("extension_auth: session build failed")
         return jsonify({"error": "session_build_failed", "message": str(e)}), 500
 
+    # Tracking plan v2 §S1 — stitch pre-auth device events to this user.
+    _link_device_identity(sleeper_user_id=user_id)
+
     expires_at = int(payload["last_active"]) + 4 * 3600
     return jsonify({
         "stage":         "connected",
@@ -9183,15 +9547,47 @@ def invite_impact_route():
 
 @app.route("/api/feature-flags")
 def feature_flags_route():
-    """Return the current effective feature-flag map.
+    """Return the current effective feature-flag map + resolved experiments.
 
-    Shape: {"flags": {"swipe.community_compare": false, ...}}
+    Shape (analytics-platform FR-35 — strictly additive over the v0
+    `{"flags": {...}}`; old parsers read `.flags` and ignore the rest):
 
-    Frontend fetches this at boot and stashes it in window.FTF_FLAGS so
-    UI code can do `if (window.FTF_FLAGS["swipe.community_compare"]) ...`.
-    Backend code uses FLAGS.swipe_community_compare or is_enabled(key).
+        {"flags": {...}, "experiments": {key: variant}, "configs": {key: {...}}}
+
+    The client sends `X-Device-Id` (+ optional `X-Session-Token`); the server
+    resolves the assignment unit (account/session identity when known, else
+    device_id) and returns the pinned variant snapshot. `experiments`/`configs`
+    are ALWAYS objects (never absent) but stay EMPTY until the P3 evaluator
+    (backend/experiments.py) lands — the contract ships in P1 so clients can
+    read `useVariant()` against a stable shape from day one.
+
+    Frontend fetches this at boot + on the ≥30-min foreground refetch
+    (analytics-platform §4.6b) and stashes flags in window.FTF_FLAGS.
     """
-    return jsonify({"flags": flags_dict()})
+    experiments: dict[str, str] = {}
+    configs: dict[str, dict] = {}
+    # P3: resolve per-unit experiment assignments here (guarded import — the
+    # evaluator module doesn't exist yet; fail-open to empty, never 500).
+    try:
+        from . import experiments as _exp  # type: ignore  # noqa: F401
+        device_id = (request.headers.get("X-Device-Id") or "").strip() or None
+        token = request.headers.get("X-Session-Token", "")
+        unit_id = None
+        if token:
+            with _sessions_lock:
+                sess = _sessions.get(token)
+            if sess:
+                unit_id = sess.get("user_id")
+        unit_id = unit_id or (f"device:{device_id}" if device_id else None)
+        if unit_id:
+            experiments, configs = _exp.resolve_for_unit(unit_id)  # type: ignore[attr-defined]
+    except Exception:
+        experiments, configs = {}, {}
+    return jsonify({
+        "flags":       flags_dict(),
+        "experiments": experiments,
+        "configs":     configs,
+    })
 
 
 @app.route("/api/feature-flags/reload", methods=["POST"])
@@ -9542,6 +9938,10 @@ def session_demo():
         with _sessions_lock:
             _sessions[token] = payload
 
+        # Tracking plan v2 §S1 — demo sessions count as a sign-in outcome
+        # for device stitching (funnel: demo_entered → real sign-in later).
+        _link_device_identity(sleeper_user_id=demo_user_id)
+
         players_dict = {p.id: p for p in DEMO_PLAYERS}
         return jsonify({
             "ok":           True,
@@ -9653,7 +10053,8 @@ def _provider_auth_response(provider: str, claims: dict):
     if not sub:
         return jsonify({"error": "invalid_token", "reason": "missing_sub"}), 401
     acct = _accounts.find_or_create_account(
-        provider, sub, _accounts.hash_email(claims.get("email"))
+        provider, sub, _accounts.hash_email(claims.get("email")),
+        email=claims.get("email"),   # stored only when auth.email_capture is on
     )
     sess = _account_session()
 
@@ -9699,6 +10100,8 @@ def _provider_auth_response(provider: str, claims: dict):
             "league_id": ACCOUNT_NO_LEAGUE_ID,
             "league_name": ACCOUNT_NO_LEAGUE_NAME,
         })
+        _link_device_identity(sleeper_user_id=acct_uid,
+                              account_id=acct["account_id"])
         return jsonify(out)
 
     bound_uid = acct["sleeper_user_id"]
@@ -9734,6 +10137,8 @@ def _provider_auth_response(provider: str, claims: dict):
                 _accounts.mark_user_verified(sess["user_id"], provider)
             except Exception as e:
                 log.warning("auth/%s: mark_user_verified failed: %s", provider, e)
+            _link_device_identity(sleeper_user_id=bind["sleeper_user_id"],
+                                  account_id=acct["account_id"])
     elif bound_uid:
         # Device-loss restore: no session, but this identity already anchors
         # a Sleeper-keyed user. Mint a user-scoped session (same shape the
@@ -9765,6 +10170,8 @@ def _provider_auth_response(provider: str, claims: dict):
             "session_token": token,
             "verified_via": provider,
         })
+        _link_device_identity(sleeper_user_id=bound_uid,
+                              account_id=acct["account_id"])
     else:
         # ACCOUNT-FIRST (P2.6): brand-new identity, no session, no bound
         # Sleeper source — the account itself is the primary identity.
@@ -10607,6 +11014,621 @@ def league_free_agents_route():
     except Exception as e:
         log.error("league/free-agents error: %s", e)
         return jsonify({"error": "internal_error"}), 500
+
+
+# ─── Monetization platform foundation ──────────────────────────────────────
+# docs/plans/monetization/00-platform-foundation.md §2.3 + §3 + §4.
+#
+# All routes here stay mounted regardless of flags:
+#   * /api/me/entitlements serves resolved state even while dark so clients
+#     can bootstrap before enforcement flips (response carries `enforcing`).
+#   * /api/admin/entitlements/* is the operator manual-grant surface —
+#     X-Cron-Secret guarded (same fail-closed rule as /api/cron/*), never
+#     flag-gated; grants written while dark sit dormant.
+#   * /api/billing/* webhooks must accept provider traffic from the moment
+#     store products exist, which precedes any flag flip.
+# Gate helper: wrap a route in @_require_pro to put it on the Pro gate
+# list. With monetize.entitlements off it is a no-op; observe/enforce
+# semantics live in entitlements.check_pro (foundation §2.4).
+
+from . import entitlements as entl
+
+
+def _require_pro(fn):
+    """Pro gate decorator (grep-auditable: the gate list is every route
+    wearing this). Never wrap the core loop (rank → trades in the synced
+    league) — guardrail in foundation §2.2."""
+    from functools import wraps
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        sess = _require_session()
+        if not entl.check_pro(sess["user_id"], request.path, logger=log):
+            return jsonify({"error": "pro_required"}), 402
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+@app.route("/api/me/entitlements", methods=["GET"])
+def me_entitlements():
+    """Client bootstrap: resolved entitlement state + enforcement posture.
+
+    Session-authed. The Chrome extension does NOT call this — its `pro`
+    bool rides in POST /api/extension/auth's payload (pro-subscription LLD;
+    username-only auth can't carry a session token)."""
+    sess = _require_session()
+    out = entl.get_entitlements(sess["user_id"])
+    out["enforcing"] = is_enabled("monetize.entitlements")
+    return jsonify(out)
+
+
+@app.route("/api/admin/entitlements/grant", methods=["POST"])
+def admin_entitlements_grant():
+    """Operator manual grant (foundation §3). Body:
+    {user: <sleeper id|username|acct_*|account_id>, entitlement: 'pro',
+     duration_days: N | expires_at: ISO | perpetual: true, note: str}."""
+    _require_cron_auth()
+    body = request.get_json(silent=True) or {}
+    user_id, account_id = entl.resolve_user(str(body.get("user", "")))
+    if user_id is None:
+        return jsonify({"error": "user_not_found"}), 404
+    entitlement = body.get("entitlement", "pro")
+    try:
+        row = entl.grant(
+            user_id, entitlement,
+            source="manual_grant",
+            account_id=account_id,
+            duration_days=body.get("duration_days"),
+            expires_at=(None if body.get("perpetual") else body.get("expires_at")),
+            granted_by="operator",
+            note=body.get("note"),
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(row), 201
+
+
+@app.route("/api/admin/entitlements/bulk-grant", methods=["POST"])
+def admin_entitlements_bulk_grant():
+    """Same body as /grant but `users: [...]` — e.g. comp every TestFlight
+    tester 90 days in one call. Partial success reported per-user."""
+    _require_cron_auth()
+    body = request.get_json(silent=True) or {}
+    users = body.get("users") or []
+    if not isinstance(users, list) or not users:
+        return jsonify({"error": "users_list_required"}), 400
+    granted, failed = [], []
+    for ident in users:
+        user_id, account_id = entl.resolve_user(str(ident))
+        if user_id is None:
+            failed.append({"user": ident, "error": "user_not_found"})
+            continue
+        try:
+            row = entl.grant(
+                user_id, body.get("entitlement", "pro"),
+                source="manual_grant", account_id=account_id,
+                duration_days=body.get("duration_days"),
+                expires_at=(None if body.get("perpetual") else body.get("expires_at")),
+                granted_by="operator", note=body.get("note"),
+            )
+            granted.append(row)
+        except ValueError as e:
+            failed.append({"user": ident, "error": str(e)})
+    return jsonify({"granted": granted, "failed": failed}), 201
+
+
+@app.route("/api/admin/entitlements/<int:entitlement_id>", methods=["DELETE"])
+def admin_entitlements_revoke(entitlement_id: int):
+    """Revoke (status flip, audit-preserving — never hard-deletes)."""
+    _require_cron_auth()
+    if not entl.revoke(entitlement_id):
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"revoked": entitlement_id})
+
+
+@app.route("/api/admin/entitlements", methods=["GET"])
+def admin_entitlements_list():
+    """?user=<identifier> — all rows any status, for support."""
+    _require_cron_auth()
+    user_id, _ = entl.resolve_user(request.args.get("user", ""))
+    if user_id is None:
+        return jsonify({"error": "user_not_found"}), 404
+    return jsonify({"user_id": user_id, "entitlements": entl.list_for_user(user_id)})
+
+
+@app.route("/api/billing/revenuecat/webhook", methods=["POST"])
+def billing_revenuecat_webhook():
+    """RevenueCat → subscription_events ledger → projector.
+    Auth: Authorization: Bearer <REVENUECAT_WEBHOOK_SECRET>. Fails closed
+    in prod when the secret is unset (same posture as CRON_SECRET)."""
+    secret = os.environ.get("REVENUECAT_WEBHOOK_SECRET", "")
+    if _IS_PROD_ENV and not secret:
+        return jsonify({"error": "webhook_secret_unset"}), 503
+    if secret:
+        sent = request.headers.get("Authorization", "")
+        if not hmac.compare_digest(sent, f"Bearer {secret}"):
+            return jsonify({"error": "unauthorized"}), 401
+    body = request.get_json(silent=True) or {}
+    event = body.get("event") or {}
+    if not event.get("id"):
+        return jsonify({"error": "malformed_event"}), 400
+    result = entl.ingest_billing_event(
+        "revenuecat", str(event["id"]), event.get("type", ""), event,
+        user_id=event.get("app_user_id"),
+        product_id=event.get("product_id"),
+        occurred_at=entl._ms_to_iso(event.get("event_timestamp_ms")),
+    )
+    return jsonify(result), 200
+
+
+@app.route("/api/billing/stripe/webhook", methods=["POST"])
+def billing_stripe_webhook():
+    """Stripe → same ledger/projector. Verifies the Stripe-Signature v1
+    scheme (HMAC-SHA256 over '<t>.<raw body>') without the stripe lib.
+    user_id/product_id ride in the object's metadata (set at Checkout
+    creation) — events without them are stored + skipped, never dropped."""
+    secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    if _IS_PROD_ENV and not secret:
+        return jsonify({"error": "webhook_secret_unset"}), 503
+    raw = request.get_data()
+    if secret:
+        sig_header = request.headers.get("Stripe-Signature", "")
+        parts = dict(p.split("=", 1) for p in sig_header.split(",") if "=" in p)
+        expected = hmac.new(secret.encode(),
+                            f"{parts.get('t', '')}.".encode() + raw,
+                            "sha256").hexdigest()
+        if not hmac.compare_digest(parts.get("v1", ""), expected):
+            return jsonify({"error": "unauthorized"}), 401
+    body = json.loads(raw or b"{}")
+    if not body.get("id"):
+        return jsonify({"error": "malformed_event"}), 400
+    obj = ((body.get("data") or {}).get("object") or {})
+    meta = obj.get("metadata") or {}
+    result = entl.ingest_billing_event(
+        "stripe", str(body["id"]), body.get("type", ""), body,
+        user_id=meta.get("user_id"),
+        product_id=meta.get("product_id"),
+    )
+    return jsonify(result), 200
+
+
+# ---------------------------------------------------------------------------
+# MFL + Fleaflicker league linking — Phase 1 read-only import
+# Flags: `mfl.link` / `fleaflicker.link` (default OFF — every route 404s dark)
+# Plan: docs/plans/multi-platform-linking-plan-2026-07-17.md §8
+#
+# Same three-step contract as ESPN (/api/espn/*): POST .../link without a team
+# key → preview (teams + crosswalk report, nothing persisted); with a team key
+# → import (league persisted platform='mfl'|'fleaflicker', members as
+# crosswalked SLEEPER player ids, the chosen team bound to the session user).
+# GET .../leagues lists linked leagues + membership; POST .../import re-syncs.
+# Counterparties get synthetic ids ('mfl:{L}.f{franchise}' /
+# 'flea:{L}.t{team}') that never reach push/notification paths — same class as
+# unlinked ESPN/Sleeper members. Owner emails/names are never harvested (MFL
+# ToS). MFL futureDraftPicks are STORED raw (leagues.platform_future_picks)
+# for the pick-inclusive follow-up but are NOT wired into the engine yet.
+# ---------------------------------------------------------------------------
+
+_MFL_DEFAULT_YEAR = 2026
+
+
+def _shared_crosswalk():
+    """The DP crosswalk (espn_service owns the cached fetch) — shared by every
+    linked platform (ESPN/MFL/Fleaflicker) via its per-platform id maps."""
+    from . import espn_service as _espn
+    return _espn.get_crosswalk()
+
+
+def _platform_report_json(report: dict) -> dict:
+    """Client-facing crosswalk report (shared shape with _espn_report_json)."""
+    return {
+        "pool_players":    report["pool_players"],
+        "matched_by_id":   report["matched_by_id"],
+        "matched_by_name": report["matched_by_name"],
+        "match_rate":      round(report["match_rate"], 4),
+        "out_of_pool":     report["out_of_pool"],
+        "unmatched":       [
+            {"name": u["name"], "position": u["position"]}
+            for u in report["unmatched"]
+        ],
+    }
+
+
+def _platform_error_response(e, platform: str):
+    """Map an MflError/FleaflickerError to a (json, status) response."""
+    kind = getattr(e, "kind", "http")
+    label = "MFL" if platform == "mfl" else "Fleaflicker"
+    if kind == "auth":
+        return jsonify({"error": f"{platform}_auth_required",
+                        "message": f"{label} wouldn't share this league — it's "
+                                   "private or the credentials expired."}), 403
+    if kind == "not_found":
+        return jsonify({"error": f"{platform}_league_not_found",
+                        "message": f"{label} has no league with that ID."}), 404
+    if kind == "input":
+        return jsonify({"error": f"{platform}_bad_league_id",
+                        "message": f"{label} league IDs are numeric."}), 400
+    log.warning("%s fetch failed [%s]: %s", platform, kind, e)
+    return jsonify({"error": f"{platform}_unavailable",
+                    "message": f"Couldn't reach {label} — try again shortly."}), 502
+
+
+# ── MFL ─────────────────────────────────────────────────────────────────────
+
+def _mfl_member_id(league_id: str, franchise_id: str) -> str:
+    return f"mfl:{league_id}.f{franchise_id}"
+
+
+def _mfl_resolve(body: dict):
+    """Parse the request into (league_id, year, host). Raises MflError."""
+    from . import mfl_service as _mfl
+    raw_input = str(body.get("mfl_league_url") or body.get("mfl_league_id") or "").strip()
+    try:
+        year = int(body.get("year") or _MFL_DEFAULT_YEAR)
+    except (TypeError, ValueError):
+        raise _mfl.MflError("year must be numeric", kind="input")
+    league_id = _mfl.parse_league_id_from_url(raw_input) or (
+        raw_input if raw_input.isdigit() else None)
+    if not league_id:
+        raise _mfl.MflError("could not parse an MFL league id", kind="input")
+    host = _mfl.parse_host_from_url(raw_input) or _mfl.resolve_host(league_id, year)
+    return league_id, year, host
+
+
+@app.route("/api/mfl/link", methods=["POST"])
+@_gate_unverified_write
+def mfl_link():
+    """Preview (no franchise_id) or import (franchise_id) an MFL league."""
+    if not is_enabled("mfl.link"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from . import mfl_service as _mfl
+    from .database import upsert_platform_league, replace_espn_league_members
+
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    body = request.get_json(force=True) or {}
+    try:
+        league_id, year, host = _mfl_resolve(body)
+        raw = _mfl.fetch_league_bundle(league_id, year, host)
+    except _mfl.MflError as e:
+        return _platform_error_response(e, "mfl")
+
+    parsed = _mfl.parse_bundle(raw)
+    mapped = _mfl.map_franchises(parsed, _shared_crosswalk())
+
+    teams_json = [
+        {"team_id": fr["franchise_id"], "name": fr["name"],
+         "mapped_players": len(mapped["rosters"].get(fr["franchise_id"], []))}
+        for fr in parsed["franchises"]
+    ]
+
+    franchise_id = body.get("franchise_id") or body.get("team_id")
+    if franchise_id is None:
+        return jsonify({
+            "status": "choose_team",
+            "league": {"mfl_league_id": parsed["league_id"] or league_id,
+                       "name": parsed["name"], "season": year,
+                       "total_teams": parsed["total_teams"], "host": host},
+            "teams": teams_json,
+            "report": _platform_report_json(mapped["report"]),
+        })
+
+    franchise_id = str(franchise_id)
+    valid = {fr["franchise_id"] for fr in parsed["franchises"]}
+    if franchise_id not in valid:
+        return jsonify({"error": "mfl_bad_team_id",
+                        "message": "That franchise isn't in this league."}), 400
+
+    members = []
+    for fr in parsed["franchises"]:
+        fid = fr["franchise_id"]
+        mid = user_id if fid == franchise_id else _mfl_member_id(league_id, fid)
+        members.append({"user_id": mid, "username": fr["name"],
+                        "display_name": fr["name"],
+                        "player_ids": mapped["rosters"].get(fid, [])})
+    try:
+        upsert_platform_league(
+            league_id=league_id, user_id=user_id,
+            name=parsed["name"] or f"MFL league {league_id}", platform="mfl",
+            season=year, auth="public", my_team=franchise_id,
+            total_rosters=parsed["total_teams"], host=host,
+            future_picks=parsed["future_picks"])
+        replace_espn_league_members(league_id, members)
+    except Exception:
+        log.exception("mfl_link: persistence failed")
+        return jsonify({"error": "store_failed"}), 500
+
+    r = mapped["report"]
+    log.info("mfl_link: user=%s league=%s year=%s teams=%d match_rate=%.1f%% "
+             "unmatched=%d picks=%d", user_id, league_id, year, len(members),
+             r["match_rate"] * 100, len(r["unmatched"]), len(parsed["future_picks"]))
+    return jsonify({
+        "ok": True, "league_id": league_id, "name": parsed["name"],
+        "platform": "mfl", "season": year, "auth": "public",
+        "total_teams": parsed["total_teams"], "teams_imported": len(members),
+        "my_team_id": franchise_id,
+        "my_roster": mapped["rosters"].get(franchise_id, []),
+        "future_picks_stored": len(parsed["future_picks"]),
+        "report": _platform_report_json(r),
+    })
+
+
+@app.route("/api/mfl/leagues")
+def mfl_leagues():
+    if not is_enabled("mfl.link"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from .database import load_platform_leagues_for_user
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+    leagues = load_platform_leagues_for_user(user_id, "mfl")
+    for lg in leagues:
+        lg["members"] = [
+            {"user_id": m["user_id"], "username": m.get("username") or "",
+             "display_name": m.get("display_name") or "",
+             "player_ids": m.get("player_ids", [])}
+            for m in lg["members"]
+        ]
+    return jsonify({"leagues": leagues})
+
+
+@app.route("/api/mfl/import", methods=["POST"])
+@_gate_unverified_write
+def mfl_import():
+    """Re-sync an already-linked MFL league's rosters (manual refresh)."""
+    if not is_enabled("mfl.link"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from . import mfl_service as _mfl
+    from .database import (get_platform_league, upsert_platform_league,
+                           replace_espn_league_members)
+
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    body = request.get_json(force=True) or {}
+    league_id = str(body.get("league_id") or "").strip()
+    row = get_platform_league(league_id, "mfl") if league_id else None
+    if not row:
+        return jsonify({"error": "mfl_not_linked",
+                        "message": "Link this MFL league first."}), 404
+
+    year = row.get("platform_season") or _MFL_DEFAULT_YEAR
+    host = row.get("platform_host")
+    try:
+        if not host:
+            host = _mfl.resolve_host(league_id, year)
+        raw = _mfl.fetch_league_bundle(league_id, year, host)
+    except _mfl.MflError as e:
+        return _platform_error_response(e, "mfl")
+
+    parsed = _mfl.parse_bundle(raw)
+    mapped = _mfl.map_franchises(parsed, _shared_crosswalk())
+    my_team = row.get("platform_my_team")
+    if my_team not in {fr["franchise_id"] for fr in parsed["franchises"]}:
+        return jsonify({"error": "mfl_team_missing",
+                        "message": "Your franchise is no longer in this league — "
+                                   "re-link to pick a team."}), 409
+
+    members = []
+    for fr in parsed["franchises"]:
+        fid = fr["franchise_id"]
+        mid = user_id if fid == my_team else _mfl_member_id(league_id, fid)
+        members.append({"user_id": mid, "username": fr["name"],
+                        "display_name": fr["name"],
+                        "player_ids": mapped["rosters"].get(fid, [])})
+    try:
+        upsert_platform_league(
+            league_id=league_id, user_id=row["user_id"],
+            name=parsed["name"] or row.get("name") or "", platform="mfl",
+            season=year, auth=row.get("platform_auth") or "public",
+            my_team=my_team, total_rosters=parsed["total_teams"], host=host,
+            future_picks=parsed["future_picks"])
+        replace_espn_league_members(league_id, members)
+    except Exception:
+        log.exception("mfl_import: persistence failed")
+        return jsonify({"error": "store_failed"}), 500
+
+    return jsonify({
+        "ok": True, "league_id": league_id, "name": parsed["name"],
+        "platform": "mfl", "season": year, "auth": row.get("platform_auth") or "public",
+        "total_teams": parsed["total_teams"], "teams_imported": len(members),
+        "my_team_id": my_team, "my_roster": mapped["rosters"].get(my_team, []),
+        "future_picks_stored": len(parsed["future_picks"]),
+        "report": _platform_report_json(mapped["report"]),
+    })
+
+
+# ── Fleaflicker ──────────────────────────────────────────────────────────────
+
+def _flea_member_id(league_id: str, team_id: str) -> str:
+    return f"flea:{league_id}.t{team_id}"
+
+
+@app.route("/api/fleaflicker/link", methods=["POST"])
+@_gate_unverified_write
+def fleaflicker_link():
+    """Preview (no team_id) or import (team_id) a Fleaflicker league."""
+    if not is_enabled("fleaflicker.link"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from . import fleaflicker_service as _flea
+    from .database import upsert_platform_league, replace_espn_league_members
+
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    body = request.get_json(force=True) or {}
+    league_id = str(body.get("fleaflicker_league_id") or body.get("league_id") or "").strip()
+    if not league_id.isdigit():
+        return jsonify({"error": "fleaflicker_bad_league_id",
+                        "message": "Fleaflicker league IDs are numeric."}), 400
+    try:
+        raw = _flea.fetch_league_bundle(league_id)
+    except _flea.FleaflickerError as e:
+        return _platform_error_response(e, "fleaflicker")
+
+    parsed = _flea.parse_bundle(raw)
+    mapped = _flea.map_teams(parsed, _shared_crosswalk())
+
+    teams_json = [
+        {"team_id": t["team_id"], "name": t["name"],
+         "mapped_players": len(mapped["rosters"].get(t["team_id"], []))}
+        for t in parsed["teams"]
+    ]
+
+    team_id = body.get("team_id")
+    if team_id is None:
+        return jsonify({
+            "status": "choose_team",
+            "league": {"fleaflicker_league_id": parsed["league_id"] or league_id,
+                       "name": parsed["name"], "total_teams": parsed["total_teams"]},
+            "teams": teams_json,
+            "report": _platform_report_json(mapped["report"]),
+        })
+
+    team_id = str(team_id)
+    if team_id not in {t["team_id"] for t in parsed["teams"]}:
+        return jsonify({"error": "fleaflicker_bad_team_id",
+                        "message": "That team isn't in this league."}), 400
+
+    members = []
+    for t in parsed["teams"]:
+        tid = t["team_id"]
+        mid = user_id if tid == team_id else _flea_member_id(league_id, tid)
+        members.append({"user_id": mid, "username": t["name"],
+                        "display_name": t["name"],
+                        "player_ids": mapped["rosters"].get(tid, [])})
+    try:
+        upsert_platform_league(
+            league_id=league_id, user_id=user_id,
+            name=parsed["name"] or f"Fleaflicker league {league_id}",
+            platform="fleaflicker", season=_MFL_DEFAULT_YEAR, auth="public",
+            my_team=team_id, total_rosters=parsed["total_teams"])
+        replace_espn_league_members(league_id, members)
+    except Exception:
+        log.exception("fleaflicker_link: persistence failed")
+        return jsonify({"error": "store_failed"}), 500
+
+    r = mapped["report"]
+    log.info("fleaflicker_link: user=%s league=%s teams=%d match_rate=%.1f%% "
+             "unmatched=%d", user_id, league_id, len(members),
+             r["match_rate"] * 100, len(r["unmatched"]))
+    return jsonify({
+        "ok": True, "league_id": league_id, "name": parsed["name"],
+        "platform": "fleaflicker", "season": _MFL_DEFAULT_YEAR, "auth": "public",
+        "total_teams": parsed["total_teams"], "teams_imported": len(members),
+        "my_team_id": team_id, "my_roster": mapped["rosters"].get(team_id, []),
+        "report": _platform_report_json(r),
+    })
+
+
+@app.route("/api/fleaflicker/leagues")
+def fleaflicker_leagues():
+    if not is_enabled("fleaflicker.link"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from .database import load_platform_leagues_for_user
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+    leagues = load_platform_leagues_for_user(user_id, "fleaflicker")
+    for lg in leagues:
+        lg["members"] = [
+            {"user_id": m["user_id"], "username": m.get("username") or "",
+             "display_name": m.get("display_name") or "",
+             "player_ids": m.get("player_ids", [])}
+            for m in lg["members"]
+        ]
+    return jsonify({"leagues": leagues})
+
+
+@app.route("/api/fleaflicker/discover", methods=["POST"])
+@_gate_unverified_write
+def fleaflicker_discover():
+    """List a Fleaflicker user's NFL leagues by account email (zero creds held)."""
+    if not is_enabled("fleaflicker.link"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from . import fleaflicker_service as _flea
+    sess = _require_session()
+    if not sess.get("user_id"):
+        return jsonify({"error": "no_user"}), 401
+    body = request.get_json(force=True) or {}
+    email = str(body.get("email") or "").strip()
+    try:
+        leagues = _flea.fetch_user_leagues(email)
+    except _flea.FleaflickerError as e:
+        return _platform_error_response(e, "fleaflicker")
+    return jsonify({"leagues": leagues})
+
+
+@app.route("/api/fleaflicker/import", methods=["POST"])
+@_gate_unverified_write
+def fleaflicker_import():
+    """Re-sync an already-linked Fleaflicker league's rosters."""
+    if not is_enabled("fleaflicker.link"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from . import fleaflicker_service as _flea
+    from .database import (get_platform_league, upsert_platform_league,
+                           replace_espn_league_members)
+
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    body = request.get_json(force=True) or {}
+    league_id = str(body.get("league_id") or "").strip()
+    row = get_platform_league(league_id, "fleaflicker") if league_id else None
+    if not row:
+        return jsonify({"error": "fleaflicker_not_linked",
+                        "message": "Link this Fleaflicker league first."}), 404
+    try:
+        raw = _flea.fetch_league_bundle(league_id)
+    except _flea.FleaflickerError as e:
+        return _platform_error_response(e, "fleaflicker")
+
+    parsed = _flea.parse_bundle(raw)
+    mapped = _flea.map_teams(parsed, _shared_crosswalk())
+    my_team = row.get("platform_my_team")
+    if my_team not in {t["team_id"] for t in parsed["teams"]}:
+        return jsonify({"error": "fleaflicker_team_missing",
+                        "message": "Your team is no longer in this league — "
+                                   "re-link to pick a team."}), 409
+
+    members = []
+    for t in parsed["teams"]:
+        tid = t["team_id"]
+        mid = user_id if tid == my_team else _flea_member_id(league_id, tid)
+        members.append({"user_id": mid, "username": t["name"],
+                        "display_name": t["name"],
+                        "player_ids": mapped["rosters"].get(tid, [])})
+    try:
+        upsert_platform_league(
+            league_id=league_id, user_id=row["user_id"],
+            name=parsed["name"] or row.get("name") or "", platform="fleaflicker",
+            season=row.get("platform_season") or _MFL_DEFAULT_YEAR,
+            auth=row.get("platform_auth") or "public", my_team=my_team,
+            total_rosters=parsed["total_teams"])
+        replace_espn_league_members(league_id, members)
+    except Exception:
+        log.exception("fleaflicker_import: persistence failed")
+        return jsonify({"error": "store_failed"}), 500
+
+    return jsonify({
+        "ok": True, "league_id": league_id, "name": parsed["name"],
+        "platform": "fleaflicker",
+        "season": row.get("platform_season") or _MFL_DEFAULT_YEAR, "auth": "public",
+        "total_teams": parsed["total_teams"], "teams_imported": len(members),
+        "my_team_id": my_team, "my_roster": mapped["rosters"].get(my_team, []),
+        "report": _platform_report_json(mapped["report"]),
+    })
 
 
 if __name__ == "__main__":

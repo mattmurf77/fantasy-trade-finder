@@ -26,6 +26,7 @@ import VerifyAccountBanner from '../components/VerifyAccountBanner';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useLeagueFormatDefault } from '../hooks/useScoringFormat';
 import { getProgress } from '../api/rankings';
+import { track } from '../api/events';
 import { navigationIntegration } from '../observability/sentry';
 
 type AuthStack = {
@@ -87,6 +88,10 @@ export default function RootNav({ booted }: { booted: boolean }) {
   // tapped it. Updated on every navigation state change. Cheap because
   // the FAB only reads it when opened.
   const [activeScreen, setActiveScreen] = useState<string>('—');
+  // Analytics (tracking plan v2): last screen_viewed we emitted, so state
+  // changes that don't move the focused route (params, modals re-render)
+  // don't double-fire, and each event can carry its prev_screen.
+  const prevScreenRef = useRef<string | null>(null);
 
   // FB #80 / #89 — league-driven scoring-format default. Whenever the
   // selected league changes, fetch its detected format (SF vs 1QB) and
@@ -191,11 +196,25 @@ export default function RootNav({ booted }: { booted: boolean }) {
         navigationIntegration.registerNavigationContainer(navigationRef);
         // Seed the active-screen tracker with whatever's mounted at boot.
         const r = navigationRef.getCurrentRoute?.();
-        if (r?.name) setActiveScreen(r.name);
+        if (r?.name) {
+          setActiveScreen(r.name);
+          track('screen_viewed', { screen: r.name, prev_screen: null }, r.name);
+          prevScreenRef.current = r.name;
+        }
       }}
       onStateChange={() => {
         const r = navigationRef.getCurrentRoute?.();
-        if (r?.name) setActiveScreen(r.name);
+        if (r?.name) {
+          setActiveScreen(r.name);
+          if (r.name !== prevScreenRef.current) {
+            track(
+              'screen_viewed',
+              { screen: r.name, prev_screen: prevScreenRef.current },
+              r.name,
+            );
+            prevScreenRef.current = r.name;
+          }
+        }
       }}
       theme={{
         ...DarkTheme,

@@ -6,6 +6,7 @@ import {
   setOnVerificationRequired,
 } from '../api/client';
 import { initLeagueSession, startDemoSession as apiStartDemoSession } from '../api/auth';
+import { maybePregenTrades } from '../api/tradePregen';
 import { connectLeague as apiConnectLeague } from '../api/league';
 import { getLeagues } from '../api/sleeper';
 import { setUser as sentrySetUser } from '../observability/sentry';
@@ -247,6 +248,10 @@ export const useSession = create<SessionState>((set, get) => ({
       });
       _lastRevalidateMs = Date.now();
       set({ hasToken: true });
+      // Onboarding item 4 (hazard H3): the silent re-init is the returning-
+      // user auto path — pregen the trade deck now so Trades opens warm.
+      // Flag-gated + per-launch-deduped inside; fire-and-forget.
+      maybePregenTrades(league.league_id);
     } catch {
       // Offline or backend down — keep current state. The cached token may
       // still be valid; never sign the user out from a failed revalidate.
@@ -263,9 +268,11 @@ export const useSession = create<SessionState>((set, get) => ({
     if (u) await AsyncStorage.setItem(SU_KEY, JSON.stringify(u));
     else   await AsyncStorage.removeItem(SU_KEY);
     set({ user: u });
-    // Tag Sentry events with the Sleeper user_id + username for triage.
+    // Tag Sentry events with the pseudonymous Sleeper user_id ONLY — no
+    // username (privacy decision 2026-07-17, analytics-platform PRD OQ-1:
+    // crash triage joins on id via our own DB; the handle never leaves us).
     // No-op when Sentry isn't initialized. Cleared on sign-out.
-    sentrySetUser(u ? { id: u.user_id, username: u.username } : null);
+    sentrySetUser(u ? { id: u.user_id } : null);
   },
 
   setLeague: async (lg) => {
@@ -382,7 +389,7 @@ export const useSession = create<SessionState>((set, get) => ({
       hasToken: true,
       isDemo:   true,
     });
-    sentrySetUser({ id: demoUser.user_id, username: demoUser.username });
+    sentrySetUser({ id: demoUser.user_id });   // pseudonymous id only (PRD OQ-1)
   },
 
   connectLeague: async (sleeperUrl) => {

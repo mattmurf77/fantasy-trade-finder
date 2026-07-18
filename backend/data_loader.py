@@ -32,14 +32,24 @@ seed_elo_for_value below):
 
 This gives every player a cross-position baseline derived from community
 consensus. User swipes personalise the rankings from there.
+
+Since 2026-07-17 (#145/#148) the DP baseline is blended with KeepTradeCut
+before Elo seeding — KTC rank-normalized onto the DP value curve, weighted
+by model_config `ktc_blend_weight` — and sf_tep TE values get the
+`tep_te_uplift` TE-premium multiplier. See the "KeepTradeCut consensus
+blend" section below; both knobs at neutral (0 / 1) reproduce the pure-DP
+pipeline byte-for-byte.
 """
 
 import csv
 import io
+import json
 import math
 import os
 import pathlib
 import re
+import threading
+import time
 import urllib.request
 from typing import Optional
 
@@ -97,6 +107,242 @@ DP_SCORING_PARAM = {
     "1qb_ppr": "1qb",
     "sf_tep":  "2qb",
 }
+# Reverse map: DP column suffix → internal format key (blend + TEP uplift
+# are keyed by internal format).
+DP_PARAM_TO_FORMAT = {v: k for k, v in DP_SCORING_PARAM.items()}
+
+# ---------------------------------------------------------------------------
+# KeepTradeCut consensus blend (#145) + sf_tep TE premium uplift (#148)
+# ---------------------------------------------------------------------------
+# KTC has no official API. The dynasty-rankings page embeds its full top-500
+# player list as a `var playersArray = [...]` literal in the HTML; each entry
+# carries BOTH formats (oneQBValues / superflexValues) plus TE-premium
+# variants (tep/tepp/teppp), so ONE polite GET per boot (24h in-memory TTL)
+# serves both format builds. This is an unsanctioned surface — expect it to
+# break without notice (see docs/runbook.md → "KTC consensus blend").
+# Fail-soft everywhere: any failure → DP-only seeds, logged, never blocks
+# boot. Kill switch: model_config ktc_blend_weight = 0 (DP-only,
+# byte-identical to the pre-#145 pipeline when tep_te_uplift is also 1).
+#
+# Blend design ("values in, same shape out"):
+#   1. NORMALIZE — KTC's value curve is much fatter in the mid-range than
+#      DP's (naive linear 0-9999→0-10000 averaging inflated the per-position
+#      "worth a 1st or more" cohort from ~36 to ~86 on 2026-07-17 data — the
+#      FB-69 tier-inflation failure mode). So KTC is normalized RANK-wise
+#      onto the DP value curve per format: the KTC-rank-i matched player gets
+#      the i-th largest DP pool value. This keeps the value distribution
+#      (and hence tier occupancy / the #117 affine calibration) DP-shaped
+#      while importing KTC's opinion of the ORDERING.
+#   2. BLEND — per matched player: (1-w)·dp + w·ktc_on_dp_curve, with
+#      w = model_config ktc_blend_weight. Unmatched pool players keep pure
+#      DP; unmatched KTC players are ignored (pool universe unchanged).
+#   3. GUARD — if the blended max slips below the DP max (sources disagree
+#      on the #1 asset), rescale so the top asset still lands on the
+#      4-firsts rung (the #117 anchor). No-op when sources agree.
+#   4. TEP UPLIFT (#148) — DP's value_2qb column carries no TE premium
+#      (sf_tep TE values sit ~25% BELOW their 1qb analogs), so cross-format
+#      copies demoted TEs. tep_te_uplift multiplies TE values in sf_tep
+#      only (default 1.18, calibrated 2026-07-17 so the top-8 sf_tep TE
+#      seeds clear their 1qb analogs — KTC's own TEP effect is ≈ +11%).
+#
+# Matching follows the #127 crosswalk rules: id-based where possible
+# (KTC playerID / mflid → DP db_playerids ktc_id/mfl_id → DP name), name
+# fallback otherwise, and NEVER across positions.
+
+KTC_RANKINGS_URL = "https://keeptradecut.com/dynasty-rankings"
+KTC_VALUE_MAX = 9999.0          # KTC's published scale tops out at 9999
+_KTC_TTL_SECONDS = 24 * 3600    # one polite fetch per day, like the DP CSV
+
+# KTC serves Cloudflare-guarded HTML — bare urllib signatures risk a 403
+# (same lesson as the Sleeper 1010 / ESPN browser-header fixes).
+_KTC_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+# Where each internal format reads its value inside a playersArray entry.
+# sf_tep uses the TEP (+0.5 TE premium) variant — that IS our format;
+# 1qb_ppr is plain 1QB (no premium).
+_KTC_FORMAT_PATH = {
+    "1qb_ppr": ("oneQBValues", None),
+    "sf_tep":  ("superflexValues", "tep"),
+}
+
+_ktc_lock = threading.Lock()
+_ktc_cache: dict[str, dict] | None = None   # {key: {"pos": .., "values": {fmt: v}}}
+_ktc_fetched_at: float = 0.0
+
+# Blend defaults — mirrored in database._MODEL_CONFIG_DEFAULTS (the DB rows
+# are authoritative at runtime; these are the no-DB fallback).
+KTC_BLEND_WEIGHT_DEFAULT = 0.5
+TEP_TE_UPLIFT_DEFAULT = 1.18
+
+
+def _blend_config() -> tuple[float, float]:
+    """(ktc_blend_weight, tep_te_uplift) from model_config, defaults on any
+    failure. Weight clamped to [0, 1]; uplift floored at 0."""
+    w, u = KTC_BLEND_WEIGHT_DEFAULT, TEP_TE_UPLIFT_DEFAULT
+    try:
+        from .database import get_config
+        cfg = get_config()
+        w = float(cfg.get("ktc_blend_weight", w))
+        u = float(cfg.get("tep_te_uplift", u))
+    except Exception:
+        pass
+    return max(0.0, min(1.0, w)), max(0.0, u)
+
+
+def parse_ktc_players(html: str) -> list[dict]:
+    """Extract the embedded playersArray from KTC rankings-page HTML.
+
+    Returns the raw player dicts filtered to real players (KTC also lists
+    rookie draft picks under position "RDP" — excluded; the pool's generic
+    picks are seeded separately). Raises on parse failure (callers treat
+    any exception as "KTC unavailable")."""
+    m = re.search(r"var\s+playersArray\s*=\s*(\[.*?\]);", html, re.S)
+    if not m:
+        raise ValueError("playersArray not found in KTC page")
+    players = json.loads(m.group(1))
+    return [p for p in players if p.get("position") in VALID_POSITIONS]
+
+
+def _fetch_ktc_html(timeout: int = 15) -> str:
+    """Fetch the KTC rankings page (or the test-seam file).
+
+    Hermetic-run rules mirror the DP seam: when FTF_KTC_VALUES_FILE is set
+    it is served instead of the network; under FTF_TEST_MODE (or when the
+    DP seam is active) a missing KTC file means KTC is simply OFF — never
+    a live egress from a test run."""
+    _ktc_file = os.environ.get("FTF_KTC_VALUES_FILE")
+    if _ktc_file:
+        return pathlib.Path(_ktc_file).read_text()  # missing file = loud, by design
+    if os.environ.get("FTF_TEST_MODE") == "1" or os.environ.get("FTF_DP_VALUES_FILE"):
+        raise RuntimeError("hermetic run without FTF_KTC_VALUES_FILE — KTC off")
+    req = urllib.request.Request(KTC_RANKINGS_URL, headers=_KTC_BROWSER_HEADERS)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8")
+
+
+def _crosswalk_id_maps() -> tuple[dict, dict]:
+    """(by_ktc_id, by_mfl_id) from the cached DP db_playerids crosswalk
+    (espn_service fetches/caches it with a bundled-snapshot fallback).
+    Empty dicts on any failure — matching then falls back to name+pos."""
+    try:
+        from .espn_service import get_crosswalk
+        xw = get_crosswalk()
+        return xw.by_ktc_id, xw.by_mfl_id
+    except Exception:
+        return {}, {}
+
+
+def _ktc_consensus() -> dict[str, dict]:
+    """Fetch+parse+match KTC once per TTL. Returns
+        { normalised_sleeper_name: {"pos": str, "values": {fmt: float}} }
+    keyed the same way as the DP maps (DP_TO_SLEEPER_NAME applied), or {}
+    when KTC is unavailable. Never raises."""
+    global _ktc_cache, _ktc_fetched_at
+    with _ktc_lock:
+        now = time.time()
+        if _ktc_cache is not None and (now - _ktc_fetched_at) < _KTC_TTL_SECONDS:
+            return _ktc_cache
+        try:
+            players = parse_ktc_players(_fetch_ktc_html())
+        except Exception as e:
+            print(f"⚠️  KTC fetch failed ({e}) — DP-only consensus seeds")
+            # Cache the failure for the TTL too: a broken/blocked endpoint
+            # shouldn't be re-hammered by every pool rebuild in one process.
+            _ktc_cache, _ktc_fetched_at = {}, now
+            return _ktc_cache
+        by_ktc_id, by_mfl_id = _crosswalk_id_maps()
+        out: dict[str, dict] = {}
+        for p in players:
+            pos = p.get("position")
+            key = None
+            # id-based first (#127: ids beat names)…
+            xw = (by_ktc_id.get(str(p.get("playerID") or ""))
+                  or by_mfl_id.get(str(p.get("mflid") or "")))
+            if xw and xw[1] == pos:
+                normed = normalise_name(xw[0])
+                key = DP_TO_SLEEPER_NAME.get(normed, normed)
+            if key is None:
+                normed = normalise_name(p.get("playerName") or "")
+                key = DP_TO_SLEEPER_NAME.get(normed, normed)
+            if not key or key in DP_EXCLUDED:
+                continue
+            values = {}
+            for fmt, (block, variant) in _KTC_FORMAT_PATH.items():
+                node = p.get(block) or {}
+                if variant:
+                    node = node.get(variant) or {}
+                v = node.get("value")
+                if isinstance(v, (int, float)) and v > 0:
+                    values[fmt] = float(v)
+            if values:
+                # setdefault: on a key collision keep the higher-ranked entry
+                out.setdefault(key, {"pos": pos, "values": values})
+        print(f"✅ Loaded {len(out)} KTC consensus values "
+              f"(top-{len(players)} page snapshot)")
+        _ktc_cache, _ktc_fetched_at = out, now
+        return _ktc_cache
+
+
+def _apply_consensus_blend(
+    fmt: str,
+    elo_map: dict[str, float],
+    value_map: dict[str, float],
+    pos_map: dict[str, str],
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Blend KTC into the DP value/elo maps for one format (see the section
+    comment above for the design). Returns (elo_map, value_map) — the inputs
+    untouched (byte-identical) when both knobs are neutral."""
+    weight, uplift = _blend_config()
+    if not value_map:
+        return elo_map, value_map
+
+    blended = dict(value_map)
+    if weight > 0.0:
+        ktc = _ktc_consensus()
+        # #127: a KTC row may only blend into a pool player at the SAME
+        # position — never cross-position, even on a name hit.
+        matched = [
+            (k, ktc[k]["values"][fmt])
+            for k in value_map
+            if k in ktc and ktc[k]["pos"] == pos_map.get(k)
+            and fmt in ktc[k]["values"]
+        ]
+        if matched:
+            # Rank-normalize KTC onto the DP value curve, then weighted-avg.
+            curve = sorted(value_map.values(), reverse=True)
+            matched.sort(key=lambda t: (-t[1], -value_map[t[0]], t[0]))
+            ktc_on_dp = {k: curve[i] for i, (k, _) in enumerate(matched)}
+            for k, _ in matched:
+                blended[k] = (1.0 - weight) * value_map[k] + weight * ktc_on_dp[k]
+            # Top-anchor guard: DP-max-equivalent must stay on the 4-firsts
+            # rung (seed_elo_for_value clamps at VALUE_MAX).
+            dp_max = min(max(value_map.values()), VALUE_MAX)
+            blended_max = max(blended.values())
+            if 0 < blended_max < dp_max:
+                scale = dp_max / blended_max
+                blended = {k: v * scale for k, v in blended.items()}
+            print(f"✅ Blended KTC consensus into {fmt} "
+                  f"(weight {weight:g}, {len(matched)}/{len(value_map)} matched)")
+
+    if fmt == "sf_tep" and uplift != 1.0:
+        blended = {
+            k: (v * uplift if pos_map.get(k) == "TE" else v)
+            for k, v in blended.items()
+        }
+
+    if blended == value_map:                     # both knobs neutral / no-op
+        return elo_map, value_map
+    blended = {k: round(v, 1) for k, v in blended.items()}
+    for k, v in blended.items():
+        elo_map[k] = round(seed_elo_for_value(v), 1)
+    return elo_map, blended
 
 # ---------------------------------------------------------------------------
 # Name-mismatch reference table: DynastyProcess → Sleeper
@@ -310,6 +556,12 @@ def _fetch_dynasty_process(
 
     print(f"✅ Loaded {len(elo_map)} player values from DynastyProcess "
           f"({len(value_map)} with value > 0)")
+
+    # #145/#148 — blend KTC into the DP baseline + sf_tep TE premium uplift.
+    # Fail-soft: any KTC problem leaves the maps DP-only. With
+    # ktc_blend_weight=0 and tep_te_uplift=1 the maps are returned untouched.
+    fmt_key = DP_PARAM_TO_FORMAT.get(scoring, scoring)
+    elo_map, value_map = _apply_consensus_blend(fmt_key, elo_map, value_map, pos_map)
     return elo_map, value_map, pos_map
 
 

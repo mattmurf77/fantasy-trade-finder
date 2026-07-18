@@ -104,8 +104,8 @@ const subScreenOptions = (title: string, fallback: string) =>
   });
 
 // Where the Rank stack opens at launch, per the saved preference
-// (useSession.rankingMethodPref). Null pref = never chosen → the
-// Build-your-board chooser. initialRouteName is only honored on the
+// (useSession.rankingMethodPref). Null pref = never chosen → Quick Set,
+// the default method (#122). initialRouteName is only honored on the
 // navigator's FIRST mount, which is exactly the contract we want: a
 // mid-session preference change (Settings slider) applies next launch,
 // while the chooser itself routes immediately via navigation.replace.
@@ -119,7 +119,13 @@ const PREF_ROUTE: Record<string, RankRoute> = {
 
 function RankStackNav() {
   const pref = useSession((s) => s.rankingMethodPref);
-  const initial: RankRoute = (pref && PREF_ROUTE[pref]) || 'RankHome';
+  // #122 — Quick set is the DEFAULT ranking method: a user with no stored
+  // preference lands in Quick Set directly, with "More ways to rank" in its
+  // header carrying chooser discoverability (formerly gated behind
+  // onboarding.rank_routing; item 9's Q1 ruling made the chooser
+  // never-a-default, #122 ships it unconditionally). A stored pref always
+  // wins — existing users' routing is untouched.
+  const initial: RankRoute = (pref && PREF_ROUTE[pref]) || 'QuickSetTiers';
   return (
     <RankStack.Navigator
       initialRouteName={initial}
@@ -144,7 +150,31 @@ function RankStackNav() {
       <RankStack.Screen
         name="QuickSetTiers"
         component={QuickSetTiersScreen}
-        options={subScreenOptions('Quick Set Tiers', 'Tiers')}
+        options={({ navigation }) => ({
+          ...subScreenOptions('Quick Set Tiers', 'Tiers')({ navigation }),
+          // #122: Quick Set is the no-pref default, so the demoted chooser
+          // stays one tap away ("More ways to rank", item 9's Q1 ruling) —
+          // it's the only path to RankHome from here (the Rank menu sheet
+          // doesn't list the chooser).
+          headerRight: () => (
+            <Pressable
+              testID="rank.more-ways"
+              onPress={() => navigation.navigate('RankHome')}
+              hitSlop={8}
+            >
+              {({ pressed }) => (
+                <Text
+                  style={[
+                    styles.moreWaysLink,
+                    pressed && { color: chalk.base },
+                  ]}
+                >
+                  More ways to rank
+                </Text>
+              )}
+            </Pressable>
+          ),
+        })}
       />
       {/* #136 — within-tier ordering pass, the polish step after Quick set.
           Offered when the quick-set walk finishes and from the Rank menu.
@@ -443,6 +473,13 @@ const styles = StyleSheet.create({
   // Rank tab icon: glyph + menu chevron in a tight row. Nothing extends past
   // the tab's icon box so there's no clipping on the bottom bar.
   rankIconWrap: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+
+  // Item 9 — chooser discoverability from the Quick Set default.
+  moreWaysLink: {
+    ...type.bodySm,
+    color: chalk.dim,
+    fontFamily: fonts.uiSemi,
+  },
 
   // #51/#52: always-on header back control for pushed sub-screens. Padded for a
   // comfortable tap target; chevron + label in chalk so it reads as actionable

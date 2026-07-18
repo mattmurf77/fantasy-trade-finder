@@ -59,7 +59,7 @@
 <body>
   <div class="wrap">
     <h1>Privacy Policy</h1>
-    <p class="updated">Effective date: July 11, 2026</p>
+    <p class="updated">Effective date: July 17, 2026</p>
 
     <p>
       Fantasy Trade Finder ("we", "us", or "the Service") operates
@@ -101,6 +101,22 @@
         with a device snapshot: device type, OS version, and app version.
       </li>
       <li>
+        <strong>Usage analytics (first-party only).</strong> To understand where
+        the app is confusing or broken, the apps send us usage events: screens
+        viewed, steps of sign-in and setup completed, taps on core features,
+        how long actions take, and app errors (error messages are scrubbed of
+        personal data and truncated before they leave your device). These
+        events are processed and stored only on our own server — no analytics
+        company receives them. Each install generates a random device
+        identifier (a meaningless ID like <code>dev_a1b2…</code>, stored in
+        your device's secure storage) so we can count installs and see where
+        new users get stuck before they sign in; it contains no information
+        about you or your device. If we run product experiments (showing
+        different versions of a feature to different users), the variant you
+        were shown is recorded with these events so we can tell whether the
+        change helped.
+      </li>
+      <li>
         <strong>In-app feedback.</strong> If you submit feedback we store the
         note text, which screen it was filed from, a severity label, and device
         metadata (app version, platform, device type, OS version). Feedback can
@@ -130,9 +146,10 @@
         <strong>Crash and performance data (Sentry).</strong> The mobile app uses
         Sentry to report crashes and performance traces (a sample of app
         interactions). Reports include device model, OS version, and app version,
-        and after sign-in are tagged with your Sleeper username and user ID so we
-        can investigate your bug reports; the tag is cleared when you sign out.
-        Sentry is configured not to collect additional personal data by default.
+        and after sign-in are tagged with your pseudonymous Sleeper user ID only
+        (never your username or any name) so we can investigate your bug
+        reports; the tag is cleared when you sign out. Sentry is configured not
+        to collect additional personal data by default.
       </li>
     </ul>
 
@@ -141,7 +158,7 @@
       <li>No passwords. Sign-in is by Sleeper username via Sleeper's public API. The optional Sleeper connection captures a session token, never your password.</li>
       <li>No email addresses, phone numbers, or payment information — the Service has no email field, no billing, and no in-app purchases.</li>
       <li>No location, contacts, camera, microphone, or health data.</li>
-      <li>No advertising or third-party marketing analytics SDKs — there are no ad networks and no trackers such as Google Analytics, Meta, Firebase Analytics, Mixpanel, or similar in the app or website.</li>
+      <li>No advertising or third-party marketing analytics SDKs — there are no ad networks and no trackers such as Google Analytics, Meta, Firebase Analytics, Mixpanel, or similar in the app or website. The usage analytics described above are collected and stored by us alone; the only third party receiving diagnostic data is Sentry, for crashes.</li>
       <li>We do not sell your data, and we do not share it with advertisers or data brokers.</li>
     </ul>
 
@@ -169,7 +186,7 @@
     <ul>
       <li><strong>Account and league data</strong> (profile, leagues, rosters) is kept while your account is active so the Service works across sessions.</li>
       <li><strong>Rankings, rating history, and daily consensus value snapshots</strong> are retained indefinitely. This is deliberate: historical values power the trends, history charts, and season-recap features, and once a day passes those numbers cannot be reconstructed.</li>
-      <li><strong>Ranking comparisons, trade decisions, and activity events</strong> are append-only logs kept for product function and quality analysis.</li>
+      <li><strong>Ranking comparisons, trade decisions, activity and usage events</strong> are append-only logs kept for product function and quality analysis. On account deletion these are anonymized rather than erased — see section 6.</li>
       <li><strong>Feedback</strong> is kept through its triage lifecycle (new → planned/in&nbsp;progress → fixed/shipped or declined) and retained as a product record afterward.</li>
       <li><strong>Push tokens</strong> are kept until you sign out on that device, disable notifications, or your data is deleted.</li>
       <li><strong>Sleeper connection tokens</strong> are kept encrypted until you disconnect in the app (immediate deletion), the token expires (about one year), or your data is deleted.</li>
@@ -179,7 +196,8 @@
 
     <h2>6. Deletion and your choices</h2>
     <ul>
-      <li><strong>Delete your data:</strong> request deletion through the in-app feedback button (or the support contact on our App Store listing), and we will remove your user record, rankings, comparison history, activity events, push tokens, and any stored Sleeper connection token within 7 days.</li>
+      <li><strong>Delete your data:</strong> request deletion through the in-app feedback button (or the support contact on our App Store listing). Within 7 days we will remove your user record, rankings, push tokens, and any stored Sleeper connection token, and <strong>anonymize</strong> your activity and usage events: every identifier on those records is replaced with a random, irreversible token, so aggregate statistics (e.g. "how many users completed setup that week") survive but nothing links them to you. The app also clears its local analytics queue when your account is deleted.</li>
+      <li><strong>Device identifier after deletion:</strong> the random install identifier lives in your device's secure storage, which apps cannot fully erase; it persists on the device even after account deletion (and survives reinstalls). It links to nothing on our servers after anonymization — if you sign up again from the same device, our systems see a new user on a previously seen device, nothing more. Erasing your device removes it entirely.</li>
       <li><strong>Disconnect Sleeper sending:</strong> in the app at any time — the stored token is deleted immediately.</li>
       <li><strong>Push notifications:</strong> can be turned off per-category in Settings or entirely in your device settings.</li>
       <li><strong>Sign out:</strong> ends your session on that device and clears the Sentry account tag.</li>

@@ -10,6 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { haptics } from '../utils/haptics';
+import { track } from '../api/events';
 import { startSpan } from '../observability/sentry';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -69,6 +70,13 @@ export default function RankScreen() {
     AsyncStorage.getItem(SPEED_MODE_KEY).then((v) => {
       if (v === '1') setSpeedMode(true);
     });
+  }, []);
+
+  // Onboarding 8b — trio retention metric: one event per screen visit
+  // (week-1 "trio session on a later day" reads off this). Gated inside
+  // track() by analytics.client_events; no onboarding flag needed.
+  useEffect(() => {
+    track('trio_session_started', undefined, 'Trios');
   }, []);
   const toggleSpeedMode = useCallback(() => {
     setSpeedMode((prev) => {

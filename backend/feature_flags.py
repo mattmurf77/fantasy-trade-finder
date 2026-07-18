@@ -107,6 +107,18 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.aggression_ab",   # A/B opening-offer aggression buckets (light/fair/generous)
     # "Send in Sleeper" — undocumented Sleeper write API (FLAGGED-BETA / ToS-adverse)
     "trade.send_in_sleeper",  # docs/plans/sleeper-write-capture-runbook.md
+    # FB-147 — import Sleeper trade-block flags (public GraphQL read) and tag
+    # involved players on trade cards. Gates BOTH the session_init sync and
+    # the `on_block` card serialization; off = payloads byte-identical to
+    # pre-147. backend/trade_block_service.py
+    "sleeper.trade_block",
+    # FB-147 engine hook — SOFT, acquire-side trade-block boost. A card whose
+    # ACQUIRE side holds a player the counterparty flagged "on the block" gets
+    # a bounded composite bump (knob block_boost_weight). Applied AFTER all
+    # gates — reorders acceptable trades, never rescues a gated one (mirrors
+    # trade.need_fit). Default ON (bounded/kill-switchable); off or knob 0 ⇒
+    # composite byte-identical. backend/trade_service.py
+    "trade.block_boost",
     # Account-auth P2 — Apple/Google identity anchors (docs/plans/account-auth-plan-2026-07-11.md)
     # Gates the sign-in surface (/api/auth/apple, /api/auth/google,
     # GET /api/account + mobile Sign in with Apple UI). DELETE /api/account
@@ -119,11 +131,75 @@ FLAG_KEYS: tuple[str, ...] = (
     # /api/sleeper/link, POST /api/trades/propose) ignore this flag and
     # always require proof.
     "auth.enforce_verified_writes",
+    # Email capture (docs/business/product/2026-07-17-email-capture-spec.md).
+    # False (default) = pre-spec behavior: Apple email is hashed, plaintext
+    # discarded. Flip ONLY in the same release as the capture UI + the
+    # privacy-policy update — the policy currently says "no email addresses".
+    "auth.email_capture",
     # ESPN league linking Phase 1 — read-only import of ESPN leagues via the
     # unofficial v3 API (docs/plans/espn-league-linking-plan-2026-07-11.md).
     # Gates /api/espn/* routes + the mobile link affordance. Also the kill
     # switch if ESPN blocks reads or Apple objects (plan §4/§6).
     "espn.link",
+    # Multi-platform league linking Phase 1 — read-only import of MFL /
+    # Fleaflicker leagues via their official public APIs
+    # (docs/plans/multi-platform-linking-plan-2026-07-17.md). Each gates its
+    # own /api/{platform}/* routes + the mobile link option; both default OFF
+    # and are the kill switch if the vendor changes or Apple objects.
+    "mfl.link",           # MFL: public zero-auth import; futureDraftPicks stored (not engine-wired)
+    "fleaflicker.link",   # Fleaflicker: public zero-auth import via sportradar_id crosswalk
+    # ── Onboarding & conversion redesign (docs/plans/onboarding-conversion/plan.md v2.1) ──
+    # Semantics: each onboarding.* feature is live iff `onboarding.v2` (the
+    # master kill-switch) AND its own flag are both true. Clients enforce the
+    # AND via the shared helper (mobile: state/flags onboardingEnabled();
+    # backend: onboarding_enabled() in server.py). All ship dark; enable
+    # individually once the item is QA'd. `analytics.client_events` is
+    # deliberately OUTSIDE the master — it gates instrumentation (tracking
+    # plan v2 §S2), which must run against the CURRENT flow to capture the
+    # pre-redesign baseline.
+    "analytics.client_events",     # CLIENT emission gate only: SDKs track/flush while
+                                   # true (P1 split — server acceptance moved to
+                                   # analytics.ingest; analytics-platform LLD §2.1)
+    "analytics.ingest",            # SERVER acceptance gate for POST /api/events.
+                                   # Off → 200 {"disposition":"disabled"}; P1+ clients
+                                   # retain their queue and back off (LLD §2.1/§4.6)
+    "onboarding.v2",               # master kill-switch for every onboarding.* below
+    "onboarding.landing",          # item 5 — username-first landing (also first consumer of landing.try_before_sync)
+    "onboarding.trades_first",     # item 4 — trades-first hook screen (pregen at auth-return, skeleton deck, chrome collapse, provenance chip, identity strip)
+    "onboarding.league_autoskip",  # item 6 — single-league LeaguePicker auto-skip + fallback
+    "onboarding.quickset_prompt",  # item 7 — inline prompt card + onboarding-mode QuickSet (return to Trades, regen, diff banner)
+    "onboarding.apple_save_moment",# item 8 — save-moment Apple prompt, decline policy, silent re-init, session-2 banner
+    "onboarding.share_sheet",      # item 8 rider — native share sheet on liked card (user-initiated only)
+    "onboarding.rank_routing",     # item 9 — chooser demotion, Rank tab → QuickSet default, deck-exhausted → trio entry
+    "onboarding.demo_bridge",      # item 10 — demo→real bar + redraft label/segment tag
+    "onboarding.guided_layer",     # v2.1 — swipe hint, coach marks (≤4), celebration beats
+    "onboarding.keep_warm",        # item 3 — server-side keep-warm affordances (cron ping target)
+    # ── Monetization platform (docs/plans/monetization/00-platform-foundation.md §1) ──
+    # One flag per monetization strategy; everything ships dark. Rollout
+    # order per foundation §1: monetize.entitlements ON in observe mode
+    # first (logs ENTITLE-OBSERVE, never blocks — enforcement starts only
+    # when the flag is on AND a paywall exists), then founder+paywall,
+    # then pro/season_pass at launch, growth.* after, ads last.
+    # Admin manual-grant routes are deliberately NOT flag-gated (operator
+    # surface, X-Cron-Secret guarded); grants written while flags are off
+    # sit dormant until enforcement flips.
+    "monetize.entitlements",       # master switch: entitlement checks enforce (off = all users implicitly pro)
+    "monetize.paywall",            # purchase UI surfaces (mobile + web)
+    "monetize.pro",                # Pro subscription SKUs + gate list (docs/plans/monetization/pro-subscription/)
+    "monetize.season_pass",        # year-labeled season SKUs (docs/plans/monetization/season-pass/)
+    "monetize.founder",            # Founder Lifetime offer window (docs/plans/monetization/founder-lifetime/)
+    "monetize.affiliate",          # affiliate placements + partner registry (docs/plans/monetization/affiliate/)
+    "monetize.ads_web",            # web display ads (docs/plans/monetization/ads/)
+    "monetize.ads_mobile",         # mobile AdMob banner+rewarded + ATT prompt
+    "growth.referral",             # give-get referral program (invite CTAs + reward granting)
+    "growth.group_unlock",         # league group-unlock experiment
+    # ── Rankings marketplace (docs/business/product/2026-07-17-rankings-marketplace-plan.md) ──
+    "ranks.accuracy_scoring",      # passive snapshot + scoring cron + leaderboard (phase 1)
+    "ranks.rank_sets",             # publish/adopt rank sets, free only (phase 2)
+    "ranks.set_types_extended",    # redraft/bestball set types (platform-thesis test)
+    "marketplace.publisher_sets",  # publisher IAP + subscriber linking (phase 3)
+    "marketplace.contributor_sales", # contributor credit-priced sales (phase 4)
+    "marketplace.cash_payouts",    # Stripe Connect cash-out rung (phase 5)
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

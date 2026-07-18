@@ -19,7 +19,7 @@ Bias toward caution over speed; use judgment for trivial tasks.
 - **Web frontend:** Vanilla HTML/CSS/JS in `web/`
 - **Mobile:** React Native / Expo in `mobile/`
 - **Browser extension:** Chrome/Edge MV3 in `extension/`
-- **Skills:** `feature-evaluator/` and `project-reorganizer/` (Claude Code skills used in this repo)
+- **Skills:** project Claude Code skills live in `.claude/skills/` (feedback pipeline, feature-evaluator, project-reorganizer, project-architect, …); retired skill workspaces/bundles are in `archive/skill-workspaces/`
 - **Optional AI:** Anthropic Claude API for smart matchup selection (env `ANTHROPIC_API_KEY`)
 
 ## Entry points

@@ -164,7 +164,7 @@ export default function QuickRankScreen() {
   );
 
   const saveMutation = useMutation({
-    mutationFn: (orderedIds: string[]) => reorderRankings(position, orderedIds),
+    mutationFn: (orderedIds: string[]) => reorderRankings(position, orderedIds, 'quickrank'),
     onSuccess: () => {
       // Same consumers as ManualRanks' reorder save: every rankings read
       // for this format, plus tier/progress derivatives.

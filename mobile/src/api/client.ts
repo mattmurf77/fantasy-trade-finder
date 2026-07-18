@@ -15,6 +15,11 @@ const SECURE_TOKEN_KEY = 'ftf.sessionToken';
 // Survives app deletion (Keychain default). Used to prefill SignInScreen
 // for returning users, even after sign-out or token expiry.
 const SECURE_LAST_USERNAME_KEY = 'ftf.lastUsername';
+// Stable per-install anonymous id ('dev_' + UUID) for analytics + the
+// pre-auth funnel (analytics-platform). Lives here (the lowest-level api
+// module) so events.ts and flags.ts share ONE mint source without an import
+// cycle through the flag store.
+const SECURE_DEVICE_ID_KEY = 'ftf.deviceId';
 
 // ── Client-info headers ─────────────────────────────────────────────────
 // The backend's before_request middleware reads these on every authed call
@@ -95,6 +100,45 @@ export async function getLastUsername(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Stable per-install anonymous id ('dev_' + UUID), minted once and kept in
+ *  SecureStore (Keychain — survives reinstall). Single-flight; never rejects.
+ *  Canonical source for both events.ts and the flag fetch. */
+let _deviceIdPromise: Promise<string> | null = null;
+export function getDeviceId(): Promise<string> {
+  if (!_deviceIdPromise) {
+    _deviceIdPromise = (async () => {
+      try {
+        const stored = await SecureStore.getItemAsync(SECURE_DEVICE_ID_KEY);
+        if (stored) return stored;
+      } catch {
+        /* fall through to mint */
+      }
+      // crypto.getRandomValues is present in the Expo runtime; a device-local
+      // timestamp+counter fallback avoids Math.random for this id.
+      let uuid: string;
+      const c = (globalThis as { crypto?: Crypto }).crypto;
+      if (c?.getRandomValues) {
+        const b = new Uint8Array(16);
+        c.getRandomValues(b);
+        b[6] = (b[6] & 0x0f) | 0x40;
+        b[8] = (b[8] & 0x3f) | 0x80;
+        const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+        uuid = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+      } else {
+        uuid = `loc-${Date.now().toString(36)}-${Math.floor(performance?.now?.() ?? 0).toString(36)}`;
+      }
+      const fresh = `dev_${uuid}`;
+      try {
+        await SecureStore.setItemAsync(SECURE_DEVICE_ID_KEY, fresh);
+      } catch {
+        /* non-fatal — id lives for this launch only */
+      }
+      return fresh;
+    })();
+  }
+  return _deviceIdPromise;
 }
 
 export async function setLastUsername(username: string): Promise<void> {

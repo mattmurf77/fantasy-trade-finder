@@ -236,15 +236,60 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _email_capture_enabled() -> bool:
+    """Flag gate for plaintext email storage (2026-07-17 email-capture spec).
+
+    Lazy import + swallow: a flags problem must never break sign-in. Off →
+    only the hash is kept, exactly the pre-spec behavior.
+    """
+    try:
+        from .feature_flags import is_enabled
+        return bool(is_enabled("auth.email_capture"))
+    except Exception:
+        return False
+
+
+def _normalize_email(email: str | None) -> str | None:
+    if not email or "@" not in email:
+        return None
+    return email.strip().lower() or None
+
+
+def set_account_email(account_id: str, email: str | None,
+                      source: str = "user") -> bool:
+    """Store/refresh an account's email with a fresh consent stamp.
+
+    The capture UI's backend entry point (and the Apple first-auth path).
+    No-ops (returns False) when the flag is off or the email is invalid.
+    """
+    email = _normalize_email(email)
+    if not email or not _email_capture_enabled():
+        return False
+    with db.engine.begin() as conn:
+        res = conn.execute(
+            update(db.accounts_table)
+            .where(db.accounts_table.c.account_id == account_id)
+            .values(email=email, email_source=source,
+                    email_consent_at=_now_iso())
+        )
+        return res.rowcount > 0
+
+
 def find_or_create_account(provider: str, provider_subject: str,
-                           email_hash: str | None = None) -> dict:
+                           email_hash: str | None = None,
+                           email: str | None = None) -> dict:
     """Return the account owning (provider, subject), creating both the
     account and the identity row on first sight.
+
+    `email`: plaintext from the provider (Apple sends it on first auth only).
+    Stored on the accounts row only when `auth.email_capture` is enabled —
+    otherwise discarded after hashing, the pre-spec behavior.
 
     Returns {account_id, sleeper_user_id, created_at, created: bool}.
     """
     if provider not in PROVIDERS:
         raise ValueError(f"unknown provider {provider!r}")
+    email = _normalize_email(email) if _email_capture_enabled() else None
     with db.engine.begin() as conn:
         ident = conn.execute(
             select(db.linked_identities_table).where(
@@ -267,6 +312,15 @@ def find_or_create_account(provider: str, provider_subject: str,
                         .where(db.linked_identities_table.c.id == ident.id)
                         .values(email_hash=email_hash)
                     )
+                # Backfill plaintext email (flag-gated above) if the account
+                # doesn't have one yet — never overwrite a user-entered one.
+                if email and not acct.email:
+                    conn.execute(
+                        update(db.accounts_table)
+                        .where(db.accounts_table.c.account_id == acct.account_id)
+                        .values(email=email, email_source=provider,
+                                email_consent_at=_now_iso())
+                    )
                 return {
                     "account_id": acct.account_id,
                     "sleeper_user_id": acct.sleeper_user_id,
@@ -283,6 +337,8 @@ def find_or_create_account(provider: str, provider_subject: str,
         now = _now_iso()
         conn.execute(insert(db.accounts_table).values(
             account_id=account_id, sleeper_user_id=None, created_at=now,
+            email=email, email_source=(provider if email else None),
+            email_consent_at=(now if email else None),
         ))
         conn.execute(insert(db.linked_identities_table).values(
             account_id=account_id, provider=provider,

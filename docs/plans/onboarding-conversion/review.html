@@ -1,0 +1,457 @@
+<title>FTF Onboarding v2 — Feature Review</title>
+<style>
+  :root {
+    --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+    --line:#262C35; --line-strong:#3D4654;
+    --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+    --ice:#56D9EC; --ice-on:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --ground:var(--ink0); --panel:var(--ink1); --well:var(--ink2);
+    --text:var(--chalk); --text-dim:var(--dim);
+    --display:'Barlow Condensed','Avenir Next Condensed','Arial Narrow',sans-serif;
+    --body:'Archivo','Avenir Next','Helvetica Neue',Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --ground:#F2F4F7; --panel:#FFFFFF; --well:#E9EDF2; --line:#D5DBE3; --line-strong:#AEB8C6; --text:#141920; --text-dim:#5A6472; --faint:#8b94a1; }
+  }
+  :root[data-theme="dark"] { --ground:#0C0E11; --panel:#13161B; --well:#1A1E25; --line:#262C35; --line-strong:#3D4654; --text:#ECEFF4; --text-dim:#97A1AE; --faint:#626C79; }
+  :root[data-theme="light"] { --ground:#F2F4F7; --panel:#FFFFFF; --well:#E9EDF2; --line:#D5DBE3; --line-strong:#AEB8C6; --text:#141920; --text-dim:#5A6472; --faint:#8b94a1; }
+
+  * { box-sizing:border-box; }
+  body { background:var(--ground); color:var(--text); font-family:var(--body); font-size:15px; line-height:1.55; margin:0; }
+  a { color:var(--ice); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+
+  .topbar { position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:16px; padding:12px 24px; background:var(--ground); border-bottom:1px solid var(--line); }
+  .topbar h1 { font-family:var(--display); text-transform:uppercase; letter-spacing:.04em; font-size:22px; margin:0; flex:1; }
+  .tick { font-family:var(--body); font-weight:600; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); }
+  .tick::before { content:""; display:inline-block; width:8px; height:2px; background:var(--ice); margin-right:6px; vertical-align:middle; }
+  .btn { font-family:var(--body); font-weight:600; font-size:13px; background:var(--ice); color:var(--ice-on); border:0; border-radius:4px; padding:8px 14px; cursor:pointer; }
+  .btn:focus-visible, textarea:focus-visible { outline:2px solid var(--ice); outline-offset:2px; }
+  .btn.ghost { background:transparent; color:var(--text-dim); border:1px solid var(--line-strong); }
+
+  main { max-width:1060px; margin:0 auto; padding:24px; }
+  .lede { max-width:68ch; color:var(--text-dim); }
+  .lede strong { color:var(--text); }
+
+  nav.toc { display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 6px; }
+  nav.toc a { font-family:var(--mono); font-size:12px; color:var(--text-dim); border:1px solid var(--line); border-radius:4px; padding:4px 8px; }
+  nav.toc a:hover { color:var(--ice); border-color:var(--line-strong); text-decoration:none; }
+
+  section.feature { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:22px 24px; margin:22px 0; }
+  .fhead { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:14px; }
+  .fnum { font-family:var(--mono); font-size:12px; color:var(--faint); }
+  .fhead h2 { font-family:var(--display); text-transform:uppercase; letter-spacing:.03em; font-size:24px; margin:0; text-wrap:balance; }
+  .chip { font-family:var(--mono); font-size:11px; border-radius:2px; padding:2px 7px; letter-spacing:.03em; }
+  .chip.flag { background:var(--well); color:var(--text-dim); border:1px solid var(--line); }
+  .chip.built { background:transparent; color:var(--pos); border:1px solid var(--pos); }
+  .chip.gate { background:transparent; color:var(--warn); border:1px solid var(--warn); }
+  .chip.doc { background:transparent; color:var(--flare); border:1px solid var(--flare); }
+  .fbody { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }
+  .desc { max-width:70ch; }
+  .desc p { margin:.5em 0; }
+  .desc .why { color:var(--text-dim); }
+  ul.evts { list-style:none; display:flex; flex-wrap:wrap; gap:6px; padding:0; margin:8px 0 0; }
+  ul.evts li { font-family:var(--mono); font-size:11px; color:var(--text-dim); background:var(--well); border-radius:2px; padding:2px 7px; }
+
+  .mockrow { display:flex; gap:16px; overflow-x:auto; padding:6px 2px 12px; }
+  .phone { flex:0 0 auto; width:252px; background:#0C0E11; border:1px solid #3D4654; border-radius:8px; padding:14px 12px; color:#ECEFF4; font-family:var(--body); font-size:12.5px; line-height:1.45; }
+  .phone .cap { font-family:var(--mono); font-size:10.5px; color:#97A1AE; text-transform:uppercase; letter-spacing:.06em; margin:-4px 0 10px; text-align:center; }
+  .m-tick { font-size:10px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:#97A1AE; margin-bottom:6px; }
+  .m-tick::before { content:""; display:inline-block; width:8px; height:2px; background:#56D9EC; margin-right:5px; vertical-align:middle; }
+  .m-h { font-family:var(--display); text-transform:uppercase; font-size:19px; line-height:1.1; letter-spacing:.02em; margin:2px 0 6px; }
+  .m-sub { color:#97A1AE; font-size:11.5px; }
+  .m-input { background:#1A1E25; border:1px solid #3D4654; border-radius:4px; padding:9px 10px; color:#626C79; margin:10px 0 4px; }
+  .m-cta { background:#56D9EC; color:#071013; font-weight:700; border-radius:4px; text-align:center; padding:9px 10px; margin:8px 0 4px; }
+  .m-ghostlink { text-align:center; color:#97A1AE; font-weight:600; font-size:11.5px; padding:6px 0; }
+  .m-err { color:#EF4444; font-size:11.5px; margin:6px 0 2px; }
+  .m-errlink { color:#56D9EC; font-weight:600; font-size:11.5px; margin:2px 0 6px; }
+  .m-card { background:#13161B; border:1px solid #262C35; border-radius:8px; padding:10px; margin:8px 0; }
+  .m-row { display:flex; align-items:center; gap:8px; }
+  .m-chipCONS { display:inline-block; font-family:var(--mono); font-size:9.5px; letter-spacing:.05em; color:#97A1AE; border:1px solid #3D4654; border-radius:2px; padding:1px 6px; margin-bottom:6px; }
+  .m-chipYB { display:inline-block; font-family:var(--mono); font-size:9.5px; letter-spacing:.05em; color:#F0508C; border:1px solid #F0508C; border-radius:2px; padding:1px 6px; margin-bottom:6px; }
+  .m-strip { display:flex; align-items:center; gap:7px; background:#1A1E25; border:1px solid #262C35; border-radius:4px; padding:6px 8px; font-size:11px; margin-bottom:8px; }
+  .m-ava { width:18px; height:18px; border-radius:999px; background:#3D4654; flex:0 0 auto; }
+  .m-skel { height:9px; border-radius:2px; background:#232833; margin:7px 0; }
+  .m-skel.w60 { width:60%; } .m-skel.w80 { width:80%; } .m-skel.w40 { width:40%; }
+  .m-player { display:flex; justify-content:space-between; font-size:11.5px; padding:3px 0; }
+  .m-player b { font-weight:600; }
+  .m-pos { font-family:var(--mono); font-size:10px; color:#97A1AE; }
+  .m-vs { text-align:center; font-family:var(--mono); font-size:10px; color:#626C79; margin:4px 0; }
+  .m-actions { display:flex; justify-content:center; gap:18px; margin-top:8px; }
+  .m-x, .m-check { width:34px; height:34px; border-radius:999px; border:1.5px solid #3D4654; display:flex; align-items:center; justify-content:center; font-weight:700; }
+  .m-x { color:#EF4444; } .m-check { color:#22C55E; }
+  .m-coach { background:#1A1E25; border:1px solid #3D4654; border-radius:4px; padding:6px 8px; font-size:11px; color:#ECEFF4; margin:6px 0; }
+  .m-banner { background:#1A1E25; border:1px solid #F0508C; border-radius:4px; padding:7px 9px; font-size:11px; font-weight:600; margin:8px 0; }
+  .m-banner2 { background:#1A1E25; border:1px solid #3D4654; border-radius:4px; padding:7px 9px; font-size:11px; font-weight:600; margin:8px 0; display:flex; gap:8px; align-items:center; justify-content:space-between; }
+  .m-banner2 span.d { color:#97A1AE; font-weight:600; }
+  .m-toast { background:#232833; border-radius:4px; padding:7px 9px; font-size:11px; margin:8px 0; border-left:2px solid #22C55E; }
+  .m-sheet { background:#13161B; border:1px solid #3D4654; border-radius:8px; padding:12px; margin:6px 0; box-shadow:0 8px 24px rgba(0,0,0,.5); }
+  .m-apple { background:#fff; color:#000; font-weight:600; text-align:center; border-radius:4px; padding:8px; margin:8px 0 4px; font-size:12px; }
+  .m-grid { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+  .m-pchip { border:1px solid #3D4654; border-radius:2px; padding:2px 6px; font-size:10.5px; color:#ECEFF4; }
+  .m-pchip.sel { border-color:#56D9EC; color:#56D9EC; }
+  .m-hdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:11px; }
+  .m-hdr .r { color:#97A1AE; font-weight:600; }
+  .m-lrow { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #262C35; padding:8px 2px; font-size:12px; }
+  .m-spin { width:14px; height:14px; border:2px solid #3D4654; border-top-color:#56D9EC; border-radius:999px; animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .m-spin { animation:none; } }
+
+  .cmt { border-top:1px dashed var(--line); padding-top:12px; }
+  .cmt label { display:block; font-family:var(--body); font-weight:600; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); margin-bottom:6px; }
+  .cmt textarea { width:100%; min-height:64px; background:var(--well); border:1px solid var(--line-strong); border-radius:4px; color:var(--text); font-family:var(--body); font-size:14px; padding:10px; resize:vertical; }
+  .cmt .saved { font-family:var(--mono); font-size:11px; color:var(--faint); margin-top:4px; min-height:14px; }
+
+  table.mini { border-collapse:collapse; font-size:13px; margin:10px 0; }
+  table.mini th, table.mini td { border:1px solid var(--line); padding:5px 10px; text-align:left; }
+  table.mini th { font-family:var(--body); font-weight:600; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--text-dim); }
+  table.mini td.n { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .tablewrap { overflow-x:auto; }
+  .runbook li { margin:4px 0; }
+  code { font-family:var(--mono); font-size:.9em; background:var(--well); border-radius:2px; padding:1px 5px; }
+  .foot { color:var(--faint); font-size:12.5px; margin:32px 0 20px; max-width:70ch; }
+</style>
+
+<div class="topbar">
+  <h1>FTF Onboarding v2 — Feature Review</h1>
+  <span class="tick">Built dark · 2026-07-17</span>
+  <button class="btn ghost" id="clearBtn" title="Clear all saved comments">Clear comments</button>
+  <button class="btn" id="exportBtn">Export comments</button>
+</div>
+
+<main>
+  <p class="lede"><strong>Everything below is built, typechecked, and 642/642 backend tests green — and every user-facing piece is dark behind <code>onboarding.v2</code> (master) AND its own per-feature flag.</strong> This page is the review surface: each section is one feature — what it does, why it exists (with the review-round ruling that shaped it), mockups of the built screens using the real shipped copy, and a comment box. Comments save locally in this browser; hit <em>Export comments</em> when you're done and hand me the file.</p>
+
+  <nav class="toc" aria-label="Sections">
+    <a href="#s0">0 Overview</a><a href="#s1">1 Analytics</a><a href="#s2">2 Deck gate</a><a href="#s3">3 Keep-warm</a><a href="#s4">4 Trades-first</a><a href="#s5">5 Landing</a><a href="#s6">6 Auto-skip</a><a href="#s7">7 Quick Set prompt</a><a href="#s8">8 Apple + share</a><a href="#s9">9 Rank routing</a><a href="#s10">10 Demo + redraft</a><a href="#s11">11 Guided layer</a>
+  </nav>
+
+  <!-- ══ 0 OVERVIEW ══ -->
+  <section class="feature" id="s0">
+    <div class="fhead"><span class="fnum">00</span><h2>The inversion, the flags, the launch order</h2><span class="chip doc">Plan v2.1</span></div>
+    <div class="fbody">
+      <div class="desc">
+        <p><strong>Old first launch:</strong> Apple sign-in → league picker → 5-way ranking chooser → eventually trades. <strong>New first launch:</strong> Sleeper username → your real trades in &lt;60s (warm) → rank contextually when trades feel off → Apple only when you have something worth keeping.</p>
+        <p class="why">Shaped by a 3-round adversarial review (ux-design × pm-growth, growth final say, converged with zero open dissents). Full plan: <code>docs/plans/onboarding-conversion/plan.md</code> · ADR-006 (account-later) · voice doc <code>docs/business/marketing/2026-07-17-assistant-gm-voice.md</code>.</p>
+        <div class="tablewrap"><table class="mini">
+          <tr><th>Launch step</th><th>Flip</th><th>Why this order</th></tr>
+          <tr><td>1. Baseline (already live)</td><td class="n">analytics.client_events ✓</td><td>1–2 weeks of old-flow numbers before anything changes</td></tr>
+          <tr><td>2. Score the deck eval</td><td class="n">— (operator)</td><td>235 cards await your insult-rate pass; gate is &lt;3%</td></tr>
+          <tr><td>3. Master + features</td><td class="n">onboarding.v2 + individual flags</td><td>Each feature independently killable; enable in any subset</td></tr>
+          <tr><td>4. Pairing</td><td class="n">landing.try_before_sync</td><td>Must flip WITH onboarding.landing (demo endpoint 404s without it)</td></tr>
+          <tr><td>Frozen until bind data</td><td class="n">auth.enforce_verified_writes</td><td>ADR-006 rider — flipping early write-blocks the funnel's majority</td></tr>
+        </table></div>
+      </div>
+      <div class="cmt"><label for="c-s0">Comments — overview / launch order</label><textarea id="c-s0" data-k="s0" placeholder="Anything about the overall flow or rollout order…"></textarea><div class="saved" data-for="s0"></div></div>
+    </div>
+  </section>
+
+  <!-- ══ 1 ANALYTICS ══ -->
+  <section class="feature" id="s1">
+    <div class="fhead"><span class="fnum">01</span><h2>Analytics baseline</h2><span class="chip flag">analytics.client_events</span><span class="chip built">LIVE — capturing baseline</span></div>
+    <div class="fbody">
+      <div class="desc">
+        <p>First-party event pipeline: <code>POST /api/events</code> ingestion (batched, device-id keyed, PII-scrubbed) + a mobile SDK with an offline queue that survives app restarts. Core funnel events are firing against the <em>current</em> flow right now — that's the before/after baseline the whole redesign is judged on.</p>
+        <p class="why">Growth P1, non-negotiable: "a conversion project that can't demonstrate conversion is a redesign project wearing our budget." Instrumentation moved from last to first in round 1.</p>
+        <ul class="evts"><li>app_opened</li><li>screen_viewed</li><li>signin_attempted/succeeded/failed</li><li>league_selected</li><li>find_trades_tapped</li><li>trade_card_viewed (+ms, cold_start)</li><li>trade_flagged</li><li>+ 20 more wired with items 4–10</li></ul>
+      </div>
+      <div class="cmt"><label for="c-s1">Comments — analytics</label><textarea id="c-s1" data-k="s1" placeholder="Event gaps? Baseline window length?"></textarea><div class="saved" data-for="s1"></div></div>
+    </div>
+  </section>
+
+  <!-- ══ 2 DECK GATE ══ -->
+  <section class="feature" id="s2">
+    <div class="fhead"><span class="fnum">02</span><h2>Deck-quality gate</h2><span class="chip gate">AWAITING YOUR SCORING</span></div>
+    <div class="fbody">
+      <div class="desc">
+        <p>Offline eval (<code>scripts/deck_eval.py</code>) simulating a brand-new user's first deck across 4 real leagues / 47 teams / 235 cards under exact production flags. Results: <strong>empty-deck rate 0.0%</strong> (gate &lt;5% ✓), warm-server first deck in <strong>~23ms</strong> — the &lt;60s budget is trivially met warm; cold start is the only threat (→ item 3). <strong>Insult-rate scoring is yours:</strong> the report has blank y/n columns per card — <code>docs/plans/onboarding-conversion/deck-eval-report.md</code>.</p>
+        <p class="why">Growth P4: trades-first lives or dies on cold-start deck quality. The eval auto-flagged one real engine defect — 2-for-1 consolidations scoring 99% fair while losing ~2,700 consensus value (Daniels+Odunze→Hurts). The fix is running in your spun-off session.</p>
+      </div>
+      <div class="cmt"><label for="c-s2">Comments — deck gate</label><textarea id="c-s2" data-k="s2" placeholder="Insult threshold? More leagues in the sample?"></textarea><div class="saved" data-for="s2"></div></div>
+    </div>
+  </section>
+
+  <!-- ══ 3 KEEP-WARM ══ -->
+  <section class="feature" id="s3">
+    <div class="fhead"><span class="fnum">03</span><h2>Keep-warm ping</h2><span class="chip flag">GitHub Actions cron</span><span class="chip built">BUILT</span></div>
+    <div class="fbody">
+      <div class="desc">
+        <p>A GitHub Actions cron (<code>.github/workflows/keep-warm.yml</code>, every 10 min) pings the prod flags endpoint so Render's free dyno stays awake. Activates when this branch merges to main. Runbook entry added; the ~$7/mo Render Starter memo sits with fin-budget as a recommended-but-non-blocking conversion expense.</p>
+        <p class="why">The documented 30–60s cold start would eat the entire time-to-first-trade budget before any UX in this plan runs (UX F3). North star restated: &lt;60s from a <em>warm</em> server; cold-start incidence measured separately.</p>
+      </div>
+      <div class="cmt"><label for="c-s3">Comments — keep-warm</label><textarea id="c-s3" data-k="s3" placeholder="Pay for Starter now, at public beta, or never?"></textarea><div class="saved" data-for="s3"></div></div>
+    </div>
+  </section>
+
+  <!-- ══ 4 TRADES-FIRST ══ -->
+  <section class="feature" id="s4">
+    <div class="fhead"><span class="fnum">04</span><h2>Trades-first hook screen</h2><span class="chip flag">onboarding.trades_first</span><span class="chip built">BUILT</span></div>
+    <div class="fbody">
+      <div class="desc">
+        <p>First-run Trades is the landing surface: card generation kicks the moment sign-in returns (before the screen even mounts), cards stream into a skeleton deck — the manual "Hit Find a Trade" empty state never shows. Chrome collapses to one row; the invite banner waits until after the first swipe. Three guards on the first impression: the <strong>identity strip</strong> (wrong-username protection — a typo'd valid username silently loads a stranger's team), the <strong>provenance chip</strong> (CONSENSUS VALUES → YOUR BOARD), and the visible <strong>Bad trade?</strong> flag.</p>
+        <p class="why">Swipes feed Elo at K=8/4 — the user is ranking without knowing it. The scorecard's top interaction (8.9) becomes minute zero of the product.</p>
+        <ul class="evts"><li>trade_card_viewed +ms_since_open +cold_start</li><li>first swipe → ftf_onboarding_state</li></ul>
+      </div>
+      <div class="mockrow">
+        <div class="phone"><div class="cap">First-run · streaming</div>
+          <div class="m-strip"><span class="m-ava"></span><span>Trading as <b>@mattkm</b> — <span style="color:#56D9EC">not you?</span></span><span style="margin-left:auto;color:#626C79">✕</span></div>
+          <div class="m-card"><div class="m-chipCONS">CONSENSUS VALUES</div>
+            <div class="m-skel w80"></div><div class="m-skel w60"></div><div class="m-skel w40"></div>
+            <div class="m-sub" style="margin-top:8px">Scouting your league. First trades in a few seconds.</div></div>
+        </div>
+        <div class="phone"><div class="cap">First card · guided layer on</div>
+          <div class="m-card"><div class="m-chipCONS">CONSENSUS VALUES</div>
+            <div class="m-coach">These are consensus values. After Quick Set, they're yours.</div>
+            <div class="m-player"><span><b>You send</b></span></div>
+            <div class="m-player"><span>Rome Odunze</span><span class="m-pos">WR · 22</span></div>
+            <div class="m-vs">— for —</div>
+            <div class="m-player"><span>DeVonta Smith</span><span class="m-pos">WR · 26</span></div>
+            <div class="m-player"><span class="m-sub">from @leaguemate3</span></div>
+            <div class="m-actions"><div class="m-x">✕</div><div class="m-check">✓</div></div>
+            <div class="m-sub" style="text-align:center;margin-top:6px">Bad trade?</div></div>
+        </div>
+      </div>
+      <div class="cmt"><label for="c-s4">Comments — trades-first hook</label><textarea id="c-s4" data-k="s4" placeholder="Skeleton copy? Chrome collapse too aggressive?"></textarea><div class="saved" data-for="s4"></div></div>
+    </div>
+  </section>
+
+  <!-- ══ 5 LANDING ══ -->
+  <section class="feature" id="s5">
+    <div class="fhead"><span class="fnum">05</span><h2>Username-first landing</h2><span class="chip flag">onboarding.landing</span><span class="chip built">BUILT + ADR-006</span></div>
+    <div class="fbody">
+      <div class="desc">
+        <p>The sign-in gate becomes one question. Apple moves off the front door into a quiet re-entry link (P2.6 account-only users have no username to type — without this link they're stranded). Errors are first-class: not-found copy explains username ≠ team name; Sleeper-down elevates the sample-league escape into the error itself.</p>
+        <p class="why">ADR-006 "account-later": Sleeper auth is a public username read — treating it as signup was self-inflicted friction. Apple keeps its role as the only durable identity; it just asks at the right moment (item 8).</p>
+        <ul class="evts"><li>landing errors carry reason codes</li><li>signin_attempted/succeeded/failed {method}</li></ul>
+      </div>
+      <div class="mockrow">
+        <div class="phone"><div class="cap">Default</div>
+          <div class="m-tick">Dynasty Fantasy Football</div>
+          <div class="m-h">Rank your league.<br>Find the trades both sides want.</div>
+          <div class="m-input">Sleeper username</div>
+          <div class="m-sub">No password. Your league's rosters do the talking.</div>
+          <div class="m-cta">See trades for your team →</div>
+          <div class="m-ghostlink">Just looking? Browse a sample league →</div>
+          <div class="m-ghostlink">Already have an account? Sign in with Apple</div>
+        </div>
+        <div class="phone"><div class="cap">Username not found</div>
+          <div class="m-input" style="color:#ECEFF4">mattsteam22</div>
+          <div class="m-err">No "@mattsteam22" on Sleeper. Usernames aren't team names — check your Sleeper profile and retype it.</div>
+          <div class="m-cta">See trades for your team →</div>
+        </div>
+        <div class="phone"><div class="cap">Sleeper down</div>
+          <div class="m-input" style="color:#ECEFF4">mattkm</div>
+          <div class="m-err">Sleeper isn't responding.</div>
+          <div class="m-errlink">Browse the sample league while we retry →</div>
+          <div class="m-cta" style="opacity:.5">See trades for your team →</div>
+        </div>
+      </div>
+      <div class="cmt"><label for="c-s5">Comments — landing</label><textarea id="c-s5" data-k="s5" placeholder="Headline? CTA copy? Apple link placement?"></textarea><div class="saved" data-for="s5"></div></div>
+    </div>
+  </section>
+
+  <!-- ══ 6 AUTO-SKIP ══ -->
+  <section class="feature" id="s6">
+    <div class="fhead"><span class="fnum">06</span><h2>League auto-skip</h2><span class="chip flag">onboarding.league_autoskip</span><span class="chip built">BUILT</span></div>
+    <div class="fbody">
+      <div class="desc">
+        <p>Exactly one league → the picker selects it itself (once per mount, never when you arrived to link ESPN). Failure falls back to the picker's existing inline error + retry, with the league named on screen. Multi-league users see the picker unchanged.</p>
+        <p class="why">Free step removal — both reviewers endorsed with "no notes." The <code>league_selected</code> event now carries <code>auto</code> and the league-type segment tag.</p>
+      </div>
+      <div class="mockrow">
+        <div class="phone"><div class="cap">Single league · auto-selecting</div>
+          <div class="m-hdr"><b>Choose a League</b><span class="r">Sign out</span></div>
+          <div class="m-lrow"><span>Dynasty Degens<br><span class="m-sub">12 teams</span></span><div class="m-spin" aria-hidden="true"></div></div>
+        </div>
+      </div>
+      <div class="cmt"><label for="c-s6">Comments — auto-skip</label><textarea id="c-s6" data-k="s6" placeholder="…"></textarea><div class="saved" data-for="s6"></div></div>
+    </div>
+  </section>
+
+  <!-- ══ 7 QUICK SET PROMPT ══ -->
+  <section class="feature" id="s7">
+    <div class="fhead"><span class="fnum">07</span><h2>Quick Set prompt + the aha</h2><span class="chip flag">onboarding.quickset_prompt</span><span class="chip built">BUILT (incl. backend force-regen)</span></div>
+    <div class="fbody">
+      <div class="desc">
+        <p>An inline card takes the top-of-deck slot — <strong>first pass after swipe 2, else after 3 swipes</strong>, once per session. Accept deep-links into onboarding-mode Quick Set (one position, Quick-Rank offer suppressed) which bounces <em>back to Trades</em>, forces a fresh deck (new backend <code>force</code> param — a board change doesn't alter the job-cache key, so without this the user would see identical cards and the whole loop dies), and shows the receipt banner. Dismiss = snooze → one session-2 re-offer → retires to the provenance chip as the evergreen door. "Dismissed forever" does not exist.</p>
+        <p class="why">Growth called the regeneration "the most important finding in either round" — the visible deck change is what converts consensus-browsers into board-owners.</p>
+        <ul class="evts"><li>quickset_prompt_shown/accepted/snoozed</li><li>quickset_completed</li><li>deck_regenerated {new_trades}</li></ul>
+      </div>
+      <div class="mockrow">
+        <div class="phone"><div class="cap">Prompt card (deck slot)</div>
+          <div class="m-card"><div class="m-tick">Your board</div>
+            <div class="m-h" style="font-size:16px;text-transform:none;font-family:var(--body);font-weight:600">These trades use consensus values.</div>
+            <div class="m-sub">Your board would find better ones. Fix one position in 2 minutes →</div>
+            <div class="m-cta">Fix one position →</div>
+            <div class="m-ghostlink">Not now</div></div>
+        </div>
+        <div class="phone"><div class="cap">Onboarding-mode Quick Set</div>
+          <div class="m-hdr"><b>Quick Set Tiers</b><span class="r">More ways to rank</span></div>
+          <div class="m-tick">WR · Tier 1 of 8 — "4+ 1sts"</div>
+          <div class="m-grid"><span class="m-pchip sel">J. Chase</span><span class="m-pchip sel">CeeDee</span><span class="m-pchip">Nabers</span><span class="m-pchip">JSN</span><span class="m-pchip">ARSB</span><span class="m-pchip">Odunze</span></div>
+          <div class="m-cta" style="margin-top:10px">Save & next tier</div>
+        </div>
+        <div class="phone"><div class="cap">Back on Trades · the receipt</div>
+          <div class="m-banner">Re-ranked with your WR board — 4 new trades.</div>
+          <div class="m-card"><div class="m-chipYB">YOUR BOARD</div>
+            <div class="m-player"><span>Tee Higgins</span><span class="m-pos">WR · 29</span></div>
+            <div class="m-vs">— for —</div>
+            <div class="m-player"><span>Jaylen Waddle</span><span class="m-pos">WR · 27</span></div>
+            <div class="m-actions"><div class="m-x">✕</div><div class="m-check">✓</div></div></div>
+        </div>
+      </div>
+      <div class="cmt"><label for="c-s7">Comments — Quick Set prompt</label><textarea id="c-s7" data-k="s7" placeholder="Trigger timing? Snooze policy? Banner copy?"></textarea><div class="saved" data-for="s7"></div></div>
+    </div>
+  </section>
+
+  <!-- ══ 8 APPLE + SHARE ══ -->
+  <section class="feature" id="s8">
+    <div class="fhead"><span class="fnum">08</span><h2>Apple save moment + share</h2><span class="chip flag">onboarding.apple_save_moment</span><span class="chip flag">onboarding.share_sheet</span><span class="chip built">BUILT</span></div>
+    <div class="fbody">
+      <div class="desc">
+        <p>The Apple modal fires on first <strong>like</strong> or first <strong>Quick Set save</strong> — max one auto-ask per class ever, one per session across classes, honest cross-device framing only (ADR-006 prohibits "save your board"; boards persist without Apple). Decline is one tap, recorded, never immediately re-asked; Settings carries the evergreen link. Session 2+, unbound with ≥5 swipes: one <em>non-modal</em> banner (round-3 ruling — iOS can't ask at backgrounding). Celebrations fire <em>before</em> asks. The share row appears only after a like and never beside the Apple prompt — user-initiated OS share sheet, text + link (card-image share deferred: needs a view-shot dependency).</p>
+        <ul class="evts"><li>apple_prompt_shown/accepted/declined {trigger}</li><li>apple_banner_dismissed</li><li>celebration_fired</li><li>trade_card_shared</li></ul>
+      </div>
+      <div class="mockrow">
+        <div class="phone"><div class="cap">First like → win, then ask</div>
+          <div class="m-toast">First target logged. Your front office is open for business.</div>
+          <div class="m-sheet"><div class="m-tick">Your front office</div>
+            <b style="font-size:13px">Keep your board on every device.</b>
+            <div class="m-sub" style="margin-top:4px">Sign in with Apple links your board to you — new phone, same front office.</div>
+            <div class="m-apple"> Sign in with Apple</div>
+            <div class="m-ghostlink">Not now</div></div>
+        </div>
+        <div class="phone"><div class="cap">Session 2 · non-modal banner</div>
+          <div class="m-banner2"><span>12 swipes on this board. Add Apple sign-in to carry it across devices →</span><span class="d">Dismiss</span></div>
+          <div class="m-card"><div class="m-chipYB">YOUR BOARD</div><div class="m-skel w80"></div><div class="m-skel w60"></div></div>
+        </div>
+        <div class="phone"><div class="cap">After the ask resolves</div>
+          <div class="m-card"><div class="m-player"><span>Liked ✓</span></div></div>
+          <div class="m-ghostlink" style="color:#97A1AE">Share your last liked trade →</div>
+          <div class="m-sub" style="text-align:center">→ OS share sheet: "Trade idea for our league: I send…, get… Found on Fantasy Trade Finder"</div>
+        </div>
+      </div>
+      <div class="cmt"><label for="c-s8">Comments — Apple + share</label><textarea id="c-s8" data-k="s8" placeholder="Ask copy? Banner threshold (5 swipes)? Share message?"></textarea><div class="saved" data-for="s8"></div></div>
+    </div>
+  </section>
+
+  <!-- ══ 9 RANK ROUTING ══ -->
+  <section class="feature" id="s9">
+    <div class="fhead"><span class="fnum">09</span><h2>Ranking-surface routing</h2><span class="chip flag">onboarding.rank_routing</span><span class="chip built">BUILT</span></div>
+    <div class="fbody">
+      <div class="desc">
+        <p>The 5-way chooser is never a default: no-preference users land in Quick Set directly, with <strong>"More ways to rank"</strong> in the header keeping the demoted chooser (and the power tools) one tap away. The deck-exhausted dead end becomes the trio-habit ramp — the push-independent path to the 9/10-retention method.</p>
+        <p class="why">Growth conceded this off the cut line in round 2: once routing changed, the demotion became load-bearing, not cosmetic.</p>
+        <ul class="evts"><li>trio_entry_tapped</li><li>trio_session_started</li><li>deck_exhausted_viewed</li></ul>
+      </div>
+      <div class="mockrow">
+        <div class="phone"><div class="cap">Deck exhausted → trio ramp</div>
+          <div class="m-card" style="text-align:center">
+            <b>That's all for now</b>
+            <div class="m-sub" style="margin:6px 0">You've seen every trade. Sharpen your board with quick head-to-heads →</div>
+            <div class="m-cta" style="background:transparent;border:1px solid #3D4654;color:#ECEFF4">Quick head-to-heads</div></div>
+        </div>
+      </div>
+      <div class="cmt"><label for="c-s9">Comments — rank routing</label><textarea id="c-s9" data-k="s9" placeholder="…"></textarea><div class="saved" data-for="s9"></div></div>
+    </div>
+  </section>
+
+  <!-- ══ 10 DEMO + REDRAFT ══ -->
+  <section class="feature" id="s10">
+    <div class="fhead"><span class="fnum">10</span><h2>Demo bridge + redraft honesty</h2><span class="chip flag">onboarding.demo_bridge</span><span class="chip built">BUILT</span></div>
+    <div class="fbody">
+      <div class="desc">
+        <p>Demo mode gets one persistent bar routing back to the username field — the flag flip plus this bar is the <em>entire</em> demo investment this cycle (crossover events tell us whether it's a funnel or a cul-de-sac). Redraft leagues get an honest "Dynasty values shown" label and a segment tag that excludes them from activation denominators; routing real users to fake demo data was rejected.</p>
+        <ul class="evts"><li>demo_bridge_tapped</li><li>league_selected {league_type}</li></ul>
+      </div>
+      <div class="mockrow">
+        <div class="phone"><div class="cap">Demo mode</div>
+          <div class="m-banner2"><span>Sample league. See this for YOUR team →</span></div>
+          <div class="m-card"><div class="m-skel w80"></div><div class="m-skel w60"></div></div>
+        </div>
+        <div class="phone"><div class="cap">Redraft league</div>
+          <div class="m-chipCONS" style="margin-bottom:8px">Dynasty values shown</div>
+          <div class="m-card"><div class="m-skel w80"></div><div class="m-skel w60"></div></div>
+        </div>
+      </div>
+      <div class="cmt"><label for="c-s10">Comments — demo + redraft</label><textarea id="c-s10" data-k="s10" placeholder="…"></textarea><div class="saved" data-for="s10"></div></div>
+    </div>
+  </section>
+
+  <!-- ══ 11 GUIDED LAYER ══ -->
+  <section class="feature" id="s11">
+    <div class="fhead"><span class="fnum">11</span><h2>Guided layer + Assistant GM voice</h2><span class="chip flag">onboarding.guided_layer</span><span class="chip built">BUILT (voice doc + copy applied)</span></div>
+    <div class="fbody">
+      <div class="desc">
+        <p>The F2P steal, without the mascot: a swipe-gesture nudge on card 1, ≤4 one-time coach marks (swipe → provenance chip → diff banner → trio entry; never modal, never stacked, all persisted), and two celebration beats timed <em>before</em> the conversion asks. Every string across items 4–10 is the <strong>Assistant GM</strong> voice — the app works for the user; the user is the GM. The animated mascot is formally deferred: post-launch experiment only if drop-off data says guidance is the leak, and it would need an mkt-brand proposal + Chalkline ADR.</p>
+        <div class="tablewrap"><table class="mini">
+          <tr><th>Moment</th><th>Shipped copy</th></tr>
+          <tr><td>Skeleton deck</td><td>Scouting your league. First trades in a few seconds.</td></tr>
+          <tr><td>Provenance coach mark</td><td>These are consensus values. After Quick Set, they're yours.</td></tr>
+          <tr><td>First like</td><td>First target logged. Your front office is open for business.</td></tr>
+          <tr><td>First Quick Set save</td><td>That's your board now. The deck rebuilds around it.</td></tr>
+          <tr><td>Diff banner</td><td>Re-ranked with your〈POS〉board —〈N〉new trades.</td></tr>
+        </table></div>
+        <ul class="evts"><li>coach_mark_shown/dismissed {mark}</li><li>celebration_fired {beat}</li></ul>
+      </div>
+      <div class="cmt"><label for="c-s11">Comments — guided layer / voice</label><textarea id="c-s11" data-k="s11" placeholder="Voice too much? Not enough? Beats to add or cut?"></textarea><div class="saved" data-for="s11"></div></div>
+    </div>
+  </section>
+
+  <p class="foot">Comments live only in this browser's localStorage until you export. Export produces a Markdown file (and copies it to the clipboard) — drop it back to me and I'll work every note. Mockups are hand-drawn representations of the shipped components (real copy, real testIDs behind them); the app itself renders Chalkline-exact.</p>
+</main>
+
+<script>
+(function () {
+  var KEY = 'ftf-onb-review-v1:';
+  var areas = document.querySelectorAll('textarea[data-k]');
+  areas.forEach(function (ta) {
+    var k = ta.getAttribute('data-k');
+    var savedEl = document.querySelector('.saved[data-for="' + k + '"]');
+    try { var v = localStorage.getItem(KEY + k); if (v) { ta.value = v; savedEl.textContent = 'saved'; } } catch (e) {}
+    var t;
+    ta.addEventListener('input', function () {
+      clearTimeout(t);
+      savedEl.textContent = '…';
+      t = setTimeout(function () {
+        try { localStorage.setItem(KEY + k, ta.value); savedEl.textContent = ta.value ? 'saved' : ''; } catch (e) { savedEl.textContent = 'could not save'; }
+      }, 400);
+    });
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', function () {
+    var lines = ['# FTF Onboarding v2 — Review comments', '', '_Exported ' + new Date().toISOString() + '_', ''];
+    document.querySelectorAll('section.feature').forEach(function (sec) {
+      var title = sec.querySelector('h2').textContent;
+      var num = sec.querySelector('.fnum').textContent;
+      var ta = sec.querySelector('textarea[data-k]');
+      var val = (ta && ta.value || '').trim();
+      lines.push('## ' + num + ' — ' + title);
+      lines.push(val ? val : '_(no comment)_');
+      lines.push('');
+    });
+    var md = lines.join('\n');
+    try { navigator.clipboard && navigator.clipboard.writeText(md); } catch (e) {}
+    var blob = new Blob([md], { type: 'text/markdown' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'ftf-onboarding-review-comments.md';
+    document.body.appendChild(a); a.click(); a.remove();
+    var btn = document.getElementById('exportBtn');
+    var old = btn.textContent; btn.textContent = 'Exported ✓';
+    setTimeout(function () { btn.textContent = old; }, 2000);
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', function () {
+    if (!confirm('Clear all saved comments on this page?')) return;
+    areas.forEach(function (ta) {
+      try { localStorage.removeItem(KEY + ta.getAttribute('data-k')); } catch (e) {}
+      ta.value = '';
+      var savedEl = document.querySelector('.saved[data-for="' + ta.getAttribute('data-k') + '"]');
+      if (savedEl) savedEl.textContent = '';
+    });
+  });
+})();
+</script>

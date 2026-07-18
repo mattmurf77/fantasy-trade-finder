@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,12 +12,24 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ink, chalk, ice, semantic, space, type } from '../theme/chalkline';
 import { Badge, Button, Icon } from '../components/chalkline';
 import { useSession } from '../state/useSession';
-import { useFlag } from '../state/useFeatureFlags';
+import { useFlag, onboardingEnabled } from '../state/useFeatureFlags';
 import { getLeagues } from '../api/sleeper';
 import { getEspnLeagues } from '../api/espn';
+import { getPlatformLeagues, LinkPlatform } from '../api/platformLink';
 import { buildSessionInitBody, submitSessionInit } from '../api/auth';
+import { maybePregenTrades } from '../api/tradePregen';
+import { track } from '../api/events';
 import EspnLinkSheet from '../components/EspnLinkSheet';
+import PlatformLinkSheet from '../components/PlatformLinkSheet';
 import type { LeagueSummary } from '../shared/types';
+
+// Platform → league-list badge text (ESPN keeps 'ESPN'; MFL/Fleaflicker are
+// the new short badges — cross-client-invariants platform-badge rule).
+const PLATFORM_BADGE: Record<string, string> = {
+  espn: 'ESPN',
+  mfl: 'MFL',
+  fleaflicker: 'FLEA',
+};
 
 interface Props {
   onLeaguePicked: () => void;
@@ -39,9 +51,13 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
   const [selectingId, setSelectingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [slowLoad, setSlowLoad] = useState(false);
-  // ESPN league linking (flag `espn.link`) — read-only import by league ID.
+  // League linking (read-only import). Each platform gates on its own flag.
   const espnEnabled = useFlag('espn.link');
+  const mflEnabled = useFlag('mfl.link');
+  const fleaflickerEnabled = useFlag('fleaflicker.link');
   const [espnOpen, setEspnOpen] = useState(false);
+  // Which zero-auth platform sheet is open (MFL / Fleaflicker), if any.
+  const [platformOpen, setPlatformOpen] = useState<LinkPlatform | null>(null);
 
   // #130 — Settings' ESPN CTA lands here with `espnLink: true`; open the
   // sheet once the flag confirms. Effect (not initial state) because the
@@ -49,6 +65,21 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
   useEffect(() => {
     if (autoOpenEspnLink && espnEnabled) setEspnOpen(true);
   }, [autoOpenEspnLink, espnEnabled]);
+
+  // Onboarding item 6 (F9): exactly one league → skip the picker (free step
+  // removal). Once-only per mount; never when the user came here to link
+  // ESPN. Failure falls back to this screen's existing inline error +
+  // retry — the single league row on screen names the league.
+  const autoSkipTried = useRef(false);
+  useEffect(() => {
+    if (autoSkipTried.current) return;
+    if (loading || error || selectingId || autoOpenEspnLink) return;
+    if (cached.length !== 1) return;
+    if (!onboardingEnabled('onboarding.league_autoskip')) return;
+    autoSkipTried.current = true;
+    void pickLeague(cached[0], { auto: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cached, loading, error, selectingId, autoOpenEspnLink]);
 
   // Render free-tier cold starts run 30–60s. Hold the friendly default for
   // the first 4s so warm requests never show the alarming "waking up" copy.
@@ -77,24 +108,41 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
     setError(null);
     try {
       const lgs = await getLeagues(user.user_id);
-      // Merge in ESPN-imported leagues (flag-gated; backend 404s dark).
-      // Best-effort — an ESPN hiccup must not hide the Sleeper list.
-      let merged = lgs;
+      // Merge in imported non-Sleeper leagues (each flag-gated; backend 404s
+      // dark). Best-effort — a hiccup on one platform must not hide the rest.
+      const merged: LeagueSummary[] = [...lgs];
+      const seen = new Set(lgs.map((lg) => lg.league_id));
+      const addAll = (rows: LeagueSummary[]) => {
+        for (const row of rows) {
+          if (!seen.has(row.league_id)) {
+            merged.push(row);
+            seen.add(row.league_id);
+          }
+        }
+      };
       if (espnEnabled) {
         try {
           const espn = await getEspnLeagues();
-          const seen = new Set(lgs.map((lg) => lg.league_id));
-          merged = [
-            ...lgs,
-            ...espn
-              .filter((lg) => !seen.has(lg.league_id))
-              .map((lg) => ({
-                league_id: lg.league_id,
-                name: lg.name || `ESPN league ${lg.league_id}`,
-                total_rosters: lg.total_rosters ?? undefined,
-                platform: 'espn',
-              })),
-          ];
+          addAll(espn.map((lg) => ({
+            league_id: lg.league_id,
+            name: lg.name || `ESPN league ${lg.league_id}`,
+            total_rosters: lg.total_rosters ?? undefined,
+            platform: 'espn',
+          })));
+        } catch {
+          /* non-fatal */
+        }
+      }
+      for (const p of ['mfl', 'fleaflicker'] as LinkPlatform[]) {
+        if (p === 'mfl' ? !mflEnabled : !fleaflickerEnabled) continue;
+        try {
+          const rows = await getPlatformLeagues(p);
+          addAll(rows.map((lg) => ({
+            league_id: lg.league_id,
+            name: lg.name || `${PLATFORM_BADGE[p]} league ${lg.league_id}`,
+            total_rosters: lg.total_rosters ?? undefined,
+            platform: p,
+          })));
         } catch {
           /* non-fatal */
         }
@@ -107,16 +155,19 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
     }
   }
 
-  // Post-import handler from the EspnLinkSheet: put the league in the
-  // cached list first (buildSessionInitBody's espn branch detects espn
-  // leagues via that cache), then run the normal pick flow.
-  async function espnLinked(lg: { league_id: string; name: string; total_rosters: number }) {
+  // Post-import handler (any platform): put the league in the cached list
+  // first (buildSessionInitBody detects imported leagues via that cache's
+  // `platform` field), then run the normal pick flow.
+  async function onLeagueLinked(lg: {
+    league_id: string; name: string; total_rosters: number; platform?: string;
+  }) {
     setEspnOpen(false);
+    setPlatformOpen(null);
     const summary: LeagueSummary = {
       league_id: lg.league_id,
       name: lg.name,
       total_rosters: lg.total_rosters,
-      platform: 'espn',
+      platform: lg.platform || 'espn',   // EspnLinkSheet omits platform
     };
     const merged = [
       ...cached.filter((x) => x.league_id !== lg.league_id),
@@ -126,10 +177,29 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
     await pickLeague(summary);
   }
 
-  async function pickLeague(lg: LeagueSummary) {
+  async function pickLeague(lg: LeagueSummary, opts?: { auto?: boolean }) {
     if (!user || selectingId) return;
     setSelectingId(lg.league_id);
     setError(null);
+    track(
+      'league_selected',
+      {
+        league_index: cached.findIndex((x) => x.league_id === lg.league_id),
+        league_count: cached.length,
+        auto: !!opts?.auto,
+        // F12 segment tag: redraft users are excluded from activation
+        // denominators (dynasty values are wrong for them by construction).
+        league_type:
+          lg.settings_type === 0
+            ? 'redraft'
+            : lg.settings_type === 1
+              ? 'keeper'
+              : lg.settings_type === 2
+                ? 'dynasty'
+                : 'unknown',
+      },
+      'LeaguePicker',
+    );
     try {
       // INIT-08-client: two-phase optimistic navigation.
       //
@@ -149,11 +219,19 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
       // toast or let the tabs' query retry handle it gracefully. Any
       // queries that fire before this lands will see a 401 or "session
       // not initialized" and retry via their own error/refetch logic.
-      submitSessionInit(body).catch((e) => {
-        // Non-fatal: the tabs will retry their queries. Log for Sentry
-        // triage but don't interrupt the user's session.
-        console.warn('[INIT-08] background sessionInit failed:', e?.message);
-      });
+      submitSessionInit(body)
+        .then(() => {
+          // Onboarding item 4 (hazard H3 — hook the EXISTING init path):
+          // pregen the trade deck the moment the league session exists so
+          // cards are ready/streaming when the user reaches Trades.
+          // Flag-gated + deduped inside; fire-and-forget, never throws.
+          maybePregenTrades(lg.league_id);
+        })
+        .catch((e) => {
+          // Non-fatal: the tabs will retry their queries. Log for Sentry
+          // triage but don't interrupt the user's session.
+          console.warn('[INIT-08] background sessionInit failed:', e?.message);
+        });
     } catch (e: any) {
       setError(e?.message || 'Failed to import this league');
       setSelectingId(null);
@@ -216,7 +294,9 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
                     <Text style={[styles.rowName, styles.rowNameText]} numberOfLines={1}>
                       {item.name}
                     </Text>
-                    {item.platform === 'espn' ? <Badge label="ESPN" /> : null}
+                    {item.platform && PLATFORM_BADGE[item.platform] ? (
+                      <Badge label={PLATFORM_BADGE[item.platform]} />
+                    ) : null}
                   </View>
                   <Text style={styles.rowMeta}>
                     {item.total_rosters || 12} teams
@@ -233,27 +313,59 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
         />
       )}
 
-      {/* Flag-gated ESPN link affordance (feedback #115). Shown in every
-          non-loading state — including "no leagues found", where an
-          ESPN-only manager would otherwise dead-end. */}
-      {espnEnabled && !loading ? (
+      {/* Flag-gated link affordances. Each platform gates on its own flag and
+          appears in every non-loading state — including "no leagues found",
+          where a non-Sleeper-only manager would otherwise dead-end. */}
+      {!loading && (espnEnabled || mflEnabled || fleaflickerEnabled) ? (
         <View style={styles.espnFooter}>
-          <Button
-            testID="leagues.link-espn"
-            label="Link an ESPN league"
-            variant="secondary"
-            compact
-            onPress={() => setEspnOpen(true)}
-            disabled={!!selectingId}
-          />
+          {espnEnabled ? (
+            <Button
+              testID="leagues.link-espn"
+              label="Link an ESPN league"
+              variant="secondary"
+              compact
+              onPress={() => setEspnOpen(true)}
+              disabled={!!selectingId}
+            />
+          ) : null}
+          {mflEnabled ? (
+            <Button
+              testID="leagues.link-mfl"
+              label="Link an MFL league"
+              variant="secondary"
+              compact
+              onPress={() => setPlatformOpen('mfl')}
+              disabled={!!selectingId}
+              style={styles.linkBtnGap}
+            />
+          ) : null}
+          {fleaflickerEnabled ? (
+            <Button
+              testID="leagues.link-fleaflicker"
+              label="Link a Fleaflicker league"
+              variant="secondary"
+              compact
+              onPress={() => setPlatformOpen('fleaflicker')}
+              disabled={!!selectingId}
+              style={styles.linkBtnGap}
+            />
+          ) : null}
         </View>
       ) : null}
 
       <EspnLinkSheet
         visible={espnOpen}
         onClose={() => setEspnOpen(false)}
-        onLinked={espnLinked}
+        onLinked={onLeagueLinked}
       />
+      {platformOpen ? (
+        <PlatformLinkSheet
+          visible={platformOpen !== null}
+          platform={platformOpen}
+          onClose={() => setPlatformOpen(null)}
+          onLinked={onLeagueLinked}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -308,4 +420,5 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: ink.line,
   },
+  linkBtnGap: { marginTop: space.sm },
 });

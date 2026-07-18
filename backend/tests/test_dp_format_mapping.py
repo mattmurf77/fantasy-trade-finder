@@ -54,6 +54,13 @@ def _mock_fetch(monkeypatch):
         data_loader.urllib.request, "urlopen",
         lambda req, timeout=10: _FakeResponse(_SYNTHETIC_CSV.encode("utf-8")),
     )
+    # These tests pin the RAW DynastyProcess column reads, so the KTC blend
+    # (FB-145) must be a no-op regardless of test order. Its module-global
+    # `_ktc_cache` has a 24h TTL, so once any prior test triggers a real KTC
+    # fetch the blend would otherwise mutate the DP values asserted below.
+    # Patch the source to empty for deterministic, order-independent DP-only
+    # values (monkeypatch auto-reverts after the test).
+    monkeypatch.setattr(data_loader, "_ktc_consensus", lambda: {})
 
 
 def test_each_format_reads_its_own_value_column(monkeypatch):

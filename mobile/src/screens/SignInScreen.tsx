@@ -16,8 +16,9 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { TickLabel } from '../components/chalkline';
 import { appleSignIn, resolveSmartStart, signIn } from '../api/auth';
+import { track } from '../api/events';
 import { NO_LEAGUE_ID, useSession } from '../state/useSession';
-import { useFlag } from '../state/useFeatureFlags';
+import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import { getLastUsername, setLastUsername } from '../api/client';
 
@@ -51,6 +52,9 @@ interface Props {
 export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSignedIn }: Props) {
   const [username, setUsername] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Onboarding landing (ADR-006): which failure class the current error is —
+  // 'unavailable' upgrades the error line with the sample-league escape.
+  const [errorKind, setErrorKind] = useState<'notfound' | 'unavailable' | 'other' | null>(null);
   const [busy, setBusy] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -62,6 +66,13 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   const smartStartEnabled = useFlag('landing.smart_start_cta');
   const tryDemoEnabled    = useFlag('landing.try_before_sync');
   const accountsEnabled   = useFlag('auth.accounts');
+  // Username-first landing (onboarding plan item 5, ADR-006 account-later):
+  // when on, the Sleeper username field is the primary surface and Apple
+  // demotes to a quiet re-entry link. Flags-off renders the P2.6 layout
+  // unchanged. NOTE: the demo affordances below still require
+  // landing.try_before_sync (the backend demo endpoint 404s without it) —
+  // the operator flips that flag together with onboarding.landing.
+  const landingOn = useOnboardingFeature('onboarding.landing');
 
   // ── Sign in with Apple (auth.accounts flag; account-auth plan P2/P2.6) ─
   const [appleAvailable, setAppleAvailable] = useState(false);
@@ -87,6 +98,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     if (busy || demoBusy || appleBusy) return;
     setAppleBusy(true);
     setError(null);
+    setErrorKind(null);
+    track('signin_attempted', { method: 'apple' }, 'SignIn');
     try {
       const cred = await AppleAuthentication.signInAsync({
         requestedScopes: [
@@ -117,6 +130,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
         } catch {
           // Non-fatal; picker will fetch its own copy
         }
+        track('signin_succeeded', { method: 'apple' }, 'SignIn');
         onSignedIn();
       } else if (res.account_only && res.user_id && res.session_token) {
         // ACCOUNT-FIRST (P2.6): no Sleeper source linked — the backend
@@ -134,11 +148,17 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
           league_id:   res.league_id || NO_LEAGUE_ID,
           league_name: res.league_name || 'No league linked',
         });
+        track('signin_succeeded', { method: 'apple' }, 'SignIn');
         (onAccountSignedIn ?? onSignedIn)();
       } else {
         throw new Error('Apple sign-in did not return a usable session.');
       }
     } catch (err: any) {
+      track(
+        'signin_failed',
+        { method: 'apple', error_code: signInErrorCode(err) },
+        'SignIn',
+      );
       if (err?.code !== 'ERR_REQUEST_CANCELED') {
         setError(err?.message || 'Apple sign-in failed. Try again.');
       }
@@ -147,7 +167,10 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     }
   }
 
-  async function handleSubmit(override?: string) {
+  async function handleSubmit(
+    override?: string,
+    method: 'sleeper' | 'last_user' = 'sleeper',
+  ) {
     if (busy) return;
     const rawInput = (override ?? username).trim();
     if (!rawInput) {
@@ -156,6 +179,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     }
     setBusy(true);
     setError(null);
+    setErrorKind(null);
+    track('signin_attempted', { method }, 'SignIn');
     Keyboard.dismiss();
 
     let usernameToAuth = rawInput.toLowerCase();
@@ -167,12 +192,22 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     if (smartStartEnabled) {
       const resolved = await resolveSmartStart(rawInput);
       if (resolved.kind === 'invalid') {
+        track(
+          'signin_failed',
+          { method, error_code: 'smart_start_invalid' },
+          'SignIn',
+        );
         setError(resolved.message || "Couldn't parse that URL.");
         setBusy(false);
         return;
       }
       if (resolved.kind === 'league_url') {
         if (resolved.platform !== 'sleeper' || !resolved.supported || !resolved.league_id) {
+          track(
+            'signin_failed',
+            { method, error_code: 'platform_unsupported' },
+            'SignIn',
+          );
           setError(
             `${resolved.platform === 'espn' ? 'ESPN' : resolved.platform === 'mfl' ? 'MyFantasyLeague' : 'That platform'} sync is coming soon — paste a Sleeper league URL or your username for now.`,
           );
@@ -194,6 +229,11 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
           if (!ownerName) throw new Error('Could not resolve a league owner.');
           usernameToAuth = ownerName.toLowerCase();
         } catch (e: any) {
+          track(
+            'signin_failed',
+            { method, error_code: 'owner_resolve_failed' },
+            'SignIn',
+          );
           setError(
             e?.message ||
               "We found that league but couldn't resolve a username. Try typing your Sleeper username.",
@@ -223,9 +263,27 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
       } catch {
         // Non-fatal; picker will fetch its own copy
       }
+      track('signin_succeeded', { method }, 'SignIn');
       onSignedIn();
     } catch (err: any) {
-      setError(err?.message || 'Sign-in failed. Try again.');
+      track(
+        'signin_failed',
+        { method, error_code: signInErrorCode(err) },
+        'SignIn',
+      );
+      const kind = classifySignInError(err);
+      setErrorKind(kind);
+      if (landingOn && kind === 'notfound') {
+        // Voice doc: username-vs-team-name confusion is the most likely
+        // first-field failure — the copy must say what to fix.
+        setError(
+          `No "@${usernameToAuth}" on Sleeper. Usernames aren't team names — check your Sleeper profile and retype it.`,
+        );
+      } else if (landingOn && kind === 'unavailable') {
+        setError("Sleeper isn't responding.");
+      } else {
+        setError(err?.message || 'Sign-in failed. Try again.');
+      }
     } finally {
       setBusy(false);
     }
@@ -235,12 +293,20 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     if (demoBusy || busy) return;
     setDemoBusy(true);
     setError(null);
+    setErrorKind(null);
+    track('signin_attempted', { method: 'demo' }, 'SignIn');
     try {
       await startDemoSession();
+      track('signin_succeeded', { method: 'demo' }, 'SignIn');
       // The demo flow drops the user straight into Main — RootNav's gating
       // (user + league + token) is already satisfied by startDemoSession.
       onDemoStarted?.();
     } catch (err: any) {
+      track(
+        'signin_failed',
+        { method: 'demo', error_code: signInErrorCode(err) },
+        'SignIn',
+      );
       setError(err?.message || 'Demo unavailable — try again.');
     } finally {
       setDemoBusy(false);
@@ -268,7 +334,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
           </View>
 
           <View style={styles.form}>
-            {appleAvailable ? (
+            {!landingOn && appleAvailable ? (
               <>
                 {/* P2.6 — Apple is the PRIMARY portal. Official Apple button
                     (HIG-required component). White variant — the HIG
@@ -296,7 +362,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 ]}
                 onPress={() => {
                   setUsername(hint);
-                  void handleSubmit(hint);
+                  void handleSubmit(hint, 'last_user');
                 }}
                 disabled={busy}
               >
@@ -307,7 +373,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
             <TextInput
               testID="signin.username-input"
               style={[styles.input, focused && styles.inputFocused]}
-              placeholder={smartStartEnabled ? 'Sleeper username or league URL' : 'Sleeper username'}
+              placeholder={smartStartEnabled && !landingOn ? 'Sleeper username or league URL' : 'Sleeper username'}
               placeholderTextColor={chalk.faint}
               value={username}
               onChangeText={setUsername}
@@ -321,29 +387,55 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               editable={!busy && !demoBusy}
               inputMode="text"
             />
-            {smartStartEnabled ? (
+            {landingOn ? (
+              <Text style={styles.fieldHint}>
+                No password. Your league's rosters do the talking.
+              </Text>
+            ) : smartStartEnabled ? (
               <Text style={styles.fieldHint}>
                 Paste your Sleeper username or league URL.
               </Text>
             ) : null}
             {error ? <Text testID="signin.error-text" style={styles.error}>{error}</Text> : null}
+            {landingOn && errorKind === 'unavailable' && tryDemoEnabled ? (
+              // F6: the highest-intent moment we'll ever have must not die on
+              // a dead error line — the demo escape converts a total loss
+              // into a partial activation.
+              <Pressable
+                testID="signin.error-demo-escape"
+                onPress={handleTryDemo}
+                disabled={busy || demoBusy}
+                hitSlop={8}
+                style={styles.errorEscape}
+              >
+                {({ pressed }) => (
+                  <Text style={[styles.errorEscapeText, pressed && styles.tryDemoTextPressed]}>
+                    Browse the sample league while we retry →
+                  </Text>
+                )}
+              </Pressable>
+            ) : null}
             <Pressable
               testID="signin.continue-btn"
               accessibilityRole="button"
               style={({ pressed }) => [
                 styles.button,
-                appleAvailable && styles.buttonSecondary,
-                pressed && !submitDisabled && (appleAvailable ? styles.buttonSecondaryPressed : styles.buttonPressed),
+                !landingOn && appleAvailable && styles.buttonSecondary,
+                pressed && !submitDisabled && (!landingOn && appleAvailable ? styles.buttonSecondaryPressed : styles.buttonPressed),
                 submitDisabled && styles.buttonDisabled,
               ]}
               onPress={() => handleSubmit()}
               disabled={submitDisabled}
             >
               {busy ? (
-                <ActivityIndicator color={appleAvailable ? chalk.base : ice.on} />
+                <ActivityIndicator color={!landingOn && appleAvailable ? chalk.base : ice.on} />
               ) : (
-                <Text style={[styles.buttonText, appleAvailable && styles.buttonSecondaryText]}>
-                  {appleAvailable ? 'Continue with Sleeper →' : 'Connect →'}
+                <Text style={[styles.buttonText, !landingOn && appleAvailable && styles.buttonSecondaryText]}>
+                  {landingOn
+                    ? 'See trades for your team →'
+                    : appleAvailable
+                      ? 'Continue with Sleeper →'
+                      : 'Connect →'}
                 </Text>
               )}
             </Pressable>
@@ -363,7 +455,35 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                     <Text
                       style={[styles.tryDemoText, pressed && styles.tryDemoTextPressed]}
                     >
-                      Try the app on a sample league →
+                      {landingOn
+                        ? 'Just looking? Browse a sample league →'
+                        : 'Try the app on a sample league →'}
+                    </Text>
+                  )
+                }
+              </Pressable>
+            ) : null}
+
+            {landingOn && appleAvailable ? (
+              // ADR-006: quiet re-entry door for existing Apple-bound
+              // (P2.6 account-only) users — they may have no Sleeper
+              // username to type. Text link by design: it must never
+              // compete with the username field. (Conscious HIG tradeoff:
+              // the official Apple button is reserved for the flags-off
+              // layout; revisit if App Review objects.)
+              <Pressable
+                testID="signin.apple-link"
+                onPress={handleAppleSignIn}
+                disabled={busy || demoBusy || appleBusy}
+                style={styles.tryDemoBtn}
+                hitSlop={8}
+              >
+                {({ pressed }) =>
+                  appleBusy ? (
+                    <ActivityIndicator color={chalk.dim} />
+                  ) : (
+                    <Text style={[styles.tryDemoText, pressed && styles.tryDemoTextPressed]}>
+                      Already have an account? Sign in with Apple
                     </Text>
                   )
                 }
@@ -391,6 +511,29 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
+}
+
+// Onboarding landing failure classes. The backend contract
+// (/api/extension/auth): 404 user_not_found for an unknown username,
+// 502 sleeper_error when Sleeper itself fails; timeouts/network errors
+// also mean "Sleeper (or our server) unreachable" from the user's seat.
+function classifySignInError(err: any): 'notfound' | 'unavailable' | 'other' {
+  if (err?.status === 404) return 'notfound';
+  if (err?.isTimeout || err?.status === 0 || (typeof err?.status === 'number' && err.status >= 500)) {
+    return 'unavailable';
+  }
+  return 'other';
+}
+
+// Analytics: normalize this screen's real error shapes into a compact
+// error_code for signin_failed. ApiError carries status/isTimeout; the
+// Apple flow throws coded errors (e.g. ERR_REQUEST_CANCELED → 'canceled').
+function signInErrorCode(err: any): string {
+  if (err?.code === 'ERR_REQUEST_CANCELED') return 'canceled';
+  if (typeof err?.code === 'string' && err.code) return err.code;
+  if (err?.isTimeout) return 'timeout';
+  if (typeof err?.status === 'number' && err.status > 0) return `http_${err.status}`;
+  return 'unknown';
 }
 
 const styles = StyleSheet.create({
@@ -504,6 +647,18 @@ const styles = StyleSheet.create({
     fontFamily: fonts.uiSemi,
   },
   tryDemoTextPressed: { color: chalk.base },
+  // Onboarding landing: Sleeper-down escape rendered directly under the
+  // error line (ice = action per Chalkline).
+  errorEscape: {
+    minHeight: 32,
+    justifyContent: 'center',
+    marginBottom: space.sm,
+  },
+  errorEscapeText: {
+    ...type.bodySm,
+    color: ice.base,
+    fontFamily: fonts.uiSemi,
+  },
   legalLine: {
     ...type.bodySm,
     color: chalk.faint,

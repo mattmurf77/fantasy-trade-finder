@@ -55,10 +55,15 @@ per-`(league, user)` roster.
 | `opponent_data` | JSON text | `[{user_id, username, player_ids}]` — importer-owner's snapshot; write-once, not read back |
 | `default_scoring` | str | `'1qb_ppr'` / `'sf_tep'` (null → `'1qb_ppr'`) |
 | `total_rosters` | int | Sleeper's `total_rosters` (TRUE team count incl. ownerless rosters; FB #41). Written by session_init's meta fetch; null for local leagues / pre-migration rows |
-| `platform` | str | `'espn'` for ESPN-imported leagues (flag `espn.link`); NULL reads as `'sleeper'`. For ESPN rows the PK column holds the numeric **ESPN** league id — the plan chose a platform column over magic-prefix ids ([plan §2](plans/espn-league-linking-plan-2026-07-11.md)) |
+| `platform` | str | League source: NULL reads as `'sleeper'`; `'espn'` (flag `espn.link`), `'mfl'` (flag `mfl.link`), `'fleaflicker'` (flag `fleaflicker.link`). For every non-Sleeper platform the PK column holds the **platform-native** league id — the plans chose a platform column over magic-prefix ids ([ESPN §2](plans/espn-league-linking-plan-2026-07-11.md) / [multi-platform](plans/multi-platform-linking-plan-2026-07-17.md)) |
 | `espn_season` | int | ESPN `seasonId` used at import — the re-sync key (`/api/espn/import`). NULL for non-ESPN rows |
-| `espn_auth` | str | `'public'` / `'cookie'` — how the league was read; `'cookie'` re-syncs decrypt the importer's `espn_credentials` row |
+| `espn_auth` | str | `'public'` / `'cookie'` — how the ESPN league was read; `'cookie'` re-syncs decrypt the importer's `espn_credentials` row |
 | `espn_my_team_id` | int | The linking user's ESPN team id — binds their `league_members` row to their real FTF `user_id` across re-syncs |
+| `platform_season` | int | Season/year at import for MFL/Fleaflicker (`mfl`/`fleaflicker`) — the re-sync key. NULL for ESPN/Sleeper rows (ESPN uses `espn_season`) |
+| `platform_host` | str | MFL's per-league `wwwNN.myfantasyleague.com` host (the wwwNN gotcha) — reused on re-sync so no re-resolve is needed. NULL for Fleaflicker/ESPN/Sleeper |
+| `platform_auth` | str | `'public'` / `'cookie'` for MFL/Fleaflicker (Phase 1 is public-only → always `'public'`) |
+| `platform_my_team` | str | The linking user's franchise/team key (MFL franchise id `"0001"`, Fleaflicker team id) — binds their `league_members` row across re-syncs (generic analog of `espn_my_team_id`; **string**, since these ids aren't numeric integers) |
+| `platform_future_picks` | text (JSON) | MFL/Fleaflicker `futureDraftPicks` stored **raw** at import (`[{franchise_id,year,round,original_owner}]`) for the pick-inclusive-trades follow-up. **Not read by the trade engine today** — additive storage only |
 | `created_at`, `updated_at` | str | |
 
 ---
@@ -109,14 +114,34 @@ Members of every league `session_init` has seen. Uniqueness enforced via `(leagu
 
 For ESPN-imported leagues (`espn.link`), rows are written by `replace_espn_league_members` (delete-then-insert snapshot): the linking user's team carries their real FTF `user_id`; every other team gets a synthetic `espn:{SWID}` (fallback `espn:{league_id}.t{team_id}`) id. Synthetic ids must never reach push/notification paths (same class as unlinked Sleeper members). `roster_data` always holds **Sleeper** player ids — ESPN ids are crosswalked at import (`backend/espn_service.py`).
 
+MFL (`mfl.link`) and Fleaflicker (`fleaflicker.link`) leagues reuse the **same writer** (`replace_espn_league_members`, which is platform-agnostic) and the same snapshot rule, with synthetic counterparty ids `mfl:{league_id}.f{franchise_id}` / `flea:{league_id}.t{team_id}`. Rosters are crosswalked to Sleeper ids via `mfl_id` / `sportradar_id` respectively (`backend/mfl_service.py`, `backend/fleaflicker_service.py`, shared crosswalk in `espn_service`). League rows are written by the generic `upsert_platform_league`; loaded by `load_platform_leagues_for_user(user_id, platform)`.
+
 | Column | Type | Notes |
 |---|---|---|
 | `id` | int PK | |
 | `league_id` | str | |
-| `user_id` | str | Real FTF id, or synthetic `espn:` id for ESPN counterparties |
+| `user_id` | str | Real FTF id, or a synthetic id for imported-league counterparties (`espn:` / `mfl:` / `flea:`) |
 | `username`, `display_name` | str | |
 | `roster_data` | JSON text | |
 | `updated_at` | str | |
+
+---
+
+## `trade_block`
+
+FB-147 — snapshot of a league's Sleeper trade block: one row per asset a manager currently flags "on the block" in the Sleeper app. Source is Sleeper's **public GraphQL** `league_players` query (`settings.otb` = flagging roster_id, `settings.otb_added_at` = epoch ms — undocumented but unauthenticated; see `backend/trade_block_service.py`). Synced by `session_init`'s background daemon (flag `sleeper.trade_block`) and replaced atomically per league (delete + insert, `member_rankings`-style). Sleeper never clears stale `otb` flags after a player moves, so a flag is stored only when the flagging roster still owns the player (validated against v1 rosters at sync). Pick pseudo-ids (`"<roster>,<season>,<round>"`) are skipped — documented follow-up.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `league_id` | str | |
+| `player_id` | str | Sleeper player id (players only; no picks in v1) |
+| `user_id` | str | Sleeper user who owns + flagged the player |
+| `roster_id` | int | flagging roster (raw `otb` value) |
+| `flagged_at` | str, nullable | ISO UTC from `otb_added_at`; NULL on legacy leagues that predate the timestamp |
+| `synced_at` | str | ISO UTC of the snapshot |
+
+Constraint: `uq_trade_block` on `(league_id, player_id)`. Written via `replace_trade_block`; read via `load_trade_block` — the documented **trade-engine hook** (weighting is owned by the trade-logic thread; serving-side, `server.trade_card_to_dict` stamps `on_block: true` on involved card players through a 5-min TTL cache).
 
 ---
 
@@ -313,7 +338,7 @@ Daily **consensus** value snapshots (backlog #57 / player profiles #17). `elo_hi
 | `id` | int PK | |
 | `player_id` | str | Sleeper player id (or pick pseudo-id) |
 | `scoring_format` | str | `'1qb_ppr'` / `'sf_tep'` |
-| `consensus_elo` | float | seed Elo at snapshot time |
+| `consensus_elo` | float | seed Elo at snapshot time. Since #145 (2026-07-17) the seed is the **blended** DP+KTC consensus (`data_loader._apply_consensus_blend`); no schema or scale change and **no migration** — a blend shifts individual players slightly on the *same* affine value scale (unlike the #117 scale change below), so pre- and post-blend rows are directly comparable and the 30d trend baselines stay meaningful. See runbook → "KTC consensus blend". |
 | `consensus_value` | float, nullable | `elo_to_value(consensus_elo)`, stored denormalised so later `elo_value_*` config changes don't rewrite recorded history |
 | `search_rank` | int, nullable | Sleeper rank proxy, if known |
 | `adp` | float, nullable | ADP, if known |
@@ -339,9 +364,11 @@ See [config-reference.md](config-reference.md) for the seeded defaults.
 
 ---
 
-## `wrapped_events`
+## `wrapped_events` — **FROZEN (analytics P0 cutover)**
 
-Silent event stream powering "Fantasy Trade Wrapped" recap. `event_type` ∈ `swipe | trade_match | trade_accepted | trade_declined | tier_save | ranking_reorder | league_sync`.
+Legacy event stream that powered the "Fantasy Trade Wrapped" recap. `event_type` ∈ `swipe | trade_match | trade_accepted | trade_declined | tier_save | ranking_reorder | league_sync`.
+
+**Zero writes since the analytics P0 cutover** ([ADR-007](adr/adr-007-first-party-analytics-experimentation.md), LLD §6.4): all five writers now route through `record_event()` into `user_events` (`league_sync` renamed to the live `league_synced`; `tier_save` also joined `_RANK_STREAK_EVENTS`, so tier saves now advance the ranking streak). The cutover instant lives in `model_config` key `analytics.wrapped_cutover_at` (epoch seconds; read via `get_wrapped_cutover_iso()`). Retained read-only for pre-cutover history: `load_league_activity()` unions `wrapped_events.created_at < cutover` with `user_events.occurred_at >= cutover` (zero overlap by construction). Do not add writers.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -369,14 +396,39 @@ Append-only log of meaningful user actions. Hot reads use the denormalized `user
 | `os_version`, `app_version` | str | |
 | `source` | str | `mobile` / `web` / `api` / `cron` |
 | `props` | JSON text | event-specific extras |
+| `event_id` | str, unique (nullable) | client-generated UUID — idempotent retries / dedup ([tracking plan v2 §S1](business/analytics/2026-07-17-tracking-plan-v2.md)) |
+| `device_id` | str, indexed | stable per-install anon id (`dev_` + UUID) — pre-signin attribution |
+| `platform` | str | `ios` / `web` / `extension` / `server` |
+| `screen` | str | screen/view the event fired from |
+| `client_ts` | str | client wall-clock ISO; `occurred_at` stays server receive time |
+| `experiments` | JSON text | `{exp_key: variant}` snapshot of active assignments at event time |
 
-Indexes: `(user_id, occurred_at)`, `(event_type, occurred_at)`.
+Indexes: `(user_id, occurred_at)`, `(event_type, occurred_at)`, **full** unique `event_id` (`ix_user_events_event_id` — NULLS-DISTINCT on both dialects, so unlimited server-fired NULL rows coexist; conflict-ignore inserts must target it *without* `index_where`), `(device_id, occurred_at)` (`ix_user_events_device_occurred` — replaced the single-column `ix_user_events_device_id`, dropped at the analytics P0 migration).
 
-**event_type taxonomy:**
+The envelope columns (`event_id` … `experiments`) are nullable and only populated by `POST /api/events` (client batches, `insert_client_events()`); server-fired `record_event()` rows leave them NULL. Pre-auth client events store `user_id = 'device:<device_id>'` — resolve through `identity_links`.
+
+**event_type taxonomy** (registry: `backend/analytics_taxonomy.py` — client and server namespaces are disjoint, asserted at import):
 - Session: `signup`, `login`, `logout`, `app_open`
-- Ranking: `trio_swipe`, `tier_save`, `ranking_complete_first_time`, `ranking_method_changed`
-- Trade: `match_viewed`, `match_swiped`, `trade_proposed`, `counter_sent`, `trade_accepted`, `trade_declined`, `trade_ratified`
-- Engagement: `push_sent`, `push_opened`, `notif_pref_changed`, `league_synced`, `wrapped_viewed`
+- Ranking: `trio_swipe`, `tier_save` (streak event since the P0 cutover; `props.via` ∈ `tiers`/`quickset`), `ranking_complete_first_time`, `ranking_method_changed`, `ranking_reorder`, `anchor_answered`, `quickset_completed` (`position, players_placed, duration_ms, skipped`), `quickrank_completed` (`position, players_ranked, duration_ms, skipped`), `swipe` (cutover twin of the legacy wrapped writer: `count, scoring_format`)
+- Trade: `match_viewed`, `match_swiped`, `trade_proposed`, `counter_sent`, `trade_accepted`, `trade_declined`, `trade_ratified`, `trade_match` (cutover twin: `match_id, partner_id, give, receive`), `trades_generated` (`count, gen_ms, engine_version, lanes`), `calc_trade_evaluated` (`verdict, asset_count, mode` — WAT north-star input; fires for pre-auth `device:` identities too)
+- Engagement: `push_sent`, `push_opened`, `notif_pref_changed`, `league_synced`, `wrapped_viewed`, `feedback_submitted`, `asset_pref_added`, `asset_pref_removed`
+- Client-fired (via `POST /api/events` only, allowlisted in `ALLOWED_CLIENT_EVENTS` in `backend/analytics_taxonomy.py`): see [cross-client-invariants.md](cross-client-invariants.md) — the allowlist is a cross-client contract.
+
+---
+
+## `identity_links`
+
+Stitches pre-auth `device:<device_id>` `user_events` rows to the signed-in identity ([tracking plan v2 §S1](business/analytics/2026-07-17-tracking-plan-v2.md)). Written idempotently by `link_identity()` on every successful sign-in that carries a `device_id` (body or `X-Device-Id` header): `/api/extension/auth`, `/api/auth/apple`, `/api/auth/google`, `/api/session/demo`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `device_id` | str | `dev_` + UUID per install |
+| `sleeper_user_id` | str | user-keyed identity (demo ids and synthetic `acct_…` working keys land here too); null when unknown |
+| `account_id` | str | `acct_…` anchor when the sign-in was provider-backed; null otherwise |
+| `linked_at` | str | ISO UTC |
+
+Indexes (analytics P0, LLD §3.2): `(device_id, linked_at)` (`ix_identity_links_device_linked` — new name on purpose: `CREATE INDEX IF NOT EXISTS` would silently no-op on the old single-column name; that old `ix_identity_links_device` is dropped by the migration) and `sleeper_user_id` (`ix_identity_links_user`). Code-enforced CHECK in `link_identity()`: at least one of `sleeper_user_id`/`account_id` non-null.
 
 ---
 
@@ -434,6 +486,10 @@ Identity-anchor layer above the app's working key (`sleeper_user_id`) — accoun
 | `account_id` | str PK | Opaque hex id (`secrets.token_hex(16)`) |
 | `sleeper_user_id` | str | Bound Sleeper source — NULL until first bind (account-only users, P2.6, stay NULL and work under the derived `acct_<account_id>` key; synthetic keys are never bound here). Binding is **sticky**: never silently rebound; a conflicting bind attempt is refused (see `bind_sleeper_user`) |
 | `created_at` | str | ISO UTC |
+| `email` | str | Plaintext, normalized lower/trim — **dark behind `auth.email_capture` (default off)**; per [email-capture spec](business/product/2026-07-17-email-capture-spec.md). NULL until the flag + capture UI + privacy-policy flip ship together. Deleted with the row (`delete_user_data`) |
+| `email_source` | str | `'apple'` \| `'user'` — how the address arrived |
+| `email_consent_at` | str | ISO UTC, stamped at capture (consent to product updates + research outreach) |
+| `email_unsubscribed_at` | str | ISO UTC — set on unsubscribe/STOP; never send when set |
 
 ---
 
@@ -554,3 +610,135 @@ Indexes: `idx_app_feedback_created_at`, `idx_app_feedback_user_id`.
 | `created_at` | str, not null | ISO timestamp from server (canonical) |
 
 Indexes: `idx_bad_trade_flags_created_at`.
+
+---
+
+## Monetization platform foundation
+
+Tables added 2026-07-17 (docs/plans/monetization/00-platform-foundation.md §2.1). All ship dark — no route writes them until `monetize.*` flags flip; the manual-grant admin routes can write dormant rows at any time. Managed by `backend/entitlements.py`.
+
+## `entitlements`
+
+Single source of truth for paid access. Writers: billing webhook projector, referral/group-unlock reward granting, manual-grant admin routes — never client receipts. Resolution is read-time (`expires_at` compared at query time).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `user_id` | str, not null, indexed | Working key (sleeper id or `acct_*`) |
+| `account_id` | str, indexed | `accounts.account_id` when known — grants survive Sleeper re-links (resolution checks both) |
+| `entitlement` | str, not null | `'pro'` \| `'ad_free'` (ads plan HLD §4) |
+| `source` | str, not null | `apple_iap` \| `stripe` \| `founder_iap` \| `season_pass_iap` \| `promo_referral` \| `promo_group_unlock` \| `manual_grant` \| `trial` \| `rankset_purchase` |
+| `product_id` | str | Store SKU (`ftf_pro_annual`, `ftf_season_pass_2026`, `ftf_founder`, …) |
+| `status` | str, not null | `active` (default) \| `expired` \| `revoked` \| `refunded` — revoke/refund flip status, never delete |
+| `starts_at` / `expires_at` | str | ISO UTC; `expires_at` NULL = perpetual (founder, manual perpetual) |
+| `granted_by` | str | `'operator'` on manual grants; webhook event id otherwise |
+| `note` | str | Operator note on manual grants |
+| `metadata` | JSON text | Store payloads (original_transaction_id, stripe sub id, referral id) |
+| `created_at` / `updated_at` | str | ISO UTC |
+
+## `subscription_events`
+
+Append-only billing ledger — every RevenueCat/Stripe webhook lands verbatim before projection. `event_id` UNIQUE (`uq_subscription_event`) = idempotency on provider retries.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `source` | str, not null | `revenuecat` \| `stripe` \| `app_store_notification` |
+| `event_type` | str, not null | `INITIAL_PURCHASE`, `RENEWAL`, `EXPIRATION`, `REFUND`, `checkout.session.completed`, … |
+| `user_id` / `account_id` / `product_id` | str | As carried by the event (Stripe: from Checkout `metadata`) |
+| `event_id` | str UNIQUE | Provider event id |
+| `payload` | JSON text, not null | Raw event, never trimmed |
+| `occurred_at` | str, not null | Provider timestamp (fallback: receipt time) |
+| `processed_at` | str | NULL until the projector ran |
+| `process_error` | str | `'ignored: unhandled event_type …'` for consciously-skipped types |
+
+## `referrals`
+
+Give-get program state (foundation §5). Fraud controls are structural: `uq_referral_pair` = one reward per unique referred user ever; league co-membership + activation gating enforced by the (future) reward writer.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `referrer_user_id` | str, not null, indexed | |
+| `referred_user_id` | str, indexed | NULL until invitee identified |
+| `league_id` | str, not null | The shared Sleeper league |
+| `invite_token` | str UNIQUE | Carried by share-card deep links (`/join/<token>`) |
+| `status` | str, not null | `pending` → `joined` → `activated` → `rewarded` \| `rejected` \| `expired` |
+| `qualifying_event` | str | e.g. `'matchups_completed>=25'` |
+| `reward_entitlement_id` | int | → `entitlements.id` |
+| `created_at` / `joined_at` / `activated_at` / `rewarded_at` | str | Lifecycle timestamps |
+
+## `affiliate_clicks`
+
+Outbound affiliate click ledger; `subid` (UNIQUE) joins partner payout CSVs back to placement/user cohort. No PII in subids. Reconciliation columns written by `scripts/affiliate_reconcile.py` (affiliate LLD §7).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `user_id` | str, indexed | NULL for DNT/anonymous clicks |
+| `partner` | str, not null | `underdog` \| `draftkings` \| `fanduel` \| `fanatics` \| `caesars` \| … |
+| `placement` | str, not null | `web_bestball_card`, `web_offers_hub`, `ext_player_overlay`, `ios_bestball_card`, … |
+| `subid` | str UNIQUE | Passed to the partner link |
+| `clicked_at` | str, not null | |
+| `converted_at` / `payout_cents` / `reconciled_at` | str / int / str | Reconciliation write-back (nullable) |
+
+## `rank_sets`
+
+Rankings-marketplace sets (docs/business/product/2026-07-17-rankings-marketplace-plan.md). Format-agnostic by schema: `set_type` declares the benchmark family. Published versions are immutable — re-publishing bumps `version`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `owner_user_id` | str, not null, indexed | Contributor's working key |
+| `owner_type` | str, not null | `'user'` (default) \| `'publisher'` |
+| `set_type` | str, not null, indexed | `dynasty` (default) \| `rookie` \| `redraft` \| `bestball` — extended types behind `ranks.set_types_extended` |
+| `scoring_format` | str, not null | `'1qb_ppr'` \| `'sf_tep'` (matches `member_rankings`) |
+| `title` / `description` | str / text | |
+| `version` | int, not null | Default 1; bumped per publish |
+| `visibility` | str, not null | `private` (default) \| `published` \| `delisted` |
+| `price_credits` | int | NULL = free / not for sale |
+| `published_at` / `created_at` / `updated_at` | str | ISO UTC |
+
+## `rank_set_entries`
+
+One row per (set, version, player). `uq_rank_set_entry` on the triple.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `rank_set_id` / `version` | int, not null | Composite-indexed (`ix_rank_set_entries_set`) |
+| `player_id` | str, not null | `players.player_id`; picks use the draft-pick pseudo-player ids |
+| `rank` | int, not null | Canonical ordering |
+| `elo` | float | Optional — present when exported from a live Elo board |
+
+## `rank_set_adoptions`
+
+One row per adoption event (plan §Adoption mechanics). Adoption is per-league so a superflex set can't seed a 1QB league.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `rank_set_id` / `version` | int, not null | |
+| `user_id` | str, not null, indexed | |
+| `league_id` | str, not null | |
+| `mode` | str, not null | `seed` \| `replace` \| `track` |
+| `entitlement_id` | int | → `entitlements.id`; NULL for free adoptions |
+| `adopted_at` | str, not null | |
+
+## `accuracy_scores`
+
+Quarterly accuracy-scoring output (plan §Accuracy engine). One row per (snapshot, benchmark, horizon); `uq_accuracy_score` on (`user_id`,`rank_set_id`,`snapshot_at`,`benchmark`,`horizon`). Badge tiers derive from rolling windows in the scoring job — never stored denormalized here.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `rank_set_id` | int | NULL for passive user-board scores |
+| `user_id` | str, not null, indexed | Board owner (passive) or set owner |
+| `set_type` / `scoring_format` | str, not null | |
+| `snapshot_at` | str, not null | Lock timestamp of the scored board |
+| `benchmark` | str, not null | `production` \| `market` \| `rookie_tiers` |
+| `horizon` | str, not null | `'13wk'` \| `'1yr'` \| `'2yr'` \| `'season'` |
+| `raw_score` | float | Benchmark-native (lower = better for gap metrics; per-job docs) |
+| `peer_zscore` / `peer_percentile` | float | Peer-relative within the scored window / 0–100 |
+| `sample_weight` | float | Relevance-weighted assets scored (min-sample gating input) |
+| `scored_at` | str, not null | |

@@ -130,7 +130,7 @@ Account-auth plan P2 + P2.6 account-first (docs/plans/account-auth-plan-2026-07-
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/trades/generate` | Generate trade cards. Optional `pinned_give_players` ("what can I get for X") and, behind `trade.finder_targeting`, `pinned_receive_players` ("what does X cost") — pinned jobs bypass the cache. Cards may carry `partner_fit` (0–1 counterparty positional fit) when targeting is active, and `need_fit` (0–1 automatic positional-need fit, FB-96) when `trade.need_fit` is on |
+| POST | `/api/trades/generate` | Generate trade cards. Optional `pinned_give_players` ("what can I get for X") and, behind `trade.finder_targeting`, `pinned_receive_players` ("what does X cost") — pinned jobs bypass the cache. Cards may carry `partner_fit` (0–1 counterparty positional fit) when targeting is active, and `need_fit` (0–1 automatic positional-need fit, FB-96) when `trade.need_fit` is on. Optional `force: true` skips the complete-fresh job cache (running jobs still shared) — used by the onboarding post-Quick-Set regeneration (item 7) |
 | GET | `/api/trades/status` | Generation job status |
 | GET | `/api/trades` | List current trade cards |
 | POST | `/api/trades/swipe` | Like/pass a trade. Optional card-context fields (`give_player_ids`, `receive_player_ids`, `target_user_id`, `target_username`, `league_id`) let the server reconstruct the card after a restart wiped the in-memory deck (FB-46) |
@@ -181,6 +181,7 @@ Notes:
 - `fairness_score` is true consensus fairness in `[0, 1]` (lesser/greater package-value ratio). Mobile and web both multiply by 100 for the fairness meter — see [cross-client-invariants.md](cross-client-invariants.md).
 - `basis: "consensus"` cards are fair-by-consensus ideas generated for opponents with no rankings; clients show the "Fair-value idea" label.
 - The job snapshot additionally sets `real_opponent` (bool) and `outlook` per card.
+- **FB-147** (flag `sleeper.trade_block`): player objects inside `give`/`receive` gain `"on_block": true` when the league's synced Sleeper trade block names that player. Omit-when-absent — never `false`, and flag-off payloads are byte-identical to pre-147. Mobile renders the "ON THE BLOCK" badge from it.
 
 ## Open trade calculator (public — no auth)
 
@@ -277,6 +278,29 @@ Read-only import of ESPN Fantasy leagues via the community-reverse-engineered v3
 
 Error contract (shared): 404 `feature_disabled` (flag off) / `espn_league_not_found` (ESPN purged or wrong season) / `espn_not_linked` (import only) · 403 `espn_auth_required` (private league or expired cookies → paste fresh ones) · 400 `espn_bad_league_id` / `espn_bad_season` / `espn_bad_team_id` / `espn_cookies_incomplete` · 409 `espn_team_missing` (bound team left the league → re-link) · 502 `espn_unavailable` · 503 `espn_unconfigured` (encryption key missing). The `report` field carries `{pool_players, matched_by_id, matched_by_name, match_rate, out_of_pool, unmatched:[{name,position}]}` — K/D-ST count as `out_of_pool`, not failures. Mutating routes use the standard unverified-write gate (grace applies).
 
+## MFL league linking (flag `mfl.link`)
+
+Read-only import of MyFantasyLeague leagues via MFL's **official, sanctioned** export API ([plan](plans/multi-platform-linking-plan-2026-07-17.md)). Gated by `mfl.link` (default **false**; every route 404s `feature_disabled` when off). Public leagues need **no auth**. Rosters are crosswalked to **Sleeper player ids** via `mfl_id` (DynastyProcess's primary key — measured 100% on live leagues; `backend/mfl_service.py`, shared 24h-TTL crosswalk cache with snapshot fallback). Per-league **`wwwNN` host** is resolved from a pasted league URL or, for a bare id, via `api.myfantasyleague.com/{year}/home/{id}`'s 302 `Location`. `futureDraftPicks` are fetched and **stored raw** (`leagues.platform_future_picks`, JSON) for the pick-inclusive follow-up — **not** wired into the trade engine yet. No MFL write path.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/mfl/link` | Body `{mfl_league_url? \| mfl_league_id?, year?, franchise_id?}`. Without `franchise_id` → **preview**: `{status:"choose_team", league:{mfl_league_id,name,season,total_teams,host}, teams:[{team_id,name,mapped_players}], report}`. With `franchise_id` → **import**: persists the league (`platform='mfl'`) + membership; chosen franchise binds to the session `user_id`, counterparties get synthetic `mfl:{L}.f{franchise}` ids; futureDraftPicks stored. Idempotent re-link. → `{ok, league_id, name, platform, season, auth, total_teams, teams_imported, my_team_id, my_roster, future_picks_stored, report}` |
+| GET | `/api/mfl/leagues` | Linked MFL leagues for the session user + full `members` snapshot (Sleeper ids) — client builds a standard `/api/session/init` body from it |
+| POST | `/api/mfl/import` | Re-sync rosters. Body `{league_id}`. Re-resolves host if needed; preserves the franchise binding. → same summary shape |
+
+## Fleaflicker league linking (flag `fleaflicker.link`)
+
+Read-only import of Fleaflicker leagues via their **official public JSON API** ([plan](plans/multi-platform-linking-plan-2026-07-17.md)). Gated by `fleaflicker.link` (default **false**). **Zero auth** for reads (no key/cookie/OAuth). Rosters carry `proPlayer.externalIds` when `external_id_type=SPORTRADAR` is requested; crosswalked to **Sleeper ids** via **`sportradar_id`** (DP's `fleaflicker_id` column is a decoy — measured 99.7% on a live league; `backend/fleaflicker_service.py`). League discovery by account **email** (`FetchUserLeagues`) — the user types their own email, no credential held. No write path.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/fleaflicker/link` | Body `{fleaflicker_league_id, team_id?}`. Without `team_id` → **preview**: `{status:"choose_team", league:{fleaflicker_league_id,name,total_teams}, teams:[{team_id,name,mapped_players}], report}`. With `team_id` → **import**: persists (`platform='fleaflicker'`) + membership; chosen team binds to the session `user_id`, counterparties get synthetic `flea:{L}.t{team}` ids. Idempotent re-link. → `{ok, league_id, name, platform, season, auth, total_teams, teams_imported, my_team_id, my_roster, report}` |
+| GET | `/api/fleaflicker/leagues` | Linked Fleaflicker leagues + `members` snapshot (Sleeper ids) |
+| POST | `/api/fleaflicker/discover` | Body `{email}` → `{leagues:[{league_id,name,size}]}` — list a user's NFL leagues by account email (zero creds held) |
+| POST | `/api/fleaflicker/import` | Re-sync rosters. Body `{league_id}`. Preserves the team binding. → same summary shape |
+
+Error contract (shared, `{platform}` = `mfl`\|`fleaflicker`): 404 `feature_disabled` / `{platform}_league_not_found` / `{platform}_not_linked` (import) · 400 `{platform}_bad_league_id` / `mfl_bad_team_id` / `fleaflicker_bad_team_id` · 409 `{platform}_team_missing` (bound team left → re-link) · 403 `{platform}_auth_required` (private/expired) · 502 `{platform}_unavailable`. The `report` field matches ESPN's shape; MFL/Fleaflicker `team_id`s are **strings** (MFL franchise ids like `"0001"`; Fleaflicker numeric team ids). Mutating routes use the standard unverified-write gate (grace applies).
+
 ## Notifications
 
 | Method | Path | Purpose |
@@ -329,7 +353,7 @@ Triggered by an external scheduler (Render cron). All POST.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/feature-flags` | Read flags |
+| GET | `/api/feature-flags` | Read flags. Response is **additive** (analytics FR-35): `{flags, experiments: {key: variant}, configs: {key: {...}}}`. `experiments`/`configs` are always objects but stay empty until the P3 evaluator lands. Send `X-Device-Id` (+ optional `X-Session-Token`) so the server can resolve per-unit experiment assignments; old parsers reading `.flags` ignore the added keys. |
 | POST | `/api/feature-flags/reload` | Reload from `config/features.json`. **Auth: X-Cron-Secret** |
 
 ## Admin
@@ -344,6 +368,10 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 | PUT | `/api/feedback/admin/<id>/status` | Operator update for a feedback note: `status` (`new\|planned\|in_progress\|fixed\|shipped\|declined`) and/or `severity` (`bug\|polish\|idea`). **Auth: X-Cron-Secret** |
 | GET | `/api/trades/flags/admin` | Operator readback of bad-trade flags (`?since_id=N&limit=M`, max 500) → `{items, count, next_since_id}` — same paging contract as `/api/feedback/admin`. **Auth: X-Cron-Secret** |
 | GET | `/api/debug/log` | Last N debug ring-buffer entries (`?n=100`). **Auth: X-Cron-Secret** |
+| POST | `/api/admin/entitlements/grant` | Manual entitlement grant (foundation §3): `{user: <sleeper id\|username\|acct_*\|account_id>, entitlement?: 'pro', duration_days?\|expires_at?\|perpetual?, note?}` → 201 row. 404 `user_not_found` on no match — never grants to a typo. **Auth: X-Cron-Secret** |
+| POST | `/api/admin/entitlements/bulk-grant` | Same body with `users: [...]` → `{granted, failed}` per-user (e.g. comp all TestFlight testers 90 days). **Auth: X-Cron-Secret** |
+| DELETE | `/api/admin/entitlements/<id>` | Revoke — flips `status='revoked'`, audit-preserving. **Auth: X-Cron-Secret** |
+| GET | `/api/admin/entitlements?user=…` | All entitlement rows any status for support. **Auth: X-Cron-Secret** |
 
 ## Misc
 
@@ -382,6 +410,61 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 Auth is best-effort. `X-Session-Token`, when present, attributes the row to the matching `user_id` + `username`; when absent the row stores `user_id = null` (anonymous submission allowed).
 
 Stores into `app_feedback` (see data-dictionary). The mobile client also retains a local AsyncStorage copy and re-POSTs unsynced items on app foreground.
+
+## Analytics events (flag `analytics.client_events`, ships dark)
+
+First-party client-event ingestion — [tracking plan v2 §S2](business/analytics/2026-07-17-tracking-plan-v2.md). 404 while the flag is off.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/events` | Batched client-event ingestion into `user_events` (P1 pipeline, `backend/analytics_ingest.py`). **Always 200 for content** — fire-safe by contract. |
+
+**Body** (JSON):
+
+```
+{
+  "events": [                          // 0..50 envelopes (empty = legal no-op)
+    {
+      "event_id":   "<client uuid>",  // REQUIRED, 8–64 chars ^[A-Za-z0-9_-]+$; dedup key
+      "event_type": "screen_viewed",  // REQUIRED, must be in ALLOWED_CLIENT_EVENTS
+      "client_ts":  "2026-07-17T12:00:00Z",
+      "screen":     "Trades",
+      "session_id": "<client session uuid>",   // REQUIRED, 8–64 chars
+      "seq":        17,                // REQUIRED, per-session monotonic ≥1 (loss detection)
+      "props":      { ... }            // ≤4KB; unknown-per-event keys stripped; PII scrubbed (§S4/FR-47)
+    }
+  ]
+}
+```
+
+**Identity:** `X-Device-Id` header preferred (body `device_id` accepted for v0 binaries). A recognized `X-Session-Token` attributes rows to that `user_id`; a dead/absent token falls back silently to `user_id = 'device:<device_id>'` (never 4xx — server sessions are wiped on deploy, so this is routine). Server stamps `occurred_at` (server time), device headers, and `source`.
+
+**Response — always `200` for content** `{ accepted, deduped, rejected: [{index, reason}], dropped, disposition }`:
+- **Accounting invariant:** `accepted + deduped + len(rejected) == N` on any committed transaction. Server-side drops (rate-limit, unknown-type, PII, oversize) count as `accepted` ("accepted-and-dropped"); `dropped` is observability only.
+- `disposition`: `"ok"` | `"disabled"` (flag `analytics.ingest` off — clients RETAIN their queue) | `"batch_rejected:too_many"` (>50) | `"batch_rejected:too_large"` (>128 KiB).
+- `rejected` reasons (closed enum): `bad_envelope | bad_event_id | bad_seq | no_identity`.
+- Rate limit / unknown type → accepted-and-dropped, **never 429/4xx** (a 429 would teach offline queues to retry-storm). Whole-txn failure is the only sum-short case: `{accepted:0, deduped:0, rejected:[]}`, still 200 → client requeues.
+
+The **gate is `analytics.ingest`** (server acceptance); `analytics.client_events` is the separate CLIENT emission gate (P1 split). Client purge rule + queue/backoff: [analytics-platform LLD §2.1/§4.6](plans/analytics-platform/lld.md). Allowed `event_type` values + envelope are the cross-client contract in [cross-client-invariants.md](cross-client-invariants.md) (registry: `backend/analytics_taxonomy.py`); unknown types default-deny.
+
+Sign-in routes (`/api/extension/auth`, `/api/auth/apple`, `/api/auth/google`, `/api/session/demo`) additionally accept a `device_id` (body) or `X-Device-Id` header and best-effort upsert an `identity_links` row on success.
+
+### Analytics admin
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/admin/analytics/health` | Ingest health: in-process counters (`accepted`, `deduped`, `dropped_unknown_type`, `dropped_rate_limited`, `rejected`, `txn_failed`, … — labeled `"since": "deploy"`, reset on restart) + boot check (`wal` true/false, `null` = n/a on Postgres; `event_id_index_present`) + `wal_file_bytes` (SQLite `-wal` size, `null` on Postgres). Dedicated static route — `health` stays OUT of the `<report>` enum below (Flask matches the static rule first). **Auth: X-Cron-Secret** |
+| GET | `/api/admin/analytics/<report>` | P2 report catalog (analytics platform; SQL in `backend/analytics_queries.py`, computed on the read-only engine — the dashboard `web/admin/analytics.html` renders and computes nothing). `report ∈ waterfall\|time\|bottlenecks\|churn\|releases\|adoption\|engagement\|pfo\|onepager`. Params: `start`,`end` (ISO date; default trailing 28 d, window ≤90 d), `format=json\|csv`, `include_demo=0\|1`, `segment=<dim>`. Returns `{report, window, generated_at, params, caveats:[{code,scope,detail}], rows, summary?}`. **Honest degradation:** a metric whose feeding events are dark (all client events today, since `analytics.ingest=false`) or whose cohort is <20 renders a null cell + caveat (`dark` → "—", `n_too_small`), never a fabricated 0; `is_dark()` separates "—" from a real measured 0. Bad param/enum → 400 (never 500). **Auth: X-Cron-Secret** |
+
+## Monetization foundation (docs/plans/monetization/00-platform-foundation.md — always mounted, behavior flag-aware)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/me/entitlements` | Session-authed bootstrap → `{pro, ad_free, sources, expires_at, enforcing}`. Serves resolved state even while `monetize.entitlements` is off (`enforcing: false`) so clients can bootstrap before enforcement flips. The Chrome extension does **not** call this — its `pro` bool rides in `POST /api/extension/auth` (pro-subscription LLD). |
+| POST | `/api/billing/revenuecat/webhook` | RevenueCat events → `subscription_events` ledger → projector. **Auth: `Authorization: Bearer <REVENUECAT_WEBHOOK_SECRET>`**; fails closed (503) in prod when unset. Idempotent on event id (`{duplicate: true}` on replay). |
+| POST | `/api/billing/stripe/webhook` | Stripe events, same ledger/projector. **Auth: `Stripe-Signature` v1 HMAC** (`STRIPE_WEBHOOK_SECRET`); fails closed in prod when unset. `user_id`/`product_id` ride in Checkout `metadata`; events without them are stored + skipped. |
+
+Gate decorator: routes on the Pro gate list wear `@_require_pro` in `backend/server.py` (grep-auditable). Semantics (foundation §2.4): `monetize.entitlements` off → no-op; on without `monetize.paywall` → observe mode (`ENTITLE-OBSERVE` log lines, never blocks); both on → 402 `{"error": "pro_required"}`. No route wears it yet — the gate list ships with the pro-subscription plan.
 
 ## Test support (`FTF_TEST_MODE=1` only — never mounted in normal operation)
 

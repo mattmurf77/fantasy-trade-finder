@@ -1,0 +1,337 @@
+{
+  "standings": {
+    "league": {
+      "id": 312861,
+      "name": "Avid Auctioneers Alliance",
+      "size": 12
+    }
+  },
+  "rosters": {
+    "rosters": [
+      {
+        "team": {
+          "id": 1578553,
+          "name": "Running Bear"
+        },
+        "players": [
+          {
+            "proPlayer": {
+              "id": 12159,
+              "nameFull": "Dak Prescott",
+              "position": "QB",
+              "externalIds": [
+                {
+                  "id": "86197778-8d4b-4eba-affe-08ef7be7c70b"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 16259,
+              "nameFull": "Trey Lance",
+              "position": "QB",
+              "externalIds": [
+                {
+                  "id": "676a508c-c65f-404a-a2b0-f861a4bfd072"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 14736,
+              "nameFull": "Devin Singletary",
+              "position": "RB",
+              "externalIds": [
+                {
+                  "id": "a961b0d4-5d7c-438e-90f0-2e1fa09f6c89"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 13772,
+              "nameFull": "Rashaad Penny",
+              "position": "RB",
+              "externalIds": [
+                {
+                  "id": "2b119688-83b5-4d19-acbf-fa2087035fae"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 12017,
+              "nameFull": "Laquon Treadwell",
+              "position": "WR",
+              "externalIds": [
+                {
+                  "id": "2e0badcd-b78c-40ee-a83b-a1bbb36bc545"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 15531,
+              "nameFull": "Brandon Aiyuk",
+              "position": "WR",
+              "externalIds": [
+                {
+                  "id": "c90471cc-fa60-4416-9388-5aebb5d877eb"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 13788,
+              "nameFull": "Michael Gallup",
+              "position": "WR",
+              "externalIds": [
+                {
+                  "id": "9e174ff2-ca0e-4e6b-96f7-90f0088f7edd"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 15564,
+              "nameFull": "Van Jefferson",
+              "position": "WR",
+              "externalIds": [
+                {
+                  "id": "8e1285f7-6e4c-41e4-aac9-92e09f9f32b2"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 9990001,
+              "nameFull": "Justin Tucker",
+              "position": "K",
+              "externalIds": [
+                {
+                  "id": "k-out-of-pool-uuid"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 1581718,
+          "name": "Officially Rebuilding"
+        },
+        "players": [
+          {
+            "proPlayer": {
+              "id": 8598,
+              "nameFull": "Russell Wilson",
+              "position": "QB",
+              "externalIds": [
+                {
+                  "id": "409d4cac-ee90-4470-9710-ebe671678339"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 13770,
+              "nameFull": "Sam Darnold",
+              "position": "QB",
+              "externalIds": [
+                {
+                  "id": "13d826c5-9b22-4e0a-a877-02d8c84c546b"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 12101,
+              "nameFull": "Kenyan Drake",
+              "position": "RB",
+              "externalIds": [
+                {
+                  "id": "a0b93053-d349-4dd1-a840-24577102699b"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 9317,
+              "nameFull": "Cordarrelle Patterson",
+              "position": "RB",
+              "externalIds": [
+                {
+                  "id": "da85107c-365c-4d58-90ab-479d97d798b4"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 16253,
+              "nameFull": "DeVonta Smith",
+              "position": "WR",
+              "externalIds": [
+                {
+                  "id": "3555d07e-57ae-43de-97d5-b1b5bf055f17"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 9311,
+              "nameFull": "DeAndre Hopkins",
+              "position": "WR",
+              "externalIds": [
+                {
+                  "id": "5c48ade7-4b9a-4757-9643-87a6e3839e2b"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 11177,
+              "nameFull": "Amari Cooper",
+              "position": "WR",
+              "externalIds": [
+                {
+                  "id": "00f88be8-45f9-4237-b2b8-3271ec790d07"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 13795,
+              "nameFull": "Courtland Sutton",
+              "position": "WR",
+              "externalIds": [
+                {
+                  "id": "b55ae5ba-593f-4560-9cab-14e10698e01d"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 1581719,
+          "name": "Jmuthers's Team"
+        },
+        "players": [
+          {
+            "proPlayer": {
+              "id": 13761,
+              "nameFull": "Josh Allen",
+              "position": "QB",
+              "externalIds": [
+                {
+                  "id": "3069db07-aa43-4503-ab11-2ae5c0002721"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 16233,
+              "nameFull": "Zach Wilson",
+              "position": "QB",
+              "externalIds": [
+                {
+                  "id": "17bb63b1-1b0e-48e1-baf7-55cd314d0e62"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 13778,
+              "nameFull": "Saquon Barkley",
+              "position": "RB",
+              "externalIds": [
+                {
+                  "id": "9811b753-347c-467a-b3cb-85937e71e2b9"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 9380,
+              "nameFull": "Keenan Allen",
+              "position": "WR",
+              "externalIds": [
+                {
+                  "id": "5f424505-f29f-433c-b3f2-1a143a04a010"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 13806,
+              "nameFull": "Christian Kirk",
+              "position": "WR",
+              "externalIds": [
+                {
+                  "id": "ebcd87ce-218c-4144-810b-921c2f59d6e8"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 7369,
+              "nameFull": "A.J. Green",
+              "position": "WR",
+              "externalIds": [
+                {
+                  "id": "c9701373-23f6-4058-9189-8d9c085f3c49"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 16373,
+              "nameFull": "Amon-Ra St. Brown",
+              "position": "WR",
+              "externalIds": [
+                {
+                  "id": "26ef0447-29b8-4dd1-9831-dcbf8132bb74"
+                }
+              ]
+            }
+          },
+          {
+            "proPlayer": {
+              "id": 13023,
+              "nameFull": "George Kittle",
+              "position": "TE",
+              "externalIds": [
+                {
+                  "id": "2ada91b0-036e-454f-83c3-6d939ff584a9"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

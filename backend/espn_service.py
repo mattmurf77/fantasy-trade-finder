@@ -200,33 +200,87 @@ def parse_league(raw: dict) -> dict:
 
 @dataclass
 class Crosswalk:
+    """Per-platform id → Sleeper-id maps built from one DynastyProcess fetch.
+
+    The multi-platform league-linking plan
+    (docs/plans/multi-platform-linking-plan-2026-07-17.md) generalized this
+    from the original ESPN-only shape: every linked platform resolves its
+    native roster ids to Sleeper player ids through the SAME cached DP file.
+    `by_name_pos` is the position-strict fallback tier (#127 rule — a name
+    hit whose position disagrees is NO match) shared by every platform.
+
+    Which id map a platform uses:
+      ESPN        → by_espn_id       (espn_id column)
+      MFL         → by_mfl_sleeper   (mfl_id column — DP's own primary key)
+      Fleaflicker → by_sportradar_id (sportradar_id from roster externalIds;
+                    DP's fleaflicker_id column is a decoy — plan §3)
+      Yahoo (future) → by_yahoo_id
+    """
     by_espn_id: dict[str, str]                     # espn_id → sleeper_id
     by_name_pos: dict[tuple[str, str], str]        # (normalised name, pos) → sleeper_id
+    # KTC/MFL id → (DP name, pos) — used by data_loader's KTC consensus blend
+    # (#145) for id-based matching. Empty when the CSV lacks the columns
+    # (e.g. the trimmed bundled snapshot) — callers fall back to name+pos.
+    by_ktc_id: dict[str, tuple[str, str]] = field(default_factory=dict)
+    by_mfl_id: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # Multi-platform linking id maps (external id → sleeper_id).
+    by_mfl_sleeper: dict[str, str] = field(default_factory=dict)
+    by_sportradar_id: dict[str, str] = field(default_factory=dict)
+    by_yahoo_id: dict[str, str] = field(default_factory=dict)
 
 
 def _parse_crosswalk_rows(reader) -> Crosswalk:
     """Build a Crosswalk from an iterable of DP db_playerids dict rows."""
     by_espn: dict[str, str] = {}
     by_name: dict[tuple[str, str], str] = {}
+    by_ktc: dict[str, tuple[str, str]] = {}
+    by_mfl: dict[str, tuple[str, str]] = {}
+    by_mfl_sleeper: dict[str, str] = {}
+    by_sportradar: dict[str, str] = {}
+    by_yahoo: dict[str, str] = {}
     for row in reader:
         sid = (row.get("sleeper_id") or "").strip()
         eid = (row.get("espn_id") or "").strip()
+        pos = (row.get("position") or "").strip().upper()
+        # KTC/MFL entries join on the DP name (not sleeper_id), so collect
+        # them before the sleeper_id guard below.
+        raw_name = (row.get("name") or "").strip()
+        mid = (row.get("mfl_id") or "").strip()
+        if raw_name and pos:
+            kid = (row.get("ktc_id") or "").strip()
+            if kid not in ("", "NA"):
+                by_ktc.setdefault(kid, (raw_name, pos))
+            if mid not in ("", "NA"):
+                by_mfl.setdefault(mid, (raw_name, pos))
         if sid in ("", "NA"):
             continue
         if eid not in ("", "NA"):
             by_espn[eid] = sid
+        # Per-platform external-id → sleeper joins (multi-platform linking).
+        if mid not in ("", "NA"):
+            by_mfl_sleeper.setdefault(mid, sid)
+        srid = (row.get("sportradar_id") or "").strip()
+        if srid not in ("", "NA"):
+            by_sportradar.setdefault(srid, sid)
+        yid = (row.get("yahoo_id") or "").strip()
+        if yid not in ("", "NA"):
+            by_yahoo.setdefault(yid, sid)
         nm = normalise_name(row.get("merge_name") or row.get("name") or "")
-        pos = (row.get("position") or "").strip().upper()
         if nm and pos:
             by_name.setdefault((nm, pos), sid)
-    return Crosswalk(by_espn_id=by_espn, by_name_pos=by_name)
+    return Crosswalk(by_espn_id=by_espn, by_name_pos=by_name,
+                     by_ktc_id=by_ktc, by_mfl_id=by_mfl,
+                     by_mfl_sleeper=by_mfl_sleeper,
+                     by_sportradar_id=by_sportradar,
+                     by_yahoo_id=by_yahoo)
 
 
 def load_crosswalk(csv_path: str) -> Crosswalk:
     """Load a DynastyProcess db_playerids CSV (full or trimmed snapshot).
 
-    Needs columns: sleeper_id, espn_id, merge_name (or name), position.
-    'NA' cells are treated as missing.
+    Needs columns: sleeper_id, position, merge_name (or name), and whichever
+    platform id columns a caller relies on (espn_id, mfl_id, sportradar_id,
+    yahoo_id). 'NA' cells are treated as missing.
     """
     with open(csv_path, newline="", encoding="utf-8") as f:
         return _parse_crosswalk_rows(csv.DictReader(f))
@@ -335,6 +389,72 @@ def map_rosters(teams: list[EspnTeam], xwalk: Crosswalk) -> dict:
                     {"name": p.name, "position": p.position, "espn_id": p.espn_id}
                 )
         rosters[team.team_id] = ids
+
+    pool = matched_id + matched_name + len(unmatched)
+    return {
+        "rosters": rosters,
+        "report": {
+            "pool_players": pool,
+            "matched_by_id": matched_id,
+            "matched_by_name": matched_name,
+            "unmatched": unmatched,
+            "out_of_pool": out_of_pool,
+            "match_rate": (matched_id + matched_name) / pool if pool else 0.0,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Generic per-platform roster crosswalk (MFL / Fleaflicker / future Yahoo)
+# ---------------------------------------------------------------------------
+# The same fetch → parse → crosswalk shape ESPN uses, factored so any
+# platform's service can resolve its native roster ids into Sleeper player
+# ids through one shared code path (plan §8). A platform supplies:
+#   - team_key: an opaque per-team key (franchise id, team id, …)
+#   - players:  list of (external_id, name, position) tuples
+#   - id_map:   the Crosswalk id map for that platform's external ids
+#               (xwalk.by_mfl_sleeper, xwalk.by_sportradar_id, …)
+# The name+position fallback (#127 position-strict) is shared via
+# xwalk.by_name_pos — identical rule on every platform.
+
+
+def map_generic_rosters(teams: list[tuple], id_map: dict, xwalk: Crosswalk) -> dict:
+    """Map external rosters into Sleeper player_ids for any platform.
+
+    teams: [(team_key, [(external_id, name, position), ...]), ...]
+    id_map: external_id → sleeper_id dict for this platform (e.g.
+            xwalk.by_mfl_sleeper). name+pos fallback uses xwalk.by_name_pos.
+
+    Returns the same {"rosters", "report"} shape as ESPN's map_rosters so the
+    route/report code is platform-agnostic. K/DST and unknown positions are
+    reported as out_of_pool, never as match failures.
+    """
+    rosters: dict = {}
+    matched_id = matched_name = out_of_pool = 0
+    unmatched: list[dict] = []
+
+    for team_key, players in teams:
+        ids: list[str] = []
+        for external_id, name, position in players:
+            pos = (position or "").upper()
+            if pos not in POOL_POSITIONS:
+                out_of_pool += 1
+                continue
+            sid = id_map.get(str(external_id)) if external_id else None
+            if sid:
+                matched_id += 1
+            else:
+                sid = xwalk.by_name_pos.get((normalise_name(name or ""), pos))
+                if sid:
+                    matched_name += 1
+            if sid:
+                ids.append(sid)
+            else:
+                unmatched.append(
+                    {"name": name, "position": pos,
+                     "external_id": str(external_id) if external_id else ""}
+                )
+        rosters[team_key] = ids
 
     pool = matched_id + matched_name + len(unmatched)
     return {

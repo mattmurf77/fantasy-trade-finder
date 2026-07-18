@@ -276,9 +276,9 @@ Current candidates (as of 2026-06-07) to evaluate for conversion:
 
 | Flat plan | Convert? | Why |
 |---|---|---|
-| `docs/plans/feedback-backend-sync.md` | Evaluate — likely yes if multi-round expected | Feedback ingestion typically iterates |
-| `docs/plans/mobile-feature-parity.md` | Yes | Multi-surface, long-running |
-| `docs/plans/mobile-feature-parity-architecture.md` | Fold into the parity thread as `round-01-findings.md` from `project-architect` | Architecture slice of the same work |
+| `docs/plans/feedback-backend-sync.md` (migrated 2026-07-12 to `docs/plans/feedback-backend-sync/plan.md`) | Evaluate — likely yes if multi-round expected | Feedback ingestion typically iterates |
+| `docs/plans/mobile-feature-parity.md` (migrated 2026-07-12 to `docs/plans/mobile-feature-parity/plan.md`) | Yes | Multi-surface, long-running |
+| `docs/plans/mobile-feature-parity-architecture.md` (migrated 2026-07-12 to `docs/plans/mobile-feature-parity/architecture.md`) | Fold into the parity thread as `round-01-findings.md` from `project-architect` | Architecture slice of the same work |
 
 Do not migrate without primary-agent + user confirmation per plan.
 

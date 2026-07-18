@@ -9,6 +9,7 @@ flowchart LR
   subgraph External
     SL[Sleeper API]
     DP[DynastyProcess CSV]
+    KTC[KeepTradeCut page HTML]
     AN[Anthropic Claude API]
     EX[Expo Push]
     CR[Render Cron]
@@ -36,7 +37,10 @@ flowchart LR
   end
 
   SL -->|users, leagues, rosters, players| SRV
+  SL -->|trade block otb flags GraphQL| TBS[trade_block_service.py]
+  TBS --> DB
   DP -->|consensus values| DL
+  KTC -.->|blended consensus, fail-soft| DL
   DL -->|seed Elo| DB
   TC -->|tier bands| RS
   TC -->|tier bands via /api/tier-config| WEB
@@ -66,18 +70,23 @@ flowchart LR
 | Module | Lines | Role |
 |---|---|---|
 | `server.py` | ~6.4k | Flask routes, session management, Sleeper passthrough, in-memory ring-buffer debug log (`/api/debug/log?n=100`), typed push dispatcher (`_send_typed_push`) with prefs/dedup/quiet-hours, cron tick handlers |
-| `database.py` | ~5.2k | SQLAlchemy Core schema (22 tables), `_migrate_db()` idempotent ALTERs, `_MODEL_CONFIG_DEFAULTS` seeded via INSERT OR IGNORE; mirror/fuzzy match check (`check_for_match`) |
+| `database.py` | ~5.2k | SQLAlchemy Core schema (22 tables), `_migrate_db()` idempotent ALTERs, `_MODEL_CONFIG_DEFAULTS` seeded via INSERT OR IGNORE; mirror/fuzzy match check (`check_for_match`); `record_event()` dual-write (user_events + `users.last_*_at`). Analytics P0 ([ADR-007](adr/adr-007-first-party-analytics-experimentation.md)): three engines on one DB — product `engine` (SQLite: WAL + `synchronous=NORMAL` + `busy_timeout=5000` via on-connect listener), `ingest_engine` (150 ms lock budget, `BEGIN IMMEDIATE`; = product engine on Postgres), read-only `ro_engine` (`mode=ro` URI / `default_transaction_read_only`) — plus `analytics_boot_status()` / `wal_file_bytes()` health probes |
 | `ranking_service.py` | ~860 | Elo math; pairwise + 3-player decomposition; `tier_bands_for` + `apply_tiers` read from `tier_config.json` |
 | `trade_service.py` | ~2.1k | Cross-user mutual-gain trade discovery. Two paths: **v2 engine** (flag `trade_engine.v2` — single value space, marginal valuation, two-sided surplus gate, harmonic ranking) and the **legacy scorer** as flag-off fallback (mismatch/fairness weights, package diminishing returns, flag-gated QB/star/clogger taxes). The old `team_outlook_multiplier` and `positional_preference_multiplier` are **deleted**: outlook is now a now/future valuation *blend* (`trade.outlook_blend`, v2-only; legacy ignores outlook), and positional preferences are a *hard filter* on candidate packages in both paths |
 | `trade_optimizer.py` | new | Tier 3 engine module (flag `trade_engine.v3`): exact per-pair package search + sweetener pass + 3-team cycle clearing (`trade.three_team`). Flag-selectable — off falls back to v2, then legacy |
 | `trade_narrative.py` | ~100 | Deterministic template-based rationale strings for trade cards. No LLM. Used by `trade_service.generate_trades()` to fill `TradeCard.narrative` |
 | `smart_matchup_generator.py` | ~530 | Claude-assisted matchup picker + algorithmic fallback. Includes `community_trio_signal` + `find_qc_trio` for QC checks |
-| `data_loader.py` | ~280 | Pulls DynastyProcess CSV; maps consensus values → seed Elo (KTC curve). `load_consensus_maps` also returns a per-name DP position map — the DP↔Sleeper name join is position-strict (#127: never name-match across positions; two NFL players can share a normalised name, e.g. Kenneth Walker WR vs Kenneth Walker III RB) |
-| `espn_service.py` | ~400 | ESPN league-linking adapter (flag `espn.link`): unofficial v3 API reads (browser-signature headers, injected `_opener`), payload parsing, and the DP `db_playerids` crosswalk (24h-TTL in-memory cache, snapshot fallback) that maps ESPN rosters → Sleeper player ids. Consumed by the `/api/espn/*` routes in `server.py`; live smoke CLI: `python3 -m backend.espn_service <league_id> [season]` |
+| `data_loader.py` | ~560 | Pulls DynastyProcess CSV; maps consensus values → seed Elo. Since #145/#148 **blends KeepTradeCut** into the DP baseline before seeding (`_apply_consensus_blend`): KTC's `dynasty-rankings` page HTML is scraped once/boot (`parse_ktc_players`, 24h TTL, fail-soft → DP-only), rank-normalized onto the DP value curve, weighted by `ktc_blend_weight`; `sf_tep` TE seeds get the `tep_te_uplift` premium. KTC↔DP matching reuses the DP `db_playerids.csv` crosswalk (`espn_service.get_crosswalk`, now also exposing `by_ktc_id`/`by_mfl_id`). `load_consensus_maps` also returns a per-name DP position map — the DP↔Sleeper name join is position-strict (#127: never name-match across positions; two NFL players can share a normalised name, e.g. Kenneth Walker WR vs Kenneth Walker III RB) |
+| `espn_service.py` | ~470 | ESPN league-linking adapter (flag `espn.link`): unofficial v3 API reads (browser-signature headers, injected `_opener`), payload parsing, and the DP `db_playerids` crosswalk (24h-TTL in-memory cache, snapshot fallback) that maps ESPN rosters → Sleeper player ids. **Also the shared crosswalk home** (multi-platform linking): `get_crosswalk` now exposes per-platform id maps (`by_mfl_sleeper`, `by_sportradar_id`, `by_yahoo_id`) + the generic `map_generic_rosters` used by MFL/Fleaflicker. Consumed by `/api/espn/*`; live smoke: `python3 -m backend.espn_service <league_id> [season]` |
+| `mfl_service.py` | ~330 | MFL league-linking adapter (flag `mfl.link`): official export API reads, per-league `wwwNN` host resolution (URL parse or `api.` 302), payload parse (`league`/`rosters`/`players`/`futureDraftPicks`, single-item dict normalization), `mfl_id` crosswalk, and raw future-pick capture. Consumed by `/api/mfl/*`; live smoke: `python3 -m backend.mfl_service <league_id_or_url> [year]` |
+| `fleaflicker_service.py` | ~230 | Fleaflicker league-linking adapter (flag `fleaflicker.link`): zero-auth public JSON API reads (`FetchLeagueStandings`/`FetchLeagueRosters` + email-based `FetchUserLeagues`), `sportradar_id` crosswalk from roster `externalIds`. Consumed by `/api/fleaflicker/*`; live smoke: `python3 -m backend.fleaflicker_service <league_id \| email>` |
 | `trends_service.py` | ~420 | Risers/fallers, contrarian, consensus-gap; reads `elo_history` |
-| `wrapped_collector.py` | ~70 | Exposes `record_event()` — dual-write into `user_events` + denormalized `users.last_*_at` |
+| `wrapped_collector.py` | ~70 | **Frozen** (analytics P0 cutover, LLD §6.4): its `record_event()` wrote `wrapped_events`, which now receives zero writes — all five former callers route through `database.record_event()` into `user_events`. Kept only until the module is retired |
+| `analytics_taxonomy.py` | ~120 | Analytics P0: single source of truth for event names — `ALLOWED_CLIENT_EVENTS` (POST /api/events allowlist), `SERVER_FIRED_EVENTS`, `FUNNEL_CRITICAL` (SDK overflow retention). Asserts client/server namespace disjointness at import |
 | `og_image.py` | ~690 | Open Graph share images (1200×630 PNG) for tiers and trades |
 | `feature_flags.py` | ~220 | Reads `config/features.json`; supports `FTF_FLAGS` env override; `/api/feature-flags/reload` re-reads at runtime |
+| `trade_block_service.py` | new | FB-147 — imports Sleeper trade-block state. Reads the **public** GraphQL `league_players` query (`settings.otb` = flagging roster_id, `settings.otb_added_at` = epoch ms; unauthenticated, unlike the write surface in `sleeper_write.py`), validates each flag against v1 rosters (drops Sleeper's stale flags; skips pick pseudo-ids), and replace-syncs the `trade_block` table. Called by `session_init`'s background daemon behind flag `sleeper.trade_block`. **Engine hook (WIRED, FB-147): `trade_service._load_on_block_by_uid` reads `database.load_trade_block(league_id)` and `_generate_trades_v2` applies a SOFT, acquire-side `block_boost` (flag `trade.block_boost`, knob `block_boost_weight`) — a card whose acquire side holds a counterparty-flagged player gets a bounded post-gate composite bump, mirroring `need_fit` (reorders acceptable trades, never rescues a gated one). See [feedback/items/147-trade-blocks/engine-hook.md](feedback/items/147-trade-blocks/engine-hook.md).** This module only imports + stores; `server.trade_card_to_dict` still stamps the display-only `on_block` field (which boosted cards reuse for client inspectability). |
+| `entitlements.py` | ~380 | Monetization foundation ([plan](plans/monetization/00-platform-foundation.md)): entitlement resolution (`get_entitlements`, working-key ↔ account bridge), flag-aware `check_pro` (off / ENTITLE-OBSERVE / enforce), grant/revoke/list (manual-grant routes wrap these), and the billing pipeline (`ingest_billing_event` → `subscription_events` ledger → projector → `entitlements`). All dark behind `monetize.*` flags; routes are thin wrappers in `server.py` (`/api/me/entitlements`, `/api/admin/entitlements/*`, `/api/billing/*`) |
 
 ### Backend support files
 
@@ -108,7 +117,7 @@ Throwaway eval workspaces and packaged `.skill` bundles are archived in `archive
 3. Returns `(player_a, player_b, player_c)`.
 4. User orders best→worst; client `POST /api/rank3` with the ordering.
 5. `server.py` decomposes into 3 pairwise updates → `swipe_decisions` rows + Elo updates → `member_rankings` snapshot + `elo_history` row per changed player.
-6. `record_event('trio_swipe', …)` in `wrapped_collector.py` writes `user_events` and bumps `users.last_active_at` / `last_rank_at` / `events_count`.
+6. `database.record_event('trio_swipe', …)` writes `user_events` and bumps `users.last_active_at` / `last_rank_at` / `events_count` (+ the ranking streak).
 7. Returns updated progress; client repaints the bar.
 
 ## Request lifecycle (trade card — v2 engine, flag `trade_engine.v2`)
@@ -156,12 +165,14 @@ External scheduler (Render cron) hits four endpoints:
 
 ## Event recording
 
-`record_event(user_id, event_type, props=…)` in `wrapped_collector.py` does a dual-write:
+`record_event(user_id, event_type, props=…)` in `database.py` does a dual-write:
 
-1. Append to `user_events` (full structured row with device/source/session/league context).
-2. Update the matching `users.last_*_at` denormalized column, plus `events_count`, `last_device_type`, `last_os_version`, `last_app_version`.
+1. Append to `user_events` (full structured row with device/source/session/league context; `event_id` stays NULL — server-fired rows never need an idempotency key).
+2. Update the matching `users.last_*_at` denormalized column, plus `events_count`, `last_device_type`, `last_os_version`, `last_app_version` (and the ranking streak for `_RANK_STREAK_EVENTS`, which includes `tier_save` since the P0 cutover).
 
-Hot-read endpoints (inactivity scans, "last login" lookups) read the denormalized `users.*` columns. Analytical reads scan `user_events` via the `(user_id, occurred_at)` or `(event_type, occurred_at)` indexes.
+Client-fired events arrive via `POST /api/events` (allowlist in `analytics_taxonomy.py`, per-device rate limit, `event_id` dedup against the full unique index) and land in the same `user_events` lineage with the envelope columns populated — never through `record_event()`, which would double-bump the denorm columns. Health counters for the ingest path are served by `GET /api/admin/analytics/health`.
+
+Hot-read endpoints (inactivity scans, "last login" lookups) read the denormalized `users.*` columns. Analytical reads scan `user_events` via the `(user_id, occurred_at)`, `(event_type, occurred_at)`, or `(device_id, occurred_at)` indexes.
 
 ## Tier bands flow
 

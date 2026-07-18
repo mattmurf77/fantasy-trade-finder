@@ -128,6 +128,14 @@ function TradeCardComp({
   // hitSlop lifts the touch target to ~44px). Rendered via PlayerCard's
   // rightSlot; on the give side it shares the slot with the UNTOUCHABLE
   // badge so both features co-exist.
+  // FB-147 — "ON THE BLOCK" micro-tag: the backend stamps `on_block` on a
+  // card player when the league's synced Sleeper trade block (flag
+  // sleeper.trade_block) names them. Chalkline Badge construction, flare =
+  // informational (ADR-005). Absent field = no tag, so legacy payloads and
+  // flag-off builds render exactly as before.
+  const blockBadge = (p: Player) =>
+    p.on_block ? <Badge label="ON THE BLOCK" color={flare.base} colorText /> : null;
+
   const swapSlot = (p: Player, side: 'give' | 'receive') =>
     onSwapPlayer ? (
       <Pressable
@@ -229,8 +237,9 @@ function TradeCardComp({
                   onToggleUntouchable ? () => onToggleUntouchable(p) : undefined
                 }
                 rightSlot={
-                  untouchableIds?.has(p.id) || onSwapPlayer ? (
+                  p.on_block || untouchableIds?.has(p.id) || onSwapPlayer ? (
                     <View style={styles.rightSlotRow}>
+                      {blockBadge(p)}
                       {untouchableIds?.has(p.id) ? (
                         <Badge label="UNTOUCHABLE" color={flare.base} />
                       ) : null}
@@ -256,7 +265,14 @@ function TradeCardComp({
                 key={p.id}
                 player={p}
                 compact
-                rightSlot={swapSlot(p, 'receive') ?? undefined}
+                rightSlot={
+                  p.on_block || onSwapPlayer ? (
+                    <View style={styles.rightSlotRow}>
+                      {blockBadge(p)}
+                      {swapSlot(p, 'receive')}
+                    </View>
+                  ) : undefined
+                }
               />
             ))}
           </View>

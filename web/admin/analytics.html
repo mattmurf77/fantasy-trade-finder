@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<!-- Analytics dashboard (analytics-platform P2). Thin renderer: it fetches the
+     CRON_SECRET-gated JSON from /api/admin/analytics/<report> and renders it.
+     ALL SQL + computation lives server-side in backend/analytics_queries.py;
+     this page computes nothing. Data values are written via textContent only
+     (never innerHTML) so a hostile event string can't XSS the one browser that
+     holds the admin secret. Chalkline design system (ADR-005). -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FTF Analytics</title>
+  <style>
+    :root {
+      --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+      --line:#262C35; --line-strong:#3D4654;
+      --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+      --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+      --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+      --mono:'IBM Plex Mono','SFMono-Regular',Menlo,monospace;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--ink-0);color:var(--chalk);
+      font-family:'Archivo','Barlow Condensed',system-ui,sans-serif;
+      font-size:13px;line-height:1.5;padding:0 0 80px}
+    header{background:var(--ink-1);border-bottom:1px solid var(--line);
+      padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+      position:sticky;top:0;z-index:10}
+    h1{font-size:16px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+    .controls{display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap}
+    input,button,select{font-family:inherit;font-size:12px;background:var(--ink-2);
+      color:var(--chalk);border:1px solid var(--line-strong);border-radius:6px;
+      padding:6px 9px}
+    input[type=date]{color-scheme:dark}
+    button{cursor:pointer}
+    button.primary{background:var(--ice);color:var(--on-ice);border-color:var(--ice);font-weight:600}
+    button.primary:hover{background:var(--ice-press)}
+    .tabs{display:flex;gap:2px;background:var(--ink-1);padding:0 12px;
+      border-bottom:1px solid var(--line);overflow-x:auto;position:sticky;top:51px;z-index:9}
+    .tab{padding:10px 13px;color:var(--chalk-dim);cursor:pointer;white-space:nowrap;
+      border-bottom:2px solid transparent;font-size:12px;letter-spacing:.02em}
+    .tab:hover{color:var(--chalk)}
+    .tab.active{color:var(--ice);border-bottom-color:var(--ice)}
+    main{padding:20px;max-width:1200px;margin:0 auto}
+    .meta{color:var(--chalk-faint);font-size:11px;font-family:var(--mono);margin-bottom:12px}
+    table{border-collapse:collapse;width:100%;font-size:12px;margin-bottom:20px}
+    th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+    th{color:var(--chalk-dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.03em}
+    td{font-family:var(--mono)}
+    td.num{text-align:left}
+    .dash{color:var(--chalk-faint)}       /* '—' dark cell */
+    .small{color:var(--warn);font-size:11px}  /* n_too_small */
+    .caveats{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+      padding:12px 14px;margin-bottom:18px;font-size:12px}
+    .caveats h3{font-size:11px;text-transform:uppercase;color:var(--chalk-dim);margin-bottom:6px;letter-spacing:.03em}
+    .cav{color:var(--chalk-dim);margin:3px 0;font-family:var(--mono);font-size:11px}
+    .cav b{color:var(--warn);font-weight:600}
+    .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;margin-bottom:16px}
+    .kpi{display:inline-block;margin-right:28px}
+    .kpi .v{font-size:24px;font-weight:700;font-family:var(--mono)}
+    .kpi .l{font-size:11px;color:var(--chalk-dim);text-transform:uppercase;letter-spacing:.03em}
+    .err{color:var(--neg);border-color:var(--neg)}
+    .gate{max-width:400px;margin:80px auto;text-align:center}
+    .gate input{width:100%;margin:12px 0;text-align:center;font-family:var(--mono)}
+    .hidden{display:none}
+    a.export{color:var(--ice);text-decoration:none;font-size:11px;font-family:var(--mono)}
+  </style>
+</head>
+<body>
+  <div id="gate" class="gate">
+    <h1>FTF Analytics</h1>
+    <p style="color:var(--chalk-dim);margin-top:8px">Operator access — enter the admin secret.</p>
+    <input id="secret" type="password" placeholder="X-Cron-Secret" autocomplete="off">
+    <button class="primary" id="gate-go" style="width:100%">Enter</button>
+    <p id="gate-err" style="color:var(--neg);margin-top:10px;min-height:16px"></p>
+  </div>
+
+  <div id="app" class="hidden">
+    <header>
+      <h1>FTF Analytics</h1>
+      <div class="controls">
+        <input id="start" type="date">
+        <input id="end" type="date">
+        <button id="reload" class="primary">Reload</button>
+        <a id="csv" class="export" href="#" target="_blank">↓ CSV</a>
+        <button id="signout">Sign out</button>
+      </div>
+    </header>
+    <div class="tabs" id="tabs"></div>
+    <main id="content"></main>
+  </div>
+
+  <script>
+  (function(){
+    "use strict";
+    var TABS = [
+      ["waterfall","Waterfall"],["time","Time / Think"],["bottlenecks","Bottlenecks"],
+      ["churn","Churn"],["releases","Releases"],["adoption","Adoption"],
+      ["engagement","Engagement"],["pfo","PFO"],["onepager","One-Pager"],
+      ["experiments","Experiments"],["health","Health"]
+    ];
+    var SS_KEY = "ftf.adminSecret";
+    var active = "engagement";
+    var $ = function(id){ return document.getElementById(id); };
+
+    // ---- element helpers (textContent only; no innerHTML of data) ----
+    function el(tag, cls, txt){ var e=document.createElement(tag);
+      if(cls) e.className=cls; if(txt!=null) e.textContent=String(txt); return e; }
+    function clear(node){ while(node.firstChild) node.removeChild(node.firstChild); }
+
+    // Render a metric cell object {value,n,caveat} OR a scalar.
+    function cell(v){
+      var td = el("td","num");
+      if(v && typeof v==="object" && ("value" in v || "caveat" in v || "error" in v)){
+        if(v.error){ td.textContent="⚠ "+v.error; td.classList.add("err"); return td; }
+        if(v.caveat==="dark"){ td.textContent="—"; td.className="num dash"; return td; }
+        if(v.caveat==="n_too_small"){
+          var s=el("span","small","n="+(v.n==null?"?":v.n)+" (<20)"); td.appendChild(s); return td; }
+        var val=v.value;
+        td.textContent = (val==null? "—" : (typeof val==="number" && val<=1 && val>=0 && String(val).indexOf(".")>=0 ? (val*100).toFixed(1)+"%" : val));
+        return td;
+      }
+      td.textContent = (v==null? "—" : v);
+      if(v==null) td.className="num dash";
+      return td;
+    }
+
+    function table(cols, rows, cellKeys){
+      var t=el("table"), thead=el("thead"), tr=el("tr");
+      cols.forEach(function(c){ tr.appendChild(el("th",null,c)); });
+      thead.appendChild(tr); t.appendChild(thead);
+      var tb=el("tbody");
+      rows.forEach(function(r){
+        var row=el("tr");
+        cellKeys.forEach(function(k){
+          var v = r[k];
+          if(v && typeof v==="object" && !("value" in v) && !("error" in v)){
+            row.appendChild(el("td",null,JSON.stringify(v)));   // plain object → JSON text
+          } else { row.appendChild(cell(v)); }
+        });
+        tb.appendChild(row);
+      });
+      t.appendChild(tb); return t;
+    }
+
+    function caveatsBlock(caveats){
+      if(!caveats || !caveats.length) return null;
+      var box=el("div","caveats"); box.appendChild(el("h3",null,"Caveats — why some cells read —"));
+      caveats.forEach(function(c){
+        var p=el("p","cav"); p.appendChild(el("b",null,"["+c.code+"] "));
+        p.appendChild(document.createTextNode((c.scope||"")+" — "+(c.detail||"")));
+        box.appendChild(p);
+      });
+      return box;
+    }
+
+    // ---- fetch ----
+    function secret(){ return sessionStorage.getItem(SS_KEY)||""; }
+    function api(report, cb){
+      var qs = "?start="+encodeURIComponent($("start").value)+"&end="+encodeURIComponent($("end").value);
+      fetch("/api/admin/analytics/"+report+qs, { headers:{ "X-Cron-Secret": secret() } })
+        .then(function(res){
+          if(res.status===401||res.status===403){ signOut("Secret rejected — re-enter."); throw new Error("auth"); }
+          return res.json().then(function(j){ return {status:res.status, body:j}; });
+        }).then(function(r){ cb(null, r); })
+        .catch(function(e){ if(e.message!=="auth") cb(e); });
+    }
+
+    // ---- per-report renderers ----
+    function render(report, r){
+      var c=$("content"); clear(c);
+      if(r.status===400){ var e=el("div","card err","Error: "+(r.body&&r.body.error)); c.appendChild(e); return; }
+      var b=r.body;
+      var meta=el("div","meta",
+        "window "+(b.window?b.window.start+" → "+b.window.end:"")+" · UTC ISO-week (Mon) · generated "+ (b.generated_at||""));
+      c.appendChild(meta);
+
+      if(report==="health"){ renderHealth(c,b); return; }
+      if(report==="experiments"){ c.appendChild(el("div","card","No experiments running — the experiment engine ships in P3.")); return; }
+
+      // Summary KPIs where present.
+      if(b.summary){
+        var card=el("div","card");
+        Object.keys(b.summary).forEach(function(k){
+          var v=b.summary[k];
+          if(v && typeof v==="object") return;   // skip nested (streak dist etc.)
+          var kpi=el("div","kpi");
+          kpi.appendChild(el("div","v", v==null?"—":v)); kpi.appendChild(el("div","l",k));
+          card.appendChild(kpi);
+        });
+        if(card.childNodes.length) c.appendChild(card);
+      }
+
+      var cav=caveatsBlock(b.caveats); if(cav) c.appendChild(cav);
+
+      // Table shape per report.
+      var rows=b.rows;
+      if(report==="pfo" || report==="onepager"){
+        c.appendChild(el("pre","card")).textContent = JSON.stringify(rows,null,2);
+        return;
+      }
+      if(!Array.isArray(rows) || !rows.length){ c.appendChild(el("div","card","No rows in window.")); return; }
+      // Logical column order: label-ish keys first, then the rest (Flask sorts
+      // JSON keys alphabetically, so we re-order for readability here).
+      var FIRST=["week","stage","name","vertical","counter","user_id","app_version","action"];
+      var ks=Object.keys(rows[0]);
+      var keys=FIRST.filter(function(k){return ks.indexOf(k)>=0;})
+                    .concat(ks.filter(function(k){return FIRST.indexOf(k)<0;}));
+      c.appendChild(table(keys, rows, keys));
+    }
+
+    function renderHealth(c,b){
+      var card=el("div","card");
+      [["WAL",b.wal===null?"n/a (pg)":String(b.wal)],
+       ["event_id index",String(b.event_id_index_present)],
+       ["WAL bytes",b.wal_file_bytes==null?"—":b.wal_file_bytes]].forEach(function(p){
+        var k=el("div","kpi"); k.appendChild(el("div","v",p[1])); k.appendChild(el("div","l",p[0])); card.appendChild(k);
+      });
+      c.appendChild(card);
+      var counters=b.counters||{};
+      var rows=Object.keys(counters).map(function(k){ return {counter:k, value:counters[k]}; });
+      c.appendChild(el("div","meta","ingest counters — since "+(b.since||"deploy")));
+      c.appendChild(table(["counter","value"], rows, ["counter","value"]));
+    }
+
+    // ---- tab machinery ----
+    function selectTab(report){
+      active=report;
+      Array.prototype.forEach.call($("tabs").children, function(t){
+        t.classList.toggle("active", t.dataset.report===report); });
+      var csv=$("csv");
+      csv.href="/api/admin/analytics/"+report+"?format=csv&start="+$("start").value+"&end="+$("end").value;
+      csv.style.display=(report==="health"||report==="experiments")?"none":"inline";
+      if(report==="health"){ apiHealth(); return; }
+      if(report==="experiments"){ render(report,{status:200,body:{}}); return; }
+      load();
+    }
+    function apiHealth(){
+      fetch("/api/admin/analytics/health",{headers:{"X-Cron-Secret":secret()}})
+        .then(function(res){ if(res.status>=400){signOut("Secret rejected.");throw 0;} return res.json(); })
+        .then(function(b){ render("health",{status:200,body:b}); }).catch(function(){});
+    }
+    function load(){
+      var c=$("content"); clear(c); c.appendChild(el("div","meta","loading "+active+"…"));
+      api(active, function(err,r){ if(err){ clear(c); c.appendChild(el("div","card err","Network error.")); return; } render(active,r); });
+    }
+
+    // ---- gate ----
+    function showApp(){ $("gate").classList.add("hidden"); $("app").classList.remove("hidden");
+      buildTabs(); defaultDates(); selectTab(active); }
+    function signOut(msg){ sessionStorage.removeItem(SS_KEY); $("app").classList.add("hidden");
+      $("gate").classList.remove("hidden"); if(msg) $("gate-err").textContent=msg; }
+    function buildTabs(){ var t=$("tabs"); clear(t);
+      TABS.forEach(function(p){ var d=el("div","tab",p[1]); d.dataset.report=p[0];
+        d.onclick=function(){ selectTab(p[0]); }; t.appendChild(d); }); }
+    function defaultDates(){ var now=new Date(); var end=now.toISOString().slice(0,10);
+      var s=new Date(now.getTime()-27*864e5).toISOString().slice(0,10);
+      $("start").value=s; $("end").value=end; }
+
+    $("gate-go").onclick=function(){ var v=$("secret").value.trim();
+      if(!v){ $("gate-err").textContent="Enter the secret."; return; }
+      sessionStorage.setItem(SS_KEY,v);
+      // Probe health to validate the secret before entering.
+      fetch("/api/admin/analytics/health",{headers:{"X-Cron-Secret":v}}).then(function(res){
+        if(res.status>=400){ sessionStorage.removeItem(SS_KEY); $("gate-err").textContent="Secret rejected."; return; }
+        showApp();
+      }).catch(function(){ $("gate-err").textContent="Network error."; });
+    };
+    $("secret").addEventListener("keydown",function(e){ if(e.key==="Enter") $("gate-go").click(); });
+    $("reload").onclick=load;
+    $("signout").onclick=function(){ signOut(""); };
+
+    if(secret()) showApp();   // resume within the tab session
+  })();
+  </script>
+</body>
+</html>

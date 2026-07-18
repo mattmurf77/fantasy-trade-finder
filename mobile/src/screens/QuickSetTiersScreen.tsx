@@ -35,6 +35,9 @@ import { getRankings, saveTiers } from '../api/rankings';
 import { TIERS, TIER_LABEL, tierForElo } from '../utils/tierBands';
 import { useSession } from '../state/useSession';
 import { useScoringFormat } from '../hooks/useScoringFormat';
+import { getOnboardingState, patchOnboardingState } from '../state/useOnboardingState';
+import { setPendingQuicksetRegen } from '../state/onboardingBus';
+import { track } from '../api/events';
 import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/types';
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
@@ -75,6 +78,11 @@ export default function QuickSetTiersScreen() {
   const [position, setPosition] = useState<Position>(
     route.params?.position ?? 'QB',
   );
+  // Onboarding item 7 — entered from the Trades prompt card. Changes only
+  // the EXIT: skip the Quick Rank offer, post a pending deck-regeneration
+  // to the onboarding bus, and bounce back to the Trades tab so the user
+  // sees their board change the suggestions (the F2 "aha").
+  const onboardingReturn: boolean = !!route.params?.onboardingReturn;
   const [tierIdx, setTierIdx] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   // #138 — per-step player-name filter over the chip grid.
@@ -149,6 +157,24 @@ export default function QuickSetTiersScreen() {
   const goTo = useCallback(
     (idx: number, savedMap: Partial<Record<Tier, string[]>>) => {
       if (idx >= TIERS.length) {
+        // Onboarding: record the completed position — the Trades provenance
+        // chip flips CONSENSUS VALUES → YOUR BOARD off this list. Inert
+        // write when onboarding surfaces are dark.
+        const donePositions = getOnboardingState().quicksetCompletedPositions;
+        if (!donePositions.includes(position)) {
+          patchOnboardingState({
+            quicksetCompletedPositions: [...donePositions, position],
+          });
+        }
+        track('quickset_completed', { position, onboarding: onboardingReturn }, 'QuickSetTiers');
+        if (onboardingReturn) {
+          // Item 7 exit: no Quick Rank offer (suppressed by ruling F2), post
+          // the regen handoff, and return to Trades. Unknown route names
+          // bubble up from the Rank stack to the tab navigator.
+          setPendingQuicksetRegen(position);
+          navigation.navigate('Trades');
+          return;
+        }
         // #119 — with 'quickset' as a launch route this screen can be the
         // stack's first mount (no history); fall through to the Tiers board
         // it just wrote, same fallback as the header back control.

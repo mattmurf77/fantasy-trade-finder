@@ -239,6 +239,14 @@ _DEFAULT_CFG: dict[str, float] = {
     # 0.30 → 0.15 per interview 2026-07-17: need counting (bodies vs
     # slots) is right but should stay a LIGHT multiplier (±7.5%).
     "need_fit_weight":            0.15,
+    # FB-147 engine hook (flag trade.block_boost) — SOFT, acquire-side
+    # trade-block boost: a card whose ACQUIRE side holds ≥1 player the
+    # counterparty flagged "on the block" gets composite *= 1 + this weight.
+    # Bounded multiplier applied AFTER all gates — reorders acceptable trades,
+    # never rescues a gated one, exactly like need_fit_weight. 0 = no-op
+    # (composite byte-identical, no stamp). ±15% at the default, matching the
+    # light-multiplier calibration the interview set for need_fit.
+    "block_boost_weight":         0.15,
     # ------------------------------------------------------------------
     # Interview phase 2 (docs/plans/trade-logic-interview-2026-07-17.md)
     # ------------------------------------------------------------------
@@ -722,6 +730,41 @@ def need_fit_score(
     if not parts:
         return None
     return round(sum(parts) / len(parts), 3)
+
+
+# ---------------------------------------------------------------------------
+# FB-147 engine hook — acquire-side trade-block boost (flag: trade.block_boost)
+# The trade block (backend/trade_block_service.py) records which players each
+# manager flagged "on the block" in Sleeper's Trade Center. A card that would
+# have the user ACQUIRE such a player from the manager who flagged it is a more
+# landable deal, so it earns a bounded post-gate composite bump. Loaded once
+# per generation like the untouchable set; give-side / the user's own flagged
+# players are out of scope (operator-approved acquire-side-only).
+# ---------------------------------------------------------------------------
+
+
+def _load_on_block_by_uid(league_id: str) -> dict[str, frozenset]:
+    """League trade-block snapshot → {flagging_owner_user_id: frozenset(pids)}.
+
+    Reads database.load_trade_block(league_id) and groups the flagged player
+    ids by the manager who flagged them, so each card's acquire side is judged
+    against the COUNTERPARTY's own block. Ownership was validated at sync time
+    (stale flags dropped — see trade_block_service.parse_trade_block), so every
+    id here is genuinely on that owner's block. Any read failure ⇒ empty map,
+    so the boost silently no-ops rather than breaking generation.
+    """
+    try:
+        from .database import load_trade_block
+        rows = load_trade_block(league_id)
+    except Exception:
+        return {}
+    by_uid: dict[str, set] = {}
+    for r in rows:
+        uid = str(r.get("user_id") or "")
+        pid = str(r.get("player_id") or "")
+        if uid and pid:
+            by_uid.setdefault(uid, set()).add(pid)
+    return {uid: frozenset(pids) for uid, pids in by_uid.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -1430,6 +1473,12 @@ class TradeCard:
     # the flag is off or no traded asset has a positional profile.
     # Serialized when set.
     need_fit: Optional[float] = None
+    # FB-147 engine hook (flag trade.block_boost) — True when this card's
+    # ACQUIRE side holds a player the counterparty flagged "on the block",
+    # earning the bounded post-gate composite bump. In-process/QA record only;
+    # client inspectability rides the existing per-player `on_block` receive-row
+    # flag (#147), so no separate serialization is added (never duplicated).
+    block_boosted: bool = False
     # Interview phase 2 (flag trade.lanes) — "window" | "value" | None:
     # which deck lane the card belongs to, from the user's resolved
     # window (declared or seeded). None = user has no window → no lanes.
@@ -1719,6 +1768,12 @@ class TradeService:
         _targeting = FLAGS.trade_finder_targeting
         # FB-96 — automatic positional-need fit (no user input required).
         _need_fit_on = FLAGS.trade_need_fit
+        # FB-147 — acquire-side trade-block boost. Load the league's on-block
+        # snapshot once (like the untouchable set), keyed by the flagging owner
+        # so each card is judged against the COUNTERPARTY's flagged players.
+        # Knob 0 ⇒ skip entirely (composite byte-identical, no stamp).
+        _block_boost_w = _c("block_boost_weight") if FLAGS.trade_block_boost else 0.0
+        _on_block_by_uid = _load_on_block_by_uid(league_id) if _block_boost_w else {}
         acquire_targets: list[str] = []
         sell_targets: list[str] = []
         if _targeting:
@@ -1925,6 +1980,22 @@ class TradeService:
                         c.need_fit = nf
                         c.composite_score = round(
                             c.composite_score * (1.0 + w_nf * (nf - 0.5)), 3)
+            # FB-147 — acquire-side trade-block boost: a card whose ACQUIRE
+            # side holds ≥1 player THIS counterparty flagged "on the block"
+            # gets a flat bounded composite bump. Applied AFTER all gates
+            # (fairness / user-gain / surplus are already settled) — it only
+            # reorders acceptable trades, never rescues a gated one, exactly
+            # like need_fit. Give-side / the user's own flagged players are out
+            # of scope. Flag off or knob 0 ⇒ _block_boost_w is 0 and this is a
+            # no-op (composite byte-identical, no stamp).
+            if _block_boost_w:
+                _blk = _on_block_by_uid.get(member.user_id)
+                if _blk:
+                    for c in cards:
+                        if _blk.intersection(c.receive_player_ids):
+                            c.block_boosted = True
+                            c.composite_score = round(
+                                c.composite_score * (1.0 + _block_boost_w), 3)
             # Interview phase 2 — two-lane labels (flag trade.lanes): stamp
             # each card "window" / "value" from the user's resolved window.
             # Pure label on consensus values; never touches gates/scores.

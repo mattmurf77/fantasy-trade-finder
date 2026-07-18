@@ -1,0 +1,484 @@
+{
+  "league": {
+    "version": "1.0",
+    "encoding": "utf-8",
+    "league": {
+      "id": "10005",
+      "name": "Masters Copper Dynasty 182198 - Classic 4",
+      "franchises": {
+        "count": "3",
+        "franchise": [
+          {
+            "id": "0001",
+            "name": "Clobberin Time 2"
+          },
+          {
+            "id": "0002",
+            "name": "DoCoMo IV"
+          },
+          {
+            "id": "0003",
+            "name": "Benji's Boys C3"
+          }
+        ]
+      }
+    }
+  },
+  "rosters": {
+    "version": "1.0",
+    "encoding": "utf-8",
+    "rosters": {
+      "franchise": [
+        {
+          "id": "0001",
+          "week": "1",
+          "player": [
+            {
+              "id": "14102",
+              "status": "ROSTER"
+            },
+            {
+              "id": "13299",
+              "status": "ROSTER"
+            },
+            {
+              "id": "15281",
+              "status": "ROSTER"
+            },
+            {
+              "id": "13131",
+              "status": "ROSTER"
+            },
+            {
+              "id": "14777",
+              "status": "ROSTER"
+            },
+            {
+              "id": "15789",
+              "status": "ROSTER"
+            },
+            {
+              "id": "16615",
+              "status": "ROSTER"
+            },
+            {
+              "id": "16616",
+              "status": "ROSTER"
+            },
+            {
+              "id": "0721",
+              "status": "ROSTER"
+            }
+          ]
+        },
+        {
+          "id": "0002",
+          "week": "1",
+          "player": [
+            {
+              "id": "13319",
+              "status": "ROSTER"
+            },
+            {
+              "id": "11244",
+              "status": "ROSTER"
+            },
+            {
+              "id": "14073",
+              "status": "ROSTER"
+            },
+            {
+              "id": "14104",
+              "status": "ROSTER"
+            },
+            {
+              "id": "14833",
+              "status": "ROSTER"
+            },
+            {
+              "id": "14802",
+              "status": "ROSTER"
+            },
+            {
+              "id": "15237",
+              "status": "ROSTER"
+            },
+            {
+              "id": "15708",
+              "status": "ROSTER"
+            },
+            {
+              "id": "0702",
+              "status": "ROSTER"
+            }
+          ]
+        },
+        {
+          "id": "0003",
+          "week": "1",
+          "player": [
+            {
+              "id": "14835",
+              "status": "ROSTER"
+            },
+            {
+              "id": "15762",
+              "status": "ROSTER"
+            },
+            {
+              "id": "13630",
+              "status": "ROSTER"
+            },
+            {
+              "id": "15715",
+              "status": "ROSTER"
+            },
+            {
+              "id": "15290",
+              "status": "ROSTER"
+            },
+            {
+              "id": "15698",
+              "status": "ROSTER"
+            },
+            {
+              "id": "13192",
+              "status": "ROSTER"
+            },
+            {
+              "id": "16598",
+              "status": "ROSTER"
+            },
+            {
+              "id": "0710",
+              "status": "ROSTER"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "futureDraftPicks": {
+    "version": "1.0",
+    "encoding": "utf-8",
+    "futureDraftPicks": {
+      "franchise": [
+        {
+          "id": "0001",
+          "futureDraftPick": [
+            {
+              "year": "2027",
+              "originalPickFor": "0001",
+              "round": "2"
+            },
+            {
+              "round": "3",
+              "originalPickFor": "0001",
+              "year": "2027"
+            },
+            {
+              "year": "2028",
+              "round": "1",
+              "originalPickFor": "0001"
+            },
+            {
+              "round": "2",
+              "originalPickFor": "0001",
+              "year": "2028"
+            },
+            {
+              "originalPickFor": "0001",
+              "round": "3",
+              "year": "2028"
+            },
+            {
+              "round": "1",
+              "originalPickFor": "0001",
+              "year": "2029"
+            },
+            {
+              "year": "2029",
+              "round": "2",
+              "originalPickFor": "0001"
+            },
+            {
+              "year": "2029",
+              "originalPickFor": "0001",
+              "round": "3"
+            }
+          ]
+        },
+        {
+          "futureDraftPick": [
+            {
+              "originalPickFor": "0002",
+              "round": "1",
+              "year": "2027"
+            },
+            {
+              "year": "2027",
+              "round": "2",
+              "originalPickFor": "0002"
+            },
+            {
+              "originalPickFor": "0002",
+              "round": "3",
+              "year": "2027"
+            },
+            {
+              "originalPickFor": "0002",
+              "round": "1",
+              "year": "2028"
+            },
+            {
+              "year": "2028",
+              "originalPickFor": "0002",
+              "round": "2"
+            },
+            {
+              "year": "2028",
+              "originalPickFor": "0002",
+              "round": "3"
+            },
+            {
+              "year": "2029",
+              "round": "1",
+              "originalPickFor": "0002"
+            },
+            {
+              "originalPickFor": "0002",
+              "round": "2",
+              "year": "2029"
+            },
+            {
+              "round": "3",
+              "originalPickFor": "0002",
+              "year": "2029"
+            }
+          ],
+          "id": "0002"
+        },
+        {
+          "futureDraftPick": [
+            {
+              "originalPickFor": "0003",
+              "round": "1",
+              "year": "2027"
+            },
+            {
+              "year": "2027",
+              "originalPickFor": "0003",
+              "round": "2"
+            },
+            {
+              "year": "2027",
+              "round": "3",
+              "originalPickFor": "0003"
+            },
+            {
+              "year": "2028",
+              "round": "1",
+              "originalPickFor": "0003"
+            },
+            {
+              "year": "2028",
+              "originalPickFor": "0003",
+              "round": "2"
+            },
+            {
+              "year": "2028",
+              "originalPickFor": "0003",
+              "round": "3"
+            },
+            {
+              "round": "1",
+              "originalPickFor": "0003",
+              "year": "2029"
+            },
+            {
+              "year": "2029",
+              "originalPickFor": "0003",
+              "round": "2"
+            },
+            {
+              "round": "3",
+              "originalPickFor": "0003",
+              "year": "2029"
+            }
+          ],
+          "id": "0003"
+        }
+      ]
+    }
+  },
+  "players": {
+    "version": "1.0",
+    "encoding": "utf-8",
+    "players": {
+      "player": [
+        {
+          "id": "0702",
+          "name": "Colts, Indianapolis",
+          "position": "TMPK",
+          "team": "IND"
+        },
+        {
+          "id": "0710",
+          "name": "Steelers, Pittsburgh",
+          "position": "TMPK",
+          "team": "PIT"
+        },
+        {
+          "id": "0721",
+          "name": "Bears, Chicago",
+          "position": "TMPK",
+          "team": "CHI"
+        },
+        {
+          "id": "11244",
+          "name": "Kelce, Travis",
+          "position": "TE",
+          "team": "KCC"
+        },
+        {
+          "id": "13131",
+          "name": "Mixon, Joe",
+          "position": "RB",
+          "team": "FA"
+        },
+        {
+          "id": "13192",
+          "name": "Njoku, David",
+          "position": "TE",
+          "team": "LAC"
+        },
+        {
+          "id": "13299",
+          "name": "Kittle, George",
+          "position": "TE",
+          "team": "SFO"
+        },
+        {
+          "id": "13319",
+          "name": "Jones, Aaron",
+          "position": "RB",
+          "team": "MIN"
+        },
+        {
+          "id": "13630",
+          "name": "Sutton, Courtland",
+          "position": "WR",
+          "team": "DEN"
+        },
+        {
+          "id": "14073",
+          "name": "Jacobs, Josh",
+          "position": "RB",
+          "team": "GBP"
+        },
+        {
+          "id": "14102",
+          "name": "Metcalf, DK",
+          "position": "WR",
+          "team": "PIT"
+        },
+        {
+          "id": "14104",
+          "name": "Brown, A.J.",
+          "position": "WR",
+          "team": "NEP"
+        },
+        {
+          "id": "14777",
+          "name": "Burrow, Joe",
+          "position": "QB",
+          "team": "CIN"
+        },
+        {
+          "id": "14802",
+          "name": "Taylor, Jonathan",
+          "position": "RB",
+          "team": "IND"
+        },
+        {
+          "id": "14833",
+          "name": "Jeudy, Jerry",
+          "position": "WR",
+          "team": "CLE"
+        },
+        {
+          "id": "14835",
+          "name": "Higgins, Tee",
+          "position": "WR",
+          "team": "CIN"
+        },
+        {
+          "id": "15237",
+          "name": "Lawrence, Trevor",
+          "position": "QB",
+          "team": "JAC"
+        },
+        {
+          "id": "15281",
+          "name": "Chase, Ja'Marr",
+          "position": "WR",
+          "team": "CIN"
+        },
+        {
+          "id": "15290",
+          "name": "Collins, Nico",
+          "position": "WR",
+          "team": "HOU"
+        },
+        {
+          "id": "15698",
+          "name": "Purdy, Brock",
+          "position": "QB",
+          "team": "SFO"
+        },
+        {
+          "id": "15708",
+          "name": "Hall, Breece",
+          "position": "RB",
+          "team": "NYJ"
+        },
+        {
+          "id": "15715",
+          "name": "Cook, James",
+          "position": "RB",
+          "team": "BUF"
+        },
+        {
+          "id": "15762",
+          "name": "Pickens, George",
+          "position": "WR",
+          "team": "DAL"
+        },
+        {
+          "id": "15789",
+          "name": "Watson, Christian",
+          "position": "WR",
+          "team": "GBP"
+        },
+        {
+          "id": "16598",
+          "name": "Irving, Bucky",
+          "position": "RB",
+          "team": "TBB"
+        },
+        {
+          "id": "16615",
+          "name": "Nabers, Malik",
+          "position": "WR",
+          "team": "NYG"
+        },
+        {
+          "id": "16616",
+          "name": "Odunze, Rome",
+          "position": "WR",
+          "team": "CHI"
+        }
+      ]
+    }
+  }
+}

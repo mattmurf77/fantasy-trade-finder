@@ -77,7 +77,7 @@
 ## Local Conventions That Become Dependencies If Violated
 
 - **DB at `data/trade_finder.db`.** Don't move it; multiple modules hardcode the path.
-- **`.sleeper_players_cache.json` at repo root.** Don't move; `server.py` looks here.
+- **`.sleeper_players_cache.json` at `data/`.** Don't move; `server.py` defaults to `data/.sleeper_players_cache.json` (override via `FTF_PLAYERS_CACHE_FILE`), and `build.sh` pre-warms it at deploy.
 - **`config/features.json`** drives feature flags consumed by both backend AND clients. Don't rename or relocate without coordinating all clients.
 - **Port 5000 is the dev contract.** Mobile + web + extension all assume `http://0.0.0.0:5000` (or `localhost:5000` / `192.168.1.88:5000`).
 - **`docs/CLAUDE.md` update-trigger table.** Any change that touches the listed files must update the corresponding doc.

@@ -1,0 +1,49 @@
+# Keep-warm ping for the Render free-tier web service (onboarding item 3).
+#
+# THIS WORKFLOW IS THE KEEP-WARM SWITCH. To turn keep-warm off, disable it in
+# the GitHub Actions UI (Actions → "keep-warm" → "…" → Disable workflow).
+# The `onboarding.keep_warm` feature flag in config/features.json is reserved
+# for future *server-side* warm affordances and does NOT gate this external ping.
+#
+# Why: Render's free tier spins the service down after ~15 min idle; the next
+# request pays a 30–60s cold start, which blows the onboarding redesign's
+# <60s time-to-first-trade-card budget. Pinging a cheap endpoint every 10
+# minutes keeps the dyno warm.
+#
+# Best-effort only: GitHub cron schedules can drift or skip under Actions load,
+# and scheduled workflows are auto-disabled after 60 days of repo inactivity.
+# See docs/runbook.md → "Render cold starts — keep-warm cron".
+
+name: keep-warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping prod feature-flags endpoint
+        env:
+          # Default is the prod URL from render.yaml. The repo variable
+          # FTF_PROD_URL (Settings → Secrets and variables → Actions →
+          # Variables) overrides it if the prod host ever moves.
+          BASE_URL: ${{ vars.FTF_PROD_URL || 'https://fantasy-trade-finder.onrender.com' }}
+        run: |
+          if [ -z "$BASE_URL" ]; then
+            echo "No prod URL configured (FTF_PROD_URL unset and no default) — skipping keep-warm ping."
+            exit 0
+          fi
+          # GET /api/feature-flags is the cheapest wake endpoint: it returns
+          # the in-memory flag map — no DB queries, no external calls.
+          # --max-time 30 is enough to register the request (which is what
+          # triggers Render's spin-up) without hanging the job through a full
+          # cold start; a timeout during a cold start is expected and fine,
+          # so the step always exits 0.
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            --max-time 30 \
+            -A 'ftf-keepwarm' \
+            "$BASE_URL/api/feature-flags") || true
+          echo "keep-warm ping: $BASE_URL/api/feature-flags -> HTTP ${status:-timeout}"

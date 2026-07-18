@@ -24,6 +24,7 @@ from sqlalchemy import (
     Column, Float, Index, Integer, MetaData, String, Table, Text, UniqueConstraint,
     create_engine, delete, func, insert, or_, select, update, and_, text,
 )
+from sqlalchemy import event as sa_event
 from datetime import timedelta
 
 # ---------------------------------------------------------------------------
@@ -40,12 +41,120 @@ DATABASE_URL = os.environ.get("DATABASE_URL", _DEFAULT_URL)
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# connect_args only needed for SQLite (enables WAL mode for concurrent reads)
+# connect_args only needed for SQLite — check_same_thread lets Flask worker
+# threads share pooled connections. (It does NOT enable WAL; the earlier
+# comment here claiming so was wrong. WAL is set by the on-connect listener
+# below — analytics-platform LLD §3.3, NFR-2.)
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 engine   = create_engine(DATABASE_URL, echo=False, future=True,
                          connect_args=_connect_args)
 metadata = MetaData()
+
+# ---------------------------------------------------------------------------
+# Analytics platform engines & PRAGMAs (docs/plans/analytics-platform/lld.md §3.3)
+# ---------------------------------------------------------------------------
+# Three engines, one DB:
+#   engine        — product path (WAL, busy_timeout 5000 — today's pysqlite
+#                   default, now explicit)
+#   ingest_engine — /api/events writes only: 150 ms lock budget so a Sunday
+#                   ingest burst sheds instead of stalling product writes
+#                   (KD-12); BEGIN IMMEDIATE up front kills the
+#                   SQLITE_BUSY_SNAPSHOT lock-upgrade race (RC-8)
+#   ro_engine     — read-only report queries (P2 consumers); mode=ro URI on
+#                   SQLite, default_transaction_read_only on Postgres
+
+if engine.dialect.name == "sqlite":
+    @sa_event.listens_for(engine, "connect")
+    def _sqlite_on_connect(dbapi_conn, _rec):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")         # persistent; set per-connect (cheap)
+        cur.execute("PRAGMA synchronous=NORMAL")       # WAL-safe durability point
+        cur.execute("PRAGMA busy_timeout=5000")        # product-path budget (explicit now)
+        cur.execute("PRAGMA wal_autocheckpoint=1000")  # ~4 MB; Health surfaces wal_file_bytes
+        cur.close()
+
+    ingest_engine = create_engine(DATABASE_URL, future=True,
+        connect_args={"check_same_thread": False, "timeout": 0.15})
+
+    @sa_event.listens_for(ingest_engine, "connect")
+    def _sqlite_on_connect_ingest(dbapi_conn, _rec):        # SEPARATE listener — do NOT attach
+        dbapi_conn.isolation_level = None                    # canonical pysqlite recipe: disable the
+        cur = dbapi_conn.cursor()                            # driver's implicit BEGIN so our explicit
+        cur.execute("PRAGMA journal_mode=WAL")               # BEGIN IMMEDIATE below is the only txn
+        cur.execute("PRAGMA synchronous=NORMAL")             # start (driver autocommit checks have
+        cur.execute("PRAGMA busy_timeout=150")               # churned across Python versions).
+        cur.close()                                          # Do NOT attach _sqlite_on_connect: its
+                                                             # busy_timeout=5000 PRAGMA runs post-
+                                                             # connect and would WIN over 150 (T-23b)
+
+    # RC-8 (SQLITE_BUSY_SNAPSHOT): the ingest SELECT-then-INSERT txn must take
+    # the write lock UP FRONT — a deferred txn's read snapshot fails its lock
+    # upgrade IMMEDIATELY (busy handler not invoked) whenever any product write
+    # committed in between, so under the very Sunday burst this design centers
+    # on, ingest would shed near-always without this.
+    @sa_event.listens_for(ingest_engine, "begin")
+    def _ingest_begin_immediate(conn):
+        conn.exec_driver_sql("BEGIN IMMEDIATE")              # write lock first, then SELECT+insert
+
+    _sqlite_db_file = engine.url.database or _DB_PATH
+    ro_engine = create_engine(
+        f"sqlite:///file:{_sqlite_db_file}?mode=ro&uri=true", future=True,
+        connect_args={"check_same_thread": False, "uri": True},
+        pool_size=2, max_overflow=1)
+    # SQLite has no statement timeout; report queries (P2) install a
+    # per-connection progress-handler watchdog (~5 s vm-ops abort) as the
+    # honest substitute — see analytics_queries.py when it lands.
+else:
+    ingest_engine = engine   # Postgres: same engine; ingest txns issue
+                             # SET LOCAL lock_timeout='150ms' (self-reverting;
+                             # MVCC has no snapshot-upgrade class — RC-8 is
+                             # sqlite-only)
+    ro_engine = create_engine(
+        DATABASE_URL, future=True, pool_size=2, max_overflow=1,
+        connect_args={"options": "-c default_transaction_read_only=on "
+                                 "-c statement_timeout=5s"})
+
+
+def analytics_boot_status() -> dict:
+    """Post-migration boot check (LLD §3.3): {wal, event_id_index_present}.
+
+    wal is None on Postgres ("n/a", rendered green by the Health tab),
+    True/False on SQLite. Never raises and never refuses to serve (HLD G-C)
+    — a False just renders red on /api/admin/analytics/health.
+    """
+    status: dict = {"wal": None, "event_id_index_present": False}
+    try:
+        if engine.dialect.name == "sqlite":
+            with engine.connect() as conn:
+                mode = conn.exec_driver_sql("PRAGMA journal_mode").scalar()
+                status["wal"] = (str(mode).lower() == "wal")
+                idx_rows = conn.exec_driver_sql(
+                    "PRAGMA index_list('user_events')").fetchall()
+                status["event_id_index_present"] = any(
+                    r[1] == "ix_user_events_event_id" for r in idx_rows)
+        else:
+            with engine.connect() as conn:
+                found = conn.execute(text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE tablename = 'user_events' "
+                    "AND indexname = 'ix_user_events_event_id'")).first()
+                status["event_id_index_present"] = found is not None
+    except Exception as e:
+        print(f"[analytics_boot_status] check failed: {e}")
+    return status
+
+
+def wal_file_bytes() -> int | None:
+    """Current size of the SQLite -wal file (0 when absent); None on Postgres.
+    Surfaced by /api/admin/analytics/health next to wal_autocheckpoint."""
+    if engine.dialect.name != "sqlite":
+        return None
+    try:
+        wal_path = (engine.url.database or _DB_PATH) + "-wal"
+        return os.path.getsize(wal_path) if os.path.exists(wal_path) else 0
+    except Exception:
+        return 0
 
 # ---------------------------------------------------------------------------
 # Table definitions
@@ -112,10 +221,23 @@ leagues_table = Table("leagues", metadata,
     # For platform='espn' rows the PK column holds the numeric ESPN league
     # id (the plan chose a platform column over magic-prefix ids; the PK
     # name is accepted as slightly a lie). NULL platform reads as 'sleeper'.
-    Column("platform",          String),  # 'sleeper' (default/NULL) | 'espn'
+    Column("platform",          String),  # 'sleeper' (default/NULL) | 'espn' | 'mfl' | 'fleaflicker'
     Column("espn_season",       Integer), # ESPN seasonId used at import (re-sync key)
     Column("espn_auth",         String),  # 'public' | 'cookie' — how the league was read
     Column("espn_my_team_id",   Integer), # the linking user's ESPN team id (binding)
+    # ── Generic multi-platform linking (MFL / Fleaflicker; flags
+    # `mfl.link` / `fleaflicker.link`) — plan
+    # docs/plans/multi-platform-linking-plan-2026-07-17.md. Reuses this row
+    # (the PK holds the platform-native league id) instead of adding
+    # per-platform tables. ESPN keeps its own espn_* columns for
+    # back-compat; new platforms use these generic ones.
+    Column("platform_season",   Integer), # season/year used at import (re-sync key)
+    Column("platform_host",     String),  # MFL wwwNN host (NULL for others)
+    Column("platform_auth",     String),  # 'public' | 'cookie'
+    Column("platform_my_team",  String),  # linking user's franchise/team key (string id)
+    Column("platform_future_picks", Text),# MFL/Fleaflicker futureDraftPicks stored raw
+                                           # (JSON list) — NOT wired into the engine yet
+                                           # (pick-inclusive trades = +M follow-up)
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -155,6 +277,25 @@ league_members_table = Table("league_members", metadata,
     Column("roster_data",  Text),    # JSON: list of player IDs on this member's team
     Column("updated_at",   String),
     UniqueConstraint("league_id", "user_id", name="uq_league_member"),
+)
+
+# FB-147 — Sleeper trade-block snapshot, per league. One row per asset a
+# manager currently has "on the block" in the Sleeper app. Replaced
+# atomically on every sync (delete + insert, snapshot semantics like
+# member_rankings). Source: Sleeper GraphQL `league_players` (public,
+# unauthenticated read; settings.otb = flagging roster_id,
+# settings.otb_added_at = epoch ms) — see backend/trade_block_service.py.
+# Only flags whose flagging roster still owns the player survive a sync
+# (Sleeper never clears stale otb rows after a player moves).
+trade_block_table = Table("trade_block", metadata,
+    Column("id",         Integer, primary_key=True, autoincrement=True),
+    Column("league_id",  String,  nullable=False),
+    Column("player_id",  String,  nullable=False),
+    Column("user_id",    String),   # Sleeper user who owns + flagged the player
+    Column("roster_id",  Integer),  # Sleeper roster_id that flagged it (raw otb value)
+    Column("flagged_at", String),   # ISO UTC from otb_added_at; NULL on legacy leagues
+    Column("synced_at",  String,  nullable=False),
+    UniqueConstraint("league_id", "player_id", name="uq_trade_block"),
 )
 
 # Latest ELO snapshot for each player as ranked by each user in each league.
@@ -552,13 +693,18 @@ model_config_table = Table("model_config", metadata,
 )
 
 # ---------------------------------------------------------------------------
-# Agent 6 additions — wrapped_events
+# Agent 6 additions — wrapped_events  ***FROZEN (analytics P0 cutover)***
 # ---------------------------------------------------------------------------
-# Silent event stream powering the "Fantasy Trade Wrapped" end-of-season recap.
-# Every row captures a single user action with an opaque JSON payload.
-# event_type is one of:
+# Silent event stream that powered the "Fantasy Trade Wrapped" recap.
+# event_type was one of:
 #   swipe | trade_match | trade_accepted | trade_declined |
 #   tier_save | ranking_reorder | league_sync
+#
+# FROZEN at the `analytics.wrapped_cutover_at` model_config instant
+# (docs/plans/analytics-platform/lld.md §6.4): all five writers now land in
+# user_events and this table receives ZERO writes. It is retained read-only
+# for pre-cutover history — load_league_activity unions it (created_at <
+# cutover) with user_events (occurred_at >= cutover). Do not add writers.
 # ---------------------------------------------------------------------------
 
 wrapped_events_table = Table("wrapped_events", metadata,
@@ -590,11 +736,17 @@ wrapped_events_table = Table("wrapped_events", metadata,
 #
 # Device fields are snapshots at the time of the event — sourced from
 # X-Device / X-OS-Version / X-App-Version request headers.
+#
+# Tracking plan v2 §S1 (docs/business/analytics/2026-07-17-tracking-plan-v2.md)
+# added the nullable envelope columns (event_id … experiments) so client-fired
+# events land in the same lineage. Pre-auth events use
+# user_id = 'device:<device_id>'; identity_links (below) stitches them to the
+# user after sign-in.
 user_events_table = Table("user_events", metadata,
     Column("id",           Integer, primary_key=True, autoincrement=True),
     Column("user_id",      String,  nullable=False, index=True),
     Column("event_type",   String,  nullable=False),
-    Column("occurred_at",  String,  nullable=False),    # ISO UTC
+    Column("occurred_at",  String,  nullable=False),    # ISO UTC (server receive time)
     Column("league_id",    String),
     Column("session_id",   String),
     Column("device_type",  String),                     # 'iphone' | 'ipad' | 'macos' | 'web' | 'extension'
@@ -602,8 +754,43 @@ user_events_table = Table("user_events", metadata,
     Column("app_version",  String),                     # '1.2.3'
     Column("source",       String),                     # 'mobile' | 'web' | 'api' | 'cron'
     Column("props",        Text),                       # JSON — event-specific extras
+    Column("event_id",     String),                     # client UUID — idempotent retries / dedup (unique index below)
+    Column("device_id",    String),                     # stable per-install anon id ('dev_' + UUID)
+    Column("platform",     String),                     # 'ios' | 'web' | 'extension' | 'server'
+    Column("screen",       String),                     # screen/view the event fired from
+    Column("client_ts",    String),                     # client wall-clock ISO; occurred_at stays server time
+    Column("experiments",  Text),                       # JSON {exp_key: variant} snapshot at event time
     Index("ix_user_events_user_occurred", "user_id", "occurred_at"),
     Index("ix_user_events_type_occurred", "event_type", "occurred_at"),
+    # FULL unique index — NULLS DISTINCT on both dialects, so unlimited
+    # v1/server-fired NULL rows coexist legally (LLD §3.1, invariant I-1).
+    # Conflict-ignore inserts must target it WITHOUT index_where.
+    Index("ix_user_events_event_id", "event_id", unique=True),
+    # Composite read index for device attribution scans (LLD §3.1); replaces
+    # the earlier single-column ix_user_events_device_id (dropped in
+    # _migrate_db — the composite is a strict superset).
+    Index("ix_user_events_device_occurred", "device_id", "occurred_at"),
+)
+
+# identity_links — stitches pre-auth device rows to the signed-in identity.
+# Written (idempotently) on every successful sign-in that carries a
+# device_id. Queries resolve 'device:<device_id>' user_events rows through
+# this table. Tracking plan v2 §S1.
+identity_links_table = Table("identity_links", metadata,
+    Column("id",              Integer, primary_key=True, autoincrement=True),
+    Column("device_id",       String,  nullable=False),
+    Column("sleeper_user_id", String),                  # null for account-only sessions
+    Column("account_id",      String),                  # acct_… anchor when known
+    Column("linked_at",       String,  nullable=False), # ISO UTC
+    # Composite (device_id, linked_at) — exactly the shape FR-21 attribution
+    # scans want (nearest linked_at ≤ occurred_at). NEW NAME on purpose:
+    # CREATE INDEX IF NOT EXISTS would silently no-op on the old
+    # single-column ix_identity_links_device name and the composite would
+    # never materialize in prod (LLD §3.2); the old index is dropped in
+    # _migrate_db. Code-enforced CHECK (see link_identity): at least one of
+    # sleeper_user_id / account_id must be non-null.
+    Index("ix_identity_links_device_linked", "device_id", "linked_at"),
+    Index("ix_identity_links_user", "sleeper_user_id"),
 )
 
 # ── M5 Push additions — device_tokens ─────────────────────────────────
@@ -743,6 +930,13 @@ accounts_table = Table("accounts", metadata,
     Column("account_id",      String, primary_key=True),   # opaque hex id
     Column("sleeper_user_id", String),                     # bound working key (nullable)
     Column("created_at",      String, nullable=False),
+    # ── Email capture (docs/business/product/2026-07-17-email-capture-spec.md) ──
+    # Dark until flag `auth.email_capture` + the capture UI + privacy-policy
+    # flip ship together. Deleted with the accounts row (delete_user_data).
+    Column("email",                 String),  # plaintext, normalized lower/trim
+    Column("email_source",          String),  # 'apple' | 'user'
+    Column("email_consent_at",      String),  # ISO — consent stamped at capture
+    Column("email_unsubscribed_at", String),  # ISO — never send when set
 )
 
 linked_identities_table = Table("linked_identities", metadata,
@@ -753,6 +947,196 @@ linked_identities_table = Table("linked_identities", metadata,
     Column("email_hash",       String),                    # SHA-256 hex of email, nullable
     Column("linked_at",        String,  nullable=False),
     UniqueConstraint("provider", "provider_subject", name="uq_linked_identity"),
+)
+
+# ---------------------------------------------------------------------------
+# Monetization platform foundation
+# (docs/plans/monetization/00-platform-foundation.md §2.1)
+#
+# entitlements is the single source of truth for who has paid access. Rows
+# are written ONLY by (a) the billing webhook projector, (b) referral /
+# group-unlock reward granting, (c) the manual-grant admin routes — never
+# from client-supplied receipts. Resolution is read-time (expires_at
+# evaluated at query time); the hygiene cron that stamps stale rows
+# status='expired' is reporting-only, never a correctness dependency.
+# All timestamps ISO-8601 UTC strings, matching every other table here.
+# ---------------------------------------------------------------------------
+
+entitlements_table = Table("entitlements", metadata,
+    Column("id",          Integer, primary_key=True, autoincrement=True),
+    Column("user_id",     String,  nullable=False),  # working key (sleeper id or acct_*)
+    Column("account_id",  String),                   # accounts.account_id when known —
+                                                     # lets grants survive Sleeper re-links
+    Column("entitlement", String,  nullable=False),  # 'pro' | 'ad_free' (glossary)
+    Column("source",      String,  nullable=False),  # apple_iap | stripe | founder_iap |
+                                                     # season_pass_iap | promo_referral |
+                                                     # promo_group_unlock | manual_grant |
+                                                     # trial | rankset_purchase
+    Column("product_id",  String),                   # store SKU (subs unlabeled, e.g.
+                                                     # ftf_pro_annual; season SKUs
+                                                     # year-labeled, e.g. ftf_season_pass_2026)
+    Column("status",      String,  nullable=False, server_default="active"),
+                                                     # active | expired | revoked | refunded
+    Column("starts_at",   String,  nullable=False),
+    Column("expires_at",  String),                   # NULL = perpetual (founder, manual)
+    Column("granted_by",  String),                   # 'operator' for manual grants;
+                                                     # webhook event id otherwise
+    Column("note",        String),                   # operator note on manual grants
+    Column("metadata",    Text),                     # JSON: original_transaction_id,
+                                                     # stripe sub id, referral id, …
+    Column("created_at",  String,  nullable=False),
+    Column("updated_at",  String,  nullable=False),
+    Index("ix_entitlements_user",    "user_id"),
+    Index("ix_entitlements_account", "account_id"),
+)
+
+# Append-only billing ledger — every webhook lands here verbatim before the
+# projector touches entitlements ("tracking subscriptions"). event_id gives
+# idempotency: replays and provider retries no-op on the unique constraint.
+subscription_events_table = Table("subscription_events", metadata,
+    Column("id",            Integer, primary_key=True, autoincrement=True),
+    Column("source",        String,  nullable=False),  # revenuecat | stripe | app_store_notification
+    Column("event_type",    String,  nullable=False),  # INITIAL_PURCHASE, RENEWAL, CANCELLATION,
+                                                       # BILLING_ISSUE, EXPIRATION, REFUND, …
+    Column("user_id",       String),
+    Column("account_id",    String),
+    Column("product_id",    String),
+    Column("event_id",      String,  nullable=False),  # provider event id → idempotency
+    Column("payload",       Text,    nullable=False),  # raw JSON, never trimmed
+    Column("occurred_at",   String,  nullable=False),
+    Column("processed_at",  String),                   # NULL until projector applied it
+    Column("process_error", String),
+    UniqueConstraint("event_id", name="uq_subscription_event"),
+    Index("ix_subscription_events_user", "user_id"),
+)
+
+# Give-get referral program (foundation §5). Fraud control is structural:
+# rewards only for verified co-members of the referrer's real Sleeper league,
+# one reward per unique referred user ever (uq below), activation-gated.
+referrals_table = Table("referrals", metadata,
+    Column("id",                    Integer, primary_key=True, autoincrement=True),
+    Column("referrer_user_id",      String,  nullable=False),
+    Column("referred_user_id",      String),                  # filled when invitee identified
+    Column("league_id",             String,  nullable=False), # the shared Sleeper league
+    Column("invite_token",          String,  nullable=False), # carried by share-card deep link
+    Column("status",                String,  nullable=False, server_default="pending"),
+                                                              # pending → joined → activated →
+                                                              # rewarded | rejected | expired
+    Column("qualifying_event",      String),                  # e.g. 'matchups_completed>=25'
+    Column("reward_entitlement_id", Integer),                 # entitlements.id of the grant
+    Column("created_at",            String,  nullable=False),
+    Column("joined_at",             String),
+    Column("activated_at",          String),
+    Column("rewarded_at",           String),
+    UniqueConstraint("invite_token", name="uq_referral_token"),
+    UniqueConstraint("referrer_user_id", "referred_user_id",
+                     name="uq_referral_pair"),
+    Index("ix_referrals_referrer", "referrer_user_id"),
+    Index("ix_referrals_referred", "referred_user_id"),
+)
+
+# Outbound affiliate click ledger. subid joins partner payout reports back to
+# placement/user cohort (no PII in subids). Reconciliation columns are
+# populated by scripts/affiliate_reconcile.py from monthly partner CSVs.
+affiliate_clicks_table = Table("affiliate_clicks", metadata,
+    Column("id",            Integer, primary_key=True, autoincrement=True),
+    Column("user_id",       String),                   # NULL for DNT / anonymous
+    Column("partner",       String,  nullable=False),  # underdog | draftkings | fanduel | …
+    Column("placement",     String,  nullable=False),  # web_bestball_card, web_offers_hub, …
+    Column("subid",         String,  nullable=False),
+    Column("clicked_at",    String,  nullable=False),
+    Column("converted_at",  String),                   # reconciliation write-back
+    Column("payout_cents",  Integer),                  # reconciliation write-back
+    Column("reconciled_at", String),                   # reconciliation write-back
+    UniqueConstraint("subid", name="uq_affiliate_subid"),
+    Index("ix_affiliate_clicks_user", "user_id"),
+)
+
+# ---------------------------------------------------------------------------
+# Rankings marketplace foundation
+# (docs/business/product/2026-07-17-rankings-marketplace-plan.md)
+#
+# rank_sets is format-agnostic BY SCHEMA (operator decision #6): set_type
+# declares which benchmark/window family scores the set. dynasty + rookie
+# are the launch types; redraft/bestball ship behind ranks.set_types_extended.
+# A "published set" is immutable per version — publishing again bumps
+# version; accuracy scoring locks onto (rank_set_id, version) snapshots.
+# ---------------------------------------------------------------------------
+
+rank_sets_table = Table("rank_sets", metadata,
+    Column("id",             Integer, primary_key=True, autoincrement=True),
+    Column("owner_user_id",  String,  nullable=False),  # contributor's working key
+    Column("owner_type",     String,  nullable=False, server_default="user"),
+                                                        # 'user' | 'publisher'
+    Column("set_type",       String,  nullable=False, server_default="dynasty"),
+                                                        # dynasty | rookie | redraft | bestball
+    Column("scoring_format", String,  nullable=False),  # '1qb_ppr' | 'sf_tep' (matches
+                                                        # member_rankings convention)
+    Column("title",          String,  nullable=False),
+    Column("description",    Text),
+    Column("version",        Integer, nullable=False, server_default="1"),
+    Column("visibility",     String,  nullable=False, server_default="private"),
+                                                        # private | published | delisted
+    Column("price_credits",  Integer),                  # NULL = free / not for sale
+    Column("published_at",   String),
+    Column("created_at",     String,  nullable=False),
+    Column("updated_at",     String,  nullable=False),
+    Index("ix_rank_sets_owner", "owner_user_id"),
+    Index("ix_rank_sets_type",  "set_type"),
+)
+
+rank_set_entries_table = Table("rank_set_entries", metadata,
+    Column("id",          Integer, primary_key=True, autoincrement=True),
+    Column("rank_set_id", Integer, nullable=False),
+    Column("version",     Integer, nullable=False),
+    Column("player_id",   String,  nullable=False),  # players.player_id (picks use the
+                                                     # draft-pick pseudo-player ids)
+    Column("rank",        Integer, nullable=False),
+    Column("elo",         Float),                    # optional — present when exported
+                                                     # from a live Elo board; rank is
+                                                     # the canonical ordering
+    UniqueConstraint("rank_set_id", "version", "player_id",
+                     name="uq_rank_set_entry"),
+    Index("ix_rank_set_entries_set", "rank_set_id", "version"),
+)
+
+# One row per adoption event. mode mirrors the plan's adoption mechanics;
+# entitlement_id links a paid adoption to its rankset_purchase entitlement.
+rank_set_adoptions_table = Table("rank_set_adoptions", metadata,
+    Column("id",             Integer, primary_key=True, autoincrement=True),
+    Column("rank_set_id",    Integer, nullable=False),
+    Column("version",        Integer, nullable=False),
+    Column("user_id",        String,  nullable=False),
+    Column("league_id",      String,  nullable=False),  # adoption is per-league (format guard)
+    Column("mode",           String,  nullable=False),  # seed | replace | track
+    Column("entitlement_id", Integer),                  # NULL for free adoptions
+    Column("adopted_at",     String,  nullable=False),
+    Index("ix_rank_set_adoptions_set",  "rank_set_id"),
+    Index("ix_rank_set_adoptions_user", "user_id"),
+)
+
+# Quarterly accuracy scoring output (plan §Accuracy engine). One row per
+# (snapshot, benchmark, horizon) — peer_percentile is recomputed per window
+# across the scored population; badge tiers derive from rolling windows in
+# the scoring job, never stored denormalized here.
+accuracy_scores_table = Table("accuracy_scores", metadata,
+    Column("id",              Integer, primary_key=True, autoincrement=True),
+    Column("rank_set_id",     Integer),                  # NULL for passive user-board scores
+    Column("user_id",         String,  nullable=False),  # board owner (passive) or set owner
+    Column("set_type",        String,  nullable=False),
+    Column("scoring_format",  String,  nullable=False),
+    Column("snapshot_at",     String,  nullable=False),  # lock timestamp of the scored board
+    Column("benchmark",       String,  nullable=False),  # production | market | rookie_tiers
+    Column("horizon",         String,  nullable=False),  # '13wk' | '1yr' | '2yr' | 'season'
+    Column("raw_score",       Float),                    # benchmark-native score (lower=better
+                                                         # for gap metrics; documented per job)
+    Column("peer_zscore",     Float),                    # peer-relative within the window
+    Column("peer_percentile", Float),                    # 0-100 within scored population
+    Column("sample_weight",   Float),                    # relevance-weighted assets scored
+    Column("scored_at",       String,  nullable=False),
+    UniqueConstraint("user_id", "rank_set_id", "snapshot_at", "benchmark",
+                     "horizon", name="uq_accuracy_score"),
+    Index("ix_accuracy_scores_user", "user_id"),
 )
 
 # Default values seeded on first run.  Only inserted if the key doesn't
@@ -773,6 +1157,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("ktc_k",                 0.0126, "Exponential decay rate for KTC dynasty value curve"),
     ("ktc_max",           10000.0,    "Maximum KTC value (rank 1 player)"),
     ("ktc_fallback_rank",   300.0,    "Rank used when a player has no search_rank in DB"),
+    # ── Consensus seed blend (#145/#148 — data_loader, applied at pool build) ──
+    ("ktc_blend_weight",      0.5,    "#145: KeepTradeCut weight in the consensus seed blend (0=DP-only kill switch, 1=KTC ordering only); takes effect on next pool build/boot"),
+    ("tep_te_uplift",         1.18,   "#148: TE value multiplier for sf_tep seeds (TE premium); 1=off; calibrated 2026-07-17 so top-8 sf_tep TE seeds clear their 1qb analogs"),
     # ── Package diminishing-returns weights (up to 5 players) ─────────────
     ("package_weight_1",      1.00,   "Value weight for 1st (best) player in a trade package"),
     ("package_weight_2",      0.75,   "Value weight for 2nd player in a trade package"),
@@ -845,6 +1232,8 @@ _MODEL_CONFIG_DEFAULTS = [
     # 0.30 → 0.15 per interview 2026-07-17 ("light multiplier"); existing
     # DB rows still at the old default are updated by the seeding pass.
     ("need_fit_weight",          0.15,  "FB-96: composite blend weight for automatic positional-need fit (0 disables the reordering)"),
+    # ── FB-147 engine hook (flag trade.block_boost) ──────────────────────
+    ("block_boost_weight",       0.15,  "FB-147: SOFT acquire-side trade-block boost — composite *= 1 + w when a card acquires a counterparty-flagged on-the-block player, applied after all gates (0 disables, composite byte-identical)"),
     ("diversity_window_days",    7.0,   "A6: lookback window for league impression saturation counts"),
     ("diversity_user_cap",       3.0,   "A6: other-member count at which a target player is 'saturated'"),
     ("diversity_penalty",        0.6,   "A6: ordering-key multiplier applied to saturated targets"),
@@ -885,6 +1274,8 @@ _MODEL_CONFIG_DEFAULTS = [
     ("lane_shift_frac",          0.10,  "phase2: min value-weighted now-lean shift for a card to label as a window move"),
     ("fit_premium_max_loss",   300.0,   "phase2: max raw-board value a flagged need-fill 1-for-1 may pay"),
     ("aggression_weight",        0.20,  "phase2: composite reweight strength for the light/fair/generous offer buckets"),
+    # ── Analytics platform P1 (docs/plans/analytics-platform/lld.md §3.4) ─
+    ("analytics_events_per_hr", 600.0,  "P1 ingest: per-device client-event budget per hour; over-budget batches are accepted-and-dropped (never 429)"),
 ]
 
 
@@ -902,6 +1293,11 @@ def _migrate_db() -> None:
     any manually-tuned rows survive re-deploys).
     """
     migration_cols = [
+        # Email capture (2026-07-17 spec) — dark behind auth.email_capture
+        ("accounts",           "email",                 "VARCHAR"),
+        ("accounts",           "email_source",          "VARCHAR"),
+        ("accounts",           "email_consent_at",      "VARCHAR"),
+        ("accounts",           "email_unsubscribed_at", "VARCHAR"),
         ("trade_matches",      "user_a_decision",      "VARCHAR"),
         ("trade_matches",      "user_b_decision",      "VARCHAR"),
         ("trade_matches",      "user_a_decided_at",    "VARCHAR"),
@@ -967,6 +1363,21 @@ def _migrate_db() -> None:
         ("leagues",            "espn_season",           "INTEGER"),
         ("leagues",            "espn_auth",             "VARCHAR"),
         ("leagues",            "espn_my_team_id",       "INTEGER"),
+        # Generic multi-platform linking (MFL / Fleaflicker; plan
+        # docs/plans/multi-platform-linking-plan-2026-07-17.md).
+        ("leagues",            "platform_season",       "INTEGER"),
+        ("leagues",            "platform_host",         "VARCHAR"),
+        ("leagues",            "platform_auth",         "VARCHAR"),
+        ("leagues",            "platform_my_team",      "VARCHAR"),
+        ("leagues",            "platform_future_picks", "TEXT"),
+        # Tracking plan v2 §S1 envelope columns (all nullable — v1 rows and
+        # v1 record_event() call sites are untouched).
+        ("user_events",        "event_id",              "VARCHAR"),
+        ("user_events",        "device_id",             "VARCHAR"),
+        ("user_events",        "platform",              "VARCHAR"),
+        ("user_events",        "screen",                "VARCHAR"),
+        ("user_events",        "client_ts",             "VARCHAR"),
+        ("user_events",        "experiments",           "TEXT"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -1007,6 +1418,61 @@ def _migrate_db() -> None:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
         except Exception:
             pass
+
+    # ── user_events / identity_links analytics indexes ────────────────────
+    # Tracking plan v2 §S1/S2 + analytics-platform LLD §3.1/§3.2. All
+    # idempotent (IF NOT EXISTS / IF EXISTS), each in its own transaction.
+    # The FULL unique index on event_id relies on NULLS-DISTINCT semantics
+    # (both dialects): unlimited v1 server-fired NULL rows coexist legally.
+    # The old single-column ix_user_events_device_id / ix_identity_links_device
+    # are dropped — their composite replacements are strict supersets.
+    _user_events_env_indexes = [
+        ("CREATE UNIQUE INDEX IF NOT EXISTS ix_user_events_event_id "
+         "ON user_events (event_id)"),
+        ("CREATE INDEX IF NOT EXISTS ix_user_events_device_occurred "
+         "ON user_events (device_id, occurred_at)"),
+        "DROP INDEX IF EXISTS ix_user_events_device_id",
+        ("CREATE INDEX IF NOT EXISTS ix_identity_links_device_linked "
+         "ON identity_links (device_id, linked_at)"),
+        ("CREATE INDEX IF NOT EXISTS ix_identity_links_user "
+         "ON identity_links (sleeper_user_id)"),
+        "DROP INDEX IF EXISTS ix_identity_links_device",
+    ]
+    for ddl in _user_events_env_indexes:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(ddl))
+        except Exception:
+            pass
+
+    # ── Analytics P0 — wrapped_events cutover timestamp (LLD §6.4, FR-4) ──
+    # Set ONCE (INSERT-or-ignore) at the first boot of the deploy that flips
+    # the five wrapped_collector writers to user_events. Stored as UNIX epoch
+    # seconds because model_config.value is Float; get_wrapped_cutover_iso()
+    # converts for ISO-TEXT comparisons. Wrapped rows are created_at <
+    # cutover; user_events narrative rows are occurred_at >= cutover — the
+    # union reader in load_league_activity depends on zero overlap.
+    try:
+        with engine.begin() as conn:
+            _cut_params = {
+                "k": "analytics.wrapped_cutover_at",
+                "v": datetime.fromisoformat(_now()).timestamp(),
+                "d": ("Epoch-seconds boundary of the wrapped_events -> "
+                      "user_events writer cutover (analytics platform P0); "
+                      "wrapped_events is frozen at this instant"),
+            }
+            if DATABASE_URL.startswith("sqlite"):
+                conn.execute(text(
+                    "INSERT OR IGNORE INTO model_config "
+                    "(key, value, description) VALUES (:k, :v, :d)"
+                ), _cut_params)
+            else:
+                conn.execute(text(
+                    "INSERT INTO model_config (key, value, description) "
+                    "VALUES (:k, :v, :d) ON CONFLICT (key) DO NOTHING"
+                ), _cut_params)
+    except Exception as e:
+        print(f"[migrate] wrapped cutover seed failed: {e}")
 
     # Ensure indexes exist on DBs that pre-date this table's index declarations.
     _app_feedback_indexes = [
@@ -1304,13 +1770,14 @@ _EVENT_TO_USER_COL: dict[str, str] = {
 # Event types that count toward the daily ranking streak. Adding a new rank
 # surface? Add it here too — and make sure the corresponding call site is
 # wired through user-events `record_event()` (NOT the legacy
-# wrapped_collector.record_event, which is a different function).
+# wrapped_collector.record_event, which is frozen — analytics P0 cutover,
+# docs/plans/analytics-platform/lld.md §6.4).
 #
-# Note: tier_save is intentionally excluded today. Tier saves only flow
-# through wrapped_collector.record_event, so they never reach this map.
-# Add "tier_save" here once that call site is migrated.
+# tier_save joined at the P0 cutover: the tiers-save route now records it
+# via record_event(), so tier saves advance the streak like trio swipes.
 _RANK_STREAK_EVENTS: frozenset[str] = frozenset({
     "trio_swipe",
+    "tier_save",
     "ranking_complete_first_time",
 })
 
@@ -1505,6 +1972,56 @@ def _recompute_streak_on_rank_event(conn, user_id: str, tz: str | None) -> dict 
         "longest":              new_longest,
         "last_rank_local_date": today_iso,
     }
+
+
+# insert_client_events() (the v0 per-row-autocommit write half of POST
+# /api/events) was retired in analytics-platform P1: the ingest pipeline now
+# lives in backend/analytics_ingest.py, which writes one batch in a single
+# transaction on the dedicated ingest_engine (150 ms lock budget,
+# BEGIN IMMEDIATE). The old per-row-transaction pattern was the self-inflicted
+# lock-contention the LLD (FR-8/KD-12) exists to prevent — do not reintroduce.
+
+
+def link_identity(
+    device_id: str,
+    *,
+    sleeper_user_id: str | None = None,
+    account_id: str | None = None,
+) -> None:
+    """Idempotent upsert of an identity_links row (tracking plan v2 §S1).
+
+    Called on every successful sign-in that carries a device_id — stitches
+    pre-auth 'device:<device_id>' user_events rows to the signed-in identity.
+    Re-linking the same (device, identity) pair is a no-op. Best-effort:
+    failures are logged and swallowed.
+    """
+    if not device_id or not (sleeper_user_id or account_id):
+        return
+    try:
+        with engine.begin() as conn:
+            exists = conn.execute(
+                select(identity_links_table.c.id).where(and_(
+                    identity_links_table.c.device_id == device_id,
+                    identity_links_table.c.sleeper_user_id.is_(None)
+                        if sleeper_user_id is None
+                        else identity_links_table.c.sleeper_user_id == sleeper_user_id,
+                    identity_links_table.c.account_id.is_(None)
+                        if account_id is None
+                        else identity_links_table.c.account_id == account_id,
+                )).limit(1)
+            ).first()
+            if exists:
+                return
+            conn.execute(
+                insert(identity_links_table).values(
+                    device_id       = device_id,
+                    sleeper_user_id = sleeper_user_id,
+                    account_id      = account_id,
+                    linked_at       = _now(),
+                )
+            )
+    except Exception as e:
+        print(f"[link_identity] {device_id} failed: {e}")
 
 
 def get_user_streak(user_id: str) -> dict:
@@ -1871,6 +2388,28 @@ def get_config() -> dict[str, float]:
     return {k: v for k, v, _ in _MODEL_CONFIG_DEFAULTS}
 
 
+def get_wrapped_cutover_iso() -> str:
+    """ISO-UTC boundary of the wrapped_events → user_events cutover.
+
+    Reads the `analytics.wrapped_cutover_at` model_config row (epoch seconds,
+    seeded once by _migrate_db) and converts to the ISO-TEXT frame every
+    timestamp column uses. Returns "" when the key is missing (fresh DB that
+    never had legacy wrapped writers) — "" compares below every ISO string,
+    so the union reader then serves user_events only.
+    """
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                select(model_config_table.c.value)
+                .where(model_config_table.c.key == "analytics.wrapped_cutover_at")
+            ).first()
+        if row and row[0] is not None:
+            return datetime.fromtimestamp(float(row[0]), timezone.utc).isoformat()
+    except Exception as e:
+        print(f"[get_wrapped_cutover_iso] failed: {e}")
+    return ""
+
+
 def set_config(key: str, value: float) -> dict:
     """
     Update a single model_config value.  Returns the updated row as a dict.
@@ -2021,13 +2560,10 @@ def save_tiers_position(
                 .where(users_table.c.sleeper_user_id == user_id)
                 .values(tiers_saved=json.dumps(all_saved))
             )
-        # Agent 6 — wrapped collector hook (non-throwing)
-        try:
-            from .wrapped_collector import record_event
-            record_event(user_id, None, "tier_save",
-                         {"position": position, "scoring_format": scoring_format})
-        except Exception:
-            pass
+        # Analytics P0 cutover (LLD §6.4): the legacy wrapped_collector
+        # tier_save hook that lived here is gone — the tiers-save route
+        # records tier_save into user_events via record_event() (which now
+        # also advances the ranking streak; see _RANK_STREAK_EVENTS).
         return saved
 
 
@@ -2310,14 +2846,10 @@ def upsert_league(
             },
         )
         conn.execute(stmt)
-    # Agent 6 — wrapped collector hook (non-throwing)
-    try:
-        from .wrapped_collector import record_event
-        record_event(user_id, league_id, "league_sync",
-                     {"name": name, "season": season,
-                      "roster_size": len(user_player_ids)})
-    except Exception:
-        pass
+    # Analytics P0 cutover (LLD §6.4): the legacy wrapped_collector
+    # 'league_sync' hook that lived here is gone — session_init records
+    # 'league_synced' into user_events via record_event() right after this
+    # upsert (server.py), which is the surviving writer.
 
 
 # ---------------------------------------------------------------------------
@@ -2353,13 +2885,12 @@ def save_ranking_swipes(
     if rows:
         with engine.begin() as conn:
             conn.execute(insert(swipe_decisions_table), rows)
-        # Agent 6 — wrapped collector hook (non-throwing)
-        try:
-            from .wrapped_collector import record_event
-            record_event(user_id, None, "swipe",
-                         {"count": len(rows), "scoring_format": scoring_format})
-        except Exception:
-            pass
+        # Analytics P0 cutover (LLD §6.4): 'swipe' now lands in user_events
+        # (equivalent props to the frozen wrapped_events writer). Non-throwing
+        # inside record_event itself.
+        record_event(user_id, "swipe", source="api",
+                     props={"count": len(rows),
+                            "scoring_format": scoring_format})
 
 
 def save_trade_swipes(
@@ -2920,6 +3451,52 @@ def load_league_members(league_id: str) -> list[dict]:
     return result
 
 
+def replace_trade_block(league_id: str, entries: list[dict]) -> None:
+    """FB-147 — replace the league's Sleeper trade-block snapshot.
+
+    entries: list of dicts with keys player_id, user_id, roster_id,
+    flagged_at (ISO or None). Delete + insert in one transaction so readers
+    never see a half-synced league (same snapshot semantics as
+    member_rankings). An empty list is a valid snapshot — it clears the
+    league (everyone took their players off the block).
+    """
+    now = _now()
+    rows = [
+        {
+            "league_id":  league_id,
+            "player_id":  str(e["player_id"]),
+            "user_id":    e.get("user_id"),
+            "roster_id":  e.get("roster_id"),
+            "flagged_at": e.get("flagged_at"),
+            "synced_at":  now,
+        }
+        for e in entries
+    ]
+    with engine.begin() as conn:
+        conn.execute(
+            trade_block_table.delete().where(
+                trade_block_table.c.league_id == league_id
+            )
+        )
+        if rows:
+            conn.execute(trade_block_table.insert(), rows)
+
+
+def load_trade_block(league_id: str) -> list[dict]:
+    """FB-147 — return the league's current trade-block snapshot rows.
+
+    The documented read hook for the trade engine (weighting is owned by
+    the trade-logic thread; see docs/feedback/items/147-trade-blocks/status.md).
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(trade_block_table).where(
+                trade_block_table.c.league_id == league_id
+            )
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
 def set_league_scoring(league_id: str, scoring_format: str) -> None:
     """Save the league's default scoring format (shown on the league summary)."""
     if scoring_format not in SCORING_FORMATS:
@@ -3266,32 +3843,76 @@ def load_league_activity(league_id: str, limit: int = 20) -> list[dict]:
         }
     """
     from datetime import datetime, timezone
-    NARRATIVE_TYPES = {
+    # Analytics P0 cutover (LLD §6.4): the feed reads the UNION of the frozen
+    # legacy table and the live lineage, split on each table's own timestamp
+    # column — wrapped_events.created_at < cutover ∪ user_events.occurred_at
+    # >= cutover (zero overlap; T-16). A missing cutover key reads as "" which
+    # compares below every ISO string → user_events only (fresh DB).
+    NARRATIVE_TYPES = {          # legacy wrapped_events names
         "trade_match",
         "trade_accepted",
         "trade_declined",
         "tier_save",
         "league_sync",
     }
+    UE_NARRATIVE_TYPES = {       # user_events successors ('league_synced' is
+        "trade_match",           # the live server name for 'league_sync';
+        "trade_accepted",        # trade_accepted/declined gained real writers
+        "trade_declined",        # in user_events — they were writer-less in
+        "tier_save",             # wrapped_events)
+        "league_synced",
+    }
+    cutover = get_wrapped_cutover_iso()
+    fetch_n = max(limit * 4, 40)
 
+    # Normalized entries: {user_id, event_type (legacy name), payload_raw, ts}
+    entries: list[dict] = []
     with engine.connect() as conn:
-        rows = conn.execute(
+        legacy_rows = conn.execute(
             select(
                 wrapped_events_table.c.user_id,
                 wrapped_events_table.c.event_type,
                 wrapped_events_table.c.payload_json,
                 wrapped_events_table.c.created_at,
             )
-            .where(wrapped_events_table.c.league_id == league_id)
+            .where(and_(
+                wrapped_events_table.c.league_id == league_id,
+                wrapped_events_table.c.created_at < cutover,
+            ))
             .order_by(wrapped_events_table.c.id.desc())
-            .limit(max(limit * 4, 40))
+            .limit(fetch_n)
         ).fetchall()
+        for r in legacy_rows:
+            if r.event_type in NARRATIVE_TYPES:
+                entries.append({"user_id": r.user_id, "event_type": r.event_type,
+                                "payload_raw": r.payload_json, "ts": r.created_at})
 
-        filtered = [r for r in rows if r.event_type in NARRATIVE_TYPES][:limit]
+        ue_rows = conn.execute(
+            select(
+                user_events_table.c.user_id,
+                user_events_table.c.event_type,
+                user_events_table.c.props,
+                user_events_table.c.occurred_at,
+            )
+            .where(and_(
+                user_events_table.c.league_id == league_id,
+                user_events_table.c.occurred_at >= cutover,
+                user_events_table.c.event_type.in_(sorted(UE_NARRATIVE_TYPES)),
+            ))
+            .order_by(user_events_table.c.id.desc())
+            .limit(fetch_n)
+        ).fetchall()
+        for r in ue_rows:
+            et = "league_sync" if r.event_type == "league_synced" else r.event_type
+            entries.append({"user_id": r.user_id, "event_type": et,
+                            "payload_raw": r.props, "ts": r.occurred_at})
+
+        entries.sort(key=lambda e: e["ts"] or "", reverse=True)
+        filtered = entries[:limit]
         if not filtered:
             return []
 
-        user_ids = list({r.user_id for r in filtered if r.user_id})
+        user_ids = list({e["user_id"] for e in filtered if e["user_id"]})
         user_map: dict[str, dict] = {}
         if user_ids:
             user_rows = conn.execute(
@@ -3344,29 +3965,32 @@ def load_league_activity(league_id: str, limit: int = 20) -> list[dict]:
     out: list[dict] = []
     for r in filtered:
         try:
-            payload = json.loads(r.payload_json) if r.payload_json else {}
+            payload = json.loads(r["payload_raw"]) if r["payload_raw"] else {}
             if not isinstance(payload, dict):
                 payload = {}
         except (json.JSONDecodeError, TypeError):
             payload = {}
 
-        actor = _handle_name(r.user_id)
-        ago = _ago(r.created_at)
-        et = r.event_type
+        actor = _handle_name(r["user_id"])
+        ago = _ago(r["ts"])
+        et = r["event_type"]
         emoji = "•"
         message = ""
+        # user_events trade rows carry partner_id (trade_match) rather than
+        # other_user_id — alias so both eras render the counterparty.
+        other_uid = payload.get("other_user_id") or payload.get("partner_id")
 
         if et == "trade_accepted":
             emoji = "✅"
-            other = _handle_name(payload.get("other_user_id"))
+            other = _handle_name(other_uid)
             message = f"✅ @{actor} accepted a trade with @{other} ({ago})"
         elif et == "trade_declined":
             emoji = "✖️"
-            other = _handle_name(payload.get("other_user_id"))
+            other = _handle_name(other_uid)
             message = f"✖️ @{actor} declined a trade with @{other} ({ago})"
         elif et == "trade_match":
             emoji = "🤝"
-            other = _handle_name(payload.get("other_user_id"))
+            other = _handle_name(other_uid)
             message = f"🤝 @{actor} matched a trade with @{other} ({ago})"
         elif et == "tier_save":
             emoji = "📋"
@@ -3380,7 +4004,7 @@ def load_league_activity(league_id: str, limit: int = 20) -> list[dict]:
             else:
                 message = f"📋 @{actor} saved their tiers ({ago})"
         elif et == "league_sync":
-            u = user_map.get(r.user_id or "", {})
+            u = user_map.get(r["user_id"] or "", {})
             inviter = u.get("invited_by") if u else ""
             if inviter:
                 emoji = "🤝"
@@ -3397,18 +4021,18 @@ def load_league_activity(league_id: str, limit: int = 20) -> list[dict]:
             fmt_key = payload.get("unlocked_format")
             fmt_lbl = FMT_LABELS.get(fmt_key, fmt_key)
             out.append({
-                "ts":            r.created_at,
+                "ts":            r["ts"],
                 "emoji":         "🎯",
                 "message":       f"🎯 @{actor} unlocked trades in {fmt_lbl} ({ago})",
-                "actor_user_id": r.user_id,
+                "actor_user_id": r["user_id"],
                 "event_type":    "unlock",
             })
 
         out.append({
-            "ts":            r.created_at,
+            "ts":            r["ts"],
             "emoji":         emoji,
             "message":       message,
-            "actor_user_id": r.user_id,
+            "actor_user_id": r["user_id"],
             "event_type":    et,
         })
 
@@ -3861,14 +4485,13 @@ def create_trade_match(
         )
         match_id = result.inserted_primary_key[0]
 
-    # Agent 6 — wrapped collector hook (non-throwing)
-    try:
-        from .wrapped_collector import record_event
-        record_event(user_a_id, league_id, "trade_match",
-                     {"match_id": match_id, "partner_id": user_b_id,
-                      "give": user_a_give, "receive": user_a_receive})
-    except Exception:
-        pass
+    # Analytics P0 cutover (LLD §6.4): 'trade_match' now lands in user_events
+    # (equivalent props to the frozen wrapped_events writer; partner_id keeps
+    # its name — the narrative reader aliases it to other_user_id).
+    # Non-throwing inside record_event itself.
+    record_event(user_a_id, "trade_match", league_id=league_id, source="api",
+                 props={"match_id": match_id, "partner_id": user_b_id,
+                        "give": user_a_give, "receive": user_a_receive})
 
     return {
         "id":          match_id,
@@ -6037,6 +6660,119 @@ def load_espn_leagues_for_user(user_id: str) -> list[dict]:
             "season":         m.get("espn_season"),
             "espn_auth":      m.get("espn_auth"),
             "my_team_id":     m.get("espn_my_team_id"),
+            "total_rosters":  m.get("total_rosters"),
+            "members":        load_league_members(m["sleeper_league_id"]),
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Generic multi-platform league linking (MFL / Fleaflicker; flags
+# `mfl.link` / `fleaflicker.link`). Plan:
+# docs/plans/multi-platform-linking-plan-2026-07-17.md. Same storage seam as
+# ESPN (leagues row keyed by the platform-native id in the PK column, members
+# in league_members with CROSSWALKED SLEEPER player ids), but using the
+# generic platform_* columns so one code path serves every non-ESPN platform.
+# Reuses replace_espn_league_members (already platform-agnostic — it only
+# touches league_members). Phase 1 is public/zero-auth: no credentials table.
+# ---------------------------------------------------------------------------
+
+def upsert_platform_league(league_id: str, user_id: str, name: str, platform: str,
+                           season: int, auth: str, my_team: str,
+                           total_rosters: int | None, host: str | None = None,
+                           future_picks: list | None = None) -> None:
+    """Insert or refresh a non-ESPN linked league row (platform='mfl' |
+    'fleaflicker'). Idempotent on the PK (platform-native league id). Refreshes
+    the league metadata AND the generic binding columns (season / host / auth /
+    the linking user's team key) on re-link. `future_picks` is stored raw as a
+    JSON list (MFL/Fleaflicker) for the pick-inclusive follow-up; it is NOT
+    read by the trade engine today."""
+    now = _now()
+    row = {
+        "sleeper_league_id": str(league_id),
+        "user_id":           user_id,
+        "name":              name,
+        "season":            str(season),
+        "roster_data":       "[]",
+        "opponent_data":     "[]",
+        "created_at":        now,
+        "updated_at":        now,
+        "platform":          platform,
+        "platform_season":   int(season),
+        "platform_host":     host,
+        "platform_auth":     auth,
+        "platform_my_team":  str(my_team),
+        "platform_future_picks": json.dumps(future_picks or []),
+        "total_rosters":     total_rosters,
+    }
+    with engine.begin() as conn:
+        if DATABASE_URL.startswith("sqlite"):
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+        else:
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        stmt = dialect_insert(leagues_table).values(row)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["sleeper_league_id"],
+            set_={
+                "name":              stmt.excluded.name,
+                "updated_at":        stmt.excluded.updated_at,
+                "platform":          stmt.excluded.platform,
+                "platform_season":   stmt.excluded.platform_season,
+                "platform_host":     stmt.excluded.platform_host,
+                "platform_auth":     stmt.excluded.platform_auth,
+                "platform_my_team":  stmt.excluded.platform_my_team,
+                "platform_future_picks": stmt.excluded.platform_future_picks,
+                "total_rosters":     stmt.excluded.total_rosters,
+            },
+        )
+        conn.execute(stmt)
+
+
+def get_platform_league(league_id: str, platform: str) -> dict | None:
+    """Return the leagues row for a linked league of the given platform, or
+    None when the id is unknown or the row's platform doesn't match."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(leagues_table)
+            .where(leagues_table.c.sleeper_league_id == str(league_id))
+        ).fetchone()
+    if not row or (row._mapping.get("platform") or "sleeper") != platform:
+        return None
+    return dict(row._mapping)
+
+
+def load_platform_leagues_for_user(user_id: str, platform: str) -> list[dict]:
+    """Return every linked league of `platform` this user is bound to, with
+    the full membership snapshot (rosters already in Sleeper player-id space)
+    so the mobile client can build a standard /api/session/init payload."""
+    if not user_id:
+        return []
+    with engine.connect() as conn:
+        member_rows = conn.execute(
+            select(league_members_table.c.league_id).where(
+                league_members_table.c.user_id == user_id
+            )
+        ).fetchall()
+        league_ids = sorted({r.league_id for r in member_rows})
+        if not league_ids:
+            return []
+        league_rows = conn.execute(
+            select(leagues_table).where(
+                (leagues_table.c.sleeper_league_id.in_(league_ids)) &
+                (leagues_table.c.platform == platform)
+            )
+        ).fetchall()
+    out = []
+    for lg in league_rows:
+        m = dict(lg._mapping)
+        out.append({
+            "league_id":      m["sleeper_league_id"],
+            "name":           m.get("name"),
+            "platform":       platform,
+            "season":         m.get("platform_season"),
+            "host":           m.get("platform_host"),
+            "auth":           m.get("platform_auth"),
+            "my_team":        m.get("platform_my_team"),
             "total_rosters":  m.get("total_rosters"),
             "members":        load_league_members(m["sleeper_league_id"]),
         })

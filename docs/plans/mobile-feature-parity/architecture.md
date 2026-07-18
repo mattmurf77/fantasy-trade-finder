@@ -1,6 +1,6 @@
 # Mobile Feature Parity — Architecture Detail
 
-Companion to [mobile-feature-parity.md](mobile-feature-parity.md). This document captures the cross-bundle integration concerns: navigation graph, state stores, type extensions, shared files, and the API surface introduced.
+Companion to [plan.md](plan.md). This document captures the cross-bundle integration concerns: navigation graph, state stores, type extensions, shared files, and the API surface introduced.
 
 ---
 

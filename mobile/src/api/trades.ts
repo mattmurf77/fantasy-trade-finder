@@ -9,6 +9,10 @@ export interface GenerateBody {
   // Honored by the backend only when flag trade.finder_targeting is on;
   // every returned card's receive side then includes at least one of them.
   pinned_receive_players?: string[];
+  // Onboarding item 7: skip the server's complete-fresh job cache (a Quick
+  // Set save changes the board but not the cache key). Running jobs are
+  // still shared server-side.
+  force?: boolean;
 }
 
 // NOTE: backend returns BARE ARRAYS for the trade endpoints — not

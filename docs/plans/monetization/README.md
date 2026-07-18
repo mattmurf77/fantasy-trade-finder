@@ -22,6 +22,12 @@ the growth-loop infrastructure (referrals, group unlock, share-card links).
 Cross-cutting flags: `monetize.entitlements` (master, observe→enforce),
 `growth.referral`, `growth.group_unlock`.
 
+**Phase-2 candidate (plan stage, no PRD yet):** the
+[rankings marketplace](../../business/product/2026-07-17-rankings-marketplace-plan.md)
+— publisher rank sets in-app (DLF/PlayerProfiler IAP + subscriber linking) and a
+contributor marketplace gated on a dynasty accuracy contest; its passive-scoring
+Phase 1 (`ranks.accuracy_scoring`) is season-long-lead and worth starting early.
+
 Build order (from the foundation doc §1): foundation platform → observe mode →
 Founder window + paywall → Pro + Season Pass at launch → referral → affiliate
 placements (calendar-driven: BBM window is Jul–Aug) → ads last (≥500 DAU gate).
