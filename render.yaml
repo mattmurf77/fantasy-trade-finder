@@ -20,6 +20,15 @@ services:
           property: connectionString
       - key: CRON_SECRET
         sync: false   # set manually in the Render dashboard
+      # Experiment tester allowlist (is_tester_allowlist targeting attr,
+      # backend/experiments.py; docs/config-reference.md). Unit ids —
+      # 'device:<id>' pseudo-ids and/or account ids. Currently: the
+      # operator's device + account for the onboarding_v2_rollout smoke
+      # (docs/business/analytics/2026-07-18-onboarding-v2-rollout-experiment.md).
+      # Pseudo-ids, not secrets; declarative here so the allowlist is
+      # reviewable in git. Engine picks up changes on its 60s cache refresh.
+      - key: FTF_TESTER_ALLOWLIST
+        value: "device:dev_loc-mrpy6qog-2t72t6,313560442465169408"
 
   # Push notification scheduling — three cron jobs that hit the typed
   # push system. Each authenticates with X-Cron-Secret matching the
