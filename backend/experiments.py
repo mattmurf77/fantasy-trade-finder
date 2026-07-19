@@ -81,6 +81,10 @@ _LEGAL_EDGES = {
 }
 _CACHE_TTL_S = 60.0
 _UNDERPOWERED_WEEKS = 26
+# Git-deployable allowlist source (see _load_cache) — module-level so tests
+# can patch it to a tmp path.
+_ALLOWLIST_FILE = os.path.join(
+    os.path.dirname(__file__), "..", "config", "tester_allowlist.json")
 
 
 class ExperimentError(ValueError):
@@ -135,16 +139,25 @@ def _load_cache() -> dict:
                 select(db.experiments_table).where(
                     db.experiments_table.c.status == "running")).mappings().all()
         running = [_parse_row(r) for r in rows]
-        # is_tester_allowlist (_CONFIG source, FR-33b): unit_ids in the
-        # FTF_TESTER_ALLOWLIST env var, comma-separated — account ids and/or
-        # 'device:<id>' pseudo-ids. Env (not model_config) because
-        # model_config.value is a Float column; Render env edits need no code
-        # deploy. Resolved here (60s cache refresh) so _gather_attrs stays
-        # query-free on the hot flags path.
+        # is_tester_allowlist (_CONFIG source, FR-33b): union of two sources —
+        #   1. FTF_TESTER_ALLOWLIST env var (comma-separated unit_ids)
+        #   2. config/tester_allowlist.json (JSON array; git-deployable —
+        #      needed because Render does NOT apply render.yaml envVars to a
+        #      dashboard-created service, observed 2026-07-19)
+        # Unit ids are account ids and/or 'device:<id>' pseudo-ids. Not
+        # model_config (value column is Float). Resolved here (60s cache
+        # refresh) so _gather_attrs stays query-free on the hot flags path.
         allowlist = {
             s.strip() for s in os.environ.get("FTF_TESTER_ALLOWLIST", "").split(",")
             if s.strip()
         }
+        try:
+            with open(_ALLOWLIST_FILE) as f:
+                parsed = json.load(f)
+            if isinstance(parsed, list):
+                allowlist |= {str(x) for x in parsed}
+        except Exception:
+            pass   # file optional — env alone is a valid configuration
         # Stamp scope: event_type/screen → [keys] for FR-32 (funnel events
         # always stamped, plus each running experiment's declared scope).
         scope: dict[str, list] = {}

@@ -322,7 +322,23 @@ def test_tester_allowlist_resolution_account_unit(engine, monkeypatch):
 
 def test_tester_allowlist_empty_env_excludes_everyone(engine, monkeypatch):
     monkeypatch.delenv("FTF_TESTER_ALLOWLIST", raising=False)
+    monkeypatch.setattr(ex, "_ALLOWLIST_FILE", "/nonexistent/allow.json")
     _mk(engine, "onb_smoke2", "onboarding", 0, 10000, unit_type="device",
         targeting={"is_tester_allowlist": True})
     ex.invalidate_cache()
     assert ex.variant_for("device:dev_anyone", "onb_smoke2") is None
+
+
+def test_tester_allowlist_file_source(engine, monkeypatch, tmp_path):
+    """config/tester_allowlist.json is a git-deployable source unioned with
+    the env var (Render doesn't apply render.yaml envVars to dashboard-created
+    services — the file is the path the operator can actually ship)."""
+    monkeypatch.delenv("FTF_TESTER_ALLOWLIST", raising=False)
+    p = tmp_path / "allow.json"
+    p.write_text('["device:dev_file_matt"]')
+    monkeypatch.setattr(ex, "_ALLOWLIST_FILE", str(p))
+    _mk(engine, "onb_smoke3", "onboarding", 0, 10000, unit_type="device",
+        targeting={"is_tester_allowlist": True})
+    ex.invalidate_cache()
+    assert ex.variant_for("device:dev_file_matt", "onb_smoke3") in ("A", "B")
+    assert ex.variant_for("device:dev_other", "onb_smoke3") is None
