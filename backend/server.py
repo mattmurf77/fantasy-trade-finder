@@ -701,6 +701,13 @@ dp_elo_by_format:    dict[str, dict[str, float]] = {}   # {fmt: {name: elo}}
 dp_pos_by_format:    dict[str, dict[str, str]]   = {}   # {fmt: {name: DP pos}} (#127)
 g_universal_by_format: dict[str, dict] = {}             # {fmt: {'players': [...], 'seed': {...}}}
 
+# A failed DP fetch (e.g. transient GitHub outage at boot) must NOT be cached
+# as an empty pool — that would degrade the format until restart. Instead the
+# format stays unbuilt and is retried on a later access, after a short backoff
+# so request threads don't hammer the remote while it's down.
+_DP_FETCH_RETRY_SECONDS = 60.0
+_dp_fetch_retry_at: dict[str, float] = {}  # {fmt: monotonic time when retry is allowed}
+
 # Backwards-compat aliases (default format). These reference the same lists
 # as g_universal_by_format['1qb_ppr'] after _ensure_universal_pools runs.
 dp_values: dict[str, float] = {}
@@ -995,21 +1002,25 @@ def _ensure_universal_pools() -> None:
     # The per-format DynastyProcess CSV fetches are independent network calls.
     # Run the two formats concurrently so the build phase isn't bottlenecked on
     # serial round-trips. Each task loads that format's values + elo maps.
-    # A fetch failure inside load_consensus_* is already handled gracefully by
-    # data_loader (returns {} → flat-Elo baseline), so a failing format yields
-    # empty maps rather than raising; we still guard the future result here so
-    # one format's failure can never block or break the other.
+    # A fetch failure inside load_consensus_* returns {} rather than raising;
+    # we still guard the future result here so one format's failure can never
+    # block or break the other. An empty values map is treated as fetch
+    # failure: nothing is cached for that format, so a later access retries
+    # (after _DP_FETCH_RETRY_SECONDS) instead of freezing an empty pool in
+    # until process restart.
     def _load_format_dp(fmt: str) -> tuple[dict[str, float], dict[str, float], dict[str, str]]:
         # Single fetch per format via load_consensus_maps — also yields the
         # DP position map that makes the pool join position-strict (#127).
         elo, vals, pos = load_consensus_maps(scoring=fmt)
         return vals, elo, pos
 
+    now = time.monotonic()
     pending = [
         fmt for fmt in DL_SCORING_FORMATS
         if fmt not in g_universal_by_format
         and (fmt not in dp_values_by_format or fmt not in dp_elo_by_format
              or fmt not in dp_pos_by_format)
+        and now >= _dp_fetch_retry_at.get(fmt, 0.0)
     ]
     if pending:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(pending)) as ex:
@@ -1019,8 +1030,14 @@ def _ensure_universal_pools() -> None:
                 try:
                     vals, elo, pos = future.result()
                 except Exception as e:
-                    log.warning("  DP fetch failed for %s (%s) — flat-Elo baseline", fmt, e)
+                    log.warning("  DP fetch failed for %s (%s)", fmt, e)
                     vals, elo, pos = {}, {}, {}
+                if not vals:
+                    _dp_fetch_retry_at[fmt] = time.monotonic() + _DP_FETCH_RETRY_SECONDS
+                    log.warning("  no DP values for %s — pool not built, retry allowed in %ds",
+                                fmt, int(_DP_FETCH_RETRY_SECONDS))
+                    continue
+                _dp_fetch_retry_at.pop(fmt, None)
                 dp_values_by_format.setdefault(fmt, vals)
                 dp_elo_by_format.setdefault(fmt, elo)
                 dp_pos_by_format.setdefault(fmt, pos)
@@ -1028,6 +1045,8 @@ def _ensure_universal_pools() -> None:
     for fmt in DL_SCORING_FORMATS:
         if fmt in g_universal_by_format:
             continue
+        if fmt not in dp_values_by_format:
+            continue  # fetch failed — leave unbuilt so a later access retries
         players, seed = build_universal_pool(
             sleeper_cache=cache,
             dp_elo=dp_elo_by_format.get(fmt, {}),
@@ -1035,6 +1054,9 @@ def _ensure_universal_pools() -> None:
             all_db_players=all_db_players,
             dp_pos=dp_pos_by_format.get(fmt),
         )
+        if not players:
+            log.warning("  universal pool build for %s yielded no players — not caching", fmt)
+            continue
         g_universal_by_format[fmt] = {"players": players, "seed": seed}
         log.info("  universal pool built for %s: %d players", fmt, len(players))
 
@@ -1056,6 +1078,10 @@ def _ensure_universal_pool() -> None:
 def _get_universal_pool(scoring_format: str) -> tuple[list[Player], dict[str, float]]:
     """Return (players, seed) for a given scoring format. Builds on demand."""
     _ensure_universal_pools()
+    from .data_loader import SCORING_FORMATS as DL_SCORING_FORMATS
+    if scoring_format not in DL_SCORING_FORMATS:
+        log.error("Unknown scoring format %r — serving 1qb_ppr pool as fallback",
+                  scoring_format)
     pool = g_universal_by_format.get(scoring_format) or g_universal_by_format.get("1qb_ppr") or {}
     return pool.get("players", []), pool.get("seed", {})
 
