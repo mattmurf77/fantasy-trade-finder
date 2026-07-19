@@ -52,7 +52,7 @@
   "fleaflicker.link": false,
   "analytics.client_events": true,
   "analytics.ingest": false,
-  "experiments.engine": false,
+  "experiments.engine": true,
   "onboarding.v2": false,
   "onboarding.landing": false,
   "onboarding.trades_first": false,

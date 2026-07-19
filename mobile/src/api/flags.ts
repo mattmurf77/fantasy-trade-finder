@@ -29,9 +29,27 @@ export async function loadFeatureFlags(
     } catch {
       /* device id unavailable — fetch flags without per-unit resolution */
     }
-    const res = await api.get<{ flags: FlagMap }>('/api/feature-flags',
-                                                  headers ? { headers } : undefined);
-    return res?.flags || {};
+    const res = await api.get<{
+      flags: FlagMap;
+      experiments?: Record<string, string>;
+      configs?: Record<string, { flags?: FlagMap } & Record<string, unknown>>;
+    }>('/api/feature-flags', headers ? { headers } : undefined);
+    const base = res?.flags || {};
+    // Experiment overlays (FR-35): a running experiment variant may carry
+    // client_config.flags — per-unit flag values resolved server-side (e.g.
+    // the onboarding rollout turning onboarding.* on for targeted units
+    // only). Overlay wins over the global map. The flag store caches the
+    // MERGED map, so an assigned unit keeps its variant flags across
+    // offline boots; assignment changes reconcile on the next fetch.
+    const configs = res?.configs || {};
+    let merged = base;
+    for (const key of Object.keys(configs)) {
+      const overlay = configs[key]?.flags;
+      if (overlay && typeof overlay === 'object' && !Array.isArray(overlay)) {
+        merged = { ...merged, ...overlay };
+      }
+    }
+    return merged;
   } catch (err) {
     if (opts.throwOnError) throw err;
     return {};

@@ -53,7 +53,7 @@
   "_comment_onboarding": "Onboarding redesign (docs/plans/onboarding-conversion/plan.md v2.1). onboarding.v2 is the master kill-switch: a feature is live iff onboarding.v2 AND its own flag. All ship dark. analytics.client_events sits OUTSIDE the master \u2014 it starts the pre-redesign baseline capture and should be flipped true first. LAUNCH PAIRING: flip landing.try_before_sync together with onboarding.landing \u2014 the backend demo endpoint (/api/session/demo) 404s without it and the landing's Sleeper-down escape + demo link depend on it.",
   "analytics.client_events": true,
   "analytics.ingest": false,
-  "experiments.engine": false,
+  "experiments.engine": true,
   "onboarding.v2": false,
   "onboarding.landing": false,
   "onboarding.trades_first": false,

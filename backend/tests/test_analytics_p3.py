@@ -286,3 +286,43 @@ def test_aggression_experiment_overrides_when_running(engine):
     assert v in ("fair", "light", "generous")
     if v == "generous":
         assert overlay.get("aggression_weight") == 0.28
+
+
+# --- tester allowlist (is_tester_allowlist, _CONFIG source) ----------------
+
+def test_tester_allowlist_resolution_device_unit(engine, monkeypatch):
+    # The operator-smoke shape: onboarding layer (device unit mandated),
+    # allowlist targeting, 0/10000 control/treatment weights.
+    monkeypatch.setenv("FTF_TESTER_ALLOWLIST",
+                       "device:dev_matt, matt_user_id")
+    _mk(engine, "onb_smoke", "onboarding", 0, 10000, unit_type="device",
+        variants=[{"name": "control", "weight_bp": 0},
+                  {"name": "treatment", "weight_bp": 10000,
+                   "client_config": {"flags": {"onboarding.v2": True}}}],
+        targeting={"is_tester_allowlist": True}, primary="wat")
+    ex.invalidate_cache()
+    # Allowlisted device → always treatment (weights make control impossible)
+    assert ex.variant_for("device:dev_matt", "onb_smoke") == "treatment"
+    # Non-listed device → excluded entirely (targeting, not bucketing)
+    assert ex.variant_for("device:dev_stranger", "onb_smoke") is None
+    # resolve_for_unit carries the variant's client_config through
+    exps, cfgs = ex.resolve_for_unit("device:dev_matt")
+    assert exps.get("onb_smoke") == "treatment"
+    assert cfgs.get("onb_smoke", {}).get("flags", {}).get("onboarding.v2") is True
+
+
+def test_tester_allowlist_resolution_account_unit(engine, monkeypatch):
+    monkeypatch.setenv("FTF_TESTER_ALLOWLIST", "matt_user_id")
+    _mk(engine, "acct_smoke", "growth", 0, 10000, unit_type="account",
+        targeting={"is_tester_allowlist": True})
+    ex.invalidate_cache()
+    assert ex.variant_for("matt_user_id", "acct_smoke") in ("A", "B")
+    assert ex.variant_for("someone_else", "acct_smoke") is None
+
+
+def test_tester_allowlist_empty_env_excludes_everyone(engine, monkeypatch):
+    monkeypatch.delenv("FTF_TESTER_ALLOWLIST", raising=False)
+    _mk(engine, "onb_smoke2", "onboarding", 0, 10000, unit_type="device",
+        targeting={"is_tester_allowlist": True})
+    ex.invalidate_cache()
+    assert ex.variant_for("device:dev_anyone", "onb_smoke2") is None

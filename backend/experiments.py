@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -117,7 +118,7 @@ def unit_type_of(unit_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 _cache_lock = threading.Lock()
-_cache: dict = {"at": 0.0, "running": [], "layers": {}, "scope": {}}
+_cache: dict = {"at": 0.0, "running": [], "layers": {}, "scope": {}, "allowlist": set()}
 
 
 def _load_cache() -> dict:
@@ -134,6 +135,16 @@ def _load_cache() -> dict:
                 select(db.experiments_table).where(
                     db.experiments_table.c.status == "running")).mappings().all()
         running = [_parse_row(r) for r in rows]
+        # is_tester_allowlist (_CONFIG source, FR-33b): unit_ids in the
+        # FTF_TESTER_ALLOWLIST env var, comma-separated — account ids and/or
+        # 'device:<id>' pseudo-ids. Env (not model_config) because
+        # model_config.value is a Float column; Render env edits need no code
+        # deploy. Resolved here (60s cache refresh) so _gather_attrs stays
+        # query-free on the hot flags path.
+        allowlist = {
+            s.strip() for s in os.environ.get("FTF_TESTER_ALLOWLIST", "").split(",")
+            if s.strip()
+        }
         # Stamp scope: event_type/screen → [keys] for FR-32 (funnel events
         # always stamped, plus each running experiment's declared scope).
         scope: dict[str, list] = {}
@@ -143,7 +154,8 @@ def _load_cache() -> dict:
                 scope.setdefault(("event", et), []).append(e["key"])
             for scr in sc.get("screens", []):
                 scope.setdefault(("screen", scr), []).append(e["key"])
-        snap = {"at": now, "running": running, "layers": layers, "scope": scope}
+        snap = {"at": now, "running": running, "layers": layers, "scope": scope,
+                "allowlist": allowlist}
         with _cache_lock:
             _cache.update(snap)
         return snap
@@ -208,6 +220,10 @@ def _gather_attrs(unit_id: str, header_attrs: dict | None) -> dict:
     """Header attrs (passed by the caller) + users-row attrs for account units.
     Device units get header/allowlist only (no users row)."""
     attrs = dict(header_attrs or {})
+    # _CONFIG-sourced allowlist membership — available to BOTH unit types
+    # (the registry says so; without this resolution a targeting predicate on
+    # is_tester_allowlist matched nobody, since missing attr == excluded).
+    attrs["is_tester_allowlist"] = unit_id in (_load_cache().get("allowlist") or set())
     if unit_type_of(unit_id) != "account":
         return attrs
     try:
