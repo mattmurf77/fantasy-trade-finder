@@ -1,0 +1,275 @@
+diff --git a/.claude/settings.local.json b/.claude/settings.local.json
+index 50d2c6e..81401ff 100644
+--- a/.claude/settings.local.json
++++ b/.claude/settings.local.json
+@@ -11,7 +11,65 @@
+       "Bash(python3 scripts/seed_test_user_2.py --dry-run)",
+       "Bash(python3 scripts/seed_test_user_2.py --clear)",
+       "Bash(python3 -)",
+-      "Bash(python3 -c ':*)"
++      "Bash(python3 -c ':*)",
++      "Bash(mkdir -p \"/tmp/session-resume\")",
++      "Bash(unzip -o \"/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/session-export-1776658378365.zip\" -d \"/tmp/session-resume\")",
++      "Read(//private/tmp/session-resume/**)",
++      "Bash(python3 -c ' *)",
++      "Bash(git -C \"/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/.claude/worktrees/loving-wright-c2e9e2\" log --oneline -5)",
++      "Bash(xcrun simctl *)",
++      "Bash(nohup npx *)",
++      "Bash(echo \"PID: $!\")",
++      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8081)",
++      "Bash(lsof -i :8081 -sTCP:LISTEN)",
++      "Bash(curl -s http://localhost:4040/api/tunnels)",
++      "Bash(mkdir -p /tmp/session-resume-2)",
++      "Bash(unzip -oq \"/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/session-export-1776658769163.zip\" -d /tmp/session-resume-2)",
++      "Read(//tmp/**)",
++      "Read(//tmp/session-resume-2/**)",
++      "Read(//Users/teresadickens/Documents/Claude/**)",
++      "Read(//Users/teresadickens/**)",
++      "Bash(kill 93087 93070 93254)",
++      "Bash(rsync -a --exclude=node_modules '/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/.claude/worktrees/loving-wright-c2e9e2/mobile/' '/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder Reference Files/react-native-mobile-v1-archived-2026-04-20/')",
++      "Bash(chmod +x \"/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/.claude/worktrees/loving-wright-c2e9e2/DTF/run_mac_app.sh\")",
++      "Bash(swift --version)",
++      "Bash(swift build *)",
++      "Bash(./run_mac_app.sh)",
++      "Bash(osascript -e 'tell application \"System Events\" to get name of every process whose background only is false')",
++      "Bash(osascript -e 'tell application \"DTF\" to activate')",
++      "Bash(screencapture -x -C /tmp/dtf_login_screenshot.png)",
++      "Bash(killall DTF)",
++      "Bash(security delete-generic-password *)",
++      "Bash(defaults delete *)",
++      "Bash(screencapture -x -C -o /tmp/dtf_login_fresh.png)",
++      "Bash(curl -s -X POST https://fantasy-trade-finder.onrender.com/api/extension/auth -H 'Content-Type: application/json' -d '{\"username\":\"mattmurf77\"}')",
++      "Bash(python3 -c \"import sys, json; r=json.load\\(sys.stdin\\); print\\('user_id:', r.get\\('user_id'\\)\\); print\\('username:', r.get\\('username'\\)\\); print\\('leagues:', len\\(r.get\\('leagues',[]\\)\\)\\); print\\('token present:', bool\\(r.get\\('session_token'\\)\\)\\)\")",
++      "Bash(screencapture -x -C -o /tmp/dtf_league_picker.png)",
++      "Bash(screencapture -x -C -o /tmp/dtf_league_picker2.png)",
++      "Bash(defaults write *)",
++      "Bash(defaults read *)",
++      "Bash(screencapture -x -C -o /tmp/dtf_main_tab.png)",
++      "Bash(sed -i '' 's/struct PositionTabs: View/struct TiersPositionTabs: View/' _staging/tiers/Sources/DTF/Views/Tiers/PositionTabs.swift)",
++      "Bash(sed -i '' 's/PositionTabs\\(selected: Binding/TiersPositionTabs\\(selected: Binding/' _staging/tiers/Sources/DTF/Views/Tiers/TiersScreen.swift)",
++      "Bash(xcode-select -p)",
++      "Bash(xcode-select --version)",
++      "Bash(DEVELOPER_DIR=/Library/Developer/CommandLineTools /Library/Developer/CommandLineTools/usr/bin/swift --version)",
++      "Bash(DEVELOPER_DIR=/Library/Developer/CommandLineTools swift build -c debug)",
++      "Bash(screencapture -x -C -o /tmp/dtf_phase4_rank.png)",
++      "Bash(DEVELOPER_DIR=/Library/Developer/CommandLineTools swift build -c debug -v)",
++      "Bash(pkill -9 -f \"/tmp/DTF.app\")",
++      "Bash(/tmp/DTF.app/Contents/MacOS/DTF)",
++      "Bash(pkill -9 -f \"/tmp/DTF.app\" cd \"/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/.claude/worktrees/loving-wright-c2e9e2\")",
++      "Bash(git add *)",
++      "Bash(DEVELOPER_DIR=/Library/Developer/CommandLineTools git add DTF/)",
++      "Bash(DEVELOPER_DIR=/Library/Developer/CommandLineTools git status --short)",
++      "Bash(python3)",
++      "Bash(pkill -9 -f \"/tmp/DTF.app\" sleep 1)",
++      "Bash(pkill -9 -f \"/tmp/DTF.app\" sleep 1 /tmp/DTF.app/Contents/MacOS/DTF)",
++      "Bash(APP_PID=$! sleep 8 pkill -9 DTF echo \"---log---\" cat /tmp/dtf_out.log)",
++      "Bash(log show *)",
++      "Bash(/usr/bin/log show *)",
++      "Bash(screencapture -x -C -o /tmp/dtf_after_init2.png)"
+     ]
+   }
+ }
+diff --git a/DTF/Sources/DTF/Services/DebugBootstrap.swift b/DTF/Sources/DTF/Services/DebugBootstrap.swift
+index dbe77f4..03910be 100644
+--- a/DTF/Sources/DTF/Services/DebugBootstrap.swift
++++ b/DTF/Sources/DTF/Services/DebugBootstrap.swift
+@@ -13,23 +13,26 @@ enum DebugBootstrap {
+     static func runIfConfigured() async {
+         #if DEBUG
+         let defaults = UserDefaults.standard
++        NSLog("[DebugBootstrap] runIfConfigured; token=\(SessionService.shared.token == nil ? "nil" : "present")")
+         guard SessionService.shared.token == nil else { return }
+         guard let username = defaults.string(forKey: autoLoginUsernameKey), !username.isEmpty else {
++            NSLog("[DebugBootstrap] no autoLoginUsername key")
+             return
+         }
++        NSLog("[DebugBootstrap] auto-login as @\(username)")
+         do {
+             let auth = try await AuthAPI.login(username: username)
+             SessionService.shared.apply(auth: auth)
++            NSLog("[DebugBootstrap] auth ok, leagues=\(auth.leagues?.count ?? 0)")
+ 
+-            // Optional: auto-select a league by index so we land directly in MainTabView.
+             let leagues = auth.leagues ?? []
+             let idxRaw = defaults.object(forKey: autoSelectLeagueIndexKey) as? Int
+             if let idx = idxRaw, idx >= 0, idx < leagues.count {
++                NSLog("[DebugBootstrap] selecting league index \(idx): \(leagues[idx].name)")
+                 SessionService.shared.selectLeague(leagues[idx])
+             }
+-            print("[DebugBootstrap] auto-logged in as @\(username), leagues=\(leagues.count)")
+         } catch {
+-            print("[DebugBootstrap] auto-login failed: \(error)")
++            NSLog("[DebugBootstrap] auto-login failed: \(error)")
+         }
+         #endif
+     }
+diff --git a/DTF/Sources/DTF/Services/SessionService.swift b/DTF/Sources/DTF/Services/SessionService.swift
+index 8e2c805..4b139b3 100644
+--- a/DTF/Sources/DTF/Services/SessionService.swift
++++ b/DTF/Sources/DTF/Services/SessionService.swift
+@@ -1,11 +1,28 @@
+ import Foundation
+ import SwiftUI
+ 
+-/// Source of truth for the user's auth state. Published so any view can react.
++/// Source of truth for the user's auth + league state. Published so any
++/// view can react.
++///
++/// Flow:
++///  1. `LoginView` → `apply(auth:)` — we have a session token + league list.
++///  2. `LeaguePickerView` → `selectLeague(_:)` — stores the selection AND
++///     kicks off `performSessionInit()` so the backend's session has
++///     `sess["league"]` populated. Every `/api/trades/*` and
++///     `/api/league/*` endpoint depends on that key.
++///  3. While init is in flight, `leagueInitPhase == .loading`. RootRouter
++///     shows a spinner. Once `.ready`, MainTabView renders.
+ @MainActor
+ final class SessionService: ObservableObject {
+     static let shared = SessionService()
+ 
++    enum LeagueInitPhase: Equatable {
++        case idle
++        case loading
++        case ready
++        case failed(String)
++    }
++
+     @Published private(set) var token: String?
+     @Published private(set) var userID: String?
+     @Published private(set) var username: String?
+@@ -14,14 +31,18 @@ final class SessionService: ObservableObject {
+     @Published private(set) var leagues: [LeagueSummary] = []
+     @Published private(set) var selectedLeagueID: String?
+     @Published private(set) var selectedLeagueName: String?
++    @Published private(set) var leagueInitPhase: LeagueInitPhase = .idle
+ 
+     var isAuthenticated: Bool { token != nil }
+     var hasLeagueSelected: Bool { selectedLeagueID != nil }
++    var isLeagueReady: Bool {
++        if case .ready = leagueInitPhase { return true }
++        return false
++    }
+ 
+     private let defaults = UserDefaults.standard
+ 
+     private init() {
+-        // Restore from Keychain + UserDefaults on launch
+         token = KeychainStore.get(
+             service: DTFConstants.Keychain.service,
+             account: DTFConstants.Keychain.tokenAccount
+@@ -36,10 +57,12 @@ final class SessionService: ObservableObject {
+            let decoded = try? JSONDecoder().decode([LeagueSummary].self, from: data) {
+             leagues = decoded
+         }
++        // If we restored a selected league, we still need to re-init the
++        // backend session — the session dict doesn't survive a server
++        // restart. The init call is cheap. Leave phase at .idle so the
++        // RootRouter triggers performSessionInit() on mount.
+     }
+ 
+-    /// Non-isolated read used by APIClient (on an actor). Reads Keychain directly to avoid
+-    /// crossing back to MainActor mid-request.
+     nonisolated func currentToken() -> String? {
+         KeychainStore.get(
+             service: DTFConstants.Keychain.service,
+@@ -68,16 +91,60 @@ final class SessionService: ObservableObject {
+         }
+     }
+ 
++    /// Store league selection locally AND async-init the backend session.
++    /// Callers should observe `leagueInitPhase` — MainTabView should
++    /// not render real tabs until `.ready`.
+     func selectLeague(_ league: LeagueSummary) {
+         selectedLeagueID = league.leagueID
+         selectedLeagueName = league.name
+         defaults.set(league.leagueID, forKey: DTFConstants.Defaults.selectedLeagueID)
+         defaults.set(league.name, forKey: DTFConstants.Defaults.selectedLeagueName)
++        Task { await performSessionInit() }
++    }
++
++    /// Kicks off a backend `/api/session/init` using the currently-selected
++    /// league. Called automatically from `selectLeague`, and manually from
++    /// `RootRouter` when a session resumes across launches.
++    func performSessionInit() async {
++        guard
++            let userID,
++            let username,
++            let selectedLeagueID,
++            let league = leagues.first(where: { $0.leagueID == selectedLeagueID })
++        else {
++            leagueInitPhase = .failed("Missing session context")
++            return
++        }
++        // Avoid redundant calls.
++        if case .loading = leagueInitPhase { return }
++        if case .ready = leagueInitPhase { return }
++
++        leagueInitPhase = .loading
++        do {
++            try await SessionInitAPI.performFullInit(
++                userID: userID,
++                username: username,
++                displayName: displayName ?? username,
++                avatar: avatarURL,
++                league: league
++            )
++            leagueInitPhase = .ready
++        } catch {
++            let msg = (error as? APIError)?.message ?? error.localizedDescription
++            leagueInitPhase = .failed(msg)
++        }
++    }
++
++    /// Drop the initialized-league flag without clearing the selection.
++    /// Forces the next render to re-init (e.g., after server cold start).
++    func invalidateLeagueInit() {
++        leagueInitPhase = .idle
+     }
+ 
+     func clearSelectedLeague() {
+         selectedLeagueID = nil
+         selectedLeagueName = nil
++        leagueInitPhase = .idle
+         defaults.removeObject(forKey: DTFConstants.Defaults.selectedLeagueID)
+         defaults.removeObject(forKey: DTFConstants.Defaults.selectedLeagueName)
+     }
+@@ -91,6 +158,7 @@ final class SessionService: ObservableObject {
+         leagues = []
+         selectedLeagueID = nil
+         selectedLeagueName = nil
++        leagueInitPhase = .idle
+         KeychainStore.delete(
+             service: DTFConstants.Keychain.service,
+             account: DTFConstants.Keychain.tokenAccount
+diff --git a/DTF/Sources/DTF/Views/RootRouter.swift b/DTF/Sources/DTF/Views/RootRouter.swift
+index 1c9fcb0..278e5e2 100644
+--- a/DTF/Sources/DTF/Views/RootRouter.swift
++++ b/DTF/Sources/DTF/Views/RootRouter.swift
+@@ -1,6 +1,10 @@
+ import SwiftUI
+ 
+ /// Top-level router: decides which surface shows based on session state.
++///  - no token → Login
++///  - token but no league → LeaguePicker
++///  - league picked but backend session not yet initialized → LeagueInitGate
++///  - everything ready → MainTabView
+ struct RootRouter: View {
+     @EnvironmentObject private var session: SessionService
+ 
+@@ -12,6 +16,9 @@ struct RootRouter: View {
+             } else if !session.hasLeagueSelected {
+                 LeaguePickerView()
+                     .transition(.move(edge: .trailing).combined(with: .opacity))
++            } else if !session.isLeagueReady {
++                LeagueInitGate()
++                    .transition(.opacity)
+             } else {
+                 MainTabView()
+                     .transition(.opacity)
+@@ -19,5 +26,6 @@ struct RootRouter: View {
+         }
+         .animation(.easeInOut(duration: 0.25), value: session.isAuthenticated)
+         .animation(.easeInOut(duration: 0.25), value: session.hasLeagueSelected)
++        .animation(.easeInOut(duration: 0.25), value: session.isLeagueReady)
+     }
+ }

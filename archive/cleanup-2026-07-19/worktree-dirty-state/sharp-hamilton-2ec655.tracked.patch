@@ -1,0 +1,44 @@
+diff --git a/.claude/settings.local.json b/.claude/settings.local.json
+index 50d2c6e..c772990 100644
+--- a/.claude/settings.local.json
++++ b/.claude/settings.local.json
+@@ -11,7 +11,38 @@
+       "Bash(python3 scripts/seed_test_user_2.py --dry-run)",
+       "Bash(python3 scripts/seed_test_user_2.py --clear)",
+       "Bash(python3 -)",
+-      "Bash(python3 -c ':*)"
++      "Bash(python3 -c ':*)",
++      "Bash(textutil -convert txt -output /tmp/csrm_prd.txt \"/Users/teresadickens/Documents/Claude/Projects/CSRM References/CSRM_PRD.pages\")",
++      "Read(//tmp/**)",
++      "Bash(python3 -m compileall -q csrm scripts tests)",
++      "Bash(git -C /Users/teresadickens/Documents/Claude/Projects/CSRM status --short)",
++      "Bash(git commit -m ' *)",
++      "Bash(git -C /Users/teresadickens/Documents/Claude/Projects/CSRM log --oneline -1)",
++      "Bash(git -C /Users/teresadickens/Documents/Claude/Projects/CSRM status)",
++      "Read(//opt/homebrew/**)",
++      "Bash(brew list *)",
++      "Read(//Library/Frameworks/Python.framework/Versions/**)",
++      "Bash(python3 -m venv .venv)",
++      "Bash(.venv/bin/pip install *)",
++      "Bash(PYTHONPATH=. /Users/teresadickens/Documents/Claude/Projects/CSRM/.venv/bin/python -m pytest -q --tb=short)",
++      "Bash(PYTHONPATH=. /Users/teresadickens/Documents/Claude/Projects/CSRM/.venv/bin/python -m pytest -q --tb=line)",
++      "Bash(git merge *)",
++      "Bash(git checkout *)",
++      "Bash(git add *)",
++      "Bash(git commit *)",
++      "Bash(PYTHONPATH=. .venv/bin/python -m pytest -q --tb=line)",
++      "Bash(PYTHONPATH=. .venv/bin/python -m pytest -q --tb=line --ignore=tests/unit/test_scrapers.py --ignore=tests/unit/test_classifier_rules.py --ignore=tests/unit/test_classifier_fallback.py --ignore=tests/unit/test_deflections.py --ignore=tests/unit/test_usage_resolver.py --ignore=tests/unit/test_depth_chart_resolver.py --ignore=tests/unit/test_roster_resolver.py --ignore=tests/unit/test_eval_classifier.py --ignore=tests/unit/test_specificity_detector.py --ignore=tests/unit/test_normalize_attribution.py --ignore=tests/integration/test_end_to_end_pipeline.py)",
++      "Bash(git rm *)",
++      "Bash(sed -i '' 's|from csrm.resolve.result import ResolutionResult|from csrm.resolve.resolvers.common import ResolutionResult|' csrm/resolve/resolvers/game_plan.py)",
++      "Bash(sed -i '' 's|notes=|rationale=|g' csrm/resolve/resolvers/game_plan.py)",
++      "Bash(PYTHONPATH=. .venv/bin/python -m pytest -q --tb=short)",
++      "Bash(PYTHONPATH=. .venv/bin/python -m pytest tests/integration/test_api_endpoints.py::test_category_endpoint_returns_evidence tests/integration/test_api_endpoints.py::test_rankings_filter_by_category_and_sample tests/integration/test_api_endpoints.py::test_evaluate_claim_insufficient_data_for_unseen_category -v --tb=short)",
++      "Bash(PYTHONPATH=. .venv/bin/python -m pytest tests/unit/test_eval_harness.py -v --tb=short)",
++      "Bash(PYTHONPATH=. .venv/bin/python -m pytest tests/unit/test_eval_harness.py::test_harness_degrades_without_fixtures_or_db -v --tb=long)",
++      "Bash(PYTHONPATH=. .venv/bin/python -m scripts.eval_csrm --output json)",
++      "Bash(PYTHONPATH=. .venv/bin/python -c \"from csrm.nlp.classifier import classify; r = classify\\('Player X is a full go for Sunday'\\); print\\(r\\)\")",
++      "Bash(.venv/bin/ruff check *)",
++      "Bash(PYTHONPATH=. .venv/bin/python -m pytest -q)"
+     ]
+   }
+ }

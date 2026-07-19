@@ -1,0 +1,103 @@
+diff --git a/backend/server.py b/backend/server.py
+index 3bbae68..bc0a79f 100644
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -620,6 +620,13 @@ dp_values_by_format: dict[str, dict[str, float]] = {}   # {fmt: {name: value}}
+ dp_elo_by_format:    dict[str, dict[str, float]] = {}   # {fmt: {name: elo}}
+ g_universal_by_format: dict[str, dict] = {}             # {fmt: {'players': [...], 'seed': {...}}}
+ 
++# A failed DP fetch (e.g. transient GitHub outage at boot) must NOT be cached
++# as an empty pool — that would degrade the format until restart. Instead the
++# format stays unbuilt and is retried on a later access, after a short backoff
++# so request threads don't hammer the remote while it's down.
++_DP_FETCH_RETRY_SECONDS = 60.0
++_dp_fetch_retry_at: dict[str, float] = {}  # {fmt: monotonic time when retry is allowed}
++
+ # Backwards-compat aliases (default format). These reference the same lists
+ # as g_universal_by_format['1qb_ppr'] after _ensure_universal_pools runs.
+ dp_values: dict[str, float] = {}
+@@ -871,20 +878,24 @@ def _ensure_universal_pools() -> None:
+     # The per-format DynastyProcess CSV fetches are independent network calls.
+     # Run the two formats concurrently so the build phase isn't bottlenecked on
+     # serial round-trips. Each task loads that format's values + elo maps.
+-    # A fetch failure inside load_consensus_* is already handled gracefully by
+-    # data_loader (returns {} → flat-Elo baseline), so a failing format yields
+-    # empty maps rather than raising; we still guard the future result here so
+-    # one format's failure can never block or break the other.
++    # A fetch failure inside load_consensus_* returns {} rather than raising;
++    # we still guard the future result here so one format's failure can never
++    # block or break the other. An empty values map is treated as fetch
++    # failure: nothing is cached for that format, so a later access retries
++    # (after _DP_FETCH_RETRY_SECONDS) instead of freezing an empty pool in
++    # until process restart.
+     def _load_format_dp(fmt: str) -> tuple[dict[str, float], dict[str, float]]:
+         return (
+             load_consensus_values(scoring=fmt),
+             load_consensus_elo(scoring=fmt),
+         )
+ 
++    now = time.monotonic()
+     pending = [
+         fmt for fmt in DL_SCORING_FORMATS
+         if fmt not in g_universal_by_format
+         and (fmt not in dp_values_by_format or fmt not in dp_elo_by_format)
++        and now >= _dp_fetch_retry_at.get(fmt, 0.0)
+     ]
+     if pending:
+         with concurrent.futures.ThreadPoolExecutor(max_workers=len(pending)) as ex:
+@@ -894,20 +905,31 @@ def _ensure_universal_pools() -> None:
+                 try:
+                     vals, elo = future.result()
+                 except Exception as e:
+-                    log.warning("  DP fetch failed for %s (%s) — flat-Elo baseline", fmt, e)
++                    log.warning("  DP fetch failed for %s (%s)", fmt, e)
+                     vals, elo = {}, {}
++                if not vals:
++                    _dp_fetch_retry_at[fmt] = time.monotonic() + _DP_FETCH_RETRY_SECONDS
++                    log.warning("  no DP values for %s — pool not built, retry allowed in %ds",
++                                fmt, int(_DP_FETCH_RETRY_SECONDS))
++                    continue
++                _dp_fetch_retry_at.pop(fmt, None)
+                 dp_values_by_format.setdefault(fmt, vals)
+                 dp_elo_by_format.setdefault(fmt, elo)
+ 
+     for fmt in DL_SCORING_FORMATS:
+         if fmt in g_universal_by_format:
+             continue
++        if fmt not in dp_values_by_format:
++            continue  # fetch failed — leave unbuilt so a later access retries
+         players, seed = build_universal_pool(
+             sleeper_cache=cache,
+             dp_elo=dp_elo_by_format.get(fmt, {}),
+             dp_vals=dp_values_by_format.get(fmt, {}),
+             all_db_players=all_db_players,
+         )
++        if not players:
++            log.warning("  universal pool build for %s yielded no players — not caching", fmt)
++            continue
+         g_universal_by_format[fmt] = {"players": players, "seed": seed}
+         log.info("  universal pool built for %s: %d players", fmt, len(players))
+ 
+@@ -929,6 +951,10 @@ def _ensure_universal_pool() -> None:
+ def _get_universal_pool(scoring_format: str) -> tuple[list[Player], dict[str, float]]:
+     """Return (players, seed) for a given scoring format. Builds on demand."""
+     _ensure_universal_pools()
++    from .data_loader import SCORING_FORMATS as DL_SCORING_FORMATS
++    if scoring_format not in DL_SCORING_FORMATS:
++        log.error("Unknown scoring format %r — serving 1qb_ppr pool as fallback",
++                  scoring_format)
+     pool = g_universal_by_format.get(scoring_format) or g_universal_by_format.get("1qb_ppr") or {}
+     return pool.get("players", []), pool.get("seed", {})
+ 
+diff --git a/docs/runbook.md b/docs/runbook.md
+index bb3f03f..31c8a37 100644
+--- a/docs/runbook.md
++++ b/docs/runbook.md
+@@ -122,6 +122,7 @@ curl -H "X-Cron-Secret: $CRON_SECRET" .../api/debug/log?n=100
+ | Suggested/default tiers absurd — dozens of "Elite" players, or stars defaulting to Depth/Bench (feedback #60/#69, "44 elite QBs") | Three stacked causes: (1) FB-76 — SF boards bucketed with 1qb_ppr thresholds (fixed 81a1934/b11a3d1, 1.3.0); (2) `apply_reorder` respread the whole board **linearly** from pool max→min, flattening the convex consensus value curve so any full Manual Ranks session pushed the top third of a position above the Elite floor; (3) `tier_config.json` bands were never calibrated to the consensus seed scale (`elo = 1200 + value/10000×600`) — DP values decay steeply, so Starter/Solid sat nearly empty and e.g. the consensus TE1 defaulted to "Depth" in SF | Fixed 2026-07-10: `apply_reorder` now permutes existing Elos (occupancy-invariant), and bands recalibrated per (format, position) to rank-count targets (Elite ≈ top 5). Guardrail: `backend/tests/test_tier_occupancy.py` pins per-position occupancy against a checked-in DP snapshot — if consensus drifts far, refresh the fixture and re-tune `tier_config.json` |
+ | League tab Pending/Accepted tiles disagree with the Matches list (feedback #91) | Tiles counted `trade_matches` rows split by disposition status (`pending`/`accepted`) and ignored per-user dismissal, while the Matches list shows all statuses minus dismissed — so one match could read as a "trade available" under both labels (e.g. a pending match you'd already accepted your side of + a dismissed accepted match) while the inbox showed one entry | Fixed 2026-07-10: tiles renamed to "Mutual matches" / "Awaiting them" and re-backed by `matches_mutual` / `matches_awaiting` in `/api/league/summary`, which mirror the Matches screen's segments exactly (see `test_league_summary_buckets.py`). Legacy keys still emitted for pre-1.4 builds |
+ | Trios keep serving the same top players (feedback #97, "Bijan/Gibbs/Jeanty way too frequently" — persisted after raising `trio_repeat_avoid` live to 8) | Selectors were deterministic *within* each strategy, and the top of the board is a tiny pool (elite ≈ 5 members; ~2+4 straddlers at the elite/starter edge within the ±60 margin): within-tier always took the tier's max/min-Elo (the #1 RB headlined every elite trio); the within-tier cursor started at *elite* on every service rebuild while anti-repeat state is in-memory (every app session opened on the same elite trio — no config value can fix a cross-restart repeat); small tiers fully inside the avoid window relaxed all-or-nothing and re-served the identical trio | Fixed 2026-07-10 (`ranking_service.py`): random cursor start per rebuild, extremes/straddlers sampled from the top-2 eligibles, partial avoid-relaxation (longest-unseen first), random edge tie-break; `trio_repeat_avoid` seeded default aligned to the live prod value (8). Live-tuning note: `trio_repeat_avoid` only suppresses repeats *within* one server lifetime — cross-session repetition is a code (selector-randomisation) concern, not a knob. Guardrail: FB #97 tests in `test_trio_variety.py` |
++| A scoring format serves no consensus values / trade values / tier seeds after a boot that coincided with a GitHub outage | `_ensure_universal_pools` used to cache a failed DynastyProcess CSV fetch as an empty pool (`{"players": [], "seed": {}}`) — the truthy dict passed the idempotency check, so the format stayed degraded until process restart | Fixed 2026-07-11: an empty DP values map is treated as fetch failure — nothing cached, retry allowed after a 60s backoff (`_DP_FETCH_RETRY_SECONDS` in `backend/server.py`), so the pool self-heals on a later request. `_get_universal_pool` also now logs an error for unknown format keys instead of silently serving the 1qb_ppr pool. Guardrail: `backend/tests/test_universal_pool_retry.py` |
+ 
+ ---
+ 

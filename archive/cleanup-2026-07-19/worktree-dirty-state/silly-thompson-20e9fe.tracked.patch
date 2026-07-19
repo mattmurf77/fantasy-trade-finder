@@ -1,0 +1,15 @@
+diff --git a/.claude/settings.local.json b/.claude/settings.local.json
+index 50d2c6e..f350547 100644
+--- a/.claude/settings.local.json
++++ b/.claude/settings.local.json
+@@ -11,7 +11,9 @@
+       "Bash(python3 scripts/seed_test_user_2.py --dry-run)",
+       "Bash(python3 scripts/seed_test_user_2.py --clear)",
+       "Bash(python3 -)",
+-      "Bash(python3 -c ':*)"
++      "Bash(python3 -c ':*)",
++      "Bash(/opt/homebrew/bin/gh pr *)",
++      "Bash(python3 -c ' *)"
+     ]
+   }
+ }

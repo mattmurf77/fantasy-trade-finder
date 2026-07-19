@@ -1,0 +1,98 @@
+diff --git a/docs/cross-client-invariants.md b/docs/cross-client-invariants.md
+index eacf0e0..3b86abe 100644
+--- a/docs/cross-client-invariants.md
++++ b/docs/cross-client-invariants.md
+@@ -14,7 +14,13 @@ Things that **must** stay in sync across backend, web, mobile, and the extension
+ | Depth | purple |
+ | Bench | gray |
+ 
+-**Locations:** `mobile/src/theme/colors.ts`, `web/css/styles.css`, `extension/content.css`, `extension/popup.css`.
++**Locations:** `mobile/src/theme/colors.ts` (`colors.tier`), `web/positional-tiers.html` (inline CSS: `.tier-row`, `.tier-assign-btn`, `.tier-legend-swatch`), `web/profile.html` (inline CSS vars `--elite`…`--bench`), `extension/content.css` (`.ftf-badge.ftf-tier-*`).
++
++Purple family reference values (from `extension/content.css`): base `#a855f7`, accents `#c084fc` / `#e9d5ff`, `rgba(168,85,247,…)`.
++
++**Not** a location: `web/css/styles.css` — its `.tier-depth` (grey) belongs to the separate dynasty-value tier badges (elite/high/mid/depth from Sleeper `search_rank`, computed in `web/js/app.js` `valueTier()`), not the Elo tiers. `extension/popup.css` has no tier colors either.
++
++**Known collision:** Depth purple `#a855f7` is also the TE position color (`--te` in web CSS, `te` in `mobile/src/theme/colors.ts`). The previous Depth orange collided with QB the same way. If either the Depth tier or TE position color changes, a human should decide the pairing deliberately.
+ 
+ ---
+ 
+diff --git a/mobile/src/theme/CLAUDE.md b/mobile/src/theme/CLAUDE.md
+index 668d63c..b12f976 100644
+--- a/mobile/src/theme/CLAUDE.md
++++ b/mobile/src/theme/CLAUDE.md
+@@ -2,7 +2,7 @@
+ 
+ Design tokens.
+ 
+-- `colors.ts` — palette including tier colors (Elite/Starter/Solid/Depth/Bench). Must match `web/css/styles.css` and `extension/content.css`.
++- `colors.ts` — palette including tier colors (Elite/Starter/Solid/Depth/Bench). Must match the locations in `docs/cross-client-invariants.md` § Tier color tokens (`web/positional-tiers.html`, `web/profile.html`, `extension/content.css`).
+ - `spacing.ts` — spacing scale.
+ 
+ Always reference tokens — never hard-code colors or px values in components.
+diff --git a/mobile/src/theme/colors.ts b/mobile/src/theme/colors.ts
+index e61871f..1acef94 100644
+--- a/mobile/src/theme/colors.ts
++++ b/mobile/src/theme/colors.ts
+@@ -23,7 +23,7 @@ export const colors = {
+     elite: '#f59e0b',
+     starter: '#22c55e',
+     solid: '#3b82f6',
+-    depth: '#f97316',
++    depth: '#a855f7',
+     bench: '#94a3b8',
+   },
+ } as const;
+diff --git a/web/positional-tiers.html b/web/positional-tiers.html
+index 1697bbf..713e8fd 100644
+--- a/web/positional-tiers.html
++++ b/web/positional-tiers.html
+@@ -232,8 +232,8 @@
+     .tier-row[data-tier="solid"]   .tier-label-area { background: rgba(56,189,248,0.06); }
+     .tier-row[data-tier="solid"]   .tier-label-name { color: #38bdf8; }
+ 
+-    .tier-row[data-tier="depth"]   .tier-label-area { background: rgba(251,146,60,0.06); }
+-    .tier-row[data-tier="depth"]   .tier-label-name { color: #fb923c; }
++    .tier-row[data-tier="depth"]   .tier-label-area { background: rgba(168,85,247,0.06); }
++    .tier-row[data-tier="depth"]   .tier-label-name { color: #a855f7; }
+ 
+     .tier-row[data-tier="bench"]   .tier-label-area { background: rgba(122,127,150,0.03); }
+     .tier-row[data-tier="bench"]   .tier-label-name { color: #555a6e; }
+@@ -575,13 +575,13 @@
+     .tier-assign-btn[data-tier="elite"]   { border-color: rgba(251,191,36,0.3); color: #fbbf24; background: rgba(251,191,36,0.06); }
+     .tier-assign-btn[data-tier="starter"] { border-color: rgba(34,197,94,0.3);  color: #22c55e; background: rgba(34,197,94,0.06); }
+     .tier-assign-btn[data-tier="solid"]   { border-color: rgba(56,189,248,0.3); color: #38bdf8; background: rgba(56,189,248,0.06); }
+-    .tier-assign-btn[data-tier="depth"]   { border-color: rgba(251,146,60,0.3); color: #fb923c; background: rgba(251,146,60,0.06); }
++    .tier-assign-btn[data-tier="depth"]   { border-color: rgba(168,85,247,0.3); color: #a855f7; background: rgba(168,85,247,0.06); }
+     .tier-assign-btn[data-tier="bench"]   { border-color: rgba(122,127,150,0.3); color: #7a7f96; background: rgba(122,127,150,0.04); }
+     /* Hover — intensify */
+     .tier-assign-btn[data-tier="elite"]:hover   { background: rgba(251,191,36,0.18); border-color: #fbbf24; }
+     .tier-assign-btn[data-tier="starter"]:hover  { background: rgba(34,197,94,0.18);  border-color: #22c55e; }
+     .tier-assign-btn[data-tier="solid"]:hover    { background: rgba(56,189,248,0.18); border-color: #38bdf8; }
+-    .tier-assign-btn[data-tier="depth"]:hover    { background: rgba(251,146,60,0.18); border-color: #fb923c; }
++    .tier-assign-btn[data-tier="depth"]:hover    { background: rgba(168,85,247,0.18); border-color: #a855f7; }
+     .tier-assign-btn[data-tier="bench"]:hover    { background: rgba(122,127,150,0.14); border-color: #7a7f96; }
+ 
+     /* ── Tier legend/key — sits in the pool-header to the right of the title ── */
+@@ -626,7 +626,7 @@
+     .tier-legend-swatch[data-tier="elite"]   { border-color: #fbbf24; color: #fcd34d; background: rgba(251,191,36,0.2); box-shadow: 0 0 8px rgba(251,191,36,0.25); }
+     .tier-legend-swatch[data-tier="starter"] { border-color: #22c55e; color: #4ade80; background: rgba(34,197,94,0.2);  box-shadow: 0 0 8px rgba(34,197,94,0.25); }
+     .tier-legend-swatch[data-tier="solid"]   { border-color: #38bdf8; color: #7dd3fc; background: rgba(56,189,248,0.2); box-shadow: 0 0 8px rgba(56,189,248,0.25); }
+-    .tier-legend-swatch[data-tier="depth"]   { border-color: #fb923c; color: #fdba74; background: rgba(251,146,60,0.2); box-shadow: 0 0 8px rgba(251,146,60,0.25); }
++    .tier-legend-swatch[data-tier="depth"]   { border-color: #a855f7; color: #c084fc; background: rgba(168,85,247,0.2); box-shadow: 0 0 8px rgba(168,85,247,0.25); }
+     .tier-legend-swatch[data-tier="bench"]   { border-color: #6b7280; color: #9ca3af; background: rgba(107,114,128,0.2); box-shadow: 0 0 8px rgba(107,114,128,0.15); }
+     .tier-legend-desc {
+       color: rgba(255,255,255,0.6);
+diff --git a/web/profile.html b/web/profile.html
+index 226acca..f8ad68f 100644
+--- a/web/profile.html
++++ b/web/profile.html
+@@ -22,7 +22,7 @@
+       --elite:   #fbbf24;
+       --starter: #22c55e;
+       --solid:   #4f7cff;
+-      --depth:   #fb923c;
++      --depth:   #a855f7;
+       --bench:   #7a7f96;
+     }
+     * { box-sizing: border-box; margin: 0; padding: 0; }

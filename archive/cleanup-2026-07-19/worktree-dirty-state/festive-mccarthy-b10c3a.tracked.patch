@@ -1,0 +1,18 @@
+diff --git a/.claude/settings.local.json b/.claude/settings.local.json
+index 2f61528..bbdfeb9 100644
+--- a/.claude/settings.local.json
++++ b/.claude/settings.local.json
+@@ -17,7 +17,12 @@
+       "Bash(python3 -c ' *)",
+       "Bash(git add *)",
+       "Bash(git commit --quiet -m 'feedback: hide closed notes from the user inbox; verify per-user scoping *)",
+-      "Bash(git commit --quiet -m 'backend+docs: feedback closed-status filter and tiers scoring_format field *)"
++      "Bash(git commit --quiet -m 'backend+docs: feedback closed-status filter and tiers scoring_format field *)",
++      "Bash(git commit -m 'web: migrate League Summary match tiles to FB-91 buckets \\(Mutual Matches / Awaiting Them\\) *)",
++      "Bash(git rebase *)",
++      "Bash(git push *)",
++      "Bash(curl -s --max-time 15 \"https://fantasy-trade-finder.onrender.com/js/app.js\")",
++      "Bash(curl -s --max-time 15 \"https://fantasy-trade-finder.onrender.com/css/styles.css\")"
+     ]
+   }
+ }

@@ -1,0 +1,183 @@
+diff --git a/backend/database.py b/backend/database.py
+index e55b775..3964039 100644
+--- a/backend/database.py
++++ b/backend/database.py
+@@ -2524,16 +2524,34 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
+     {
+         "league_name":              str,
+         "default_scoring":          '1qb_ppr' | 'sf_tep',
+-        "matches_pending":          int,   # current user's pending matches in this league
+-        "matches_accepted":         int,   # current user's accepted matches in this league
++        "matches_mutual":           int,   # trade_matches rows involving the user, any status
++        "matches_awaiting":         int,   # user's one-sided likes not yet matured into a match
++        "matches_pending":          int,   # DEPRECATED (feedback #91) — status-split view
++        "matches_accepted":         int,   # DEPRECATED (feedback #91) — status-split view
+         "leaguemates_total":        int,   # members other than current user
+         "leaguemates_joined":       int,   # how many have a users row
+         "leaguemates_unlocked_1qb": int,   # how many unlocked 1qb_ppr
+         "leaguemates_unlocked_sf":  int,   # how many unlocked sf_tep
+     }
++
++    Match buckets (feedback #91): matches_mutual counts every trade_matches
++    row involving the caller in this league regardless of status — the
++    league-scoped equivalent of the Matches "Mutual matches" segment.
++    matches_awaiting counts the caller's likes that have NOT matured into a
++    match (the "Awaiting them" segment, via load_awaiting_trades). The two
++    buckets are disjoint by construction, unlike the deprecated
++    pending/accepted split which showed the same trade under two tiles.
+     """
+     from sqlalchemy import func
+ 
++    # "Awaiting them" bucket — reuse the exact segment logic so the summary
++    # tile always agrees with the Matches screen (likes that matured into a
++    # match are excluded there, keeping the two buckets disjoint).
++    # load_awaiting_trades is cross-league; scope to this league here.
++    matches_awaiting = sum(
++        1 for a in load_awaiting_trades(user_id) if a["league_id"] == league_id
++    )
++
+     with engine.connect() as conn:
+         # League name and default scoring (first row wins)
+         league_row = conn.execute(
+@@ -2548,7 +2566,19 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
+             else DEFAULT_SCORING
+         )
+ 
+-        # Match counts for the current user
++        # Match counts for the current user. matches_mutual is dismissal-
++        # agnostic and status-agnostic — it must equal the number of tiles
++        # in the Matches "Mutual matches" segment for this league.
++        matches_mutual = conn.execute(
++            select(func.count()).select_from(trade_matches_table).where(
++                (trade_matches_table.c.league_id == league_id) &
++                (
++                    (trade_matches_table.c.user_a_id == user_id) |
++                    (trade_matches_table.c.user_b_id == user_id)
++                )
++            )
++        ).scalar() or 0
++
+         matches_pending = conn.execute(
+             select(func.count()).select_from(trade_matches_table).where(
+                 (trade_matches_table.c.league_id == league_id) &
+@@ -2585,6 +2615,8 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
+             return {
+                 "league_name":              league_name,
+                 "default_scoring":          default_scoring,
++                "matches_mutual":           matches_mutual,
++                "matches_awaiting":         matches_awaiting,
+                 "matches_pending":          matches_pending,
+                 "matches_accepted":         matches_accepted,
+                 "leaguemates_total":        0,
+@@ -2619,6 +2651,8 @@ def get_league_summary(league_id: str, user_id: str) -> dict:
+     return {
+         "league_name":              league_name,
+         "default_scoring":          default_scoring,
++        "matches_mutual":           matches_mutual,
++        "matches_awaiting":         matches_awaiting,
+         "matches_pending":          matches_pending,
+         "matches_accepted":         matches_accepted,
+         "leaguemates_total":        leaguemates_total,
+@@ -3524,7 +3558,7 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
+                     trade_matches_table.c.user_a_id == user_id,
+                     trade_matches_table.c.user_b_id == user_id,
+                 )
+-            ).order_by(trade_matches_table.c.created_at.desc()).limit(500)
++            ).order_by(trade_matches_table.c.matched_at.desc()).limit(500)
+         ).fetchall()
+ 
+         # Fan out one league_members fetch covering every league the user
+diff --git a/backend/server.py b/backend/server.py
+index cf336ab..96d3d85 100644
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -4350,7 +4350,11 @@ def league_summary_route():
+     """GET /api/league/summary?league_id=XXX
+ 
+     Returns the roll-up shown on the League Summary page:
+-      - matches_pending / matches_accepted (current user's)
++      - matches_mutual / matches_awaiting (current user's; feedback #91 —
++        mirror the Matches screen's "Mutual matches" / "Awaiting them"
++        segments)
++      - matches_pending / matches_accepted (DEPRECATED status-split view;
++        kept for older clients)
+       - leaguemates_total / _joined / _unlocked_1qb / _unlocked_sf
+       - default_scoring, league_name
+     """
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index dbde678..eb22269 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -120,7 +120,7 @@ Notes:
+ | GET | `/api/league/picks` | Draft picks in current league |
+ | GET | `/api/league/preferences` | Read outlook + position prefs |
+ | POST | `/api/league/preferences` | Write outlook + position prefs |
+-| GET | `/api/league/summary` | League summary |
++| GET | `/api/league/summary` | League summary. Match counters: `matches_mutual` (caller's `trade_matches` rows, any status — "Mutual matches" segment) + `matches_awaiting` (caller's likes not yet matured into a match — "Awaiting them"); `matches_pending`/`matches_accepted` deprecated (feedback #91) |
+ | POST | `/api/league/scoring` | Set scoring format |
+ | GET | `/api/league/coverage` | Member ranking coverage |
+ | GET | `/api/league/member-unlock-states` | Per-member unlock badges |
+diff --git a/docs/cross-client-invariants.md b/docs/cross-client-invariants.md
+index 51f7c3f..0d2d646 100644
+--- a/docs/cross-client-invariants.md
++++ b/docs/cross-client-invariants.md
+@@ -91,6 +91,19 @@ Shared user-facing strings rendered by both mobile and web — must stay charact
+ 
+ **Locations:** `mobile/src/components/TradeCard.tsx`, `web/js/app.js` (search "likes-you-pill" / "consensus-tag" / "trade-sweetener").
+ 
++## Match bucket labels & semantics (feedback #91)
++
++The match counters shown on League Summary must agree with the Matches screen segments, using the same two labels on every client:
++
++| Label | Backend source | Definition |
++|---|---|---|
++| `Mutual matches` | `/api/league/summary` → `matches_mutual`; segment via `/api/trades/matches/all` | caller's `trade_matches` rows, any status |
++| `Awaiting them` | `/api/league/summary` → `matches_awaiting`; segment via `/api/trades/awaiting` | caller's likes not yet matured into a match |
++
++The buckets are disjoint — a like leaves "Awaiting them" the moment it matures into a match. The legacy `matches_pending`/`matches_accepted` keys are deprecated (status-split; double-signaled one trade under two tiles).
++
++**Locations:** `backend/database.py` (`get_league_summary`, `load_awaiting_trades`), `web/js/app.js` (`renderLeagueSummary`), `mobile/src/screens/MatchesScreen.tsx` (segment labels). `mobile/src/screens/LeagueScreen.tsx` still renders the deprecated keys as "Pending"/"Accepted" — migration pending.
++
+ ## Fairness meter semantics
+ 
+ `fairness_score` is serialized as a float in `[0, 1]` on every trade card (consensus package-value ratio, lesser/greater). Clients render it as a percent: `Math.round(fairness * 100)` driving a 0–100% meter. Do **not** rescale server-side — both clients multiply by 100.
+diff --git a/docs/glossary.md b/docs/glossary.md
+index 01b9fb0..ee6e446 100644
+--- a/docs/glossary.md
++++ b/docs/glossary.md
+@@ -59,7 +59,9 @@ Domain terms used throughout the codebase. Add a term when new jargon appears.
+ 
+ **Smart matchup** — Claude-powered matchup selection. Generates ~10 candidate pairs (nearby Elo, not yet compared), asks Claude to pick the most dynasty-informative. Toggle via `smart_matchup_enabled` (1.0). Falls back to algorithmic without `ANTHROPIC_API_KEY`.
+ 
+-**Mutual gain trade / Trade match** — Both sides improve by their own Elo math. When both users like mirrored trades, a `trade_matches` row is created (status `pending`) and both inboxes get a `trade_match` notification.
++**Mutual gain trade / Trade match** — Both sides improve by their own Elo math. When both users like mirrored trades, a `trade_matches` row is created (status `pending`) and both inboxes get a `trade_match` notification. "Mutual matches" (Matches screen segment; League Summary card) counts these rows for the caller regardless of status.
++
++**Awaiting them** — A trade the user liked that hasn't yet matured into a mutual match: their one-sided like, waiting on the counterparty's. Powers the Matches screen segment (`/api/trades/awaiting`) and the League Summary `matches_awaiting` counter. Disjoint from "Mutual matches" — a like leaves this bucket the moment it matures.
+ 
+ **Mirrored trade** — Same player set viewed from both sides: A's "give X get Y" and B's "give Y get X" are mirrors.
+ 
+diff --git a/web/js/app.js b/web/js/app.js
+index 536862a..cd5e6e9 100644
+--- a/web/js/app.js
++++ b/web/js/app.js
+@@ -4600,14 +4600,14 @@
+       if (grid) {
+         grid.innerHTML = `
+           <div class="summary-card">
+-            <div class="summary-card-value pending">${data.matches_pending || 0}</div>
+-            <div class="summary-card-label">Matches Pending</div>
+-            <div class="summary-card-sub">Waiting on a decision</div>
++            <div class="summary-card-value accepted">${data.matches_mutual || 0}</div>
++            <div class="summary-card-label">Mutual matches</div>
++            <div class="summary-card-sub">Liked by both sides</div>
+           </div>
+           <div class="summary-card">
+-            <div class="summary-card-value accepted">${data.matches_accepted || 0}</div>
+-            <div class="summary-card-label">Matches Accepted</div>
+-            <div class="summary-card-sub">Both sides agreed</div>
++            <div class="summary-card-value pending">${data.matches_awaiting || 0}</div>
++            <div class="summary-card-label">Awaiting them</div>
++            <div class="summary-card-sub">Your like, waiting on theirs</div>
+           </div>
+           <div class="summary-card">
+             <div class="summary-card-value">${(data.leaguemates_joined || 0) + 1} / ${(data.leaguemates_total || 0) + 1}</div>

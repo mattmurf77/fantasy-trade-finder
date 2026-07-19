@@ -1,0 +1,65 @@
+diff --git a/backend/database.py b/backend/database.py
+index 7588d3c..4163970 100644
+--- a/backend/database.py
++++ b/backend/database.py
+@@ -885,6 +885,8 @@ _MODEL_CONFIG_DEFAULTS = [
+     ("lane_shift_frac",          0.10,  "phase2: min value-weighted now-lean shift for a card to label as a window move"),
+     ("fit_premium_max_loss",   300.0,   "phase2: max raw-board value a flagged need-fill 1-for-1 may pay"),
+     ("aggression_weight",        0.20,  "phase2: composite reweight strength for the light/fair/generous offer buckets"),
++    # ── Deck-eval 2026-07-17 — consensus consolidation sanity gate ───────
++    ("consolidation_raw_loss_frac", 0.15, "deck-eval: max RAW consensus loss on a user-give-side consolidation as a fraction of the raw give total (consensus path); 0 disables"),
+ ]
+ 
+ 
+diff --git a/backend/trade_service.py b/backend/trade_service.py
+index 581a601..d65d20a 100644
+--- a/backend/trade_service.py
++++ b/backend/trade_service.py
+@@ -185,6 +185,17 @@ _DEFAULT_CFG: dict[str, float] = {
+     # pad a package. 0 disables. Headliners are exempt (deep-league 1-for-1
+     # swaps of cheap players stay legal).
+     "asset_floor_abs":         450.0,
++    # Deck-eval 2026-07-17 — consolidation raw-delta sanity gate
++    # (consensus path). The package_adj_gamma depth discount vaporizes a
++    # VALUABLE second give asset (a 2940 WR contributes ~1181) while the
++    # crown premium inflates the received stud, so a consensus-lopsided
++    # 2-for-1 (Daniels + Odunze → Hurts, raw consensus Δ −2748) scored
++    # fairness 0.99 and passed the #108 adjusted-delta gate. On a
++    # user-give-side consolidation (more assets given than received) the
++    # RAW consensus loss may not exceed this fraction of the raw give
++    # total — the market's consolidation premium tops out around ~15%;
++    # anything past it is an insult card. 0 disables (pre-fix behavior).
++    "consolidation_raw_loss_frac": 0.15,
+     # ------------------------------------------------------------------
+     # Tier 2 — work item 2.2: outlook as now/future valuation blend
+     # (flag: trade.outlook_blend). α = weight on NOW value; 1−α on FUTURE.
+@@ -2462,6 +2473,17 @@ class TradeService:
+             # (1 − threshold) more consensus value (TC-CFG-001 gap).
+             if rv - gv < _c("user_gain_epsilon"):
+                 return
++            # Deck-eval 2026-07-17 — the adjusted delta above can flip
++            # positive on a consensus-lopsided consolidation (gamma depth
++            # discount guts the second give asset, crown premium inflates
++            # the received stud), so user-give-side consolidations must
++            # ALSO keep their RAW consensus loss within
++            # consolidation_raw_loss_frac of the raw give total.
++            _frac = _c("consolidation_raw_loss_frac")
++            if _frac > 0 and len(give_ids) > len(recv_ids):
++                raw_give = sum(gvals)
++                if raw_give - sum(rvals) > _frac * raw_give:
++                    return
+             # #108 — and when the user DOES have both players on their own
+             # raw board, a 1-for-1 must respect that ordering too.
+             if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
+diff --git a/docs/config-reference.md b/docs/config-reference.md
+index 0b5c504..43cc2c0 100644
+--- a/docs/config-reference.md
++++ b/docs/config-reference.md
+@@ -122,6 +122,7 @@ The trio loop rotates among three strategies (never repeating the previous one),
+ | `user_gain_epsilon` | 0.0 | #108 user-board gain gate (value space). 1-for-1 player swaps (any basis, v2 + v3) must show receive − give ≥ ε on the user's OWN raw board (pre-shrinkage `user_elo`) — never offer the user's higher-ranked player for their lower-ranked one. Consensus-basis cards additionally require the consensus package delta (receive − give) ≥ ε on every shape. 0.0 = receive must at least tie give. Multi-asset divergence packages are exempt from the raw-board rule (the aggregate surplus gate is the compensation test). |
+ | `filler_min_frac` | 0.25 | #141 junk-filler gate (all package shapes: v2 pair, v3 optimizer incl. the 3.4 sweetener pass, consensus fallback). Any piece beyond a side's headliner (its best asset) must be worth ≥ this fraction of that headliner, each player priced at **max(user board, opponent board)** raw value — a filler EITHER side genuinely values survives; junk both boards value low never pads a suggestion. Headliners (the 1-for-1 core) are exempt; marginal valuation is deliberately NOT used (it collapses depth pieces by design, but "is this junk?" is a board-value judgment). On the consensus path the opponent's board is consensus. 0.25 ≈ a 277-Elo window below the headliner: on the 2026-06-13 DP snapshot a Chase-headlined side (≈8470) only accepts pieces ≥ ~2100 (≈ a mid 1st / top-65), a rank-50-headlined side (≈3250) accepts ≥ ~810 (≈ rank 115), and a rank-100-headlined side (≈1000) accepts ≥ ~250 (≈ rank 250) — so depth-for-depth trades are untouched. 0 restores pre-#141 behavior byte-identically. Unlike the other Tier-1 keys this one **is DB-seeded** (`_MODEL_CONFIG_DEFAULTS`), so it is live-tunable via `PUT /api/admin/config/filler_min_frac`. |
+ | `asset_floor_abs` | 450.0 | Interview 2026-07-17 ("both floors") — absolute companion to `filler_min_frac`, same code path (`filler_ok`) and same max-of-boards metric: every non-headliner piece must ALSO clear this value-space floor (~bottom of the depth tier, Elo ≈ 1350), so pure roster-clogger bodies never pad a package even when the relative bar is tiny. Headliners exempt; `filler_min_frac = 0` remains the master kill-switch for the whole gate; 0 disables just the absolute floor. DB-seeded. |
++| `consolidation_raw_loss_frac` | 0.15 | Deck-eval 2026-07-17 — consolidation raw-delta sanity gate, **consensus path only** (`_generate_consensus_for_pair._emit`). On a user-give-side consolidation (more assets given than received) the **raw** consensus loss `Σgive − Σreceive` may not exceed this fraction of `Σgive`. Closes the insult-card class where the `package_adj_gamma` depth discount vaporizes a valuable second give asset while the crown premium inflates the received stud, so the adjusted delta (the #108 gate's input) flips positive and fairness scores ~0.99 on a raw −2748 consensus loss (Daniels + Odunze → Hurts). Divergence cards are untouched (their both-sides surplus gates run on real boards). 0.15 ≈ the market's ceiling on a fair consolidation premium; a 13%-loss 2-for-1 still surfaces. 0 disables (pre-fix behavior). DB-seeded. |
+ | `fairness_floor_divergence` | 0.55 | Interview 2026-07-17 ("loosen it") — for **divergence** cards (both members have real boards) the consensus fairness gate becomes `min(fairness_threshold, this)`: an extreme-case veto only, since the both-sides surplus gate already proves mutual gain on the boards that matter. Applies in the v2 pair generator and the v3 optimizer (including the sweetener band). Consensus-basis cards keep the full `fairness_threshold`. Fairness still weighs into the composite, so lopsided-but-mutual trades rank lower rather than vanish. DB-seeded. |
+ | `mutual_gain_cap` | 1500.0 | Normalization ceiling for the harmonic-mean term in the composite score |
+ | `waiver_slot_cost` | 425.0 | Value cost per extra player received (FantasyCalc-derived ≈ rank-300 value) |

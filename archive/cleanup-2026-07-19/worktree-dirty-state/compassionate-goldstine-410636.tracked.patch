@@ -1,0 +1,21 @@
+diff --git a/.claude/settings.local.json b/.claude/settings.local.json
+index 50d2c6e..e61b11b 100644
+--- a/.claude/settings.local.json
++++ b/.claude/settings.local.json
+@@ -11,7 +11,15 @@
+       "Bash(python3 scripts/seed_test_user_2.py --dry-run)",
+       "Bash(python3 scripts/seed_test_user_2.py --clear)",
+       "Bash(python3 -)",
+-      "Bash(python3 -c ':*)"
++      "Bash(python3 -c ':*)",
++      "Bash(textutil -convert txt -output /tmp/rcsm_prd.txt \"/Users/teresadickens/Documents/Claude/Projects/RCSM References/RCSM_PRD.pages\")",
++      "Read(//tmp/**)",
++      "Bash(osascript -e 'tell application \"Pages\" to open POSIX file \"/Users/teresadickens/Documents/Claude/Projects/RCSM References/RCSM_PRD.pages\"')",
++      "Bash(osascript -e 'tell application \"Pages\" to export front document to POSIX file \"/tmp/rcsm_prd.pdf\" as PDF')",
++      "Bash(osascript -e 'tell application \"Pages\" to close front document saving no')",
++      "Bash(mdls -name kMDItemNumberOfPages /tmp/rcsm_prd.pdf)",
++      "Bash(python3 -c ' *)",
++      "Bash(curl -sfSL --max-time 20 'https://api.sleeper.app/v1/players/nfl' -o /tmp/sleeper_players.json)"
+     ]
+   }
+ }

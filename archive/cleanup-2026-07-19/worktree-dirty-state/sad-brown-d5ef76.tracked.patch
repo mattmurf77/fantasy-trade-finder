@@ -1,0 +1,17 @@
+diff --git a/.claude/settings.local.json b/.claude/settings.local.json
+index 50d2c6e..b4200f4 100644
+--- a/.claude/settings.local.json
++++ b/.claude/settings.local.json
+@@ -11,7 +11,11 @@
+       "Bash(python3 scripts/seed_test_user_2.py --dry-run)",
+       "Bash(python3 scripts/seed_test_user_2.py --clear)",
+       "Bash(python3 -)",
+-      "Bash(python3 -c ':*)"
++      "Bash(python3 -c ':*)",
++      "Bash(unzip -l ~/Downloads/andrej-karpathy-skills-main.zip)",
++      "Bash(cd \"/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder\" && ls backend/ && echo \"---\" && wc -l backend/*.py)",
++      "Bash(cd \"/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder\" && grep -n \"^def \\\\|^class \" backend/smart_matchup_generator.py backend/ranking_service.py backend/trade_service.py backend/trends_service.py backend/wrapped_collector.py | head -60)",
++      "Bash(cd \"/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder\" && grep -n \"def _send_typed_push\\\\|def get_pref_bucket\\\\|def record_event\\\\|def _drain_queue\\\\|def _ensure_prefs\" backend/server.py | head -20)"
+     ]
+   }
+ }

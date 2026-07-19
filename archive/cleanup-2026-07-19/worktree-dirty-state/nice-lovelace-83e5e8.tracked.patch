@@ -1,0 +1,17 @@
+diff --git a/.claude/settings.local.json b/.claude/settings.local.json
+index 50d2c6e..868a70f 100644
+--- a/.claude/settings.local.json
++++ b/.claude/settings.local.json
+@@ -11,7 +11,11 @@
+       "Bash(python3 scripts/seed_test_user_2.py --dry-run)",
+       "Bash(python3 scripts/seed_test_user_2.py --clear)",
+       "Bash(python3 -)",
+-      "Bash(python3 -c ':*)"
++      "Bash(python3 -c ':*)",
++      "Bash(pandoc --track-changes=all \"/Users/teresadickens/Documents/Claude/Projects/TRS References/TRS_PRD_v3.docx\" -o /tmp/trs_prd.md)",
++      "Read(//tmp/**)",
++      "Read(//Users/teresadickens/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/7d1e8fa6-7071-4941-9053-4557953fa405/89a35e17-82fe-47b1-83c0-7283223d91b7/skills/docx/**)",
++      "Bash(python3 scripts/office/unpack.py \"/Users/teresadickens/Documents/Claude/Projects/TRS References/TRS_PRD_v3.docx\" /tmp/trs_prd_unpacked/)"
+     ]
+   }
+ }

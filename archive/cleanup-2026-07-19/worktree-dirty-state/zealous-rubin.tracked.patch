@@ -1,0 +1,48 @@
+diff --git a/.claude/settings.local.json b/.claude/settings.local.json
+index 50d2c6e..a8f71f0 100644
+--- a/.claude/settings.local.json
++++ b/.claude/settings.local.json
+@@ -11,7 +11,42 @@
+       "Bash(python3 scripts/seed_test_user_2.py --dry-run)",
+       "Bash(python3 scripts/seed_test_user_2.py --clear)",
+       "Bash(python3 -)",
+-      "Bash(python3 -c ':*)"
++      "Bash(python3 -c ':*)",
++      "Bash(mkdir -p \"/Users/teresadickens/Documents/Claude/Projects/BabyRecallTracker\")",
++      "Read(//Users/teresadickens/Documents/Claude/Projects/**)",
++      "Bash(npm list:*)",
++      "Bash(npm install:*)",
++      "Bash(npm init:*)",
++      "Bash(node build_deck.js)",
++      "Bash(python3 -c \"import zipfile; z = zipfile.ZipFile\\('Cradle_Pitch_Deck.pptx'\\); slides=[n for n in z.namelist\\(\\) if n.startswith\\('ppt/slides/slide'\\)]; print\\(f'slides: {len\\(slides\\)}'\\)\")",
++      "Bash(python3 \"/Users/teresadickens/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/7d1e8fa6-7071-4941-9053-4557953fa405/89a35e17-82fe-47b1-83c0-7283223d91b7/skills/pptx/scripts/office/soffice.py\" --headless --convert-to pdf /Users/teresadickens/Documents/Claude/Projects/BabyRecallTracker/Cradle_Pitch_Deck.pptx --outdir /Users/teresadickens/Documents/Claude/Projects/BabyRecallTracker/)",
++      "Bash(brew list:*)",
++      "Bash(command -v brew)",
++      "Bash(pip3 install:*)",
++      "Bash(python3 -m markitdown \"/Users/teresadickens/Documents/Claude/Projects/BabyRecallTracker/Cradle_Pitch_Deck.pptx\")",
++      "Bash(grep -iE \"\\\\bx{3,}\\\\b|lorem|ipsum|\\\\bTODO|\\\\[insert|placeholder\")",
++      "Bash(chmod +x \"/Users/teresadickens/Documents/Claude/Projects/BabyRecallTracker/Cradle/run_mac_app.sh\")",
++      "Bash(swift build:*)",
++      "Bash(killall Cradle)",
++      "Bash(./run_mac_app.sh)",
++      "Bash(screencapture -x -C /tmp/cradle_screenshot.png)",
++      "Read(//tmp/**)",
++      "Bash(swift test:*)",
++      "Bash(osascript -e 'tell application \"Cradle\" to activate')",
++      "Bash(screencapture -x -C /tmp/cradle_v2.png)",
++      "Bash(screencapture -x -C /tmp/cradle_v3.png)",
++      "Bash(screencapture -x -C /tmp/cradle_v4.png)",
++      "Bash(screencapture -x -C /tmp/cradle_phase4.png)",
++      "Bash(osascript)",
++      "Bash(screencapture -x -C /tmp/cradle_phase4_b.png)",
++      "Bash(screencapture -x -C /tmp/cradle_phase4_tabs.png)",
++      "Bash(screencapture -x -C /tmp/cradle_dob_arrows.png)",
++      "Bash(open -a Cradle)",
++      "Bash(screencapture -x -C /tmp/cradle_arrows_v2.png)",
++      "Bash(sed -n '15,25p' /Users/teresadickens/Documents/Claude/Projects/BabyRecallTracker/Cradle/Sources/Cradle/Services/AffiliateService.swift)",
++      "Bash(sed -n '55,90p' /Users/teresadickens/Documents/Claude/Projects/BabyRecallTracker/Cradle/Sources/Cradle/Views/Notifications/NotificationSettingsView.swift)",
++      "Bash(screencapture -x -C /tmp/cradle_p567.png)",
++      "Bash(ls -la /Users/teresadickens/.claude/projects/-Users-teresadickens-Documents-Claude-Projects-Fantasy-Trade-Finder/memory/ 2>/dev/null)"
+     ]
+   }
+ }
