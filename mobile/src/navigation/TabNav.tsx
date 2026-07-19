@@ -9,6 +9,8 @@ import { Icon, Button, type IconName } from '../components/chalkline';
 import { getNextTrio, getRankings, getTiersStatus } from '../api/rankings';
 import { getLikedTrades, getAllMatches } from '../api/trades';
 import { useSession } from '../state/useSession';
+import { onboardingEnabled } from '../state/useFeatureFlags';
+import { getOnboardingState } from '../state/useOnboardingState';
 import RankScreen from '../screens/RankScreen';
 import RankHomeScreen from '../screens/RankHomeScreen';
 import PickAnchorScreen from '../screens/PickAnchorScreen';
@@ -245,6 +247,20 @@ export default function TabNav() {
   const [rankMenuOpen, setRankMenuOpen] = useState(false);
   const queryClient = useQueryClient();
 
+  // Onboarding trades-first (the gap found in the build-48 operator smoke):
+  // nothing routed a treatment user to the deck — every onboarding surface
+  // lives on the Trades tab, but the navigator defaulted to Rank. First-
+  // session treatment users (no swipe yet) now land on Trades. Computed
+  // once at mount (initialRouteName is only honored then); the App.tsx boot
+  // gate awaits ftf_onboarding_state hydration, so this read never races
+  // defaults. Flags-off → 'Rank', byte-identical to before.
+  const [initialTab] = useState(() =>
+    onboardingEnabled('onboarding.trades_first') &&
+    !getOnboardingState().firstSwipeDone
+      ? 'Trades'
+      : 'Rank',
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: ink.ink0 }}>
       {/* Global top bar — sits above the tab navigator on every authed
@@ -254,6 +270,7 @@ export default function TabNav() {
           inset isn't double-counted. */}
       <TopBar />
       <Tab.Navigator
+        initialRouteName={initialTab}
         screenOptions={{
           headerShown: false,
           tabBarStyle: {

@@ -80,8 +80,16 @@ function App() {
     // bootstrap() restores from AsyncStorage/SecureStore plus the cached
     // feature-flag map. Both are local IO and resolve in milliseconds, so
     // the first screen renders without waiting on any network round-trip.
-    Promise.all([bootstrap(), loadCachedFlags()])
-      .catch(() => { /* both legs are best-effort */ })
+    // ftf_onboarding_state joins the gated set (local AsyncStorage read,
+    // ms-fast like the other legs): TabNav's first-session initial-tab
+    // decision (onboarding trades-first) reads it at mount and must not
+    // race hydration.
+    Promise.all([
+      bootstrap(),
+      loadCachedFlags(),
+      useOnboardingState.getState().hydrateOnboarding(),
+    ])
+      .catch(() => { /* all legs are best-effort */ })
       .finally(() => {
         setBooted(true);
         // FB-45 — detached: mint a fresh server session for the restored
@@ -94,19 +102,10 @@ function App() {
         // analytics.client_events gate reads the hydrated flag map.
         initAnalytics();
         track('app_opened', { launch_type: 'cold' });
-        // Onboarding scaffold (plan item 4): hydrate the persisted
-        // ftf_onboarding_state off the critical path, then count this cold
-        // start. Inert while onboarding.* flags are dark — nothing reads
-        // the store unless a gate is open; sessionCount just accrues.
-        void useOnboardingState
-          .getState()
-          .hydrateOnboarding()
-          .then(() => {
-            patchOnboardingState({
-              sessionCount: getOnboardingState().sessionCount + 1,
-            });
-          })
-          .catch(() => {});
+        // Count this cold start (hydration already awaited above).
+        patchOnboardingState({
+          sessionCount: getOnboardingState().sessionCount + 1,
+        });
       });
 
     // Detached network legs — fire-and-forget. None of these gate the
