@@ -7469,6 +7469,15 @@ def session_init():
     }
     """
     body              = request.get_json(force=True) or {}
+
+    # Fail fast: an authenticated caller (session token present) must say who
+    # it is. Silently defaulting to DEMO_USER_ID here builds a session with an
+    # empty user_roster that only errors much later, at trade generation.
+    # Demo bootstrap (/api/session/demo) and tokenless first-init keep the
+    # default. Surfaced by the mobile-testing S2 drill.
+    if request.headers.get("X-Session-Token") and not body.get("user_id"):
+        return jsonify({"error": "missing_user_id"}), 400
+
     user_id           = body.get("user_id",          DEMO_USER_ID)
     league_id         = body.get("league_id",        "sleeper_league")
     league_name       = body.get("league_name",      "My Sleeper League")

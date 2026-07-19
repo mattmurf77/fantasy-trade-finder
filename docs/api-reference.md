@@ -10,7 +10,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/session/init` | Establish session for a Sleeper username. Response includes the additive `verification` field (below) |
+| POST | `/api/session/init` | Establish session for a Sleeper username. Response includes the additive `verification` field (below). 400 `missing_user_id` if a session token is sent without `user_id` in the body (tokenless demo/first-init still defaults to the demo user) |
 | GET | `/api/session/ping` | Liveness / session check |
 | POST/GET | `/api/session/demo` | Demo session bootstrap |
 | POST | `/api/extension/auth` | Issue extension bearer token |
