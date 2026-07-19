@@ -762,6 +762,7 @@ user_events_table = Table("user_events", metadata,
     Column("screen",       String),                     # screen/view the event fired from
     Column("client_ts",    String),                     # client wall-clock ISO; occurred_at stays server time
     Column("experiments",  Text),                       # JSON {exp_key: variant} snapshot at event time
+    Column("country",      String),                     # ISO-3166 alpha-2, CDN-header-derived at ingest (never raw IP); NULL when no geo header
     Index("ix_user_events_user_occurred", "user_id", "occurred_at"),
     Index("ix_user_events_type_occurred", "event_type", "occurred_at"),
     # FULL unique index — NULLS DISTINCT on both dialects, so unlimited
@@ -1466,6 +1467,7 @@ def _migrate_db() -> None:
         ("user_events",        "screen",                "VARCHAR"),
         ("user_events",        "client_ts",             "VARCHAR"),
         ("user_events",        "experiments",           "TEXT"),
+        ("user_events",        "country",               "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the

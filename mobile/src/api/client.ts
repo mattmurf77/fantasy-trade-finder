@@ -236,7 +236,56 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+// ── Universal API-failure observability (tracking plan addendum 2026-07-19) ──
+// Every failed apiRequest emits ONE api_request_failed event with a
+// cardinality-bounded route. Exclusions: the ingest endpoint itself
+// (recursion) and caller aborts (navigation cancellations aren't failures).
+// Deadline timeouts ARE failures (status 0, timeout:true).
+function _normalizeRoute(path: string): string {
+  let p = path.startsWith('http') ? path.replace(/^https?:\/\/[^/]+/, '') : path;
+  p = p.split('?')[0];
+  // Digit runs (sleeper ids, league ids, years in paths) → ':id' so the
+  // route dimension stays enumerable and identifier-free.
+  p = p.replace(/\d{4,}/g, ':id');
+  return p.slice(0, 80);
+}
+
+function _reportApiFailure(path: string, method: string, err: unknown, ms: number): void {
+  try {
+    if (path.includes('/api/events')) return;
+    if ((err as any)?.name === 'AbortError') return;
+    const isApi = err instanceof ApiError;
+    // Lazy require — events.ts imports getDeviceId from this module, so a
+    // top-level import here would be a cycle. track() self-gates on the
+    // analytics.client_events flag and never throws.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { track } = require('./events') as typeof import('./events');
+    track('api_request_failed', {
+      route: _normalizeRoute(path),
+      method,
+      status: isApi ? (err as ApiError).status : 0,
+      ms,
+      timeout: isApi ? (err as ApiError).isTimeout : false,
+    });
+  } catch {
+    /* observability must never mask or alter the original error */
+  }
+}
+
 export async function apiRequest<T = unknown>(
+  path: string,
+  opts: RequestOptions = {},
+): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    return await _apiRequestInner<T>(path, opts);
+  } catch (err) {
+    _reportApiFailure(path, opts.method || 'GET', err, Date.now() - startedAt);
+    throw err;
+  }
+}
+
+async function _apiRequestInner<T = unknown>(
   path: string,
   opts: RequestOptions = {},
 ): Promise<T> {

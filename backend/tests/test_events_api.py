@@ -281,3 +281,36 @@ def test_pii_scrubbed_in_allowed_prop(harness):
     assert "a@b.com" not in props["message"]
     assert "[scrubbed]" in props["message"]
     assert props["error_kind"] == "auth"        # non-PII prop preserved
+
+
+# --- observability addendum (2026-07-19) -----------------------------------
+
+def test_new_observability_events_accepted(harness):
+    """api_request_failed + screen_left are in the taxonomy with their props."""
+    client, engine = harness
+    body = _post(client, [
+        _envelope(0, event_type="api_request_failed",
+                  props={"route": "/api/trades/generate", "method": "POST",
+                         "status": 502, "ms": 1200, "timeout": False}),
+        _envelope(1, event_type="screen_left",
+                  props={"screen": "Trades", "dwell_ms": 8100, "reason": "nav"}),
+    ]).get_json()
+    _assert_invariant(body, 2)
+    assert body["accepted"] == 2 and body["dropped"] == 0
+    by_type = {r._mapping["event_type"]: r._mapping for r in _rows(engine)}
+    assert set(by_type) == {"api_request_failed", "screen_left"}
+    arf = json.loads(by_type["api_request_failed"]["props"])
+    assert arf["route"] == "/api/trades/generate" and arf["status"] == 502
+    sl = json.loads(by_type["screen_left"]["props"])
+    assert sl["dwell_ms"] == 8100 and sl["reason"] == "nav"
+
+
+def test_country_stamped_from_header(harness):
+    """Coarse geo rides the CDN header (X-Country-Code fallback) — never IP."""
+    client, engine = harness
+    _post(client, [_envelope(0)], headers={"X-Country-Code": "us"})
+    _post(client, [_envelope(1)])
+    rows = sorted((r._mapping for r in _rows(engine)),
+                  key=lambda m: m["event_id"])
+    assert rows[0]["country"] == "US"      # normalized upper, 2 chars
+    assert rows[1]["country"] is None      # no header → NULL, never guessed

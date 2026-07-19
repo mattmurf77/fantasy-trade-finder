@@ -355,6 +355,12 @@ def ingest_request(session_user_id: str | None):
     # Request-level stamps shared by every row.
     info = getattr(g, "device_info", {}) or {}
     source = (request.headers.get("X-Source") or "").strip() or "mobile"
+    # Coarse geo: CDN-provided country header only (CF-IPCountry when
+    # Cloudflare fronts the service; X-Country-Code as a generic fallback).
+    # Never derived from or stored with the raw IP (PII posture, FR-47).
+    # On bare Render neither header exists → NULL until a CDN/geoip decision.
+    country = (request.headers.get("CF-IPCountry")
+               or request.headers.get("X-Country-Code") or "").strip().upper()[:2] or None
     dev = (info.get("device_type") or "").lower()
     platform = (str(body.get("platform") or "").strip()
                 or ("ios" if dev in ("iphone", "ipad", "macos") else dev)
@@ -439,6 +445,7 @@ def ingest_request(session_user_id: str | None):
             "client_ts":   client_ts[:32] if client_ts else None,
             # FR-32 stamp via guarded import — None until P3 lands.
             "experiments": _experiment_stamp(user_id, etype, screen),
+            "country":     country,
         })
 
     # 11/12 — single transaction on ingest_engine: pre-insert SELECT for

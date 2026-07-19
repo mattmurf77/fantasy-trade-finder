@@ -38,6 +38,10 @@ from .database import _EVENT_TO_USER_COL, _RANK_STREAK_EVENTS
 ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # Lifecycle / navigation
     "app_opened", "app_backgrounded", "screen_viewed", "client_error",
+    # Observability addendum (tracking plan v2, 2026-07-19): universal API-
+    # failure signal from the client wrapper + explicit screen-exit so dwell
+    # time has a real terminator instead of a next-screen_viewed inference.
+    "api_request_failed", "screen_left",
     # Pre-auth funnel
     "signin_attempted", "signin_succeeded", "signin_failed",
     "league_selected", "demo_entered",
@@ -111,6 +115,10 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "app_backgrounded":  frozenset({"session_ms", "screens_viewed"}),
     "screen_viewed":     frozenset({"screen", "prev_screen", "tab"}),
     "client_error":      frozenset({"screen", "error_kind", "message", "fatal"}),
+    # route is NORMALIZED client-side (query stripped, id runs → ':id') so
+    # cardinality stays bounded and no user identifiers ride in props.
+    "api_request_failed": frozenset({"route", "method", "status", "ms", "timeout"}),
+    "screen_left":        frozenset({"screen", "dwell_ms", "reason"}),
     # Pre-auth funnel
     "signin_attempted":  frozenset({"method", "has_league_url"}),
     "signin_succeeded":  frozenset({"method"}),

@@ -126,3 +126,14 @@ Added at backend build time (eng-backend, same date) to the client-event allowli
 | `deck_exhausted_viewed` | item 9 — deck-exhausted state that routes to trio entry | `lane`, `cards_seen` |
 
 Also built same date (server-fired, §S3 rollout order "server-fired first"): `ranking_method_changed`, `tier_save` (now in `user_events`, props `position`/`changed_count`/`via` — `wrapped_events` write still on, freeze pending Decision 2), `ranking_reorder` (props `moves_count`), `anchor_answered` (props `player_id`/`pick_value`/`skipped`), `feedback_submitted` (props `severity`/`screen`, attributed submissions only, no note text), `league_synced` (props `league_id`/`platform`). Envelope columns, `identity_links`, and `POST /api/events` per §S1/§S2 are live behind `analytics.client_events`.
+
+---
+
+## Addendum 2026-07-19 — observability events + geo column
+
+| Event | Props | Source | Purpose |
+|---|---|---|---|
+| `api_request_failed` | `route` (normalized: query stripped, digit runs → `:id`), `method`, `status` (0 = network/timeout), `ms`, `timeout` | `client.ts` wrapper (every failed `apiRequest`; excludes `/api/events` recursion + caller aborts) | Universal silent-API-failure detection per screen/route |
+| `screen_left` | `screen`, `dwell_ms`, `reason` (`nav` \| `background`) | `RootNav` (nav-away + app-background) | Real dwell time incl. the truncated-last-screen case |
+
+Envelope addition: `user_events.country` — ISO-3166 alpha-2 from CDN geo header only (`CF-IPCountry` / `X-Country-Code`), never raw IP (FR-47 posture). NULL on bare Render; populates automatically if a CDN fronts the service. Device/app characteristic joins (`device_type`, `os_version`, `app_version`) were already stamped per row at ingest — no change needed.

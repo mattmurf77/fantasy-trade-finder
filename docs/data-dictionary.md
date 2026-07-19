@@ -402,6 +402,7 @@ Append-only log of meaningful user actions. Hot reads use the denormalized `user
 | `screen` | str | screen/view the event fired from |
 | `client_ts` | str | client wall-clock ISO; `occurred_at` stays server receive time |
 | `experiments` | JSON text | `{exp_key: variant}` snapshot of active assignments at event time |
+| `country` | str | ISO-3166 alpha-2, stamped at ingest from a CDN geo header (`CF-IPCountry` / `X-Country-Code`) only — never derived from or stored with raw IP; NULL when no header (bare Render today) |
 
 Indexes: `(user_id, occurred_at)`, `(event_type, occurred_at)`, **full** unique `event_id` (`ix_user_events_event_id` — NULLS-DISTINCT on both dialects, so unlimited server-fired NULL rows coexist; conflict-ignore inserts must target it *without* `index_where`), `(device_id, occurred_at)` (`ix_user_events_device_occurred` — replaced the single-column `ix_user_events_device_id`, dropped at the analytics P0 migration).
 

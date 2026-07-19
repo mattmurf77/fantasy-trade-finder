@@ -1,11 +1,11 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   NavigationContainer,
   DarkTheme,
   createNavigationContainerRef,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { View, Text, ActivityIndicator, StyleSheet, Pressable } from 'react-native';
+import { AppState, View, Text, ActivityIndicator, StyleSheet, Pressable } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
 import { ink, chalk, ice, fonts, radii } from '../theme/chalkline';
@@ -92,6 +92,35 @@ export default function RootNav({ booted }: { booted: boolean }) {
   // changes that don't move the focused route (params, modals re-render)
   // don't double-fire, and each event can carry its prev_screen.
   const prevScreenRef = useRef<string | null>(null);
+  // Observability addendum (2026-07-19): when the current screen was
+  // entered, so screen_left carries a real dwell_ms. Emitted on nav-away
+  // (below, in onStateChange) and on app-background — the case derived
+  // dwell (delta between screen_viewed events) could never see.
+  const screenEnteredAtRef = useRef<number>(Date.now());
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background' || next === 'inactive') {
+        const screen = prevScreenRef.current;
+        if (screen) {
+          track(
+            'screen_left',
+            {
+              screen,
+              dwell_ms: Date.now() - screenEnteredAtRef.current,
+              reason: 'background',
+            },
+            screen,
+          );
+        }
+      } else if (next === 'active') {
+        // Foreground resumes the clock for the same screen — dwell across a
+        // background gap is two screen_left rows, not one inflated one.
+        screenEnteredAtRef.current = Date.now();
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // FB #80 / #89 — league-driven scoring-format default. Whenever the
   // selected league changes, fetch its detected format (SF vs 1QB) and
@@ -207,6 +236,21 @@ export default function RootNav({ booted }: { booted: boolean }) {
         if (r?.name) {
           setActiveScreen(r.name);
           if (r.name !== prevScreenRef.current) {
+            // Close out the screen we're leaving with its measured dwell,
+            // then open the next one. Order matters: screen_left(prev)
+            // precedes screen_viewed(next) in the seq stream.
+            if (prevScreenRef.current) {
+              track(
+                'screen_left',
+                {
+                  screen: prevScreenRef.current,
+                  dwell_ms: Date.now() - screenEnteredAtRef.current,
+                  reason: 'nav',
+                },
+                prevScreenRef.current,
+              );
+            }
+            screenEnteredAtRef.current = Date.now();
             track(
               'screen_viewed',
               { screen: r.name, prev_screen: prevScreenRef.current },
