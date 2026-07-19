@@ -185,6 +185,17 @@ _DEFAULT_CFG: dict[str, float] = {
     # pad a package. 0 disables. Headliners are exempt (deep-league 1-for-1
     # swaps of cheap players stay legal).
     "asset_floor_abs":         450.0,
+    # Deck-eval 2026-07-17 — consolidation raw-delta sanity gate
+    # (consensus path). The package_adj_gamma depth discount vaporizes a
+    # VALUABLE second give asset (a 2940 WR contributes ~1181) while the
+    # crown premium inflates the received stud, so a consensus-lopsided
+    # 2-for-1 (Daniels + Odunze → Hurts, raw consensus Δ −2748) scored
+    # fairness 0.99 and passed the #108 adjusted-delta gate. On a
+    # user-give-side consolidation (more assets given than received) the
+    # RAW consensus loss may not exceed this fraction of the raw give
+    # total — the market's consolidation premium tops out around ~15%;
+    # anything past it is an insult card. 0 disables (pre-fix behavior).
+    "consolidation_raw_loss_frac": 0.15,
     # ------------------------------------------------------------------
     # Tier 2 — work item 2.2: outlook as now/future valuation blend
     # (flag: trade.outlook_blend). α = weight on NOW value; 1−α on FUTURE.
@@ -2554,6 +2565,17 @@ class TradeService:
             # (1 − threshold) more consensus value (TC-CFG-001 gap).
             if rv - gv < _c("user_gain_epsilon"):
                 return
+            # Deck-eval 2026-07-17 — the adjusted delta above can flip
+            # positive on a consensus-lopsided consolidation (gamma depth
+            # discount guts the second give asset, crown premium inflates
+            # the received stud), so user-give-side consolidations must
+            # ALSO keep their RAW consensus loss within
+            # consolidation_raw_loss_frac of the raw give total.
+            _frac = _c("consolidation_raw_loss_frac")
+            if _frac > 0 and len(give_ids) > len(recv_ids):
+                raw_give = sum(gvals)
+                if raw_give - sum(rvals) > _frac * raw_give:
+                    return
             # #108 — and when the user DOES have both players on their own
             # raw board, a 1-for-1 must respect that ordering too.
             if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):

@@ -1365,6 +1365,8 @@ _MODEL_CONFIG_DEFAULTS = [
     ("aggression_weight",        0.20,  "phase2: composite reweight strength for the light/fair/generous offer buckets"),
     # ── Analytics platform P1 (docs/plans/analytics-platform/lld.md §3.4) ─
     ("analytics_events_per_hr", 600.0,  "P1 ingest: per-device client-event budget per hour; over-budget batches are accepted-and-dropped (never 429)"),
+    # ── Deck-eval 2026-07-17 — consensus consolidation sanity gate ───────
+    ("consolidation_raw_loss_frac", 0.15, "deck-eval: max RAW consensus loss on a user-give-side consolidation as a fraction of the raw give total (consensus path); 0 disables"),
 ]
 
 
