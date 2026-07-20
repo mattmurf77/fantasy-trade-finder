@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB #169 — League Summary redesign (bar chart + filter + drill-in)</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#07090c;color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:28px 16px 64px;gap:18px}
+  .pageh{max-width:420px;width:100%;text-align:left}
+  .pageh h1{font-family:var(--cond);font-weight:700;font-size:26px;line-height:1.05;
+     letter-spacing:.02em;text-transform:uppercase;margin:0 0 6px;display:flex;
+     align-items:center;gap:10px}
+  .pageh h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .pageh p{font-size:13px;line-height:1.55;color:var(--chalk-dim);margin:0}
+  .pageh .tag{display:inline-block;font:600 10px var(--ui);letter-spacing:.07em;
+     text-transform:uppercase;color:var(--pos);border:1px solid var(--pos);
+     border-radius:2px;padding:2px 6px;margin-top:8px}
+
+  /* Phone frame */
+  .phone{width:390px;max-width:100%;background:var(--ink-0);border:1px solid var(--line);
+     border-radius:22px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.6)}
+  .status{height:34px;display:flex;align-items:center;justify-content:space-between;
+     padding:0 20px;font:600 12px var(--mono);color:var(--chalk-dim)}
+  .nav{display:flex;align-items:center;gap:10px;padding:10px 16px 6px;
+     border-bottom:1px solid var(--line)}
+  .nav .back{width:28px;height:28px;display:flex;align-items:center;justify-content:center;
+     color:var(--chalk-dim)}
+  .nav h2{font-family:var(--cond);font-weight:700;font-size:20px;letter-spacing:.02em;
+     text-transform:uppercase;margin:0}
+  .body{padding:14px 16px 20px}
+
+  /* Basis toggle */
+  .basis{display:flex;gap:8px;margin-bottom:12px}
+  .chip{padding:7px 12px;border-radius:4px;border:1px solid var(--line);background:transparent;
+     color:var(--chalk-dim);font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+     cursor:pointer;transition:all .12s ease-out}
+  .chip[aria-selected="true"]{background:var(--ink-3);border-color:var(--line-strong);color:var(--chalk)}
+  .chip:disabled{opacity:.45;cursor:not-allowed}
+
+  .lbl{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+     color:var(--chalk-faint);margin:14px 0 8px;display:flex;align-items:center;gap:8px}
+  .lbl::before{content:"";width:12px;height:2px;background:var(--ice);flex:none}
+
+  /* Position filter */
+  .posfilter{display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+  .pf{padding:6px 11px;border-radius:999px;border:1px solid var(--line);background:transparent;
+     font:600 11px var(--ui);letter-spacing:.05em;cursor:pointer;color:var(--chalk-dim);
+     transition:all .12s ease-out;display:flex;align-items:center;gap:5px}
+  .pf .dot{width:7px;height:7px;border-radius:999px;background:currentColor;opacity:.9}
+  .pf[data-on="true"]{border-color:var(--line-strong);background:var(--ink-3);color:var(--chalk)}
+  .pf[data-pos="ALL"][data-on="true"]{border-color:var(--ice);color:var(--ice)}
+  .pf[data-pos="QB"]{--c:var(--qb)} .pf[data-pos="RB"]{--c:var(--rb)}
+  .pf[data-pos="WR"]{--c:var(--wr)} .pf[data-pos="TE"]{--c:var(--te)}
+  .pf[data-pos]:not([data-pos="ALL"]) .dot{background:var(--c)}
+  .pf[data-pos]:not([data-pos="ALL"])[data-on="true"]{color:var(--c);border-color:var(--c)}
+  .fhint{font-size:11px;color:var(--chalk-faint);margin:0 0 14px;line-height:1.45}
+  .fhint .m{font-family:var(--mono)}
+
+  /* Bar chart */
+  .chart{display:flex;flex-direction:column;gap:2px;position:relative}
+  .barrow{display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:9px;
+     padding:7px 0;cursor:pointer;transition:transform .38s cubic-bezier(.32,.72,0,1),opacity .3s;
+     border-bottom:1px solid var(--line)}
+  .barrow:hover{background:var(--ink-1)}
+  .barrow .rk{font:600 13px var(--mono);color:var(--chalk-dim);text-align:center}
+  .barrow.you .rk{color:var(--ice)}
+  .barmid{min-width:0}
+  .barname{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+  .barname .nm{font:600 13px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .barname .you{font:600 9px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+     color:var(--on-ice);background:var(--ice);border-radius:2px;padding:1px 4px}
+  .track{height:16px;background:var(--ink-2);border-radius:3px;overflow:hidden;display:flex}
+  .seg{height:100%;transition:width .42s cubic-bezier(.32,.72,0,1)}
+  .seg.qb{background:var(--qb)} .seg.rb{background:var(--rb)}
+  .seg.wr{background:var(--wr)} .seg.te{background:var(--te)}
+  .seg.solo{background:var(--ice)}
+  .barval{font:600 13px var(--mono);color:var(--chalk);text-align:right;white-space:nowrap;
+     font-variant-numeric:tabular-nums}
+  .barval .chev{color:var(--chalk-faint);margin-left:2px}
+
+  .legend{display:flex;gap:14px;margin-top:12px;flex-wrap:wrap}
+  .legend span{display:flex;align-items:center;gap:5px;font:500 11px var(--ui);color:var(--chalk-dim)}
+  .legend i{width:9px;height:9px;border-radius:2px}
+  .legend .qb{background:var(--qb)} .legend .rb{background:var(--rb)}
+  .legend .wr{background:var(--wr)} .legend .te{background:var(--te)}
+
+  /* Drill-in */
+  .scrim{position:fixed;inset:0;background:rgba(7,9,12,.78);display:none;
+     align-items:center;justify-content:center;padding:24px;z-index:10}
+  .scrim.on{display:flex}
+  .drill{width:390px;max-width:100%;max-height:82vh;background:var(--ink-2);
+     border:1px solid var(--line);border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,.55);
+     display:flex;flex-direction:column;overflow:hidden}
+  .drillh{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
+     padding:16px 18px 10px}
+  .drillh h3{font-family:var(--cond);font-weight:700;font-size:22px;letter-spacing:.02em;
+     text-transform:uppercase;margin:0}
+  .drillh .sub{font:500 12px var(--mono);color:var(--chalk-dim);margin-top:3px}
+  .drillh .x{width:30px;height:30px;border-radius:4px;border:none;background:transparent;
+     color:var(--chalk-dim);font-size:18px;cursor:pointer;flex:none}
+  .drillfilter{display:flex;gap:6px;padding:0 18px 10px;flex-wrap:wrap}
+  .drilllist{overflow-y:auto;padding:0 18px 18px}
+  .grp{margin-top:10px}
+  .grph{display:flex;align-items:center;justify-content:space-between;padding:8px 0 6px;
+     border-bottom:1px solid var(--line)}
+  .grph .gp{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase}
+  .grph .gp.qb{color:var(--qb)} .grph .gp.rb{color:var(--rb)}
+  .grph .gp.wr{color:var(--wr)} .grph .gp.te{color:var(--te)}
+  .grph .gm{font:500 11px var(--mono);color:var(--chalk-dim)}
+  .prow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+  .prow .pv{font:600 13px var(--mono);color:var(--chalk);width:52px;text-align:right;
+     font-variant-numeric:tabular-nums}
+  .prow .pn{flex:1;min-width:0}
+  .prow .pn b{font:600 13px var(--ui);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .prow .pn small{font:500 11px var(--mono);color:var(--chalk-dim)}
+  .prow .pi{width:5px;height:26px;border-radius:2px;flex:none}
+  .prow .pi.qb{background:var(--qb)} .prow .pi.rb{background:var(--rb)}
+  .prow .pi.wr{background:var(--wr)} .prow .pi.te{background:var(--te)}
+
+  .note{max-width:420px;width:100%;font-size:12px;line-height:1.55;color:var(--chalk-faint);
+     background:var(--ink-1);border:1px solid var(--line);border-left:2px solid var(--ice);
+     border-radius:6px;padding:12px 14px}
+  .note b{color:var(--chalk-dim)}
+  .note .m{font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="pageh">
+  <h1>League Summary — Bar Chart Redesign</h1>
+  <p>Vertical bar chart of team valuations, stacked by position. Tap a position to filter — the chart reorders and rescales live. Tap a team to drill into its roster.</p>
+  <span class="tag">Near-term buildable (dynasty basis)</span>
+</div>
+
+<div class="phone">
+  <div class="status"><span>9:41</span><span>Dynasty • 12-team SF</span></div>
+  <div class="nav">
+    <div class="back">&#8249;</div>
+    <h2>League Rankings</h2>
+  </div>
+  <div class="body">
+    <div class="basis" role="tablist">
+      <button class="chip" data-basis="dynasty" aria-selected="true">Dynasty</button>
+      <button class="chip" data-basis="redraft" aria-selected="false">Redraft</button>
+      <button class="chip" disabled title="My board basis reuses the existing personal toggle">My board</button>
+    </div>
+
+    <div class="posfilter" id="posfilter">
+      <button class="pf" data-pos="ALL" data-on="true"><span class="dot"></span>All</button>
+      <button class="pf" data-pos="QB" data-on="false"><span class="dot"></span>QB</button>
+      <button class="pf" data-pos="RB" data-on="false"><span class="dot"></span>RB</button>
+      <button class="pf" data-pos="WR" data-on="false"><span class="dot"></span>WR</button>
+      <button class="pf" data-pos="TE" data-on="false"><span class="dot"></span>TE</button>
+    </div>
+    <p class="fhint" id="fhint"></p>
+
+    <div class="chart" id="chart"></div>
+
+    <div class="legend">
+      <span><i class="qb"></i>QB</span><span><i class="rb"></i>RB</span>
+      <span><i class="wr"></i>WR</span><span><i class="te"></i>TE</span>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <b>What's real here:</b> the stacked bars, the <span class="m">Dynasty</span> ordering, the single/multi position filter that reorders + rescales, and the roster drill-in are all buildable on today's <span class="m">/api/league/power-rankings</span> data (it already returns per-position value breakdowns). <b>The <span class="m">Redraft</span> tab is a modeling dependency</b> — FTF has no redraft value source (the backend 501s <span class="m">basis=redraft</span>). Toggle it to see the placeholder + the honest empty state.
+</div>
+
+<div class="scrim" id="scrim">
+  <div class="drill" id="drill"></div>
+</div>
+
+<script>
+// ── Realistic 12-team superflex dynasty league ────────────────────────────
+// Values on FTF's 0–~8500 dynasty scale (elo_to_value space). Redraft numbers
+// are FABRICATED to show divergence (win-now vets pop, rookie stashes sink) —
+// they do not exist in the product today.
+const PLAYERS = {
+  // name, pos, dyn, red, team, age
+  jjett:['Ja’Marr Chase','WR',8420,7900,'CIN',25],
+  ceed:['CeeDee Lamb','WR',8100,7600,'DAL',26],
+  jjeff:['Justin Jefferson','WR',8250,7700,'MIN',26],
+  bijan:['Bijan Robinson','RB',7600,6900,'ATL',23],
+  gibbs:['Jahmyr Gibbs','RB',7350,6600,'DET',23],
+  jamarr:['Malik Nabers','WR',7900,6400,'NYG',22],
+  jayden:['Jayden Daniels','QB',7700,6800,'WAS',25],
+  cjsb:['C.J. Stroud','QB',6900,6100,'HOU',24],
+  josh:['Josh Allen','QB',7200,7400,'BUF',29],
+  lamar:['Lamar Jackson','QB',6800,7200,'BAL',29],
+  nabb:['Nico Collins','WR',6600,6500,'HOU',26],
+  puka:['Puka Nacua','WR',7100,6900,'LAR',24],
+  bowers:['Brock Bowers','TE',6900,5800,'LV',22],
+  laporta:['Sam LaPorta','TE',5200,5000,'DET',24],
+  mcbride:['Trey McBride','TE',5600,5400,'ARI',26],
+  breece:['Breece Hall','RB',6100,5900,'NYJ',24],
+  achane:['De’Von Achane','RB',6800,6300,'MIA',24],
+  jacobs:['Josh Jacobs','RB',4900,5600,'GB',27],
+  saquon:['Saquon Barkley','RB',5400,7000,'PHI',28],
+  london:['Drake London','WR',6700,6100,'ATL',24],
+  bcooks:['Garrett Wilson','WR',6900,6400,'NYJ',25],
+  odunze:['Rome Odunze','WR',5800,4600,'CHI',23],
+  harrison:['Marvin Harrison Jr','WR',6400,5200,'ARI',23],
+  mahomes:['Patrick Mahomes','QB',6300,7100,'KC',30],
+  burrow:['Joe Burrow','QB',6200,6700,'CIN',29],
+  pick1:['2026 Early 1st','PICK',3400,900,'—',0],
+  pick2:['2026 Mid 1st','PICK',2400,600,'—',0],
+  pick3:['2027 1st (unk)','PICK',2100,300,'—',0],
+};
+// Build 12 teams by assembling headline rosters (values summed for totals).
+const RAW = [
+  ['Dynasty Warlords', true,  ['jayden','bijan','ceed','puka','bowers','odunze','pick1']],
+  ['The Autodrafters', false, ['josh','saquon','jjeff','london','mcbride','jacobs']],
+  ['Bell Cow Believers',false,['cjsb','gibbs','jamarr','harrison','laporta','pick2']],
+  ['Zero RB Zealots',  false, ['lamar','achane','jjett','nabb','bowers','breece']],
+  ['Rebuild Central',  false, ['jayden','breece','jamarr','odunze','mcbride','pick1','pick3']],
+  ['Waiver Wire Wolves',false,['burrow','jacobs','puka','london','laporta']],
+  ['Trade Deadline Ghosts',false,['mahomes','saquon','ceed','harrison','mcbride']],
+  ['Kicker Truthers',  false, ['cjsb','breece','nabb','bcooks','bowers','pick2']],
+  ['Perpetual Rebuild',false, ['jayden','gibbs','odunze','harrison','laporta','pick1','pick3']],
+  ['Championship or Bust',false,['josh','saquon','jjeff','bcooks','mcbride','jacobs']],
+  ['The Tank Commanders',false,['cjsb','breece','jamarr','odunze','bowers','pick2','pick3']],
+  ['Middling Managers',false, ['burrow','achane','london','nabb','laporta']],
+];
+// De-dup by cloning value contributions per team (mock; a real roster is disjoint).
+const POS_COL={QB:'qb',RB:'rb',WR:'wr',TE:'te',PICK:'wr'};
+const TEAMS = RAW.map((r,i)=>{
+  const roster = r[2].map(k=>{const b=PLAYERS[k];return {name:b[0],pos:b[1],dyn:b[2],red:b[3],team:b[3],age:b[4],_k:k};});
+  // give each a little pseudo-depth variance by team index so bars differ
+  const jitter=(1 - i*0.012);
+  roster.forEach(p=>{p.dyn=Math.round(p.dyn*jitter);p.red=Math.round(p.red*jitter);});
+  return {name:r[0], you:r[1], roster};
+});
+const POSITIONS=['QB','RB','WR','TE'];
+function posOf(p){return p.pos==='PICK'?'WR':p.pos;} // picks fold into WR column visually as "future"
+function vk(){return BASIS==='dynasty'?'dyn':'red';} // map basis → player value key
+function teamPosTotals(t,basis){
+  const k=basis==='dynasty'?'dyn':'red';
+  const o={QB:0,RB:0,WR:0,TE:0};
+  t.roster.forEach(p=>{const c=posOf(p);o[c]+=p[k];});
+  return o;
+}
+
+let BASIS='dynasty';
+let FILTER=new Set(); // empty = all
+
+function activeTotal(t){
+  const pt=teamPosTotals(t,BASIS);
+  if(FILTER.size===0) return POSITIONS.reduce((s,p)=>s+pt[p],0);
+  return [...FILTER].reduce((s,p)=>s+pt[p],0);
+}
+function render(){
+  const chart=document.getElementById('chart');
+  if(BASIS==='redraft'){
+    chart.innerHTML='<div style="padding:40px 8px;text-align:center;color:var(--chalk-faint);font-size:13px;line-height:1.6">'
+      +'<div style="font-family:var(--cond);font-weight:700;font-size:18px;letter-spacing:.02em;text-transform:uppercase;color:var(--chalk-dim);margin-bottom:8px">Redraft values not available</div>'
+      +'FTF’s value source is dynasty-only. A redraft bar chart needs a separate current-season projection model (see feasibility brief). This tab is a placeholder for the vision.</div>';
+    document.getElementById('fhint').textContent='';
+    return;
+  }
+  const rows=TEAMS.map(t=>({t,total:activeTotal(t),pt:teamPosTotals(t,BASIS)}))
+    .sort((a,b)=>b.total-a.total);
+  const max=Math.max(...rows.map(r=>r.total))||1;
+  chart.innerHTML='';
+  rows.forEach((r,idx)=>{
+    const div=document.createElement('div');
+    div.className='barrow'+(r.t.you?' you':'');
+    const w=(r.total/max)*100;
+    const showPos=FILTER.size===0?POSITIONS:[...FILTER];
+    let segs='';
+    if(FILTER.size===1){
+      const p=[...FILTER][0];
+      segs=`<div class="seg ${p.toLowerCase()}" style="width:100%"></div>`;
+    }else{
+      showPos.forEach(p=>{const seg=(r.pt[p]/r.total)*100||0;
+        segs+=`<div class="seg ${p.toLowerCase()}" style="width:${seg}%"></div>`;});
+    }
+    div.innerHTML=`
+      <div class="rk">${idx+1}</div>
+      <div class="barmid">
+        <div class="barname">
+          <span class="nm">${r.t.name}</span>
+          ${r.t.you?'<span class="you">You</span>':''}
+        </div>
+        <div class="track" style="width:${Math.max(w,6)}%">${segs}</div>
+      </div>
+      <div class="barval">${fmtK(r.total)}<span class="chev">&#8250;</span></div>`;
+    div.onclick=()=>openDrill(r.t);
+    chart.appendChild(div);
+  });
+  // filter hint
+  const fh=document.getElementById('fhint');
+  if(FILTER.size===0) fh.innerHTML='Ranked by <b>total roster value</b>. Bars show position mix.';
+  else fh.innerHTML=`Ranked by <b>${[...FILTER].join(' + ')} value only</b> — chart reordered.`;
+}
+function fmtK(v){return v>=1000?(Math.round(v/100)/10).toFixed(1)+'k':String(Math.round(v));}
+
+// Position filter interactions
+document.getElementById('posfilter').addEventListener('click',e=>{
+  const b=e.target.closest('.pf'); if(!b)return;
+  const pos=b.dataset.pos;
+  if(pos==='ALL'){FILTER.clear();}
+  else{
+    if(FILTER.has(pos))FILTER.delete(pos); else FILTER.add(pos);
+  }
+  // sync UI
+  document.querySelectorAll('.pf').forEach(x=>{
+    const p=x.dataset.pos;
+    x.dataset.on = (p==='ALL') ? (FILTER.size===0) : FILTER.has(p);
+  });
+  render();
+});
+// Basis
+document.querySelectorAll('.chip[data-basis]').forEach(c=>{
+  c.onclick=()=>{BASIS=c.dataset.basis;
+    document.querySelectorAll('.chip[data-basis]').forEach(x=>x.setAttribute('aria-selected',x===c));
+    render();};
+});
+
+// Drill-in
+let drillPos=new Set();
+function openDrill(t){
+  drillPos=new Set();
+  const scrim=document.getElementById('scrim');
+  drawDrill(t);
+  scrim.classList.add('on');
+}
+function drawDrill(t){
+  const K=vk();
+  const total=t.roster.reduce((s,p)=>s+p[K],0);
+  const rank=TEAMS.map(x=>({x,v:x.roster.reduce((s,p)=>s+p[K],0)})).sort((a,b)=>b.v-a.v).findIndex(o=>o.x===t)+1;
+  const d=document.getElementById('drill');
+  const shown = drillPos.size===0?POSITIONS:[...drillPos];
+  let groups='';
+  shown.forEach(pos=>{
+    const rows=t.roster.filter(p=>posOf(p)===pos).sort((a,b)=>b[K]-a[K]);
+    if(!rows.length)return;
+    const gv=rows.reduce((s,p)=>s+p[K],0);
+    groups+=`<div class="grp"><div class="grph"><span class="gp ${pos.toLowerCase()}">${pos}</span>`
+      +`<span class="gm">${rows.length} · ${fmtK(gv)}</span></div>`;
+    rows.forEach(p=>{groups+=`<div class="prow"><div class="pi ${pos.toLowerCase()}"></div>`
+      +`<div class="pn"><b>${p.name}</b><small>${p.team} · ${p.pos}${p.age?' · '+p.age:''}</small></div>`
+      +`<div class="pv">${fmtK(p[K])}</div></div>`;});
+    groups+='</div>';
+  });
+  d.innerHTML=`
+    <div class="drillh">
+      <div><h3>${t.name}</h3><div class="sub">#${rank} · ${Math.round(total).toLocaleString()} total · ${BASIS}</div></div>
+      <button class="x" onclick="document.getElementById('scrim').classList.remove('on')">&#215;</button>
+    </div>
+    <div class="drillfilter" id="drillfilter">
+      <button class="pf" data-pos="ALL" data-on="${drillPos.size===0}"><span class="dot"></span>All</button>
+      ${POSITIONS.map(p=>`<button class="pf" data-pos="${p}" data-on="${drillPos.has(p)}"><span class="dot"></span>${p}</button>`).join('')}
+    </div>
+    <div class="drilllist">${groups}</div>`;
+  document.getElementById('drillfilter').onclick=e=>{
+    const b=e.target.closest('.pf'); if(!b)return;
+    const pos=b.dataset.pos;
+    if(pos==='ALL')drillPos.clear();
+    else{if(drillPos.has(pos))drillPos.delete(pos);else drillPos.add(pos);}
+    drawDrill(t);
+  };
+}
+document.getElementById('scrim').addEventListener('click',e=>{
+  if(e.target.id==='scrim')e.currentTarget.classList.remove('on');
+});
+
+render();
+</script>
+</body>
+</html>

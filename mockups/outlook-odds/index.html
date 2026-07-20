@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB #169 — Outlook, Odds &amp; Value: mockups + feasibility</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --warn:#F59E0B;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;justify-content:center;padding:40px 18px 80px}
+  .wrap{max-width:820px;width:100%}
+  h1{font-family:var(--cond);font-weight:700;font-size:34px;line-height:1.03;letter-spacing:.02em;
+     text-transform:uppercase;margin:0 0 8px;display:flex;align-items:center;gap:12px}
+  h1::before{content:"";width:20px;height:4px;background:var(--ice);flex:none}
+  .lede{font-size:14px;line-height:1.6;color:var(--chalk-dim);margin:0 0 6px;max-width:64ch}
+  .lede b{color:var(--chalk)}
+  .meta{font:500 12px var(--mono);color:var(--chalk-faint);margin:0 0 28px}
+
+  h2{font-family:var(--cond);font-weight:600;font-size:22px;letter-spacing:.03em;text-transform:uppercase;
+     margin:34px 0 14px;display:flex;align-items:center;gap:10px}
+  h2::before{content:"";width:14px;height:3px;background:var(--ice);flex:none}
+
+  /* mockup cards */
+  .grid{display:grid;gap:14px}
+  a.mk{display:block;background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:18px 20px;
+     text-decoration:none;color:var(--chalk);transition:border-color .12s,background .12s}
+  a.mk:hover{border-color:var(--line-strong);background:var(--ink-2)}
+  a.mk .top{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+  a.mk h3{font-family:var(--cond);font-weight:700;font-size:21px;letter-spacing:.02em;text-transform:uppercase;margin:0}
+  a.mk .badge{margin-left:auto;font:600 10px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+     border-radius:2px;padding:3px 7px}
+  .badge.near{color:var(--pos);border:1px solid var(--pos)}
+  .badge.model{color:var(--warn);border:1px solid var(--warn)}
+  .badge.mixed{color:var(--ice);border:1px solid var(--ice)}
+  a.mk p{margin:0;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  a.mk .go{font:600 12px var(--mono);color:var(--ice);margin-top:9px;display:inline-block}
+
+  /* split table */
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px}
+  @media(max-width:640px){.split{grid-template-columns:1fr}}
+  .col{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:16px 18px}
+  .col.near{border-top:3px solid var(--pos)}
+  .col.model{border-top:3px solid var(--warn)}
+  .col h4{font:600 11px var(--ui);letter-spacing:.07em;text-transform:uppercase;margin:0 0 4px}
+  .col.near h4{color:var(--pos)} .col.model h4{color:var(--warn)}
+  .col .csub{font:500 12px var(--ui);color:var(--chalk-faint);margin:0 0 14px}
+  .col ul{margin:0;padding:0;list-style:none}
+  .col li{padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;line-height:1.45;color:var(--chalk-dim)}
+  .col li:last-child{border-bottom:none}
+  .col li b{color:var(--chalk);display:block;margin-bottom:2px;font-weight:600}
+  .col li .m{font-family:var(--mono);font-size:11px;color:var(--chalk-faint)}
+
+  .dep{background:var(--ink-1);border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:8px;
+     padding:16px 18px;margin-top:14px}
+  .dep h4{font:600 11px var(--ui);letter-spacing:.07em;text-transform:uppercase;color:var(--flare);margin:0 0 10px}
+  .dep p{margin:0 0 9px;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .dep p:last-child{margin-bottom:0}
+  .dep b{color:var(--chalk)} .dep .m{font-family:var(--mono);font-size:12px}
+
+  .foot{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;line-height:1.6;color:var(--chalk-faint)}
+  .foot .m{font-family:var(--mono)} .foot a{color:var(--ice);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Outlook, Odds &amp; Value</h1>
+  <p class="lede">Feedback <b>#169</b> — expanded into a vision for <b>outcome-framed, objective trade impact</b>. Three mockups explore the pieces; the split below is the honest read on what's buildable now versus what needs new data and modeling.</p>
+  <p class="meta">design + feasibility session · Chalkline dark · mockups only, no app code touched</p>
+
+  <h2>The mockups</h2>
+  <div class="grid">
+    <a class="mk" href="value-bar.html">
+      <div class="top"><h3>Value Bar — Trade Verdict</h3><span class="badge near">Near-term</span></div>
+      <p>Reframes the fairness meter as a diverging value bar centered on "even". Answers "which side wins, and by how much" in draft-pick units — the counteroffer is right in the copy. Overlaps FB-157.</p>
+      <span class="go">Open mockup →</span>
+    </a>
+    <a class="mk" href="league-summary.html">
+      <div class="top"><h3>League Summary — Bar Chart Redesign</h3><span class="badge mixed">Mostly near-term</span></div>
+      <p>Vertical bar chart of team valuations stacked by position. Single/multi position filter reorders + rescales the chart live; tap a team to drill into its position-grouped roster. Dynasty basis is real today; the Redraft tab is a modeling dependency (shown as an honest empty state).</p>
+      <span class="go">Open interactive mockup →</span>
+    </a>
+    <a class="mk" href="outlook-card.html">
+      <div class="top"><h3>Suggestion Card — Outlook &amp; Odds</h3><span class="badge model">Needs modeling</span></div>
+      <p>A trade card carrying projected record, playoff odds, and title odds — before/after the deal, across 2026/27/28. The value verdict strip is real; the amber outlook block is the modeling layer.</p>
+      <span class="go">Open mockup →</span>
+    </a>
+  </div>
+
+  <h2>Near-term vs. modeling</h2>
+  <div class="split">
+    <div class="col near">
+      <h4>Near-term — buildable on existing data</h4>
+      <p class="csub">No new data source. Reskins / recombines what the backend already serves.</p>
+      <ul>
+        <li><b>Value-bar trade verdict</b>
+          <span class="m">/api/trade/evaluate → give_value, receive_value, gap.firsts, gap.pick_equivalent</span></li>
+        <li><b>League Summary bar chart (dynasty)</b>
+          <span class="m">/api/league/power-rankings already returns per-position value breakdowns</span></li>
+        <li><b>Position filter + live reorder/rescale</b>
+          <span class="m">pure client-side sort over the same payload</span></li>
+        <li><b>Roster drill-in, value-sorted by position</b>
+          <span class="m">team.roster is already grouped + value-desc</span></li>
+        <li><b>"This is about fit, not value" fit line</b>
+          <span class="m">analyze_roster_strengths → position_needs / position_surplus</span></li>
+      </ul>
+    </div>
+    <div class="col model">
+      <h4>Needs new data / modeling — real projects</h4>
+      <p class="csub">Each is a standalone build. Don't fake these — flag them.</p>
+      <ul>
+        <li><b>Redraft values</b>
+          <span class="m">FTF has none — backend 501s basis=redraft (dynasty-only source)</span></li>
+        <li><b>Season / final-standing projections</b>
+          <span class="m">no weekly-points projection model exists</span></li>
+        <li><b>Playoff + championship odds</b>
+          <span class="m">needs standings + remaining schedule + Monte-Carlo sim + playoff-format/bye logic</span></li>
+        <li><b>Schedule-aware "+2 wins" deltas</b>
+          <span class="m">re-sim the season with the added/removed player</span></li>
+        <li><b>Outlook-tightened 1st-round pick slotting</b>
+          <span class="m">price picks by projected draft slot, not the flat GENERIC_PICK_SEEDS</span></li>
+        <li><b>Multi-year (2026/27/28) title odds</b>
+          <span class="m">RosterAudit-style; compounds every dependency above</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="dep">
+    <h4>The two dependencies that gate everything else</h4>
+    <p><b>1. A redraft / current-season value source.</b> Every "outlook" number starts from projected weekly points. FTF's only value axis today is dynasty (KTC-style, long-horizon). Redraft values, weekly projections, and standings projections are the <b>same missing input</b> viewed three ways. Reference: <span class="m">DynastyDaddy</span> ships both dynasty + redraft; <span class="m">FantasyCalc</span> exposes a redraft toggle.</p>
+    <p><b>2. A league-state simulator.</b> Playoff %, title %, and "+2 wins" all require simulating the rest of THIS league's season — standings, remaining schedule, per-matchup win probabilities, and the league's playoff format (seeds, byes). Reference: <span class="m">RosterAudit</span>'s multi-year championship odds. This is a projection-model + Monte-Carlo project, not a display change.</p>
+    <p>Order of operations: (1) redraft/projection values unlock the redraft bar chart AND feed the simulator; (2) the simulator unlocks record/playoff/title deltas; (3) projected draft slots unlock outlook-tightened pick pricing. The value-bar + dynasty bar chart ship independent of all of it.</p>
+  </div>
+
+  <div class="foot">
+    <p>Files: <span class="m">mockups/outlook-odds/{index,value-bar,league-summary,outlook-card}.html</span> + <span class="m">feasibility.md</span>. All self-contained, dark Chalkline, mobile frames. No app code changed; nothing committed.</p>
+  </div>
+</div>
+</body>
+</html>

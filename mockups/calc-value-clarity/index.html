@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB #157 — Calculator value clarity: who wins, in picks</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --flare:#F0508C;
+    --t-2nd:#38bdf8; --t-1st:#2dd4bf; --t-2firsts:#fbbf24;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;justify-content:center;
+       padding:32px 16px 72px}
+  .wrap{max-width:760px;width:100%}
+  h1{font-family:var(--cond);font-weight:700;font-size:30px;line-height:1.1;
+     letter-spacing:.02em;text-transform:uppercase;margin:0 0 8px;display:flex;
+     align-items:center;gap:12px}
+  h1::before{content:"";width:18px;height:3px;background:var(--ice);flex:none}
+  .sub{font-size:14px;line-height:1.6;color:var(--chalk-dim);margin:0 0 8px}
+  .sub strong{color:var(--chalk)}
+  .quote{font-size:13px;line-height:1.6;color:var(--chalk-dim);border-left:3px solid var(--flare);
+         padding:8px 14px;background:var(--ink-1);border-radius:0 6px 6px 0;margin:0 0 24px}
+  .quote em{color:var(--chalk);font-style:normal;font-weight:600}
+
+  a.card{display:block;background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+         padding:16px 20px;margin-bottom:12px;text-decoration:none;color:var(--chalk)}
+  a.card:hover{border-color:var(--line-strong);background:var(--ink-2)}
+  a.card.lead{border-color:var(--ice)}
+  .card h2{font-family:var(--cond);font-weight:600;font-size:20px;letter-spacing:.03em;
+           text-transform:uppercase;margin:0 0 4px;display:flex;align-items:baseline;gap:10px}
+  .card h2 .rec{font:600 10px var(--ui);letter-spacing:.08em;color:var(--flare);
+                border:1px solid var(--flare);border-radius:2px;padding:2px 5px;
+                margin-left:auto;text-transform:uppercase}
+  .card p{margin:0;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .card p .pri{color:var(--chalk)}
+  .exph{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+        color:var(--chalk-faint);margin:22px 0 8px}
+
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12px}
+  th{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+     color:var(--chalk-dim);text-align:left;padding:6px 10px;
+     border-bottom:1px solid var(--line-strong)}
+  td{padding:8px 10px;border-bottom:1px solid var(--line);color:var(--chalk-dim);
+     vertical-align:top;line-height:1.45}
+  td.v{color:var(--chalk);font-weight:600;white-space:nowrap}
+  td .m{font-family:var(--mono);font-size:11px}
+
+  .verdict{margin-top:26px;background:var(--ink-1);border:1px solid var(--line);
+           border-left:3px solid var(--ice);border-radius:8px;padding:16px 20px}
+  .verdict h3{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+              color:var(--ice);margin:0 0 8px}
+  .verdict p{margin:0 0 10px;font-size:13px;line-height:1.65;color:var(--chalk-dim)}
+  .verdict p:last-child{margin-bottom:0}
+  .verdict strong{color:var(--chalk)}
+  .verdict .m{font-family:var(--mono);font-size:12px}
+
+  .honest{margin-top:16px;background:var(--ink-1);border:1px solid var(--line);
+           border-left:3px solid var(--flare);border-radius:8px;padding:16px 20px}
+  .honest h3{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+             color:var(--flare);margin:0 0 8px}
+  .honest ul{margin:0;padding-left:18px}
+  .honest li{font-size:13px;line-height:1.6;color:var(--chalk-dim);margin-bottom:6px}
+  .honest li:last-child{margin-bottom:0}
+  .honest strong{color:var(--chalk)}
+  .honest .m{font-family:var(--mono);font-size:12px}
+
+  .foot{margin-top:24px;font-size:12px;line-height:1.6;color:var(--chalk-faint)}
+  .foot .m{font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>FB #157 — Make the calculator show WHO wins &amp; by how many PICKS</h1>
+  <p class="sub">Three mockups of the Trade Calculator verdict, dark Chalkline, ~390px. Same sample trade throughout: <strong>Side A sends Jahmyr Gibbs</strong> (1st, 7,000) for <strong>Side B's Malik Nabers</strong> (2 1sts, 8,500) — an 82% deal that <strong>Side&nbsp;A wins by ≈ a Mid&nbsp;2nd</strong>.</p>
+  <p class="quote">Operator vision: <em>"Hard to see what the value is here, and who's winning the deal. And would still love the value being based on picks rather than some arbitrage number value."</em></p>
+
+  <p class="exph">The mockups</p>
+
+  <a class="card lead" href="tilt-bar.html">
+    <h2>A · Pick-denominated tilt bar <span class="rec">Recommended</span></h2>
+    <p><span class="pri">A tug-of-war bar whose full scale is ±&nbsp;a Mid&nbsp;1st — the needle position literally reads in picks.</span> Big "SIDE&nbsp;A WINS" headline + "≈ a Mid&nbsp;2nd" margin pill. Directly answers FB-169's value-bar ask.</p>
+  </a>
+
+  <a class="card" href="package-ledger.html">
+    <h2>B · Two-package ledger + verdict banner</h2>
+    <p><span class="pri">Each side is a column; every player wears its tier chip ("1st" vs "2 1sts").</span> Shows <em>why</em> one side is heavier. Colored banner states the winner in one pick sentence. Closest to today's card — lowest build risk.</p>
+  </a>
+
+  <a class="card" href="pick-net.html">
+    <h2>C · Net-pick chip (currency framing)</h2>
+    <p><span class="pri">Leads with a single object: "+ a Mid 2nd → Side A", the whole trade as change owed.</span> Per-player tier conversions below, raw values as the quietest text. Most opinionated, least busy.</p>
+  </a>
+
+  <p class="exph">How they compare</p>
+  <table>
+    <thead><tr><th>Dimension</th><th>A · Tilt bar</th><th>B · Ledger</th><th>C · Net chip</th></tr></thead>
+    <tbody>
+      <tr><td>WHO wins — glanceability</td><td class="v">Strong</td><td class="v">Strong</td><td class="v">Strongest</td></tr>
+      <tr><td>BY HOW MUCH, in picks</td><td class="v">Strongest (needle + pill)</td><td class="v">Good (banner)</td><td class="v">Good (chip only)</td></tr>
+      <tr><td>Per-side value in pick terms</td><td>Not shown per side</td><td class="v">Yes — tier chip each player</td><td class="v">Yes — tier per row</td></tr>
+      <tr><td>Raw number demoted?</td><td class="v">Yes, below a rule</td><td class="v">Yes, under tier</td><td class="v">Yes, smallest text</td></tr>
+      <tr><td>Build risk / new surface</td><td>New bar component</td><td class="v">Lowest — reshuffles today's card</td><td>New hero block</td></tr>
+      <tr><td>Multi-player packages</td><td class="v">Scales (one needle)</td><td>Chip stack per column</td><td>Row list, net can under-read</td></tr>
+    </tbody>
+  </table>
+
+  <div class="verdict">
+    <h3>Recommendation</h3>
+    <p><strong>Ship Variant&nbsp;A (tilt bar) as the headline, borrow Variant&nbsp;B's per-player tier chips.</strong> A nails both operator asks in one glance: the ice needle answers "who wins," and because the bar's full scale is one first, its position <em>is</em> the pick margin — no arbitrage number needed. The "≈ a Mid&nbsp;2nd" pill is the same <span class="m">gap.pick_equivalent</span> the card already computes.</p>
+    <p>B's move worth stealing: tag each player chip with its <strong>tier label in pick terms</strong> (Gibbs "1st", Nabers "2 1sts"). That's the honest per-side pick denomination the operator wants, and it reuses the tier ladder already computed for every valued asset — no new math. Put those chips on the Side&nbsp;A / Side&nbsp;B builder rows, keep the tilt bar as the verdict.</p>
+    <p>C is the cleanest single idea but too lossy alone — keep the net-pick chip in reserve as a compact/share layout.</p>
+    <p><strong>Everything reused, zero new engine work:</strong> <span class="m">give_value</span>, <span class="m">receive_value</span>, <span class="m">point_ratio</span>, <span class="m">verdict</span>, <span class="m">favors</span>, <span class="m">gap.firsts</span>, <span class="m">gap.pick_equivalent</span>, and the per-player tier from the ladder — all already on <span class="m">/api/trade/evaluate</span> and the values feed.</p>
+  </div>
+
+  <div class="honest">
+    <h3>What we honestly DON'T have (don't fake it)</h3>
+    <ul>
+      <li><strong>No summed "package = N picks" figure.</strong> The engine denominates <em>individual players</em> in tiers and the <em>gap</em> in one pick — it never adds players into a single pick sum. All three mockups respect that: per-player tier chips + a one-pick margin, never "this package = 2 firsts + a 2nd."</li>
+      <li><strong>Live mode is consensus-only.</strong> "Who wins" here is by market value, not roster fit. The two-board "who wins by whose board" read only exists in <span class="m">In league</span> mode (<span class="m">InLeagueCalculator</span>) — these verdict treatments should carry over there, labelled as such.</li>
+      <li><strong>No redraft values.</strong> Dynasty only; the redraft basis is reserved but 501s ("soon"). Don't imply a redraft winner.</li>
+      <li><strong>Gaps bigger than one first</strong> have no single-pick equivalent — fall back to the existing <span class="m">"≈ 1.4 mid 1sts"</span> copy (tilt bar pins the needle to the end).</li>
+    </ul>
+  </div>
+
+  <p class="foot">
+    Mockup only — no app code changed. Fonts fall back to condensed system stacks here; production bundles Barlow&nbsp;Condensed&nbsp;/&nbsp;Archivo&nbsp;/&nbsp;IBM&nbsp;Plex&nbsp;Mono. Colors, radii, spacing per <span class="m">docs/design/design-system.md</span>; pick-tier chip hues per <span class="m">docs/cross-client-invariants.md</span>. Overlaps FB-169 (value bar) — Variant&nbsp;A satisfies both.
+  </p>
+</div>
+</body>
+</html>

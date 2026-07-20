@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB #169 — Season-outlook + playoff/title-odds suggestion card</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --t-first:#2dd4bf; --t-second:#38bdf8;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#07090c;color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:28px 16px 64px;gap:18px}
+  .pageh{max-width:420px;width:100%}
+  .pageh h1{font-family:var(--cond);font-weight:700;font-size:26px;line-height:1.05;
+     letter-spacing:.02em;text-transform:uppercase;margin:0 0 6px;display:flex;align-items:center;gap:10px}
+  .pageh h1::before{content:"";width:16px;height:3px;background:var(--flare);flex:none}
+  .pageh p{font-size:13px;line-height:1.55;color:var(--chalk-dim);margin:0}
+  .pageh .tag{display:inline-block;font:600 10px var(--ui);letter-spacing:.07em;text-transform:uppercase;
+     color:var(--warn);border:1px solid var(--warn);border-radius:2px;padding:2px 6px;margin-top:8px}
+
+  .phone{width:390px;max-width:100%;background:var(--ink-0);border:1px solid var(--line);
+     border-radius:22px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.6)}
+  .status{height:34px;display:flex;align-items:center;justify-content:space-between;
+     padding:0 20px;font:600 12px var(--mono);color:var(--chalk-dim)}
+  .nav{display:flex;align-items:center;gap:10px;padding:10px 16px 6px;border-bottom:1px solid var(--line)}
+  .nav .back{width:28px;height:28px;display:flex;align-items:center;justify-content:center;color:var(--chalk-dim)}
+  .nav h2{font-family:var(--cond);font-weight:700;font-size:20px;letter-spacing:.02em;text-transform:uppercase;margin:0}
+  .body{padding:16px}
+
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .cardhead{padding:13px 15px 12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+  .cardhead .partner{font:600 13px var(--ui)}
+  .cardhead .partner small{display:block;font:500 11px var(--mono);color:var(--chalk-dim);margin-top:1px}
+  .cardhead .lane{font:600 9px var(--ui);letter-spacing:.06em;text-transform:uppercase;color:var(--ice);
+     border:1px solid var(--ice);border-radius:2px;padding:2px 6px}
+
+  .swaprow{display:grid;grid-template-columns:1fr 26px 1fr;gap:8px;padding:14px 15px;align-items:center}
+  .col h5{font:600 9px var(--ui);letter-spacing:.07em;text-transform:uppercase;color:var(--chalk-faint);margin:0 0 8px}
+  .a{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+  .a:last-child{margin-bottom:0}
+  .a .pi{width:4px;height:20px;border-radius:2px;flex:none}
+  .a .pi.qb{background:var(--qb)} .a .pi.rb{background:var(--rb)}
+  .a .pi.wr{background:var(--wr)} .a .pi.te{background:var(--te)} .a .pi.pick{background:var(--t-first)}
+  .a b{font:600 12px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .swap{display:flex;align-items:center;justify-content:center;color:var(--chalk-faint);font-size:15px}
+
+  /* value verdict strip (near-term, reused from value-bar) */
+  .vstrip{margin:0 15px 4px;background:var(--ink-2);border:1px solid var(--line);border-radius:6px;
+     padding:9px 12px;display:flex;align-items:center;gap:10px}
+  .vstrip .pos{width:8px;height:8px;border-radius:2px;background:var(--pos);flex:none}
+  .vstrip p{margin:0;font:500 12px var(--ui);color:var(--chalk-dim);line-height:1.4}
+  .vstrip p b{color:var(--chalk)} .vstrip .pick{color:var(--t-first);font-weight:600}
+
+  /* OUTLOOK block — the modeling layer */
+  .outlook{margin:12px 15px 4px;background:#12100b;border:1px solid #3a2f14;border-radius:8px;padding:13px 14px}
+  .outlook .oh{font:600 10px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--warn);
+     margin:0 0 12px;display:flex;align-items:center;gap:7px}
+  .outlook .oh .beta{margin-left:auto;font:600 8px var(--ui);letter-spacing:.05em;color:var(--warn);
+     border:1px solid var(--warn);border-radius:2px;padding:1px 5px}
+
+  .record{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .record .rblock{flex:1}
+  .record .rlabel{font:500 10px var(--ui);letter-spacing:.04em;text-transform:uppercase;color:var(--chalk-faint);margin-bottom:3px}
+  .record .rval{font:600 20px var(--mono);color:var(--chalk);font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:6px}
+  .record .rval .d{font-size:12px}
+  .record .d.up{color:var(--pos)} .record .d.dn{color:var(--neg)}
+  .record .arrow{color:var(--chalk-faint);font-size:16px}
+
+  .odds{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+  .odd{background:var(--ink-1);border:1px solid var(--line);border-radius:6px;padding:10px 11px}
+  .odd .ol{font:500 10px var(--ui);letter-spacing:.04em;text-transform:uppercase;color:var(--chalk-dim);margin-bottom:6px}
+  .odd .ov{font:600 17px var(--mono);color:var(--chalk);display:flex;align-items:baseline;gap:5px}
+  .odd .ov .d{font-size:11px}
+  .odd .d.up{color:var(--pos)} .odd .d.dn{color:var(--neg)}
+  .obar{height:5px;background:var(--ink-3);border-radius:3px;margin-top:7px;overflow:hidden;position:relative}
+  .obar .now{position:absolute;left:0;top:0;bottom:0;background:var(--warn);border-radius:3px}
+  .obar .add{position:absolute;top:0;bottom:0;background:var(--pos);opacity:.55}
+
+  .multiyear{border-top:1px solid #3a2f14;padding-top:11px}
+  .multiyear .ml{font:500 10px var(--ui);letter-spacing:.04em;text-transform:uppercase;color:var(--chalk-faint);margin-bottom:8px}
+  .yr{display:grid;grid-template-columns:44px 1fr 46px;gap:8px;align-items:center;margin-bottom:6px}
+  .yr .y{font:600 12px var(--mono);color:var(--chalk-dim)}
+  .yr .ybar{height:8px;background:var(--ink-3);border-radius:3px;overflow:hidden}
+  .yr .ybar i{display:block;height:100%;background:var(--warn)}
+  .yr .yp{font:600 12px var(--mono);color:var(--chalk);text-align:right}
+  .why{margin:11px 15px 15px;font:500 12px var(--ui);color:var(--chalk-dim);line-height:1.5;
+     background:var(--ink-2);border-radius:6px;padding:10px 12px}
+  .why b{color:var(--chalk)}
+
+  .actions{display:flex;gap:8px;padding:0 15px 15px}
+  .actions button{flex:1;padding:11px;border-radius:4px;font:600 12px var(--ui);letter-spacing:.05em;
+     text-transform:uppercase;cursor:pointer;border:1px solid var(--line-strong);background:transparent;color:var(--chalk)}
+  .actions .primary{background:var(--ice);color:var(--on-ice);border-color:var(--ice)}
+
+  .note{max-width:420px;width:100%;font-size:12px;line-height:1.55;color:var(--chalk-faint);
+     background:var(--ink-1);border:1px solid var(--line);border-left:2px solid var(--warn);
+     border-radius:6px;padding:12px 14px}
+  .note b{color:var(--chalk-dim)} .note .m{font-family:var(--mono)}
+  .note .real{color:var(--pos)} .note .model{color:var(--warn)}
+</style>
+</head>
+<body>
+<div class="pageh">
+  <h1>Suggestion Card — Outlook &amp; Odds</h1>
+  <p>A trade card that carries the objective impact: not just "who wins on value" but <b>projected record, playoff odds, and title odds</b> — before and after the deal, across three seasons.</p>
+  <span class="tag">Needs new data + modeling</span>
+</div>
+
+<div class="phone">
+  <div class="status"><span>9:41</span><span>Trade Finder</span></div>
+  <div class="nav"><div class="back">&#8249;</div><h2>Suggested Trade</h2></div>
+  <div class="body">
+    <div class="card">
+      <div class="cardhead">
+        <div class="partner">with The Autodrafters<small>7–2 · contender</small></div>
+        <span class="lane">Window</span>
+      </div>
+
+      <div class="swaprow">
+        <div class="col">
+          <h5>You give</h5>
+          <div class="a"><div class="pi wr"></div><b>Garrett Wilson</b></div>
+          <div class="a"><div class="pi pick"></div><b>2027 2nd</b></div>
+        </div>
+        <div class="swap">&#8644;</div>
+        <div class="col">
+          <h5>You get</h5>
+          <div class="a"><div class="pi rb"></div><b>Bijan Robinson</b></div>
+        </div>
+      </div>
+
+      <div class="vstrip">
+        <span class="pos"></span>
+        <p><b>Even by value</b> — within <span class="pick">a Mid 3rd</span> (0.3 firsts). This deal is about <b>fit</b>, not value.</p>
+      </div>
+
+      <!-- MODELING LAYER -->
+      <div class="outlook">
+        <p class="oh"><span>Season outlook</span><span class="beta">Projected</span></p>
+
+        <div class="record">
+          <div class="rblock">
+            <div class="rlabel">Your projected record</div>
+            <div class="rval">10–4 <span class="d up">▲ +2</span></div>
+          </div>
+          <div class="arrow">&#8594;</div>
+          <div class="rblock">
+            <div class="rlabel">Autodrafters</div>
+            <div class="rval">8–6 <span class="d dn">▼ −1</span></div>
+          </div>
+        </div>
+
+        <div class="odds">
+          <div class="odd">
+            <div class="ol">Your playoff odds</div>
+            <div class="ov">86% <span class="d up">+11</span></div>
+            <div class="obar"><div class="now" style="width:75%"></div><div class="add" style="left:75%;width:11%"></div></div>
+          </div>
+          <div class="odd">
+            <div class="ol">Your title odds</div>
+            <div class="ov">18% <span class="d up">+6</span></div>
+            <div class="obar"><div class="now" style="width:12%"></div><div class="add" style="left:12%;width:6%"></div></div>
+          </div>
+        </div>
+
+        <div class="multiyear">
+          <div class="ml">Championship odds — by season (bye-adjusted)</div>
+          <div class="yr"><span class="y">2026</span><div class="ybar"><i style="width:18%"></i></div><span class="yp">18%</span></div>
+          <div class="yr"><span class="y">2027</span><div class="ybar"><i style="width:14%"></i></div><span class="yp">14%</span></div>
+          <div class="yr"><span class="y">2028</span><div class="ybar"><i style="width:9%"></i></div><span class="yp">9%</span></div>
+        </div>
+      </div>
+
+      <div class="why">
+        <b>Why:</b> Bijan is a weekly RB1 in a lineup thin at RB — the model projects him to swing ~2 more wins over your remaining schedule, lifting you from the 6-seed bubble into a likely first-round bye.
+      </div>
+
+      <div class="actions">
+        <button>Pass</button>
+        <button class="primary">Send offer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <b>Honest split.</b> <span class="real">Real today (green strip):</span> the value verdict + pick-denominated fit line reuse <span class="m">/api/trade/evaluate</span> and <span class="m">analyze_roster_strengths</span> (already flags RB as a position need). <span class="model">Everything in the amber block is a modeling dependency:</span> projected record, playoff %, title %, and multi-year odds require a <b>current-season projection model + league standings + remaining-schedule simulation + playoff-format logic</b> — none of which exist in FTF today. See the feasibility brief; RosterAudit / DynastyDaddy are the scope references.
+</div>
+</body>
+</html>

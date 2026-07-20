@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB #157 — Variant C · Net-pick chip (currency framing)</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --on-ice:#071013;
+    --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --rb:#22C55E; --wr:#3B82F6;
+    --t-2nd:#38bdf8; --t-1st:#2dd4bf; --t-2firsts:#fbbf24;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#08090c;color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:24px 16px 64px}
+
+  .note{max-width:640px;width:100%;background:var(--ink-1);border:1px solid var(--line);
+        border-left:3px solid var(--ice);border-radius:8px;padding:14px 18px;margin-bottom:28px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:22px;letter-spacing:.02em;
+           text-transform:uppercase;margin:0 0 8px}
+  .note p{margin:0 0 6px;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note p:last-child{margin-bottom:0}
+  .note strong{color:var(--chalk)}
+  .note .k{font:600 10px var(--ui);letter-spacing:.07em;text-transform:uppercase;color:var(--ice)}
+  .note .m{font-family:var(--mono);font-size:12px}
+
+  .frame{width:390px;max-width:100%;background:var(--ink-0);border:1px solid var(--line);
+         border-radius:24px;padding:18px 16px 22px;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+  .tick{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+        color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:0 0 12px}
+  .tick::before{content:"";width:14px;height:3px;background:var(--ice);border-radius:2px}
+
+  /* the hero: a single NET pick chip */
+  .hero{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:20px 16px 18px;text-align:center}
+  .hero .cap{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+             color:var(--chalk-faint);margin:0 0 12px}
+  .netchip{display:inline-flex;align-items:center;gap:10px;background:var(--ink-3);
+           border:1px solid var(--t-2nd);border-radius:999px;padding:9px 18px 9px 14px}
+  .netchip .plus{font-family:var(--cond);font-weight:700;font-size:30px;line-height:1;
+                 color:var(--t-2nd)}
+  .netchip .pk{font-family:var(--cond);font-weight:700;font-size:22px;line-height:1;
+               letter-spacing:.02em;text-transform:uppercase;color:var(--chalk)}
+  .toline{font-family:var(--cond);font-weight:700;font-size:20px;letter-spacing:.02em;
+          text-transform:uppercase;margin:12px 0 0}
+  .toline .arrow{color:var(--chalk-faint)}
+  .toline .a{color:var(--ice)}
+  .heronote{font:400 12px var(--ui);color:var(--chalk-dim);margin:8px 0 0;line-height:1.5}
+
+  /* the two conversions — "what each side is really getting, in picks" */
+  .rows{margin-top:12px;background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:4px 14px}
+  .lrow{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .lrow:last-child{border-bottom:none}
+  .pos{font:600 9px var(--ui);width:26px;height:17px;border-radius:2px;display:flex;
+       align-items:center;justify-content:center;flex:none;color:#08090c}
+  .pos.rb{background:var(--rb)} .pos.wr{background:var(--wr)}
+  .lr-meta{flex:1;min-width:0}
+  .lr-name{font:600 14px var(--ui);line-height:1.15}
+  .lr-side{font:400 11px var(--ui);color:var(--chalk-faint);margin-top:1px;
+           text-transform:uppercase;letter-spacing:.04em}
+  .lr-pick{font-family:var(--cond);font-weight:700;font-size:16px;letter-spacing:.02em;
+           text-transform:uppercase;text-align:right;flex:none}
+  .lr-pick.t1st{color:var(--t-1st)} .lr-pick.t2f{color:var(--t-2firsts)}
+  .lr-raw{font:600 11px var(--mono);color:var(--chalk-dim);display:block;margin-top:1px;
+          font-variant-numeric:tabular-nums;font-family:var(--mono);text-transform:none;
+          letter-spacing:0}
+
+  .balance{margin-top:12px;background:var(--ink-2);border:1px solid var(--line);border-radius:6px;
+           padding:11px 13px;font:400 13px var(--ui);line-height:1.5;color:var(--chalk-dim)}
+  .balance strong{color:var(--chalk);font-weight:600}
+  .balance .pk{color:var(--t-2nd);font-weight:600}
+  .foot{font:400 11px var(--ui);color:var(--chalk-faint);margin-top:12px;line-height:1.5;text-align:center}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Variant C — Net-pick chip (currency framing)</h1>
+  <p><span class="k">Approach</span> Lead with a single answer: <strong>one net pick chip</strong> — "+ a Mid&nbsp;2nd → Side&nbsp;A" — treating the whole trade like change owed. Below it, each player is converted to its tier pick, raw value as a quiet subline. The rawest expression of "value in picks, not an arbitrage number."</p>
+  <p><span class="k">Primary</span> The net-pick chip = who wins + by how much, in one object. <span class="k">Secondary</span> per-player pick conversions; raw values are the smallest text on screen.</p>
+  <p><span class="k">Reuses</span> <span class="m">gap.pick_equivalent</span> (the net chip) + the tier ladder (per-player rows). No new math.</p>
+  <p><span class="k">Tradeoff</span> Most opinionated / least busy, but hides magnitude nuance — a 2-piece side still lists rows, and "net = one pick" can under-read a lopsided multi-player deal. Best when paired with Variant&nbsp;A's bar for users who want to see the tilt, not just the number.</p>
+</div>
+
+<div class="frame">
+  <div class="tick">Trade Calculator · Real values · 1QB PPR</div>
+
+  <div class="hero">
+    <p class="cap">Who wins this deal</p>
+    <span class="netchip">
+      <span class="plus">+</span>
+      <span class="pk">a Mid 2nd</span>
+    </span>
+    <p class="toline"><span class="arrow">→</span> <span class="a">Side A</span></p>
+    <p class="heronote">Side A comes out a 2nd-round pick ahead on consensus value.</p>
+  </div>
+
+  <div class="rows">
+    <div class="lrow">
+      <span class="pos rb">RB</span>
+      <div class="lr-meta">
+        <div class="lr-name">Jahmyr Gibbs</div>
+        <div class="lr-side">Side A sends</div>
+      </div>
+      <div class="lr-pick t1st">A 1st<span class="lr-raw">7,000</span></div>
+    </div>
+    <div class="lrow">
+      <span class="pos wr">WR</span>
+      <div class="lr-meta">
+        <div class="lr-name">Malik Nabers</div>
+        <div class="lr-side">Side B sends</div>
+      </div>
+      <div class="lr-pick t2f">2 1sts<span class="lr-raw">8,500</span></div>
+    </div>
+  </div>
+
+  <div class="balance">
+    <strong>Make it even:</strong> Side&nbsp;A throws in <span class="pk">≈ a Mid&nbsp;2nd</span> and the net zeroes out.
+  </div>
+  <p class="foot">Consensus market value + tier ladder — the same engine the trade finder uses.</p>
+</div>
+
+</body>
+</html>

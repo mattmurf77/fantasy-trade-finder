@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trade-Finding Hub — Mockup Options (#156)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--ink0);color:var(--chalk);font-family:var(--f-ui);line-height:1.55;padding:40px 20px 80px}
+.wrap{max-width:900px;margin:0 auto}
+h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:34px;margin-bottom:6px}
+.sub{color:var(--dim);font-size:14px;margin-bottom:8px}
+.meta{color:var(--faint);font-size:12px;font-family:var(--f-mono);margin-bottom:28px}
+h2{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.03em;font-size:20px;color:var(--chalk);margin:34px 0 12px;display:flex;align-items:center;gap:9px}
+h2::before{content:"";width:4px;height:16px;background:var(--ice);border-radius:2px}
+p{color:var(--dim);font-size:14px;margin-bottom:12px}
+b{color:var(--chalk)}
+a{color:var(--ice);text-decoration:none}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-bottom:10px}
+.vcard{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:18px;display:flex;flex-direction:column;gap:8px}
+.vcard.rec{border-color:var(--ice)}
+.vcard .tag{align-self:flex-start;font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;color:var(--onIce);background:var(--ice);border-radius:999px;padding:3px 9px}
+.vcard h3{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.02em;font-size:19px}
+.vcard p{font-size:13px;margin:0}
+.vcard .go{margin-top:6px;font-size:13px;font-weight:600}
+
+table{width:100%;border-collapse:collapse;margin:6px 0 10px;font-size:13px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);font-weight:600}
+td b{color:var(--chalk)}
+.tblwrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+.pos{color:var(--pos)} .neg{color:var(--neg)} .flare{color:var(--flare)}
+
+.callout{border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:8px;background:var(--ink1);padding:16px 18px;margin:14px 0}
+.callout h3{font-family:var(--f-display);text-transform:uppercase;letter-spacing:.03em;font-size:15px;margin-bottom:8px}
+.callout ul{margin:0 0 0 18px;color:var(--dim);font-size:13px} .callout li{margin:5px 0}
+.datatag{display:inline-block;font-size:10px;font-family:var(--f-mono);border-radius:999px;padding:2px 8px;margin-left:4px}
+.have{background:rgba(34,197,94,.14);color:var(--pos)}
+.build{background:rgba(240,80,140,.14);color:var(--flare)}
+
+.reco{border:1px solid var(--ice);border-radius:8px;background:var(--ink1);padding:18px 20px}
+.reco h3{font-family:var(--f-display);text-transform:uppercase;letter-spacing:.03em;font-size:17px;color:var(--ice);margin-bottom:8px}
+ul.plain{margin:0 0 0 18px;color:var(--dim);font-size:14px} ul.plain li{margin:6px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Trade-Finding Hub</h1>
+  <div class="sub">Mockup options for feedback #156 — one place to choose <b>how</b> you find trades, and the home for every targeting preference.</div>
+  <div class="meta">Design mockups only · Chalkline dark palette · ~390px frame · no app code changed</div>
+
+  <p>The operator's vision: give users an easy, seamless way to pick a trade-finding mode — <b>Fully Guided</b>, <b>Specific Team</b>, <b>Specific Player</b> (trade for / away / both), or <b>Manual Calculator</b> — and make this same surface the home for untouchables, positions-needed, positions-to-trade-away, and named players to acquire/shop. Inspiration: NBA2K's find-a-trade board (pick players for/away/both → engine returns constrained suggestions). All three variants build on features FTF already ships.</p>
+
+  <div class="cards">
+    <div class="vcard">
+      <span class="tag" style="background:var(--ink3);color:var(--dim)">Variant A</span>
+      <h3>Mode Tabs + Shared Drawer</h3>
+      <p>Sticky 4-segment mode selector under the header; a single shared Trade Preferences drawer below all modes.</p>
+      <a class="go" href="variant-a-mode-tabs.html">Open Variant A →</a>
+    </div>
+    <div class="vcard rec">
+      <span class="tag">Variant B · recommended</span>
+      <h3>Launcher Hub + Focused Modes</h3>
+      <p>Trades home is a hub: a Trade DNA panel + 4 mode cards. Each mode opens full-screen with lateral quick-switch chips.</p>
+      <a class="go" href="variant-b-launcher-hub.html">Open Variant B →</a>
+    </div>
+    <div class="vcard">
+      <span class="tag" style="background:var(--ink3);color:var(--dim)">Variant C</span>
+      <h3>Unified Brief (mode = lens)</h3>
+      <p>One canvas holds the whole brief; the mode selector re-emphasizes blocks in place. Most seamless, densest.</p>
+      <a class="go" href="variant-c-unified-brief.html">Open Variant C →</a>
+    </div>
+  </div>
+
+  <h2>How they compare</h2>
+  <div class="tblwrap">
+  <table>
+    <tr><th>Dimension</th><th>A · Mode Tabs</th><th>B · Launcher Hub</th><th>C · Unified Brief</th></tr>
+    <tr><td>Switch cost between modes</td><td>1 tap, in place</td><td>1 tap out + lateral chips</td><td class="pos">0 — re-emphasis</td></tr>
+    <tr><td>Prefs visibility</td><td>Below fold (drawer)</td><td class="pos">Top panel + in-mode</td><td class="pos">Always co-visible</td></tr>
+    <tr><td>Room for NBA2K board</td><td>Compact</td><td class="pos">Full screen</td><td>Compact</td></tr>
+    <tr><td>First-timer clarity</td><td class="pos">High</td><td class="pos">High</td><td>Medium (dense)</td></tr>
+    <tr><td>Calculator fit</td><td>OK (stacked)</td><td class="pos">Clean (own screen)</td><td>Awkward (dock swap)</td></tr>
+    <tr><td>Selections persist across modes</td><td class="pos">Yes (one drawer)</td><td class="pos">Yes (Trade DNA)</td><td class="pos">Yes (one canvas)</td></tr>
+    <tr><td>Net-new build surface</td><td class="pos">Smallest</td><td>Medium (hub shell)</td><td>Largest (lens engine)</td></tr>
+  </table>
+  </div>
+
+  <h2>What's real vs. what needs building</h2>
+  <p>Every variant is mostly a re-composition of shipped features. The honest gaps:</p>
+  <div class="callout">
+    <h3>Data &amp; feature dependencies</h3>
+    <ul>
+      <li><b>4 modes</b> — Guided, Player, and Calculator all exist today (trade generation + FB-47 targeting + TradeCalculatorScreen). <span class="datatag have">have</span></li>
+      <li><b>Specific Player · for / away / both</b> — the FB-47 finder already supports pinned_give / pinned_receive with a direction toggle; "both" is expressible now. The mockups just make it the visual centerpiece. <span class="datatag have">have</span></li>
+      <li><b>Untouchables</b> — asset_prefs list_type <span class="mono">untouchable</span> (feedback #95) is live. <span class="datatag have">have</span></li>
+      <li><b>Named players to acquire / shop</b> — asset_prefs <span class="mono">target</span> + FB-47 pins cover this. <span class="datatag have">have</span></li>
+      <li><b>Positions-needed / positions-to-trade-away</b> as manual chips — already in OutlookSheet (acquire_positions / trade_away_positions). <span class="datatag have">have</span></li>
+      <li><b>Recommendation chips on those positions</b> ("Thin at WR", "Deep at RB") — the roster analysis exists (<span class="mono">analyze_roster_strengths</span> returns <span class="mono">position_needs</span> + <span class="mono">position_surplus</span>), but today only <span class="mono">inferred_outlook</span> is exposed to clients. Surfacing needs/surplus needs a thin endpoint (or extra fields on the prefs response). <span class="datatag have">data exists</span> <span class="datatag build">wiring new</span></li>
+      <li><b>Specific Team</b> mode (scope generation to one league-mate) — the engine already iterates opponents and rosters are available; a single-opponent scope is a small backend param + picker. <span class="datatag build">small new</span></li>
+      <li><b>The hub / drawer / lens shell itself</b> — net-new client structure; no new backend. <span class="datatag build">new UI</span></li>
+    </ul>
+  </div>
+
+  <h2>Recommendation</h2>
+  <div class="reco">
+    <h3>Go with Variant B — Launcher Hub</h3>
+    <ul class="plain">
+      <li><b>Best fit for the vision's two jobs.</b> The hub cleanly separates "pick a mode" (four cards) from "set your preferences" (Trade DNA panel), so both feel first-class instead of one hiding under the other.</li>
+      <li><b>The NBA2K board gets the room it deserves.</b> Specific Player as a full-screen two-column FOR/AWAY board is the closest adaptation of the 2K pattern and reads well on a phone — cramped in A and C.</li>
+      <li><b>Seamless jumping is preserved</b> via the lateral quick-switch chip row inside every mode, so the one-extra-tap cost of a hub mostly disappears in practice.</li>
+      <li><b>Card-launcher pattern already exists</b> in the app (RankHomeScreen's method chooser), so it's familiar to build and to users.</li>
+    </ul>
+    <p style="margin:12px 0 0"><b>If the priority is minimal build:</b> Variant A ships fastest (mode tabs are today's trades subnav widened, prefs drawer is a re-home of existing sheets). <b>If the priority is a power-user "cockpit":</b> Variant C is the most seamless but should wait until the recommendation-chip endpoint and lens-emphasis interactions are worth the density.</p>
+  </div>
+
+  <h2>Open questions for the operator</h2>
+  <ul class="plain">
+    <li>Should the recommendation-chip endpoint be built now (unlocks the "rec" chips in all three), or do we ship with manual position chips first and add recs in a fast-follow?</li>
+    <li>Is "Specific Team" worth the small backend scope work for v1, or should it be a fast-follow after the other three modes land?</li>
+    <li>Do preferences live per-league (matches asset_prefs / league_preferences today) — confirm the hub is always league-scoped, with a visible league pill as mocked.</li>
+  </ul>
+</div>
+</body>
+</html>

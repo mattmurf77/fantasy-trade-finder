@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB #157 — Variant B · Two-package ledger + verdict banner</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --on-ice:#071013;
+    --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --rb:#22C55E; --wr:#3B82F6;
+    --t-2nd:#38bdf8; --t-1st:#2dd4bf; --t-2firsts:#fbbf24;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#08090c;color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:24px 16px 64px}
+
+  .note{max-width:640px;width:100%;background:var(--ink-1);border:1px solid var(--line);
+        border-left:3px solid var(--ice);border-radius:8px;padding:14px 18px;margin-bottom:28px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:22px;letter-spacing:.02em;
+           text-transform:uppercase;margin:0 0 8px}
+  .note p{margin:0 0 6px;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note p:last-child{margin-bottom:0}
+  .note strong{color:var(--chalk)}
+  .note .k{font:600 10px var(--ui);letter-spacing:.07em;text-transform:uppercase;color:var(--ice)}
+  .note .m{font-family:var(--mono);font-size:12px}
+
+  .frame{width:390px;max-width:100%;background:var(--ink-0);border:1px solid var(--line);
+         border-radius:24px;padding:18px 16px 22px;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+  .tick{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+        color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:0 0 12px}
+  .tick::before{content:"";width:14px;height:3px;background:var(--ice);border-radius:2px}
+
+  /* verdict banner — colored by winner, headline is the pick sentence */
+  .banner{background:var(--ink-1);border:1px solid var(--line);border-left:3px solid var(--ice);
+          border-radius:8px;padding:14px 16px;margin-bottom:12px}
+  .banner .who{font-family:var(--cond);font-weight:700;font-size:23px;line-height:1.1;
+               letter-spacing:.02em;text-transform:uppercase;margin:0}
+  .banner .who .a{color:var(--ice)}
+  .banner .who .pk{color:var(--t-2nd)}
+  .banner .sub{font:400 12px var(--ui);color:var(--chalk-dim);margin:5px 0 0;line-height:1.5}
+  .banner .sub .m{font-family:var(--mono);font-size:11px}
+
+  /* two package columns */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .col{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:12px 12px 10px}
+  .col.win{border-color:var(--ice)}
+  .colhead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:9px}
+  .colhead .s{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;color:var(--chalk-dim)}
+  .col.win .colhead .s{color:var(--ice)}
+  .colhead .tag{font:600 9px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+                color:var(--ice);border:1px solid var(--ice);border-radius:2px;padding:2px 5px}
+  .pcell{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+  .pos{font:600 9px var(--ui);width:26px;height:17px;border-radius:2px;display:flex;
+       align-items:center;justify-content:center;flex:none;color:#08090c}
+  .pos.rb{background:var(--rb)} .pos.wr{background:var(--wr)}
+  .pc-meta{flex:1;min-width:0}
+  .pc-name{font:600 13px var(--ui);line-height:1.15;white-space:nowrap;overflow:hidden;
+           text-overflow:ellipsis}
+  .pc-tier{font:600 9px var(--ui);letter-spacing:.04em;text-transform:uppercase;margin-top:2px}
+  .pc-tier.t1st{color:var(--t-1st)} .pc-tier.t2f{color:var(--t-2firsts)}
+  .coltot{border-top:1px solid var(--line);padding-top:8px;margin-top:2px}
+  .coltot .worth{font:600 10px var(--ui);letter-spacing:.05em;text-transform:uppercase;
+                 color:var(--chalk-faint)}
+  .coltot .pick{font-family:var(--cond);font-weight:700;font-size:16px;letter-spacing:.02em;
+                text-transform:uppercase;margin-top:1px}
+  .coltot .pick.t1st{color:var(--t-1st)} .coltot .pick.t2f{color:var(--t-2firsts)}
+  .coltot .raw{font:600 11px var(--mono);color:var(--chalk-dim);margin-top:2px;
+               font-variant-numeric:tabular-nums}
+
+  /* thin gap bar under the columns */
+  .gapbar{margin-top:12px}
+  .gapbar .cap{display:flex;justify-content:space-between;font:600 10px var(--ui);
+               letter-spacing:.05em;text-transform:uppercase;color:var(--chalk-faint);margin-bottom:5px}
+  .gt{position:relative;height:10px;background:var(--ink-3);border-radius:999px;overflow:hidden}
+  .gt .bfill{position:absolute;left:0;top:0;bottom:0;width:45.2%;background:var(--chalk-faint);
+             border-radius:999px 0 0 999px}
+  .gt .afill{position:absolute;right:0;top:0;bottom:0;width:54.8%;background:var(--ice);
+             border-radius:0 999px 999px 0}
+  .gt .div{position:absolute;top:-2px;bottom:-2px;left:54.8%;width:2px;background:var(--ink-0)}
+
+  .balance{margin-top:12px;background:var(--ink-2);border:1px solid var(--line);border-radius:6px;
+           padding:11px 13px;font:400 13px var(--ui);line-height:1.5;color:var(--chalk-dim)}
+  .balance strong{color:var(--chalk);font-weight:600}
+  .balance .pk{color:var(--t-2nd);font-weight:600}
+  .foot{font:400 11px var(--ui);color:var(--chalk-faint);margin-top:12px;line-height:1.5;text-align:center}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Variant B — Two-package ledger + verdict banner</h1>
+  <p><span class="k">Approach</span> Each side becomes a column; every player carries its <strong>tier chip in pick terms</strong> (Gibbs = "1st", Nabers = "2 1sts"). Column footer restates the package's headline pick worth, raw value demoted underneath. A colored banner names the winner in one pick sentence.</p>
+  <p><span class="k">Primary</span> Who wins &amp; margin (banner sentence). <span class="k">Also primary</span> per-side pick worth (tier chips) — answers "why is one side heavier" at a glance. <span class="k">Secondary</span> raw totals + the thin ratio bar.</p>
+  <p><span class="k">Reuses</span> the real <strong>tier ladder</strong> per player (already computed for every valued asset) + <span class="m">gap.pick_equivalent</span> for the banner. Closest to today's card, lowest build risk.</p>
+  <p><span class="k">Tradeoff</span> A multi-player package shows a <em>stack</em> of tier chips, not one summed pick figure — honest (the engine never adds players into a single pick number) but less punchy than Variant&nbsp;A's single needle. The column "worth" line for a 1-player side just echoes its tier.</p>
+</div>
+
+<div class="frame">
+  <div class="tick">Trade Calculator · Real values · 1QB PPR</div>
+
+  <div class="banner">
+    <p class="who"><span class="a">Side A</span> wins by <span class="pk">≈ a Mid 2nd</span></p>
+    <p class="sub">Nabers is a tier up — a <span class="m">2 1sts</span> asset for a <span class="m">1st</span>. The exact edge is about a 2nd-round pick.</p>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <div class="colhead"><span class="s">Side A sends</span></div>
+      <div class="pcell">
+        <span class="pos rb">RB</span>
+        <div class="pc-meta">
+          <div class="pc-name">Jahmyr Gibbs</div>
+          <div class="pc-tier t1st">Worth a 1st</div>
+        </div>
+      </div>
+      <div class="coltot">
+        <div class="worth">Package worth</div>
+        <div class="pick t1st">A 1st</div>
+        <div class="raw">7,000</div>
+      </div>
+    </div>
+
+    <div class="col win">
+      <div class="colhead"><span class="s">Side B sends</span><span class="tag">Heavier</span></div>
+      <div class="pcell">
+        <span class="pos wr">WR</span>
+        <div class="pc-meta">
+          <div class="pc-name">Malik Nabers</div>
+          <div class="pc-tier t2f">Worth 2 1sts</div>
+        </div>
+      </div>
+      <div class="coltot">
+        <div class="worth">Package worth</div>
+        <div class="pick t2f">2 1sts</div>
+        <div class="raw">8,500</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gapbar">
+    <div class="cap"><span>Side A out · 7,000</span><span>Side A back · 8,500 · 82%</span></div>
+    <div class="gt">
+      <div class="bfill"></div><div class="afill"></div><div class="div"></div>
+    </div>
+  </div>
+
+  <div class="balance">
+    <strong>To even it out:</strong> Side&nbsp;A adds <span class="pk">≈ a Mid&nbsp;2nd</span> back to the lighter side.
+  </div>
+  <p class="foot">Consensus market value + tier ladder — the same engine the trade finder uses.</p>
+</div>
+
+</body>
+</html>

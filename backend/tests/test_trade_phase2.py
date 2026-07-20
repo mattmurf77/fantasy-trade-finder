@@ -182,6 +182,48 @@ def test_opponent_outlook_label_without_value_blend():
         "outlook label should be stamped even when the value blend is off")
 
 
+# ───────────────────────── #156 Specific Team scope ─────────────────────────
+
+
+def _two_opponent_league():
+    players = {
+        "G": _Player("G", "RB", 25),
+        "R1": _Player("R1", "WR", 25),
+        "R2": _Player("R2", "WR", 25),
+    }
+    opp1 = LeagueMember(user_id="opp1", username="opp1", roster=["R1"],
+                        elo_ratings={"G": 1700, "R1": 1500}, has_rankings=True)
+    opp2 = LeagueMember(user_id="opp2", username="opp2", roster=["R2"],
+                        elo_ratings={"G": 1700, "R2": 1500}, has_rankings=True)
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[opp1, opp2]))
+    return svc
+
+
+def _gen(svc, **extra):
+    return svc.generate_trades(
+        user_id="user",
+        user_elo={"G": 1500, "R1": 1700, "R2": 1700},
+        user_roster=["G"], league_id="L1",
+        seed_elo={"G": 1540, "R1": 1500, "R2": 1500},
+        fairness_threshold=0.05, **extra)
+
+
+def test_opponent_scope_limits_generation_to_one_leaguemate():
+    """#156 Specific Team — opponent_user_id restricts the sweep to that one
+    league-mate; unset keeps the full league-wide sweep."""
+    _set(**{"trade_engine.v2": True})
+    all_cards = _gen(_two_opponent_league())
+    assert {c.target_user_id for c in all_cards} == {"opp1", "opp2"}, (
+        "unscoped generation should reach every eligible opponent")
+
+    scoped = _gen(_two_opponent_league(), opponent_user_id="opp1")
+    assert scoped, "scoped generation should still surface a card"
+    assert {c.target_user_id for c in scoped} == {"opp1"}, (
+        "scoping to opp1 must exclude opp2's cards")
+
+
 def test_lane_stamped_via_orchestrator():
     _set(**{"trade_engine.v2": True, "trade.lanes": True})
     players = {"OLD": _Player("OLD", "RB", 29), "YNG": _Player("YNG", "WR", 22)}

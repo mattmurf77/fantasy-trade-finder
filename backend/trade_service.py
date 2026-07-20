@@ -1560,6 +1560,8 @@ class TradeService:
         pinned_give_players: list[str] | None = None,  # specific players user wants to trade away
         pinned_receive_players: list[str] | None = None,  # specific players user wants to acquire
                                                           # (FB-47; v2-only, legacy ignores it)
+        opponent_user_id: str | None = None,  # #156 Specific Team: scope the
+                                              # sweep to this one league-mate
         scoring_format: str = "1qb_ppr",
         is_dynasty: bool = False,
         on_opponent_done = None,             # callback(idx_done, total, sorted_cards_so_far)
@@ -1611,6 +1613,7 @@ class TradeService:
                 trade_away_positions = trade_away_positions,
                 pinned_give_players  = pinned_give_players,
                 pinned_receive_players = pinned_receive_players,
+                opponent_user_id     = opponent_user_id,
                 scoring_format       = scoring_format,
                 is_dynasty           = is_dynasty,
                 on_opponent_done     = on_opponent_done,
@@ -1633,6 +1636,9 @@ class TradeService:
             m for m in league.members
             if m.user_id != user_id and m.elo_ratings
         ]
+        # #156 Specific Team — scope to a single league-mate when requested.
+        if opponent_user_id:
+            eligible = [m for m in eligible if m.user_id == opponent_user_id]
         total = len(eligible)
 
         # Once we've collected enough cards across all opponents, further
@@ -1755,6 +1761,7 @@ class TradeService:
         trade_away_positions: list[str] | None,
         pinned_give_players: list[str] | None,
         pinned_receive_players: list[str] | None = None,
+        opponent_user_id: str | None = None,
         scoring_format: str = "1qb_ppr",
         is_dynasty: bool = False,
         on_opponent_done = None,
@@ -1829,6 +1836,10 @@ class TradeService:
         # real rankings are NOT compared in divergence space (their
         # elo_ratings are fabricated noise) — they get consensus cards.
         eligible = [m for m in league.members if m.user_id != user_id and m.roster]
+        # #156 Specific Team — scope the sweep to a single league-mate. Applied
+        # before fit-sort/global-target so the whole budget goes to this pair.
+        if opponent_user_id:
+            eligible = [m for m in eligible if m.user_id == opponent_user_id]
         # FB-47 — counterparty fit per opponent (None ⇒ targeting inactive
         # or no targets expressed). Profiles are recomputed inside the loop
         # for match_ctx; this pre-pass is cheap (rosters are small) and lets

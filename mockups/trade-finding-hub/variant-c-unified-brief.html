@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trade-Finding Hub — Variant C · Unified Brief</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+.note{max-width:760px;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)} .note .reuse{color:var(--pos)} .note .newx{color:var(--flare)}
+.note ul{margin:4px 0 0 18px} .note li{margin:2px 0}
+
+.phone{width:390px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55);position:relative}
+.status{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.appbar{display:flex;align-items:center;justify-content:space-between;padding:8px 16px 6px}
+.appbar .ttl{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:26px}
+.leaguepill{display:flex;align-items:center;gap:6px;background:var(--ink2);border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:12px;color:var(--dim)}
+.leaguepill .dot{width:7px;height:7px;border-radius:999px;background:var(--ice)}
+
+/* lens selector */
+.lens{display:flex;gap:6px;padding:6px 16px 12px}
+.lb{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 4px;border-radius:8px;border:1px solid var(--line);background:var(--ink1);cursor:pointer}
+.lb.on{border-color:var(--ice);background:var(--ink2)}
+.lb svg{width:20px;height:20px;stroke:var(--dim);stroke-width:1.75;fill:none;stroke-linecap:square}
+.lb.on svg{stroke:var(--ice)}
+.lb span{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;color:var(--dim);text-align:center;line-height:1.15}
+.lb.on span{color:var(--chalk)}
+
+.canvas{padding:0 16px 90px;max-height:560px;overflow-y:auto}
+.lenscap{font-size:12.5px;color:var(--dim);line-height:1.5;background:var(--ink1);border:1px solid var(--line);border-left:2px solid var(--ice);border-radius:6px;padding:10px 12px;margin-bottom:14px}
+.lenscap b{color:var(--chalk)}
+
+/* section block; dim when not emphasized by lens */
+.block{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:13px 14px;margin-bottom:12px;transition:.2s}
+.block.mute{opacity:.5}
+.block.hot{border-color:var(--lineStrong)}
+.bh{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.bh .l{display:flex;align-items:center;gap:7px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.bh .l::before{content:"";width:3px;height:12px;background:var(--ice);border-radius:2px}
+.block.mute .bh .l::before{background:var(--faint)}
+.bh .tag{font-size:9px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;color:var(--ice);border:1px solid var(--ice);border-radius:999px;padding:2px 7px}
+
+/* for/away board */
+.board{display:flex;gap:8px}
+.col{flex:1;background:var(--ink2);border:1px solid var(--line);border-radius:6px;padding:9px;min-height:120px}
+.col.for{border-top:2px solid var(--pos)} .col.away{border-top:2px solid var(--flare)}
+.colh{font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:7px}
+.col.for .colh{color:var(--pos)} .col.away .colh{color:var(--flare)}
+.mini{display:flex;align-items:center;gap:6px;padding:6px 7px;border-radius:5px;background:var(--ink1);margin-bottom:6px;font-size:12px}
+.mini .x{margin-left:auto;color:var(--faint)} .mini .pdot{width:6px;height:6px}
+.addbtn{width:100%;border:1px dashed var(--lineStrong);background:transparent;color:var(--dim);border-radius:5px;padding:7px;font-size:11.5px;cursor:pointer;font-family:var(--f-ui)}
+
+.pdot{width:8px;height:8px;border-radius:2px;flex:0 0 auto;display:inline-block}
+.pos-qb{background:var(--qb)} .pos-rb{background:var(--rb)} .pos-wr{background:var(--wr)} .pos-te{background:var(--te)}
+.chiprow{display:flex;flex-wrap:wrap;gap:7px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border-radius:999px;border:1px solid var(--line);background:var(--ink2);font-size:12.5px;cursor:pointer;min-height:34px}
+.chip.sel{border-color:var(--ice);background:var(--ink3)}
+.chip.rec{border-style:dashed;border-color:var(--lineStrong)}
+.chip.rec .tag{font-size:9px;color:var(--flare);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.chip .x{color:var(--faint);font-size:14px}
+.subhint{font-size:11.5px;color:var(--dim);margin:8px 0 8px}
+
+.teamsel{display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--ink2);margin-bottom:7px;cursor:pointer}
+.teamsel.sel{border-color:var(--ice)}
+.teamsel .n{font-size:13px;font-weight:600}
+.teamsel .m{font-size:10.5px;color:var(--dim);font-family:var(--f-mono)}
+.teamsel .v{margin-left:auto;font-size:10px;color:var(--ice);font-family:var(--f-mono)}
+
+/* calc swap block (only in calc lens) */
+.verdict{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--pos);border-radius:6px;background:var(--ink2);margin-top:10px}
+.verdict .g{font-size:14px;font-weight:600;color:var(--pos)}
+.verdict .s{font-size:10.5px;color:var(--dim)}
+.verdict .pct{margin-left:auto;font-family:var(--f-mono);font-size:18px;color:var(--pos)}
+
+/* sticky action */
+.dock{position:absolute;left:0;right:0;bottom:56px;padding:10px 16px 12px;background:linear-gradient(to top,var(--ink0) 70%,transparent)}
+.cta{width:100%;height:48px;border:none;border-radius:4px;background:var(--ice);color:var(--onIce);font-family:var(--f-ui);font-weight:700;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+.dockmeta{text-align:center;font-size:11px;color:var(--dim);margin-bottom:8px;font-family:var(--f-mono)}
+
+.tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink1)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 12px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:22px;height:22px;stroke:var(--faint);stroke-width:1.75;fill:none}
+.tab.on{color:var(--ice)} .tab.on svg{stroke:var(--ice)}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="note">
+  <h1>Variant C — Unified Brief (mode = a lens)</h1>
+  <p><b>Structure:</b> One continuous canvas holds the whole "trade brief" — direction board, target team, positions, untouchables — always present. The 4-mode selector is a <b>lens</b>: it re-emphasizes the relevant blocks (brightens + auto-scrolls) and dims the rest, rather than swapping screens. Guided pre-fills the brief from roster analysis; Calculator swaps the sticky action into a live fairness verdict. A sticky bottom CTA reflects the active lens.</p>
+  <h2>What's shown</h2>
+  <ul>
+    <li>Tap a lens (Guided · Team · Player · Calc) — blocks brighten/dim in place; nothing is hidden, so prefs never "disappear."</li>
+    <li>The NBA2K FOR / AWAY board and the position rec-chips live in the same scroll, so cross-referencing is one gesture.</li>
+    <li>Sticky CTA morphs: "Show me trades" (Guided/Team/Player) vs. the live verdict (Calc).</li>
+  </ul>
+  <h2>Tradeoffs</h2>
+  <ul>
+    <li><b>+</b> Most <b>seamless</b> jumping — mode change is a re-emphasis, zero navigation, all state co-visible.</li>
+    <li><b>+</b> Doubles as the single prefs home by construction; nothing lives in a separate drawer or screen.</li>
+    <li><b>−</b> Densest option; the dim-not-hide model can read as busy for a first-timer.</li>
+    <li><b>−</b> Calculator (a manual builder) is a slightly awkward fit inside a "brief" metaphor — handled by swapping the dock.</li>
+  </ul>
+  <h2>Reuse vs. new</h2>
+  <ul>
+    <li><span class="reuse">Reuse:</span> board = <b>FB-47 targeting</b>; positions = <b>OutlookSheet</b> acquire/away; untouchables = <b>asset_prefs #95</b>; verdict = <b>evaluate Mode B</b> (InLeagueCalculator). Lens emphasis is pure client state.</li>
+    <li><span class="newx">New:</span> the unified-canvas shell + lens emphasis engine; "Specific Team" scoping. Recommendation chips: <span class="reuse">roster needs/surplus already computed</span> server-side (analyze_roster_strengths) but <span class="newx">need a client endpoint</span> — only inferred_outlook is exposed today.</li>
+  </ul>
+</div>
+
+<div class="phone">
+  <div class="status"><span>9:41</span><span>Trade Finder</span><span>▮▮▮</span></div>
+  <div class="appbar">
+    <div class="ttl">Find a Trade</div>
+    <div class="leaguepill"><span class="dot"></span>Dynasty Warlords</div>
+  </div>
+
+  <div class="lens">
+    <div class="lb on" data-l="guided" onclick="lens('guided')">
+      <svg viewBox="0 0 24 24"><path d="M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 21l-4.9-2.6.9-5.5-4-3.9 5.5-.8z"/></svg><span>Guided</span></div>
+    <div class="lb" data-l="team" onclick="lens('team')">
+      <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M4 20c0-3 2.5-5 5-5s5 2 5 5"/><circle cx="17" cy="9" r="2.2"/></svg><span>Team</span></div>
+    <div class="lb" data-l="player" onclick="lens('player')">
+      <svg viewBox="0 0 24 24"><path d="M7 8h10M7 8l3-3M7 8l3 3M17 16H7M17 16l-3-3M17 16l-3 3"/></svg><span>Player</span></div>
+    <div class="lb" data-l="calc" onclick="lens('calc')">
+      <svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h3M13 11h3M8 15h3"/></svg><span>Calc</span></div>
+  </div>
+
+  <div class="canvas" id="canvas">
+    <div class="lenscap" id="cap"><b>Fully Guided.</b> We pre-filled this brief from your roster &amp; league. Tweak anything, or just tap Show me trades.</div>
+
+    <!-- GUIDED signals (only in guided lens) -->
+    <div class="block" data-b="guided">
+      <div class="bh"><span class="l">From your roster</span><span class="tag">auto</span></div>
+      <div class="chiprow">
+        <span class="chip"><span class="pdot" style="background:var(--warn)"></span>Outlook: Contender</span>
+        <span class="chip rec sel"><span class="pdot pos-wr"></span>Thin at WR <span class="tag">need</span></span>
+        <span class="chip rec sel"><span class="pdot pos-rb"></span>Deep at RB <span class="tag">shed</span></span>
+      </div>
+    </div>
+
+    <!-- TEAM scope -->
+    <div class="block" data-b="team">
+      <div class="bh"><span class="l">Target team</span></div>
+      <div class="subhint">Optional — leave blank to search the whole league.</div>
+      <div class="teamsel sel"><div><div class="n">@couchGM_kayla</div><div class="m">2–4 · needs RB · loaded WR</div></div><span class="v">GOOD FIT</span></div>
+      <div class="teamsel"><div><div class="n">@ppr_pete</div><div class="m">5–1 · needs QB · loaded TE</div></div></div>
+      <div class="teamsel"><div><div class="n">@waiverWytch</div><div class="m">3–3 · needs WR · loaded RB</div></div></div>
+    </div>
+
+    <!-- PLAYER board (nba2k) -->
+    <div class="block" data-b="player">
+      <div class="bh"><span class="l">Named players</span></div>
+      <div class="board">
+        <div class="col for"><div class="colh">Trade FOR</div>
+          <div class="mini"><span class="pdot pos-wr"></span>M. Nabers<span class="x">×</span></div>
+          <div class="mini"><span class="pdot pos-te"></span>B. Bowers<span class="x">×</span></div>
+          <button class="addbtn">+ target</button></div>
+        <div class="col away"><div class="colh">Trade AWAY</div>
+          <div class="mini"><span class="pdot pos-rb"></span>N. Harris<span class="x">×</span></div>
+          <button class="addbtn">+ asset</button></div>
+      </div>
+    </div>
+
+    <!-- POSITIONS -->
+    <div class="block" data-b="pos">
+      <div class="bh"><span class="l">Positions</span></div>
+      <div class="subhint">Acquire — <span style="color:var(--flare)">rec</span> chips from roster analysis.</div>
+      <div class="chiprow" style="margin-bottom:10px">
+        <span class="chip rec sel"><span class="pdot pos-wr"></span>WR <span class="tag">rec</span></span>
+        <span class="chip"><span class="pdot pos-qb"></span>QB</span>
+        <span class="chip"><span class="pdot pos-te"></span>TE</span>
+      </div>
+      <div class="subhint">Trade away</div>
+      <div class="chiprow">
+        <span class="chip rec sel"><span class="pdot pos-rb"></span>RB <span class="tag">rec</span></span>
+        <span class="chip"><span class="pdot pos-qb"></span>QB</span>
+      </div>
+    </div>
+
+    <!-- UNTOUCHABLES -->
+    <div class="block" data-b="unt">
+      <div class="bh"><span class="l">Untouchables</span></div>
+      <div class="subhint">Never offered from your roster in generated deals.</div>
+      <div class="chiprow">
+        <span class="chip sel"><span class="pdot pos-wr"></span>Ja'Marr Chase <span class="x">×</span></span>
+        <span class="chip sel"><span class="pdot pos-rb"></span>Jahmyr Gibbs <span class="x">×</span></span>
+        <span class="chip" style="border-style:dashed;color:var(--dim)">+ Add</span>
+      </div>
+    </div>
+
+    <!-- CALC block (only shown in calc lens) -->
+    <div class="block hidden" data-b="calc">
+      <div class="bh"><span class="l">Manual trade</span><span class="tag">live verdict</span></div>
+      <div class="board">
+        <div class="col"><div class="colh" style="color:var(--chalk)">You send</div>
+          <div class="mini"><span class="pdot pos-rb"></span>Breece Hall<span class="x">×</span></div>
+          <button class="addbtn">+ add</button></div>
+        <div class="col"><div class="colh" style="color:var(--chalk)">You get</div>
+          <div class="mini"><span class="pdot pos-wr"></span>Puka Nacua<span class="x">×</span></div>
+          <button class="addbtn">+ add</button></div>
+      </div>
+      <div class="verdict"><div><div class="g">Fair — you gain +4%</div><div class="s">both boards agree</div></div><span class="pct">96%</span></div>
+    </div>
+  </div>
+
+  <div class="dock">
+    <div class="dockmeta" id="dockmeta">11 opponents · consensus + your board</div>
+    <button class="cta" id="cta">Show me trades →</button>
+  </div>
+
+  <div class="tabbar">
+    <div class="tab"><svg viewBox="0 0 24 24"><path d="M5 20V9M12 20V4M19 20v-7"/></svg>Rank</div>
+    <div class="tab on"><svg viewBox="0 0 24 24"><path d="M7 8h10l-3-3M17 16H7l3 3"/></svg>Trades</div>
+    <div class="tab"><svg viewBox="0 0 24 24"><path d="M8 9a3 3 0 100-6 3 3 0 000 6zM16 21a3 3 0 100-6 3 3 0 000 6zM8 9c4 0 8 2 8 6"/></svg>Matches</div>
+    <div class="tab"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16"/></svg>League</div>
+  </div>
+</div>
+
+<script>
+// which blocks each lens emphasizes; others go muted. calc lens reveals the calc block + hides the rest.
+const EMPH={
+  guided:['guided','pos','unt'],
+  team:['team','pos','unt'],
+  player:['player','pos','unt'],
+  calc:['calc']
+};
+const CAP={
+  guided:'<b>Fully Guided.</b> We pre-filled this brief from your roster &amp; league. Tweak anything, or just tap Show me trades.',
+  team:'<b>Specific Team.</b> Scoped to one manager — only mutual-gain deals with their roster. Your positions &amp; untouchables still apply.',
+  player:'<b>Specific Player.</b> Name who you want and who you\'ll move (NBA2K-style). The engine builds fair packages around them.',
+  calc:'<b>Manual Calculator.</b> Hand-build any trade; the dual-board fairness verdict updates live. Prefs are advisory here.'
+};
+const CTA={guided:'Show me trades →',team:'Find deals with @couchGM →',player:'Build packages →',calc:'Save to Matches'};
+const META={guided:'11 opponents · consensus + your board',team:'1 team · mutual-gain only',player:'3 named players pinned',calc:'consensus + both boards'};
+function lens(l){
+  document.querySelectorAll('.lb').forEach(e=>e.classList.toggle('on',e.dataset.l===l));
+  const emph=EMPH[l];
+  document.querySelectorAll('.block').forEach(b=>{
+    const key=b.dataset.b;
+    if(l==='calc'){ b.classList.toggle('hidden',key!=='calc'); }
+    else { b.classList.toggle('hidden',key==='calc');
+           b.classList.toggle('mute',!emph.includes(key));
+           b.classList.toggle('hot',emph[0]===key); }
+  });
+  document.getElementById('cap').innerHTML=CAP[l];
+  document.getElementById('cta').textContent=CTA[l];
+  document.getElementById('dockmeta').textContent=META[l];
+  document.getElementById('canvas').scrollTop=0;
+}
+lens('guided');
+</script>
+</body>
+</html>

@@ -1,19 +1,18 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Card, Meter } from './chalkline';
+import TradeValueBar from './TradeValueBar';
 import type { CalcEvaluation } from '../api/calc';
-import { chalk, ice, semantic, space, type } from '../theme/chalkline';
+import { semantic, space, type } from '../theme/chalkline';
 
 // Server-authoritative verdict for the Trade Calculator's live mode: one
 // consensus value per side (no per-owner boards), fairness gate + verdict
 // straight from POST /api/trade/evaluate. Companion to VerdictPanel, which
 // renders the demo mode's dual-board evaluation.
-
-const VERDICT_COPY: Record<string, { label: string; color: string }> = {
-  even:   { label: 'Dead even',  color: ice.base },
-  fair:   { label: 'Fair trade', color: semantic.pos },
-  unfair: { label: 'Uneven',     color: semantic.neg },
-};
+//
+// The verdict is presented as a pick-denominated diverging value bar
+// (TradeValueBar, feedback #157 + #169) — who wins and by how many picks. The
+// raw give/get totals stay below as secondary reference.
 
 export default function ConsensusVerdictCard({
   evaluation,
@@ -23,27 +22,23 @@ export default function ConsensusVerdictCard({
   stale?: boolean;
 }) {
   const both = evaluation.verdict !== null;
-  const v = evaluation.verdict ? VERDICT_COPY[evaluation.verdict] : null;
   const maxSide = Math.max(evaluation.give_value, evaluation.receive_value, 1);
-  const favorsNote =
-    evaluation.verdict === 'unfair'
-      ? evaluation.favors === 'give'
-        ? ' — you send more than you get back'
-        : ' — you get more than you send'
-      : '';
 
   return (
     <Card>
       <View style={[styles.inner, stale && styles.stale]}>
-        {v ? (
-          <Text style={[type.title, styles.verdict, { color: v.color }]}>
-            {v.label}
-            {favorsNote}
-          </Text>
+        {both && evaluation.gap ? (
+          <TradeValueBar
+            giveValue={evaluation.give_value}
+            receiveValue={evaluation.receive_value}
+            favors={evaluation.favors}
+            gap={evaluation.gap}
+          />
         ) : (
           <Text style={[type.title, styles.verdict]}>Package value</Text>
         )}
 
+        {/* Raw side totals — secondary reference beneath the value bar. */}
         <View style={styles.row}>
           <Text style={[type.label, styles.rowLabel]}>You send</Text>
           <View style={styles.meter}>
@@ -63,25 +58,6 @@ export default function ConsensusVerdictCard({
           </Text>
         </View>
 
-        {both && evaluation.point_ratio !== null ? (
-          <Text style={styles.ratio}>
-            Value ratio {Math.round(evaluation.point_ratio * 100)}%
-          </Text>
-        ) : null}
-
-        {/* Pick-denominated gap: turn the delta into an actionable
-            counteroffer ("ask for ≈ a Mid 2nd back"). Hidden on dead-even
-            verdicts — naming a 4th under "Dead even" is noise. */}
-        {evaluation.verdict && evaluation.verdict !== 'even' &&
-         evaluation.gap && evaluation.gap.add_to ? (
-          <Text style={styles.gapNote}>
-            {evaluation.gap.pick_equivalent
-              ? evaluation.gap.add_to === 'give'
-                ? `You get more — evens out if you add ≈ a ${evaluation.gap.pick_equivalent.label}.`
-                : `You send more — ask for ≈ a ${evaluation.gap.pick_equivalent.label} back.`
-              : `Gap ≈ ${evaluation.gap.firsts.toFixed(1)} mid 1sts — more than any single pick closes.`}
-          </Text>
-        ) : null}
         {evaluation.dropped_player_ids.length > 0 ? (
           <Text style={styles.note}>
             {evaluation.dropped_player_ids.length} asset(s) had no consensus value and were
@@ -104,7 +80,5 @@ const styles = StyleSheet.create({
   rowLabel: { width: 64 },
   meter: { flex: 1 },
   rowValue: { minWidth: 56, textAlign: 'right' },
-  ratio: { ...type.data, textAlign: 'center', color: chalk.dim },
-  gapNote: { ...type.data, textAlign: 'center', color: chalk.base },
   note: { ...type.bodySm },
 });

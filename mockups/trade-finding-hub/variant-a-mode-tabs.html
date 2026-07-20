@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trade-Finding Hub — Variant A · Mode Tabs</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+.note{max-width:760px;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note .reuse{color:var(--pos)} .note .newx{color:var(--flare)}
+.note ul{margin:4px 0 0 18px} .note li{margin:2px 0}
+
+/* phone */
+.phone{width:390px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+.status{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.appbar{display:flex;align-items:center;justify-content:space-between;padding:8px 16px 10px}
+.appbar .ttl{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:26px}
+.leaguepill{display:flex;align-items:center;gap:6px;background:var(--ink2);border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:12px;color:var(--dim)}
+.leaguepill .dot{width:7px;height:7px;border-radius:999px;background:var(--ice)}
+
+/* mode tab bar */
+.modes{display:flex;gap:6px;padding:4px 12px 12px;overflow-x:auto}
+.mode{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:5px;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--ink1);cursor:pointer;min-width:78px}
+.mode.active{border-color:var(--ice);background:var(--ink2)}
+.mode svg{width:22px;height:22px;stroke:var(--dim);stroke-width:1.75;fill:none;stroke-linecap:square}
+.mode.active svg{stroke:var(--ice)}
+.mode .ml{font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;color:var(--dim);text-align:center;line-height:1.2}
+.mode.active .ml{color:var(--chalk)}
+
+.body{padding:0 16px 16px;min-height:360px}
+.seclabel{display:flex;align-items:center;gap:7px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim);margin:16px 0 8px}
+.seclabel::before{content:"";width:3px;height:12px;background:var(--ice);border-radius:2px}
+.hint{font-size:12.5px;color:var(--dim);line-height:1.5;margin-bottom:6px}
+
+/* generic controls */
+.chiprow{display:flex;flex-wrap:wrap;gap:7px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--ink1);font-size:13px;color:var(--chalk);cursor:pointer;min-height:36px}
+.chip.sel{border-color:var(--ice);background:var(--ink2)}
+.chip .x{color:var(--faint);font-size:15px;line-height:1}
+.chip.rec{border-style:dashed;border-color:var(--lineStrong)}
+.chip.rec .tag{font-size:9px;color:var(--flare);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.poschip{border-radius:4px;padding:9px 0;flex:1;justify-content:center;font-weight:600;font-size:13px}
+
+.cta{width:100%;height:48px;border:none;border-radius:4px;background:var(--ice);color:var(--onIce);font-family:var(--f-ui);font-weight:700;font-size:15px;cursor:pointer;margin-top:16px;display:flex;align-items:center;justify-content:center;gap:8px}
+.cta.ghost{background:transparent;border:1px solid var(--lineStrong);color:var(--chalk)}
+
+/* player rows */
+.prow{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--ink1);margin-bottom:7px}
+.pdot{width:8px;height:8px;border-radius:2px;flex:0 0 auto}
+.pname{font-size:14px;font-weight:600}
+.pmeta{font-size:11px;color:var(--dim);font-family:var(--f-mono)}
+.pval{margin-left:auto;font-family:var(--f-mono);font-size:13px;color:var(--dim)}
+.pos-qb{background:var(--qb)} .pos-rb{background:var(--rb)} .pos-wr{background:var(--wr)} .pos-te{background:var(--te)}
+
+/* for/away board (NBA2K) */
+.board{display:flex;gap:8px}
+.col{flex:1;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:10px;min-height:150px}
+.col.for{border-top:2px solid var(--pos)}
+.col.away{border-top:2px solid var(--flare)}
+.colh{font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:8px;color:var(--dim)}
+.col.for .colh{color:var(--pos)} .col.away .colh{color:var(--flare)}
+.mini{display:flex;align-items:center;gap:6px;padding:6px 7px;border-radius:6px;background:var(--ink2);margin-bottom:6px;font-size:12px}
+.mini .pdot{width:6px;height:6px}
+.addbtn{width:100%;border:1px dashed var(--lineStrong);background:transparent;color:var(--dim);border-radius:6px;padding:8px;font-size:12px;cursor:pointer;font-family:var(--f-ui)}
+.dirtoggle{display:flex;background:var(--ink2);border-radius:999px;padding:3px;margin-bottom:10px}
+.dirtoggle button{flex:1;border:none;background:transparent;color:var(--dim);padding:7px;border-radius:999px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--f-ui)}
+.dirtoggle button.on{background:var(--ink0);color:var(--chalk)}
+
+/* prefs drawer */
+.drawer{margin:14px 16px 0;border:1px solid var(--line);border-radius:8px;background:var(--ink1);overflow:hidden}
+.drawerhd{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;cursor:pointer}
+.drawerhd .lft{display:flex;align-items:center;gap:8px;font-family:var(--f-display);text-transform:uppercase;letter-spacing:.03em;font-weight:600;font-size:15px}
+.badge{background:var(--ink3);border-radius:999px;font-size:10px;font-family:var(--f-mono);color:var(--dim);padding:2px 7px}
+.drawerbody{padding:0 14px 14px;border-top:1px solid var(--line)}
+.chev{stroke:var(--dim);stroke-width:1.75;fill:none;width:18px;height:18px;transition:transform .2s}
+.open .chev{transform:rotate(180deg)}
+
+/* tab bar */
+.tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink1)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 12px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:22px;height:22px;stroke:var(--faint);stroke-width:1.75;fill:none}
+.tab.on{color:var(--ice)} .tab.on svg{stroke:var(--ice)}
+.hidden{display:none}
+.summ{font-size:12px;color:var(--dim);line-height:1.5;margin-top:2px}
+.summ b{color:var(--chalk)}
+</style>
+</head>
+<body>
+<div class="note">
+  <h1>Variant A — Mode Tabs + Shared Prefs Drawer</h1>
+  <p><b>Structure:</b> A sticky 4-segment mode selector lives directly under the Trades header. The mode body swaps in place; a single <b>Trade Preferences</b> drawer sits below and is <b>shared by every mode</b> — untouchables, positions-needed (with roster-rec chips), positions-to-shed (rec chips), players-for, players-away. Selections persist as you switch modes because they live in one place, not per-mode.</p>
+  <h2>What's shown</h2>
+  <ul>
+    <li>Tap the mode segments to jump between <b>Fully Guided · Specific Team · Specific Player · Calculator</b> (all clickable).</li>
+    <li>Specific Player uses the NBA2K <b>for / away / both</b> direction toggle feeding a two-column board.</li>
+    <li>The prefs drawer is collapsed by default with a state summary; open it to edit shared prefs.</li>
+  </ul>
+  <h2>Tradeoffs</h2>
+  <ul>
+    <li><b>+</b> Lowest mental overhead — modes are always visible, one tap to switch, prefs never lost.</li>
+    <li><b>+</b> Prefs are decoupled from mode, so they're obviously global.</li>
+    <li><b>−</b> Prefs sit below the fold; a new user may not notice the recommendation chips until they scroll.</li>
+    <li><b>−</b> Vertical stack gets long in Calculator mode (mode body + drawer + builder).</li>
+  </ul>
+  <h2>Reuse vs. new</h2>
+  <ul>
+    <li><span class="reuse">Reuse:</span> mode segments = today's <b>trades.subnav</b> (Trades/Portfolio/Calculator) widened. Specific Player = existing <b>FB-47 finder targeting</b> (pinned_give/receive + PlayerPickerModal). Untouchables = <b>asset_prefs</b> (#95). Positions = <b>OutlookSheet</b> acquire/trade-away chips. Calculator = <b>TradeCalculatorScreen / InLeagueCalculator</b>.</li>
+    <li><span class="newx">New:</span> "Specific Team" mode (pick one league-mate → generate only vs. them). The <b>recommendation chips</b> need a thin endpoint: roster needs/surplus are already computed by <b>analyze_roster_strengths</b> but only <b>inferred_outlook</b> is exposed today — positions rec = <span class="reuse">data exists</span>, <span class="newx">wiring new</span>.</li>
+  </ul>
+</div>
+
+<div class="phone">
+  <div class="status"><span>9:41</span><span>Trade Finder</span><span>▮▮▮</span></div>
+  <div class="appbar">
+    <div class="ttl">Find a Trade</div>
+    <div class="leaguepill"><span class="dot"></span>Dynasty Warlords</div>
+  </div>
+
+  <div class="modes">
+    <div class="mode active" data-m="guided" onclick="setMode('guided')">
+      <svg viewBox="0 0 24 24"><path d="M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 21l-4.9-2.6.9-5.5-4-3.9 5.5-.8z"/></svg>
+      <span class="ml">Fully<br>Guided</span></div>
+    <div class="mode" data-m="team" onclick="setMode('team')">
+      <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M4 20c0-3 2.5-5 5-5s5 2 5 5"/><circle cx="17" cy="9" r="2.2"/><path d="M15 20c0-2.5 1.5-4 3.5-4"/></svg>
+      <span class="ml">Specific<br>Team</span></div>
+    <div class="mode" data-m="player" onclick="setMode('player')">
+      <svg viewBox="0 0 24 24"><path d="M7 8h10M7 8l3-3M7 8l3 3M17 16H7M17 16l-3-3M17 16l-3 3"/></svg>
+      <span class="ml">Specific<br>Player</span></div>
+    <div class="mode" data-m="calc" onclick="setMode('calc')">
+      <svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h3M13 11h3M8 15h3M13 15h3"/></svg>
+      <span class="ml">Manual<br>Calc</span></div>
+  </div>
+
+  <!-- GUIDED -->
+  <div class="body" id="m-guided">
+    <div class="hint">We read your roster and league, then walk you to the best deals. No setup needed — refine anytime below.</div>
+    <div class="prow" style="border-color:var(--lineStrong)">
+      <span class="pdot" style="background:var(--warn)"></span>
+      <div><div class="pname">Your outlook: Contender</div><div class="pmeta">inferred from roster — tap to change</div></div>
+    </div>
+    <div class="seclabel">We spotted on your roster</div>
+    <div class="chiprow">
+      <span class="chip rec"><span class="pdot pos-wr"></span>Thin at WR <span class="tag">need</span></span>
+      <span class="chip rec"><span class="pdot pos-rb"></span>Deep at RB <span class="tag">shed</span></span>
+    </div>
+    <button class="cta" onclick="pulse(this)">Show me trades →</button>
+    <div class="summ" style="text-align:center;margin-top:10px">Uses everything in Trade Preferences below.</div>
+  </div>
+
+  <!-- TEAM -->
+  <div class="body hidden" id="m-team">
+    <div class="hint">Pick a league-mate — we'll only surface mutual-gain deals with their roster.</div>
+    <div class="seclabel">Choose a manager</div>
+    <div class="prow" style="border-color:var(--ice)"><span class="pdot" style="background:var(--ice)"></span><div><div class="pname">@couchGM_kayla</div><div class="pmeta">2–4 · needs RB · loaded at WR</div></div><span class="pval">SELECTED</span></div>
+    <div class="prow"><span class="pdot" style="background:var(--dim)"></span><div><div class="pname">@ppr_pete</div><div class="pmeta">5–1 · needs QB · loaded at TE</div></div></div>
+    <div class="prow"><span class="pdot" style="background:var(--dim)"></span><div><div class="pname">@waiverWytch</div><div class="pmeta">3–3 · needs WR · loaded at RB</div></div></div>
+    <button class="cta" onclick="pulse(this)">Find deals with @couchGM_kayla →</button>
+  </div>
+
+  <!-- PLAYER -->
+  <div class="body hidden" id="m-player">
+    <div class="hint">Name the players. NBA2K-style: trade <b>for</b> someone, <b>away</b> someone, or both — the engine builds packages around them.</div>
+    <div class="dirtoggle">
+      <button class="on" onclick="dir(this,0)">Trade FOR</button>
+      <button onclick="dir(this,1)">Trade AWAY</button>
+      <button onclick="dir(this,2)">Both</button>
+    </div>
+    <div class="board">
+      <div class="col for"><div class="colh">Get these</div>
+        <div class="mini"><span class="pdot pos-wr"></span>M. Nabers</div>
+        <button class="addbtn">+ Add target</button></div>
+      <div class="col away"><div class="colh">Give these</div>
+        <div class="mini"><span class="pdot pos-rb"></span>Najee Harris</div>
+        <div class="mini"><span class="pdot pos-rb"></span>2026 1st</div>
+        <button class="addbtn">+ Add asset</button></div>
+    </div>
+    <button class="cta" onclick="pulse(this)">Build packages →</button>
+  </div>
+
+  <!-- CALC -->
+  <div class="body hidden" id="m-calc">
+    <div class="hint">Hand-build any trade and see the dual-board fairness verdict. Untouchables here are advisory only.</div>
+    <div class="board">
+      <div class="col"><div class="colh" style="color:var(--chalk)">You send</div>
+        <div class="mini"><span class="pdot pos-rb"></span>Breece Hall</div>
+        <button class="addbtn">+ Add</button></div>
+      <div class="col"><div class="colh" style="color:var(--chalk)">You get</div>
+        <div class="mini"><span class="pdot pos-wr"></span>Puka Nacua</div>
+        <button class="addbtn">+ Add</button></div>
+    </div>
+    <div class="prow" style="margin-top:12px;border-color:var(--pos)"><div><div class="pname" style="color:var(--pos)">Fair — you gain +4%</div><div class="pmeta">consensus &amp; both boards agree</div></div><span class="pval" style="color:var(--pos)">96%</span></div>
+  </div>
+
+  <!-- SHARED PREFS DRAWER -->
+  <div class="drawer open" id="drawer">
+    <div class="drawerhd" onclick="toggleDrawer()">
+      <span class="lft">Trade Preferences <span class="badge">shared</span></span>
+      <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="drawerbody">
+      <div class="seclabel">Positions to acquire</div>
+      <div class="hint">Chips marked <span style="color:var(--flare)">rec</span> come from your roster analysis.</div>
+      <div class="chiprow">
+        <span class="chip rec sel"><span class="pdot pos-wr"></span>WR <span class="tag">rec</span></span>
+        <span class="chip"><span class="pdot pos-qb"></span>QB</span>
+        <span class="chip"><span class="pdot pos-te"></span>TE</span>
+        <span class="chip"><span class="pdot pos-rb"></span>RB</span>
+      </div>
+      <div class="seclabel">Positions to trade away</div>
+      <div class="chiprow">
+        <span class="chip rec sel"><span class="pdot pos-rb"></span>RB <span class="tag">rec</span></span>
+        <span class="chip"><span class="pdot pos-qb"></span>QB</span>
+        <span class="chip"><span class="pdot pos-wr"></span>WR</span>
+        <span class="chip"><span class="pdot pos-te"></span>TE</span>
+      </div>
+      <div class="seclabel">Untouchables — never offered from your roster</div>
+      <div class="chiprow">
+        <span class="chip sel"><span class="pdot pos-wr"></span>Ja'Marr Chase <span class="x">×</span></span>
+        <span class="chip sel"><span class="pdot pos-rb"></span>Jahmyr Gibbs <span class="x">×</span></span>
+        <span class="chip" style="border-style:dashed;color:var(--dim)">+ Add player</span>
+      </div>
+      <div class="seclabel">Players to target / shop</div>
+      <div class="chiprow">
+        <span class="chip sel" style="border-color:var(--pos)"><span class="pdot pos-wr"></span>Malik Nabers <span style="font-size:9px;color:var(--pos)">FOR</span> <span class="x">×</span></span>
+        <span class="chip sel" style="border-color:var(--flare)"><span class="pdot pos-rb"></span>Najee Harris <span style="font-size:9px;color:var(--flare)">AWAY</span> <span class="x">×</span></span>
+        <span class="chip" style="border-style:dashed;color:var(--dim)">+ Add player</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabbar" style="margin-top:14px">
+    <div class="tab"><svg viewBox="0 0 24 24"><path d="M5 20V9M12 20V4M19 20v-7"/></svg>Rank</div>
+    <div class="tab on"><svg viewBox="0 0 24 24"><path d="M7 8h10l-3-3M17 16H7l3 3"/></svg>Trades</div>
+    <div class="tab"><svg viewBox="0 0 24 24"><path d="M8 9a3 3 0 100-6 3 3 0 000 6zM16 21a3 3 0 100-6 3 3 0 000 6zM8 9c4 0 8 2 8 6"/></svg>Matches</div>
+    <div class="tab"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16"/></svg>League</div>
+  </div>
+</div>
+
+<script>
+function setMode(m){
+  document.querySelectorAll('.mode').forEach(e=>e.classList.toggle('active',e.dataset.m===m));
+  ['guided','team','player','calc'].forEach(k=>document.getElementById('m-'+k).classList.toggle('hidden',k!==m));
+}
+function toggleDrawer(){document.getElementById('drawer').classList.toggle('open');
+  document.querySelector('.drawerbody').style.display=document.getElementById('drawer').classList.contains('open')?'block':'none';}
+function dir(btn,i){document.querySelectorAll('.dirtoggle button').forEach((b,j)=>b.classList.toggle('on',j===i));}
+function pulse(b){b.style.background='var(--icePress)';setTimeout(()=>b.style.background='var(--ice)',150);}
+</script>
+</body>
+</html>

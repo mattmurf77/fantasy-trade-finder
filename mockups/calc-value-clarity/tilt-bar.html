@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB #157 — Variant A · Pick-denominated tilt bar</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC;   --ice-press:#3FC2D6; --on-ice:#071013;
+    --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    /* position data colors */
+    --rb:#22C55E; --wr:#3B82F6; --qb:#F97316; --te:#A855F7;
+    /* tier ladder data colors (2nd = sky, 1st = teal, 2 firsts = gold) */
+    --t-2nd:#38bdf8; --t-1st:#2dd4bf; --t-2firsts:#fbbf24;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#08090c;color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+       align-items:center;padding:24px 16px 64px}
+
+  /* ---- header note (mockup meta, not part of the UI) ---- */
+  .note{max-width:640px;width:100%;background:var(--ink-1);border:1px solid var(--line);
+        border-left:3px solid var(--ice);border-radius:8px;padding:14px 18px;margin-bottom:28px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:22px;letter-spacing:.02em;
+           text-transform:uppercase;margin:0 0 8px}
+  .note p{margin:0 0 6px;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note p:last-child{margin-bottom:0}
+  .note strong{color:var(--chalk)}
+  .note .k{font:600 10px var(--ui);letter-spacing:.07em;text-transform:uppercase;
+           color:var(--ice)}
+
+  /* ---- phone frame ---- */
+  .frame{width:390px;max-width:100%;background:var(--ink-0);border:1px solid var(--line);
+         border-radius:24px;padding:18px 16px 22px;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+  .tick{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+        color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:0 0 10px}
+  .tick::before{content:"";width:14px;height:3px;background:var(--ice);border-radius:2px}
+
+  /* ---- trade builder (context) ---- */
+  .side{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:12px 14px}
+  .side + .swap{margin:6px 0}
+  .side .lbl{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+             color:var(--chalk-faint);margin:0 0 8px}
+  .prow{display:flex;align-items:center;gap:10px}
+  .pos{font:600 10px var(--ui);letter-spacing:.04em;width:34px;height:20px;border-radius:2px;
+       display:flex;align-items:center;justify-content:center;flex:none;color:#08090c}
+  .pos.rb{background:var(--rb)} .pos.wr{background:var(--wr)}
+  .pmeta{flex:1;min-width:0}
+  .pname{font:600 15px var(--ui);line-height:1.2}
+  .psub{font:400 12px var(--ui);color:var(--chalk-dim);margin-top:1px}
+  .ptier{font:600 10px var(--ui);letter-spacing:.05em;text-transform:uppercase;
+         border-radius:2px;padding:3px 6px;flex:none;color:#08090c}
+  .ptier.t1st{background:var(--t-1st)} .ptier.t2f{background:var(--t-2firsts)}
+  .swap{display:flex;align-items:center;gap:10px;color:var(--chalk-faint)}
+  .swap .rule{flex:1;height:1px;background:var(--line)}
+  .swap svg{flex:none}
+
+  /* ---- verdict card (the focus) ---- */
+  .verdict{margin-top:14px;background:var(--ink-1);border:1px solid var(--line);
+           border-radius:8px;padding:18px 16px 16px}
+  .vhead{text-align:center;margin-bottom:16px}
+  .winner{font-family:var(--cond);font-weight:700;font-size:26px;line-height:1.05;
+          letter-spacing:.02em;text-transform:uppercase;margin:0}
+  .winner .a{color:var(--ice)}
+  .margin{display:inline-flex;align-items:baseline;gap:7px;margin-top:9px;
+          background:var(--ink-3);border:1px solid var(--line-strong);border-radius:999px;
+          padding:5px 13px}
+  .margin .by{font:600 10px var(--ui);letter-spacing:.07em;text-transform:uppercase;
+              color:var(--chalk-dim)}
+  .margin .pick{font-family:var(--cond);font-weight:700;font-size:17px;letter-spacing:.02em;
+                text-transform:uppercase;color:var(--t-2nd)}
+
+  /* the tilt bar — full scale is +/- one Mid 1st, so needle position is literally in picks.
+     Needle at 75% = center (+50% of the right half) = half of one first = ~a Mid 2nd. */
+  .tiltwrap{margin:6px 2px 4px}
+  .scalerow{display:flex;justify-content:space-between;font:600 10px var(--ui);
+            letter-spacing:.05em;text-transform:uppercase;color:var(--chalk-faint);
+            margin-bottom:6px;padding:0 1px}
+  .scalerow .mid{color:var(--chalk-dim)}
+  /* floating needle caption — pinned above the needle at 75% */
+  .caprow{position:relative;height:18px;margin-bottom:2px}
+  .needlecap{position:absolute;left:75%;transform:translateX(-50%);white-space:nowrap;
+             font:700 11px var(--ui);letter-spacing:.03em;text-transform:uppercase;color:var(--t-2nd)}
+  .track{position:relative;height:46px;background:var(--ink-3);border:1px solid var(--line);
+         border-radius:6px;overflow:hidden}
+  /* faint tick grid at each half-first */
+  .track .grid{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}
+  .track .center{position:absolute;top:0;bottom:0;left:50%;width:2px;
+                 background:var(--line-strong);transform:translateX(-1px);z-index:2}
+  /* fill from center toward the winner (Side A = right); width = margin as fraction of scale */
+  .fill{position:absolute;top:3px;bottom:3px;left:50%;width:25%;   /* 0.5 firsts of a 1.0-first half-scale */
+        background:rgba(86,217,236,.18);border:1px solid var(--ice);
+        border-left:none;border-radius:0 5px 5px 0;z-index:1}
+  .needle{position:absolute;top:-2px;bottom:-2px;width:3px;background:var(--ice);
+          left:75%;transform:translateX(-1.5px);z-index:3;border-radius:2px}
+  .needle::after{content:"";position:absolute;top:50%;left:50%;width:11px;height:11px;
+                 background:var(--ice);border:2px solid var(--ink-1);border-radius:999px;
+                 transform:translate(-50%,-50%)}
+  .endlbl{display:flex;justify-content:space-between;margin-top:7px;
+          font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase}
+  .endlbl .scale{color:var(--chalk-faint)}
+  .endlbl .b{color:var(--chalk-dim)}
+  .endlbl .a{color:var(--ice)}
+  .endrow2{display:flex;justify-content:space-between;margin-top:2px;
+           font:600 9px var(--ui);letter-spacing:.05em;text-transform:uppercase;color:var(--chalk-faint)}
+
+  .rawrow{display:flex;justify-content:center;gap:18px;margin-top:14px;padding-top:12px;
+          border-top:1px solid var(--line)}
+  .raw{text-align:center}
+  .raw .n{font:600 17px var(--mono);font-variant-numeric:tabular-nums}
+  .raw .c{font:600 10px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+          color:var(--chalk-faint);margin-top:2px}
+  .raw.win .n{color:var(--ice)}
+  .ratio{font:600 12px var(--mono);color:var(--chalk-dim);align-self:center}
+
+  .balance{margin-top:14px;background:var(--ink-2);border:1px solid var(--line);
+           border-radius:6px;padding:11px 13px;font:400 13px var(--ui);line-height:1.5;
+           color:var(--chalk-dim)}
+  .balance strong{color:var(--chalk);font-weight:600}
+  .balance .pk{color:var(--t-2nd);font-weight:600}
+  .foot{font:400 11px var(--ui);color:var(--chalk-faint);margin-top:12px;line-height:1.5;
+        text-align:center}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Variant A — Pick-denominated tilt bar</h1>
+  <p><span class="k">Approach</span> One "tug-of-war" value bar whose <strong>full scale is ±&nbsp;a Mid&nbsp;1st</strong>. The needle sits at the exact imbalance, so its position <em>is</em> a pick reading. Big "SIDE&nbsp;A WINS" headline + a margin pill denominated in the nearest single pick.</p>
+  <p><span class="k">Primary</span> Who wins (headline) &amp; by how much in picks (bar needle + "≈ a Mid&nbsp;2nd" pill). <span class="k">Secondary</span> raw consensus totals + value ratio, demoted below a rule.</p>
+  <p><span class="k">Reuses</span> <span style="font-family:var(--mono);font-size:12px">gap.firsts</span> for needle position, <span style="font-family:var(--mono);font-size:12px">gap.pick_equivalent.label</span> for the pill — both already in <span style="font-family:var(--mono);font-size:12px">/api/trade/evaluate</span>. Pill tinted with the tier-ladder color of that pick round (2nd = sky).</p>
+  <p><span class="k">Tradeoff</span> The bar is the strongest "how much" signal but adds a new visual the demo/in-league verdicts don't share yet. Needs a sensible clamp when the gap exceeds one first (bar pins to the end, pill falls back to "≈ 1.4 firsts").</p>
+</div>
+
+<div class="frame">
+  <div class="tick">Trade Calculator · Real values · 1QB PPR</div>
+
+  <div class="side">
+    <p class="lbl">Side A sends</p>
+    <div class="prow">
+      <span class="pos rb">RB</span>
+      <div class="pmeta">
+        <div class="pname">Jahmyr Gibbs</div>
+        <div class="psub">DET · 22 yo</div>
+      </div>
+      <span class="ptier t1st">1st</span>
+    </div>
+  </div>
+
+  <div class="swap">
+    <div class="rule"></div>
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square"><path d="M4 7h12M13 4l3 3-3 3M16 13H4M7 10l-3 3 3 3"/></svg>
+    <div class="rule"></div>
+  </div>
+
+  <div class="side">
+    <p class="lbl">Side B sends</p>
+    <div class="prow">
+      <span class="pos wr">WR</span>
+      <div class="pmeta">
+        <div class="pname">Malik Nabers</div>
+        <div class="psub">NYG · 22 yo</div>
+      </div>
+      <span class="ptier t2f">2 1sts</span>
+    </div>
+  </div>
+
+  <!-- VERDICT -->
+  <div class="verdict">
+    <div class="vhead">
+      <p class="winner"><span class="a">Side A</span> wins this deal</p>
+      <span class="margin">
+        <span class="by">by ≈</span>
+        <span class="pick">a Mid 2nd</span>
+      </span>
+    </div>
+
+    <div class="tiltwrap">
+      <div class="scalerow"><span>◄ Side B wins</span><span class="mid">even</span><span>Side A wins ►</span></div>
+      <div class="caprow"><span class="needlecap">▼ a Mid 2nd</span></div>
+      <div class="track">
+        <div class="grid" style="left:25%"></div>
+        <div class="grid" style="left:75%"></div>
+        <div class="center"></div>
+        <div class="fill"></div>
+        <div class="needle"></div>
+      </div>
+      <div class="endrow2"><span>◄ a full 1st</span><span>a full 1st ►</span></div>
+    </div>
+
+    <div class="rawrow">
+      <div class="raw"><div class="n">7,000</div><div class="c">Side A gets out</div></div>
+      <div class="ratio">82%</div>
+      <div class="raw win"><div class="n">8,500</div><div class="c">Side A gets back</div></div>
+    </div>
+
+    <div class="balance">
+      <strong>Even it up:</strong> Side&nbsp;A adds <span class="pk">≈ a Mid&nbsp;2nd</span> and the deal reads fair.
+    </div>
+    <p class="foot">Consensus market value — the same engine the trade finder uses.</p>
+  </div>
+</div>
+
+</body>
+</html>
