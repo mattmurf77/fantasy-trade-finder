@@ -44,3 +44,6 @@ mobile/test-artifacts/
 feedback-workspace/*
 !feedback-workspace/README.md
 archive/cleanup-2026-07-19/*.bundle
+
+# App teardown review (local audit artifacts)
+app-teardown-review/
