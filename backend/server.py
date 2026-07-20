@@ -781,6 +781,41 @@ def _pick_gap_equivalent(gap_value: float) -> dict:
     return {"firsts": firsts, "pick_equivalent": pick}
 
 
+def _value_verdict_payload(give_value: float, receive_value: float,
+                           even: bool) -> dict:
+    """Shared value-verdict shape for the pick-denominated TradeValueBar.
+
+    Single source of truth for the `favors` + `gap` construction used by
+    BOTH the manual calculator (POST /api/trade/evaluate) and the generated
+    deck cards (trade_card_to_dict), so the two can never drift. `even` is the
+    caller's balanced-trade decision (evaluate passes `point_ratio >= 0.95`;
+    cards pass the same ratio test over their own consensus package values).
+
+    Returns {give_value, receive_value, favors, gap}:
+      favors  'give' | 'receive' | 'even' — who the value leans to.
+      gap     the pick-denominated delta (add_to = the LIGHTER side that
+              needs the sweetener), via _pick_gap_equivalent; gap.value is 0
+              and pick_equivalent None on an even/exact trade.
+    """
+    favors = ("even" if even
+              else "receive" if receive_value > give_value
+              else "give")
+    gap_val = abs(receive_value - give_value)
+    gap = {
+        "value":  round(gap_val, 1),
+        "add_to": (None if gap_val == 0
+                   else "give" if give_value < receive_value
+                   else "receive"),
+        **_pick_gap_equivalent(gap_val),
+    }
+    return {
+        "give_value":    give_value,
+        "receive_value": receive_value,
+        "favors":        favors,
+        "gap":           gap,
+    }
+
+
 # ── Pick-anchor wizard (POST /api/anchor/save) ─────────────────────────────
 # Anchor keys are a cross-client enum (mobile sends them verbatim — see
 # docs/cross-client-invariants.md). Single-pick anchors pin directly to that
@@ -1917,6 +1952,13 @@ def _inject_likes_you_cards(
         recv_val = sum(seed_map.get(pid, 1500.0) for pid in my_recv)
         fairness = (round(min(give_val, recv_val) / max(give_val, recv_val), 3)
                     if give_val > 0 and recv_val > 0 else 0.0)
+        # Consensus package values (value space) for the TradeValueBar — same
+        # fn the calculator uses. seed_map is raw Elo, so wrap it in
+        # elo_to_value; fairness_score above stays on its raw-Elo basis.
+        from .trade_optimizer import _consensus_packages
+        _e2v = _trade_service_mod.elo_to_value
+        _gv, _rv = _consensus_packages(
+            my_give, my_recv, lambda pid: _e2v(seed_map.get(pid, 1500.0)))
         card = TradeCard(
             trade_id           = f"likesyou_{uuid.uuid4().hex[:12]}",
             league_id          = league_id,
@@ -1930,6 +1972,8 @@ def _inject_likes_you_cards(
             composite_score    = boost_score,
             basis              = "consensus",
             likes_you          = True,
+            give_value         = round(_gv, 1),
+            receive_value      = round(_rv, 1),
         )
         trade_service._trade_cards[card.trade_id] = card
         new_cards.append(card)
@@ -4667,32 +4711,24 @@ def trade_evaluate_route():
 
         give_value = receive_value = 0.0
         point_ratio = fairness = verdict = favors = None
+        # Pick-denominated gap read: how far apart the packages are, expressed
+        # as generic-pick equivalents ("≈ a Mid 2nd") so the delta is an
+        # actionable counteroffer instead of an abstract number. `favors` +
+        # `gap` are built by the shared _value_verdict_payload helper (the same
+        # one the deck cards use, so the two verdicts can never drift).
+        gap = None
         if give or recv:
             gv, rv = _consensus_packages(give, recv, seed_value)
             give_value, receive_value = round(gv, 1), round(rv, 1)
         if give and recv:
             fairness, point_ratio, _gv, _rv = _fairness_v3(
                 give, recv, seed_value, None, thr)
-            if point_ratio >= 0.95:
-                verdict, favors = "even", "even"
-            else:
-                verdict = "fair" if fairness is not None else "unfair"
-                favors = "receive" if receive_value > give_value else "give"
-
-        # Pick-denominated gap read: how far apart the packages are, expressed
-        # as generic-pick equivalents ("≈ a Mid 2nd") so the delta is an
-        # actionable counteroffer instead of an abstract number. `add_to` is
-        # the LIGHTER side — the one that needs the sweetener.
-        gap = None
-        if give and recv:
-            gap_val = abs(receive_value - give_value)
-            gap = {
-                "value":  round(gap_val, 1),
-                "add_to": (None if gap_val == 0
-                           else "give" if give_value < receive_value
-                           else "receive"),
-                **_pick_gap_equivalent(gap_val),
-            }
+            even = point_ratio >= 0.95
+            verdict = ("even" if even
+                       else "fair" if fairness is not None else "unfair")
+            _vp = _value_verdict_payload(give_value, receive_value, even)
+            favors = _vp["favors"]
+            gap = _vp["gap"]
 
         result = {
             "scoring_format":     fmt,
@@ -5038,9 +5074,10 @@ def trade_card_to_dict(card, players: dict) -> dict:
         "give":              [p(pid) for pid in card.give_player_ids],
         "receive":           [p(pid) for pid in card.receive_player_ids],
         "mismatch_score":    card.mismatch_score,
-        # P1-9: true fairness in [0,1] — mobile's fairness meter
-        # (mobile/src/api/trades.ts, TradeCard.tsx) reads this field and
-        # multiplies by 100; it was never serialized before.
+        # P1-9: true fairness in [0,1] — legacy fairness signal, still read by
+        # trade_narrative + web. The mobile deck now renders the pick-
+        # denominated TradeValueBar (give_value/receive_value/favors/gap
+        # below) instead of a 0–1 meter; this field is kept for back-compat.
         "fairness_score":    card.fairness_score,
         "composite_score":   card.composite_score,
         # v2 cards may be consensus/need-based vs. disagreement-driven.
@@ -5048,6 +5085,20 @@ def trade_card_to_dict(card, players: dict) -> dict:
         "decision":          card.decision,
         "expires_at":        card.expires_at,
     }
+    # Pick-denominated value verdict (feedback #157 value-bar) — the same
+    # {give_value, receive_value, favors, gap} shape POST /api/trade/evaluate
+    # returns, built here from the card's own consensus package values via the
+    # shared _value_verdict_payload helper so the deck's TradeValueBar and the
+    # calculator can never drift. Only serialized when the construction path
+    # stamped the package values (all live engine paths do); cards rebuilt from
+    # client echo omit them and the client hides the bar. `even` mirrors
+    # evaluate's point_ratio >= 0.95 test over these values.
+    give_value = getattr(card, "give_value", None)
+    receive_value = getattr(card, "receive_value", None)
+    if give_value is not None and receive_value is not None:
+        hi = max(give_value, receive_value)
+        even = hi <= 0 or round(min(give_value, receive_value) / hi, 3) >= 0.95
+        out.update(_value_verdict_payload(give_value, receive_value, even))
     # Tier 2 (2.3a) — only serialized when true so payloads for ordinary
     # cards stay byte-identical to the pre-likes-you shape.
     if getattr(card, "likes_you", False):

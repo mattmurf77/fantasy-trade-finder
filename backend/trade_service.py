@@ -1502,6 +1502,15 @@ class TradeCard:
     # opening-offer bucket ("light" | "fair" | "generous") that reweighted
     # this deck. Serialized for event joins; not user-facing copy.
     aggression_variant: Optional[str] = None
+    # Consensus package values (value space, elo_to_value over the seed) for
+    # the give / receive sides — the SAME numbers the manual calculator shows.
+    # Populated at construction from each path's consensus value fn; drive the
+    # pick-denominated TradeValueBar on the deck cards (trade_card_to_dict
+    # builds favors/gap from these via _value_verdict_payload). None on cards
+    # reconstructed from client echo (no package math available) — the client
+    # gates the bar on their presence.
+    give_value: Optional[float] = None
+    receive_value: Optional[float] = None
 
 
 @dataclass
@@ -2453,9 +2462,15 @@ class TradeService:
         # clogger phenomenon is handled by package_value_v2 diminishing
         # returns + the waiver-slot cost; QB/star reconciliation is Tier 2.
         ranked = sorted(heap, key=lambda e: (e[0], e[1]), reverse=True)
+        # Consensus package values for the TradeValueBar — same fn + value
+        # space the manual calculator uses, so a deck card and the calculator
+        # show identical numbers for the same players. Lazy import: the
+        # optimizer imports this module (top-level would cycle).
+        from .trade_optimizer import _consensus_packages
         cards: list[TradeCard] = []
         for composite, _t, hm, fairness, give_ids, recv_ids, fit_paid \
                 in ranked[:max_cards]:
+            _gv, _rv = _consensus_packages(give_ids, recv_ids, seed_value)
             card = TradeCard(
                 trade_id          = str(uuid.uuid4())[:8],
                 league_id         = league_id,
@@ -2468,6 +2483,8 @@ class TradeService:
                 fairness_score    = round(fairness, 3),
                 composite_score   = round(composite, 3),
                 basis             = "divergence",
+                give_value        = round(_gv, 1),
+                receive_value     = round(_rv, 1),
             )
             if fit_paid is not None:
                 p = players.get(recv_ids[0])
@@ -2618,6 +2635,10 @@ class TradeService:
                 fairness_score    = round(fairness, 3),
                 composite_score   = round(composite, 3),
                 basis             = "consensus",
+                # gv/rv above are the consensus package values (same fn +
+                # value space as the calculator) — drive the TradeValueBar.
+                give_value        = round(gv, 1),
+                receive_value     = round(rv, 1),
             ))
 
         # 1-for-1 first (most acceptable shape), then 2-for-1.
@@ -3090,8 +3111,17 @@ class TradeService:
         # Sort and take top N
         # ------------------------------------------------------------------
         _adjusted.sort(key=lambda x: x[0], reverse=True)
+        # Consensus package values for the TradeValueBar — value space
+        # (elo_to_value over the seed), same fn the calculator uses. This
+        # legacy path prices fairness off raw-Elo sums, but the value bar
+        # always speaks consensus dynasty value, so derive it here. Lazy
+        # import: the optimizer imports this module (top-level would cycle).
+        from .trade_optimizer import _consensus_packages
+        def _seed_val(pid: str) -> float:
+            return elo_to_value(seed_elo.get(pid, 1500.0))
         cards = []
         for composite, mismatch, fairness, give_ids, recv_ids, reasons in _adjusted[:max_cards]:
+            _gv, _rv = _consensus_packages(give_ids, recv_ids, _seed_val)
             card = TradeCard(
                 trade_id          = str(uuid.uuid4())[:8],
                 league_id         = league_id,
@@ -3104,6 +3134,8 @@ class TradeService:
                 fairness_score    = round(fairness, 3),
                 composite_score   = round(composite, 3),
                 reasons           = reasons if FLAGS.trade_math_human_explanations else [],
+                give_value        = round(_gv, 1),
+                receive_value     = round(_rv, 1),
             )
             cards.append(card)
         return cards

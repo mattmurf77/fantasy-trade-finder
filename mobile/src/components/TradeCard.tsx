@@ -8,9 +8,10 @@ import {
   type AccessibilityActionEvent,
 } from 'react-native';
 import { ink, chalk, flare, ice, semantic, space, radii, type } from '../theme/chalkline';
-import { TickLabel, Button, Meter, fairnessColor, Icon, Badge } from './chalkline';
+import { TickLabel, Button, Icon, Badge } from './chalkline';
 import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
+import TradeValueBar from './TradeValueBar';
 import SendInSleeperButton from './SendInSleeperButton';
 import { LockGlyph } from './PlayerContextMenu';
 import { useFlag } from '../state/useFeatureFlags';
@@ -92,11 +93,15 @@ function TradeCardComp({
   fitTargetPositions,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
-  // `fairness` is always serialized by the v2 backend (fairness_score),
-  // so the meter renders on every fresh card. Keep the guard so legacy /
-  // adapter-shaped cards without it hide the row instead of showing a
-  // bogus 0%.
-  const hasFairness = typeof data.fairness === 'number';
+  // The pick-denominated TradeValueBar (feedback #157) is the universal
+  // trade verdict — it replaces the old 0–1 fairness meter on the deck.
+  // Backend stamps give_value/receive_value/favors/gap on every generated
+  // card; render only when both package values are present so legacy /
+  // echo-rebuilt cards (and swapped cards mid-reprice) hide the bar instead
+  // of crashing. `gap` may be null (one-sided/exactly even) — the bar
+  // renders correctly with gap={null}.
+  const hasValueVerdict =
+    typeof data.give_value === 'number' && typeof data.receive_value === 'number';
   // v2: consensus cards are fair-value ideas vs an opponent who hasn't
   // ranked yet (no real disagreement signal behind them).
   const isConsensus = data.basis === 'consensus';
@@ -312,7 +317,7 @@ function TradeCardComp({
 
       {/* Match strength was computed for the ORIGINAL package; after a
           player swap it's stale, so edited cards hide it and lean on the
-          re-priced fairness meter below. */}
+          re-priced value bar below. */}
       {!data.edited && <StrengthBar value={matchPct} label="Match strength" />}
 
       <View style={styles.split}>
@@ -380,17 +385,19 @@ function TradeCardComp({
         </View>
       </View>
 
-      {hasFairness && (
-        <Meter
-          value={data.fairness as number}
-          color={fairnessColor(data.fairness as number)}
-          label="Fairness"
-          showPercent
+      {hasValueVerdict && !repricing && (
+        <TradeValueBar
+          giveValue={data.give_value as number}
+          receiveValue={data.receive_value as number}
+          favors={data.favors ?? null}
+          gap={data.gap ?? null}
+          youLabel="You"
+          themLabel={`@${data.opponent_username}`}
         />
       )}
 
-      {/* Edited-card re-price in flight — the fairness meter above is
-          hidden (fairness cleared on swap) until fresh numbers land. */}
+      {/* Edited-card re-price in flight — the value bar above is hidden
+          (give/receive cleared on swap) until fresh numbers land. */}
       {repricing && (
         <View style={styles.repricingRow}>
           <ActivityIndicator size="small" color={ice.base} />

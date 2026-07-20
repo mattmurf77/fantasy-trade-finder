@@ -1,5 +1,6 @@
 import { api } from './client';
 import type { TradeCard, TradeJobSnapshot, TradeMatch, AwaitingTrade, Player } from '../shared/types';
+import type { CalcGap } from './calc';
 
 export interface GenerateBody {
   league_id: string;
@@ -120,6 +121,30 @@ function normalizeTradeCard(raw: any): TradeCard {
   // Phase-2 aggression variant — opaque string, passed through as-is.
   const aggressionVariant =
     typeof raw?.aggression_variant === 'string' ? raw.aggression_variant : undefined;
+  // Pick-denominated value verdict (feedback #157 value-bar). Backend stamps
+  // give_value/receive_value/favors/gap on every generated card (same shape as
+  // /api/trade/evaluate); the deck renders TradeValueBar off these. Validated
+  // defensively so a legacy/echo-rebuilt payload without them degrades to
+  // "no bar" (TradeCard gates on give_value/receive_value being present).
+  const giveValue =
+    typeof raw?.give_value === 'number' ? raw.give_value : undefined;
+  const receiveValue =
+    typeof raw?.receive_value === 'number' ? raw.receive_value : undefined;
+  const favors: 'give' | 'receive' | 'even' | null | undefined =
+    raw?.favors === 'give' || raw?.favors === 'receive' || raw?.favors === 'even'
+      ? raw.favors
+      : raw?.favors === null
+        ? null
+        : undefined;
+  // gap is the CalcGap shape or null; passed straight to TradeValueBar which
+  // already renders correctly with gap === null. Only the object/null cases
+  // are accepted; anything else degrades to undefined.
+  const gap =
+    raw?.gap && typeof raw.gap === 'object'
+      ? (raw.gap as CalcGap)
+      : raw?.gap === null
+        ? null
+        : undefined;
 
   return {
     trade_id:           String(raw?.trade_id ?? ''),
@@ -152,6 +177,10 @@ function normalizeTradeCard(raw: any): TradeCard {
     lane,
     fitPremium,
     aggressionVariant,
+    give_value:         giveValue,
+    receive_value:      receiveValue,
+    favors,
+    gap,
   };
 }
 

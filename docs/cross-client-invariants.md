@@ -129,9 +129,21 @@ Shared user-facing strings rendered by both mobile and web — must stay charact
 
 ## Fairness meter semantics
 
-`fairness_score` is serialized as a float in `[0, 1]` on every trade card (consensus package-value ratio, lesser/greater). Clients render it as a percent: `Math.round(fairness * 100)` driving a 0–100% meter. Do **not** rescale server-side — both clients multiply by 100.
+`fairness_score` is serialized as a float in `[0, 1]` on every trade card (consensus package-value ratio, lesser/greater). The **web** still renders it as a percent: `Math.round(fairness * 100)` driving a 0–100% meter (do **not** rescale server-side). **Mobile (1.10.0+) no longer renders `fairness_score`** on the deck — it renders the pick-denominated value bar (below) instead. `fairness_score` stays serialized (web meter + `trade_narrative` still read it).
 
-**Locations:** `backend/server.py` (`trade_card_to_dict`), `mobile/src/api/trades.ts` + `mobile/src/components/TradeCard.tsx` (`fairPct`), `web/js/app.js` fairness meter.
+**Locations:** `backend/server.py` (`trade_card_to_dict`), `web/js/app.js` fairness meter.
+
+## Trade value-verdict shape (`favors` + `gap`) — the value bar
+
+The pick-denominated **TradeValueBar** (feedback #157) is the universal trade verdict — it replaces the mobile deck's 0–1 fairness meter. It reads four fields that BOTH `POST /api/trade/evaluate` and every deck card (`/api/trades`, `/api/trades/status`, `/api/trades/liked`) now carry, built by the single shared helper `_value_verdict_payload` in `backend/server.py`:
+
+- `favors`: enum **`give` | `receive` | `even`** — who the value leans to (`receive` = the caller/you win). `even` is set when the package point ratio ≥ 0.95. (`/api/trade/evaluate` may also return `favors: null` on a one-sided read; deck cards always have both sides.)
+- `give_value` / `receive_value`: consensus package values (value space, `elo_to_value` over the seed) — the SAME numbers the calculator shows for the same players.
+- `gap`: `{value, add_to: give|receive|null, firsts, pick_equivalent}` — the consensus delta in generic-pick terms; `add_to` is the LIGHTER side needing the sweetener. `null` only when one-sided; on an exactly-even trade `gap.value` is 0 and `pick_equivalent` is `null`.
+
+Deck cards **omit** all four when rebuilt from client echo (server-restart FB-46 path); clients gate the bar on `give_value`/`receive_value` being present.
+
+**Locations to update together:** `backend/server.py` (`_value_verdict_payload`, `trade_evaluate_route`, `trade_card_to_dict`), the card-construction sites in `backend/trade_service.py` + `backend/trade_optimizer.py` (stamp `give_value`/`receive_value`), `mobile/src/components/TradeValueBar.tsx` + `TradeCard.tsx`, `mobile/src/api/trades.ts` + `mobile/src/api/calc.ts` + `mobile/src/shared/types.ts`.
 
 ---
 

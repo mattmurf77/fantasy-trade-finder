@@ -1182,6 +1182,13 @@ export default function TradesScreen({ navigation, route }: any) {
             ...cur,
             fairness: (ev.fairness ?? undefined) as unknown as number,
             basis: ev.basis,
+            // Fresh pick-denominated verdict for the re-priced package — the
+            // same {give_value, receive_value, favors, gap} shape the deck
+            // cards carry, so the value bar re-appears with the new numbers.
+            give_value: ev.give_value,
+            receive_value: ev.receive_value,
+            favors: ev.favors,
+            gap: ev.gap,
           },
         };
       });
@@ -1769,10 +1776,15 @@ export default function TradesScreen({ navigation, route }: any) {
       receive_player_ids: receive.map((p) => p.id),
       edited: true,
       // The engine's numbers described the ORIGINAL package. Clear them —
-      // the fairness meter hides while undefined and the re-price below
-      // fills it back in; reasons/sweetener narrated the old package; the
-      // counterparty's like was for the original mirror, not this variant.
+      // the value bar hides while give/receive are undefined and the
+      // re-price below fills them back in; reasons/sweetener narrated the old
+      // package; the counterparty's like was for the original mirror, not
+      // this variant.
       fairness: undefined as unknown as number,
+      give_value: undefined,
+      receive_value: undefined,
+      favors: undefined,
+      gap: undefined,
       reasons: undefined,
       sweetener: undefined,
       likesYou: false,

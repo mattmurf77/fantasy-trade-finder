@@ -492,6 +492,11 @@ def generate_pair_trades_v3(
 
     def _card(composite, hm, fairness, give_ids, recv_ids,
               fit_paid=None) -> TradeCard:
+        # Consensus package values for the TradeValueBar — _sv is the same
+        # value-space consensus fn (elo_to_value over the seed) the calculator
+        # uses and fairness was priced on, so a deck card and the calculator
+        # show identical numbers for the same players.
+        _gv, _rv = _consensus_packages(give_ids, recv_ids, _sv)
         card = TradeCard(
             trade_id           = str(uuid.uuid4())[:8],
             league_id          = league_id,
@@ -504,6 +509,8 @@ def generate_pair_trades_v3(
             fairness_score     = round(fairness, 3),
             composite_score    = round(composite, 3),
             basis              = "divergence",
+            give_value         = round(_gv, 1),
+            receive_value      = round(_rv, 1),
         )
         if fit_paid is not None:
             p = players.get(recv_ids[0])

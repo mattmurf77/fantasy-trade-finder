@@ -4,6 +4,11 @@
 // more fields. Intent is a tight enough safety net to catch typos; not
 // a legal contract.
 
+// CalcGap is the pick-denominated gap shape shared by the calculator
+// (/api/trade/evaluate) and the deck cards' TradeValueBar. Type-only import
+// (erased at build), so the calc.ts ↔ types.ts reference is compile-time only.
+import type { CalcGap } from '../api/calc';
+
 export type ScoringFormat = '1qb_ppr' | 'sf_tep';
 export type Position = 'QB' | 'RB' | 'WR' | 'TE';
 // Pick-value tier ladder (2026-07-12 8-tier ladder, #117) — tier keys read
@@ -162,6 +167,18 @@ export interface TradeCard {
   fitPremium?: { value_paid: number; position?: string };
   /** Phase-2: which engine aggression variant built this card. */
   aggressionVariant?: string;
+  // Pick-denominated value verdict (feedback #157 value-bar) — the same
+  // shape POST /api/trade/evaluate returns, now stamped on every generated
+  // deck card so the card renders the universal TradeValueBar instead of a
+  // 0–1 fairness meter. give_value/receive_value are consensus package values
+  // (value space, matching the calculator); favors is who the value leans to;
+  // gap is the pick-denominated delta (null on a one-sided/exactly-even read).
+  // All optional: absent on cards rebuilt from client echo, and on swap the
+  // client clears them until the re-price round-trip lands fresh numbers.
+  give_value?: number;
+  receive_value?: number;
+  favors?: 'give' | 'receive' | 'even' | null;
+  gap?: CalcGap | null;
 }
 
 export interface TradeMatch {
