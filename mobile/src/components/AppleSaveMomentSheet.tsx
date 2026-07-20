@@ -106,6 +106,8 @@ export default function AppleSaveMomentSheet({ visible, trigger, onClose }: Prop
           {busy ? <ActivityIndicator color={chalk.dim} /> : null}
           <Pressable
             testID="trades.apple-sheet.decline"
+            accessibilityRole="button"
+            accessibilityLabel="Not now"
             onPress={() => onClose(false)}
             disabled={busy}
             hitSlop={8}

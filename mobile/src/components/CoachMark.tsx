@@ -20,8 +20,11 @@ export default function CoachMark({ text, onDismiss, testID }: Props) {
     <Pressable
       testID={testID}
       onPress={onDismiss}
+      // S8 PRD-02 — instructional "Tap to dismiss" moves from the label
+      // (name) into the hint, per the label/hint split.
       accessibilityRole="button"
-      accessibilityLabel={`${text}. Tap to dismiss.`}
+      accessibilityLabel={text}
+      accessibilityHint="Tap to dismiss"
       style={({ pressed }) => [styles.mark, pressed && styles.markPressed]}
     >
       <Text style={styles.text}>{text}</Text>

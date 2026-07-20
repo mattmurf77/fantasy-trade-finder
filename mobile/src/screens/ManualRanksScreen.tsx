@@ -8,6 +8,8 @@ import {
   TextInput,
   Keyboard,
   RefreshControl,
+  AccessibilityInfo,
+  type AccessibilityActionEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DraggableFlatList, {
@@ -69,6 +71,14 @@ const FILTER_UNDERLINE: Record<Position | 'ALL', string> = {
 
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
+// S8 PRD-01 — VoiceOver custom actions on each row (the no-drag power
+// path). Wired to the SAME move/jump handlers the touch paths use.
+const ROW_A11Y_ACTIONS: { name: string; label: string }[] = [
+  { name: 'moveUp', label: 'Move up' },
+  { name: 'moveDown', label: 'Move down' },
+  { name: 'setRank', label: 'Set rank' },
+];
+
 // ── RankEditRow ───────────────────────────────────────────────────────────
 // Owns the draft string locally so the renderItem useCallback no longer
 // depends on `editValue` state — only on `editingPid` + `commitRankEdit`.
@@ -95,6 +105,7 @@ function RankEditRowInner({ initialValue, onCommit, onBlur }: RankEditRowProps) 
       maxLength={4}
       style={styles.rankInput}
       selectTextOnFocus
+      accessibilityLabel="New rank"
     />
   );
 }
@@ -316,16 +327,14 @@ export default function ManualRanksScreen() {
   // so renderItem's useCallback no longer depends on `editValue`.
   const [editingPid, setEditingPid] = useState<string | null>(null);
 
-  const commitRankEdit = useCallback((val: string) => {
-    if (!editingPid) return;
-    const target = parseInt(val, 10);
-    setEditingPid(null);
-    if (!Number.isFinite(target) || target < 1) return;
-
+  // Move `pid` to 1-based `target` in the FILTERED view. Shared by the
+  // jump-to-rank input and the S8 PRD-01 VoiceOver custom actions
+  // (Move up / Move down / announce=true announces the landing rank).
+  const applyRankMove = useCallback((pid: string, target: number, announce = false) => {
     setRows((prev) => {
       // Resolve indexes in the FILTERED view first.
       const visible = filter === 'ALL' ? prev : prev.filter((r) => r.position === filter);
-      const fromVisIdx = visible.findIndex((r) => r.id === editingPid);
+      const fromVisIdx = visible.findIndex((r) => r.id === pid);
       if (fromVisIdx < 0) return prev;
       const toVisIdx = Math.max(0, Math.min(visible.length - 1, target - 1));
       if (toVisIdx === fromVisIdx) return prev;
@@ -345,9 +354,22 @@ export default function ManualRanksScreen() {
       }
       scheduleSave(next);
       haptics.success();
+      if (announce) {
+        AccessibilityInfo.announceForAccessibility(
+          `${moved.name} moved to rank ${toVisIdx + 1}`,
+        );
+      }
       return next;
     });
-  }, [editingPid, filter, scheduleSave]);
+  }, [filter, scheduleSave]);
+
+  const commitRankEdit = useCallback((val: string) => {
+    if (!editingPid) return;
+    const target = parseInt(val, 10);
+    setEditingPid(null);
+    if (!Number.isFinite(target) || target < 1) return;
+    applyRankMove(editingPid, target);
+  }, [editingPid, applyRankMove]);
 
   // ── Render helpers ────────────────────────────────────────────────
   const renderItem = useCallback(
@@ -368,8 +390,43 @@ export default function ManualRanksScreen() {
       // as the active-drag state; cleared when the query clears).
       const isHighlighted = highlightId === item.id;
 
+      // S8 PRD-01 — one grouped utterance per row + the custom-action
+      // power path (Move up / Move down / Set rank), all wired to the
+      // existing jump/reorder handlers.
+      const rowLabel = [
+        item.name,
+        String(item.position),
+        item.team || 'FA',
+        `rank ${rankNum}`,
+        posRank,
+        value != null ? `value ${value.toLocaleString('en-US')}` : null,
+        item.injury_status ? `injury ${item.injury_status}` : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
+      const onRowA11yAction = ({ nativeEvent }: AccessibilityActionEvent) => {
+        switch (nativeEvent.actionName) {
+          case 'moveUp':
+            applyRankMove(item.id, rankNum - 1, true);
+            break;
+          case 'moveDown':
+            applyRankMove(item.id, rankNum + 1, true);
+            break;
+          case 'setRank':
+            setEditingPid(item.id);
+            haptics.selection();
+            break;
+        }
+      };
+
       return (
+        // accessible={false}: the components/CLAUDE.md RN caveat — an
+        // accessible container swallows its children on iOS, which made
+        // the jump-to-rank Pressable (the drag alternative) unreachable
+        // under VoiceOver. The row's semantics live on the grouped name
+        // block + the rank button below instead.
         <Pressable
+          accessible={false}
           onLongPress={drag}
           delayLongPress={DRAG_ACTIVATION_MS}
           disabled={isActive || isEditing}
@@ -393,19 +450,39 @@ export default function ManualRanksScreen() {
               }}
               hitSlop={{ top: 13, bottom: 13, left: 8, right: 8 }}
               style={styles.rankNumWrap}
+              accessibilityRole="button"
+              accessibilityLabel={`Rank ${rankNum} — set rank for ${item.name}`}
+              accessibilityHint="Opens a number input to type a new rank"
             >
               <Text style={styles.rankNum}>{rankNum}</Text>
             </Pressable>
           )}
-          <PositionChip position={item.position as Position} size="sm" />
-          <View style={{ flex: 1, minWidth: 0 }}>
+          {/* Chip + right cluster are folded into the grouped label below —
+              hidden here so the row doesn't read fragment-by-fragment. */}
+          <View
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <PositionChip position={item.position as Position} size="sm" />
+          </View>
+          <View
+            style={{ flex: 1, minWidth: 0 }}
+            accessible
+            accessibilityLabel={rowLabel}
+            accessibilityActions={ROW_A11Y_ACTIONS}
+            onAccessibilityAction={onRowA11yAction}
+          >
             <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
             <Text style={styles.meta} numberOfLines={1}>
               {(item.team || 'FA')}{ageStr ? ` · ${ageStr}` : ''}
               {item.injury_status ? ` · ${item.injury_status}` : ''}
             </Text>
           </View>
-          <View style={styles.valueWrap}>
+          <View
+            style={styles.valueWrap}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
             <Text style={[styles.posRank, posColor ? { color: posColor } : null]}>
               {posRank}
             </Text>
@@ -413,14 +490,18 @@ export default function ManualRanksScreen() {
               <Text style={styles.valueNum}>{value.toLocaleString('en-US')}</Text>
             ) : null}
           </View>
-          <View style={styles.grip} importantForAccessibility="no-hide-descendants">
+          <View
+            style={styles.grip}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
             <View style={styles.gripBar} />
             <View style={styles.gripBar} />
           </View>
         </Pressable>
       );
     },
-    [commitRankEdit, editingPid, posRanks, highlightId],
+    [commitRankEdit, editingPid, posRanks, highlightId, applyRankMove],
   );
 
   // ── Pull-to-refresh (S7 PRD-04 ride-along, flag ux.touch_polish) ────
@@ -445,7 +526,7 @@ export default function ManualRanksScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Overall Ranks</Text>
+        <Text style={styles.title} accessibilityRole="header">Overall Ranks</Text>
         <SaveIndicator status={saveStatus} errorText={errorText} />
       </View>
 
@@ -460,6 +541,9 @@ export default function ManualRanksScreen() {
           return (
             <Pressable
               key={f}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={f === 'ALL' ? 'All positions' : f}
               onPress={() => {
                 if (f === filter) return;
                 // Dismiss any in-flight rank edit; the visible index would

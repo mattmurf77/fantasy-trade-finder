@@ -87,6 +87,8 @@ function Board({
           return (
             <Pressable
               key={t.key}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isActive }}
               onPress={() => {
                 if (t.key !== tabKey) haptics.selection();
                 setTabKey(t.key);

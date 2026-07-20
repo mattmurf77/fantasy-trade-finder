@@ -38,6 +38,8 @@ export default function QuickSetPromptCard({ onAccept, onDismiss }: Props) {
       </Pressable>
       <Pressable
         testID="trades.quickset-prompt.dismiss"
+        accessibilityRole="button"
+        accessibilityLabel="Not now"
         onPress={onDismiss}
         hitSlop={8}
         style={styles.dismiss}

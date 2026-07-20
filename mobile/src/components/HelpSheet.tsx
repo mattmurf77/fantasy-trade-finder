@@ -50,11 +50,16 @@ export default function HelpSheet({
       animationType={reduceMotion ? 'fade' : 'slide'}
       onRequestClose={onClose}
     >
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
       <View style={styles.sheet} testID="help-sheet">
         <SafeAreaView edges={['bottom']}>
           <View style={styles.grabber} />
-          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.title} accessibilityRole="header">{title}</Text>
           <Text style={styles.body}>{body}</Text>
           <View style={styles.actions}>
             {readMoreUrl ? (

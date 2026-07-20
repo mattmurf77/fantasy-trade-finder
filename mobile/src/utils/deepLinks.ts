@@ -120,6 +120,10 @@ const V2_SCREENS = {
         path: 'trades',
         screens: {
           TradesHome: '',
+          // FB #156 — the deck reached from the finder hub per mode (only
+          // registered when flag `trades.finder_hub` is on; harmless as a
+          // path otherwise).
+          TradeDeck: 'finder',
           Portfolio: 'portfolio',
           TradeCalculator: 'calculator',
         },

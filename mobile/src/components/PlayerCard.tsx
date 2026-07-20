@@ -1,5 +1,12 @@
 import React, { forwardRef } from 'react';
-import { View, StyleSheet, Pressable } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  Pressable,
+  type AccessibilityActionEvent,
+  type AccessibilityActionInfo,
+  type AccessibilityState,
+} from 'react-native';
 import {
   ink,
   chalk,
@@ -13,6 +20,7 @@ import {
   fonts,
 } from '../theme/chalkline';
 import { Badge, PositionBadge, TierChalkBadge, RookieBadge, InjuryBadge, Text } from './chalkline';
+import { TIER_LABEL } from '../utils/tierBands'; // tier name in the composed a11y label
 import { colors } from '../theme/colors'; // medal tokens (gold/silver) for rank accents
 import { useFlag } from '../state/useFeatureFlags';
 import type { Player, Tier } from '../shared/types';
@@ -41,6 +49,17 @@ export interface PlayerCardProps {
   dense?: boolean;
   statsSlot?: React.ReactNode;     // dense line 2 — the TileStats strip
   value?: number | null;           // dense right cluster — 0–10k seed-scale value
+  // Teardown S8 PRD-01/-02 (inert a11y): the card is a composite tile —
+  // VoiceOver reads it as ONE utterance (Pressable groups children by
+  // default). When no override is passed, a label is composed from the
+  // player facts so the utterance is ordered/complete instead of a raw
+  // child-text concatenation. Custom actions let callers attach board
+  // commands ("Move to tier…", "Set rank…") to the row's single focusable.
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  accessibilityState?: AccessibilityState;
+  accessibilityActions?: readonly AccessibilityActionInfo[];
+  onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
 }
 
 // Normalize Sleeper injury strings to the Chalkline InjuryBadge codes.
@@ -77,6 +96,11 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     dense = false,
     statsSlot,
     value,
+    accessibilityLabel,
+    accessibilityHint,
+    accessibilityState,
+    accessibilityActions,
+    onAccessibilityAction,
   },
   ref,
 ) {
@@ -119,6 +143,42 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     rank === 2 ? styles.rankFg2 :
     rank === 3 ? styles.rankFg3 : null;
 
+  // ── Composed a11y label (S8 PRD-01/-02, inert) ──────────────────────
+  // One ordered utterance per tile: name, position, team, then the data
+  // facts a sighted user reads off the badges/right cluster. Callers can
+  // override wholesale via `accessibilityLabel`.
+  const composedLabel =
+    accessibilityLabel ??
+    [
+      player.name,
+      String(player.position),
+      teamStr,
+      rank != null ? `ranked ${rank} of 3` : null,
+      tier ? `tier ${TIER_LABEL[tier]}` : null,
+      posRank ?? null,
+      value != null ? `value ${value.toLocaleString('en-US')}` : null,
+      isRookie ? 'rookie' : null,
+      injury ? `injury ${injCode ?? injury}` : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+  // Pressable is the tile's single focusable; give it the button trait
+  // only when it actually does something on activation.
+  const a11yProps = {
+    accessible: true,
+    accessibilityRole:
+      onPress || onLongPress ? ('button' as const) : undefined,
+    accessibilityLabel: composedLabel,
+    accessibilityHint,
+    accessibilityState: {
+      selected: selected || rank != null,
+      disabled: !!disabled,
+      ...accessibilityState,
+    },
+    accessibilityActions: accessibilityActions as AccessibilityActionInfo[] | undefined,
+    onAccessibilityAction,
+  };
+
   // ── Dense (cozy) branch — Tiers board only (#58) ────────────────────
   if (dense) {
     return (
@@ -129,6 +189,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
         onLongPress={onLongPress}
         disabled={disabled}
         delayLongPress={commandLongPressMs}
+        {...a11yProps}
         style={({ pressed }) => [
           styles.card,
           styles.cardDense,
@@ -202,6 +263,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
       onLongPress={onLongPress}
       disabled={disabled}
       delayLongPress={commandLongPressMs}
+      {...a11yProps}
       style={({ pressed }) => [
         styles.card,
         compact && styles.cardCompact,

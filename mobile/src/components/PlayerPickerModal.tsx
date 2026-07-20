@@ -120,6 +120,11 @@ export default function PlayerPickerModal({
               renderItem={({ item }) => (
                 <Pressable
                   testID={`calc.picker.row.${item.id}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${item.name}, ${item.pos}, ${
+                    item.pick ? 'draft capital' : `${item.nflTeam}, ${item.age} years`
+                  }, value ${ownerBoardValue(item).toLocaleString()}`}
+                  accessibilityHint="Adds this player to the trade"
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   onPress={() => onPick(item)}
                 >

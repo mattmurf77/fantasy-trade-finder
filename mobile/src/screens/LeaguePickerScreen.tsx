@@ -252,7 +252,7 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>Choose a League</Text>
+          <Text style={styles.title} accessibilityRole="header">Choose a League</Text>
           <Text style={styles.sub}>Leagues for {user?.display_name || '…'}</Text>
         </View>
         <Button label="Sign out" variant="ghost" compact onPress={onSignOut} />
@@ -291,6 +291,21 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
             return (
               <Pressable
                 testID={`leagues.row.${item.league_id}`}
+                // S8 PRD-02 — the row Pressable swallows child text on iOS
+                // (documented in components/CLAUDE.md); the explicit
+                // grouped label makes it one complete button utterance.
+                accessibilityRole="button"
+                accessibilityLabel={[
+                  item.name,
+                  item.platform && PLATFORM_BADGE[item.platform]
+                    ? PLATFORM_BADGE[item.platform]
+                    : null,
+                  `${item.total_rosters || 12} teams`,
+                ]
+                  .filter(Boolean)
+                  .join(', ')}
+                accessibilityHint="Opens this league"
+                accessibilityState={{ disabled: !!selectingId, busy: isBusy }}
                 style={({ pressed }) => [
                   styles.row,
                   pressed && styles.rowPressed,

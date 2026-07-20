@@ -74,6 +74,9 @@ export default function FreeAgentsScreen() {
             <Pressable
               key={f}
               testID={`free-agents.pos-tab.${f.toLowerCase()}`}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={f === 'ALL' ? 'All positions' : f}
               onPress={() => setFilter(f)}
               style={({ pressed }) => [
                 styles.filterSegment,

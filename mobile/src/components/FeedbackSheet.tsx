@@ -109,14 +109,19 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
       animationType="slide"
       onRequestClose={onClose}
     >
-      <Pressable style={styles.backdrop} onPress={onClose} />
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.kav}
       >
         <View style={styles.sheet}>
           <View style={styles.grabber} />
-          <Text style={styles.title}>Capture feedback</Text>
+          <Text style={styles.title} accessibilityRole="header">Capture feedback</Text>
           <Text style={styles.sub}>Saved on this device. Share or export from Settings.</Text>
 
           <ScrollView keyboardShouldPersistTaps="handled">
@@ -128,6 +133,9 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
                   <Pressable
                     key={opt.value}
                     testID={`feedback.severity.${opt.value}`}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: active, checked: active }}
+                    accessibilityLabel={`Severity: ${opt.label}`}
                     onPress={() => setSeverity(opt.value)}
                     style={({ pressed }) => [
                       styles.sevChip,
@@ -147,6 +155,7 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
             <TextInput
               value={screen}
               onChangeText={setScreen}
+              accessibilityLabel="Screen"
               style={styles.screenInput}
               placeholder="e.g. Trades / Tiers / Rank-Trios"
               placeholderTextColor={chalk.faint}
@@ -160,6 +169,7 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
               ref={inputRef}
               value={text}
               onChangeText={setText}
+              accessibilityLabel="Note"
               style={styles.noteInput}
               placeholder="What did you notice?"
               placeholderTextColor={chalk.faint}

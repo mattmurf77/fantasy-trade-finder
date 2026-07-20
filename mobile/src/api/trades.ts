@@ -9,6 +9,10 @@ export interface GenerateBody {
   // Honored by the backend only when flag trade.finder_targeting is on;
   // every returned card's receive side then includes at least one of them.
   pinned_receive_players?: string[];
+  // FB #156 (Trade-Finding Hub, "Specific Team" mode): scope generation to a
+  // single league-mate. Absent ⇒ the full league-wide sweep. Opponent-scoped
+  // jobs bypass the shared server cache (like pinned jobs).
+  opponent_user_id?: string;
   // Onboarding item 7: skip the server's complete-fresh job cache (a Quick
   // Set save changes the board but not the cache key). Running jobs are
   // still shared server-side.

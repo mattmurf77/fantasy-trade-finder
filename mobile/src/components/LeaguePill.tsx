@@ -31,6 +31,10 @@ export default function LeaguePill({ onPress, label = 'League', compact = false 
     <Pressable
       onPress={onPress}
       disabled={switching}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${league?.league_name || 'No league selected'}`}
+      accessibilityHint="Opens the league switcher"
+      accessibilityState={{ disabled: switching, busy: switching }}
       style={({ pressed }) => [
         styles.pill,
         compact && styles.pillCompact,

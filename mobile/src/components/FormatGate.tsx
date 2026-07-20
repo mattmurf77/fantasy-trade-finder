@@ -132,6 +132,9 @@ function LegacyGate({
       <Pressable
         disabled={copying}
         onPress={onCopy}
+        accessibilityRole="button"
+        accessibilityLabel={`Copy from ${FORMAT_LABELS[setFormat]}`}
+        accessibilityState={{ disabled: copying, busy: copying }}
         style={({ pressed }) => [
           legacyStyles.primaryBtn,
           pressed && { opacity: 0.85 },
@@ -150,6 +153,8 @@ function LegacyGate({
       <Pressable
         disabled={copying}
         onPress={onSetUpManually}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: copying }}
         style={({ pressed }) => [
           legacyStyles.secondaryBtn,
           pressed && { opacity: 0.7 },

@@ -63,10 +63,12 @@ export default function LeagueSwitcherSheet({ visible, onClose, onSwitched }: Pr
       <Pressable
         style={styles.backdrop}
         onPress={() => (busyId ? null : onClose())}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
       />
       <View style={styles.sheet}>
         <View style={styles.grabber} />
-        <Text style={type.heading}>Switch league</Text>
+        <Text style={type.heading} accessibilityRole="header">Switch league</Text>
         <Text style={[type.bodySm, styles.sub]}>
           Picking a league reloads your team rosters and trade pool.
         </Text>
@@ -88,6 +90,16 @@ export default function LeagueSwitcherSheet({ visible, onClose, onSwitched }: Pr
               return (
                 <Pressable
                   key={lg.league_id}
+                  accessibilityRole="button"
+                  accessibilityLabel={[
+                    lg.name,
+                    lg.platform === 'espn' ? 'ESPN' : null,
+                    `${(lg.total_rosters as number | undefined) || 12} teams`,
+                  ]
+                    .filter(Boolean)
+                    .join(', ')}
+                  accessibilityState={{ selected: isActive, disabled: busyId !== null, busy: isBusy }}
+                  accessibilityHint={isActive ? 'Currently active league' : 'Switches to this league'}
                   onPress={() => handlePick(lg.league_id, lg.name)}
                   disabled={busyId !== null}
                   style={({ pressed }) => [

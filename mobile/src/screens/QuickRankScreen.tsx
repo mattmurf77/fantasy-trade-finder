@@ -342,6 +342,8 @@ export default function QuickRankScreen() {
             <Pressable
               key={p}
               testID={`quick-rank.pos-tab.${p}`}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isActive }}
               onPress={() => onPosition(p)}
               style={({ pressed }) => [
                 styles.switcherBtn,
@@ -463,6 +465,9 @@ export default function QuickRankScreen() {
             />
             <Pressable
               testID="quick-rank.save-btn"
+              accessibilityRole="button"
+              accessibilityLabel={`Save ${TIER_LABEL[tier]}${isLastTier ? ' and finish' : ''}`}
+              accessibilityState={{ disabled: saving, busy: saving }}
               disabled={saving}
               onPress={onSave}
               style={({ pressed }) => [

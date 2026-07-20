@@ -548,11 +548,56 @@ def render_trade_card(match_id) -> tuple[bytes, int]:
     ), 200
 
 
+def render_package_card(short_id) -> tuple[bytes, int]:
+    """
+    Render an arbitrary shared package (shared_packages row) as an OG card
+    — the /s/p/<short_id> landing (teardown S7 PRD-01, flag
+    `growth.share_landing`). Same layout as the trade-match card; sides
+    come from the sharer's snapshot rather than a trade_matches row.
+
+    Returns (png_bytes, http_status_code): 200 on success, 404 for an
+    unknown short_id (placeholder PNG body).
+    """
+    if _PIL_IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "Pillow is not installed. Run: pip install Pillow>=10.0"
+        ) from _PIL_IMPORT_ERROR
+
+    try:
+        from .database import load_shared_package, load_players_by_ids
+    except Exception as e:
+        log.error("og_image: import failed: %s", e)
+        return render_placeholder_card("Unavailable", "Data service offline"), 500
+
+    try:
+        pkg = load_shared_package(str(short_id))
+    except Exception as e:
+        log.error("og_image: package lookup failed for %s: %s", short_id, e)
+        return render_placeholder_card("Unavailable", "Data service offline"), 500
+    if pkg is None:
+        return render_placeholder_card("Package not found", f"id={short_id!r}"), 404
+
+    give = [str(x) for x in pkg.get("give_ids") or []]
+    receive = [str(x) for x in pkg.get("receive_ids") or []]
+    all_ids = give + receive
+    players_by_id = load_players_by_ids(all_ids) if all_ids else {}
+    fairness = _compute_fairness(give, receive, players_by_id)
+
+    return _render_trade_card_png(
+        give_ids=give,
+        receive_ids=receive,
+        players_by_id=players_by_id,
+        fairness=fairness,
+        title="Trade Package",
+    ), 200
+
+
 def _render_trade_card_png(
     give_ids: list[str],
     receive_ids: list[str],
     players_by_id: dict[str, dict],
     fairness: int,
+    title: str = "Trade Match",
 ) -> bytes:
     img = _new_canvas()
     draw = ImageDraw.Draw(img)
@@ -565,7 +610,6 @@ def _render_trade_card_png(
     font_small   = _load_font(22)
 
     # Header
-    title = "Trade Match"
     draw.text((60, 45), title, font=font_title, fill=TEXT_PRIMARY)
 
     # Two sides

@@ -21,6 +21,7 @@ import QuickRankScreen from '../screens/QuickRankScreen';
 import ManualRanksScreen from '../screens/ManualRanksScreen';
 import TrendsScreen from '../screens/TrendsScreen';
 import TradesScreen from '../screens/TradesScreen';
+import TradeFinderHubScreen from '../screens/TradeFinderHubScreen';
 import PortfolioScreen from '../screens/PortfolioScreen';
 import TradeCalculatorScreen from '../screens/TradeCalculatorScreen';
 import MatchesScreen from '../screens/MatchesScreen';
@@ -47,7 +48,7 @@ export type RankRoute =
   | 'QuickRank'
   | 'ManualRanks'
   | 'Trends';
-export type TradesRoute = 'TradesHome' | 'Portfolio' | 'TradeCalculator';
+export type TradesRoute = 'TradesHome' | 'TradeDeck' | 'Portfolio' | 'TradeCalculator';
 
 // #51/#52 — Rank sub-screens (Tiers / Overall Ranks / Trends) are siblings
 // reached from the Rank menu, not a linear drill-down. The native back button
@@ -295,9 +296,21 @@ function RankStackNav() {
 }
 
 function TradesStackNav() {
+  // FB #156 — Trade-Finding Hub (Variant B). Flag on: the Trades home is the
+  // launcher hub, and TradesScreen (the deck) is a pushed `TradeDeck` route the
+  // hub opens per mode. Flag off: TradesScreen stays the home exactly as before
+  // (TradeDeck unregistered), so the onboarding trades-first flow — which
+  // auto-generates on the deck home — is untouched.
+  const finderHubOn = useFlag('trades.finder_hub');
   return (
     <TradesStack.Navigator screenOptions={{ headerShown: false }}>
-      <TradesStack.Screen name="TradesHome" component={TradesScreen} />
+      <TradesStack.Screen
+        name="TradesHome"
+        component={finderHubOn ? TradeFinderHubScreen : TradesScreen}
+      />
+      {finderHubOn ? (
+        <TradesStack.Screen name="TradeDeck" component={TradesScreen} />
+      ) : null}
       <TradesStack.Screen
         name="Portfolio"
         component={PortfolioScreen}
@@ -593,15 +606,25 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
       <View style={styles.sheet}>
         <View style={styles.handle} />
-        <Text style={type.heading}>Rank</Text>
+        <Text style={type.heading} accessibilityRole="header">Rank</Text>
         <Text style={styles.sheetSub}>Pick how you want to rank players.</Text>
         {items.map((it) => (
           <Pressable
             key={it.route}
             testID={it.testID}
+            accessibilityRole="button"
+            accessibilityLabel={
+              it.recommended ? `${it.label}, recommended` : it.label
+            }
+            accessibilityHint={it.sub}
             onPress={() => go(it.route)}
             style={({ pressed }) => [
               styles.item,

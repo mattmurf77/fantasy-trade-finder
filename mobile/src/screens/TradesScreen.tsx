@@ -51,6 +51,7 @@ import Toast from '../components/Toast';
 import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
 import HelpSheet, { InfoButton } from '../components/HelpSheet';
 import OutlookSheet from '../components/OutlookSheet';
+import TradeFinderModeBar from '../components/TradeFinderModeBar';
 import LeaguePill from '../components/LeaguePill';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import QueueChip from '../components/QueueChip';
@@ -168,7 +169,7 @@ let guideS7ShownThisSession = false;
 // across all trigger classes — asks never stack and never nag.
 let appleAskShownThisSession = false;
 
-export default function TradesScreen({ navigation }: any) {
+export default function TradesScreen({ navigation, route }: any) {
   const queryClient = useQueryClient();
   const league = useSession((s) => s.league);
   const switching = useSession((s) => s.switching);
@@ -319,6 +320,36 @@ export default function TradesScreen({ navigation }: any) {
   const outlookInlineOn = useFlag('ux.outlook_inline_default'); // S4 PRD-02
   const helpOn = useFlag('ux.help_surface');              // S4 PRD-01
   const shareLandingOn = useFlag('growth.share_landing'); // S7 PRD-01
+
+  // ── FB #156 — Trade-Finding Hub (flag `trades.finder_hub`) ────────────
+  // Launched from the launcher hub as the `TradeDeck` route, route.params
+  // carries which mode opened us and (team mode) the scoped league-mate.
+  // Flag off or no params ⇒ every value here is undefined and this screen
+  // behaves exactly as the standalone Trades home. The lateral quick-switch
+  // bar (TradeFinderModeBar) + the opponent scope are the only additions.
+  const finderHubOn = useFlag('trades.finder_hub');
+  const finderMode: 'guided' | 'team' | 'player' | undefined = finderHubOn
+    ? route?.params?.mode
+    : undefined;
+  const scopedOpponent: string | undefined =
+    finderMode === 'team' ? route?.params?.opponentUserId : undefined;
+  const scopedOpponentName: string | undefined =
+    finderMode === 'team' ? route?.params?.opponentName : undefined;
+
+  // Lateral switch handlers. Guided/Player switch in place (setParams keeps
+  // this instance mounted, so pinned targets persist across the switch);
+  // Team without a chosen opponent bounces to the hub picker; Calculator and
+  // Hub are separate destinations.
+  const switchFinderMode = useCallback(
+    (m: 'guided' | 'team' | 'player') => {
+      if (m === 'team' && !scopedOpponent) {
+        navigation?.navigate?.('TradesHome');
+        return;
+      }
+      navigation?.setParams?.({ mode: m });
+    },
+    [navigation, scopedOpponent],
+  );
 
   // S4 PRD-01 — "How trades are priced" sheet next to the fairness toggle.
   const [pricingHelpOpen, setPricingHelpOpen] = useState(false);
@@ -654,6 +685,9 @@ export default function TradesScreen({ navigation }: any) {
           targetingEnabled && pinnedReceive.length > 0
             ? pinnedReceive.map((p) => p.id)
             : undefined,
+        // FB #156 Specific Team — scope the sweep to one league-mate. Omitted
+        // (not null) when unset so untargeted payloads stay byte-identical.
+        opponent_user_id: scopedOpponent || undefined,
       }),
     onSuccess: (snapshot) => {
       setJob(snapshot);
@@ -1075,6 +1109,16 @@ export default function TradesScreen({ navigation }: any) {
     setEdits({});
     setSwapTarget(null);
   }
+
+  // FB #156 — entering or changing a hub finder mode/scope starts a clean
+  // deck so team-scoped or player-targeted results never mix with a prior
+  // mode's cards. Gated to hub launches; the standalone Trades home never
+  // runs this (finderMode is undefined there).
+  useEffect(() => {
+    if (!finderHubOn || !finderMode) return;
+    resetDeckForNewTargets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finderMode, scopedOpponent]);
 
   function handleAddTarget(p: CalcPlayer) {
     const player: Player = {
@@ -1998,6 +2042,19 @@ export default function TradesScreen({ navigation }: any) {
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!topCard || !generateMutation.isPending}
       >
+        {/* FB #156 — lateral quick-switch bar (only when opened from the
+            hub as a focused mode). Replaces the Trades/Portfolio/Calculator
+            subnav below for these launches. */}
+        {finderMode ? (
+          <TradeFinderModeBar
+            mode={finderMode}
+            teamName={scopedOpponentName}
+            onSwitch={switchFinderMode}
+            onCalculator={() => navigation?.navigate?.('TradeCalculator')}
+            onHub={() => navigation?.navigate?.('TradesHome')}
+          />
+        ) : null}
+
         {/* Onboarding item 4 (F5) — first-run identity confirm. A valid-
             but-wrong username silently loads a stranger's team; this is
             the escape hatch. Session-dismissible; demo sessions skip it. */}
@@ -2039,7 +2096,7 @@ export default function TradesScreen({ navigation }: any) {
             Calculator (manual trade builder, demo data) is always
             reachable — it needs no league. Chalkline chip construction:
             1px border + label type on ink; active = ink-3 well + chalk. */}
-        {!firstRun && (
+        {!firstRun && !finderMode && (
         <View style={styles.subnavRow}>
           <View testID="trades.subnav.trades" style={[styles.subnavPill, styles.subnavPillActive]}>
             <Text style={[styles.subnavPillText, styles.subnavPillTextActive]}>
@@ -2049,6 +2106,7 @@ export default function TradesScreen({ navigation }: any) {
           {showPortfolioPill ? (
             <Pressable
               testID="trades.subnav.portfolio"
+              accessibilityRole="button"
               onPress={() => navigation?.navigate?.('Portfolio')}
               style={({ pressed }) => [
                 styles.subnavPill,
@@ -2060,6 +2118,7 @@ export default function TradesScreen({ navigation }: any) {
           ) : null}
           <Pressable
             testID="trades.subnav.calculator"
+            accessibilityRole="button"
             onPress={() => navigation?.navigate?.('TradeCalculator')}
             style={({ pressed }) => [
               styles.subnavPill,
@@ -2423,6 +2482,7 @@ export default function TradesScreen({ navigation }: any) {
         {demoBridgeOn && isDemo ? (
           <Pressable
             testID="trades.demo-bridge"
+            accessibilityRole="button"
             style={styles.demoBridge}
             onPress={async () => {
               track('demo_bridge_tapped', undefined, 'Trades');
@@ -2476,7 +2536,12 @@ export default function TradesScreen({ navigation }: any) {
             until acted on or dismissed, then never again (persisted). */}
         {appleBannerShown ? (
           <View testID="trades.apple-session2-banner" style={styles.appleBanner}>
-            <Pressable style={styles.appleBannerBody} onPress={openSession2Banner} hitSlop={4}>
+            <Pressable
+              style={styles.appleBannerBody}
+              onPress={openSession2Banner}
+              hitSlop={4}
+              accessibilityRole="button"
+            >
               <Text style={styles.appleBannerText}>
                 {obTotalSwipes} swipes on this board. Sign in with Apple to
                 save your rankings to your account →
@@ -2486,6 +2551,8 @@ export default function TradesScreen({ navigation }: any) {
               testID="trades.apple-session2-banner.dismiss"
               onPress={dismissSession2Banner}
               hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss"
             >
               {({ pressed }) => (
                 <Text style={[styles.appleBannerDismiss, pressed && { color: chalk.base }]}>
@@ -2569,6 +2636,9 @@ export default function TradesScreen({ navigation }: any) {
               {queueEnabled && leagueId ? (
                 <Pressable
                   onPress={() => handleQueue(topCard)}
+                  accessibilityRole="button"
+                  accessibilityLabel={topCardQueued ? 'Queued' : 'Queue this trade'}
+                  accessibilityState={{ selected: topCardQueued }}
                   style={({ pressed }) => [
                     styles.queueBtn,
                     topCardQueued && styles.queueBtnQueued,
@@ -2680,6 +2750,8 @@ export default function TradesScreen({ navigation }: any) {
                   onPress={() => void shareLikedTrade()}
                   style={styles.shareRow}
                   hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share your last liked trade"
                 >
                   {({ pressed }) => (
                     <Text style={[styles.shareRowText, pressed && { color: chalk.base }]}>
@@ -2771,6 +2843,8 @@ export default function TradesScreen({ navigation }: any) {
         <View style={styles.queueFooter}>
           <Pressable
             onPress={() => setQueueSheetOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`${queuedTrades.length} queued, tap to review`}
             style={({ pressed }) => [
               styles.queueFooterTap,
               pressed && styles.queueFooterTapPressed,
@@ -2800,11 +2874,13 @@ export default function TradesScreen({ navigation }: any) {
         <Pressable
           style={styles.queueBackdrop}
           onPress={() => setQueueSheetOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
         />
         <View style={styles.queueSheet}>
           <View style={styles.queueHandle} />
           <View style={styles.queueSheetHeader}>
-            <Text style={styles.queueSheetTitle}>Trade queue</Text>
+            <Text style={styles.queueSheetTitle} accessibilityRole="header">Trade queue</Text>
             <Text style={styles.queueSheetSub}>
               <Text style={type.data}>{queuedTrades.length}</Text>
               {' queued · "Send All" opens each on Sleeper'}
@@ -3074,6 +3150,17 @@ function SwipableTopCard({
         style={[styles.cardStack, animatedStyle]}
         onLayout={onCardLayout}
         onTouchStart={nudge ? () => onFirstTouch?.() : undefined}
+        // S8 PRD-01 (inert a11y): the swipe gesture's power path — like/
+        // pass as VoiceOver custom actions on the card itself, mirroring
+        // the visible check/X buttons (identical advance() handlers).
+        accessibilityActions={[
+          { name: 'like', label: 'Accept this trade' },
+          { name: 'pass', label: 'Pass on this trade' },
+        ]}
+        onAccessibilityAction={({ nativeEvent }) => {
+          if (nativeEvent.actionName === 'like') onLike();
+          else if (nativeEvent.actionName === 'pass') onPass();
+        }}
       >
         <TradeCardComp
           data={card}

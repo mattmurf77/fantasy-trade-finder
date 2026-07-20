@@ -1045,6 +1045,52 @@ linked_identities_table = Table("linked_identities", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# Persistent sessions (teardown 06-03 PRD, flag `auth.persistent_sessions`)
+#
+# Durable identity layer under server.py's in-memory `_sessions` dict. Only
+# VERIFIED sessions (Sleeper-JWT proof or Apple/Google anchor) are ever
+# written here — username-only unverified sessions deliberately stay
+# memory-only so they keep the 4h idle eviction + restart loss that limits
+# the squatting window. Tokens are stored as SHA-256 hashes (a DB leak must
+# not hand out live bearer tokens). Rows are the source of truth for
+# "session survives a deploy": on a memory miss the server rebuilds the
+# in-memory session from this row (90d rolling idle expiry, enforced at
+# read time + purged by the cleanup loop).
+# ---------------------------------------------------------------------------
+
+sessions_table = Table("sessions", metadata,
+    Column("token_hash",   String, primary_key=True),   # SHA-256 hex of the bearer token
+    Column("user_id",      String, nullable=False),     # sleeper id or acct_* working key
+    Column("account_id",   String),                     # accounts.account_id when anchored
+    Column("verified_via", String),                     # 'sleeper' | 'apple' | 'google'
+    Column("account_only", Integer),                    # 1 = acct_* session (no Sleeper source)
+    Column("username",     String),                     # for session rebuild after restart
+    Column("display_name", String),
+    Column("created_at",   String, nullable=False),     # ISO UTC
+    Column("last_seen_at", String, nullable=False),     # ISO UTC — throttled refresh
+    Index("ix_sessions_user", "user_id"),
+)
+
+# ---------------------------------------------------------------------------
+# Shared trade packages (teardown S7 PRD-01 follow-up, flag
+# `growth.share_landing`) — landing objects for calculator / unmatched-trade
+# shares, which previously had no /s/ page and fell back to the site root.
+# A row is a compact public snapshot: two player-id lists chosen by the
+# sharer. Retention: kept indefinitely (share links shouldn't rot);
+# created_at is recorded so a future sweep can prune. The sharer's user_id
+# is stored for rate limiting/abuse tracing but never rendered on the page.
+# ---------------------------------------------------------------------------
+
+shared_packages_table = Table("shared_packages", metadata,
+    Column("short_id",    String, primary_key=True),    # url token, e.g. 8 chars
+    Column("user_id",     String, nullable=False),      # sharer (server-side only)
+    Column("give_ids",    Text,   nullable=False),      # JSON list[str] of player ids
+    Column("receive_ids", Text,   nullable=False),      # JSON list[str] of player ids
+    Column("created_at",  String, nullable=False),      # ISO UTC
+    Index("ix_shared_packages_user", "user_id"),
+)
+
+# ---------------------------------------------------------------------------
 # Monetization platform foundation
 # (docs/plans/monetization/00-platform-foundation.md §2.1)
 #
@@ -7690,3 +7736,176 @@ def list_bad_trade_flags(*, since_id: int = 0, limit: int = 100) -> list[dict]:
                 d[field] = []
         out.append(d)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Persistent sessions — helpers for server.py's session store
+# (teardown 06-03, flag `auth.persistent_sessions`; see sessions_table)
+# ---------------------------------------------------------------------------
+
+def session_token_hash(token: str) -> str:
+    """SHA-256 hex of a bearer token — the only form ever stored at rest."""
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
+
+def persist_session(
+    token: str,
+    *,
+    user_id: str,
+    account_id: str | None = None,
+    verified_via: str | None = None,
+    account_only: bool = False,
+    username: str | None = None,
+    display_name: str | None = None,
+) -> None:
+    """Upsert the durable row for a verified session. Refreshes
+    last_seen_at (and identity fields) when the row already exists —
+    callers throttle, so this doubles as the rolling-expiry heartbeat."""
+    if not token or not user_id:
+        return
+    th = session_token_hash(token)
+    now = _now()
+    vals = {
+        "user_id":      user_id,
+        "account_id":   account_id,
+        "verified_via": verified_via,
+        "account_only": 1 if account_only else 0,
+        "username":     username,
+        "display_name": display_name,
+        "last_seen_at": now,
+    }
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(sessions_table)
+            .where(sessions_table.c.token_hash == th)
+            .values(**vals)
+        )
+        if res.rowcount == 0:
+            try:
+                conn.execute(insert(sessions_table).values(
+                    token_hash=th, created_at=now, **vals))
+            except Exception:
+                pass  # raced concurrent insert — the other writer's row wins
+
+
+def load_persisted_session(token: str) -> dict | None:
+    """Row for this bearer token, or None. Keys mirror sessions_table."""
+    if not token:
+        return None
+    th = session_token_hash(token)
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(sessions_table).where(sessions_table.c.token_hash == th)
+        ).fetchone()
+    return dict(row._mapping) if row is not None else None
+
+
+def touch_persisted_session(token: str) -> None:
+    """Bump last_seen_at for the rolling 90d idle expiry. No-op on miss."""
+    if not token:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            update(sessions_table)
+            .where(sessions_table.c.token_hash == session_token_hash(token))
+            .values(last_seen_at=_now())
+        )
+
+
+def delete_persisted_session(token: str) -> bool:
+    """Remove one session row (sign-out). True when a row was deleted."""
+    if not token:
+        return False
+    with engine.begin() as conn:
+        res = conn.execute(
+            delete(sessions_table)
+            .where(sessions_table.c.token_hash == session_token_hash(token))
+        )
+    return bool(res.rowcount)
+
+
+def delete_persisted_sessions_for_user(user_id: str) -> int:
+    """Remove every session row for a user (account deletion, working-key
+    migration, test-user teardown). Returns the number of rows deleted."""
+    if not user_id:
+        return 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            delete(sessions_table).where(sessions_table.c.user_id == user_id)
+        )
+    return int(res.rowcount or 0)
+
+
+def purge_stale_persisted_sessions(max_idle_days: int = 90) -> int:
+    """Delete rows idle past the rolling expiry. ISO-8601 UTC strings
+    compare lexicographically, so a computed cutoff string suffices."""
+    cutoff = (datetime.now(timezone.utc)
+              - timedelta(days=max_idle_days)).isoformat()
+    with engine.begin() as conn:
+        res = conn.execute(
+            delete(sessions_table).where(sessions_table.c.last_seen_at < cutoff)
+        )
+    return int(res.rowcount or 0)
+
+
+# ---------------------------------------------------------------------------
+# Shared trade packages — helpers for the /s/p/<id> share landing
+# (teardown S7 PRD-01 follow-up, flag `growth.share_landing`)
+# ---------------------------------------------------------------------------
+
+def create_shared_package(
+    short_id: str,
+    user_id: str,
+    give_ids: list[str],
+    receive_ids: list[str],
+) -> bool:
+    """Insert one share snapshot. False on a short_id collision (caller
+    re-mints and retries)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(insert(shared_packages_table).values(
+                short_id=short_id,
+                user_id=user_id,
+                give_ids=json.dumps([str(x) for x in give_ids]),
+                receive_ids=json.dumps([str(x) for x in receive_ids]),
+                created_at=_now(),
+            ))
+        return True
+    except Exception:
+        return False
+
+
+def load_shared_package(short_id: str) -> dict | None:
+    """{short_id, user_id, give_ids: list, receive_ids: list, created_at}
+    or None."""
+    if not short_id:
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(shared_packages_table)
+            .where(shared_packages_table.c.short_id == short_id)
+        ).fetchone()
+    if row is None:
+        return None
+    d = dict(row._mapping)
+    for field in ("give_ids", "receive_ids"):
+        try:
+            d[field] = json.loads(d[field])
+        except (json.JSONDecodeError, TypeError):
+            d[field] = []
+    return d
+
+
+def count_recent_shared_packages(user_id: str, *, hours: int = 1) -> int:
+    """Sharer's rows newer than the window — the POST rate-limit input."""
+    if not user_id:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with engine.connect() as conn:
+        n = conn.execute(
+            select(func.count())
+            .select_from(shared_packages_table)
+            .where(and_(shared_packages_table.c.user_id == user_id,
+                        shared_packages_table.c.created_at >= cutoff))
+        ).scalar()
+    return int(n or 0)

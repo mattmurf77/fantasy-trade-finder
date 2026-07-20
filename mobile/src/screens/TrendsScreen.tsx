@@ -101,6 +101,9 @@ export default function TrendsScreen() {
           return (
             <Pressable
               key={f}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={f === 'ALL' ? 'All positions' : f}
               onPress={() => setFilter(f)}
               style={({ pressed }) => [
                 styles.filterSegment,

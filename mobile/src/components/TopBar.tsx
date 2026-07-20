@@ -165,11 +165,16 @@ export default function TopBar() {
         animationType="slide"
         onRequestClose={() => setOpen(false)}
       >
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => setOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        />
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <View style={styles.sheetHead}>
-            <Text style={type.heading}>Notifications</Text>
+            <Text style={type.heading} accessibilityRole="header">Notifications</Text>
             {items.length > 0 && (
               <Button
                 label="Clear all"

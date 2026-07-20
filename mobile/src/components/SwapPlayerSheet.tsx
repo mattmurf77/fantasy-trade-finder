@@ -146,13 +146,18 @@ export default function SwapPlayerSheet({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
       <View style={styles.sheet}>
         <SafeAreaView style={styles.sheetInner} edges={['bottom']}>
           <View style={styles.grabber} />
           <View style={styles.header}>
             <View style={styles.headerText}>
-              <Text style={type.heading} numberOfLines={1}>
+              <Text style={type.heading} numberOfLines={1} accessibilityRole="header">
                 Replace {replacing?.name ?? 'player'}
               </Text>
               <Text style={type.bodySm}>from {rosterLabel}</Text>

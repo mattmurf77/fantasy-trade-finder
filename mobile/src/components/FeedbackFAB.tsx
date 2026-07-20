@@ -101,7 +101,12 @@ export default function FeedbackFAB({ activeScreen }: Props) {
           testID="feedback.fab"
           onPress={() => setSheetOpen(true)}
           style={({ pressed }) => [styles.fab, pressed && styles.pressed]}
-          accessibilityLabel="Capture feedback"
+          accessibilityRole="button"
+          accessibilityLabel={
+            items.length > 0
+              ? `Capture feedback, ${items.length} saved`
+              : 'Capture feedback'
+          }
         >
           <Icon name="flag" size={20} color={chalk.base} />
           {items.length > 0 ? (

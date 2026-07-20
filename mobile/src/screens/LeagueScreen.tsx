@@ -472,10 +472,15 @@ export default function LeagueScreen() {
         animationType="fade"
         onRequestClose={() => setMembersOpen(false)}
       >
-        <Pressable style={styles.overlayBackdrop} onPress={() => setMembersOpen(false)} />
+        <Pressable
+          style={styles.overlayBackdrop}
+          onPress={() => setMembersOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        />
         <View style={styles.overlayCard}>
           <View style={styles.overlayHead}>
-            <Text style={type.heading}>League members</Text>
+            <Text style={type.heading} accessibilityRole="header">League members</Text>
             <Pressable
               onPress={() => setMembersOpen(false)}
               hitSlop={12}

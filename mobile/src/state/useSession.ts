@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  api,
   clearSessionToken,
   getSessionToken,
+  setOnSessionExpired,
   setOnVerificationRequired,
 } from '../api/client';
 import { initLeagueSession, startDemoSession as apiStartDemoSession } from '../api/auth';
@@ -443,6 +445,7 @@ export const useSession = create<SessionState>((set, get) => ({
   },
 
   signOut: async () => {
+    api.post('/api/session/signout').catch(() => {});   // best-effort server-side revoke (W2C handoff; route evicts the token + its durable row)
     await Promise.all([
       AsyncStorage.removeItem(SU_KEY),
       AsyncStorage.removeItem(SL_KEY),
@@ -487,4 +490,49 @@ setOnVerificationRequired(() => {
       enforced:         cur?.enforced ?? false,
     },
   });
+});
+
+// ── Session-expired signal (teardown 06-03, flag auth.persistent_sessions) ──
+// A 401 just cleared the stored token. Sleeper-keyed sessions silently
+// re-mint via revalidateSession, and demo sessions just end — but an
+// ACCOUNT-ONLY session (no sleeper_username) has no silent path: identity
+// tokens are one-shot, so recovery needs a fresh Apple tap. Interim
+// mitigation per the P3 PRD: route to SignIn pre-set for Apple re-auth
+// instead of leaving the user stranded on failing screens. Flag-gated so
+// flag-off behavior stays the legacy generic clear.
+
+// One-shot hint for SignInScreen: "you're here for an Apple re-auth".
+// Module-level (not store state) — it's routing context, not UI state.
+let _appleReauthPending = false;
+/** Read-and-clear the pending Apple re-auth hint (SignInScreen mount). */
+export function consumeAppleReauthHint(): boolean {
+  const v = _appleReauthPending;
+  _appleReauthPending = false;
+  return v;
+}
+
+setOnSessionExpired(() => {
+  const s = useSession.getState();
+  if (s.isDemo || !s.user?.account_only) return;
+  try {
+    // Lazy require — the flag store imports api modules that import us.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { useFeatureFlags } = require('./useFeatureFlags') as typeof import('./useFeatureFlags');
+    if (!useFeatureFlags.getState().flags['auth.persistent_sessions']) return;
+  } catch {
+    return; // can't read the flag → keep legacy behavior
+  }
+  useSession.setState({ hasToken: false });
+  _appleReauthPending = true;
+  try {
+    // Lazy require breaks the RootNav → useSession import cycle; resolved
+    // only at 401 time, long after both modules initialized.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { navigationRef } = require('../navigation/RootNav') as typeof import('../navigation/RootNav');
+    if (navigationRef.isReady() && navigationRef.getCurrentRoute?.()?.name !== 'SignIn') {
+      navigationRef.navigate('SignIn' as never);
+    }
+  } catch {
+    /* navigation not mounted yet — RootNav's gating handles the next boot */
+  }
 });

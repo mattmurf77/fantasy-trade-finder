@@ -510,6 +510,38 @@ One row per provider identity. Keyed on the provider's stable `sub` claim — **
 
 ---
 
+## `sessions`
+
+**Teardown 06-03 P3 (W3B), flag `auth.persistent_sessions`.** Durable layer under `server.py`'s in-memory session dict. Rows exist **only for verified sessions** (Sleeper-JWT proof or Apple/Google anchor) — username-only unverified sessions deliberately stay memory-only so their 4h idle TTL + restart loss keeps bounding the impersonation/squatting window. On a memory miss the server rebuilds the live session from this row (rolling 90-day idle expiry, enforced at read time and purged by the 5-min cleanup loop). Rows are deleted on sign-out, account deletion, `acct_*`→Sleeper working-key migration (link-sleeper), test-user teardown, and when `/api/session/init` re-points a token at a different user. Flag off: no rows are written or read.
+
+| Column | Type | Notes |
+|---|---|---|
+| `token_hash` | str PK | **SHA-256 hex of the bearer token** — the raw token is never stored (a DB leak must not yield live credentials) |
+| `user_id` | str, not null | Sleeper user id or `acct_<account_id>` working key. Indexed (`ix_sessions_user`) for the delete-all-for-user eviction paths |
+| `account_id` | str | → `accounts.account_id` when the session is account-anchored |
+| `verified_via` | str | `'sleeper'` / `'apple'` / `'google'` — re-stamped onto the rebuilt session |
+| `account_only` | int | 0/1 — 1 = `acct_*` session with no Sleeper source (rebuilds as the empty-sentinel-league account session) |
+| `username` | str | Snapshot for rebuild; falls back to the `users` profile when null |
+| `display_name` | str | Snapshot for rebuild |
+| `created_at` | str, not null | ISO UTC |
+| `last_seen_at` | str, not null | ISO UTC — heartbeat-refreshed (throttled to ≥10 min between writes); drives the rolling 90d expiry |
+
+---
+
+## `shared_packages`
+
+**Teardown S7 PRD-01 follow-up (W3B), flag `growth.share_landing`.** Landing objects for arbitrary shared trade packages (`POST /api/share/package` → `/s/p/<short_id>` + `/og/p/<short_id>.png`) — calculator builds and liked-but-unmatched trades, which have no `trade_matches` row to share. **Retention:** rows are kept indefinitely (share links shouldn't rot); `created_at` is recorded so a future sweep can prune. **Privacy note for the operator:** the landing page is public-by-URL and shows only the player ids the sharer chose; `user_id` is stored server-side for rate limiting/abuse tracing and is never rendered.
+
+| Column | Type | Notes |
+|---|---|---|
+| `short_id` | str PK | URL token (`secrets.token_urlsafe(6)`, 8 chars) |
+| `user_id` | str, not null | Sharer. Indexed (`ix_shared_packages_user`) — feeds the 20/hour rate limit |
+| `give_ids` | text, not null | JSON `list[str]` of player ids (≤5) |
+| `receive_ids` | text, not null | JSON `list[str]` of player ids (≤5) |
+| `created_at` | str, not null | ISO UTC |
+
+---
+
 ## `notification_prefs`
 
 Per-user push notification preferences. Buckets (`trade_matches` / `weekly_digest` / `reengagement`) map kinds → user-facing toggle in `get_pref_bucket()` in the push dispatcher.

@@ -65,12 +65,17 @@ export default function RookieDraftBoardSheet({ visible, onClose }: Props) {
       animationType="slide"
       onRequestClose={onClose}
     >
-      <Pressable style={styles.backdrop} onPress={onClose} />
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
       <View style={styles.sheet}>
         <View style={styles.grabber} />
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={type.heading}>Rookie Draft Board</Text>
+            <Text style={type.heading} accessibilityRole="header">Rookie Draft Board</Text>
             <Text style={[type.bodySm, styles.sub]}>
               First-year players and pre-draft prospects.
             </Text>
@@ -78,6 +83,8 @@ export default function RookieDraftBoardSheet({ visible, onClose }: Props) {
           <Pressable
             onPress={onClose}
             hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
             style={({ pressed }) => [styles.closeBtn, pressed && styles.closeBtnPressed]}
           >
             <Icon name="x" size={20} color={chalk.dim} />
@@ -91,6 +98,9 @@ export default function RookieDraftBoardSheet({ visible, onClose }: Props) {
             return (
               <Pressable
                 key={f}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isActive }}
+                accessibilityLabel={f === 'ALL' ? 'All positions' : f}
                 onPress={() => setFilter(f)}
                 style={({ pressed }) => [
                   styles.filterTab,

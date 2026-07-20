@@ -407,6 +407,8 @@ export default function QuickSetTiersScreen() {
             <Pressable
               key={p}
               testID={`quick-set.pos-tab.${p}`}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isActive }}
               onPress={() => onPosition(p)}
               style={({ pressed }) => [
                 styles.switcherBtn,
@@ -518,6 +520,9 @@ export default function QuickSetTiersScreen() {
         />
         <Pressable
           testID="quick-set.save-btn"
+          accessibilityRole="button"
+          accessibilityLabel={`Save ${TIER_LABEL[tier]}${isLastTier ? ' and finish' : ''}`}
+          accessibilityState={{ disabled: saving || rankingsQuery.isLoading, busy: saving }}
           disabled={saving || rankingsQuery.isLoading}
           onPress={onSave}
           style={({ pressed }) => [

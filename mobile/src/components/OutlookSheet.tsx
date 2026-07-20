@@ -87,10 +87,15 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
       <View style={styles.sheet}>
         <View style={styles.grabber} />
-        <Text style={type.heading}>What's your team outlook?</Text>
+        <Text style={type.heading} accessibilityRole="header">What's your team outlook?</Text>
         <Text style={type.bodySm}>
           We'll use this to bias trade suggestions toward what you actually want.
         </Text>
@@ -101,6 +106,10 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
             return (
               <Pressable
                 key={o.key}
+                accessibilityRole="radio"
+                accessibilityState={{ selected, checked: selected }}
+                accessibilityLabel={o.title}
+                accessibilityHint={o.blurb}
                 onPress={() => setOutlook(o.key)}
                 style={({ pressed }) => [
                   styles.outlookRow,
@@ -123,6 +132,9 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
               return (
                 <Pressable
                   key={p}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: selected }}
+                  accessibilityLabel={`Acquire ${p}`}
                   onPress={() => toggle(acquire, setAcquire, p)}
                   style={({ pressed }) => [
                     styles.posChip,
@@ -142,6 +154,9 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
               return (
                 <Pressable
                   key={p}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: selected }}
+                  accessibilityLabel={`Trade away ${p}`}
                   onPress={() => toggle(away, setAway, p)}
                   style={({ pressed }) => [
                     styles.posChip,
@@ -161,6 +176,9 @@ export default function OutlookSheet({ visible, initial, onClose, onSubmit }: Pr
             state, and we keep the in-flight spinner behavior. */}
         <Pressable
           testID="outlook.save-btn"
+          accessibilityRole="button"
+          accessibilityLabel="Save outlook"
+          accessibilityState={{ disabled: submitting, busy: submitting }}
           disabled={submitting}
           onPress={handleSubmit}
           style={({ pressed }) => [

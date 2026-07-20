@@ -123,7 +123,7 @@ export default function RankHomeScreen({ navigation }: any) {
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.body}>
-        <Text style={styles.title}>Build your board</Text>
+        <Text style={styles.title} accessibilityRole="header">Build your board</Text>
 
         <View style={styles.callout}>
           <Icon name="trade" size={18} color={flare.base} />
@@ -141,6 +141,9 @@ export default function RankHomeScreen({ navigation }: any) {
           <Pressable
             key={m.pref}
             testID={`rank-home.card.${m.pref}`}
+            accessibilityRole="button"
+            accessibilityLabel={m.recommended ? `${m.title}, recommended` : m.title}
+            accessibilityHint={`${m.body} ${m.time}`}
             onPress={() => choose(m)}
             style={({ pressed }) => [
               styles.card,

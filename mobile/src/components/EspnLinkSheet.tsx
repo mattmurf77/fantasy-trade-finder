@@ -199,7 +199,12 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={requestClose}>
-      <Pressable style={styles.backdrop} onPress={requestClose} />
+      <Pressable
+        style={styles.backdrop}
+        onPress={requestClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
       {/* #129: keyboard-avoiding wrapper (FeedbackSheet pattern) — without it
           the absolutely-positioned sheet's content is hidden behind the iOS
           keyboard, leaving Continue unreachable while typing the league ID. */}
@@ -209,7 +214,7 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
       >
       <View style={styles.sheet}>
         <View style={styles.grabber} />
-        <Text style={type.heading}>Link an ESPN league</Text>
+        <Text style={type.heading} accessibilityRole="header">Link an ESPN league</Text>
 
         {step === 'input' ? (
           <>
@@ -219,6 +224,7 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
             </Text>
             <TextInput
               testID="espn-link.input"
+              accessibilityLabel="ESPN league ID or league URL"
               style={styles.field}
               value={input}
               onChangeText={setInput}
@@ -234,6 +240,7 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
               onPress={() => setShowCookies((v) => !v)}
               style={styles.cookieToggle}
               accessibilityRole="button"
+              accessibilityState={{ expanded: showCookies }}
             >
               <Icon name={showCookies ? 'chevron-down' : 'chevron-right'} size={14} color={chalk.dim} />
               <Text style={type.bodySm}>Private league? Paste your ESPN cookies</Text>
@@ -299,6 +306,10 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
                   <Pressable
                     key={t.team_id}
                     testID={`espn-link.team.${t.team_id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t.name}${t.owner_display ? `, ${t.owner_display}` : ''}, ${t.mapped_players} players mapped`}
+                    accessibilityHint="Imports this team as yours"
+                    accessibilityState={{ disabled: busyTeamId !== null, busy: isBusy }}
                     onPress={() => pickTeam(t.team_id)}
                     disabled={busyTeamId !== null}
                     style={({ pressed }) => [

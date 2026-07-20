@@ -115,6 +115,9 @@ export default function AnalystGuide() {
           style={StyleSheet.absoluteFill}
           onPress={() => advance('tap')}
           testID="guide.tap-catcher"
+          accessibilityRole="button"
+          accessibilityLabel="Continue"
+          accessibilityHint="Advances the tour"
         />
       ) : null}
 
@@ -142,7 +145,13 @@ export default function AnalystGuide() {
           <View style={[styles.bubble, { maxWidth: winW - AVATAR - 3 * pad }]} testID="guide.bubble">
             <View style={styles.bubbleHead}>
               <Text style={styles.who}>The Analyst</Text>
-              <Pressable onPress={skipStep} hitSlop={10} testID="guide.step-x">
+              <Pressable
+                onPress={skipStep}
+                hitSlop={10}
+                testID="guide.step-x"
+                accessibilityRole="button"
+                accessibilityLabel="Skip this step"
+              >
                 <Text style={styles.x}>✕</Text>
               </Pressable>
             </View>
@@ -153,6 +162,7 @@ export default function AnalystGuide() {
                   <Pressable
                     key={c.label}
                     testID={`guide.cta.${c.action}`}
+                    accessibilityRole="button"
                     onPress={() => {
                       if (c.action === 'accept') onAccept?.();
                       else onDismissCta?.();
@@ -170,7 +180,13 @@ export default function AnalystGuide() {
                 ))}
               </View>
             ) : null}
-            <Pressable onPress={dismissTour} hitSlop={8} testID="guide.skip-tour" style={styles.skip}>
+            <Pressable
+              onPress={dismissTour}
+              hitSlop={8}
+              testID="guide.skip-tour"
+              style={styles.skip}
+              accessibilityRole="button"
+            >
               <Text style={styles.skipText}>Skip the tour</Text>
             </Pressable>
           </View>

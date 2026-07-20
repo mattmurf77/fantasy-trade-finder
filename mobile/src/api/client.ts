@@ -191,6 +191,17 @@ export function setOnVerificationRequired(fn: (() => void) | null): void {
   _onVerificationRequired = fn;
 }
 
+// ── session-expired listener (teardown 06-03, flag auth.persistent_sessions) ──
+// Fired when a 401 just cleared the stored token (the "this session is dead"
+// moment). The session store registers a handler that routes ACCOUNT-ONLY
+// users to SignIn for an Apple re-auth — they have no Sleeper username for
+// the silent re-mint, so without this they'd be stranded on failing screens.
+// Same callback-not-import pattern as setOnVerificationRequired above.
+let _onSessionExpired: (() => void) | null = null;
+export function setOnSessionExpired(fn: (() => void) | null): void {
+  _onSessionExpired = fn;
+}
+
 // ── Request deadlines (INIT-12 Wave 1, FR-1/FR-2) ───────────────────────────
 // Default cap for any request; the known-slow cold-start POSTs get a generous
 // cap so a legitimately-slow-but-progressing session_init isn't aborted.
@@ -413,6 +424,16 @@ async function _apiRequestInner<T = unknown>(
               const current = await getSessionToken();
               if (sent && current && sent === current) {
                 await clearSessionToken();
+                // The stored token is definitively dead — let the session
+                // store decide whether to route to re-auth (account-only,
+                // flag-gated inside the handler).
+                if (_onSessionExpired) {
+                  try {
+                    _onSessionExpired();
+                  } catch {
+                    /* listener errors must never mask the API error */
+                  }
+                }
               }
             }
             const msg = (parsed && (parsed.message || parsed.error)) || `HTTP ${res!.status}`;

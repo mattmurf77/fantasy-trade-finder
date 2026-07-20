@@ -13,10 +13,20 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 | POST | `/api/session/init` | Establish session for a Sleeper username. Response includes the additive `verification` field (below). 400 `missing_user_id` if a session token is sent without `user_id` in the body (tokenless demo/first-init still defaults to the demo user) |
 | GET | `/api/session/ping` | Liveness / session check |
 | POST/GET | `/api/session/demo` | Demo session bootstrap |
-| POST | `/api/session/signout` | **Teardown 06-03 (W2C), unflagged.** Evict the calling `X-Session-Token` server-side → `{ok: true, evicted: bool}`. Idempotent, never errors (missing/stale token → `evicted: false`) — clients call it best-effort during sign-out so the token doesn't stay live until idle eviction |
+| POST | `/api/session/signout` | **Teardown 06-03 (W2C), unflagged.** Evict the calling `X-Session-Token` server-side → `{ok: true, evicted: bool}`. Idempotent, never errors (missing/stale token → `evicted: false`) — clients call it best-effort during sign-out so the token doesn't stay live until idle eviction. Also deletes the token's durable `sessions` row (W3B; unconditional, so rows from a flag-on period can't outlive a sign-out) |
 | POST | `/api/extension/auth` | Issue extension bearer token |
 | POST | `/api/reset` | Wipe current user's rankings + decisions (in-memory service state) |
 | POST | `/api/account/reset-rankings` | **Verified-only** (403 `verification_required`, no grace). Squatter remedy (account-auth P1 §2d): deletes the caller's persisted ranking inputs across all formats — `swipe_decisions`, published `member_rankings`, `users.tier_overrides`/`tiers_saved`/`ranking_method` — and resets this session's in-memory services. → `{ok, counts}`. UI entry point ships with P2's Settings account section |
+
+### Persistent sessions (teardown 06-03 P3, flag `auth.persistent_sessions` — W3B)
+
+Sessions live in an in-memory dict (the hot path). With the flag ON, **verified** sessions additionally get a durable row in the `sessions` table (token stored as a SHA-256 hash) and are transparently **rebuilt from that row** on a memory miss — so deploys/restarts and the 4h idle memory sweep no longer sign out account-anchored users. Mechanics:
+
+- **Who persists:** only sessions with `verified=True` (Sleeper-JWT proof or an Apple/Google anchor), never demo sessions. Username-only **unverified** sessions stay memory-only on purpose: their 4h idle TTL + restart loss bounds the squatting window (anyone can mint a session by naming a Sleeper username), and persistence must not extend it.
+- **Expiry:** rolling **90 days** idle for persisted sessions (heartbeat refresh throttled to ≥10 min between DB writes; checked at read time and purged by the cleanup loop). Unverified sessions keep the 4h posture exactly.
+- **Restore shape:** `acct_*` sessions rebuild fully (account-only empty-league session — immediately usable). Sleeper-keyed sessions rebuild user-scoped (rankings work; league-backed routes 409 `session_not_initialized` until the client's normal `/api/session/init` re-handshake, which reuses the same token and keeps its verified state).
+- **Evictions delete durable rows too:** `/api/session/signout` (own token), `DELETE /api/account` (all rows for the user), `POST /api/account/link-sleeper` (the migrated `acct_*` working key's rows), `DELETE /api/test-users/<id>`, and a token re-pointed at a different user in `/api/session/init`. Verified-owner lockout of squatters is denial-based (per-request read/write gates), not eviction-based — and squatter sessions are never persisted, so no row exists to clean.
+- **Flag OFF:** no rows written, no DB fallback on miss — byte-identical legacy behavior (in-memory only, 4h idle, lost on restart).
 
 ### Verified sessions & the write gate (account-auth P1)
 
@@ -132,7 +142,7 @@ Account-auth plan P2 + P2.6 account-first (docs/plans/account-auth-plan-2026-07-
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/trades/generate` | Generate trade cards. Optional `pinned_give_players` ("what can I get for X") and, behind `trade.finder_targeting`, `pinned_receive_players` ("what does X cost") — pinned jobs bypass the cache. Cards may carry `partner_fit` (0–1 counterparty positional fit) when targeting is active, and `need_fit` (0–1 automatic positional-need fit, FB-96) when `trade.need_fit` is on. Optional `force: true` skips the complete-fresh job cache (running jobs still shared) — used by the onboarding post-Quick-Set regeneration (item 7) |
+| POST | `/api/trades/generate` | Generate trade cards. Optional `pinned_give_players` ("what can I get for X") and, behind `trade.finder_targeting`, `pinned_receive_players` ("what does X cost") — pinned jobs bypass the cache. Optional `opponent_user_id` (FB #156 Specific Team) scopes the sweep to one league-mate; like pinned jobs it bypasses the shared cache. Cards may carry `partner_fit` (0–1 counterparty positional fit) when targeting is active, and `need_fit` (0–1 automatic positional-need fit, FB-96) when `trade.need_fit` is on. Optional `force: true` skips the complete-fresh job cache (running jobs still shared) — used by the onboarding post-Quick-Set regeneration (item 7) |
 | GET | `/api/trades/status` | Generation job status |
 | GET | `/api/trades` | List current trade cards |
 | POST | `/api/trades/swipe` | Like/pass a trade. Optional card-context fields (`give_player_ids`, `receive_player_ids`, `target_user_id`, `target_username`, `league_id`) let the server reconstruct the card after a restart wiped the in-memory deck (FB-46) |
@@ -251,7 +261,7 @@ Verdict math is `trade_service.classify_verdict(give_value, receive_value)` (no 
 |---|---|---|
 | GET | `/api/leagues` | User's leagues |
 | GET | `/api/league/picks` | Draft picks in current league |
-| GET | `/api/league/preferences` | Read the **session user's** outlook + position prefs (a `user_id` query param is ignored — teardown S6B-01 closed the cross-user override). When `trade.outlook_seed` is on and no outlook is declared, adds `inferred_outlook` + `inferred_signals` (#8) |
+| GET | `/api/league/preferences` | Read the **session user's** outlook + position prefs (a `user_id` query param is ignored — teardown S6B-01 closed the cross-user override). When `trade.outlook_seed` is on and no outlook is declared, adds `inferred_outlook` + `inferred_signals` (#8). Always adds `position_needs` + `position_surplus` (FB #156) — the caller's own roster needs/surplus from `analyze_roster_strengths`, powering the Trade-Finding Hub's recommendation chips (scoped to the session roster, like `inferred_outlook`; best-effort, omitted on a profiling error) |
 | POST | `/api/league/preferences` | Write the **session user's** outlook + position prefs (a body `user_id` is ignored — teardown S6B-01; the old override allowed cross-user writes) |
 | GET | `/api/league/asset-prefs` | Read untouchables + targets (#2) → `{untouchables:[], targets:[]}` |
 | POST | `/api/league/asset-prefs` | Tag a player: body `{league_id, player_id, list: "untouchable"\|"target"\|"none"}`; single membership; invalidates the league's cached deck (#2) |
@@ -345,7 +355,10 @@ Triggered by an external scheduler (Render cron). All POST.
 | GET | `/og/tiers/<pos>/<username>.png` | OG image (tiers) |
 | GET | `/og/trade/<match_id>.png` | OG image (trade) |
 | GET | `/s/tiers/<pos>/<username>` | Share page (tiers) |
-| GET | `/s/trade/<match_id>` | Share page (trade) |
+| GET | `/s/trade/<match_id>` | Share page (trade — requires a mutual `trade_matches` row) |
+| POST | `/api/share/package` | **Teardown S7 PRD-01 follow-up (W3B), flag `growth.share_landing` (404 dark).** Snapshot an arbitrary give/receive package (calculator builds, liked-but-unmatched trades) for a public landing. Session-authed; demo sessions → 400 `demo_session`. Body `{give_player_ids: [...], receive_player_ids: [...]}` — ≤5 ids per side, ≥1 overall, ids matching `[A-Za-z0-9_.\-]{1,40}` (else 400 `bad_package`). Rate limit 20/user/hour → 429 `rate_limited`. → `{ok, short_id, url: "/s/p/<id>", og_image: "/og/p/<id>.png"}`; clients build the share URL as `<base><url>?ref=<username>` |
+| GET | `/s/p/<short_id>` | Share page (arbitrary package) — public OG landing, same style as the trade page. 404 while dark or for an unknown id |
+| GET | `/og/p/<short_id>.png` | OG image (arbitrary package) — trade-card layout titled "Trade Package" with the cosmetic fairness read. 404 while dark; unknown id → 404 with a placeholder PNG body |
 
 ## Extension
 

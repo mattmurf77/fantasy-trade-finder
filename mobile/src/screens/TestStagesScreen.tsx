@@ -96,7 +96,7 @@ export default function TestStagesScreen({ navigation }: any) {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.body}>
         <TickLabel>Operator QA · synthetic users</TickLabel>
-        <Text style={styles.h1}>Test Stages</Text>
+        <Text style={styles.h1} accessibilityRole="header">Test Stages</Text>
         <Text style={styles.sub}>
           Spawn a throwaway qa_* user at an adoption stage and swap this device into it.
           Synthetic users ride a seeded demo league, never touch Sleeper, and are excluded
@@ -105,6 +105,7 @@ export default function TestStagesScreen({ navigation }: any) {
 
         <Pressable
           testID="test-stages.factory-reset"
+          accessibilityRole="button"
           style={({ pressed }) => [styles.card, styles.cardDanger, pressed && styles.pressed]}
           onPress={() =>
             Alert.alert(
@@ -128,6 +129,7 @@ export default function TestStagesScreen({ navigation }: any) {
           <Pressable
             key={s.key}
             testID={`test-stages.spawn.${s.key}`}
+            accessibilityRole="button"
             style={({ pressed }) => [styles.card, pressed && styles.pressed]}
             onPress={() => spawn(s.key)}
             disabled={!!busy}

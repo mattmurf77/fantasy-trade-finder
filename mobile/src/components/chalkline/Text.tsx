@@ -36,9 +36,16 @@ export interface ChalkTextProps extends TextProps {
 export default function Text({ variant, scale, style, ...rest }: ChalkTextProps) {
   const scalingOn = useFlag('a11y.text_scaling');
   const tier: ScaleTier = scale ?? (variant ? typeMaxFontScale[variant] : 'body');
+  // Teardown S8 PRD-01 (inert a11y, unflagged): the display/heading variants
+  // are section titles by construction — give them the VoiceOver header trait
+  // so rotor heading-navigation works app-wide. Callers can still override
+  // via an explicit accessibilityRole in `rest`.
+  const headerRole =
+    variant === 'display' || variant === 'heading' ? ('header' as const) : undefined;
   return (
     <RNText
       maxFontSizeMultiplier={scalingOn ? maxFontScale[tier] : undefined}
+      accessibilityRole={headerRole}
       style={variant ? [typeStyles[variant], style] : style}
       {...rest}
     />

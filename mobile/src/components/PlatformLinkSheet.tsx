@@ -217,14 +217,19 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={requestClose}>
-      <Pressable style={styles.backdrop} onPress={requestClose} />
+      <Pressable
+        style={styles.backdrop}
+        onPress={requestClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.kav}
       >
         <View style={styles.sheet}>
           <View style={styles.grabber} />
-          <Text style={type.heading}>Link a {LABEL[platform]} league</Text>
+          <Text style={type.heading} accessibilityRole="header">Link a {LABEL[platform]} league</Text>
 
           {step === 'input' ? (
             <>
@@ -267,6 +272,7 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
                     onPress={() => setShowEmail((v) => !v)}
                     style={styles.cookieToggle}
                     accessibilityRole="button"
+                    accessibilityState={{ expanded: showEmail }}
                   >
                     <Icon name={showEmail ? 'chevron-down' : 'chevron-right'} size={14} color={chalk.dim} />
                     <Text style={type.bodySm}>Don't know the ID? Find leagues by email</Text>
@@ -299,6 +305,8 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
                             <Pressable
                               key={lg.league_id}
                               testID={`platform-link.discovered.${lg.league_id}`}
+                              accessibilityRole="button"
+                              accessibilityState={{ disabled: busy }}
                               onPress={() => fetchPreview(lg.league_id)}
                               disabled={busy}
                               style={({ pressed }) => [styles.teamRow, pressed && styles.rowPressed]}
@@ -345,6 +353,10 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
                     <Pressable
                       key={t.team_id}
                       testID={`platform-link.team.${t.team_id}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${t.name}, ${t.mapped_players} players mapped`}
+                      accessibilityHint="Imports this team as yours"
+                      accessibilityState={{ disabled: busyTeamId !== null, busy: isBusy }}
                       onPress={() => pickTeam(t.team_id)}
                       disabled={busyTeamId !== null}
                       style={({ pressed }) => [

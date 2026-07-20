@@ -116,6 +116,23 @@ export default function SettingsScreen({ navigation }: any) {
     }
   }
 
+  // ── Modal-over-modal fix (teardown 01-05, W2A→W2C handoff; gated under
+  // `account.settings_v2`) ────────────────────────────────────────────────
+  // Settings is itself a root modal. Navigating onward to another root
+  // route (FeedbackInbox / SleeperConnect / LeaguePicker) stacked a second
+  // modal on top of it, and closing THAT modal landed back on Settings
+  // instead of Main. Flag on: dismiss Settings first, then present the
+  // destination — both dispatches in the same tick coalesce on
+  // native-stack (per the W2A spec). Flag off: legacy stacking, verbatim.
+  const navigateFromSettings = (route: string, params?: object) => {
+    if (settingsV2) {
+      navigation.goBack?.();
+      navigation.navigate?.(route, params);
+    } else {
+      navigation.navigate?.(route, params);
+    }
+  };
+
   const onRankingPrefChange = (m: RankMethodPref) => {
     void setRankingPref(m);
     setRankingMethod(m).catch(() => {});
@@ -375,7 +392,7 @@ export default function SettingsScreen({ navigation }: any) {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Verify now',
-          onPress: () => navigation.navigate?.('SleeperConnect'),
+          onPress: () => navigateFromSettings('SleeperConnect'),
         },
       ],
     );
@@ -607,6 +624,13 @@ export default function SettingsScreen({ navigation }: any) {
         return (
           <Pressable
             key={lg.league_id}
+            accessibilityRole="button"
+            accessibilityLabel={`${lg.name}, ${(lg.total_rosters as number | undefined) || 12} teams`}
+            accessibilityState={{
+              selected: isActive,
+              disabled: busyLeagueId !== null || switching || isActive,
+            }}
+            accessibilityHint={isActive ? 'Currently active league' : 'Switches to this league'}
             onPress={() => handleSwitch(lg.league_id, lg.name)}
             disabled={busyLeagueId !== null || switching || isActive}
             style={({ pressed }) => [
@@ -668,7 +692,8 @@ export default function SettingsScreen({ navigation }: any) {
       {espnLinkEnabled ? (
         <Pressable
           testID="settings.link-espn"
-          onPress={() => navigation.navigate?.('LeaguePicker', { espnLink: true })}
+          accessibilityRole="button"
+          onPress={() => navigateFromSettings('LeaguePicker', { espnLink: true })}
           style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
         >
           <View style={{ flex: 1 }}>
@@ -686,7 +711,8 @@ export default function SettingsScreen({ navigation }: any) {
       {mflLinkEnabled || fleaflickerLinkEnabled ? (
         <Pressable
           testID="settings.link-platform"
-          onPress={() => navigation.navigate?.('LeaguePicker')}
+          accessibilityRole="button"
+          onPress={() => navigateFromSettings('LeaguePicker')}
           style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
         >
           <View style={{ flex: 1 }}>
@@ -798,7 +824,8 @@ export default function SettingsScreen({ navigation }: any) {
         <TickLabel>Testing</TickLabel>
       </View>
       <Pressable
-        onPress={() => navigation.navigate?.('FeedbackInbox')}
+        accessibilityRole="button"
+        onPress={() => navigateFromSettings('FeedbackInbox')}
         style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
       >
         <View style={{ flex: 1 }}>
@@ -812,6 +839,7 @@ export default function SettingsScreen({ navigation }: any) {
       {stageUsersEnabled ? (
         <Pressable
           testID="settings.test-stages"
+          accessibilityRole="button"
           onPress={() => navigation.navigate?.('TestStages')}
           style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
         >
@@ -835,6 +863,8 @@ export default function SettingsScreen({ navigation }: any) {
       sleeperLink.connected ? (
         <Pressable
           testID="settings.sleeper-disconnect"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: disconnecting, busy: disconnecting }}
           onPress={confirmDisconnectSleeper}
           disabled={disconnecting}
           style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
@@ -879,6 +909,8 @@ export default function SettingsScreen({ navigation }: any) {
     dataExportEnabled && !isDemo ? (
       <Pressable
         testID="settings.export-data"
+        accessibilityRole="button"
+        accessibilityState={{ disabled: exporting, busy: exporting }}
         onPress={() => void handleExportData()}
         disabled={exporting}
         style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
@@ -1016,7 +1048,8 @@ export default function SettingsScreen({ navigation }: any) {
               account-only users, whose Apple sign-in IS the verification. */}
           {!user?.account_only ? (
             <Pressable
-              onPress={() => navigation.navigate?.('SleeperConnect')}
+              accessibilityRole="button"
+              onPress={() => navigateFromSettings('SleeperConnect')}
               style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
             >
               <View style={{ flex: 1 }}>
@@ -1032,6 +1065,12 @@ export default function SettingsScreen({ navigation }: any) {
           {publicProfileRow}
           {exportRow}
           <Pressable
+            // S8 PRD-02 acceptance: Delete account announces as a button
+            // with a clear destructive label (was a plain text group).
+            accessibilityRole="button"
+            accessibilityLabel="Delete account"
+            accessibilityHint="Permanently deletes your account and all of its data"
+            accessibilityState={{ disabled: deleting, busy: deleting }}
             onPress={confirmDeleteAccount}
             disabled={deleting}
             style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
@@ -1063,6 +1102,8 @@ export default function SettingsScreen({ navigation }: any) {
       {helpSurfaceEnabled ? (
         <Pressable
           testID="settings.help-faq"
+          accessibilityRole="link"
+          accessibilityHint="Opens in your browser"
           onPress={() => Linking.openURL(`${WEB_ORIGIN}/faq.html`)}
           style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
         >
@@ -1076,6 +1117,8 @@ export default function SettingsScreen({ navigation }: any) {
         </Pressable>
       ) : null}
       <Pressable
+        accessibilityRole="link"
+        accessibilityHint="Opens in your browser"
         onPress={() => Linking.openURL(`${WEB_ORIGIN}/privacy`)}
         style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
       >
@@ -1083,6 +1126,8 @@ export default function SettingsScreen({ navigation }: any) {
         <Icon name="chevron-right" color={chalk.dim} size={16} />
       </Pressable>
       <Pressable
+        accessibilityRole="link"
+        accessibilityHint="Opens in your browser"
         onPress={() => Linking.openURL(`${WEB_ORIGIN}/terms`)}
         style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
       >
@@ -1096,6 +1141,7 @@ export default function SettingsScreen({ navigation }: any) {
     <>
       <View style={{ height: space.xxl }} />
       <Pressable
+        accessibilityRole="button"
         onPress={async () => {
           await signOut();
           navigation.replace?.('SignIn');
@@ -1197,6 +1243,10 @@ function Row({
       <Switch
         value={value}
         onValueChange={onChange}
+        // S8 PRD-02 — the bare Switch announced with no name; pair it
+        // with the visible row title (+ sub copy as the hint).
+        accessibilityLabel={title}
+        accessibilityHint={sub}
         trackColor={{ false: ink.ink3, true: ice.base }}
         thumbColor={chalk.base}
       />

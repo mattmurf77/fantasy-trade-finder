@@ -413,6 +413,9 @@ export default function MatchesScreen() {
           return (
             <Pressable
               key={c.id}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isActive }}
+              accessibilityLabel={`Filter: ${c.name}`}
               onPress={() => setFilterLeagueId(c.id)}
               hitSlop={{ top: 6, bottom: 6 }}
               style={({ pressed }) => [

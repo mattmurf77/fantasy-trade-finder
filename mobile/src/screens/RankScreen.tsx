@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
+  AccessibilityInfo,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -196,6 +197,12 @@ export default function RankScreen() {
       if (resp.streak) {
         queryClient.setQueryData(['streak', leagueId, activeFormat], resp.streak);
       }
+      // S8 PRD-01 (inert a11y): the deck rotates silently on a plain
+      // success — announce it so VoiceOver users know the rank landed.
+      // (Failure + streak/QC paths already announce via Toast.)
+      if (!(next > prev && next >= 2)) {
+        AccessibilityInfo.announceForAccessibility('Ranking saved — next trio');
+      }
     },
     onError: () => {
       // Submit failed (network or 5xx). Today the deck doesn't advance
@@ -342,6 +349,9 @@ export default function RankScreen() {
         {(streakQuery.data?.current ?? 0) > 0 ? (
           <View style={styles.streakRow}>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${streakQuery.data!.current} day streak`}
+              accessibilityHint="Opens the League tab leaderboards"
               onPress={() => {
                 haptics.selection();
                 // RankScreen is the inner screen of RankStack which is
@@ -388,6 +398,13 @@ export default function RankScreen() {
               <Pressable
                 key={p}
                 testID={`trios.pos-tab.${p.toLowerCase()}`}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isActive }}
+                accessibilityLabel={
+                  isUnlockedEverywhere
+                    ? p
+                    : `${p}, ${Math.min(count, threshold)} of ${threshold} ranked`
+                }
                 onPress={() => {
                   if (p === position) return;
                   setSelectionOrder([]);
@@ -469,8 +486,10 @@ export default function RankScreen() {
           ) : null}
         </View>
 
-        {/* Instruction */}
-        <Text style={styles.instruction}>
+        {/* Instruction — live region so the stepwise coaching line is
+            announced as it changes (Android; iOS relies on the card
+            state + submit announcements). */}
+        <Text style={styles.instruction} accessibilityLiveRegion="polite">
           {submitMutation.isPending
             ? 'Submitting…'
             : selectionOrder.length === 0
@@ -552,6 +571,16 @@ export default function RankScreen() {
         <Pressable
           testID="trios.speed-toggle"
           onPress={toggleSpeedMode}
+          // S8 PRD-02: persisted on/off setting → switch + checked (the
+          // fairness toggle pattern). Behavior copy rides as the hint.
+          accessibilityRole="switch"
+          accessibilityState={{ checked: speedMode }}
+          accessibilityLabel="I am speed — auto-confirm ranking"
+          accessibilityHint={
+            speedMode
+              ? 'Pick your top 2 — the 3rd is auto-ranked and saved'
+              : 'Tap all 3, then tap Confirm to save'
+          }
           style={({ pressed }) => [
             styles.speedTile,
             speedMode && styles.speedTileOn,
@@ -618,10 +647,15 @@ export default function RankScreen() {
       {/* Long-press info sheet, gesture-audit flag */}
       {infoSheet && (
         <View style={styles.infoOverlay}>
-          <Pressable style={styles.infoBackdrop} onPress={() => setInfoSheet(null)} />
+          <Pressable
+            style={styles.infoBackdrop}
+            onPress={() => setInfoSheet(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          />
           <View style={styles.infoSheet}>
             <View style={styles.grabber} />
-            <Text style={styles.infoTitle}>{infoSheet.name}</Text>
+            <Text style={styles.infoTitle} accessibilityRole="header">{infoSheet.name}</Text>
             <Text style={styles.infoBody}>{infoSheet.info}</Text>
             <Button
               variant="ghost"
@@ -658,6 +692,11 @@ function TrioPlayerCard({
   disabled,
 }: TrioCardProps) {
   const player = side === 'a' ? trio.player_a : side === 'b' ? trio.player_b : trio.player_c;
+  // S8 PRD-01 (inert a11y): the signature interaction reads as one button
+  // with its rank state — "Josh Allen, QB, Buffalo — ranked 1 of 3".
+  const label = `${player.name}, ${player.position}, ${player.team || 'FA'}${
+    rank != null ? ` — ranked ${rank} of 3` : ''
+  }`;
   return (
     <PlayerCard
       player={player}
@@ -668,6 +707,12 @@ function TrioPlayerCard({
       onLongPress={onLongPress}
       disabled={disabled}
       showInjury={false}
+      accessibilityLabel={label}
+      accessibilityHint={
+        rank != null
+          ? 'Removes this rank and any later picks'
+          : 'Assigns the next rank to this player'
+      }
     />
   );
 }

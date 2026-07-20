@@ -100,7 +100,12 @@ export default function Toast({
       pointerEvents="box-none"
       style={[styles.wrap, animatedStyle]}
     >
-      <Pressable onPress={onDismiss} style={styles.bubble}>
+      <Pressable
+        onPress={onDismiss}
+        style={styles.bubble}
+        accessibilityRole="button"
+        accessibilityHint="Dismisses this message"
+      >
         <View style={[styles.rail, { backgroundColor: railColor(tone) }]} />
         <Text style={styles.text}>{message}</Text>
         {action ? (

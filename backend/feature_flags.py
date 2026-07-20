@@ -56,6 +56,10 @@ FLAG_KEYS: tuple[str, ...] = (
     # Trade UI (Agent A3)
     "trades.queue_2k",
     "trades.new_partners_alerts",
+    # FB #156 — Trade-Finding Hub (Variant B launcher hub). When ON the Trades
+    # tab home becomes the mode launcher (Guided / Team / Player / Calculator)
+    # + Trade DNA panel; OFF keeps today's TradesScreen deck as the home.
+    "trades.finder_hub",
     # League social (Agent A4)
     "league.unlock_badges_per_member",
     "league.activity_feed",

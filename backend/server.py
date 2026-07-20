@@ -25,6 +25,7 @@ import math
 import os
 import pathlib
 import random
+import re
 import secrets
 import ssl
 import threading
@@ -148,6 +149,12 @@ from .database import (
     save_bad_trade_flag, list_bad_trade_flags,
     # "Send in Sleeper" — encrypted Sleeper write-token storage (flagged beta)
     upsert_sleeper_credential, get_sleeper_credential, delete_sleeper_credential,
+    # Persistent sessions (teardown 06-03, flag auth.persistent_sessions)
+    persist_session, load_persisted_session, touch_persisted_session,
+    delete_persisted_session, delete_persisted_sessions_for_user,
+    purge_stale_persisted_sessions,
+    # Share-landing packages (teardown S7 PRD-01, flag growth.share_landing)
+    create_shared_package, load_shared_package, count_recent_shared_packages,
 )
 from . import sleeper_write as _sleeper_write
 from . import trade_service as _trade_service_mod
@@ -1205,6 +1212,182 @@ def handle_unexpected_error(e):
                     "message": "Unexpected server error."}), 500
 
 
+# ---------------------------------------------------------------------------
+# Persistent sessions (teardown 06-03 PRD, flag `auth.persistent_sessions`)
+#
+# The in-memory `_sessions` dict stays the hot path; a DB row (sessions
+# table, token hashed at rest) is the durable layer for VERIFIED sessions
+# only. Split expiry posture, on purpose:
+#   • verified / account-anchored sessions → persisted, 90d ROLLING idle
+#     expiry, survive deploys and the 4h memory sweep (the sweep just drops
+#     the cache; the row rebuilds it on next request).
+#   • username-only UNVERIFIED sessions → never persisted. They keep the
+#     4h idle eviction + restart loss. That short TTL is part of the
+#     impersonation defense (anyone can mint a session by naming a Sleeper
+#     username), so persistence must not extend a squatter's window.
+# Demo sessions are never persisted either.
+# ---------------------------------------------------------------------------
+
+_PERSISTED_SESSION_IDLE_DAYS = 90     # rolling — refreshed by the heartbeat
+_PERSISTED_TOUCH_THROTTLE_S = 600     # ≥10 min between per-session DB writes
+_session_restore_lock = threading.Lock()  # serialises post-restart rebuilds
+
+
+def _session_persist_eligible(sess: dict) -> bool:
+    user_id = str(sess.get("user_id") or "")
+    return bool(
+        sess.get("verified")
+        and user_id
+        and not sess.get("is_demo")
+        and not user_id.startswith("demo_user_")
+    )
+
+
+def _persist_session_if_eligible(token: str, sess: dict) -> None:
+    """Upsert the durable row for this session when the flag is on and the
+    session is verified. Also the throttled heartbeat: refreshes
+    last_seen_at (rolling expiry) at most once per throttle window. Never
+    raises — persistence must not break auth flows."""
+    if not token or not is_enabled("auth.persistent_sessions"):
+        return
+    if not _session_persist_eligible(sess):
+        return
+    now = time.time()
+    if now - sess.get("_persisted_at", 0) < _PERSISTED_TOUCH_THROTTLE_S:
+        return
+    try:
+        persist_session(
+            token,
+            user_id=str(sess["user_id"]),
+            account_id=sess.get("account_id"),
+            verified_via=sess.get("verified_via"),
+            account_only=bool(sess.get("account_only")),
+            username=sess.get("username"),
+            display_name=sess.get("display_name"),
+        )
+        sess["_persisted_at"] = now
+    except Exception as e:
+        log.warning("persist_session failed for user %s: %s",
+                    sess.get("user_id"), e)
+
+
+def _persisted_row_expired(row: dict) -> bool:
+    """Rolling 90d idle expiry, evaluated at read time."""
+    try:
+        last_seen = datetime.fromisoformat(row["last_seen_at"])
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - last_seen
+        return age.total_seconds() > _PERSISTED_SESSION_IDLE_DAYS * 86400
+    except Exception:
+        return True  # unreadable timestamp → treat as expired (fail closed)
+
+
+def _restore_persisted_session(token: str) -> dict | None:
+    """Rebuild an in-memory session from its durable row (post-restart /
+    post-idle-sweep). Returns the live session dict, or None when no valid
+    row exists. The rebuild is the same build the auth routes use:
+      • acct_* working keys → full account-only session (empty sentinel
+        league, per-format services) — immediately usable.
+      • Sleeper-keyed users → user-scoped session (services, no league);
+        league-backed routes 409 session_not_initialized until the client's
+        normal /api/session/init re-handshake, which reuses this token.
+    Restored sessions are re-stamped verified from the row — only verified
+    sessions are ever persisted."""
+    try:
+        row = load_persisted_session(token)
+    except Exception as e:
+        log.warning("persisted-session lookup failed: %s", e)
+        return None
+    if row is None:
+        return None
+    if _persisted_row_expired(row):
+        try:
+            delete_persisted_session(token)
+        except Exception:
+            pass
+        return None
+
+    from . import accounts as _accts
+    with _session_restore_lock:
+        # Another request may have rebuilt while we waited on the lock.
+        with _sessions_lock:
+            sess = _sessions.get(token)
+        if sess is not None:
+            return sess
+        user_id = str(row["user_id"])
+        try:
+            if _accts.is_account_user_id(user_id):
+                _, payload = _account_build_session(
+                    user_id,
+                    row.get("display_name") or "Manager",
+                    token=token,
+                )
+            else:
+                profile = _accts.get_user_profile(user_id) or {}
+                _, payload = _extension_build_session(
+                    user_id=user_id,
+                    username=row.get("username") or profile.get("username") or "",
+                    display_name=(row.get("display_name")
+                                  or profile.get("display_name")
+                                  or profile.get("username") or ""),
+                    avatar=profile.get("avatar"),
+                    token=token,
+                )
+                payload.pop("extension", None)
+        except Exception:
+            log.exception("persisted-session rebuild failed for %s", user_id)
+            return None
+        payload["verified"] = True
+        payload["verified_via"] = row.get("verified_via")
+        if row.get("account_id"):
+            payload["account_id"] = row["account_id"]
+        payload["_persisted_at"] = time.time()
+    try:
+        touch_persisted_session(token)   # rolling expiry heartbeat
+    except Exception:
+        pass
+    log.info("session restored from durable store: user=%s via=%s",
+             user_id, row.get("verified_via"))
+    return payload
+
+
+def _sync_persisted_session_after_init(token: str, sess: dict,
+                                       user_changed: bool) -> None:
+    """Durable-row hygiene after /api/session/init reuses a token.
+
+    user_changed: the token was re-pointed at a different user_id — the
+    durable row (if any) must not resurrect the OLD identity later, so it
+    is deleted (unconditional, mirroring the in-memory verified-state pop).
+    Same user + still verified: refresh the row's identity fields +
+    rolling expiry (throttled internally)."""
+    if user_changed:
+        try:
+            delete_persisted_session(token)
+        except Exception:
+            pass
+        sess.pop("_persisted_at", None)
+    elif sess.get("verified"):
+        _persist_session_if_eligible(token, sess)
+
+
+def _get_session(token: str) -> dict | None:
+    """Session lookup — memory first, then (flag-gated) the durable store.
+    The single resolver behind _require_session, the verified-read/write
+    gates, session_init's token reuse, /api/session/ping and the account
+    routes. Analytics-only best-effort lookups stay memory-only by design
+    (they self-heal once any authed route restores the session)."""
+    if not token:
+        return None
+    with _sessions_lock:
+        sess = _sessions.get(token)
+    if sess is not None:
+        return sess
+    if not is_enabled("auth.persistent_sessions"):
+        return None
+    return _restore_persisted_session(token)
+
+
 def _require_session() -> dict:
     """Return the active session dict, or raise _SessionExpired (→ 401).
 
@@ -1219,8 +1402,7 @@ def _require_session() -> dict:
     format's data without changing the user's active view.
     """
     token = request.headers.get("X-Session-Token", "")
-    with _sessions_lock:
-        sess = _sessions.get(token)
+    sess = _get_session(token)
     if sess is None:
         raise _SessionExpired()
 
@@ -1352,8 +1534,7 @@ def _gate_unverified_write(fn):
     @functools.wraps(fn)
     def _wrapper(*args, **kwargs):
         if request.method in _MUTATING_METHODS:
-            with _sessions_lock:
-                sess = _sessions.get(request.headers.get("X-Session-Token", ""))
+            sess = _get_session(request.headers.get("X-Session-Token", ""))
             if sess is not None:
                 denial = _verified_write_denial(sess)
                 if denial is not None:
@@ -1418,8 +1599,7 @@ def _gate_unverified_read(fn):
     @functools.wraps(fn)
     def _wrapper(*args, **kwargs):
         if request.method not in _MUTATING_METHODS:
-            with _sessions_lock:
-                sess = _sessions.get(request.headers.get("X-Session-Token", ""))
+            sess = _get_session(request.headers.get("X-Session-Token", ""))
             if sess is not None:
                 denial = _verified_read_denial(sess)
                 if denial is not None:
@@ -1433,7 +1613,10 @@ def _cleanup_loop() -> None:
     while True:
         time.sleep(300)  # check every 5 min
 
-        # Sessions — 4hr inactivity
+        # Sessions — 4hr inactivity. This is a MEMORY sweep only: persisted
+        # (verified, flag-on) sessions keep their durable row and rebuild on
+        # the next request; unverified sessions have no row, so for them the
+        # 4h idle eviction stays terminal (the squatter-window defense).
         cutoff = time.time() - 4 * 3600
         with _sessions_lock:
             stale = [t for t, s in _sessions.items()
@@ -1442,6 +1625,15 @@ def _cleanup_loop() -> None:
                 _sessions.pop(t, None)
         if stale:
             log.info("Cleaned up %d stale session(s)", len(stale))
+
+        # Durable session rows — rolling 90d idle expiry (read-time checks
+        # in _restore_persisted_session make this purely hygienic).
+        try:
+            purged = purge_stale_persisted_sessions(_PERSISTED_SESSION_IDLE_DAYS)
+            if purged:
+                log.info("Purged %d expired persisted session row(s)", purged)
+        except Exception as e:
+            log.warning("persisted-session purge failed: %s", e)
 
         # Trade jobs — three reasons to evict:
         #   (a) running jobs older than _JOB_HARD_TIMEOUT → mark as error so
@@ -1543,6 +1735,11 @@ def _stash_device_and_touch_activity() -> None:
         sess["last_active"] = now
     except Exception:
         pass  # never break the request on activity logging
+    # Durable-session heartbeat (flag auth.persistent_sessions): refresh the
+    # rolling 90d expiry. Internally throttled to one write per
+    # _PERSISTED_TOUCH_THROTTLE_S per session, and the upsert also heals a
+    # missing row for a session verified before the flag flipped on.
+    _persist_session_if_eligible(token, sess)
 
 
 
@@ -1953,6 +2150,7 @@ def _run_trade_job(
     fairness_threshold: float,
     pinned_give: list,
     pinned_receive: list | None = None,
+    opponent_user_id: str | None = None,
 ):
     """Daemon-thread entry point. Resolves the session itself (rather than
     capturing closures over per-request state) so the request that kicked
@@ -2098,6 +2296,7 @@ def _run_trade_job(
             trade_away_positions = trade_away_positions,
             pinned_give_players  = pinned_give or None,
             pinned_receive_players = pinned_receive or None,
+            opponent_user_id     = opponent_user_id,
             scoring_format       = active_format,
             on_opponent_done     = progress_cb,
             opponent_outlooks    = opponent_outlooks or None,
@@ -2112,7 +2311,8 @@ def _run_trade_job(
         # the organic deck exactly as before. Skipped for pinned-give decks
         # ("what can I get for X?") — unrelated injections would pollute them.
         if (_likes_you_enabled() and league_id != "league_demo"
-                and not pinned_give and not pinned_receive):
+                and not pinned_give and not pinned_receive
+                and not opponent_user_id):
             try:
                 final_cards = _inject_likes_you_cards(
                     cards         = final_cards,
@@ -2260,15 +2460,17 @@ def _kickoff_trade_job(
     fairness_threshold: float = 0.75,
     pinned_give: list | None = None,
     pinned_receive: list | None = None,
+    opponent_user_id: str | None = None,
     opponents_total: int | None = None,
 ) -> str:
     """Register a new job in _trade_jobs and start its worker thread.
     Returns the job_id. Caller is responsible for any pre-existing-job
     deduplication; this always creates a fresh one."""
     job_id = uuid.uuid4().hex
-    # Pinned flows (give OR receive) bypass the shared per-key cache — they
-    # answer a specific question, not the league-wide deck.
-    is_pinned = bool(pinned_give) or bool(pinned_receive)
+    # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
+    # Team) bypass the shared per-key cache — they answer a specific
+    # question, not the league-wide deck.
+    is_pinned = bool(pinned_give) or bool(pinned_receive) or bool(opponent_user_id)
     job = {
         "job_id":             job_id,
         "key":                _trade_job_key(user_id, league_id, scoring_format),
@@ -2292,7 +2494,7 @@ def _kickoff_trade_job(
     threading.Thread(
         target=_run_trade_job,
         args=(job_id, sess_token, league_id, fairness_threshold,
-              pinned_give or [], pinned_receive or []),
+              pinned_give or [], pinned_receive or [], opponent_user_id),
         daemon=True,
     ).start()
     return job_id
@@ -4945,7 +5147,12 @@ def generate_trades():
     # is on so flag-off behavior stays byte-identical for any early client.
     pinned_receive     = (body.get("pinned_receive_players") or []
                           if is_enabled("trade.finder_targeting") else [])
-    _any_pinned        = bool(pinned_give) or bool(pinned_receive)
+    # FB #156 (Trade-Finding Hub, "Specific Team" mode) — scope generation to
+    # a single league-mate. Additive: absent ⇒ the full league-wide sweep,
+    # byte-identical to before. An opponent-scoped job answers a specific
+    # question (like a pinned job), so it bypasses the shared per-key cache.
+    opponent_user_id   = body.get("opponent_user_id") or None
+    _any_pinned        = bool(pinned_give) or bool(pinned_receive) or bool(opponent_user_id)
     # Default to 50% when pinned players are selected (wide net), 75% otherwise
     default_fairness   = 0.50 if _any_pinned else 0.75
     fairness_threshold = float(body.get("fairness_threshold", default_fairness))
@@ -5010,6 +5217,7 @@ def generate_trades():
         fairness_threshold = fairness_threshold,
         pinned_give        = pinned_give or None,
         pinned_receive     = pinned_receive or None,
+        opponent_user_id   = opponent_user_id,
         opponents_total    = opponents_total,
     )
     with _trade_jobs_lock:
@@ -5624,6 +5832,11 @@ def sleeper_link():
         except Exception:
             log.exception("persisting verified marker failed (session still "
                           "verified in memory)")
+        # Durable session (flag auth.persistent_sessions): the session just
+        # became verified — persist it so it survives deploys/idle sweeps.
+        sess["_persisted_at"] = 0  # force the upsert past the throttle
+        _persist_session_if_eligible(
+            request.headers.get("X-Session-Token", ""), sess)
 
     return jsonify({
         "connected": True,
@@ -6492,6 +6705,25 @@ def get_league_preferences():
                 payload = {**payload,
                            "inferred_outlook": inferred,
                            "inferred_signals": signals}
+        # FB #156 (Trade-Finding Hub) — surface the caller's own roster
+        # needs/surplus so the hub's positions-needed / positions-to-shed
+        # cards can render recommendation chips ("thin at WR", "deep at RB").
+        # Reuses analyze_roster_strengths (already the trade engine's roster
+        # profiler); additive fields, best-effort so a profiling hiccup never
+        # breaks the prefs read. Scoped to the session roster, matching the
+        # inferred-outlook block above (both read sess["user_roster"]).
+        try:
+            _roster  = sess.get("user_roster") or []
+            _players = sess.get("players") or []
+            if _roster and _players:
+                _pdict = {p.id: p for p in _players}
+                _prof  = _trade_service_mod.analyze_roster_strengths(
+                    _roster, _pdict, _active_format(sess))
+                payload = {**payload,
+                           "position_needs":   _prof.get("position_needs", []),
+                           "position_surplus": _prof.get("position_surplus", [])}
+        except Exception as _rs_err:
+            log.warning("get_league_preferences: roster-strengths failed: %s", _rs_err)
         return jsonify(payload)
     except Exception as e:
         log.error("get_league_preferences error: %s", e)
@@ -7555,9 +7787,11 @@ def session_init():
              user_id, league_id, len(user_player_ids), len(opponent_rosters))
 
     # ── Resolve existing session (league-switch reuses same token) ────────
+    # _get_session reads through to the durable store (flag
+    # auth.persistent_sessions), so a verified session's token — and its
+    # verified state — survives a deploy across the client's re-init.
     incoming_token = request.headers.get("X-Session-Token", "")
-    with _sessions_lock:
-        existing_sess  = _sessions.get(incoming_token)
+    existing_sess = _get_session(incoming_token)
 
     # ── Build universal ranking pool (once) ────────────────────────────
     # Rankings are user-level, not league-specific.  The ranking service
@@ -7833,6 +8067,8 @@ def session_init():
         "display_name":  display_name,
         "last_active":   time.time(),
     }
+    user_changed = bool(existing_sess
+                        and existing_sess.get("user_id") != user_id)
     with _sessions_lock:
         if existing_sess:
             token = incoming_token
@@ -7840,7 +8076,7 @@ def session_init():
             # (league switch, revalidate) — the Sleeper-JWT proof bound the
             # SESSION to the user, not to a league. It must NOT survive the
             # token being re-pointed at a different user_id.
-            if existing_sess.get("user_id") != user_id:
+            if user_changed:
                 existing_sess.pop("verified", None)
                 existing_sess.pop("verified_via", None)
             existing_sess.update(session_payload)
@@ -7849,6 +8085,8 @@ def session_init():
             token = secrets.token_urlsafe(32)
             _sessions[token] = session_payload
             session_verified = False
+    if existing_sess:
+        _sync_persisted_session_after_init(token, existing_sess, user_changed)
 
     # ── Defer DB upserts + push fanout + Sleeper meta to a daemon ────────
     # Everything below this point that isn't required for the response
@@ -8191,8 +8429,7 @@ def session_init():
 @app.route("/api/session/ping", methods=["GET"])
 def session_ping():
     """GET /api/session/ping — check whether the current session is alive."""
-    with _sessions_lock:
-        sess = _sessions.get(request.headers.get("X-Session-Token", ""))
+    sess = _get_session(request.headers.get("X-Session-Token", ""))
     if not sess:
         return jsonify({"ok": False}), 401
     sess["last_active"] = time.time()
@@ -9480,6 +9717,127 @@ def share_trade_page(match_id):
 
 
 # ---------------------------------------------------------------------------
+# Share landing for arbitrary packages (teardown S7 PRD-01 follow-up,
+# flag `growth.share_landing`; W2B handoff).
+#
+# /s/trade/<match_id> only works for MUTUAL matches (a trade_matches row).
+# Calculator builds and liked-but-unmatched trades previously fell back to
+# the bare site root. This trio gives them a real landing object:
+#   POST /api/share/package  (session-authed, rate-limited) → /s/p/<id>
+#   GET  /s/p/<short_id>     public OG landing page
+#   GET  /og/p/<short_id>.png rendered card (same style as trade cards)
+# ---------------------------------------------------------------------------
+
+_SHARE_PACKAGE_HOURLY_LIMIT = 20      # per user — abuse guard, not a product cap
+_SHARE_PACKAGE_SIDE_MAX = 5           # mirrors the trade engine's package cap
+_SHARE_PACKAGE_ID_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,40}$")
+
+
+def _clean_package_side(raw) -> list[str] | None:
+    """Normalise one side's player-id list. None = invalid payload."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > _SHARE_PACKAGE_SIDE_MAX:
+        return None
+    out: list[str] = []
+    for x in raw:
+        s = str(x).strip()
+        if not _SHARE_PACKAGE_ID_RE.match(s):
+            return None
+        out.append(s)
+    return out
+
+
+@app.route("/api/share/package", methods=["POST"])
+def create_share_package_route():
+    """POST /api/share/package — snapshot an arbitrary give/receive package
+    for a public share landing. 404 while `growth.share_landing` is dark.
+
+    Body: {"give_player_ids": [...], "receive_player_ids": [...]}
+    → {ok, short_id, url: "/s/p/<id>", og_image: "/og/p/<id>.png"}
+    Demo sessions are refused (shared demo user would pool the rate limit
+    and demo shares are disabled client-side anyway).
+    """
+    if not is_enabled("growth.share_landing"):
+        return jsonify({"error": "not_found"}), 404
+    sess = _require_session()
+    user_id = str(sess.get("user_id") or "")
+    if sess.get("is_demo") or user_id.startswith("demo_user_"):
+        return jsonify({"error": "demo_session"}), 400
+
+    body = request.get_json(force=True, silent=True) or {}
+    give = _clean_package_side(body.get("give_player_ids"))
+    receive = _clean_package_side(body.get("receive_player_ids"))
+    if give is None or receive is None or not (give or receive):
+        return jsonify({
+            "error": "bad_package",
+            "message": ("give_player_ids/receive_player_ids must be lists of "
+                        f"player ids, at most {_SHARE_PACKAGE_SIDE_MAX} per "
+                        "side, at least one player overall."),
+        }), 400
+
+    try:
+        recent = count_recent_shared_packages(user_id, hours=1)
+    except Exception as e:
+        log.warning("share/package: rate-limit count failed: %s", e)
+        recent = 0
+    if recent >= _SHARE_PACKAGE_HOURLY_LIMIT:
+        return jsonify({"error": "rate_limited",
+                        "message": "Too many shares — try again later."}), 429
+
+    for _ in range(4):   # token_urlsafe(6) collisions are ~impossible; belt+braces
+        short_id = secrets.token_urlsafe(6)
+        if create_shared_package(short_id, user_id, give, receive):
+            return jsonify({
+                "ok": True,
+                "short_id": short_id,
+                "url": f"/s/p/{short_id}",
+                "og_image": f"/og/p/{short_id}.png",
+            })
+    log.error("share/package: could not mint a short_id for %s", user_id)
+    return jsonify({"error": "store_failed"}), 500
+
+
+@app.route("/s/p/<short_id>")
+def share_package_page(short_id):
+    """Public OG landing page for a shared package (flag growth.share_landing)."""
+    if not is_enabled("growth.share_landing"):
+        return jsonify({"error": "not_found"}), 404
+    try:
+        pkg = load_shared_package(short_id)
+    except Exception as e:
+        log.warning("share/package page lookup failed: %s", e)
+        pkg = None
+    if pkg is None:
+        return jsonify({"error": "not_found"}), 404
+    n = len(pkg["give_ids"]) + len(pkg["receive_ids"])
+    return _share_html(
+        title="Trade Package",
+        description=(f"A {n}-player dynasty trade package — see the give/get "
+                     "breakdown and fairness read."),
+        image_url=f"/og/p/{short_id}.png",
+        cta_text="Build your own trade",
+        cta_url="/",
+    )
+
+
+@app.route("/og/p/<short_id>.png")
+def og_package_card(short_id):
+    """Render a shared package as a 1200x630 OG PNG (flag growth.share_landing)."""
+    if not is_enabled("growth.share_landing"):
+        return jsonify({"error": "not_found"}), 404
+    if _og_image is None:
+        return _og_unavailable_response()
+    try:
+        png, status = _og_image.render_package_card(short_id)
+    except Exception as e:
+        log.error("og_package_card error (%s): %s", short_id, e)
+        png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
+        status = 500
+    return _png_response(png, status=status)
+
+
+# ---------------------------------------------------------------------------
 # Browser extension — /api/extension/auth + /api/extension/rankings
 # ---------------------------------------------------------------------------
 # The Chrome/Edge extension injects the user's personal tier + pos-rank next
@@ -9490,8 +9848,14 @@ def share_trade_page(match_id):
 # or opponent-member hydration for read-only badge injection.
 
 def _extension_build_session(user_id: str, username: str,
-                             display_name: str, avatar: str | None) -> tuple[str, dict]:
+                             display_name: str, avatar: str | None,
+                             token: str | None = None) -> tuple[str, dict]:
     """Build a user-scoped session for the browser extension.
+
+    `token` re-registers the session under an existing bearer token —
+    used only by the persistent-session restore path (teardown 06-03),
+    where the client still holds the pre-restart token. Default (None)
+    mints a fresh one.
 
     No league locked in — the scoring format is resolved per-request from
     the league_id query param on /api/extension/rankings. Builds one
@@ -9564,7 +9928,7 @@ def _extension_build_session(user_id: str, username: str,
         "extension":     True,
         "last_active":   time.time(),
     }
-    token = secrets.token_urlsafe(32)
+    token = token or secrets.token_urlsafe(32)
     with _sessions_lock:
         _sessions[token] = payload
     return token, payload
@@ -10473,6 +10837,10 @@ def delete_test_user_route(user_id: str):
                      if s.get("user_id") == user_id]
             for t in stale:
                 _sessions.pop(t, None)
+        try:
+            delete_persisted_sessions_for_user(user_id)
+        except Exception:
+            pass
         counts = _test_users.delete_test_user(user_id)
         counts["sessions_evicted"] = len(stale)
         log.info("test-users: deleted %s — %s", user_id, counts)
@@ -10497,8 +10865,7 @@ def _account_session() -> dict | None:
     Demo sessions don't persist anything, so they never bind to an account.
     """
     token = request.headers.get("X-Session-Token", "")
-    with _sessions_lock:
-        sess = _sessions.get(token)
+    sess = _get_session(token)
     if sess is None:
         return None
     if sess.get("is_demo") or str(sess.get("user_id", "")).startswith("demo_user_"):
@@ -10513,8 +10880,10 @@ ACCOUNT_NO_LEAGUE_ID = "no_league"
 ACCOUNT_NO_LEAGUE_NAME = "No league linked"
 
 
-def _account_build_session(user_id: str, display_name: str) -> tuple[str, dict]:
+def _account_build_session(user_id: str, display_name: str,
+                           token: str | None = None) -> tuple[str, dict]:
     """Build a full session for an account-only user (P2.6).
+    `token` re-uses an existing bearer token (persistent-session restore).
 
     Contract: upserts the users row for `user_id` and returns
     (token, session_payload) with per-format Ranking + Trade services and an
@@ -10528,6 +10897,7 @@ def _account_build_session(user_id: str, display_name: str) -> tuple[str, dict]:
         username="",
         display_name=display_name,
         avatar=None,
+        token=token,
     )
     empty_league = League(
         league_id=ACCOUNT_NO_LEAGUE_ID,
@@ -10613,6 +10983,7 @@ def _provider_auth_response(provider: str, claims: dict):
             _accounts.mark_user_verified(acct_uid, provider)
         except Exception as e:
             log.warning("auth/%s: mark_user_verified failed: %s", provider, e)
+        _persist_session_if_eligible(token, payload)
         out.update({
             "account_only": True,
             "user_id": acct_uid,
@@ -10636,6 +11007,9 @@ def _provider_auth_response(provider: str, claims: dict):
             sess["verified"] = True
             sess["verified_via"] = provider
             sess["account_id"] = acct["account_id"]
+            sess["_persisted_at"] = 0  # re-auth refreshes the durable row now
+            _persist_session_if_eligible(
+                request.headers.get("X-Session-Token", ""), sess)
             out.update({
                 "account_only": True,
                 "user_id": sess["user_id"],
@@ -10659,6 +11033,9 @@ def _provider_auth_response(provider: str, claims: dict):
                 _accounts.mark_user_verified(sess["user_id"], provider)
             except Exception as e:
                 log.warning("auth/%s: mark_user_verified failed: %s", provider, e)
+            sess["_persisted_at"] = 0  # anchor moment — persist immediately
+            _persist_session_if_eligible(
+                request.headers.get("X-Session-Token", ""), sess)
             _link_device_identity(sleeper_user_id=bind["sleeper_user_id"],
                                   account_id=acct["account_id"])
     elif bound_uid:
@@ -10683,6 +11060,7 @@ def _provider_auth_response(provider: str, claims: dict):
             _accounts.mark_user_verified(bound_uid, provider)
         except Exception as e:
             log.warning("auth/%s: mark_user_verified failed: %s", provider, e)
+        _persist_session_if_eligible(token, payload)
         out.update({
             "linked": True,
             "sleeper_user_id": bound_uid,
@@ -10911,13 +11289,19 @@ def link_sleeper_source():
         _accounts.mark_user_verified(sleeper_uid, provider)
     except Exception as e:
         log.warning("link-sleeper: mark_user_verified failed: %s", e)
+    _persist_session_if_eligible(token, payload)
 
     # Evict the account-keyed sessions — their working key just migrated.
+    # Durable rows too (unconditional: rows may exist from a flag-on period).
     if _accounts.is_account_user_id(acct_uid):
         with _sessions_lock:
             for t in [t for t, s in _sessions.items()
                       if s.get("user_id") == acct_uid]:
                 _sessions.pop(t, None)
+        try:
+            delete_persisted_sessions_for_user(acct_uid)
+        except Exception as e:
+            log.warning("link-sleeper: durable session cleanup failed: %s", e)
 
     log.info("link-sleeper: account=%s bound sleeper=%s merge=%s",
              account_id, sleeper_uid, merged)
@@ -11032,6 +11416,12 @@ def delete_account_route():
         for t in [t for t, s in _sessions.items()
                   if s.get("user_id") == user_id]:
             _sessions.pop(t, None)
+    # Durable session rows too (teardown 06-03) — deletion is the
+    # revoke-all path, so no token may survive in the persistent store.
+    try:
+        delete_persisted_sessions_for_user(user_id)
+    except Exception as e:
+        log.warning("delete_account: durable session cleanup failed: %s", e)
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
     return jsonify({"ok": True, "deleted": counts,
                     "apple_revoked": apple_revoked})
@@ -11053,6 +11443,12 @@ def session_signout():
     if token:
         with _sessions_lock:
             evicted = _sessions.pop(token, None) is not None
+        # Durable row too (teardown 06-03). Unconditional — a row may exist
+        # from a flag-on period even if the flag is off right now.
+        try:
+            evicted = delete_persisted_session(token) or evicted
+        except Exception as e:
+            log.warning("session/signout: durable delete failed: %s", e)
     if evicted:
         log.info("session/signout: token evicted")
     return jsonify({"ok": True, "evicted": evicted})

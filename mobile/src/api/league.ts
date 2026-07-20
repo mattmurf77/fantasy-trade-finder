@@ -34,6 +34,13 @@ export interface LeaguePreferences {
   /** Phase-2: the per-signal scores behind inferred_outlook (additive,
    *  GET-only, same condition). Keys are backend signal names. */
   inferred_signals?: Record<string, number>;
+  /** FB #156 (Trade-Finding Hub): the caller's own roster needs/surplus
+   *  from analyze_roster_strengths — positions below the starter threshold
+   *  (needs) and at/above the surplus threshold (surplus). GET-only,
+   *  additive; power the hub's positions-needed / positions-to-shed
+   *  recommendation chips. Never POSTed back. */
+  position_needs?: string[];
+  position_surplus?: string[];
 }
 
 export async function getLeaguePreferences(leagueId: string) {

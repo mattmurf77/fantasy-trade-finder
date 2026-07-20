@@ -26,6 +26,7 @@ export default function QueueChip({ trade, onRemove }: Props) {
         </Text>
       </View>
       <Pressable
+        accessibilityRole="button"
         accessibilityLabel="Remove from queue"
         hitSlop={8}
         onPress={onRemove}

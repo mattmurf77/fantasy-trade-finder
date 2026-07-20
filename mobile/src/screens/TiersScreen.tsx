@@ -11,6 +11,8 @@ import {
   TextInput,
   RefreshControl,
   LayoutChangeEvent,
+  AccessibilityInfo,
+  type AccessibilityActionEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DraggableFlatList, {
@@ -91,6 +93,14 @@ type Row =
   | { kind: 'empty';  zone: Zone };
 
 const DRAG_ACTIVATION_MS = 220;
+
+// S8 PRD-01 — VoiceOver custom actions on player rows: "Move to <tier>"
+// mirrors the multi-select tier-target chips (the no-drag path) so a
+// screen-reader user can complete a tier move without the drag gesture.
+const TIER_A11Y_ACTIONS: { name: string; label: string }[] = TIERS.map((t) => ({
+  name: `tier:${t}`,
+  label: `Move to ${TIER_LABEL[t]}`,
+}));
 
 // Offset of the multi-select action bar's bottom edge from the screen
 // bottom (styles.actionBar.bottom) — it sits just above the save bar.
@@ -576,6 +586,35 @@ export default function TiersScreen() {
     [selectedIds],
   );
 
+  // ── Single-player tier move (S8 PRD-01, VoiceOver custom actions) ──
+  // Mirrors moveSelectedToTier's placement semantics (append to the END
+  // of the target tier) for ONE player, and — like the drag path — also
+  // accepts a pool (unassigned) source, reconciling clearedPids the same
+  // way onDragEnd does. Only reachable via the row custom actions, so
+  // touch behavior is unchanged.
+  const movePlayerToTier = useCallback((player: RankedPlayer, target: Tier) => {
+    bucketsDirtyRef.current = true;
+    setBuckets((prev) => {
+      const next = emptyBuckets();
+      next.unassigned = prev.unassigned.filter((p) => p.id !== player.id);
+      for (const t of TIERS) next[t] = prev[t].filter((p) => p.id !== player.id);
+      next[target] = [...next[target], player];
+      return next;
+    });
+    // The player now sits in a tier — drop any pending clear (drag-out-
+    // then-move-back-in within one session), matching onDragEnd.
+    setClearedPids((prev) => {
+      if (!prev.has(player.id)) return prev;
+      const out = new Set(prev);
+      out.delete(player.id);
+      return out;
+    });
+    haptics.success();
+    AccessibilityInfo.announceForAccessibility(
+      `${player.name} moved to ${TIER_LABEL[target]}`,
+    );
+  }, []);
+
   // ── Render helpers ─────────────────────────────────────────────────
   const saving = saveMutation.isPending;
   // Initial load ONLY (HANDOFF follow-up #1) — `isFetching` here swapped the
@@ -842,6 +881,17 @@ export default function TiersScreen() {
         return (
           <Pressable
             onPress={() => toggleSelected(item.player.id)}
+            // S8 PRD-02 — the selection tile is one button with checked
+            // state; the inner card's facts fold into the grouped label.
+            accessibilityRole="button"
+            accessibilityState={{ selected: isSelected }}
+            accessibilityLabel={[
+              item.player.name,
+              String(item.player.position),
+              item.player.team || 'FA',
+              zoneTier ? `tier ${TIER_LABEL[zoneTier]}` : 'unassigned',
+            ].join(', ')}
+            accessibilityHint="Toggles selection for bulk tier moves"
             style={styles.chipSelectableWrap}
           >
             {/* pointerEvents="none" so PlayerCard's own inner Pressable
@@ -880,7 +930,13 @@ export default function TiersScreen() {
       // paths for tier moves are multi-select's Tier up/down buttons (FB-73)
       // and the tier-target chips (FB4-62).
       return (
+        // accessible={false}: the components/CLAUDE.md RN caveat — the row
+        // container otherwise swallows the card on iOS. The dense
+        // PlayerCard is the row's focusable (grouped label) and carries
+        // the S8 PRD-01 "Move to <tier>" custom actions, so a VoiceOver
+        // user never needs the long-press drag.
         <Pressable
+          accessible={false}
           onLongPress={drag}
           delayLongPress={DRAG_ACTIVATION_MS}
           disabled={isActive}
@@ -900,12 +956,19 @@ export default function TiersScreen() {
               posRank={posRank}
               value={tileValue}
               statsSlot={<TileStats {...stats} />}
+              accessibilityActions={TIER_A11Y_ACTIONS}
+              onAccessibilityAction={({ nativeEvent }: AccessibilityActionEvent) => {
+                const t = nativeEvent.actionName.startsWith('tier:')
+                  ? (nativeEvent.actionName.slice(5) as Tier)
+                  : null;
+                if (t) movePlayerToTier(item.player, t);
+              }}
             />
           </View>
         </Pressable>
       );
     },
-    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor, allPosRanks, cleanup, highlightPid],
+    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor, allPosRanks, cleanup, highlightPid, movePlayerToTier],
   );
 
   // ── Copy-from-format button derivation ─────────────────────────────
@@ -1027,7 +1090,7 @@ export default function TiersScreen() {
       <View style={styles.headerRow}>
         {/* #135 — "Positional Tiers" wrapped to two lines next to the header
             actions; the stack header (TabNav) already says "Tiers". */}
-        <Text style={styles.title}>Tiers</Text>
+        <Text style={styles.title} accessibilityRole="header">Tiers</Text>
         <View style={styles.headerActions}>
           {/* Multi-select toggle. While ON, chip tap toggles selection
               (drag is suppressed); tapping again here cancels and clears
@@ -1101,6 +1164,9 @@ export default function TiersScreen() {
             <Pressable
               key={p}
               testID={`tiers.pos-tab.${p.toLowerCase()}`}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isActive }}
+              accessibilityLabel={p === 'ALL' ? 'All positions' : p}
               onPress={() => {
                 if (p !== position) setPosition(p);
               }}
@@ -1158,6 +1224,8 @@ export default function TiersScreen() {
       <Pressable
         disabled={copyMutation.isPending}
         onPress={onCopyFromOtherFormat}
+        accessibilityRole="button"
+        accessibilityLabel={`Copy tier list from ${FORMAT_LABELS[otherFormat]}`}
         style={({ pressed }) => [
           styles.copyBtn,
           pressed && { backgroundColor: ink.ink3 },
@@ -1297,7 +1365,14 @@ export default function TiersScreen() {
             the top (and again when scrolled back to the very top) — see the
             viewability handler. pointerEvents="none": purely informational. */}
         {hasRankings && stickyZone ? (
-          <View style={styles.stickyOverlay} pointerEvents="none">
+          <View
+            style={styles.stickyOverlay}
+            pointerEvents="none"
+            // Decorative duplicate of the inline section header — hidden
+            // from both platforms' a11y trees.
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
             <TierStickyHeader
               label={stickyZone === 'unassigned' ? 'Unassigned' : TIER_LABEL[stickyZone]}
               accent={accentFor(stickyZone, cleanup)}
@@ -1372,6 +1447,8 @@ export default function TiersScreen() {
         <Pressable
           testID="tiers.save-btn"
           disabled={saving || loading}
+          accessibilityRole="button"
+          accessibilityLabel={isAllView ? 'Save all tiers' : `Save ${position} tiers`}
           onPress={() => saveMutation.mutate()}
           style={({ pressed }) => [
             styles.saveBtn,

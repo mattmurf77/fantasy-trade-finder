@@ -8,6 +8,7 @@
   "tiers.swipe_secondary_actions": false,
   "trades.queue_2k": false,
   "trades.new_partners_alerts": false,
+  "trades.finder_hub": false,
   "league.unlock_badges_per_member": false,
   "league.activity_feed": false,
   "league.unlock_badges_nav_pill": false,

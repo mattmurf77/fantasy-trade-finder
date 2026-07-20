@@ -1,5 +1,12 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ActivityIndicator,
+  type AccessibilityActionEvent,
+} from 'react-native';
 import { ink, chalk, flare, ice, semantic, space, radii, type } from '../theme/chalkline';
 import { TickLabel, Button, Meter, fairnessColor, Icon, Badge } from './chalkline';
 import PlayerCard from './PlayerCard';
@@ -195,6 +202,44 @@ function TradeCardComp({
     return undefined;
   };
 
+  // S8 PRD-02 (inert a11y) — each player row is one grouped utterance
+  // (PlayerCard composes the base label; badges appended here) with the
+  // row's commands as custom actions. The rightSlot icon buttons are
+  // swallowed by the row container on iOS (the documented RN caveat), so
+  // the actions are the screen-reader path to swap/untouchable/menu.
+  const rowA11y = (p: Player, side: 'give' | 'receive') => {
+    const marked = untouchableIds?.has(p.id) ?? false;
+    const actions: { name: string; label: string }[] = [];
+    if (onPlayerMenu) actions.push({ name: 'menu', label: 'Player options' });
+    if (side === 'give' && onToggleUntouchable) {
+      actions.push({
+        name: 'untouchable',
+        label: marked ? 'Remove untouchable' : 'Mark untouchable',
+      });
+    }
+    if (onSwapPlayer) actions.push({ name: 'swap', label: 'Swap for another player' });
+    return {
+      accessibilityLabel: [
+        p.name,
+        String(p.position),
+        p.team || 'FA',
+        marked ? 'untouchable' : null,
+        p.on_block ? 'on the block' : null,
+        p.injury_status ? `injury ${p.injury_status}` : null,
+      ]
+        .filter(Boolean)
+        .join(', '),
+      accessibilityActions: actions.length ? actions : undefined,
+      onAccessibilityAction: actions.length
+        ? ({ nativeEvent }: AccessibilityActionEvent) => {
+            if (nativeEvent.actionName === 'menu') onPlayerMenu?.(p, side);
+            else if (nativeEvent.actionName === 'untouchable') onToggleUntouchable?.(p);
+            else if (nativeEvent.actionName === 'swap') onSwapPlayer?.(p, side);
+          }
+        : undefined,
+    };
+  };
+
   return (
     <View style={styles.card}>
       {/* Likes-you pill — counterparty already liked the mirror of this
@@ -279,6 +324,7 @@ function TradeCardComp({
                 key={p.id}
                 player={p}
                 compact
+                {...rowA11y(p, 'give')}
                 onLongPress={longPressFor(p, 'give')}
                 rightSlot={
                   p.on_block ||
@@ -313,6 +359,7 @@ function TradeCardComp({
                 key={p.id}
                 player={p}
                 compact
+                {...rowA11y(p, 'receive')}
                 onLongPress={longPressFor(p, 'receive')}
                 rightSlot={
                   p.on_block || onSwapPlayer ? (

@@ -31,6 +31,7 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `Toast` | Transient notification. Teardown S4 PRD-03: unflagged VoiceOver announce on show + Reduce Motion fade fallback; flag `ux.toast_v2` = warn/error hold ≥5s (holdMs 0 = sticky); optional `action` slot (label+callback, e.g. Undo — callers pass it only under `ux.swipe_undo`) |
 | `PlayerContextMenu` | Teardown S3 PRD-02 (flag `ux.player_context_menu`): shared player long-press bottom sheet — header = player info, rows = per-surface commands (untouchable / swap) passed by the caller; also exports `LockGlyph` (untouchable visible-twin icon, local Svg pending Icon.tsx fold-in) |
 | `HelpSheet` | Teardown S4 PRD-01 (flag `ux.help_surface`): lightweight help bottom sheet (2–3 sentences + "Read more" web link); exports `InfoButton` (ⓘ, 44pt effective target) |
+| `TradeFinderModeBar` | Trade-Finding Hub (#156, flag `trades.finder_hub`): lateral quick-switch chip row (Guided · Team · Player · Calc) + "‹ Hub" back + mode title/hint, carried atop each focused trade-finder mode in `TradesScreen`. Presentational; host owns nav (guided/team/player switch in place via setParams, calc/hub navigate) |
 | `TopBar` | Screen header |
 
 ## testID registry (UI-test harness — docs/plans/mobile-testing/lld.md Appendix A)
@@ -91,6 +92,9 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 - LeagueSummaryScreen: `league-summary.basis.<consensus|personal|redraft>` (basis chips — redraft is permanently disabled "(soon)") · `league-summary.team.<user_id>` (ranked team row → roster overlay) · `league-summary.roster-close` (overlay close Icon Button)
 - LeagueScreen Explore rows: `league.rankings-row` (→ root-stack `LeagueSummary`) · `league.free-agents-row` (→ root-stack `FreeAgents`)
 
+**League rankings bar-chart redesign tranche (2026-07-20, #169):**
+- LeagueSummaryScreen: `league-summary.posfilter.<all|qb|rb|wr|te>` (chart position filter pills — single/multi select, reorders + rescales the stacked bars live) · `league-summary.roster-posfilter.<all|qb|rb|wr|te>` (drill-in overlay's own position filter). The team rows are now stacked bars but keep `league-summary.team.<user_id>`; basis + roster-close IDs unchanged
+
 **Onboarding items 5–10 tranche (2026-07-17, flags `onboarding.*` per feature):**
 - SignIn (item 5, `onboarding.landing`): `signin.apple-link` (quiet Apple re-entry text link) · `signin.error-demo-escape` (Sleeper-down "browse the sample league" escape)
 - Trades (items 7/8/9/10): `trades.quickset-prompt` (+ `.accept` / `.dismiss`) · `trades.diff-banner` (post-Quick-Set regen receipt) · `trades.apple-sheet.<like|quickset_save|session2_banner>` (+ `trades.apple-sheet.signin` / `.decline`) · `trades.apple-session2-banner` (+ `.dismiss`) · `trades.share-liked` · `trades.trio-entry` (deck-exhausted CTA) · `trades.demo-bridge` · `trades.redraft-label`
@@ -112,5 +116,9 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 - `rank.more-ways` note: with flag `ux.rank_tab_destination` on, the same ID appears in the header of EVERY rank surface (Trios/Anchors/Tiers/QuickSetTiers/QuickRank/ManualRanks/Trends) and opens the RankMenu sheet; flag off it remains QuickSetTiers-only → RankHome (unchanged)
 
 Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). Full planned list: lld.md Appendix A (~90 IDs).
+
+**Trade-Finding Hub tranche (2026-07-20, #156, flag `trades.finder_hub`):**
+- TradeFinderHubScreen: `finder-hub.dna.edit` (opens OutlookSheet) · `finder-hub.card.<guided|team|player|calc>` (mode launcher cards) · `finder-hub.team-picker.<user_id>` (manager rows in the Specific Team sheet)
+- TradeFinderModeBar (rendered in `TradesScreen` when opened as `TradeDeck` with a `mode` param): `trades.finder-mode.<guided|team|player|calc>` (quick-switch chips) · `trades.finder-mode.hub` (back to hub). The Trades/Portfolio/Calculator subnav is hidden in these launches
 
 **Guided avatar (The Analyst, flag `onboarding.guided_avatar`):** `analyst/` (six rn-svg pose components + `AnalystAvatar`; art source-of-truth = mockups/avatar-lab/analyst-poses.html) · `AnalystGuide.tsx` (RootNav-mounted overlay: scrim+cutout spotlight, bubble with in-bubble CTAs, ✕ skip / Skip-tour opt-out) · `analystScript.ts` (dialogue table = DATA; script doc: docs/plans/onboarding-conversion/guided-avatar-script.md). Guide testIDs: `guide.overlay` · `guide.bubble` · `guide.cta.<accept|dismiss>` · `guide.step-x` · `guide.skip-tour` · `guide.avatar.<pose>` · new targets `trades.card-body`

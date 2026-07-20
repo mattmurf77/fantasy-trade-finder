@@ -17,7 +17,7 @@ import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/c
 import { TickLabel } from '../components/chalkline';
 import { appleSignIn, resolveSmartStart, signIn } from '../api/auth';
 import { track } from '../api/events';
-import { NO_LEAGUE_ID, useSession } from '../state/useSession';
+import { consumeAppleReauthHint, NO_LEAGUE_ID, useSession } from '../state/useSession';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
 import { useGuide, requestGuideStep, advanceGuideIfActive, guidedAvatarActive } from '../state/useGuide';
 import { getOnboardingState } from '../state/useOnboardingState';
@@ -81,6 +81,11 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // ── Sign in with Apple (auth.accounts flag; account-auth plan P2/P2.6) ─
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [appleBusy, setAppleBusy] = useState(false);
+  // Teardown 06-03 (flag auth.persistent_sessions): an account-only
+  // session's 401 routed here for an Apple re-auth — say so, once. The
+  // hint is one-shot (consumed at mount) so an ordinary later visit to
+  // SignIn doesn't re-show it. Only ever set while the flag is on.
+  const [reauthNotice] = useState(() => consumeAppleReauthHint());
 
   useEffect(() => {
     getLastUsername().then((u) => {
@@ -367,6 +372,12 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
           </View>
 
           <View style={styles.form}>
+            {reauthNotice ? (
+              <Text testID="signin.reauth-notice" style={styles.reauthNotice}>
+                Your session expired — sign in with Apple to pick up where you
+                left off.
+              </Text>
+            ) : null}
             {!landingOn && appleAvailable ? (
               <>
                 {/* P2.6 — Apple is the PRIMARY portal. Official Apple button
@@ -389,6 +400,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
             {hint ? (
               <Pressable
                 testID="signin.hint-btn"
+                accessibilityRole="button"
+                accessibilityLabel={`Continue as @${hint}`}
                 style={({ pressed }) => [
                   styles.hintRow,
                   pressed && styles.hintRowPressed,
@@ -440,6 +453,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               // into a partial activation.
               <Pressable
                 testID="signin.error-demo-escape"
+                accessibilityRole="button"
                 onPress={handleTryDemo}
                 disabled={busy || demoBusy}
                 hitSlop={8}
@@ -480,6 +494,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
             {tryDemoEnabled ? (
               <Pressable
                 testID="signin.demo-link"
+                accessibilityRole="button"
                 onPress={handleTryDemo}
                 disabled={busy || demoBusy}
                 style={styles.tryDemoBtn}
@@ -510,6 +525,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               // layout; revisit if App Review objects.)
               <Pressable
                 testID="signin.apple-link"
+                accessibilityRole="button"
                 onPress={handleAppleSignIn}
                 disabled={busy || demoBusy || appleBusy}
                 style={styles.tryDemoBtn}
@@ -628,6 +644,13 @@ const styles = StyleSheet.create({
     ...type.bodySm,
     color: semantic.neg,
     marginBottom: space.sm,
+  },
+  // Teardown 06-03 — account-only session-expired re-auth notice.
+  // Informational (not an error): dim chalk, sits above the Apple portal.
+  reauthNotice: {
+    ...type.bodySm,
+    color: chalk.dim,
+    marginBottom: space.md,
   },
   button: {
     height: 44,

@@ -58,7 +58,12 @@ export default function PlayerContextMenu({ visible, player, actions, onClose }:
       animationType={reduceMotion ? 'fade' : 'slide'}
       onRequestClose={onClose}
     >
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
       <View style={styles.sheet} testID="player-menu">
         <SafeAreaView edges={['bottom']}>
           <View style={styles.grabber} />

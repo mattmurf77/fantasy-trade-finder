@@ -120,7 +120,7 @@ export default function FeedbackInboxScreen() {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <View style={styles.headerRow}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Test feedback</Text>
+          <Text style={styles.title} accessibilityRole="header">Test feedback</Text>
           <Text style={styles.sub}>
             <Text style={styles.subCount}>{visibleItems.length}</Text>
             {` note${visibleItems.length === 1 ? '' : 's'} saved on this device`}
@@ -179,6 +179,23 @@ export default function FeedbackInboxScreen() {
               <Pressable
                 key={it.id}
                 onLongPress={() => onDelete(it)}
+                // S8 PRD-02 — grouped utterance + a "Delete note" custom
+                // action (the container otherwise swallows the inner delete
+                // button on iOS; the long-press stays the touch accelerator).
+                accessibilityLabel={[
+                  responded ? 'Responded' : null,
+                  SEV_LABEL[it.severity],
+                  it.screen,
+                  it.text,
+                  relativeTime(it.created_at),
+                  syncText,
+                ]
+                  .filter(Boolean)
+                  .join(', ')}
+                accessibilityActions={[{ name: 'delete', label: 'Delete note' }]}
+                onAccessibilityAction={({ nativeEvent }) => {
+                  if (nativeEvent.actionName === 'delete') onDelete(it);
+                }}
                 style={({ pressed }) => [
                   styles.row,
                   responded && styles.rowUnread,
