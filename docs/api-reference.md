@@ -13,6 +13,7 @@ Auth: session cookie via `/api/session/init`. Extension uses a bearer token from
 | POST | `/api/session/init` | Establish session for a Sleeper username. Response includes the additive `verification` field (below). 400 `missing_user_id` if a session token is sent without `user_id` in the body (tokenless demo/first-init still defaults to the demo user) |
 | GET | `/api/session/ping` | Liveness / session check |
 | POST/GET | `/api/session/demo` | Demo session bootstrap |
+| POST | `/api/session/signout` | **Teardown 06-03 (W2C), unflagged.** Evict the calling `X-Session-Token` server-side → `{ok: true, evicted: bool}`. Idempotent, never errors (missing/stale token → `evicted: false`) — clients call it best-effort during sign-out so the token doesn't stay live until idle eviction |
 | POST | `/api/extension/auth` | Issue extension bearer token |
 | POST | `/api/reset` | Wipe current user's rankings + decisions (in-memory service state) |
 | POST | `/api/account/reset-rankings` | **Verified-only** (403 `verification_required`, no grace). Squatter remedy (account-auth P1 §2d): deletes the caller's persisted ranking inputs across all formats — `swipe_decisions`, published `member_rankings`, `users.tier_overrides`/`tiers_saved`/`ranking_method` — and resets this session's in-memory services. → `{ok, counts}`. UI entry point ships with P2's Settings account section |
@@ -99,7 +100,7 @@ Account-auth plan P2 + P2.6 account-first (docs/plans/account-auth-plan-2026-07-
 | GET | `/api/trio` | Next 3-player matchup |
 | POST | `/api/trio/skip` | Skip current trio |
 | POST | `/api/rank3` | Submit ordered (best→worst) result |
-| POST | `/api/rankings/submit` | Bulk submit pre-computed rankings |
+| POST | `/api/rankings/submit` | Publish the **session user's** ELO snapshot to `member_rankings` (optional body `league_id`; a body `user_id` is ignored — teardown W2C closed the S6B-01-class override that let any session upsert another user's published rankings) |
 | POST | `/api/rankings/reorder` | Manually reorder ranks |
 | GET | `/api/rankings` | Read current rankings. Each player may carry `consensus_pos_rank` (1-based rank within position by consensus seed value over the active format's universal pool) and `consensus_pos_rank_delta_30d` (30d movement of that rank vs. the oldest prior-day `player_value_history` snapshot in-window; positive = moved up). Both omit-when-absent — the delta is absent until snapshot history accrues (FB4-61 tile stats, 2026-07-10). Each player may also carry ONE of `tradeability` / `acquirability` (0–1 tile trade meters, TestFlight #71, 2026-07-10): tradeability on players the user owns in the session's league (gap vs community-mean Elo), acquirability on leaguemate-owned players (gap vs that owner's Elo, community-mean fallback); scaling `clamp01(0.5 + gap/800)` via `trends_service.compute_tile_trade_scores`. Omitted when there's no basis: demo/no league, < 3 community rankers, free agent, or owned player absent from the community pool |
 | GET | `/api/skips` | Skipped matchups log |
@@ -256,7 +257,7 @@ Verdict math is `trade_service.classify_verdict(give_value, receive_value)` (no 
 | POST | `/api/league/asset-prefs` | Tag a player: body `{league_id, player_id, list: "untouchable"\|"target"\|"none"}`; single membership; invalidates the league's cached deck (#2) |
 | GET | `/api/league/summary` | League summary roll-up. Match tiles (#91): `matches_mutual` (non-dismissed `trade_matches` rows involving the caller, any status — equals the Matches tab's "Mutual matches" segment for the league) + `matches_awaiting` (caller's one-sided likes not yet matured — equals "Awaiting them"). Every trade is in exactly one bucket. Legacy `matches_pending`/`matches_accepted` (status-split, dismissal-blind) still emitted for pre-1.4 clients — do not use in new UI. `total_teams` (FB #41): TOTAL teams in the league, caller included — Sleeper's `total_rosters` when persisted, else `leaguemates_total + 1`; clients must show this in the teams tile, not a derived count |
 | POST | `/api/league/scoring` | Set scoring format |
-| GET | `/api/league/coverage` | Member ranking coverage |
+| GET | `/api/league/coverage` | Member ranking coverage (the excluded "current user" is always the session user — a `user_id` query param is ignored, teardown W2C hygiene) |
 | GET | `/api/league/member-unlock-states` | Per-member unlock badges |
 | GET | `/api/league/members` | League member roster + invite metadata (League Summary "Leaguemates Joined") |
 | GET | `/api/leaderboard` | League + Universal leaderboards (rendered inside the League tab) |
@@ -337,8 +338,10 @@ Triggered by an external scheduler (Render cron). All POST.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/portfolio` | User's cross-league exposure. Optional `?league_ids=a,b,c` (FB-48) scopes to the caller's current-season leagues — Sleeper mints a new league_id per season, so unscoped queries double-count carried-over players |
-| GET | `/u/<username>` | Public profile page |
-| GET | `/api/profile/<username>` | Profile JSON |
+| GET | `/u/<username>` | Public profile page. Flag `profiles.public_pages` (404 dark); with `profiles.user_toggle` ALSO on, 404 unless the user's `users.profile_public` opt-in is set (teardown 06-04 — the global flag alone can no longer publish everyone) |
+| GET | `/api/profile/<username>` | Profile JSON — same two-layer gate as `/u/<username>`; opt-in denial is indistinguishable from not-found (no username enumeration) |
+| GET | `/api/profile/visibility` | **Teardown 06-04, flag `profiles.user_toggle` (404 dark).** Session user's public-profile opt-in → `{public: bool}` (default false) |
+| PUT | `/api/profile/visibility` | Set the opt-in: body `{public: bool}` → `{public}`. Verified-write gated (`_verified_write_denial`): once a verified controller exists, a squatter session cannot flip exposure |
 | GET | `/og/tiers/<pos>/<username>.png` | OG image (tiers) |
 | GET | `/og/trade/<match_id>.png` | OG image (trade) |
 | GET | `/s/tiers/<pos>/<username>` | Share page (tiers) |

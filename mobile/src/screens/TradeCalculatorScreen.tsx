@@ -43,12 +43,20 @@ import VerdictPanel from '../components/VerdictPanel';
 import ConsensusVerdictCard from '../components/ConsensusVerdictCard';
 import SuggestionCard from '../components/SuggestionCard';
 import PlayerPickerModal from '../components/PlayerPickerModal';
+import Toast from '../components/Toast';
 import { Button, Card, Icon, TickLabel } from '../components/chalkline';
 import { haptics } from '../utils/haptics';
+import { track } from '../api/events';
+import { getBaseUrl } from '../api/client';
 import { chalk, flare, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
 import InLeagueCalculator from '../components/InLeagueCalculator';
 import type { ScoringFormat } from '../shared/types';
+
+// Triage undo (S3 PRD-03, flag ux.swipe_undo): how long the cleared-trade
+// snapshot (and its Undo toast) is held. Pure local state — nothing to POST.
+const UNDO_HOLD_MS = 5000;
 
 // Manual Trade Calculator. Two modes:
 //   'live' — REAL consensus values from the backend's universal pool.
@@ -102,6 +110,19 @@ export default function TradeCalculatorScreen() {
   const [liveReceiveIds, setLiveReceiveIds] = useState<string[]>([]);
   const [picker, setPicker] = useState<'send' | 'receive' | null>(null);
   const [hydrated, setHydrated] = useState(false);
+
+  // ── Teardown-remediation flags (default false — flag off is
+  // byte-identical behavior) ──────────────────────────────────────────
+  const swipeUndoOn = useFlag('ux.swipe_undo');           // S3 PRD-03
+  const shareLandingOn = useFlag('growth.share_landing'); // S7 PRD-01
+
+  // S3 PRD-03 — "Clear trade" snapshot + Undo toast.
+  const [toast, setToast] = useState<{
+    msg: string;
+    tone?: 'success' | 'warn';
+    holdMs?: number;
+    action?: { label: string; onPress: () => void };
+  } | null>(null);
 
   // In-league mode (Mode B) is only offered when a real league is active.
   const league = useSession((s) => s.league);
@@ -446,8 +467,20 @@ export default function TradeCalculatorScreen() {
           `Their board: ${demoEvaluation.theirGive.toLocaleString()} out, ${demoEvaluation.theirGet.toLocaleString()} back (${formatDelta(demoEvaluation.theirDeltaPct)})`,
           `Verdict: ${CALC_VERDICT_LABEL[demoEvaluation.verdict]}`,
         ];
+    // S7 PRD-01 (growth.share_landing): shares carry a landing URL with
+    // ?ref= attribution. A hand-built calculator trade has no server object
+    // (no /s/ route exists for arbitrary packages — documented W3/backend
+    // handoff), so the site root is the landing page. Flag off: legacy
+    // link-free message, byte for byte.
+    if (shareLandingOn) {
+      const ref = user?.username ? `?ref=${encodeURIComponent(user.username)}` : '';
+      lines.push(`Build your own: ${getBaseUrl()}/${ref}`);
+    }
     try {
       await Share.share({ message: lines.filter(Boolean).join('\n') });
+      if (shareLandingOn) {
+        track('calc_trade_shared', { mode }, 'Calculator');
+      }
     } catch {
       /* user dismissed or share unavailable — nothing to do */
     }
@@ -457,6 +490,15 @@ export default function TradeCalculatorScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      {/* S3 PRD-03 — Clear-trade Undo toast (only ever set flag-on). */}
+      <Toast
+        visible={!!toast}
+        message={toast?.msg || ''}
+        tone={toast?.tone}
+        holdMs={toast?.holdMs ?? 1500}
+        action={toast?.action}
+        onDismiss={() => setToast(null)}
+      />
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Mode switch: real consensus values vs the seeded demo league. */}
         <View style={styles.modeRow}>
@@ -693,6 +735,27 @@ export default function TradeCalculatorScreen() {
               variant="ghost"
               onPress={() => {
                 haptics.warning();
+                // S3 PRD-03 (ux.swipe_undo): snapshot the hand-built trade
+                // and offer a 5s Undo — no server state, pure restore.
+                if (swipeUndoOn) {
+                  const prevSend = activeSendIds;
+                  const prevReceive = activeReceiveIds;
+                  const restoreSend = setActiveSendIds;
+                  const restoreReceive = setActiveReceiveIds;
+                  setToast({
+                    msg: 'Trade cleared',
+                    tone: 'success',
+                    holdMs: UNDO_HOLD_MS,
+                    action: {
+                      label: 'Undo',
+                      onPress: () => {
+                        restoreSend(prevSend);
+                        restoreReceive(prevReceive);
+                        track('calc_clear_undone', undefined, 'Calculator');
+                      },
+                    },
+                  });
+                }
                 setActiveSendIds([]);
                 setActiveReceiveIds([]);
               }}

@@ -11,6 +11,9 @@ import {
 } from '../theme/chalkline';
 import { Button, Icon } from './chalkline';
 import { usePushPriming } from '../state/usePushPriming';
+import { useInterruptCoordinator } from '../state/useInterruptCoordinator';
+import { useFlag } from '../state/useFeatureFlags';
+import { track } from '../api/events';
 
 // Pre-permission priming sheet. Shown once when usePushNotifications detects
 // the iOS permission is `undetermined` AND the user has progressed far
@@ -18,19 +21,29 @@ import { usePushPriming } from '../state/usePushPriming';
 //
 // Two outcomes:
 //   Enable now  → calls the registered handler which triggers the iOS prompt
-//   Maybe later → dismisses the sheet without prompting. Re-asked next session.
+//   Maybe later → dismisses the sheet without prompting. With
+//     `ux.prompt_arbiter` on, declines persist and the primer re-arms only
+//     after 3+ sessions or a want-it moment (see usePushPriming); flag off,
+//     it re-asks next session as before.
+//
+// S4 PRD-04 (`ux.prompt_arbiter`): as a root modal this SELF-DEFERS while
+// any instructional surface holds the arbiter slot — `pending` stays true,
+// so the sheet appears the moment the slot frees instead of stacking.
 export default function PushPrimingModal() {
   const pending = usePushPriming((s) => s.pending);
   const acceptHandler = usePushPriming((s) => s.acceptHandler);
   const dismiss = usePushPriming((s) => s.dismiss);
+  const arbiterOn = useFlag('ux.prompt_arbiter');
+  const surfaceBusy = useInterruptCoordinator((s) => s.activeSurface !== null);
 
   const accept = async () => {
+    if (arbiterOn) track('push_primer_accepted');
     if (acceptHandler) await acceptHandler();
   };
 
   return (
     <Modal
-      visible={pending}
+      visible={pending && !(arbiterOn && surfaceBusy)}
       transparent
       animationType="fade"
       onRequestClose={dismiss}
@@ -41,10 +54,13 @@ export default function PushPrimingModal() {
             <Icon name="bell" size={28} color={chalk.base} />
           </View>
           <Text style={styles.title}>Get pinged when a trade match drops</Text>
+          {/* Copy correction (W1B handoff, unflagged): "counters your offer"
+              promised a push kind that never fires — the real trigger is a
+              leaguemate accepting your match. */}
           <Text style={styles.body}>
             We'll let you know when:{"\n"}
             • A new trade match is generated for you{"\n"}
-            • A leaguemate counters your offer{"\n"}
+            • A leaguemate accepts your match{"\n"}
             • A match is about to expire
           </Text>
           <Text style={styles.fine}>

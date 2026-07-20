@@ -9,10 +9,12 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 
 import { ink, chalk, ice, space, radii, type } from '../theme/chalkline';
-import { TickLabel } from '../components/chalkline';
+import { Button, TickLabel } from '../components/chalkline';
+import { useFlag } from '../state/useFeatureFlags';
 import PositionChip from '../components/PositionChip';
 import TierBadge from '../components/TierBadge';
 import { getPortfolio } from '../api/league';
@@ -29,8 +31,12 @@ import type { PortfolioRow, PortfolioTier, Tier } from '../shared/types';
 // returning tier-per-league, no UI change needed — the type already
 // accepts `Tier | 'pool'`.
 export default function PortfolioScreen() {
+  const navigation = useNavigation<any>();
   const leagues = useSession((s) => s.leagues);
   const hasMultiLeague = (leagues?.length || 0) >= 2;
+  // S4 PRD-05 (ux.empty_state_ctas): the gate names Settings as the fix —
+  // offer the button that goes there. Flag off: copy-only gate, as before.
+  const emptyCtasOn = useFlag('ux.empty_state_ctas');
 
   // FB-48 — scope the aggregation to the current-season league list (the
   // same set the switcher shows). The DB also holds last season's instance
@@ -53,6 +59,14 @@ export default function PortfolioScreen() {
             Portfolio shows which players you own across multiple leagues.
             Add another Sleeper league from Settings to unlock it.
           </Text>
+          {emptyCtasOn ? (
+            <Button
+              testID="portfolio.open-settings"
+              label="Open Settings"
+              variant="primary"
+              onPress={() => navigation.navigate('Settings')}
+            />
+          ) : null}
         </View>
       </SafeAreaView>
     );

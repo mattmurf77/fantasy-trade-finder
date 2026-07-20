@@ -9,9 +9,10 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { haptics } from '../utils/haptics';
@@ -27,12 +28,14 @@ import {
   type,
   fonts,
 } from '../theme/chalkline';
-import { TickLabel, Button } from '../components/chalkline';
+import { TickLabel, Button, Text as ChalkText } from '../components/chalkline';
 import Toast from '../components/Toast';
 import FormatToggle from '../components/FormatToggle';
+import { setPinnedBottomBarHeight } from '../components/FeedbackFAB';
 import { getRankings, reorderRankings } from '../api/rankings';
 import { TIERS, TIER_LABEL, tierForElo } from '../utils/tierBands';
 import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
 import { useScoringFormat } from '../hooks/useScoringFormat';
 import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/types';
 
@@ -71,6 +74,17 @@ export default function QuickRankScreen() {
   const fmt: ScoringFormat = activeFormat || '1qb_ppr';
   // #137 — SF/1QB toggle in the walk header, same wiring as Quick set's.
   const { setFormat, switching: formatSwitching } = useScoringFormat();
+
+  // S2 PRD-04 ride-along (flag visual.chalkline_cleanup): 9px chip metas
+  // rise to the 11px type floor; faint content text promotes to dim.
+  const cleanup = useFlag('visual.chalkline_cleanup');
+
+  // S3 PRD-01 — report the pinned walk footer to the feedback FAB (same
+  // contract as Quick set: focused-only, FAB ignores it while
+  // ux.touch_polish is off). The reporting effect lives below, after the
+  // step derivation — the footer only renders when there's a tier to walk.
+  const isFocused = useIsFocused();
+  const [footerH, setFooterH] = useState(0);
 
   const [position, setPosition] = useState<Position>(
     route.params?.position ?? 'QB',
@@ -116,6 +130,16 @@ export default function QuickRankScreen() {
   const tier = steps[Math.min(stepIdx, Math.max(steps.length - 1, 0))];
   const isLastTier = stepIdx >= steps.length - 1;
   const members = (tier ? membersByTier.get(tier) : undefined) ?? [];
+
+  // S3 PRD-01 — FAB-offset reporting (see the state block above). The
+  // footer only renders on the walkable branch, so report 0 whenever the
+  // empty/loading/error states own the screen.
+  const footerVisible =
+    !rankingsQuery.isLoading && !rankingsQuery.isError && steps.length > 0 && !!tier;
+  React.useEffect(() => {
+    setPinnedBottomBarHeight('quickrank', isFocused && footerVisible ? footerH : 0);
+  }, [isFocused, footerVisible, footerH]);
+  React.useEffect(() => () => setPinnedBottomBarHeight('quickrank', 0), []);
 
   // #138 — what the grid RENDERS. Click order lives in the pid list and
   // save reads the full member set, so filtering the view can never drop
@@ -247,21 +271,35 @@ export default function QuickRankScreen() {
               </View>
             ) : null}
           </View>
+          {/* S2 PRD-04 ride-along — meta row through the chalkline Text
+              primitive (dense Dynamic-Type tier); the 9px sizes rise to
+              the 11px floor under visual.chalkline_cleanup. */}
           <View style={styles.chipMeta}>
             {SHOW_POSITION ? (
-              <Text style={[styles.chipPos, { color: positionColors[posKey] ?? chalk.dim }]}>
+              <ChalkText
+                scale="dense"
+                style={[
+                  styles.chipPos,
+                  cleanup && styles.chipMetaFloor,
+                  { color: positionColors[posKey] ?? chalk.dim },
+                ]}
+              >
                 {item.position}
-              </Text>
+              </ChalkText>
             ) : null}
-            <Text style={styles.chipTeam}>{item.team ?? 'FA'}</Text>
+            <ChalkText scale="dense" style={[styles.chipTeam, cleanup && styles.chipMetaFloor]}>
+              {item.team ?? 'FA'}
+            </ChalkText>
             {item.age != null ? (
-              <Text style={styles.chipAge}>{item.age}</Text>
+              <ChalkText scale="dense" style={[styles.chipAge, cleanup && styles.chipMetaFloor]}>
+                {item.age}
+              </ChalkText>
             ) : null}
           </View>
         </Pressable>
       );
     },
-    [rankOf, toggle],
+    [rankOf, toggle, cleanup],
   );
 
   const saving = saveMutation.isPending;
@@ -339,7 +377,8 @@ export default function QuickRankScreen() {
         </View>
       ) : steps.length === 0 || !tier ? (
         <View style={styles.centered}>
-          <Text style={styles.emptyText}>
+          {/* S2 PRD-04 — explanatory content: faint → dim under cleanup. */}
+          <Text style={[styles.emptyText, cleanup && styles.emptyTextDim]}>
             No {position} tier has two or more players to order yet — set
             tiers first with Quick set.
           </Text>
@@ -395,15 +434,19 @@ export default function QuickRankScreen() {
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
               query.length > 0 ? (
-                <Text style={styles.emptyText}>
+                <Text style={[styles.emptyText, cleanup && styles.emptyTextDim]}>
                   {`No ${position} here matches “${search.trim()}”.`}
                 </Text>
               ) : null
             }
           />
 
-          {/* Walk controls pinned to the bottom: Back / Skip / Save-and-next. */}
-          <View style={styles.footer}>
+          {/* Walk controls pinned to the bottom: Back / Skip / Save-and-next.
+              onLayout feeds the S3 PRD-01 FAB-offset registry. */}
+          <View
+            style={styles.footer}
+            onLayout={(e: LayoutChangeEvent) => setFooterH(e.nativeEvent.layout.height)}
+          >
             <Button
               variant="ghost"
               compact
@@ -580,12 +623,19 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: chalk.dim,
   },
+  // S2 PRD-04 (visual.chalkline_cleanup) — 11px type floor for the chip
+  // meta row (was 9px; components.md updated). The 10px rank-badge numeral
+  // is untouched: it sits inside a fixed 16px badge (raising it means
+  // resizing the badge — a coordinated spec change, not a ride-along).
+  chipMetaFloor: { fontSize: 11 },
   emptyText: {
     ...type.bodySm,
     color: chalk.faint,
     textAlign: 'center',
     paddingHorizontal: space.xl,
   },
+  // S2 PRD-04 (visual.chalkline_cleanup) — content text ≥ dim.
+  emptyTextDim: { color: chalk.dim },
   centered: {
     flex: 1,
     alignItems: 'center',

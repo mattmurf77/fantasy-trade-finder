@@ -206,6 +206,12 @@ users_table = Table("users", metadata,
     # control of this user record. NULL = never verified (username-only).
     Column("verified_at",           String),
     Column("verified_via",          String),
+    # ── Public-profile opt-in (teardown 06-04, flag profiles.user_toggle) ─
+    # 1 = user opted into /u/<username> exposure; NULL/0 = private. Checked
+    # by the public profile routes IN ADDITION to the global
+    # profiles.public_pages flag, so flipping the global flag can never
+    # publish a user who didn't opt in.
+    Column("profile_public",        Integer),
 )
 
 leagues_table = Table("leagues", metadata,
@@ -1447,6 +1453,8 @@ def _migrate_db() -> None:
         # safe for both phases to declare the same columns.
         ("users",              "verified_at",           "VARCHAR"),
         ("users",              "verified_via",          "VARCHAR"),
+        # Public-profile opt-in (teardown 06-04, flag profiles.user_toggle)
+        ("users",              "profile_public",        "INTEGER"),
         # ESPN league linking Phase 1 (flag `espn.link`; plan
         # docs/plans/espn-league-linking-plan-2026-07-11.md) — see
         # leagues_table column comments.
@@ -2649,6 +2657,36 @@ def get_ranking_method(user_id: str) -> str | None:
             )
         ).fetchone()
         return row.ranking_method if row else None
+
+
+def get_profile_public(user_id: str) -> bool:
+    """Public-profile opt-in (teardown 06-04). Missing row/NULL = private."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.profile_public).where(
+                users_table.c.sleeper_user_id == user_id
+            )
+        ).fetchone()
+        return bool(row.profile_public) if row else False
+
+
+def set_profile_public(user_id: str, public: bool) -> None:
+    """Persist the user's public-profile opt-in. Creates the users row if
+    the toggle beats session_init's background upsert (same race guard as
+    the verified marker)."""
+    val = 1 if public else 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(users_table)
+            .where(users_table.c.sleeper_user_id == user_id)
+            .values(profile_public=val)
+        )
+        if res.rowcount == 0:
+            conn.execute(insert(users_table).values(
+                sleeper_user_id=user_id,
+                profile_public=val,
+                created_at=_now(),
+            ))
 
 
 def _parse_per_format_json(raw: str | None, is_list: bool) -> dict:

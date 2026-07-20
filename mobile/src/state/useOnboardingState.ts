@@ -46,6 +46,16 @@ export interface OnboardingPersisted {
   guideDismissed: boolean;                 // "Skip tour" — permanent opt-out
   guideSeen: Record<string, boolean>;      // once-ever steps by script id
   guideTourCompleted: boolean;             // S8 reached → reactive-only mode
+
+  // Push-primer backoff (teardown S4 PRD-04, flag ux.prompt_arbiter):
+  // "Maybe later" declines are persisted so the primer re-arms only after
+  // 3+ sessions or a want-it moment — never every session.
+  pushPrimerDeclines: number;              // lifetime "Maybe later" count
+  pushPrimerLastDeclineSession: number;    // sessionCount at last decline
+
+  // Rating prompt (teardown S7 PRD-02, flag growth.rating_prompt):
+  // app version the StoreReview request last fired for (once per version).
+  ratingPromptShownVersion: string | null;
 }
 
 const DEFAULTS: OnboardingPersisted = {
@@ -65,6 +75,9 @@ const DEFAULTS: OnboardingPersisted = {
   guideDismissed: false,
   guideSeen: {},
   guideTourCompleted: false,
+  pushPrimerDeclines: 0,
+  pushPrimerLastDeclineSession: 0,
+  ratingPromptShownVersion: null,
 };
 
 interface OnboardingStateStore {

@@ -10,13 +10,19 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ink, chalk, ice, semantic, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
 import { Icon, Button } from './chalkline';
-import { useNotifications } from '../state/useNotifications';
+import { useNotifications, type AppNotification } from '../state/useNotifications';
+import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
+import { getNotifications, markAllNotificationsRead } from '../api/notifications';
 import { relativeTime } from '../utils/relativeTime';
 // Circular at module-load (TopBar ← TabNav ← RootNav), but `navigationRef`
 // is a top-level const created at RootNav import time and only *read*
 // lazily inside onPress below. If you refactor navigationRef into the
-// component body, this circular import will break silently.
+// component body, this circular import will break silently. The same
+// applies to utils/deepLinks (deepLinks ← RootNav): its exports are only
+// *called* from event handlers, never at module-eval time.
 import { navigationRef } from '../navigation/RootNav';
+import { resolveNotificationTarget, routeNotificationTap } from '../utils/deepLinks';
 
 // Global top bar that sits above the tab navigator. Chalkline TopNav:
 // wordmark (ice tick + condensed caps) on the left, settings + bell icon
@@ -46,12 +52,52 @@ export default function TopBar() {
   const unreadCount = useNotifications((s) => s.unreadCount);
   const markAllRead = useNotifications((s) => s.markAllRead);
   const clearAll    = useNotifications((s) => s.clear);
+  const hydrateFromServer = useNotifications((s) => s.hydrateFromServer);
+  const userId = useSession((s) => s.user?.user_id ?? null);
+  // S5 PRD-02 (flag `notif.tap_routing_v2`): the bell hydrates from the
+  // server inbox on open (the in-memory feed resets on relaunch, so without
+  // this the sheet claims "all caught up" over real unread rows), rows are
+  // tappable via their stored payload metadata, and reads sync back via the
+  // existing endpoints. Flag off: in-session feed only, rows inert — today's
+  // behavior exactly.
+  const tapV2 = useFlag('notif.tap_routing_v2');
   const [open, setOpen] = useState(false);
 
   const openSheet = () => {
     setOpen(true);
     // Mark read when the sheet is opened so the dot disappears.
     markAllRead();
+    if (tapV2 && userId) {
+      getNotifications(userId)
+        .then((res) => {
+          const rows: AppNotification[] = (res?.notifications ?? []).map((row) => ({
+            id: String(row.id),
+            title: row.title || 'Notification',
+            body: row.body || '',
+            receivedAt: Date.parse(row.created_at) || Date.now(),
+            // The sheet is open — everything shown is being read right now.
+            read: true,
+            data: { type: row.type, ...(row.metadata ?? {}) },
+          }));
+          hydrateFromServer(rows);
+          // Server-side mark-read so the next launch's inbox agrees with
+          // what the user has seen. Best-effort.
+          void markAllNotificationsRead().catch(() => {});
+        })
+        .catch(() => {
+          /* offline / server hiccup — keep the in-session feed */
+        });
+    }
+  };
+
+  // Row tap (flag on): close the sheet and route through the same tap
+  // router pushes use, off the row's stored payload (`data.type`,
+  // `data.match_id`). Unroutable kinds are inert.
+  const onRowTap = (it: AppNotification) => {
+    const target = resolveNotificationTarget(it.data);
+    if (!target) return;
+    setOpen(false);
+    routeNotificationTap(target.tab, target.matchId);
   };
 
   return (
@@ -147,17 +193,36 @@ export default function TopBar() {
             </View>
           ) : (
             <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-              {items.map((it) => (
-                <View key={it.id} style={styles.item}>
-                  <Text style={styles.itemTitle}>{it.title}</Text>
-                  {it.body ? (
-                    <Text style={styles.itemBody}>{stripLeadingTypeEmoji(it.body)}</Text>
-                  ) : null}
-                  <Text style={styles.itemTime}>
-                    {relativeTime(new Date(it.receivedAt).toISOString())}
-                  </Text>
-                </View>
-              ))}
+              {items.map((it) => {
+                const body = (
+                  <>
+                    <Text style={styles.itemTitle}>{it.title}</Text>
+                    {it.body ? (
+                      <Text style={styles.itemBody}>{stripLeadingTypeEmoji(it.body)}</Text>
+                    ) : null}
+                    <Text style={styles.itemTime}>
+                      {relativeTime(new Date(it.receivedAt).toISOString())}
+                    </Text>
+                  </>
+                );
+                // Flag on: rows route like push taps. Flag off: inert rows,
+                // byte-identical to today.
+                return tapV2 ? (
+                  <Pressable
+                    key={it.id}
+                    testID={`topbar.notif-row.${it.id}`}
+                    onPress={() => onRowTap(it)}
+                    style={({ pressed }) => [styles.item, pressed && { backgroundColor: ink.ink3 }]}
+                    accessibilityRole="button"
+                  >
+                    {body}
+                  </Pressable>
+                ) : (
+                  <View key={it.id} style={styles.item}>
+                    {body}
+                  </View>
+                );
+              })}
             </ScrollView>
           )}
         </View>

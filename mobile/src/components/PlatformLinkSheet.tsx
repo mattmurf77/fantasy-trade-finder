@@ -10,9 +10,11 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { ink, chalk, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
 import { Button, Icon } from './chalkline';
+import { useFlag } from '../state/useFeatureFlags';
 import { ApiError } from '../api/client';
 import {
   LinkPlatform,
@@ -55,6 +57,16 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
   const [preview, setPreview] = useState<PlatformLinkPreview | null>(null);
   const [summary, setSummary] = useState<PlatformImportSummary | null>(null);
 
+  // Teardown PRD 01-01 audit hit (same hazard as EspnLinkSheet), flag
+  // `ux.sheet_guard`: OFF — every close resets (backdrop tap wipes typed
+  // league ID / lookup email mid-flow). ON — close keeps state so reopening
+  // resumes the step; backdrop/back get Keep editing / Discard while dirty;
+  // the explicit Cancel button closes keeping the draft.
+  const guardOn = useFlag('ux.sheet_guard');
+  const dirty =
+    step === 'team' ||
+    (step === 'input' && !!(input.trim() || email.trim()));
+
   function reset() {
     setStep('input');
     setInput('');
@@ -71,8 +83,38 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
 
   function close() {
     if (busy || busyTeamId !== null) return;
+    if (guardOn) {
+      // Keep all state — reopening resumes where the user left off.
+      onClose();
+      return;
+    }
     reset();
     onClose();
+  }
+
+  // Backdrop tap + onRequestClose: possibly accidental — confirm first when
+  // the guard is on and there's unsaved progress. Flag off: same as close().
+  function requestClose() {
+    if (busy || busyTeamId !== null) return;
+    if (guardOn && dirty) {
+      Alert.alert(
+        'Discard this league link?',
+        'Your entries will be cleared.',
+        [
+          { text: 'Keep editing', style: 'cancel' },
+          {
+            text: 'Discard',
+            style: 'destructive',
+            onPress: () => {
+              reset();
+              onClose();
+            },
+          },
+        ],
+      );
+      return;
+    }
+    close();
   }
 
   function parseInput(raw: string): string | null {
@@ -174,8 +216,8 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
   const report = step === 'done' ? summary?.report : preview?.report;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
-      <Pressable style={styles.backdrop} onPress={close} />
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={requestClose}>
+      <Pressable style={styles.backdrop} onPress={requestClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.kav}

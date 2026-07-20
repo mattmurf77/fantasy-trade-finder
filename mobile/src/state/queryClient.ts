@@ -14,6 +14,10 @@ import { QueryClient } from '@tanstack/react-query';
 // `placeholderData: (prev) => prev` on screen-level queries, this gives
 // "instant content, refetch silently" behavior across the tabs (Mobile
 // review #M5).
+//
+// `refetchOnReconnect: true` is LIVE as of the S7 PRD-04 NetInfo bridge:
+// App.tsx wires onlineManager to @react-native-community/netinfo, so
+// active queries revalidate when connectivity returns.
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

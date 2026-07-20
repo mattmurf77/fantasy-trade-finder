@@ -10,9 +10,11 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { ink, chalk, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
 import { Button, Icon } from './chalkline';
+import { useFlag } from '../state/useFeatureFlags';
 import { ApiError } from '../api/client';
 import {
   linkEspnLeague,
@@ -49,6 +51,21 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
   const [preview, setPreview] = useState<EspnLinkPreview | null>(null);
   const [summary, setSummary] = useState<EspnImportSummary | null>(null);
 
+  // Teardown PRD 01-01 (S1B-04), flag `ux.sheet_guard`:
+  //   OFF — every close resets, so a stray backdrop tap wipes the league ID
+  //   and pasted espn_s2/SWID cookies (painful to re-paste).
+  //   ON  — close does NOT reset; reopening resumes the step with fields
+  //   intact. Accidental dismiss vectors (backdrop tap, Android back) get a
+  //   Keep editing / Discard confirm while there's anything to lose; the
+  //   explicit Cancel button closes keeping the draft (resume on reopen).
+  const guardOn = useFlag('ux.sheet_guard');
+  // Anything worth protecting: typed fields on step 1, or a fetched
+  // preview mid-flow. The 'done' step has nothing to lose (import already
+  // completed server-side).
+  const dirty =
+    step === 'team' ||
+    (step === 'input' && !!(input.trim() || espnS2.trim() || swid.trim()));
+
   function reset() {
     setStep('input');
     setInput('');
@@ -64,8 +81,38 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
 
   function close() {
     if (busy || busyTeamId !== null) return;
+    if (guardOn) {
+      // Keep all state — reopening resumes where the user left off.
+      onClose();
+      return;
+    }
     reset();
     onClose();
+  }
+
+  // Backdrop tap + onRequestClose: possibly accidental — confirm first when
+  // the guard is on and there's unsaved progress. Flag off: same as close().
+  function requestClose() {
+    if (busy || busyTeamId !== null) return;
+    if (guardOn && dirty) {
+      Alert.alert(
+        'Discard this league link?',
+        'Your league ID and cookies will be cleared.',
+        [
+          { text: 'Keep editing', style: 'cancel' },
+          {
+            text: 'Discard',
+            style: 'destructive',
+            onPress: () => {
+              reset();
+              onClose();
+            },
+          },
+        ],
+      );
+      return;
+    }
+    close();
   }
 
   async function fetchPreview() {
@@ -151,8 +198,8 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
   const report = step === 'done' ? summary?.report : preview?.report;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
-      <Pressable style={styles.backdrop} onPress={close} />
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={requestClose}>
+      <Pressable style={styles.backdrop} onPress={requestClose} />
       {/* #129: keyboard-avoiding wrapper (FeedbackSheet pattern) — without it
           the absolutely-positioned sheet's content is hidden behind the iOS
           keyboard, leaving Continue unreachable while typing the league ID. */}

@@ -24,6 +24,7 @@ import {
 } from '../theme/chalkline';
 import { Button } from './chalkline';
 import { useFeedback, type FeedbackSeverity } from '../state/useFeedback';
+import { useFlag } from '../state/useFeatureFlags';
 
 interface Props {
   visible: boolean;
@@ -40,28 +41,47 @@ const SEVERITY_OPTIONS: { value: FeedbackSeverity; label: string }[] = [
 ];
 
 // Modal-based bottom sheet for capturing a single feedback note. Keyboard-
-// avoiding so the text area doesn't get hidden on smaller phones. Resets
-// to defaults on close so reopening is always a clean slate.
+// avoiding so the text area doesn't get hidden on smaller phones.
+//
+// Flag `ux.sheet_guard` OFF (default): resets to defaults on open so
+// reopening is always a clean slate — a stray backdrop tap loses the note.
+// Flag ON (teardown PRD 01-01, S1A-02): the typed note is a DRAFT — any
+// dismiss path (backdrop, Android back, Cancel) keeps it, and reopening
+// restores it (the PRD's preferred no-dialog variant). Only a successful
+// Save clears it. The sheet stays mounted with `visible` toggling, so
+// component state IS the draft store — no persistence layer needed.
 export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props) {
   const [severity, setSeverity] = useState<FeedbackSeverity>('bug');
   const [screen, setScreen] = useState(defaultScreen);
   const [text, setText] = useState('');
   const inputRef = useRef<TextInput>(null);
   const add = useFeedback((s) => s.add);
+  const guardOn = useFlag('ux.sheet_guard');
 
   // Re-seed screen whenever the sheet opens (it may have changed since the
-  // last open). Reset other fields too.
+  // last open). Reset other fields too — unless the guard flag is on and a
+  // draft note exists, in which case restore everything as the user left it.
   useEffect(() => {
     if (visible) {
-      setScreen(defaultScreen);
-      setText('');
-      setSeverity('bug');
+      if (guardOn && text.trim()) {
+        // Draft restore: keep note + severity + screen override. Only
+        // backfill the screen field if the user blanked it.
+        if (!screen.trim()) setScreen(defaultScreen);
+      } else {
+        setScreen(defaultScreen);
+        setText('');
+        setSeverity('bug');
+      }
       // Small delay so the modal animation finishes before the keyboard
       // pops — otherwise the keyboard appears before the modal is fully
       // settled and the layout jitters.
       const t = setTimeout(() => inputRef.current?.focus(), 250);
       return () => clearTimeout(t);
     }
+    // `text`/`screen`/`guardOn` intentionally not in deps: this effect only
+    // runs on open/close transitions and reads the values current at that
+    // moment (the closure re-captures every render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, defaultScreen]);
 
   async function onSave() {
@@ -76,6 +96,9 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
       text: trimmed,
       app_version: Constants.expoConfig?.version,
     });
+    // Saved — clear the draft so the next open starts clean (flag-off gets
+    // the same net result via the reset-on-open effect above).
+    setText('');
     onClose();
   }
 

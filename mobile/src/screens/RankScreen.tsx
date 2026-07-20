@@ -31,6 +31,7 @@ import { Button, Icon } from '../components/chalkline';
 import FormatToggle from '../components/FormatToggle';
 import PlayerCard from '../components/PlayerCard';
 import Toast from '../components/Toast';
+import { InfoButton } from '../components/HelpSheet';
 import {
   getNextTrio,
   getProgress,
@@ -89,6 +90,13 @@ export default function RankScreen() {
 
   const qcEnabled      = useFlag('swipe.qc_compliments');
   const gestureEnabled = useFlag('swipe.gesture_audit');
+  // Teardown flags (default false — flag off is byte-identical):
+  // S4 PRD-02 unlock-copy fixes ride the outlook-inline flag; S3 PRD-02
+  // gives the long-press info sheet a visible ⓘ twin; S2 PRD-04 ride-along
+  // promotes content-carrying faint text to dim.
+  const unlockCopyOn = useFlag('ux.outlook_inline_default');
+  const menuOn = useFlag('ux.player_context_menu');
+  const cleanupOn = useFlag('visual.chalkline_cleanup');
 
   // FB #80 — explicit format switch from the header toggle. On failure the
   // local state is untouched (the toggle stays where it was) — just toast.
@@ -355,7 +363,10 @@ export default function RankScreen() {
           </View>
         ) : null}
 
-        <Text style={styles.modeHint}>Trios · tap Rank below for more modes</Text>
+        {/* S2 PRD-04 ride-along: content-carrying hint faint → dim. */}
+        <Text style={[styles.modeHint, cleanupOn && styles.modeHintDim]}>
+          Trios · tap Rank below for more modes
+        </Text>
 
         {/* FB #80 — SF/1QB scoring-format toggle. Defaults to the selected
             league's detected format (useLeagueFormatDefault in RootNav);
@@ -447,6 +458,15 @@ export default function RankScreen() {
               {` ${position}s ranked`}
             </Text>
           )}
+          {/* S4 PRD-02 (ux.outlook_inline_default): the bar states its
+              reward BEFORE completion — a counter without a payoff reads
+              as busywork. */}
+          {unlockCopyOn && !isUnlockedEverywhere ? (
+            <Text testID="rank.unlock-payoff" style={styles.progressText}>
+              Rank {threshold} per position → trades priced off your board,
+              not consensus.
+            </Text>
+          ) : null}
         </View>
 
         {/* Instruction */}
@@ -498,15 +518,32 @@ export default function RankScreen() {
         ) : (
           <View style={styles.cards}>
             {(['a', 'b', 'c'] as const).map((side) => (
-              <TrioPlayerCard
-                key={`${trio.player_a.id}-${side}`}
-                trio={trio}
-                side={side}
-                rank={rankOf(side)}
-                onTap={() => rankSide(side)}
-                onLongPress={() => showInfoSheet(side)}
-                disabled={submitMutation.isPending || isRefetchingTrio}
-              />
+              <View key={`${trio.player_a.id}-${side}`} style={styles.trioCardWrap}>
+                <TrioPlayerCard
+                  trio={trio}
+                  side={side}
+                  rank={rankOf(side)}
+                  onTap={() => rankSide(side)}
+                  onLongPress={() => showInfoSheet(side)}
+                  disabled={submitMutation.isPending || isRefetchingTrio}
+                />
+                {/* S3 PRD-02 (ux.player_context_menu): visible ⓘ twin for
+                    the 500ms-hold info sheet — the accelerator is never the
+                    sole path. Bottom-right so it can't collide with the
+                    top-right rank badge. 44pt effective target. */}
+                {menuOn && gestureEnabled ? (
+                  <View style={styles.trioInfoBtn}>
+                    <InfoButton
+                      testID={`trios.info.${side}`}
+                      label={`Player info for ${playerForSide(trio, side).name}`}
+                      onPress={() => {
+                        track('player_menu_opened', { surface: 'trios' }, 'Trios');
+                        showInfoSheet(side);
+                      }}
+                    />
+                  </View>
+                ) : null}
+              </View>
             ))}
           </View>
         )}
@@ -567,7 +604,12 @@ export default function RankScreen() {
           <View style={styles.unlockedBanner}>
             <View style={styles.bannerTick} />
             <Text style={styles.unlockedText}>
-              Trade Finder unlocked — check the Trades tab
+              {/* S4 PRD-02: "unlocked" copy drifted — trades already
+                  generate pre-threshold on consensus values. The honest
+                  payoff is board-priced trades. */}
+              {unlockCopyOn
+                ? 'Your board now prices your trades — see the Trades tab'
+                : 'Trade Finder unlocked — check the Trades tab'}
             </Text>
           </View>
         )}
@@ -657,6 +699,14 @@ const styles = StyleSheet.create({
     color: chalk.faint,
     textAlign: 'center',
     marginTop: -space.xs,
+  },
+  modeHintDim: { color: chalk.dim },
+  // S3 PRD-02 — trio card wrapper hosts the absolute ⓘ twin.
+  trioCardWrap: { position: 'relative' },
+  trioInfoBtn: {
+    position: 'absolute',
+    right: space.sm,
+    bottom: space.sm,
   },
 
   // Segmented control: 1px line-bordered group, radii.sm; active segment =

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,21 +9,30 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { haptics } from '../utils/haptics';
+import { track } from '../api/events';
+import { getBaseUrl } from '../api/client';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { Button, Badge, Icon } from '../components/chalkline';
 import TradeCardComp from '../components/TradeCard';
 import Toast from '../components/Toast';
+import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
+import HelpSheet from '../components/HelpSheet';
 import { getAllMatches, getAwaitingTrades, dismissMatch } from '../api/trades';
 import { getAssetPrefs, setAssetPref } from '../api/league';
 import { useSession } from '../state/useSession';
+import { usePushPriming } from '../state/usePushPriming';
 import { useFlag } from '../state/useFeatureFlags';
 import { relativeTime } from '../utils/relativeTime';
 import { readErrorCopy } from '../utils/verification';
 import type { TradeMatch, AwaitingTrade, Player } from '../shared/types';
+
+// Triage undo (S3 PRD-03, flag ux.swipe_undo): how long a dismiss's archive
+// POST is held (and the Undo toast shown) before committing.
+const UNDO_HOLD_MS = 5000;
 
 type LeagueFilter = string | 'all';
 type Segment = 'mutual' | 'awaiting';
@@ -41,11 +50,34 @@ type Segment = 'mutual' | 'awaiting';
 // yet been mirrored by the counterparty. Backed by /api/trades/awaiting.
 export default function MatchesScreen() {
   const queryClient = useQueryClient();
+  const navigation = useNavigation<any>();
   const leagues = useSession((s) => s.leagues);
   const activeLeague = useSession((s) => s.league);
-  const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
+  const [toast, setToast] = useState<{
+    msg: string;
+    tone?: 'success' | 'warn' | 'error';
+    holdMs?: number;
+    action?: { label: string; onPress: () => void };
+  } | null>(null);
   const [filterLeagueId, setFilterLeagueId] = useState<LeagueFilter>('all');
   const [segment, setSegment] = useState<Segment>('mutual');
+
+  // ── Teardown-remediation flags (all default false — flag off is
+  // byte-identical behavior) ──────────────────────────────────────────
+  const swipeUndoOn = useFlag('ux.swipe_undo');           // S3 PRD-03
+  const menuOn = useFlag('ux.player_context_menu');       // S3 PRD-02
+  const emptyCtasOn = useFlag('ux.empty_state_ctas');     // S4 PRD-05
+  const helpOn = useFlag('ux.help_surface');              // S4 PRD-01
+  const cleanupOn = useFlag('visual.chalkline_cleanup');  // S2 PRD-04 ride-along
+
+  // S4 PRD-01 — "How matching works" sheet from the empty state.
+  const [matchingHelpOpen, setMatchingHelpOpen] = useState(false);
+  // S3 PRD-02 — shared player context menu target.
+  const [menuTarget, setMenuTarget] = useState<{
+    leagueId: string;
+    player: Player;
+    side: 'give' | 'receive';
+  } | null>(null);
 
   // FB-91 — the League tab's Matches tiles deep-link into a specific
   // segment: navigate('Matches', { segment, at }). `at` (a timestamp)
@@ -99,6 +131,12 @@ export default function MatchesScreen() {
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(['matches', 'all'], ctx.prev);
+      // Undo path (ux.swipe_undo): the row was removed at TAP time, so
+      // ctx.prev here is the already-filtered list — refetch to restore
+      // the failed-dismiss row instead of leaving it invisibly archived.
+      if (swipeUndoOn) {
+        queryClient.invalidateQueries({ queryKey: ['matches', 'all'] });
+      }
       setToast({ msg: 'Could not dismiss — try again', tone: 'warn' });
     },
     onSuccess: () => {
@@ -108,13 +146,88 @@ export default function MatchesScreen() {
     },
   });
 
+  // ── Dismiss undo (S3 PRD-03, flag ux.swipe_undo) ─────────────────────
+  // Same design decision as the Trades pass-undo: the archive POST is
+  // DELAYED for UNDO_HOLD_MS rather than reversed (there is no un-dismiss
+  // endpoint). The row is removed optimistically at tap time; Undo restores
+  // the snapshotted list and drops the pending write. A second dismiss,
+  // or unmount, flushes the pending one first.
+  const pendingDismissRef = useRef<{
+    id: string;
+    prev: TradeMatch[] | undefined;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+
+  function flushPendingDismiss() {
+    const p = pendingDismissRef.current;
+    if (!p) return;
+    pendingDismissRef.current = null;
+    clearTimeout(p.timer);
+    dismissMutation.mutate(p.id);
+  }
+  const flushPendingDismissRef = useRef(flushPendingDismiss);
+  flushPendingDismissRef.current = flushPendingDismiss;
+
+  function undoDismiss() {
+    const p = pendingDismissRef.current;
+    if (!p) return;
+    pendingDismissRef.current = null;
+    clearTimeout(p.timer);
+    if (p.prev) queryClient.setQueryData(['matches', 'all'], p.prev);
+    track('match_dismiss_undone', { match_id: p.id }, 'Matches');
+  }
+
+  // Commit any pending dismiss on unmount — leaving ends the undo window.
+  useEffect(
+    () => () => {
+      flushPendingDismissRef.current();
+    },
+    [],
+  );
+
   function handleDismiss(m: TradeMatch) {
     haptics.selection();
-    dismissMutation.mutate(m.match_id);
+    if (!swipeUndoOn) {
+      dismissMutation.mutate(m.match_id);
+      return;
+    }
+    // Double-fire guard: the tile's Dismiss can only be pending once.
+    if (pendingDismissRef.current?.id === m.match_id) return;
+    flushPendingDismiss();
+    // Optimistic removal now; the POST waits out the undo window.
+    const prev = queryClient.getQueryData<TradeMatch[]>(['matches', 'all']);
+    if (prev) {
+      queryClient.setQueryData(
+        ['matches', 'all'],
+        prev.filter((x) => x.match_id !== m.match_id),
+      );
+    }
+    pendingDismissRef.current = {
+      id: m.match_id,
+      prev,
+      timer: setTimeout(() => flushPendingDismissRef.current(), UNDO_HOLD_MS),
+    };
+    setToast({
+      msg: 'Dismissed',
+      tone: 'success',
+      holdMs: UNDO_HOLD_MS,
+      action: { label: 'Undo', onPress: undoDismiss },
+    });
   }
 
   const allMatches: TradeMatch[] = matchesQuery.data || [];
   const allAwaiting: AwaitingTrade[] = awaitingQuery.data || [];
+
+  // S4 PRD-04 (ux.prompt_arbiter) — want-it moment for the push primer:
+  // the first mutual match seen this session is the "get pinged when a
+  // match drops" payoff made concrete. No-op unless the arbiter flag is on
+  // AND a backoff-suppressed primer is parked (see usePushPriming).
+  const wantItFiredRef = useRef(false);
+  useEffect(() => {
+    if (wantItFiredRef.current || allMatches.length === 0) return;
+    wantItFiredRef.current = true;
+    usePushPriming.getState().wantItMoment();
+  }, [allMatches.length]);
 
   // ── Untouchables (feedback #95, flag trade.preference_lists) ─────────
   // Long-press a player on the YOU SEND side to mark/unmark them
@@ -170,6 +283,10 @@ export default function MatchesScreen() {
     if (untouchableMutation.isPending) return;
     haptics.selection();
     const marked = untouchablesByLeague.get(leagueId)?.has(p.id) ?? false;
+    // S3 PRD-02 discoverability metric — gated so flag-off emits nothing new.
+    if (menuOn) {
+      track('untouchable_toggled', { marked: !marked }, 'Matches');
+    }
     untouchableMutation.mutate({
       leagueId,
       playerId: p.id,
@@ -236,6 +353,8 @@ export default function MatchesScreen() {
         visible={!!toast}
         message={toast?.msg || ''}
         tone={toast?.tone}
+        holdMs={toast?.holdMs ?? 1500}
+        action={toast?.action}
         onDismiss={() => setToast(null)}
       />
 
@@ -250,8 +369,13 @@ export default function MatchesScreen() {
             it. Only when the flag is on and there's something to press. */}
         {untouchablesEnabled
           && (segment === 'mutual' ? visibleMatches.length > 0 : visibleAwaiting.length > 0) ? (
-          <Text style={styles.hint}>
-            Hold a player you'd send to mark them untouchable.
+          // S2 PRD-04 ride-along (visual.chalkline_cleanup): content-carrying
+          // hint promotes chalk-faint → chalk-dim. S3 PRD-02: with the menu
+          // live, the hold gesture opens the shared menu — say so.
+          <Text style={[styles.hint, cleanupOn && styles.hintDim]}>
+            {menuOn
+              ? 'Hold a player for options — info and untouchable.'
+              : "Hold a player you'd send to mark them untouchable."}
           </Text>
         ) : null}
       </View>
@@ -341,7 +465,43 @@ export default function MatchesScreen() {
               Head to the Trades tab and swipe on some proposals. When a
               leaguemate likes the same trade, it'll show up here.
             </Text>
-            <Button label="Refresh" variant="secondary" compact onPress={onRefresh} />
+            {/* S4 PRD-05 (ux.empty_state_ctas): the primary button DOES what
+                the copy says — navigate into the core loop. Refresh demotes
+                to a quiet secondary. Flag off: Refresh alone, as before. */}
+            {emptyCtasOn ? (
+              <>
+                <Button
+                  testID="matches.go-to-trades"
+                  label="Go to Trades"
+                  variant="primary"
+                  onPress={() => navigation.navigate('Trades')}
+                />
+                <Button label="Refresh" variant="ghost" compact onPress={onRefresh} />
+              </>
+            ) : (
+              <Button label="Refresh" variant="secondary" compact onPress={onRefresh} />
+            )}
+            {/* S4 PRD-01 (ux.help_surface): answer "how does matching work?"
+                at the moment the empty inbox raises it. */}
+            {helpOn ? (
+              <Pressable
+                testID="matches.matching-help"
+                onPress={() => {
+                  track('help_opened', { topic: 'matching' }, 'Matches');
+                  setMatchingHelpOpen(true);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="How matching works"
+                hitSlop={8}
+                style={styles.helpLink}
+              >
+                {({ pressed }) => (
+                  <Text style={[styles.helpLinkText, pressed && { color: chalk.base }]}>
+                    How matching works
+                  </Text>
+                )}
+              </Pressable>
+            ) : null}
           </View>
         ) : (
           <FlatList
@@ -371,7 +531,7 @@ export default function MatchesScreen() {
                       New match with @{item.counterparty_username}
                     </Text>
                   </View>
-                  <Text style={styles.matchTime}>{relativeTime(item.created_at)}</Text>
+                  <Text style={[styles.matchTime, cleanupOn && styles.matchTimeDim]}>{relativeTime(item.created_at)}</Text>
                 </View>
                 <TradeCardComp
                   variant="match"
@@ -389,6 +549,19 @@ export default function MatchesScreen() {
                       ? (p) => handleToggleUntouchable(item.league_id, p)
                       : undefined
                   }
+                  onPlayerMenu={
+                    menuOn
+                      ? (p, side) => {
+                          haptics.selection();
+                          track(
+                            'player_menu_opened',
+                            { surface: 'matches', side },
+                            'Matches',
+                          );
+                          setMenuTarget({ leagueId: item.league_id, player: p, side });
+                        }
+                      : undefined
+                  }
                 />
               </View>
             )}
@@ -403,7 +576,20 @@ export default function MatchesScreen() {
             <Text style={styles.emptyBody}>
               Swipe more in the Trades tab.
             </Text>
-            <Button label="Refresh" variant="secondary" compact onPress={onRefresh} />
+            {/* S4 PRD-05 — same rule as the mutual empty state. */}
+            {emptyCtasOn ? (
+              <>
+                <Button
+                  testID="matches.go-to-trades"
+                  label="Go to Trades"
+                  variant="primary"
+                  onPress={() => navigation.navigate('Trades')}
+                />
+                <Button label="Refresh" variant="ghost" compact onPress={onRefresh} />
+              </>
+            ) : (
+              <Button label="Refresh" variant="secondary" compact onPress={onRefresh} />
+            )}
           </View>
         ) : (
           <FlatList
@@ -428,7 +614,7 @@ export default function MatchesScreen() {
                   <Text style={styles.awaitingLabel}>
                     Waiting on @{item.counterparty_username}
                   </Text>
-                  <Text style={styles.matchTime}>{relativeTime(item.liked_at)}</Text>
+                  <Text style={[styles.matchTime, cleanupOn && styles.matchTimeDim]}>{relativeTime(item.liked_at)}</Text>
                 </View>
                 {/* Reuse swipe variant — no Accept/Decline buttons because
                     the user has already swiped accept. They're just waiting
@@ -447,6 +633,19 @@ export default function MatchesScreen() {
                       ? (p) => handleToggleUntouchable(item.league_id, p)
                       : undefined
                   }
+                  onPlayerMenu={
+                    menuOn
+                      ? (p, side) => {
+                          haptics.selection();
+                          track(
+                            'player_menu_opened',
+                            { surface: 'matches_awaiting', side },
+                            'Matches',
+                          );
+                          setMenuTarget({ leagueId: item.league_id, player: p, side });
+                        }
+                      : undefined
+                  }
                 />
               </View>
             )}
@@ -454,8 +653,59 @@ export default function MatchesScreen() {
           />
         )
       )}
+
+      {/* S3 PRD-02 (ux.player_context_menu) — shared long-press menu.
+          menuTarget is only ever set while the flag is on. */}
+      <PlayerContextMenu
+        visible={!!menuTarget}
+        player={menuTarget?.player ?? null}
+        actions={menuTarget ? menuActionsFor(menuTarget) : []}
+        onClose={() => setMenuTarget(null)}
+      />
+
+      {/* S4 PRD-01 (ux.help_surface) — "How matching works" in place. */}
+      {helpOn ? (
+        <HelpSheet
+          visible={matchingHelpOpen}
+          title="How matching works"
+          body={
+            'When you like a trade, we quietly show its mirror to the other ' +
+            'owner in their own deck. If they like it too, it becomes a ' +
+            'mutual match and lands here — neither side sees a one-way ' +
+            'like, so there is no pressure until you both said yes.'
+          }
+          readMoreUrl={`${getBaseUrl()}/faq.html`}
+          topic="matching"
+          onClose={() => setMatchingHelpOpen(false)}
+        />
+      ) : null}
     </SafeAreaView>
   );
+
+  // S3 PRD-02 — per-surface commands for the shared player context menu.
+  function menuActionsFor(target: {
+    leagueId: string;
+    player: Player;
+    side: 'give' | 'receive';
+  }): PlayerMenuAction[] {
+    const { leagueId, player, side } = target;
+    const actions: PlayerMenuAction[] = [];
+    if (side === 'give' && untouchablesEnabled) {
+      const marked = untouchablesByLeague.get(leagueId)?.has(player.id) ?? false;
+      actions.push({
+        key: marked ? 'untouchable-remove' : 'untouchable-add',
+        label: marked ? 'Remove untouchable' : 'Mark untouchable',
+        hint: marked
+          ? 'Allow this player in trade ideas again'
+          : 'Never offered from your roster in trade ideas',
+        onPress: () => {
+          setMenuTarget(null);
+          handleToggleUntouchable(leagueId, player);
+        },
+      });
+    }
+    return actions;
+  }
 }
 
 function SegmentBtn({
@@ -559,6 +809,21 @@ const styles = StyleSheet.create({
   title: { ...type.display },
   subtitle: { ...type.bodySm, marginTop: space.xs },
   hint: { ...type.bodySm, color: chalk.faint, marginTop: space.xs },
+  // S2 PRD-04 ride-along (visual.chalkline_cleanup): content-carrying text
+  // never sits at chalk-faint (3.4:1) — promote to chalk-dim.
+  hintDim: { color: chalk.dim },
+  matchTimeDim: { color: chalk.dim },
+  // S4 PRD-01 — quiet "How matching works" link on the empty state.
+  helpLink: {
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  helpLinkText: {
+    ...type.bodySm,
+    color: chalk.dim,
+    fontFamily: fonts.uiSemi,
+  },
 
   // flexGrow:0 prevents the horizontal ScrollView from stretching to fill
   // remaining vertical space when the body below is an empty-state View.

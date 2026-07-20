@@ -48,6 +48,8 @@ import { TickLabel, Button, Meter, Icon, Card } from '../components/chalkline';
 import TradeCardComp from '../components/TradeCard';
 import SendInSleeperButton from '../components/SendInSleeperButton';
 import Toast from '../components/Toast';
+import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
+import HelpSheet, { InfoButton } from '../components/HelpSheet';
 import OutlookSheet from '../components/OutlookSheet';
 import LeaguePill from '../components/LeaguePill';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
@@ -80,6 +82,8 @@ import {
 } from '../api/calc';
 import { getProgress } from '../api/rankings';
 import { track, msSinceOpen } from '../api/events';
+import { getBaseUrl } from '../api/client';
+import { useInterruptSlot } from '../state/useInterruptCoordinator';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import FormatGate, { formatLabel } from '../components/FormatGate';
 import ProvenanceChip from '../components/ProvenanceChip';
@@ -116,6 +120,9 @@ import type { Player, TradeCard, TradeJobSnapshot, ScoringFormat } from '../shar
 
 const SCREEN_W = Dimensions.get('window').width;
 const SWIPE_THRESHOLD = 120;
+// Triage undo (S3 PRD-03, flag ux.swipe_undo): how long a pass swipe's
+// disposition POST is held (and the Undo toast shown) before committing.
+const UNDO_HOLD_MS = 5000;
 
 // Stable empty-array reference so the zustand selector doesn't return a
 // brand-new `[]` on every render (which would trigger an infinite re-render
@@ -294,11 +301,33 @@ export default function TradesScreen({ navigation }: any) {
   // behind a 1-player top) can't leak its extra tile out from under the
   // top card. Updated via onLayout on every top-card mount/re-layout.
   const [topCardH, setTopCardH] = useState<number | null>(null);
-  const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
+  const [toast, setToast] = useState<{
+    msg: string;
+    tone?: 'success' | 'warn' | 'error';
+    holdMs?: number;
+    action?: { label: string; onPress: () => void };
+  } | null>(null);
   const [outlookOpen, setOutlookOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
   const [slowSwitch, setSlowSwitch] = useState(false);
+
+  // ── Teardown-remediation flags (all default false — flag off is
+  // byte-identical behavior) ──────────────────────────────────────────
+  const swipeUndoOn = useFlag('ux.swipe_undo');           // S3 PRD-03
+  const menuOn = useFlag('ux.player_context_menu');       // S3 PRD-02
+  const outlookInlineOn = useFlag('ux.outlook_inline_default'); // S4 PRD-02
+  const helpOn = useFlag('ux.help_surface');              // S4 PRD-01
+  const shareLandingOn = useFlag('growth.share_landing'); // S7 PRD-01
+
+  // S4 PRD-01 — "How trades are priced" sheet next to the fairness toggle.
+  const [pricingHelpOpen, setPricingHelpOpen] = useState(false);
+  // S3 PRD-02 — shared player context menu target (long-press on any
+  // player row of the top card while the flag is on).
+  const [menuTarget, setMenuTarget] = useState<{
+    player: Player;
+    side: 'give' | 'receive';
+  } | null>(null);
 
   // Render free-tier cold starts run 30–60s. Hold the friendly default for
   // the first 4s so warm switches never show the alarming "waking up" copy.
@@ -365,6 +394,8 @@ export default function TradesScreen({ navigation }: any) {
     // Toggling the threshold invalidates the current deck — the next
     // Find-a-Trade tap should request a fresh set under the new mode.
     // Also avoids visual shuffle if streaming cards were still arriving.
+    flushPendingPassRef.current(); // commit any undoable pass before reset
+    lastDispositionedRef.current = null; // regenerated decks can reuse ids
     setDeck([]);
     setDeckIdx(0);
     setLaneFilter(null);
@@ -392,8 +423,12 @@ export default function TradesScreen({ navigation }: any) {
   // never front it with a modal sheet (plan: no interruption before the
   // first cards). The sheet resumes force-opening on the next mount; the
   // Edit path and the inferred-outlook one-tap confirm stay available.
+  // S4 PRD-02 (ux.outlook_inline_default): the sheet NEVER force-opens —
+  // the inline banner below is the universal first-visit path on every
+  // flag configuration; the sheet opens only from an explicit Edit/Change/
+  // Set-outlook tap.
   useEffect(() => {
-    if (firstRun) return;
+    if (firstRun || outlookInlineOn) return;
     if (
       prefsQuery.data &&
       !prefsQuery.data.team_outlook &&
@@ -401,7 +436,7 @@ export default function TradesScreen({ navigation }: any) {
     ) {
       setOutlookOpen(true);
     }
-  }, [prefsQuery.data, firstRun]);
+  }, [prefsQuery.data, firstRun, outlookInlineOn]);
 
   // Phase-2 inferred outlook — set only while no outlook is declared;
   // drives the one-tap confirm banner and the sheet's preselection.
@@ -471,6 +506,10 @@ export default function TradesScreen({ navigation }: any) {
     if (untouchableMutation.isPending || !leagueId) return;
     haptics.selection();
     const marked = untouchableIds?.has(p.id) ?? false;
+    // S3 PRD-02 discoverability metric — gated so flag-off emits nothing new.
+    if (menuOn) {
+      track('untouchable_toggled', { marked: !marked }, 'Trades');
+    }
     untouchableMutation.mutate({
       playerId: p.id,
       list: marked ? 'none' : 'untouchable',
@@ -751,6 +790,11 @@ export default function TradesScreen({ navigation }: any) {
   // stale state. (The fairness toggle handles its own reset inline.)
   // FB-47 targets are roster-specific, so they clear with the league too.
   useEffect(() => {
+    // Commit any undoable pass against the OLD league before the reset,
+    // and let the guard/match maps start fresh for the new one.
+    flushPendingPassRef.current();
+    lastDispositionedRef.current = null;
+    matchIdByTradeRef.current.clear();
     setDeck([]);
     setDeckIdx(0);
     setLaneFilter(null);
@@ -814,7 +858,14 @@ export default function TradesScreen({ navigation }: any) {
       const dispatchedIdx = deck.findIndex((c) => c.trade_id === rawId);
       return { tradeId, rawId, dispatchedIdx };
     },
-    onSuccess: (_, vars) => {
+    onSuccess: (res: any, vars, ctx) => {
+      // S7 PRD-01 (growth.share_landing): a like that completes a mutual
+      // match returns { matched: true, match_id } — remember the match id
+      // so shareLikedTrade can point at the /s/trade/<match_id> landing
+      // page (OG card) instead of the bare site root.
+      if (ctx?.rawId && res?.matched === true && res?.match_id != null) {
+        matchIdByTradeRef.current.set(ctx.rawId, String(res.match_id));
+      }
       if (vars.decision === 'like') {
         // Liked-trades count is per-league (backend filters by session). Use a
         // league-scoped key so switching leagues doesn't show a stale count.
@@ -850,6 +901,64 @@ export default function TradesScreen({ navigation }: any) {
       setToast({ msg: "Swipe didn't save — try again.", tone: 'warn' });
     },
   });
+
+  // ── Triage undo (S3 PRD-03, flag ux.swipe_undo) ──────────────────────
+  // Design decision (documented for the build report): a pass swipe's
+  // disposition POST is DELAYED for UNDO_HOLD_MS rather than reversed —
+  // the swipe API has no void/unswipe endpoint (api/trades.ts:swipeTrade →
+  // POST /api/trades/swipe is decision-final and feeds Elo), so holding the
+  // write is the only path that keeps an undone pass out of the
+  // disposition signal entirely. The deck advances optimistically as
+  // always; Undo rewinds deckIdx and drops the pending write. Any newer
+  // disposition, deck reset, league switch, or unmount FLUSHES the pending
+  // pass first so ordering and at-most-one-pending invariants hold.
+  const pendingPassRef = useRef<{
+    card: TradeCard;
+    rawId: string;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  // Double-fire guard (S3B-08): last-dispositioned RAW trade_id — the tap
+  // and gesture paths can both fire advance() for the same top card.
+  const lastDispositionedRef = useRef<string | null>(null);
+  // S7 PRD-01 — trade_id → mutual-match id learned from swipe responses.
+  const matchIdByTradeRef = useRef<Map<string, string>>(new Map());
+  // Current sorted deck for callbacks whose closures may be stale (the
+  // Undo toast action outlives the render that created it).
+  const sortedDeckRef = useRef<TradeCard[]>([]);
+
+  function flushPendingPass() {
+    const p = pendingPassRef.current;
+    if (!p) return;
+    pendingPassRef.current = null;
+    clearTimeout(p.timer);
+    swipeMutation.mutate({ card: p.card, decision: 'pass' });
+  }
+  // Latest-instance ref so the unmount cleanup can flush without a stale
+  // closure over swipeMutation.
+  const flushPendingPassRef = useRef(flushPendingPass);
+  flushPendingPassRef.current = flushPendingPass;
+
+  function undoPass() {
+    const p = pendingPassRef.current;
+    if (!p) return;
+    pendingPassRef.current = null;
+    clearTimeout(p.timer);
+    lastDispositionedRef.current = null;
+    setDeckIdx((cur) => {
+      const idx = sortedDeckRef.current.findIndex((c) => c.trade_id === p.rawId);
+      return idx >= 0 ? idx : Math.max(0, cur - 1);
+    });
+    track('swipe_undone', { trade_id: p.rawId }, 'Trades');
+  }
+
+  // Commit any pending pass on unmount — leaving the screen ends the undo
+  // window; the disposition must not be silently lost.
+  useEffect(
+    () => () => {
+      flushPendingPassRef.current();
+    },
+    [],
+  );
 
   // Bad-trade flag (feedback #85) — engine-quality signal, distinct from
   // pass. Best-effort: the deck has already advanced via the pass path, so
@@ -957,6 +1066,8 @@ export default function TradesScreen({ navigation }: any) {
   // Trade" tap regenerates through the normal job flow (pinned jobs bypass
   // the server cache). Deliberately NOT auto-firing a job per chip change.
   function resetDeckForNewTargets() {
+    flushPendingPassRef.current(); // commit any undoable pass before reset
+    lastDispositionedRef.current = null; // regenerated decks can reuse ids
     setDeck([]);
     setDeckIdx(0);
     setLaneFilter(null);
@@ -1068,12 +1179,18 @@ export default function TradesScreen({ navigation }: any) {
       .sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
     return [...pinned, ...rest];
   }, [deck, fairnessOn, laneFilter]);
+  sortedDeckRef.current = sortedDeck;
 
   // Lane pills render only when the engine actually laned this deck.
   const deckHasLanes = useMemo(() => deck.some((c) => !!c.lane), [deck]);
 
   function handleLaneFilter(lane: 'window' | 'value') {
     haptics.selection();
+    // A lane change can legitimately re-surface an already-dispositioned
+    // card at the top (index resets to 0) — commit any pending pass and
+    // clear the double-fire guard so re-swiping it isn't no-oped.
+    flushPendingPassRef.current();
+    lastDispositionedRef.current = null;
     setLaneFilter((prev) => (prev === lane ? null : lane));
     // The filtered deck is a different list — restart from its top.
     setDeckIdx(0);
@@ -1086,6 +1203,47 @@ export default function TradesScreen({ navigation }: any) {
   const rawTopCard = sortedDeck[deckIdx];
   const topCard = rawTopCard ? edits[rawTopCard.trade_id] ?? rawTopCard : undefined;
   const nextCard = sortedDeck[deckIdx + 1];
+
+  // ── S4 PRD-04 (ux.prompt_arbiter): one-surface arbiter ───────────────
+  // At most ONE instructional/promotional surface at a time on this screen.
+  // Slots are claimed in priority order (hook call order IS the tiebreak):
+  // quickset prompt > coach mark > apple banner > outlook banner. Flag off:
+  // each slot is a passthrough of its `wants` condition — byte-identical.
+  // The swipe-hint card nudge is gesture coaching on the card itself, not a
+  // stacked surface, so it doesn't claim a slot. Root modals
+  // (PushPrimingModal / AppleSaveMomentSheet) self-defer while any slot is
+  // claimed — see those components.
+  const quicksetPromptShown = useInterruptSlot(
+    'quickset_prompt',
+    quicksetPromptVisible,
+    'Trades',
+  );
+  const provenanceMarkWants =
+    tradesFirstOn && guidedOn && provenanceMarkVisible && !!topCard;
+  const provenanceMarkShown = useInterruptSlot(
+    'coach_mark',
+    provenanceMarkWants,
+    'Trades',
+  );
+  const appleBannerWants =
+    appleSaveOn &&
+    !appleAsk &&
+    Platform.OS === 'ios' &&
+    !isDemo &&
+    !user?.account_only &&
+    !verification?.user_verified &&
+    obSessionCount >= 2 &&
+    obTotalSwipes >= 5 &&
+    !session2BannerShown;
+  const appleBannerShown = useInterruptSlot('apple_banner', appleBannerWants, 'Trades');
+  const outlookBannerWants =
+    !!inferredOutlook ||
+    (outlookInlineOn && !!prefsQuery.data && !prefsQuery.data.team_outlook);
+  const outlookBannerShown = useInterruptSlot(
+    'outlook_banner',
+    outlookBannerWants,
+    'Trades',
+  );
 
   // Analytics: one trade_card_viewed per card reaching the top of the
   // deck (keyed on trade_id, so re-renders don't re-fire). The first card
@@ -1309,6 +1467,7 @@ export default function TradesScreen({ navigation }: any) {
     useCallback(() => {
       const pos = consumePendingQuicksetRegen();
       if (!pos || !leagueId) return;
+      flushPendingPassRef.current(); // regen rewinds the deck — commit first
       pendingRegenRef.current = {
         position: pos,
         prevIds: new Set(deck.map((c) => c.trade_id)),
@@ -1456,15 +1615,38 @@ export default function TradesScreen({ navigation }: any) {
     if (!c) return;
     const give = c.give_players.map((p) => p.name).join(' + ');
     const recv = c.receive_players.map((p) => p.name).join(' + ');
+    // S7 PRD-01 (growth.share_landing): when the like completed a mutual
+    // match, share the backend's /s/trade/<match_id> landing page (rich OG
+    // card in iMessage/Discord) with ?ref= attribution. Liked-but-unmatched
+    // trades have no server object yet (no /s/ route exists for them —
+    // documented W3/backend handoff), so those fall back to the site root
+    // with ?ref= preserved. Flag off: the legacy bare-root message, byte
+    // for byte.
+    const rawId = c.trade_id.endsWith(EDITED_SUFFIX)
+      ? c.trade_id.slice(0, -EDITED_SUFFIX.length)
+      : c.trade_id;
+    const matchId = matchIdByTradeRef.current.get(rawId);
+    const ref = user?.username ? `ref=${encodeURIComponent(user.username)}` : '';
+    const url = shareLandingOn
+      ? matchId
+        ? `${getBaseUrl()}/s/trade/${matchId}${ref ? `?${ref}` : ''}`
+        : `${getBaseUrl()}/${ref ? `?${ref}` : ''}`
+      : 'https://fantasy-trade-finder.onrender.com';
     try {
       const res = await Share.share({
         message:
           `Trade idea for our league: I send ${give}, get ${recv} from ` +
           `@${c.opponent_username}. Found on Fantasy Trade Finder — ` +
-          'https://fantasy-trade-finder.onrender.com',
+          url,
       });
       if (res.action !== Share.dismissedAction) {
-        track('trade_card_shared', { trade_id: c.trade_id }, 'Trades');
+        track(
+          'trade_card_shared',
+          shareLandingOn
+            ? { trade_id: c.trade_id, landing: !!matchId }
+            : { trade_id: c.trade_id },
+          'Trades',
+        );
       }
     } catch {
       /* share sheet canceled or unavailable — nothing to record */
@@ -1563,6 +1745,17 @@ export default function TradesScreen({ navigation }: any) {
 
   function advance(decision: 'like' | 'pass') {
     if (!topCard) return;
+    // S3 PRD-03 (ux.swipe_undo) — double-fire guard: the gesture's
+    // animation-end callback and the disposition buttons can both fire for
+    // the same top card; no-op the repeat on the RAW deck id.
+    const dispatchRawId = rawTopCard?.trade_id ?? topCard.trade_id;
+    if (swipeUndoOn) {
+      if (lastDispositionedRef.current === dispatchRawId) return;
+      lastDispositionedRef.current = dispatchRawId;
+      // A newer disposition always commits the previous pending pass first
+      // (at most one undoable action in flight; ordering preserved).
+      flushPendingPass();
+    }
     // Onboarding item 4: persist first-swipe + lifetime swipe count
     // (items 7/8 read these for the prompt-card and Apple-ask triggers).
     // Gated on ANY consumer feature so each flag works independently
@@ -1590,7 +1783,17 @@ export default function TradesScreen({ navigation }: any) {
     // Guided layer: any disposition (swipe or button) retires an active
     // swipe hint — the card it pointed at is leaving.
     if (swipeHintActive) dismissSwipeHint();
-    swipeMutation.mutate({ card: topCard, decision });
+    if (swipeUndoOn && decision === 'pass') {
+      // Hold the POST for the undo window (design note at pendingPassRef).
+      const card = topCard;
+      pendingPassRef.current = {
+        card,
+        rawId: dispatchRawId,
+        timer: setTimeout(() => flushPendingPassRef.current(), UNDO_HOLD_MS),
+      };
+    } else {
+      swipeMutation.mutate({ card: topCard, decision });
+    }
     setDeckIdx((i) => i + 1);
     if (decision === 'like') {
       haptics.success();
@@ -1630,6 +1833,16 @@ export default function TradesScreen({ navigation }: any) {
       }
     } else {
       haptics.swipe();
+      if (swipeUndoOn) {
+        // "Passed — Undo": the toast's hold matches the pending-POST
+        // window, so the affordance and the commit expire together.
+        setToast({
+          msg: 'Passed',
+          tone: 'success',
+          holdMs: UNDO_HOLD_MS,
+          action: { label: 'Undo', onPress: undoPass },
+        });
+      }
     }
   }
 
@@ -1644,6 +1857,9 @@ export default function TradesScreen({ navigation }: any) {
     track('trade_flagged', { trade_id: topCard.trade_id }, 'Trades');
     flagMutation.mutate(topCard);
     advance('pass');
+    // Flagging is deliberate — commit the pass immediately (no undo window;
+    // the flag toast below replaces the pass-undo toast anyway).
+    if (swipeUndoOn) flushPendingPass();
     setToast({ msg: 'Flagged — thanks, this trains the engine', tone: 'success' });
   }
 
@@ -1697,12 +1913,52 @@ export default function TradesScreen({ navigation }: any) {
 
   const topCardQueued = topCard ? isQueued(topCard.trade_id) : false;
 
+  // S3 PRD-02 — per-surface commands for the shared player context menu.
+  // The menu header carries the player-info disclosure; commands below are
+  // whichever of untouchable/swap apply to the held row.
+  function menuActionsFor(target: {
+    player: Player;
+    side: 'give' | 'receive';
+  }): PlayerMenuAction[] {
+    const { player, side } = target;
+    const actions: PlayerMenuAction[] = [];
+    if (side === 'give' && untouchablesEnabled && leagueId) {
+      const marked = untouchableIds?.has(player.id) ?? false;
+      actions.push({
+        key: marked ? 'untouchable-remove' : 'untouchable-add',
+        label: marked ? 'Remove untouchable' : 'Mark untouchable',
+        hint: marked
+          ? 'Allow this player in trade ideas again'
+          : 'Never offered from your roster in trade ideas',
+        onPress: () => {
+          setMenuTarget(null);
+          handleToggleUntouchable(player);
+        },
+      });
+    }
+    actions.push({
+      key: 'swap',
+      label: 'Swap player',
+      hint:
+        side === 'give'
+          ? 'Replace with someone from your roster'
+          : 'Replace with someone from their roster',
+      onPress: () => {
+        setMenuTarget(null);
+        setSwapTarget({ player, side });
+      },
+    });
+    return actions;
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <Toast
         visible={!!toast}
         message={toast?.msg || ''}
         tone={toast?.tone}
+        holdMs={toast?.holdMs ?? 1500}
+        action={toast?.action}
         onDismiss={() => setToast(null)}
       />
 
@@ -1873,7 +2129,25 @@ export default function TradesScreen({ navigation }: any) {
           {!firstRun && (
           <View style={styles.fairnessRow}>
             <View style={{ flex: 1 }}>
-              <TickLabel>Trade fairness</TickLabel>
+              {/* S4 PRD-01 (ux.help_surface): ⓘ answers "why is this trade
+                  fair?" at the moment of doubt. Flag off renders the bare
+                  TickLabel exactly as before. */}
+              {helpOn ? (
+                <View style={styles.helpLabelRow}>
+                  <TickLabel>Trade fairness</TickLabel>
+                  <InfoButton
+                    testID="trades.fairness-help"
+                    label="How trades are priced"
+                    size={16}
+                    onPress={() => {
+                      track('help_opened', { topic: 'trade_pricing' }, 'Trades');
+                      setPricingHelpOpen(true);
+                    }}
+                  />
+                </View>
+              ) : (
+                <TickLabel>Trade fairness</TickLabel>
+              )}
               <Text style={styles.fairnessHint}>
                 {fairnessOn
                   ? 'Recommend balanced trades'
@@ -2099,7 +2373,7 @@ export default function TradesScreen({ navigation }: any) {
             Change opens the sheet (preselected) as before. Bordered-chalk
             (secondary) Confirm — the screen's ice budget is already spent
             (fairness thumb, Find a Trade, queued state). */}
-        {inferredOutlook && (
+        {outlookBannerShown && inferredOutlook ? (
           <View style={styles.inferredBanner}>
             <Text style={type.body}>
               Your roster reads as {cap(inferredOutlook)}.
@@ -2121,7 +2395,24 @@ export default function TradesScreen({ navigation }: any) {
               />
             </View>
           </View>
-        )}
+        ) : outlookBannerShown && outlookInlineOn ? (
+          // S4 PRD-02 (ux.outlook_inline_default): no inference available —
+          // the same inline banner is still the universal first-visit path;
+          // the sheet opens only from this explicit tap.
+          <View testID="trades.outlook-set-banner" style={styles.inferredBanner}>
+            <Text style={type.body}>
+              Set your team's outlook — it tunes which trades we find.
+            </Text>
+            <View style={styles.inferredActions}>
+              <Button
+                variant="secondary"
+                compact
+                label="Set outlook"
+                onPress={() => setOutlookOpen(true)}
+              />
+            </View>
+          </View>
+        ) : null}
 
         {/* Onboarding item 4 — provenance chip: which value basis built
             this deck. Deck-level (state is global to every card); item 7
@@ -2183,15 +2474,7 @@ export default function TradesScreen({ navigation }: any) {
         {/* Item 8 (round-3 D1): session-2 NON-MODAL Apple banner — the one
             softer ask for unbound users with real swipe investment. Shown
             until acted on or dismissed, then never again (persisted). */}
-        {appleSaveOn &&
-        !appleAsk &&
-        Platform.OS === 'ios' &&
-        !isDemo &&
-        !user?.account_only &&
-        !verification?.user_verified &&
-        obSessionCount >= 2 &&
-        obTotalSwipes >= 5 &&
-        !session2BannerShown ? (
+        {appleBannerShown ? (
           <View testID="trades.apple-session2-banner" style={styles.appleBanner}>
             <Pressable style={styles.appleBannerBody} onPress={openSession2Banner} hitSlop={4}>
               <Text style={styles.appleBannerText}>
@@ -2212,7 +2495,7 @@ export default function TradesScreen({ navigation }: any) {
             </Pressable>
           </View>
         ) : null}
-        {tradesFirstOn && guidedOn && provenanceMarkVisible && topCard ? (
+        {provenanceMarkShown ? (
           <CoachMark
             testID="trades.coach-mark.provenance"
             text="These are consensus values. After Quick Set, they're yours."
@@ -2221,7 +2504,7 @@ export default function TradesScreen({ navigation }: any) {
         ) : null}
 
         <View style={styles.deckWrap} ref={deckWrapRef} collapsable={false}>
-          {quicksetPromptVisible ? (
+          {quicksetPromptShown ? (
             // Item 7 — inline prompt card holds the top-of-deck slot until
             // answered; the deck resumes underneath on either action.
             <QuickSetPromptCard
@@ -2263,6 +2546,19 @@ export default function TradesScreen({ navigation }: any) {
                   untouchablesEnabled ? handleToggleUntouchable : undefined
                 }
                 onSwapPlayer={(player, side) => setSwapTarget({ player, side })}
+                onPlayerMenu={
+                  menuOn
+                    ? (player, side) => {
+                        haptics.selection();
+                        track(
+                          'player_menu_opened',
+                          { surface: 'trades', side },
+                          'Trades',
+                        );
+                        setMenuTarget({ player, side });
+                      }
+                    : undefined
+                }
                 repricing={topCard.edited === true && repriceMutation.isPending}
                 fitTargetPositions={fitTargetPositions}
               />
@@ -2348,6 +2644,14 @@ export default function TradesScreen({ navigation }: any) {
               <Text style={styles.deckHint}>
                 Swipe right to like · Swipe left to pass
               </Text>
+              {/* S3 PRD-02 (ux.player_context_menu): the Matches hold-hint
+                  carried onto the deck — the long-press menu needs a visible
+                  pointer on its primary surface. */}
+              {menuOn ? (
+                <Text style={styles.deckHint}>
+                  Hold a player for options — info, untouchable, swap.
+                </Text>
+              ) : null}
               {/* Bad-trade flag (feedback #85) — tertiary to like/pass, so it
                   sits below the disposition row at hint-level prominence.
                   Tapping files an engine-quality flag (operator review, not
@@ -2603,6 +2907,33 @@ export default function TradesScreen({ navigation }: any) {
         trigger={appleAsk ?? 'like'}
         onClose={closeAppleAsk}
       />
+
+      {/* S3 PRD-02 (ux.player_context_menu) — shared long-press menu.
+          menuTarget is only ever set while the flag is on. */}
+      <PlayerContextMenu
+        visible={!!menuTarget}
+        player={menuTarget?.player ?? null}
+        actions={menuTarget ? menuActionsFor(menuTarget) : []}
+        onClose={() => setMenuTarget(null)}
+      />
+
+      {/* S4 PRD-01 (ux.help_surface) — "How trades are priced" in place. */}
+      {helpOn ? (
+        <HelpSheet
+          visible={pricingHelpOpen}
+          title="How trades are priced"
+          body={
+            'Every trade is priced on two boards — yours and your ' +
+            "leaguemate's. A trade surfaces when each side gives up less " +
+            'value on their own board than they get back; the fairness ' +
+            'meter compares the two packages by value. Rank more players ' +
+            'and trades get priced off your board instead of consensus.'
+          }
+          readMoreUrl={`${getBaseUrl()}/ranking-method.html`}
+          topic="trade_pricing"
+          onClose={() => setPricingHelpOpen(false)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -2652,6 +2983,8 @@ interface SwipableProps {
   onToggleUntouchable?: (player: Player) => void;
   // Player-swap (feedback #86) — pass-throughs to TradeCard.
   onSwapPlayer?: (player: Player, side: 'give' | 'receive') => void;
+  // Shared context menu (S3 PRD-02, ux.player_context_menu) — pass-through.
+  onPlayerMenu?: (player: Player, side: 'give' | 'receive') => void;
   repricing?: boolean;
   // FB-47 — pass-through to TradeCard's partner-fit line copy.
   fitTargetPositions?: string[];
@@ -2672,6 +3005,7 @@ function SwipableTopCard({
   untouchableIds,
   onToggleUntouchable,
   onSwapPlayer,
+  onPlayerMenu,
   repricing,
   fitTargetPositions,
   nudge,
@@ -2746,6 +3080,7 @@ function SwipableTopCard({
           untouchableIds={untouchableIds}
           onToggleUntouchable={onToggleUntouchable}
           onSwapPlayer={onSwapPlayer}
+          onPlayerMenu={onPlayerMenu}
           repricing={repricing}
           fitTargetPositions={fitTargetPositions}
         />
@@ -2820,6 +3155,12 @@ const styles = StyleSheet.create({
   fairnessHint: {
     ...type.bodySm,
     marginTop: space.xs,
+  },
+  // S4 PRD-01 — TickLabel + ⓘ pair (flag ux.help_surface only).
+  helpLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
   },
   // Chalkline slider construction (components.md → Forms): 4px ink-3
   // track, 16px square ice thumb at radius xs. Binary here — the thumb

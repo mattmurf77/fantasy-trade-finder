@@ -104,6 +104,7 @@ from .database import (
     load_local_league_rosters,
     load_local_league_users,
     set_ranking_method, get_ranking_method,
+    get_profile_public, set_profile_public,
     save_tiers_position, get_tiers_saved,
     save_tier_overrides, load_tier_overrides,
     save_anchor_scale, load_anchor_scale,
@@ -6405,11 +6406,17 @@ def submit_rankings():
     Explicitly publish the caller's current ELO snapshot to member_rankings
     so leaguemates can use their real valuations in trade generation.
 
-    Body (all optional — defaults to current session state):
+    Body (optional — defaults to current session state):
     {
-      "user_id":   "sleeper_user_id",   # defaults to g_user_id
       "league_id": "league_id",         # defaults to g_league.league_id
     }
+
+    Always writes the SESSION user's snapshot — a body `user_id` is ignored
+    (teardown W1A sibling sweep: the old `body.get("user_id") or g_user_id`
+    override let any authenticated session upsert member_rankings under an
+    arbitrary user_id, and member_rankings feed leaguemates' trade
+    generation — same S6B-01 class as the fixed league-preferences routes.
+    No client ever sent `user_id`).
 
     Called automatically after every swipe via post_rank3(), but can also
     be triggered manually (e.g. on tab switch).
@@ -6420,7 +6427,7 @@ def submit_rankings():
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
     body      = request.get_json(force=True) or {}
-    user_id   = body.get("user_id")   or g_user_id
+    user_id   = g_user_id
     league_id = body.get("league_id") or g_league.league_id
 
     all_rankings = service.get_rankings(position=None)
@@ -6692,6 +6699,10 @@ def league_coverage():
     GET /api/league/coverage?league_id=...
     Returns how many leaguemates have submitted rankings for the league.
 
+    The excluded "current user" is always the SESSION user — a `user_id`
+    query param is ignored (teardown hygiene: the override only shifted an
+    aggregate count, but no client ever sent it).
+
     Response:
     {
       "ranked": 3,
@@ -6706,7 +6717,7 @@ def league_coverage():
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
     league_id = request.args.get("league_id") or g_league.league_id
-    user_id   = request.args.get("user_id")   or g_user_id
+    user_id   = g_user_id
 
     try:
         coverage = get_ranking_coverage(
@@ -10084,11 +10095,31 @@ def _build_profile_contrarian(
     return out
 
 
+def _profile_opt_in_denied(user: dict | None) -> bool:
+    """Per-user public-profile opt-in gate (teardown 06-04, flag
+    profiles.user_toggle). When the flag is ON, a profile is only served
+    if the user's `profile_public` marker is set — the global
+    profiles.public_pages flag alone can no longer publish everyone.
+    Flag off = legacy behavior (global flag governs)."""
+    if not is_enabled("profiles.user_toggle"):
+        return False
+    return not (user or {}).get("profile_public")
+
+
 @app.route("/u/<path:username>")
 def public_profile_page(username):
-    """Serve the public profile page when flag is on; 404 otherwise."""
+    """Serve the public profile page when flag is on; 404 otherwise.
+    With profiles.user_toggle on, also requires the user's opt-in."""
     if not is_enabled("profiles.public_pages"):
         return jsonify({"error": "not_found"}), 404
+    if is_enabled("profiles.user_toggle"):
+        try:
+            user = get_user_by_username((username or "").strip().lower())
+        except Exception as e:
+            log.warning("profile page: user lookup failed: %s", e)
+            user = None
+        if _profile_opt_in_denied(user):
+            return jsonify({"error": "not_found"}), 404
     return send_from_directory(app.static_folder, "profile.html")
 
 
@@ -10115,6 +10146,11 @@ def public_profile_data(username):
 
     user_id = user.get("sleeper_user_id") or user.get("user_id")
     if not user_id:
+        return jsonify({"error": "not_found"}), 404
+
+    # Per-user opt-in (teardown 06-04): indistinguishable from not-found so
+    # usernames can't be enumerated through the privacy gate.
+    if _profile_opt_in_denied(user):
         return jsonify({"error": "not_found"}), 404
 
     # Count distinct leagues
@@ -10179,6 +10215,49 @@ def public_profile_data(username):
         "contrarian_takes": contrarian,
         "tiers_snapshot":   best_tiers,
     })
+
+
+@app.route("/api/profile/visibility", methods=["GET", "PUT"])
+def profile_visibility():
+    """Per-user public-profile opt-in (teardown 06-04, flag
+    profiles.user_toggle; 404 while dark).
+
+    GET → {"public": bool} — the session user's stored opt-in (default
+    False). PUT {"public": bool} → persist. The PUT applies the standard
+    verified-write gate: once a verified controller exists for this
+    user_id, a squatter session cannot publish (or hide) their board.
+    """
+    if not is_enabled("profiles.user_toggle"):
+        return jsonify({"error": "not_found"}), 404
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    if request.method == "PUT":
+        denial = _verified_write_denial(sess)
+        if denial is not None:
+            return denial
+        body = request.get_json(force=True, silent=True) or {}
+        if "public" not in body:
+            return jsonify({"error": "bad_request",
+                            "message": "Body must include \"public\"."}), 400
+        public = bool(body.get("public"))
+        try:
+            set_profile_public(user_id, public)
+        except Exception as e:
+            log.error("profile visibility save failed for %s: %s", user_id, e)
+            return jsonify({"error": "internal_error"}), 500
+        log.info("profile visibility: user %s → %s",
+                 user_id, "public" if public else "private")
+        return jsonify({"public": public})
+
+    try:
+        return jsonify({"public": get_profile_public(user_id)})
+    except Exception as e:
+        log.error("profile visibility read failed for %s: %s", user_id, e)
+        return jsonify({"error": "internal_error"}), 500
 
 
 @app.route("/api/session/demo", methods=["POST", "GET"])
@@ -10956,6 +11035,27 @@ def delete_account_route():
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
     return jsonify({"ok": True, "deleted": counts,
                     "apple_revoked": apple_revoked})
+
+
+@app.route("/api/session/signout", methods=["POST"])
+def session_signout():
+    """Server-side sign-out (teardown 06-03 lifecycle hygiene): evict the
+    calling session token so client sign-out revokes the server copy too —
+    previously sign-out only cleared device storage and the token stayed
+    live until idle eviction.
+
+    Idempotent and never fails: holding the token IS the authorization to
+    kill it, and a stale/unknown token simply reports evicted=false. Called
+    best-effort by clients — a network failure must never block sign-out.
+    """
+    token = request.headers.get("X-Session-Token", "")
+    evicted = False
+    if token:
+        with _sessions_lock:
+            evicted = _sessions.pop(token, None) is not None
+    if evicted:
+        log.info("session/signout: token evicted")
+    return jsonify({"ok": True, "evicted": evicted})
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Linking, ViewStyle } from 'react-native';
-import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import Button from './chalkline/Button';
+import { haptics } from '../utils/haptics';
+import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag } from '../state/useFeatureFlags';
 import { useSession } from '../state/useSession';
 import { proposeTradeToSleeper, getSleeperLinkStatus } from '../api/sendInSleeper';
@@ -71,9 +72,10 @@ export default function SendInSleeperButton({
         /* fall through to the "couldn't confirm" copy */
       }
       if (connected) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        haptics.success();
+        // Emoji strip (W1B handoff ride-along, ADR-004: no emoji as icons).
         Alert.alert(
-          'Sleeper connected ✅',
+          'Sleeper connected',
           'Tap “Send in Sleeper” again to send your trade.',
         );
       } else {
@@ -108,8 +110,15 @@ export default function SendInSleeperButton({
         receive_player_ids: receivePlayerIds,
       });
       setState('sent');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      Alert.alert('Trade sent ✅', 'Check your Sleeper app for the pending offer.');
+      haptics.success();
+      // Emoji strip (W1B handoff ride-along). S7 PRD-02: a successful send
+      // is the primary demonstrated-satisfaction moment — evaluate the
+      // rating-prompt gate once the user acknowledges the alert
+      // (maybeRequestReview is fully gated behind growth.rating_prompt and
+      // no-ops flag-off).
+      Alert.alert('Trade sent', 'Check your Sleeper app for the pending offer.', [
+        { text: 'OK', onPress: () => void maybeRequestReview('send_in_sleeper') },
+      ]);
     } catch (err) {
       setState('idle');
       const body = err instanceof ApiError ? (err.body as any) : undefined;
@@ -174,7 +183,9 @@ export default function SendInSleeperButton({
 
   const onPress = useCallback(async () => {
     if (state !== 'idle') return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    // Routed through utils/haptics (W1B handoff): pickup = impact-medium,
+    // the same physical feedback as the previous direct expo-haptics call.
+    haptics.pickup();
 
     // No real league/opponent to send to → hand off to Sleeper directly.
     if (!leagueId || !theirUserId) {

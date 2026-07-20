@@ -3,7 +3,8 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { focusManager } from '@tanstack/react-query';
+import { focusManager, onlineManager } from '@tanstack/react-query';
+import NetInfo from '@react-native-community/netinfo';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -191,9 +192,20 @@ function App() {
       return () => focusSub.remove();
     });
 
-    // TODO(wave2): wire onlineManager when NetInfo is added
-    // (@react-native-community/netinfo is not a dependency in Wave 1, so
-    // refetchOnReconnect stays unbridged for now).
+    // S7 PRD-04 — bridge TanStack Query's onlineManager to NetInfo so
+    // `refetchOnReconnect: true` (queryClient default) actually fires on
+    // reconnect. Per the TanStack RN recipe: the manager owns the
+    // subscription lifecycle (same pattern as focusManager above), so the
+    // listener registers once at startup and NetInfo's unsubscribe is
+    // returned for the manager to call if the listener is ever replaced.
+    // `!!state.isConnected` treats NetInfo's initial `null` as offline for
+    // a beat — the first real event corrects it within milliseconds.
+    onlineManager.setEventListener((setOnline) => {
+      const netSub = NetInfo.addEventListener((state) => {
+        setOnline(!!state.isConnected);
+      });
+      return netSub;
+    });
 
     return () => {
       sub.remove();

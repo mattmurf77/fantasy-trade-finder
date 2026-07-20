@@ -25,7 +25,15 @@ import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import AnalystGuide from '../components/AnalystGuide';
 import VerifyAccountBanner from '../components/VerifyAccountBanner';
+import Toast from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { useFlag, useFeatureFlags } from '../state/useFeatureFlags';
+import {
+  getLinkingV2,
+  flushPendingNavIntents,
+  setLinkFallbackNotifier,
+  routeNotificationTap,
+} from '../utils/deepLinks';
 import { useLeagueFormatDefault } from '../hooks/useScoringFormat';
 import { getProgress } from '../api/rankings';
 import { track } from '../api/events';
@@ -135,11 +143,24 @@ export default function RootNav({ booted }: { booted: boolean }) {
   useLeagueFormatDefault();
 
   // Tap-router: the push hook decodes `data.type` and tells us which tab
-  // to focus. We intentionally don't pass match_id deeper — the Matches
-  // tab loads the latest list on focus and any specific match the user
-  // tapped is already at the top.
+  // to focus.
+  //
+  // Legacy path (flag `notif.tap_routing_v2` OFF): tab-level navigate only —
+  // match_id is intentionally discarded (the Matches tab loads the latest
+  // list on focus) and not-ready taps are silently dropped.
+  //
+  // V2 path (flag ON, S5 PRD-02): route through utils/deepLinks'
+  // routeNotificationTap — buffers until the container is ready (cold-start
+  // taps replay via onReady), passes match_id into Matches as a route param
+  // (`{ match_id, src: 'push', ts }` — scroll/highlight is MatchesScreen
+  // work), and resolves through the v2 route table when
+  // `ux.deeplink_router_v2` is also on.
   const onTapMatchNotification = useCallback(
-    (tab: 'Matches' | 'League' | 'Rank' | 'Trades', _matchId?: string | number) => {
+    (tab: 'Matches' | 'League' | 'Rank' | 'Trades', matchId?: string | number) => {
+      if (useFeatureFlags.getState().flags['notif.tap_routing_v2']) {
+        routeNotificationTap(tab, matchId);
+        return;
+      }
       if (!navigationRef.isReady()) return;
       try {
         // @ts-expect-error — nested tab nav route; types don't cover cross-stack
@@ -150,6 +171,16 @@ export default function RootNav({ booted }: { booted: boolean }) {
     },
     [],
   );
+
+  // PRD 01-04 item 3: "Couldn't open that link" fallback toast for
+  // unroutable deep links (v2 router only — the legacy parser keeps its
+  // silent no-op). The Toast renders null while not visible, so this is
+  // inert flag-off.
+  const [linkToastVisible, setLinkToastVisible] = useState(false);
+  useEffect(() => {
+    setLinkFallbackNotifier(() => setLinkToastVisible(true));
+    return () => setLinkFallbackNotifier(null);
+  }, []);
 
   // Drive the iOS push-permission deferral. We only want to ask after the
   // user has earned the Find-a-Trade unlock (progress.unlocked === true),
@@ -171,6 +202,11 @@ export default function RootNav({ booted }: { booted: boolean }) {
   });
   if (progressQuery.data?.unlocked === true) everUnlockedRef.current = true;
   const pushEnabled = everUnlockedRef.current || progressQuery.data?.unlocked === true;
+
+  // PRD 01-04: v2 deep-link router flag. Read via hook so the component has
+  // the hydrated value at mount; NavigationContainer only reads `linking`
+  // once, so a mid-session flag flip applies on next launch (documented).
+  const deeplinkV2 = useFlag('ux.deeplink_router_v2');
 
   // Registers the device's Expo push token with the backend once the
   // user has signed in AND unlocked Find-a-Trade. The hook always wires
@@ -206,24 +242,34 @@ export default function RootNav({ booted }: { booted: boolean }) {
   // /u/<username> route the web hosts so a single share URL works in both
   // surfaces. The `?ref=` capture is handled separately in utils/deepLinks
   // (we keep both so referrals work even when the URL has no path).
-  const linking = {
-    prefixes: [Linking.createURL('/'), 'https://fantasy-trade-finder.onrender.com'],
-    config: {
-      screens: {
-        SignIn:       'signin',
-        LeaguePicker: 'leagues',
-        Main:         'app',
-        Settings:     'settings',
-        Profile:      'u/:username',
-      },
-    },
-  };
+  //
+  // Flag `ux.deeplink_router_v2` swaps in the full nested route table from
+  // utils/deepLinks (tabs + pushed screens all URL-addressable); flag off
+  // keeps the legacy 5-route map below exactly.
+  const linking = deeplinkV2
+    ? getLinkingV2()
+    : {
+        prefixes: [Linking.createURL('/'), 'https://fantasy-trade-finder.onrender.com'],
+        config: {
+          screens: {
+            SignIn:       'signin',
+            LeaguePicker: 'leagues',
+            Main:         'app',
+            Settings:     'settings',
+            Profile:      'u/:username',
+          },
+        },
+      };
 
   return (
     <NavigationContainer
       ref={navigationRef}
       linking={linking}
       onReady={() => {
+        // Replay any navigation intents (cold-start push taps, early deep
+        // links) buffered while the container wasn't ready. Only flag-on
+        // paths enqueue, so with flags off this is a no-op on an empty queue.
+        flushPendingNavIntents();
         // Hand the container ref to Sentry so it can tag spans by screen.
         // No-op when Sentry isn't initialized.
         navigationIntegration.registerNavigationContainer(navigationRef);
@@ -429,6 +475,15 @@ export default function RootNav({ booted }: { booted: boolean }) {
           not just the authed tabs. Renders null unless a step is active;
           native sheets/alerts still render above it (system modals win). */}
       <AnalystGuide />
+      {/* PRD 01-04: unroutable-deep-link fallback toast (v2 router only).
+          Renders null while not visible — inert with the flag off. */}
+      <Toast
+        visible={linkToastVisible}
+        message="Couldn't open that link"
+        tone="warn"
+        holdMs={2500}
+        onDismiss={() => setLinkToastVisible(false)}
+      />
     </NavigationContainer>
   );
 }

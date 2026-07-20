@@ -44,10 +44,13 @@ import { importEspnLeague } from '../api/espn';
 import { initLeagueSession } from '../api/auth';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { useWhatsNew } from '../hooks/useWhatsNew';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import LeaderboardsSection from '../components/LeaderboardsSection';
 import ActivityFeed from '../components/ActivityFeed';
 import ContrarianLeaderboard from '../components/ContrarianLeaderboard';
+import CoachMark from '../components/CoachMark';
+import RookieDraftBoardSheet from '../components/RookieDraftBoardSheet';
 
 // League tab v1 — replaces the prior PlaceholderScreen. Pulls
 // /api/league/summary + /api/league/coverage and renders:
@@ -63,6 +66,13 @@ export default function LeagueScreen() {
   const [switcherOpen, setSwitcherOpen] = useState(false);
   // FB-38/42 — member-roster overlay, opened from the hero's joined chip.
   const [membersOpen, setMembersOpen] = useState(false);
+  // S7 PRD-04 item 2 (flag league.rookie_board_entry) — the previously
+  // orphaned RookieDraftBoardSheet mounts behind an Explore row.
+  const showRookieBoard = useFlag('league.rookie_board_entry');
+  const [rookieOpen, setRookieOpen] = useState(false);
+  // S7 PRD-04 item 5 (flag ux.whats_new) — one version-keyed inline tip,
+  // shown once per release (see useWhatsNew for the contract).
+  const { entry: whatsNew, dismiss: dismissWhatsNew } = useWhatsNew();
   // FB-37 — Matches tiles deep-link to the Matches tab.
   const navigation = useNavigation<any>();
 
@@ -231,6 +241,22 @@ export default function LeagueScreen() {
           />
         }
       >
+        {/* ux.whats_new — one CoachMark-style inline tip per release,
+            never a modal, never stacked (whatsNew is null when the flag is
+            off, the release has no entry, or it was already dismissed).
+            Tap = dismiss; when the entry carries a deep-link route the tap
+            also navigates there ("show me" semantics). */}
+        {whatsNew ? (
+          <CoachMark
+            testID="league.whats-new"
+            text={whatsNew.headline}
+            onDismiss={() => {
+              dismissWhatsNew();
+              if (whatsNew.route) navigation.navigate(whatsNew.route);
+            }}
+          />
+        ) : null}
+
         {/* League name + scoring. The whole hero card is now a Pressable
             that opens the LeagueSwitcherSheet — matching the web feedback
             ("Let me navigate/update my league directly from the page
@@ -335,6 +361,16 @@ export default function LeagueScreen() {
             sub="Best available players in this league"
             onPress={() => navigation.navigate('FreeAgents')}
           />
+          {/* S7 PRD-04 item 2 (flag league.rookie_board_entry) — mounts the
+              rookie board bottom sheet in place (no nav route needed). */}
+          {showRookieBoard ? (
+            <ExploreRow
+              testID="league.rookie-board-row"
+              label="Rookie draft board"
+              sub="First-year players and pre-draft prospects"
+              onPress={() => setRookieOpen(true)}
+            />
+          ) : null}
         </View>
 
         {/* Recent activity — flag-gated. Backend already short-circuits to
@@ -416,6 +452,15 @@ export default function LeagueScreen() {
       <LeagueSwitcherSheet
         visible={switcherOpen}
         onClose={() => setSwitcherOpen(false)}
+      />
+
+      {/* league.rookie_board_entry — read-only rookie board (fetches only
+          once opened; renders nothing while closed). Mounted regardless of
+          the flag so an in-flight open survives a flag revalidation; the
+          Explore row above is the only opener. */}
+      <RookieDraftBoardSheet
+        visible={rookieOpen}
+        onClose={() => setRookieOpen(false)}
       />
 
       {/* FB-38 — member-roster overlay: X top-right, join status per

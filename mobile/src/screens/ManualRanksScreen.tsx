@@ -7,15 +7,28 @@ import {
   ActivityIndicator,
   TextInput,
   Keyboard,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DraggableFlatList, {
   RenderItemParams,
   DragEndParams,
 } from 'react-native-draggable-flatlist';
+import type { FlatList } from 'react-native-gesture-handler';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { ink, chalk, ice, semantic, position, space, radii, type, fonts } from '../theme/chalkline';
+import {
+  ink,
+  chalk,
+  ice,
+  semantic,
+  position,
+  space,
+  radii,
+  type,
+  fonts,
+  DRAG_ACTIVATION_DISTANCE,
+} from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
 import PositionChip from '../components/PositionChip';
 import { getRankings, reorderRankings } from '../api/rankings';
@@ -24,6 +37,7 @@ import { valueForElo } from '../utils/playerValue';
 import { readErrorCopy } from '../utils/verification';
 import { startSpan } from '../observability/sentry';
 import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
 import type { Position, RankedPlayer } from '../shared/types';
 
 // ── Overall Ranks ─────────────────────────────────────────────────────
@@ -89,6 +103,12 @@ const RankEditRow = React.memo(RankEditRowInner);
 export default function ManualRanksScreen() {
   const queryClient = useQueryClient();
   const activeFormat = useSession((s) => s.activeFormat);
+  // Teardown flags. Both default false → byte-identical behavior.
+  //   ux.touch_polish (S3 PRD-04): activationDistance 5→18, lift haptic,
+  //     drag-end downgraded to impact-light, pull-to-refresh, FAB clearance.
+  //   ux.board_search (S7 PRD-04): name search with scroll-to + highlight.
+  const touchPolish = useFlag('ux.touch_polish');
+  const boardSearch = useFlag('ux.board_search');
   const [filter, setFilter] = useState<Position | 'ALL'>('ALL');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -125,6 +145,36 @@ export default function ManualRanksScreen() {
   const visibleRows: RankedPlayer[] = useMemo(() => {
     return filter === 'ALL' ? rows : rows.filter((r) => r.position === filter);
   }, [rows, filter]);
+
+  // ── Board search (S7 PRD-04, flag ux.board_search) ─────────────────
+  // Scroll-to + highlight over the loaded list — NOT a filter. Rationale:
+  // this board's drag semantics assume the visible list IS the (position-
+  // filtered) ordering; onDragEnd splices the visible order back into the
+  // full list keyed on the position filter alone. A name-filtered subset
+  // has no well-defined splice-back (reordering an arbitrary subset of a
+  // ranked list is ambiguous), so filtering would force drag to be
+  // disabled while searching. Scroll-to keeps the full board intact: the
+  // user finds the player and drags them in place immediately.
+  const [search, setSearch] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const listRef = useRef<FlatList<RankedPlayer>>(null);
+  const searchQuery = search.trim().toLowerCase();
+  // First match in the VISIBLE (position-filtered) list — searching the
+  // hidden positions would scroll nowhere.
+  const highlightIndex = useMemo(() => {
+    if (!boardSearch || searchQuery.length === 0) return -1;
+    return visibleRows.findIndex((r) => r.name.toLowerCase().includes(searchQuery));
+  }, [boardSearch, searchQuery, visibleRows]);
+  const highlightId = highlightIndex >= 0 ? visibleRows[highlightIndex].id : null;
+
+  useEffect(() => {
+    if (highlightIndex < 0) return;
+    listRef.current?.scrollToIndex({
+      index: highlightIndex,
+      animated: true,
+      viewPosition: 0.3,
+    });
+  }, [highlightIndex]);
 
   // #53 — positional rank (QB1, RB4, …) derived client-side from the FULL
   // local ordering: a player's positional rank is their 1-based index among
@@ -227,10 +277,20 @@ export default function ManualRanksScreen() {
   // (filtered) rows. When filtered, we splice that sub-order back into
   // the full `rows` list, preserving the relative order of rows that
   // weren't part of the visible set.
+  // S3 PRD-04 (flag ux.touch_polish) — tactile lift confirmation: the
+  // 220ms long-press pickup was silent, making scroll-vs-drag ambiguous.
+  const onDragBegin = useCallback(() => {
+    if (touchPolish) haptics.pickup();
+  }, [touchPolish]);
+
   const onDragEnd = useCallback(
     ({ data: newVisible, from, to }: DragEndParams<RankedPlayer>) => {
       if (from === to) return;        // no-op
-      haptics.success();
+      // S3 PRD-04 — drag end is routine: impact-light, not success()
+      // (success is reserved for server-confirmed outcomes; this board's
+      // save is a debounced network call that hasn't happened yet).
+      if (touchPolish) haptics.swipe();
+      else haptics.success();
       setRows((prev) => {
         let next: RankedPlayer[];
         if (filter === 'ALL') {
@@ -247,7 +307,7 @@ export default function ManualRanksScreen() {
         return next;
       });
     },
-    [filter, scheduleSave],
+    [filter, scheduleSave, touchPolish],
   );
 
   // ── Inline rank edit ──────────────────────────────────────────────
@@ -304,6 +364,10 @@ export default function ManualRanksScreen() {
         position[String(item.position).toLowerCase() as keyof typeof position];
       const value = valueForElo(item.elo);
 
+      // ux.board_search — locate cue for the matched row (same ink-2 well
+      // as the active-drag state; cleared when the query clears).
+      const isHighlighted = highlightId === item.id;
+
       return (
         <Pressable
           onLongPress={drag}
@@ -312,6 +376,7 @@ export default function ManualRanksScreen() {
           style={({ pressed }) => [
             styles.row,
             isActive && styles.rowActive,
+            isHighlighted && !isActive && styles.rowHighlight,
             pressed && !isActive && { backgroundColor: ink.ink3 },
           ]}
         >
@@ -355,8 +420,18 @@ export default function ManualRanksScreen() {
         </Pressable>
       );
     },
-    [commitRankEdit, editingPid, posRanks],
+    [commitRankEdit, editingPid, posRanks, highlightId],
   );
+
+  // ── Pull-to-refresh (S7 PRD-04 ride-along, flag ux.touch_polish) ────
+  // Invalidates the whole rankings family for the active format (this
+  // board + Tiers + walks all read through it). Guard: while a reorder is
+  // pending/saving, a refetch response would clobber the local `rows`
+  // state via the resync effect — skip the pull until the save settles.
+  const onRefresh = useCallback(() => {
+    if (saveStatus === 'pending' || saveStatus === 'saving') return;
+    void queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat] });
+  }, [saveStatus, queryClient, activeFormat]);
 
   // ── Header save indicator ─────────────────────────────────────────
   // Renders one of three states. The "saved" dot fades back to idle
@@ -408,6 +483,29 @@ export default function ManualRanksScreen() {
         })}
       </View>
 
+      {/* ux.board_search — QuickSet-pattern name search (Input construction:
+          ink-2 fill, line-strong border, radius sm, faint placeholder, ice
+          focus border, 44pt tall). Scroll-to + highlight, never a filter —
+          see the highlightIndex derivation for why a drag list can't
+          filter. */}
+      {boardSearch ? (
+        <TextInput
+          testID="manual-ranks.search"
+          style={[styles.search, searchFocused && styles.searchFocused]}
+          placeholder="Search players…"
+          placeholderTextColor={chalk.faint}
+          value={search}
+          onChangeText={setSearch}
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+          accessibilityLabel="Search players on this board"
+        />
+      ) : null}
+
       {ranksQuery.isLoading ? (
         <View style={styles.center}>
           <ActivityIndicator color={ice.base} />
@@ -433,13 +531,50 @@ export default function ManualRanksScreen() {
         </View>
       ) : (
         <DraggableFlatList
+          ref={listRef}
           data={visibleRows}
           keyExtractor={(r) => r.id}
           renderItem={renderItem}
+          onDragBegin={onDragBegin}
           onDragEnd={onDragEnd}
-          activationDistance={5}
+          // S3 PRD-04 (#57 recurrence): 5px let ordinary vertical scrolls
+          // cross the threshold and steal the touch into a drag, with the
+          // accidental re-rank persisted by the 600ms auto-save. 18
+          // (DRAG_ACTIVATION_DISTANCE — the value Tiers landed on) keeps
+          // scrolling a scroll; long-press still initiates the drag.
+          activationDistance={touchPolish ? DRAG_ACTIVATION_DISTANCE : 5}
+          // ux.board_search — rows are near-constant height but not
+          // measured up front; far-away scrollToIndex targets need the
+          // standard offset-then-retry fallback.
+          onScrollToIndexFailed={(info) => {
+            listRef.current?.scrollToOffset({
+              offset: info.averageItemLength * info.index,
+              animated: true,
+            });
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({
+                index: info.index,
+                animated: true,
+                viewPosition: 0.3,
+              });
+            }, 250);
+          }}
+          refreshControl={
+            touchPolish ? (
+              <RefreshControl
+                refreshing={ranksQuery.isFetching && !!ranksQuery.data}
+                onRefresh={onRefresh}
+                tintColor={ice.base}
+              />
+            ) : undefined
+          }
           containerStyle={styles.listContainer}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[
+            styles.listContent,
+            // S3 PRD-01 — bottom clearance so the last rows can scroll
+            // above the (TestFlight-only) feedback FAB.
+            touchPolish && styles.listContentFabClearance,
+          ]}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
         />
       )}
@@ -542,8 +677,28 @@ const styles = StyleSheet.create({
   filterText: { ...type.label },
   filterTextActive: { color: chalk.base },
 
+  // ux.board_search — Input construction per the design system (QuickSet's
+  // search pattern): 1px line-strong border, ink-2 fill, radius sm, chalk
+  // text, faint placeholder; focus = ice border. 44pt tall (touch floor).
+  search: {
+    ...type.body,
+    height: 44,
+    marginHorizontal: space.lg,
+    marginBottom: space.sm,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: 0,
+  },
+  searchFocused: { borderColor: ice.base },
+
   listContainer: { flex: 1 },
   listContent: { paddingHorizontal: space.lg, paddingBottom: space.xxl },
+  // S3 PRD-01 (ux.touch_polish) — extra bottom clearance for the feedback
+  // FAB (52pt + margin) so the last rows aren't pinned under it.
+  listContentFabClearance: { paddingBottom: space.xxl + 72 },
 
   row: {
     flexDirection: 'row',
@@ -553,6 +708,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.xs,
   },
   rowActive: {
+    backgroundColor: ink.ink2,
+    borderRadius: radii.sm,
+  },
+  // ux.board_search — matched-row locate cue (same well as rowActive).
+  rowHighlight: {
     backgroundColor: ink.ink2,
     borderRadius: radii.sm,
   },

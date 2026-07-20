@@ -1,15 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Text, Pressable, View, StyleSheet, Modal } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { NavigationContainerRefContext, CommonActions } from '@react-navigation/native';
+import { NavigationContainerRefContext, CommonActions, StackActions } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { ink, chalk, ice, flare, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
 import { Icon, Button, type IconName } from '../components/chalkline';
 import { getNextTrio, getRankings, getTiersStatus } from '../api/rankings';
 import { getLikedTrades, getAllMatches } from '../api/trades';
 import { useSession } from '../state/useSession';
-import { onboardingEnabled } from '../state/useFeatureFlags';
+import { onboardingEnabled, useFlag } from '../state/useFeatureFlags';
+import { requestScrollToTop } from './scrollToTop';
 import { getOnboardingState } from '../state/useOnboardingState';
 import RankScreen from '../screens/RankScreen';
 import RankHomeScreen from '../screens/RankHomeScreen';
@@ -105,6 +106,47 @@ const subScreenOptions = (title: string, fallback: string) =>
     headerLeft: () => <HeaderBack navigation={navigation} fallback={fallback} />,
   });
 
+// ── PRD 01-02 (flag `ux.rank_tab_destination`) — RankMenu-from-header ────
+// With the flag on, the Rank tab navigates instead of opening the mode
+// menu, so every rank surface carries a "More ways to rank" header control
+// that opens the existing RankMenu sheet (generalizing the QuickSetTiers
+// pattern). The sheet's open-state lives in the TabNav component; this
+// module-level hook lets header buttons (rendered by the stack navigator)
+// reach it without prop-drilling through `component={...}` screens.
+let _openRankMenu: (() => void) | null = null;
+
+function MoreWaysButton() {
+  return (
+    <Pressable testID="rank.more-ways" onPress={() => _openRankMenu?.()} hitSlop={8}>
+      {({ pressed }) => (
+        <Text style={[styles.moreWaysLink, pressed && { color: chalk.base }]}>
+          More ways to rank
+        </Text>
+      )}
+    </Pressable>
+  );
+}
+
+// subScreenOptions + the More-ways header control (flag-on rank surfaces).
+const rankSubScreenOptions = (title: string, fallback: string) =>
+  ({ navigation }: { navigation: any }) => ({
+    ...subScreenOptions(title, fallback)({ navigation }),
+    headerRight: () => <MoreWaysButton />,
+  });
+
+// PRD 01-05 / 01-02: pop a tab's nested stack to its root. Returns false
+// when the tab has no nested history (caller falls back to scroll-to-top).
+// Reads the partial nested state off the tab `route` — absent until the
+// nested navigator has actually navigated.
+function popNestedToTop(navigation: any, route: any): boolean {
+  const nested = route?.state;
+  if (!nested || !Array.isArray(nested.routes) || !nested.key) return false;
+  const depth = typeof nested.index === 'number' ? nested.index + 1 : nested.routes.length;
+  if (depth <= 1) return false;
+  navigation.dispatch({ ...StackActions.popToTop(), target: nested.key });
+  return true;
+}
+
 // Where the Rank stack opens at launch, per the saved preference
 // (useSession.rankingMethodPref). Null pref = never chosen → Quick Set,
 // the default method (#122). initialRouteName is only honored on the
@@ -128,22 +170,53 @@ function RankStackNav() {
   // never-a-default, #122 ships it unconditionally). A stored pref always
   // wins — existing users' routing is untouched.
   const initial: RankRoute = (pref && PREF_ROUTE[pref]) || 'QuickSetTiers';
+  // PRD 01-02: with the flag on, every rank surface gets the "More ways to
+  // rank" header control (opens the RankMenu sheet). Flag off keeps today's
+  // options exactly (QuickSetTiers' RankHome link included).
+  const rankDest = useFlag('ux.rank_tab_destination');
   return (
     <RankStack.Navigator
       initialRouteName={initial}
       screenOptions={{ headerShown: false }}
     >
-      <RankStack.Screen name="RankHome" component={RankHomeScreen} />
-      <RankStack.Screen name="Trios" component={RankScreen} />
+      {/* S1B-05 bug fix (unflagged, noted): RankHome previously rendered
+          headerless with only edge-swipe exit. Give it the shared
+          sub-screen header so it has a visible back control, falling back
+          to the preferred rank surface when it's the stack's first mount. */}
+      <RankStack.Screen
+        name="RankHome"
+        component={RankHomeScreen}
+        options={subScreenOptions('Rank', initial)}
+      />
+      <RankStack.Screen
+        name="Trios"
+        component={RankScreen}
+        // Flag on: Trios gains a header purely to host the More-ways
+        // control (it's a stack home — no back button). Flag off: headerless
+        // as today.
+        options={
+          rankDest
+            ? { ...chalklineHeader('Trios'), headerRight: () => <MoreWaysButton /> }
+            : undefined
+        }
+      />
       <RankStack.Screen
         name="Anchors"
         component={PickAnchorScreen}
-        options={subScreenOptions('Pick Anchors', 'Trios')}
+        options={
+          rankDest
+            ? rankSubScreenOptions('Pick Anchors', 'Trios')
+            : subScreenOptions('Pick Anchors', 'Trios')
+        }
       />
       <RankStack.Screen
         name="Tiers"
         component={TiersScreen}
-        options={subScreenOptions('Tiers', 'Trios')}
+        options={
+          rankDest
+            ? rankSubScreenOptions('Tiers', 'Trios')
+            : subScreenOptions('Tiers', 'Trios')
+        }
       />
       {/* 1.5.4 #104 — guided tier quick-set walk. #119 promoted it to a
           first-class method: reachable from the Tiers header, the Rank menu,
@@ -152,31 +225,39 @@ function RankStackNav() {
       <RankStack.Screen
         name="QuickSetTiers"
         component={QuickSetTiersScreen}
-        options={({ navigation }) => ({
-          ...subScreenOptions('Quick Set Tiers', 'Tiers')({ navigation }),
-          // #122: Quick Set is the no-pref default, so the demoted chooser
-          // stays one tap away ("More ways to rank", item 9's Q1 ruling) —
-          // it's the only path to RankHome from here (the Rank menu sheet
-          // doesn't list the chooser).
-          headerRight: () => (
-            <Pressable
-              testID="rank.more-ways"
-              onPress={() => navigation.navigate('RankHome')}
-              hitSlop={8}
-            >
-              {({ pressed }) => (
-                <Text
-                  style={[
-                    styles.moreWaysLink,
-                    pressed && { color: chalk.base },
-                  ]}
-                >
-                  More ways to rank
-                </Text>
-              )}
-            </Pressable>
-          ),
-        })}
+        // Flag on (PRD 01-02): the shared More-ways control opens the
+        // RankMenu sheet like every other rank surface (RankHome stays
+        // reachable — the menu's rows and this header's back-fallbacks
+        // cover mode switching). Flag off: today's link to RankHome.
+        options={
+          rankDest
+            ? rankSubScreenOptions('Quick Set Tiers', 'Tiers')
+            : ({ navigation }) => ({
+                ...subScreenOptions('Quick Set Tiers', 'Tiers')({ navigation }),
+                // #122: Quick Set is the no-pref default, so the demoted chooser
+                // stays one tap away ("More ways to rank", item 9's Q1 ruling) —
+                // it's the only path to RankHome from here (the Rank menu sheet
+                // doesn't list the chooser).
+                headerRight: () => (
+                  <Pressable
+                    testID="rank.more-ways"
+                    onPress={() => navigation.navigate('RankHome')}
+                    hitSlop={8}
+                  >
+                    {({ pressed }) => (
+                      <Text
+                        style={[
+                          styles.moreWaysLink,
+                          pressed && { color: chalk.base },
+                        ]}
+                      >
+                        More ways to rank
+                      </Text>
+                    )}
+                  </Pressable>
+                ),
+              })
+        }
       />
       {/* #136 — within-tier ordering pass, the polish step after Quick set.
           Offered when the quick-set walk finishes and from the Rank menu.
@@ -185,17 +266,29 @@ function RankStackNav() {
       <RankStack.Screen
         name="QuickRank"
         component={QuickRankScreen}
-        options={subScreenOptions('Quick Rank', 'Tiers')}
+        options={
+          rankDest
+            ? rankSubScreenOptions('Quick Rank', 'Tiers')
+            : subScreenOptions('Quick Rank', 'Tiers')
+        }
       />
       <RankStack.Screen
         name="ManualRanks"
         component={ManualRanksScreen}
-        options={subScreenOptions('Overall Ranks', 'Trios')}
+        options={
+          rankDest
+            ? rankSubScreenOptions('Overall Ranks', 'Trios')
+            : subScreenOptions('Overall Ranks', 'Trios')
+        }
       />
       <RankStack.Screen
         name="Trends"
         component={TrendsScreen}
-        options={subScreenOptions('Trends', 'Trios')}
+        options={
+          rankDest
+            ? rankSubScreenOptions('Trends', 'Trios')
+            : subScreenOptions('Trends', 'Trios')
+        }
       />
     </RankStack.Navigator>
   );
@@ -246,6 +339,19 @@ const rankTabIcon = (name: IconName) =>
 export default function TabNav() {
   const [rankMenuOpen, setRankMenuOpen] = useState(false);
   const queryClient = useQueryClient();
+  // PRD 01-02: Rank tab is a real destination (navigate, no menu intercept).
+  const rankDest = useFlag('ux.rank_tab_destination');
+  // PRD 01-05: focused-tab re-tap pops to root / scrolls to top.
+  const retapOn = useFlag('ux.retap_active_tab');
+
+  // Expose the RankMenu opener to the rank surfaces' header buttons
+  // (MoreWaysButton above). Module-level hook — see its comment.
+  useEffect(() => {
+    _openRankMenu = () => setRankMenuOpen(true);
+    return () => {
+      _openRankMenu = null;
+    };
+  }, []);
 
   // Onboarding trades-first (the gap found in the build-48 operator smoke):
   // nothing routed a treatment user to the deck — every onboarding surface
@@ -289,22 +395,44 @@ export default function TabNav() {
           // #49: FB-28 added a chevron to the label, but the icon already
           // renders one (PR #79) — the two cues stacked. Keep the icon chevron
           // (the conventional "fans out" signal) and drop the label arrow.
-          options={{ tabBarIcon: rankTabIcon('rank'), tabBarLabel: 'Rank', tabBarButtonTestID: 'tab.rank' }}
-          listeners={() => ({
-            // Intercept the tap on the Rank tab — open the action sheet
-            // instead of jumping into a sub-screen. We still keep the tab
-            // active visually so the user knows where they are.
-            tabPress: (e) => {
-              e.preventDefault();
-              setRankMenuOpen(true);
-            },
-          })}
+          // PRD 01-02 (flag on): the tab navigates like a normal tab, so the
+          // menu-signal chevron goes away.
+          options={{
+            tabBarIcon: rankDest ? tabIcon('rank') : rankTabIcon('rank'),
+            tabBarLabel: 'Rank',
+            tabBarButtonTestID: 'tab.rank',
+          }}
+          listeners={
+            rankDest
+              ? ({ navigation, route }) => ({
+                  // PRD 01-02: default tab behavior — tapping Rank from
+                  // another tab navigates to the stack (its initial route is
+                  // the PREF_ROUTE surface; any in-session surface the user
+                  // navigated to is preserved, i.e. "last used"). Focused
+                  // re-tap pops the Rank stack back to that preferred
+                  // surface. Mode switching lives in the surfaces' "More
+                  // ways to rank" header control.
+                  tabPress: () => {
+                    if (!navigation.isFocused()) return;
+                    popNestedToTop(navigation, route);
+                  },
+                })
+              : () => ({
+                  // Intercept the tap on the Rank tab — open the action sheet
+                  // instead of jumping into a sub-screen. We still keep the tab
+                  // active visually so the user knows where they are.
+                  tabPress: (e) => {
+                    e.preventDefault();
+                    setRankMenuOpen(true);
+                  },
+                })
+          }
         />
         <Tab.Screen
           name="Trades"
           component={TradesStackNav}
           options={{ tabBarIcon: tabIcon('trade'), tabBarButtonTestID: 'tab.trades' }}
-          listeners={() => ({
+          listeners={({ navigation, route }) => ({
             // Warm the liked-trades cache during the tab transition so
             // TradesScreen's `useQuery(['liked-trades', leagueId])` adopts
             // the in-flight request on mount. Don't preventDefault — the
@@ -313,6 +441,12 @@ export default function TabNav() {
             // prefetch when no league is active (the screen's query is
             // `enabled: !!leagueId`).
             tabPress: () => {
+              // PRD 01-05 (flag `ux.retap_active_tab`): focused re-tap pops
+              // the Trades stack (Portfolio/Calculator → TradesHome); at
+              // root, ask the screen to scroll its deck/list to top.
+              if (retapOn && navigation.isFocused()) {
+                if (!popNestedToTop(navigation, route)) requestScrollToTop('Trades');
+              }
               const leagueId = useSession.getState().league?.league_id ?? null;
               if (!leagueId) return;
               void queryClient.prefetchQuery({
@@ -327,12 +461,14 @@ export default function TabNav() {
           name="Matches"
           component={MatchesScreen}
           options={{ tabBarIcon: tabIcon('match'), tabBarButtonTestID: 'tab.matches' }}
-          listeners={() => ({
+          listeners={({ navigation }) => ({
             // Warm the cross-league matches cache during the tab transition
             // so MatchesScreen's `useQuery(['matches', 'all'])` adopts the
             // in-flight request on mount. Fire-and-forget; errors surface on
             // the screen's own query.
             tabPress: () => {
+              // PRD 01-05: no nested stack — focused re-tap scrolls to top.
+              if (retapOn && navigation.isFocused()) requestScrollToTop('Matches');
               void queryClient.prefetchQuery({
                 queryKey: ['matches', 'all'],
                 queryFn: getAllMatches,
@@ -345,6 +481,12 @@ export default function TabNav() {
           name="League"
           component={LeagueScreen}
           options={{ tabBarIcon: tabIcon('crown'), tabBarButtonTestID: 'tab.league' }}
+          listeners={({ navigation }) => ({
+            // PRD 01-05: no nested stack — focused re-tap scrolls to top.
+            tabPress: () => {
+              if (retapOn && navigation.isFocused()) requestScrollToTop('League');
+            },
+          })}
         />
       </Tab.Navigator>
 

@@ -9,6 +9,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 
 import {
@@ -26,6 +27,7 @@ import PlayerCard from '../components/PlayerCard';
 import { getFreeAgents, type FreeAgentRow } from '../api/league';
 import { readErrorCopy } from '../utils/verification';
 import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
 import type { Position } from '../shared/types';
 
 type PositionFilter = Position | 'ALL';
@@ -38,8 +40,12 @@ const FILTERS: PositionFilter[] = ['ALL', 'QB', 'RB', 'WR', 'TE'];
 // "Drop: <player> (+delta)" subline whenever the backend found a lower-
 // valued same-position player on the user's roster to cut for the FA.
 export default function FreeAgentsScreen() {
+  const navigation = useNavigation<any>();
   const [filter, setFilter] = useState<PositionFilter>('ALL');
   const leagueId = useSession((s) => s.league?.league_id);
+  // S4 PRD-05 (ux.empty_state_ctas): the no-league state gets the action
+  // its copy describes. Flag off: copy-only, as before.
+  const emptyCtasOn = useFlag('ux.empty_state_ctas');
 
   const query = useQuery({
     // Position is part of the key: the backend caps each response at ~50
@@ -91,6 +97,14 @@ export default function FreeAgentsScreen() {
           <Text testID="free-agents.empty-text" style={styles.emptyBody}>
             Connect a league to see its free agents.
           </Text>
+          {emptyCtasOn ? (
+            <Button
+              testID="free-agents.pick-league"
+              label="Pick a league"
+              variant="primary"
+              onPress={() => navigation.navigate('LeaguePicker')}
+            />
+          ) : null}
         </View>
       ) : query.isLoading ? (
         <View style={styles.centerFill}>
@@ -151,6 +165,9 @@ export default function FreeAgentsScreen() {
 // suggestion; right cluster = positional FA rank over the caller-board value.
 function FreeAgentRowCard({ row }: { row: FreeAgentRow }) {
   const drop = row.drop_suggestion;
+  // S2 PRD-04 ride-along (visual.chalkline_cleanup): "No drop worth making"
+  // is content, not a placeholder — faint → dim.
+  const cleanupOn = useFlag('visual.chalkline_cleanup');
   return (
     <View style={styles.rowWrap}>
       <PlayerCard
@@ -174,7 +191,10 @@ function FreeAgentRowCard({ row }: { row: FreeAgentRow }) {
               </Text>
             </Text>
           ) : (
-            <Text style={styles.noDropLine} numberOfLines={1}>
+            <Text
+              style={[styles.noDropLine, cleanupOn && { color: chalk.dim }]}
+              numberOfLines={1}
+            >
               No drop worth making
             </Text>
           )

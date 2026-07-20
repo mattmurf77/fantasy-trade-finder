@@ -8,12 +8,16 @@ import {
   Alert,
   Platform,
   ViewToken,
+  TextInput,
+  RefreshControl,
+  LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DraggableFlatList, {
   RenderItemParams,
   DragEndParams,
 } from 'react-native-draggable-flatlist';
+import type { FlatList } from 'react-native-gesture-handler';
 import { haptics } from '../utils/haptics';
 import { startSpan } from '../observability/sentry';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -29,9 +33,12 @@ import {
   radii,
   type,
   fonts,
+  DRAG_ACTIVATION_DISTANCE,
 } from '../theme/chalkline';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { TickLabel, Button, Icon } from '../components/chalkline';
+import { useFlag } from '../state/useFeatureFlags';
+import { setPinnedBottomBarHeight } from '../components/FeedbackFAB';
 import FormatToggle from '../components/FormatToggle';
 import PlayerCard from '../components/PlayerCard';
 import TileStats from '../components/TileStats';
@@ -85,6 +92,11 @@ type Row =
 
 const DRAG_ACTIVATION_MS = 220;
 
+// Offset of the multi-select action bar's bottom edge from the screen
+// bottom (styles.actionBar.bottom) — it sits just above the save bar.
+// Shared with the FAB-offset math so the two never drift.
+const ACTION_BAR_BOTTOM = 76;
+
 export default function TiersScreen() {
   const queryClient = useQueryClient();
   // Sibling Rank-stack routes (QuickSetTiers) — the stack's param types
@@ -98,6 +110,16 @@ export default function TiersScreen() {
   const [position, setPosition] = useState<BoardTab>('QB');
   const isAllView = position === 'ALL';
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
+
+  // Teardown flags. All default false → byte-identical behavior.
+  //   ux.touch_polish (S3 PRD-01/04): lift haptic, drag-end downgrade,
+  //     expand-button 44pt hitSlop, pull-to-refresh, FAB offset/clearance.
+  //   ux.board_search (S7 PRD-04): name search with scroll-to + highlight.
+  //   visual.chalkline_cleanup (S2 PRD-04): faint→dim on content-carrying
+  //     text (Unassigned accent, empty-bin hint).
+  const touchPolish = useFlag('ux.touch_polish');
+  const boardSearch = useFlag('ux.board_search');
+  const cleanup = useFlag('visual.chalkline_cleanup');
 
   // FB4-63 — zone of the topmost VISIBLE player row, driven by the list's
   // onViewableItemsChanged. Null until the first viewability callback fires
@@ -596,6 +618,56 @@ export default function TiersScreen() {
     return item.player.id;
   }, []);
 
+  // ── Board search (S7 PRD-04, flag ux.board_search) ──────────────────
+  // Scroll-to + highlight over the loaded flat list — NOT a filter, for
+  // the same reason as ManualRanks: the drag handler rebuilds buckets by
+  // walking the FULL post-drag row order (headers re-anchor zones), so a
+  // name-filtered view would have no well-defined drop semantics. The
+  // first matching PLAYER row scrolls into view with the dense card's ice
+  // locate ring.
+  const [search, setSearch] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const listRef = useRef<FlatList<Row>>(null);
+  const searchQuery = search.trim().toLowerCase();
+  const highlightIndex = useMemo(() => {
+    if (!boardSearch || searchQuery.length === 0) return -1;
+    return listData.findIndex(
+      (r) => r.kind === 'player' && r.player.name.toLowerCase().includes(searchQuery),
+    );
+  }, [boardSearch, searchQuery, listData]);
+  const highlightRow = highlightIndex >= 0 ? listData[highlightIndex] : null;
+  const highlightPid =
+    highlightRow && highlightRow.kind === 'player' ? highlightRow.player.id : null;
+
+  useEffect(() => {
+    if (highlightIndex < 0) return;
+    listRef.current?.scrollToIndex({
+      index: highlightIndex,
+      animated: true,
+      viewPosition: 0.3,
+    });
+  }, [highlightIndex]);
+
+  // ── FAB offset reporting (S3 PRD-01, flag ux.touch_polish) ──────────
+  // Report the pinned bottom-bar footprint (save bar, plus the multi-
+  // select action bar when visible) to the feedback FAB so it rises above
+  // the primary CTA instead of covering its right edge. Report only while
+  // FOCUSED — this screen stays mounted when the user switches tabs, and
+  // an unfocused board must not offset the FAB elsewhere. The FAB ignores
+  // reports while ux.touch_polish is off (byte-identical rendering).
+  const isFocused = useIsFocused();
+  const [saveBarH, setSaveBarH] = useState(0);
+  const [actionBarH, setActionBarH] = useState(0);
+  const actionBarVisible = multiSelect && selectedIds.size > 0;
+  useEffect(() => {
+    const occupied = Math.max(
+      saveBarH,
+      actionBarVisible ? ACTION_BAR_BOTTOM + actionBarH : 0,
+    );
+    setPinnedBottomBarHeight('tiers', isFocused ? occupied : 0);
+  }, [isFocused, saveBarH, actionBarH, actionBarVisible]);
+  useEffect(() => () => setPinnedBottomBarHeight('tiers', 0), []);
+
   // ── Sticky tier header (FB4-63) ─────────────────────────────────────
   // Track the zone of the topmost VISIBLE row off the list's viewability
   // callback — NOT a separate scroll/pan listener (which would fight the
@@ -642,7 +714,10 @@ export default function TiersScreen() {
   // set (drag-out-then-back-in within one session).
   const onDragBegin = useCallback(() => {
     isDraggingRef.current = true;
-  }, []);
+    // S3 PRD-04 (flag ux.touch_polish) — tactile lift confirmation for the
+    // 220ms long-press pickup (scroll-vs-drag was ambiguous without it).
+    if (touchPolish) haptics.pickup();
+  }, [touchPolish]);
   const onDragEnd = useCallback(
     ({ data, from, to }: DragEndParams<Row>) => {
       isDraggingRef.current = false;
@@ -693,15 +768,19 @@ export default function TiersScreen() {
         for (const t of TIERS) for (const p of next[t]) out.delete(p.id);
         return out;
       });
-      haptics.success();
+      // S3 PRD-04 — drag end is routine: impact-light, not success().
+      // success() is reserved for server-confirmed outcomes (the save
+      // mutation / reset); firing it on every drop diluted its meaning.
+      if (touchPolish) haptics.swipe();
+      else haptics.success();
     },
-    [],
+    [touchPolish],
   );
 
   const renderItem = useCallback(
     ({ item, drag, isActive }: RenderItemParams<Row>) => {
       if (item.kind === 'header') {
-        const accent = accentFor(item.zone);
+        const accent = accentFor(item.zone, cleanup);
         const label = item.zone === 'unassigned' ? 'Unassigned' : TIER_LABEL[item.zone];
         const count = buckets[item.zone].length;
         // #58 (cozy) — header aggregates: count sits next to the label,
@@ -728,7 +807,13 @@ export default function TiersScreen() {
       if (item.kind === 'empty') {
         // Tier zones only — the Unassigned section is hidden while empty
         // (#105), so an empty pool never renders a placeholder row.
-        return <Text style={styles.emptyBin}>Drag players here</Text>;
+        // S2 PRD-04 (visual.chalkline_cleanup): the hint is an instruction,
+        // not a placeholder — faint (3.4:1) promotes to dim.
+        return (
+          <Text style={[styles.emptyBin, cleanup && styles.emptyBinDim]}>
+            Drag players here
+          </Text>
+        );
       }
 
       // ── Player row ──────────────────────────────────────────────────
@@ -808,7 +893,10 @@ export default function TiersScreen() {
               tier={zoneTier}
               // Active (picked-up) ring rides the dense card's own ice
               // border so the 60px row pitch stays exact (no wrapper border).
-              selected={isActive}
+              // ux.board_search reuses the same ring as the locate cue for
+              // the matched row (highlightPid is null while the flag is off
+              // or the query is empty).
+              selected={isActive || item.player.id === highlightPid}
               posRank={posRank}
               value={tileValue}
               statsSlot={<TileStats {...stats} />}
@@ -817,7 +905,7 @@ export default function TiersScreen() {
         </Pressable>
       );
     },
-    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor, allPosRanks],
+    [buckets, multiSelect, selectedIds, toggleSelected, tileStatsFor, allPosRanks, cleanup, highlightPid],
   );
 
   // ── Copy-from-format button derivation ─────────────────────────────
@@ -1038,6 +1126,28 @@ export default function TiersScreen() {
         })}
       </View>
 
+      {/* ux.board_search — QuickSet-pattern name search (Input construction,
+          44pt). Kept visible in BOTH collapsed and expanded states — the
+          expanded full-screen board is where findability matters most.
+          Scroll-to + highlight, never a filter (see highlightIndex). */}
+      {boardSearch ? (
+        <TextInput
+          testID="tiers.search"
+          style={[styles.search, searchFocused && styles.searchFocused]}
+          placeholder={isAllView ? 'Search players…' : `Search ${position}s…`}
+          placeholderTextColor={chalk.faint}
+          value={search}
+          onChangeText={setSearch}
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+          accessibilityLabel="Search players on this board"
+        />
+      ) : null}
+
       {/* Copy tier list from the OTHER scoring format. Mirrors web's
           `copy-tiers-btn` — the from-format reads as a label so the user
           knows EXACTLY which format they're pulling tiers from. Disabled
@@ -1083,7 +1193,9 @@ export default function TiersScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={expanded ? 'Exit full-screen board' : 'Expand board to full screen'}
-          hitSlop={4}
+          // S3 PRD-04 (ux.touch_polish): 32pt button + 6pt slop = 44pt
+          // effective (was 4 → 40pt, under the floor).
+          hitSlop={touchPolish ? 6 : 4}
           onPress={toggleExpanded}
           style={({ pressed }) => [
             styles.expandBtn,
@@ -1111,6 +1223,7 @@ export default function TiersScreen() {
       ) : (
         <View testID="tiers.list" style={styles.boardWrap}>
         <DraggableFlatList
+          ref={listRef}
           data={listData}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
@@ -1127,7 +1240,9 @@ export default function TiersScreen() {
           // Raised to 18px so normal scrolling stays a scroll; the long-
           // press still initiates the drag and edge auto-scroll (library
           // autoscrollThreshold/Speed defaults, untouched) still works.
-          activationDistance={18}
+          // S3 PRD-04: the literal 18 became the shared constant so both
+          // drag boards (and any future one) stay in lockstep.
+          activationDistance={DRAG_ACTIVATION_DISTANCE}
           // #82: keep the lifted tile anchored to the touch point. Without
           // this the library clamps the hover tile inside the list
           // container, so picking up a partially-visible tile at the top/
@@ -1135,8 +1250,46 @@ export default function TiersScreen() {
           // auto-scroll engagement is also gated on actual drag movement
           // toward the edge — see patches/react-native-draggable-flatlist.
           dragItemOverflow
+          // ux.board_search — rows aren't pre-measured; far targets need
+          // the standard offset-then-retry fallback.
+          onScrollToIndexFailed={(info) => {
+            listRef.current?.scrollToOffset({
+              offset: info.averageItemLength * info.index,
+              animated: true,
+            });
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({
+                index: info.index,
+                animated: true,
+                viewPosition: 0.3,
+              });
+            }, 250);
+          }}
+          // S7 PRD-04 ride-along (ux.touch_polish) — pull-to-refresh.
+          // Clobber guard: the auto-bucket effect skips rebuilds while
+          // bucketsDirtyRef is set, so a pull with unsaved drags refreshes
+          // the caches without wiping the user's local layout.
+          refreshControl={
+            touchPolish ? (
+              <RefreshControl
+                refreshing={rankingsQuery.isFetching && !!rankingsQuery.data}
+                onRefresh={() => {
+                  void queryClient.invalidateQueries({
+                    queryKey: ['rankings', activeFormat],
+                  });
+                  void queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
+                }}
+                tintColor={ice.base}
+              />
+            ) : undefined
+          }
           containerStyle={styles.listContainer}
-          contentContainerStyle={styles.scroll}
+          contentContainerStyle={[
+            styles.scroll,
+            // S3 PRD-01 — extra clearance: with the FAB riding above the
+            // save bar, the board's last rows need room to scroll clear.
+            touchPolish && styles.scrollFabClearance,
+          ]}
         />
         {/* FB4-63 / #67 — pinned tier banner, OVERLAYING the top of the
             board so appearing/disappearing never shifts the list. stickyZone
@@ -1147,7 +1300,7 @@ export default function TiersScreen() {
           <View style={styles.stickyOverlay} pointerEvents="none">
             <TierStickyHeader
               label={stickyZone === 'unassigned' ? 'Unassigned' : TIER_LABEL[stickyZone]}
-              accent={accentFor(stickyZone)}
+              accent={accentFor(stickyZone, cleanup)}
               count={buckets[stickyZone].length}
             />
           </View>
@@ -1160,7 +1313,10 @@ export default function TiersScreen() {
           can still commit after a bulk move without leaving select
           mode. "Done" exits select mode without canceling the moves. */}
       {multiSelect && selectedIds.size > 0 ? (
-        <View style={styles.actionBar}>
+        <View
+          style={styles.actionBar}
+          onLayout={(e: LayoutChangeEvent) => setActionBarH(e.nativeEvent.layout.height)}
+        >
           {/* FB4-62 — quick tier-move: tap a tier chip to send every selected
               player straight into that tier (appended, order preserved).
               Selection persists so the ↑/↓ / Tier up/down controls can still
@@ -1207,8 +1363,12 @@ export default function TiersScreen() {
       ) : null}
 
       {/* Save button pinned to the bottom. Composed inline (primary-button
-          tokens) because the Button primitive has no in-flight spinner. */}
-      <View style={styles.saveBar}>
+          tokens) because the Button primitive has no in-flight spinner.
+          onLayout feeds the S3 PRD-01 FAB-offset registry. */}
+      <View
+        style={styles.saveBar}
+        onLayout={(e: LayoutChangeEvent) => setSaveBarH(e.nativeEvent.layout.height)}
+      >
         <Pressable
           testID="tiers.save-btn"
           disabled={saving || loading}
@@ -1298,8 +1458,14 @@ function moveTierByOne(
 }
 
 // Accent (tick) color for a zone's header — mirrors TierBin's tickColor.
-function accentFor(zone: Zone): string {
-  return zone === 'unassigned' ? chalk.faint : tierColors[zone];
+// S2 PRD-04 (visual.chalkline_cleanup): the Unassigned accent colors the
+// header's LABEL text (content, not decoration) — faint (3.4:1) promotes
+// to dim when the cleanup flag is on. Tier zones keep their data hexes.
+// The optional param keeps the signature compatible with TierTargetChips'
+// `accentFor` prop (which only ever passes real tiers).
+function accentFor(zone: Zone, cleanupDim?: boolean): string {
+  if (zone === 'unassigned') return cleanupDim ? chalk.dim : chalk.faint;
+  return tierColors[zone];
 }
 
 // ── Styles ──────────────────────────────────────────────────────────
@@ -1370,7 +1536,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 76,                       // sits just above the save bar
+    bottom: ACTION_BAR_BOTTOM,        // sits just above the save bar
     paddingVertical: space.sm,
     paddingHorizontal: space.md,
     backgroundColor: ink.ink1,
@@ -1421,6 +1587,22 @@ const styles = StyleSheet.create({
   switcherBtnActive: { backgroundColor: ink.ink3 },
   switcherText: { ...type.label },
   switcherTextActive: { color: chalk.base },
+  // ux.board_search — Input construction per the design system (QuickSet's
+  // search pattern): line-strong border, ink-2 fill, radius sm, faint
+  // placeholder, ice focus border. 44pt tall (touch floor).
+  search: {
+    ...type.body,
+    height: 44,
+    marginHorizontal: space.lg,
+    marginTop: space.sm,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: 0,
+  },
+  searchFocused: { borderColor: ice.base },
   // Copy-tiers-from-other-format action. Secondary-button construction
   // (hairline line-strong border, chalk text) with the swap icon.
   copyBtn: {
@@ -1489,12 +1671,17 @@ const styles = StyleSheet.create({
     padding: space.lg,
     paddingBottom: 96, // room for the Save bar
   },
+  // S3 PRD-01 (ux.touch_polish) — the FAB rides above the save bar now;
+  // give the last rows room to scroll clear of it (52pt FAB + margin).
+  scrollFabClearance: { paddingBottom: 96 + 72 },
   emptyBin: {
     ...type.bodySm,
     color: chalk.faint,
     textAlign: 'center',
     paddingVertical: space.sm,
   },
+  // S2 PRD-04 (visual.chalkline_cleanup) — instruction text ≥ dim.
+  emptyBinDim: { color: chalk.dim },
   saveBar: {
     position: 'absolute',
     left: 0,

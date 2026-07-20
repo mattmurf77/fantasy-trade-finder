@@ -10,9 +10,10 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ink, chalk, ice, flare, semantic, space, type, fonts } from '../theme/chalkline';
+import { ink, chalk, ice, flare, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
 import { useFeedback, formatFeedbackAsMarkdown, type FeedbackItem } from '../state/useFeedback';
+import { useFlag } from '../state/useFeatureFlags';
 import type { FeedbackStatus } from '../api/feedback';
 import { relativeTime } from '../utils/relativeTime';
 
@@ -54,6 +55,11 @@ export default function FeedbackInboxScreen() {
   const clear     = useFeedback((s) => s.clear);
   const retrySync = useFeedback((s) => s.retrySync);
   const refreshStatuses = useFeedback((s) => s.refreshStatuses);
+
+  // Teardown 03-04 (flag `ux.touch_polish`): per-row delete used to be
+  // long-press only — an invisible gesture. The flag adds a visible ✕
+  // affordance per row; long-press stays as an accelerator.
+  const touchPolish = useFlag('ux.touch_polish');
 
   const [retrying, setRetrying] = useState(false);
   const unsyncedCount = items.filter((i) => !i.synced).length;
@@ -184,6 +190,21 @@ export default function FeedbackInboxScreen() {
                   <Text style={styles.rowSev}>{SEV_LABEL[it.severity]}</Text>
                   <View style={{ flex: 1 }} />
                   <Text style={styles.rowWhen}>{relativeTime(it.created_at)}</Text>
+                  {touchPolish ? (
+                    <Pressable
+                      testID={`feedback-inbox.delete.${it.id}`}
+                      accessibilityRole="button"
+                      accessibilityLabel="Delete note"
+                      hitSlop={8}
+                      onPress={() => onDelete(it)}
+                      style={({ pressed }) => [
+                        styles.deleteBtn,
+                        pressed && styles.deleteBtnPressed,
+                      ]}
+                    >
+                      <Icon name="x" size={16} color={chalk.dim} />
+                    </Pressable>
+                  ) : null}
                 </View>
                 <Text style={styles.rowScreen}>{it.screen}</Text>
                 <Text style={styles.rowText}>{it.text}</Text>
@@ -257,6 +278,16 @@ const styles = StyleSheet.create({
     marginBottom: space.xs,
   },
   rowSev:    { ...type.label, color: chalk.base },
+  // Visible per-row delete (flag `ux.touch_polish`) — Icon Button spec
+  // (components.md): 32×32, radius sm, chalk-dim glyph, pressed = ink-3.
+  deleteBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteBtnPressed: { backgroundColor: ink.ink3 },
   rowWhen:   { ...type.data, color: chalk.faint },
   rowScreen: { ...type.label, marginBottom: space.xs },
   rowText:   { ...type.body },

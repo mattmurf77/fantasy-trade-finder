@@ -3,6 +3,8 @@ import { View, Text, Pressable, Share, StyleSheet } from 'react-native';
 
 import { ink, chalk, ice, space, radii, type, fonts } from '../theme/chalkline';
 import { getBaseUrl } from '../api/client';
+import { track } from '../api/events';
+import { useFlag } from '../state/useFeatureFlags';
 
 // Cold-start banner shown at the top of TradesScreen when NO league-mate
 // has submitted rankings yet. In that state every card is a consensus-basis
@@ -29,13 +31,21 @@ export function buildInviteUrl(leagueId: string, username?: string | null): stri
 }
 
 export default function InviteLeaguematesBanner({ leagueId, leagueName, username, total }: Props) {
+  // S7 PRD-01 (growth.share_landing): the invite URL already IS the landing
+  // page with ?ref= attribution preserved (verified against
+  // utils/deepLinks + web captureReferralFromUrl) — no URL change needed;
+  // the flag adds the share→open funnel event only.
+  const shareLandingOn = useFlag('growth.share_landing');
   async function handleInvite() {
     const url = buildInviteUrl(leagueId, username);
     const where = leagueName || 'our league';
     try {
-      await Share.share({
+      const res = await Share.share({
         message: `Join me on Dynasty Trade Finder to find trades in ${where} → ${url}`,
       });
+      if (shareLandingOn && res.action !== Share.dismissedAction) {
+        track('invite_shared', { league_id: leagueId }, 'Trades');
+      }
     } catch {
       /* user dismissed the sheet — nothing to do */
     }

@@ -5,6 +5,7 @@ import { TickLabel, Button, Meter, fairnessColor, Icon, Badge } from './chalklin
 import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
 import SendInSleeperButton from './SendInSleeperButton';
+import { LockGlyph } from './PlayerContextMenu';
 import { useFlag } from '../state/useFeatureFlags';
 import type { Player, TradeCard as TradeCardData } from '../shared/types';
 
@@ -32,6 +33,12 @@ interface Props {
   // edited card's /api/trade/evaluate round-trip re-prices the package.
   onSwapPlayer?: (player: Player, side: 'give' | 'receive') => void;
   repricing?: boolean;
+  // Player context menu (teardown S3 PRD-02, flag ux.player_context_menu).
+  // When set (screens pass it only while the flag is on), long-pressing ANY
+  // player row opens the shared context menu instead of the legacy
+  // single-purpose gestures, and give-side rows gain a visible lock toggle
+  // (the untouchable "visible twin") beside the swap affordance.
+  onPlayerMenu?: (player: Player, side: 'give' | 'receive') => void;
   // FB-47 finder targeting: positions the user is trying to ACQUIRE
   // (pinned targets + saved acquire prefs). Used only to sharpen the
   // partner-fit line's copy ("They're deep at WR"); the line itself
@@ -74,6 +81,7 @@ function TradeCardComp({
   onToggleUntouchable,
   onSwapPlayer,
   repricing = false,
+  onPlayerMenu,
   fitTargetPositions,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
@@ -148,6 +156,44 @@ function TradeCardComp({
         <Icon name="swap" size={14} color={chalk.dim} />
       </Pressable>
     ) : null;
+
+  // Untouchable visible twin (S3 PRD-02, menu flag on): a lock toggle in
+  // the give-side rightSlot so the long-press accelerator is never the
+  // sole path. Marked = ice-bordered closed lock; unmarked = dim open lock.
+  const lockSlot = (p: Player) =>
+    onPlayerMenu && onToggleUntouchable ? (
+      (() => {
+        const marked = untouchableIds?.has(p.id) ?? false;
+        return (
+          <Pressable
+            hitSlop={8}
+            onPress={() => onToggleUntouchable(p)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: marked }}
+            accessibilityLabel={
+              marked
+                ? `Remove untouchable from ${p.name}`
+                : `Mark ${p.name} untouchable`
+            }
+            style={({ pressed }) => [
+              styles.swapBtn,
+              marked && styles.lockBtnMarked,
+              pressed && styles.swapBtnPressed,
+            ]}
+          >
+            <LockGlyph size={14} color={marked ? ice.base : chalk.dim} locked={marked} />
+          </Pressable>
+        );
+      })()
+    ) : null;
+
+  // Command long-press: the shared context menu (flag on via onPlayerMenu)
+  // supersedes the legacy give-side-only untouchable toggle.
+  const longPressFor = (p: Player, side: 'give' | 'receive') => {
+    if (onPlayerMenu) return () => onPlayerMenu(p, side);
+    if (side === 'give' && onToggleUntouchable) return () => onToggleUntouchable(p);
+    return undefined;
+  };
 
   return (
     <View style={styles.card}>
@@ -233,16 +279,18 @@ function TradeCardComp({
                 key={p.id}
                 player={p}
                 compact
-                onLongPress={
-                  onToggleUntouchable ? () => onToggleUntouchable(p) : undefined
-                }
+                onLongPress={longPressFor(p, 'give')}
                 rightSlot={
-                  p.on_block || untouchableIds?.has(p.id) || onSwapPlayer ? (
+                  p.on_block ||
+                  untouchableIds?.has(p.id) ||
+                  onSwapPlayer ||
+                  (onPlayerMenu && onToggleUntouchable) ? (
                     <View style={styles.rightSlotRow}>
                       {blockBadge(p)}
                       {untouchableIds?.has(p.id) ? (
                         <Badge label="UNTOUCHABLE" color={flare.base} />
                       ) : null}
+                      {lockSlot(p)}
                       {swapSlot(p, 'give')}
                     </View>
                   ) : undefined
@@ -265,6 +313,7 @@ function TradeCardComp({
                 key={p.id}
                 player={p}
                 compact
+                onLongPress={longPressFor(p, 'receive')}
                 rightSlot={
                   p.on_block || onSwapPlayer ? (
                     <View style={styles.rightSlotRow}>
@@ -481,6 +530,11 @@ const styles = StyleSheet.create({
   },
   swapBtnPressed: {
     backgroundColor: ink.ink3,
+  },
+  // Untouchable lock twin — marked state borrows the active treatment
+  // (ice border) from the queue button's queued state.
+  lockBtnMarked: {
+    borderColor: ice.base,
   },
   repricingRow: {
     flexDirection: 'row',

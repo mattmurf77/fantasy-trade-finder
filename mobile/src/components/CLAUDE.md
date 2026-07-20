@@ -28,7 +28,9 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `IdentityConfirmStrip` | Onboarding item 4 (F5): first-run "Trading as @user — not you?" strip (avatar + ice action → sign-out confirm; X = session dismiss) |
 | `QuickSetPromptCard` | Onboarding item 7 (flag `onboarding.quickset_prompt`): inline deck-slot prompt card ("These trades use consensus values.") — accept deep-links to onboarding-mode QuickSetTiers, dismiss = snooze (caller owns bookkeeping); explicit buttons, not swipeable (documented deviation) |
 | `AppleSaveMomentSheet` | Onboarding item 8 (flag `onboarding.apple_save_moment`, ADR-006): save-moment Apple ask modal — honest cross-device framing only, official Apple button, "Not now" decline; bind flow mirrors Settings' handleLinkApple (conflict/linked/no-session outcomes) |
-| `Toast` | Transient notification |
+| `Toast` | Transient notification. Teardown S4 PRD-03: unflagged VoiceOver announce on show + Reduce Motion fade fallback; flag `ux.toast_v2` = warn/error hold ≥5s (holdMs 0 = sticky); optional `action` slot (label+callback, e.g. Undo — callers pass it only under `ux.swipe_undo`) |
+| `PlayerContextMenu` | Teardown S3 PRD-02 (flag `ux.player_context_menu`): shared player long-press bottom sheet — header = player info, rows = per-surface commands (untouchable / swap) passed by the caller; also exports `LockGlyph` (untouchable visible-twin icon, local Svg pending Icon.tsx fold-in) |
+| `HelpSheet` | Teardown S4 PRD-01 (flag `ux.help_surface`): lightweight help bottom sheet (2–3 sentences + "Read more" web link); exports `InfoButton` (ⓘ, 44pt effective target) |
 | `TopBar` | Screen header |
 
 ## testID registry (UI-test harness — docs/plans/mobile-testing/lld.md Appendix A)
@@ -93,6 +95,21 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 - SignIn (item 5, `onboarding.landing`): `signin.apple-link` (quiet Apple re-entry text link) · `signin.error-demo-escape` (Sleeper-down "browse the sample league" escape)
 - Trades (items 7/8/9/10): `trades.quickset-prompt` (+ `.accept` / `.dismiss`) · `trades.diff-banner` (post-Quick-Set regen receipt) · `trades.apple-sheet.<like|quickset_save|session2_banner>` (+ `trades.apple-sheet.signin` / `.decline`) · `trades.apple-session2-banner` (+ `.dismiss`) · `trades.share-liked` · `trades.trio-entry` (deck-exhausted CTA) · `trades.demo-bridge` · `trades.redraft-label`
 - Rank stack (item 9, `onboarding.rank_routing`): `rank.more-ways` (QuickSetTiers header link → demoted RankHome chooser)
+
+**Teardown Trades/engagement tranche (2026-07-19, W2B):**
+- Trades: `trades.fairness-help` (flag `ux.help_surface`, ⓘ by the fairness toggle → HelpSheet) · `trades.outlook-set-banner` (flag `ux.outlook_inline_default`, no-inference set-outlook banner)
+- Matches: `matches.go-to-trades` (flag `ux.empty_state_ctas`, both empty states) · `matches.matching-help` (flag `ux.help_surface`)
+- Portfolio: `portfolio.open-settings` · FreeAgents: `free-agents.pick-league` (both flag `ux.empty_state_ctas`)
+- Rank/Trios: `rank.unlock-payoff` (flag `ux.outlook_inline_default` pre-threshold caption) · `trios.info.<a|b|c>` (flag `ux.player_context_menu` ⓘ twins)
+- Shared: `player-menu` (+ `player-menu.<action-key>`, keys `untouchable-add|untouchable-remove|swap`) · `help-sheet`
+
+**Teardown growth/boards tranche (2026-07-19, W2D):**
+- Board search (flag `ux.board_search`): `manual-ranks.search` · `tiers.search` (scroll-to + highlight inputs — the highlighted row reuses the active-drag ring, no ID of its own)
+- League tab: `league.rookie-board-row` (flag `league.rookie_board_entry` → opens RookieDraftBoardSheet) · `league.whats-new` (flag `ux.whats_new`, CoachMark — tap dismisses)
+
+**Teardown navigation tranche (2026-07-19, W2A):**
+- TopBar bell sheet: `topbar.notif-row.<notification_id>` (tappable inbox row — only rendered with flag `notif.tap_routing_v2`; flag off the rows are inert Views with no ID)
+- `rank.more-ways` note: with flag `ux.rank_tab_destination` on, the same ID appears in the header of EVERY rank surface (Trios/Anchors/Tiers/QuickSetTiers/QuickRank/ManualRanks/Trends) and opens the RankMenu sheet; flag off it remains QuickSetTiers-only → RankHome (unchanged)
 
 Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). Full planned list: lld.md Appendix A (~90 IDs).
 

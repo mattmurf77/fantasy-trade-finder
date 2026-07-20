@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet, Linking } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { useNavigation } from '@react-navigation/native';
 import { ink, chalk, ice, space, type } from '../theme/chalkline';
@@ -112,6 +112,21 @@ export default function SleeperConnectScreen() {
           we securely connect and verify your account so you can send trades
           from FTF.
         </Text>
+        {/* Teardown 09-02 — token disclosure AT the consent moment (the
+            policy already discloses this; the decision point didn't). */}
+        <Text style={type.bodySm}>
+          We store the sign-in token Sleeper issues — encrypted, used only to
+          send trades you approve. Disconnect anytime in Settings.{' '}
+          <Text
+            style={styles.learnMore}
+            accessibilityRole="link"
+            onPress={() =>
+              Linking.openURL('https://fantasy-trade-finder.onrender.com/privacy')
+            }
+          >
+            Learn more
+          </Text>
+        </Text>
         {phase === 'error' && (
           <Text style={[type.bodySm, styles.error]}>
             Couldn’t connect — try again, and make sure you log in to the same
@@ -165,6 +180,8 @@ const styles = StyleSheet.create({
     gap: space.xs,
   },
   error: { color: chalk.dim },
+  // Tappable disclosure link — ice = action color (Chalkline).
+  learnMore: { color: ice.base },
   web: { flex: 1, backgroundColor: ink.ink0 },
   overlay: {
     ...StyleSheet.absoluteFillObject,

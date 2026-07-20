@@ -6,6 +6,8 @@ import Constants from 'expo-constants';
 import { registerDeviceForPush } from '../api/notifications';
 import { useNotifications } from '../state/useNotifications';
 import { usePushPriming } from '../state/usePushPriming';
+import { useFeatureFlags } from '../state/useFeatureFlags';
+import { resolveNotificationTarget } from '../utils/deepLinks';
 
 // Display pushes while app is foregrounded. Setting this once per module
 // rather than per-hook-invocation avoids any ordering surprises.
@@ -50,6 +52,34 @@ export function usePushNotifications(
   // Cache whether we've already done the registration round-trip in this
   // session. Prevents firing the prompt twice if `enabled` toggles.
   const registeredRef = useRef(false);
+  // S5 PRD-02 (flag `notif.tap_routing_v2`): the last tap that launched or
+  // resumed the app. Cold-start taps never reach the response listener (it
+  // registers too late), so this hook is the only reliable source for them.
+  // Called unconditionally (rules of hooks); consumed only when the flag is
+  // on. Dedupe set shared with the live listener — a warm tap can surface
+  // through BOTH paths and must route once.
+  const lastResponse = Notifications.useLastNotificationResponse();
+  const handledTapIdsRef = useRef<Set<string>>(new Set());
+
+  // ── Cold-start tap replay (flag `notif.tap_routing_v2`) ──
+  useEffect(() => {
+    if (!userId || !lastResponse || !onTapMatchNotification) return;
+    if (!useFeatureFlags.getState().flags['notif.tap_routing_v2']) return;
+    try {
+      const respId = lastResponse?.notification?.request?.identifier ?? null;
+      if (respId) {
+        if (handledTapIdsRef.current.has(respId)) return;
+        handledTapIdsRef.current.add(respId);
+      }
+      const data = lastResponse?.notification?.request?.content?.data as any;
+      const target = resolveNotificationTarget(data);
+      // The tap router buffers until navigationRef.isReady() and replays,
+      // so a cold-start tap survives the boot gap instead of being dropped.
+      if (target) onTapMatchNotification(target.tab, target.matchId);
+    } catch {
+      // best-effort — never let tap routing crash the root
+    }
+  }, [userId, lastResponse, onTapMatchNotification]);
 
   // ── Permission ask + token registration (deferred until `enabled`) ──
   useEffect(() => {
@@ -137,6 +167,19 @@ export function usePushNotifications(
       try {
         const data = resp?.notification?.request?.content?.data as any;
         if (!data?.type || !onTapMatchNotification) return;
+        // V2 (flag `notif.tap_routing_v2`, read at event time): shared kind
+        // map from utils/deepLinks (adds `bundle_summary`), match_id passed
+        // through, and dedupe against the cold-start replay above.
+        if (useFeatureFlags.getState().flags['notif.tap_routing_v2']) {
+          const respId = resp?.notification?.request?.identifier ?? null;
+          if (respId) {
+            if (handledTapIdsRef.current.has(respId)) return;
+            handledTapIdsRef.current.add(respId);
+          }
+          const target = resolveNotificationTarget(data);
+          if (target) onTapMatchNotification(target.tab, target.matchId);
+          return;
+        }
         // Route by `data.type` (set by backend = the push `kind`). Legacy
         // 'trade_match' value still routes to Matches for older payloads
         // already sitting in iOS Notification Center.

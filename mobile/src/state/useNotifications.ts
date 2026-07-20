@@ -23,6 +23,12 @@ interface NotificationsState {
   items: AppNotification[];
   unreadCount: number;
   add: (n: Omit<AppNotification, 'receivedAt' | 'read'>) => void;
+  /** S5 PRD-02 (flag `notif.tap_routing_v2`): merge the server inbox
+   *  (GET /api/notifications) into the feed. Server rows win on id clash;
+   *  in-session pushes not yet persisted server-side are kept. Called with
+   *  the bell sheet open (which marks everything read), so unreadCount
+   *  settles to 0. */
+  hydrateFromServer: (serverItems: AppNotification[]) => void;
   markAllRead: () => void;
   clear: () => void;
 }
@@ -46,6 +52,17 @@ export const useNotifications = create<NotificationsState>((set, get) => ({
       // the bell sheet.
       unreadCount: Math.min(s.unreadCount + 1, 50),
     }));
+  },
+
+  hydrateFromServer: (serverItems) => {
+    set((s) => {
+      const serverIds = new Set(serverItems.map((it) => it.id));
+      const localOnly = s.items.filter((it) => !serverIds.has(it.id));
+      const merged = [...serverItems, ...localOnly]
+        .sort((a, b) => b.receivedAt - a.receivedAt)
+        .slice(0, 50);
+      return { items: merged, unreadCount: 0 };
+    });
   },
 
   markAllRead: () => {

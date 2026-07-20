@@ -10,9 +10,10 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { haptics } from '../utils/haptics';
@@ -28,12 +29,14 @@ import {
   type,
   fonts,
 } from '../theme/chalkline';
-import { TickLabel, Button, Icon } from '../components/chalkline';
+import { TickLabel, Button, Icon, Text as ChalkText } from '../components/chalkline';
 import Toast from '../components/Toast';
 import FormatToggle from '../components/FormatToggle';
+import { setPinnedBottomBarHeight } from '../components/FeedbackFAB';
 import { getRankings, saveTiers } from '../api/rankings';
 import { TIERS, TIER_LABEL, tierForElo } from '../utils/tierBands';
 import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
 import { useScoringFormat } from '../hooks/useScoringFormat';
 import { getOnboardingState, patchOnboardingState } from '../state/useOnboardingState';
 import { setPendingQuicksetRegen } from '../state/onboardingBus';
@@ -76,6 +79,21 @@ export default function QuickSetTiersScreen() {
   // setFormat flips the server session + local mirrors and marks the
   // choice explicit so the league-default applier won't override it.
   const { setFormat, switching: formatSwitching } = useScoringFormat();
+
+  // S2 PRD-04 ride-along (flag visual.chalkline_cleanup): 9px chip metas
+  // rise to the 11px type floor; faint content text promotes to dim.
+  const cleanup = useFlag('visual.chalkline_cleanup');
+
+  // S3 PRD-01 — report the pinned walk footer to the feedback FAB so it
+  // rides above Back/Skip/Save instead of covering them. Focused-only
+  // (stack screens stay mounted behind pushes); FAB ignores reports while
+  // ux.touch_polish is off.
+  const isFocused = useIsFocused();
+  const [footerH, setFooterH] = useState(0);
+  React.useEffect(() => {
+    setPinnedBottomBarHeight('quickset', isFocused ? footerH : 0);
+  }, [isFocused, footerH]);
+  React.useEffect(() => () => setPinnedBottomBarHeight('quickset', 0), []);
 
   const [position, setPosition] = useState<Position>(
     route.params?.position ?? 'QB',
@@ -307,24 +325,45 @@ export default function QuickSetTiersScreen() {
             </Text>
             {isSelected ? <Icon name="check" size={12} color={ice.base} /> : null}
           </View>
+          {/* S2 PRD-04 ride-along — meta row through the chalkline Text
+              primitive (dense Dynamic-Type tier); the 9px sizes rise to
+              the 11px floor under visual.chalkline_cleanup. */}
           <View style={styles.chipMeta}>
             {SHOW_POSITION ? (
-              <Text style={[styles.chipPos, { color: positionColors[posKey] ?? chalk.dim }]}>
+              <ChalkText
+                scale="dense"
+                style={[
+                  styles.chipPos,
+                  cleanup && styles.chipMetaFloor,
+                  { color: positionColors[posKey] ?? chalk.dim },
+                ]}
+              >
                 {item.position}
-              </Text>
+              </ChalkText>
             ) : null}
-            <Text style={styles.chipTeam}>{item.team ?? 'FA'}</Text>
+            <ChalkText scale="dense" style={[styles.chipTeam, cleanup && styles.chipMetaFloor]}>
+              {item.team ?? 'FA'}
+            </ChalkText>
             {item.age != null ? (
-              <Text style={styles.chipAge}>{item.age}</Text>
+              <ChalkText scale="dense" style={[styles.chipAge, cleanup && styles.chipMetaFloor]}>
+                {item.age}
+              </ChalkText>
             ) : null}
-            <Text style={[styles.chipTier, { color: tierColors[currentTier] }]}>
+            <ChalkText
+              scale="dense"
+              style={[
+                styles.chipTier,
+                cleanup && styles.chipMetaFloor,
+                { color: tierColors[currentTier] },
+              ]}
+            >
               {TIER_LABEL[currentTier]}
-            </Text>
+            </ChalkText>
           </View>
         </Pressable>
       );
     },
-    [selected, toggle, position, fmt],
+    [selected, toggle, position, fmt, cleanup],
   );
 
   const saving = saveMutation.isPending;
@@ -446,7 +485,9 @@ export default function QuickSetTiersScreen() {
           contentContainerStyle={styles.grid}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
-            <Text style={styles.emptyText}>
+            /* S2 PRD-04 — explanatory content, not a placeholder: faint
+               promotes to dim under visual.chalkline_cleanup. */
+            <Text style={[styles.emptyText, cleanup && styles.emptyTextDim]}>
               {query.length > 0 && gridPlayers.length > 0
                 ? `No ${position} here matches “${search.trim()}”.`
                 : `Every ${position} is already placed in an earlier tier.`}
@@ -455,8 +496,12 @@ export default function QuickSetTiersScreen() {
         />
       )}
 
-      {/* Walk controls pinned to the bottom: Back / Skip / Save-and-next. */}
-      <View style={styles.footer}>
+      {/* Walk controls pinned to the bottom: Back / Skip / Save-and-next.
+          onLayout feeds the S3 PRD-01 FAB-offset registry. */}
+      <View
+        style={styles.footer}
+        onLayout={(e: LayoutChangeEvent) => setFooterH(e.nativeEvent.layout.height)}
+      >
         <Button
           variant="ghost"
           compact
@@ -624,12 +669,17 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
+  // S2 PRD-04 (visual.chalkline_cleanup) — 11px type floor for the chip
+  // meta row (was 9px, below the global floor; components.md updated).
+  chipMetaFloor: { fontSize: 11 },
   emptyText: {
     ...type.bodySm,
     color: chalk.faint,
     textAlign: 'center',
     paddingVertical: space.xl,
   },
+  // S2 PRD-04 (visual.chalkline_cleanup) — content text ≥ dim.
+  emptyTextDim: { color: chalk.dim },
   centered: {
     flex: 1,
     alignItems: 'center',

@@ -83,6 +83,11 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
   const ranked = rank != null;
   // Teardown S2 PRD-04: dense micro-tags rise from 9px to the 11px floor.
   const cleanup = useFlag('visual.chalkline_cleanup');
+  // Teardown S3 PRD-02 (`ux.player_context_menu`): command long-press
+  // standardizes on the system 500ms (drops the 400ms override). This card
+  // never hosts drag-lift — reorder surfaces (Tiers/ManualRanks) own their
+  // own delayLongPress on DraggableFlatList rows.
+  const commandLongPressMs = useFlag('ux.player_context_menu') ? 500 : 400;
   const ageStr = player.age != null ? `${player.age} yo` : null;
   const teamStr = player.team || 'FA';
   const expStr =
@@ -123,7 +128,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
         onPress={onPress}
         onLongPress={onLongPress}
         disabled={disabled}
-        delayLongPress={400}
+        delayLongPress={commandLongPressMs}
         style={({ pressed }) => [
           styles.card,
           styles.cardDense,
@@ -196,7 +201,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
       onPress={onPress}
       onLongPress={onLongPress}
       disabled={disabled}
-      delayLongPress={400}
+      delayLongPress={commandLongPressMs}
       style={({ pressed }) => [
         styles.card,
         compact && styles.cardCompact,

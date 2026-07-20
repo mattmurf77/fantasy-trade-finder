@@ -5,6 +5,8 @@ import { ink, chalk, space, radii, type, fonts, scrim } from '../theme/chalkline
 import { TickLabel } from './chalkline';
 import { appleSignIn } from '../api/auth';
 import { useSession } from '../state/useSession';
+import { useInterruptCoordinator } from '../state/useInterruptCoordinator';
+import { useFlag } from '../state/useFeatureFlags';
 
 interface Props {
   visible: boolean;
@@ -30,6 +32,13 @@ export default function AppleSaveMomentSheet({ visible, trigger, onClose }: Prop
   const [note, setNote] = useState<string | null>(null);
   const setVerification = useSession((s) => s.setVerification);
   const verification = useSession((s) => s.verification);
+  // S4 PRD-04 (`ux.prompt_arbiter`): root modals self-defer while any
+  // instructional surface holds the arbiter slot — the caller's `visible`
+  // stays true, so the sheet presents the moment the slot frees instead of
+  // stacking over an open banner/prompt. Flag off: passthrough.
+  const arbiterOn = useFlag('ux.prompt_arbiter');
+  const surfaceBusy = useInterruptCoordinator((s) => s.activeSurface !== null);
+  const effectiveVisible = visible && !(arbiterOn && surfaceBusy);
 
   async function handleApple() {
     if (busy) return;
@@ -76,7 +85,7 @@ export default function AppleSaveMomentSheet({ visible, trigger, onClose }: Prop
   }
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => onClose(false)}>
+    <Modal visible={effectiveVisible} transparent animationType="fade" onRequestClose={() => onClose(false)}>
       <View style={styles.scrim}>
         <View testID={`trades.apple-sheet.${trigger}`} style={styles.sheet}>
           <TickLabel>Your front office</TickLabel>
