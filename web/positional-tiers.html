@@ -1373,7 +1373,7 @@
               <span class="tier-legend-desc">Worth 2 firsts</span>
             </span>
             <span class="tier-legend-item">
-              <span class="tier-legend-swatch" data-tier="first_1">1st</span>
+              <span class="tier-legend-swatch" data-tier="first_1">1 1st</span>
               <span class="tier-legend-desc">Worth a 1st</span>
             </span>
             <span class="tier-legend-item">
@@ -1446,7 +1446,7 @@
 
       <div class="tier-row" data-tier="first_1">
         <div class="tier-label-area">
-          <div class="tier-label-name">1st</div>
+          <div class="tier-label-name">1 1st</div>
           <div class="tier-label-desc">Worth a 1st</div>
           <div class="tier-label-count" id="count-first_1">0</div>
           <button class="tier-multiselect-btn" id="ms-toggle-first_1"
@@ -2131,7 +2131,7 @@
           <div class="tier-assign-row">
             ${TIERS.map(t => {
               // Short labels so all fit uniformly in the narrow card
-              const shortLabels = { firsts_4plus: '4+1st', firsts_3: '3 1st', firsts_2: '2 1st', first_1: '1st', second: '2nd', third: '3rd', fourth: '4th', waivers: 'FA' };
+              const shortLabels = { firsts_4plus: '4+1st', firsts_3: '3 1st', firsts_2: '2 1st', first_1: '1 1st', second: '2nd', third: '3rd', fourth: '4th', waivers: 'FA' };
               const label = shortLabels[t] || (t.charAt(0).toUpperCase() + t.slice(1, 5));
               return `<button class="tier-assign-btn" data-tier="${t}" ${stopDrag}
                 onclick="event.stopPropagation(); assignToTier('${player.id}', '${t}')"
@@ -2959,7 +2959,7 @@
                         'second', 'third', 'fourth', 'waivers'];
     const TIER_LABELS_SHORT = {
       firsts_4plus: '4+ 1sts', firsts_3: '3 1sts', firsts_2: '2 1sts',
-      first_1: '1st', second: '2nd',
+      first_1: '1 1st', second: '2nd',
       third: '3rd', fourth: '4th', waivers: 'FA',
     };
 

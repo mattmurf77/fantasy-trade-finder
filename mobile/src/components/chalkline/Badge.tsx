@@ -31,7 +31,7 @@ const TIER_BADGE_LABEL: Record<keyof typeof tier, string> = {
   firsts_4plus: '4+ 1sts',
   firsts_3: '3 1sts',
   firsts_2: '2 1sts',
-  first_1: '1st',
+  first_1: '1 1st',
   second: '2nd',
   third: '3rd',
   fourth: '4th',

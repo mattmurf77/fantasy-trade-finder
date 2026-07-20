@@ -831,7 +831,7 @@ export default function TiersScreen() {
         return (
           <View style={styles.tierHeader}>
             <View style={styles.tierHeaderLeft}>
-              {/* Tier labels ARE pick terms now ("4+ 1sts" / "1st" / …) —
+              {/* Tier labels ARE pick terms now ("4+ 1sts" / "1 1st" / …) —
                   the former #103 sublabel is folded into the name. */}
               <TickLabel color={accent}>{label}</TickLabel>
               <Text style={styles.tierHeaderCount}>{count}</Text>

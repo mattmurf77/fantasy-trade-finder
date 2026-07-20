@@ -15,7 +15,7 @@ Color rule unchanged (re-canonicalized 2026-07-10 to de-collide from position co
 | `firsts_4plus` | 4+ 1sts | red | `#f87171` | `248,113,113` | [1927, 1972] |
 | `firsts_3` | 3 1sts | fuchsia | `#e879f9` | `232,121,249` | [1869, 1922] |
 | `firsts_2` | 2 1sts | gold | `#fbbf24` | `251,191,36` | [1788, 1864] |
-| `first_1` | 1st | teal | `#2dd4bf` | `45,212,191` | [1580, 1785] |
+| `first_1` | 1 1st | teal | `#2dd4bf` | `45,212,191` | [1580, 1785] |
 | `second` | 2nd | sky | `#38bdf8` | `56,189,248` | [1400, 1575] |
 | `third` | 3rd | pink | `#f472b6` | `244,114,182` | [1280, 1395] |
 | `fourth` | 4th | lime | `#a3e635` | `163,230,53` | [1220, 1275] |
