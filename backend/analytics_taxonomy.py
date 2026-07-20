@@ -60,6 +60,9 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     "trade_card_shared",
     "coach_mark_shown", "coach_mark_dismissed",
     "celebration_shown", "deck_exhausted_viewed",
+    # Guided avatar tour (docs/plans/onboarding-conversion/guided-avatar-script.md §6)
+    "guide_step_shown", "guide_step_advanced", "guide_step_skipped",
+    "guide_tour_dismissed", "guide_tour_completed",
 })
 
 # ---------------------------------------------------------------------------
@@ -150,6 +153,13 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "coach_mark_dismissed":  frozenset({"mark_key", "mark"}),
     "celebration_shown":     frozenset({"beat_key", "beat"}),
     "deck_exhausted_viewed": frozenset({"lane", "cards_seen", "deck_size"}),
+    # Guided avatar tour — `step` is the script id (s0.1 … s8.1), `via` is the
+    # advance mechanism (tap | cta | action | auto | timeout).
+    "guide_step_shown":      frozenset({"step", "pose", "screen"}),
+    "guide_step_advanced":   frozenset({"step", "via"}),
+    "guide_step_skipped":    frozenset({"step"}),
+    "guide_tour_dismissed":  frozenset({"at_step"}),
+    "guide_tour_completed":  frozenset({"steps_seen"}),
 }
 
 

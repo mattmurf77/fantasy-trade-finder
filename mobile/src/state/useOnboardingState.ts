@@ -41,6 +41,11 @@ export interface OnboardingPersisted {
     trio_entry?: boolean;
   };
   celebrationsShown: { first_like?: boolean; first_quickset_save?: boolean };
+
+  // Guided avatar tour (guided-avatar-script.md; flag onboarding.guided_avatar)
+  guideDismissed: boolean;                 // "Skip tour" — permanent opt-out
+  guideSeen: Record<string, boolean>;      // once-ever steps by script id
+  guideTourCompleted: boolean;             // S8 reached → reactive-only mode
 }
 
 const DEFAULTS: OnboardingPersisted = {
@@ -57,6 +62,9 @@ const DEFAULTS: OnboardingPersisted = {
   appleSession2BannerShown: false,
   coachMarksShown: {},
   celebrationsShown: {},
+  guideDismissed: false,
+  guideSeen: {},
+  guideTourCompleted: false,
 };
 
 interface OnboardingStateStore {
@@ -78,6 +86,7 @@ function mergeState(
     applePromptShownFor: { ...base.applePromptShownFor, ...patch.applePromptShownFor },
     coachMarksShown: { ...base.coachMarksShown, ...patch.coachMarksShown },
     celebrationsShown: { ...base.celebrationsShown, ...patch.celebrationsShown },
+    guideSeen: { ...base.guideSeen, ...patch.guideSeen },
   };
 }
 

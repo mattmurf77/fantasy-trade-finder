@@ -38,6 +38,8 @@ import { useScoringFormat } from '../hooks/useScoringFormat';
 import { getOnboardingState, patchOnboardingState } from '../state/useOnboardingState';
 import { setPendingQuicksetRegen } from '../state/onboardingBus';
 import { track } from '../api/events';
+import { requestGuideStep, guidedAvatarActive } from '../state/useGuide';
+import { S as GUIDE } from '../components/analystScript';
 import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/types';
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
@@ -83,6 +85,15 @@ export default function QuickSetTiersScreen() {
   // to the onboarding bus, and bounce back to the Trades tab so the user
   // sees their board change the suggestions (the F2 "aha").
   const onboardingReturn: boolean = !!route.params?.onboardingReturn;
+
+  // Guided tour S4.1 — one quiet-coach line at the top of the first walk
+  // (once ever); The Analyst then stays silent through the tiers.
+  React.useEffect(() => {
+    if (onboardingReturn && guidedAvatarActive()) {
+      requestGuideStep(GUIDE.s4_1());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [tierIdx, setTierIdx] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   // #138 — per-step player-name filter over the chip grid.

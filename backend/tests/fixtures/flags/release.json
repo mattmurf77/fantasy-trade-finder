@@ -63,6 +63,7 @@
   "onboarding.rank_routing": false,
   "onboarding.demo_bridge": false,
   "onboarding.guided_layer": false,
+  "onboarding.guided_avatar": false,
   "onboarding.keep_warm": false,
   "monetize.entitlements": false,
   "monetize.paywall": false,

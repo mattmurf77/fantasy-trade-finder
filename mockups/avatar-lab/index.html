@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FTF Avatar Lab — Guided Onboarding Characters</title>
+<style>
+  :root{
+    --ink0:#0E1116; --ink1:#151A21; --ink2:#1C232C; --ink3:#242D38;
+    --line:#2B3542; --line-strong:#3A4656;
+    --chalk:#E8EDF2; --chalk-dim:#9AA7B4; --chalk-faint:#5F6B78;
+    --ice:#4FD8EB; --ice-press:#37B9CC; --flare:#F25CA2;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--ink0);color:var(--chalk);font:15px/1.55 "Archivo","Helvetica Neue",Arial,sans-serif;padding:32px 20px 80px}
+  .wrap{max-width:1080px;margin:0 auto}
+  .tick{font:600 11px/1 "IBM Plex Mono",monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--ice)}
+  h1{font:700 34px/1.1 "Barlow Condensed",Arial,sans-serif;text-transform:uppercase;letter-spacing:.02em;margin:10px 0 6px}
+  .sub{color:var(--chalk-dim);max-width:760px;margin-bottom:8px}
+  .note{color:var(--chalk-faint);font-size:13px;max-width:760px;margin-bottom:28px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px}
+  .card{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:20px;display:flex;flex-direction:column;gap:14px}
+  .card.picked{border-color:var(--ice)}
+  .stage{background:var(--ink2);border:1px solid var(--line);border-radius:8px;padding:18px 14px 10px;position:relative;min-height:290px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end}
+  .bubble{background:var(--ink0);border:1px solid var(--line-strong);border-radius:8px;padding:10px 12px;font-size:13px;color:var(--chalk);position:relative;margin-bottom:14px;width:100%}
+  .bubble:after{content:"";position:absolute;left:44px;bottom:-7px;width:12px;height:12px;background:var(--ink0);border-right:1px solid var(--line-strong);border-bottom:1px solid var(--line-strong);transform:rotate(45deg)}
+  .bubble b{color:var(--ice);font-weight:600}
+  svg{display:block}
+  .meta{display:flex;align-items:baseline;gap:10px}
+  .name{font:700 22px/1 "Barlow Condensed",Arial,sans-serif;text-transform:uppercase;letter-spacing:.03em}
+  .role{font:600 10px/1 "IBM Plex Mono",monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--chalk-faint)}
+  .concept{color:var(--chalk-dim);font-size:13px}
+  textarea{width:100%;min-height:64px;background:var(--ink2);border:1px solid var(--line);border-radius:8px;color:var(--chalk);font:13px/1.5 "Archivo",Arial,sans-serif;padding:10px;resize:vertical}
+  textarea:focus{outline:none;border-color:var(--ice)}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  label.pick{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--chalk-dim);cursor:pointer}
+  input[type=radio]{accent-color:var(--ice);width:16px;height:16px}
+  .btn{background:var(--ice);border:none;border-radius:6px;color:#06272C;font:600 13px "Archivo",Arial,sans-serif;padding:10px 16px;cursor:pointer}
+  .btn:hover{background:var(--ice-press)}
+  .toolbar{position:sticky;bottom:16px;margin-top:32px;display:flex;gap:12px;justify-content:flex-end}
+  .exported{background:var(--ink3);border:1px solid var(--line);border-radius:8px;color:var(--chalk-dim);font:12px "IBM Plex Mono",monospace;padding:10px;white-space:pre-wrap;display:none;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="tick">Avatar Lab · Guided Onboarding Experiment</div>
+  <h1>Pick your Assistant GM</h1>
+  <p class="sub">Six Clippy-school characters — oversized eyes, heavy brows, simple shapes — each shown doing the actual job: introducing itself and directing the user's next tap. The winner gets pose variants (pointing, celebrating, thinking), a dialogue engine, and a spotlight overlay, shipped as a new variant arm of the onboarding experiment.</p>
+  <p class="note">Comments persist in this browser (localStorage). "Export notes" copies everything as JSON to paste back to Claude.</p>
+
+  <div class="grid" id="grid">
+
+    <!-- 1 · COACH -->
+    <div class="card" data-key="coach">
+      <div class="stage">
+        <div class="bubble"><b>Coach</b>: "Hey — I'm Coach, your assistant GM. I scout trades your league actually wants. Tap that first card and let's work."</div>
+        <svg width="170" height="200" viewBox="0 0 140 165" role="img" aria-label="Coach — human assistant GM character">
+          <!-- body: polo -->
+          <path d="M38 160 q-2 -34 12 -42 q20 -10 40 0 q14 8 12 42 Z" fill="#2E6E7E" stroke="#173A43" stroke-width="3"/>
+          <path d="M62 118 l8 10 l8 -10" fill="none" stroke="#173A43" stroke-width="3"/>
+          <!-- lanyard -->
+          <path d="M60 122 q10 22 20 0" fill="none" stroke="#F25CA2" stroke-width="3.5"/>
+          <rect x="66" y="138" width="9" height="12" rx="2" fill="#E8EDF2" stroke="#173A43" stroke-width="2"/>
+          <!-- head -->
+          <circle cx="70" cy="78" r="34" fill="#E8B98C" stroke="#8A5A34" stroke-width="3"/>
+          <!-- cap -->
+          <path d="M38 66 a32 32 0 0 1 64 0 l0 6 l-64 0 Z" fill="#4FD8EB" stroke="#1E6E7A" stroke-width="3"/>
+          <path d="M100 68 q18 -2 20 8 q-12 4 -22 2 Z" fill="#4FD8EB" stroke="#1E6E7A" stroke-width="3"/>
+          <ellipse cx="70" cy="52" rx="7" ry="4" fill="#1E6E7A"/>
+          <!-- headset -->
+          <path d="M38 76 q-8 0 -6 10" fill="none" stroke="#222" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="37" cy="78" r="6" fill="#222"/>
+          <path d="M34 86 q4 14 20 16" fill="none" stroke="#222" stroke-width="3.5" stroke-linecap="round"/>
+          <circle cx="56" cy="103" r="4" fill="#222"/>
+          <!-- eyes (clippy) -->
+          <ellipse cx="58" cy="80" rx="11" ry="13" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <ellipse cx="83" cy="80" rx="11" ry="13" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <circle cx="61" cy="83" r="4.4" fill="#151515"/>
+          <circle cx="86" cy="83" r="4.4" fill="#151515"/>
+          <!-- brows -->
+          <path d="M48 64 q9 -6 19 -3" stroke="#5C3A1E" stroke-width="4" fill="none" stroke-linecap="round"/>
+          <path d="M74 61 q9 -3 18 1" stroke="#5C3A1E" stroke-width="4" fill="none" stroke-linecap="round"/>
+          <!-- mouth: confident smirk -->
+          <path d="M60 100 q10 8 22 2" stroke="#8A5A34" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="name">Coach</span><span class="role">Human · Assistant GM</span></div>
+      <p class="concept">The literal assistant GM — headset, team cap, credential lanyard. Reads as staff, not mascot; strongest fit if the avatar later fronts an AI chat assistant. Least whimsical of the six.</p>
+      <textarea placeholder="Notes on Coach…"></textarea>
+      <div class="row"><label class="pick"><input type="radio" name="fav" value="coach">This one</label></div>
+    </div>
+
+    <!-- 2 · PIGSKIN -->
+    <div class="card" data-key="pigskin">
+      <div class="stage">
+        <div class="bubble"><b>Pigskin</b>: "I'm Pigskin — I live for this. See that trade? Swipe right if you'd take it. I'll learn your taste as you go."</div>
+        <svg width="185" height="200" viewBox="0 0 150 160" role="img" aria-label="Pigskin — talking football character">
+          <g transform="rotate(-6 75 92)">
+            <!-- body -->
+            <ellipse cx="75" cy="92" rx="52" ry="37" fill="#9C5528" stroke="#5C2E16" stroke-width="3.5"/>
+            <!-- end stripes -->
+            <path d="M31 78 q-3 8 0 24" stroke="#F5EFE6" stroke-width="4" fill="none" stroke-linecap="round"/>
+            <path d="M119 78 q3 8 0 24" stroke="#F5EFE6" stroke-width="4" fill="none" stroke-linecap="round"/>
+            <!-- lace -->
+            <line x1="55" y1="62" x2="97" y2="62" stroke="#F5EFE6" stroke-width="4.5" stroke-linecap="round"/>
+            <line x1="61" y1="56" x2="61" y2="68" stroke="#F5EFE6" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="72" y1="56" x2="72" y2="68" stroke="#F5EFE6" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="83" y1="56" x2="83" y2="68" stroke="#F5EFE6" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="93" y1="56" x2="93" y2="68" stroke="#F5EFE6" stroke-width="3.5" stroke-linecap="round"/>
+          </g>
+          <!-- eyes -->
+          <ellipse cx="60" cy="88" rx="13.5" ry="16" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <ellipse cx="90" cy="86" rx="13.5" ry="16" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <circle cx="64" cy="92" r="5.2" fill="#151515"/>
+          <circle cx="94" cy="90" r="5.2" fill="#151515"/>
+          <!-- brows: eager -->
+          <path d="M47 66 q10 -9 24 -5" stroke="#3A1F0F" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+          <path d="M79 60 q11 -5 22 1" stroke="#3A1F0F" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+          <!-- open grin -->
+          <path d="M62 110 q13 12 28 3 q-4 10 -15 10 q-10 0 -13 -13 Z" fill="#3A1F0F"/>
+          <!-- feet -->
+          <ellipse cx="58" cy="132" rx="10" ry="5" fill="#5C2E16"/>
+          <ellipse cx="92" cy="130" rx="10" ry="5" fill="#5C2E16"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="name">Pigskin</span><span class="role">Talking Football</span></div>
+      <p class="concept">The purest Clippy translation — the product's own object with a face. Instantly legible at 60px, animates well (wobble, spiral spin celebration), zero explanation needed.</p>
+      <textarea placeholder="Notes on Pigskin…"></textarea>
+      <div class="row"><label class="pick"><input type="radio" name="fav" value="pigskin">This one</label></div>
+    </div>
+
+    <!-- 3 · THE AGENT -->
+    <div class="card" data-key="agent">
+      <div class="stage">
+        <div class="bubble"><b>The Agent</b>: "Name's Agent. I move players. You want value? Build your board — one position, two minutes. I'll handle the calls."</div>
+        <svg width="160" height="200" viewBox="0 0 130 165" role="img" aria-label="The Agent — football in a suit">
+          <!-- suit body -->
+          <path d="M30 162 q-2 -38 14 -46 q22 -10 42 0 q16 8 14 46 Z" fill="#232B36" stroke="#0D1218" stroke-width="3"/>
+          <!-- shirt + tie -->
+          <path d="M53 116 l12 14 l12 -14 l-4 46 l-16 0 Z" fill="#E8EDF2" stroke="#0D1218" stroke-width="2"/>
+          <path d="M65 130 l-6 -8 l6 -5 l6 5 Z" fill="#F25CA2"/>
+          <path d="M65 130 l-5 22 l5 8 l5 -8 Z" fill="#F25CA2" stroke="#B23A78" stroke-width="1.5"/>
+          <!-- lapels -->
+          <path d="M53 116 l-10 20 l14 -4 Z" fill="#1A212A"/>
+          <path d="M77 116 l10 20 l-14 -4 Z" fill="#1A212A"/>
+          <!-- football head (upright) -->
+          <ellipse cx="65" cy="72" rx="33" ry="44" fill="#9C5528" stroke="#5C2E16" stroke-width="3.5"/>
+          <!-- lace as hair -->
+          <line x1="50" y1="34" x2="80" y2="34" stroke="#F5EFE6" stroke-width="4" stroke-linecap="round"/>
+          <line x1="56" y1="29" x2="56" y2="39" stroke="#F5EFE6" stroke-width="3" stroke-linecap="round"/>
+          <line x1="65" y1="29" x2="65" y2="39" stroke="#F5EFE6" stroke-width="3" stroke-linecap="round"/>
+          <line x1="74" y1="29" x2="74" y2="39" stroke="#F5EFE6" stroke-width="3" stroke-linecap="round"/>
+          <!-- eyes: half-lidded dealmaker -->
+          <ellipse cx="53" cy="70" rx="11" ry="13" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <ellipse cx="78" cy="70" rx="11" ry="13" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <path d="M42 63 a11 8 0 0 1 22 0 Z" fill="#9C5528"/>
+          <path d="M67 63 a11 8 0 0 1 22 0 Z" fill="#9C5528"/>
+          <circle cx="56" cy="73" r="4.4" fill="#151515"/>
+          <circle cx="81" cy="73" r="4.4" fill="#151515"/>
+          <!-- flat brows -->
+          <line x1="44" y1="55" x2="62" y2="54" stroke="#3A1F0F" stroke-width="4" stroke-linecap="round"/>
+          <line x1="69" y1="54" x2="87" y2="55" stroke="#3A1F0F" stroke-width="4" stroke-linecap="round"/>
+          <!-- smirk -->
+          <path d="M53 96 q12 7 26 0" stroke="#3A1F0F" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+          <!-- phone in hand -->
+          <rect x="98" y="120" width="14" height="24" rx="3" fill="#4FD8EB" stroke="#1E6E7A" stroke-width="2" transform="rotate(12 105 132)"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="name">The Agent</span><span class="role">Football · In a Suit</span></div>
+      <p class="concept">Pigskin's older brother who went to business school. The suit + phone sells "I negotiate for you" — thematically perfect for a TRADE app, and the half-lidded eyes give it attitude the others don't have.</p>
+      <textarea placeholder="Notes on The Agent…"></textarea>
+      <div class="row"><label class="pick"><input type="radio" name="fav" value="agent">This one</label></div>
+    </div>
+
+    <!-- 4 · WHISTLER -->
+    <div class="card" data-key="whistler">
+      <div class="stage">
+        <div class="bubble"><b>Whistler</b>: "TWEET! I'm Whistler. My job: keep your trades fair. That card up top? Consensus values. Let's make them YOURS."</div>
+        <svg width="180" height="200" viewBox="0 0 150 160" role="img" aria-label="Whistler — referee whistle character">
+          <!-- lanyard up from the ring -->
+          <path d="M30 52 q6 -30 40 -40" fill="none" stroke="#F25CA2" stroke-width="4" stroke-dasharray="1 8" stroke-linecap="round"/>
+          <!-- ring -->
+          <circle cx="32" cy="60" r="8" fill="none" stroke="#4A5563" stroke-width="4"/>
+          <!-- barrel (mouthpiece extends right) -->
+          <path d="M40 66 l74 0 q10 0 10 10 l0 10 q0 8 -9 8 l-38 0 Z" fill="#98A2B0" stroke="#4A5563" stroke-width="3.5"/>
+          <!-- mouthpiece slot -->
+          <rect x="106" y="72" width="14" height="5" rx="2.5" fill="#4A5563"/>
+          <!-- chamber -->
+          <circle cx="64" cy="106" r="33" fill="#98A2B0" stroke="#4A5563" stroke-width="3.5"/>
+          <!-- air slot on barrel top -->
+          <rect x="66" y="60" width="18" height="7" rx="3.5" fill="#4A5563"/>
+          <!-- pea (the ball inside) peeking at the air hole -->
+          <circle cx="64" cy="124" r="7" fill="#4A5563"/>
+          <!-- eyes on the chamber -->
+          <ellipse cx="52" cy="98" rx="12" ry="14.5" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <ellipse cx="80" cy="96" rx="12" ry="14.5" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <circle cx="55" cy="101" r="4.8" fill="#151515"/>
+          <circle cx="83" cy="99" r="4.8" fill="#151515"/>
+          <!-- raised brow + flat brow on the barrel -->
+          <path d="M40 82 q8 -7 20 -4" stroke="#333" stroke-width="4" fill="none" stroke-linecap="round"/>
+          <line x1="70" y1="82" x2="88" y2="81" stroke="#333" stroke-width="4" stroke-linecap="round"/>
+          <!-- puffed-cheek mouth mid-TWEET -->
+          <ellipse cx="66" cy="126" rx="0" ry="0" fill="none"/>
+          <path d="M50 122 q8 7 20 3" stroke="#333" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+          <!-- motion tweets -->
+          <path d="M126 66 l10 -6 M128 78 l12 0 M126 88 l10 6" stroke="#F25CA2" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="name">Whistler</span><span class="role">Referee Whistle</span></div>
+      <p class="concept">The fairness mascot — a natural voice for the both-sides-win pitch and the "Bad trade?" flag. The TWEET verbal tic is a memorable attention-getter for step transitions, or an annoying one. High risk, high charm.</p>
+      <textarea placeholder="Notes on Whistler…"></textarea>
+      <div class="row"><label class="pick"><input type="radio" name="fav" value="whistler">This one</label></div>
+    </div>
+
+    <!-- 5 · BLITZ -->
+    <div class="card" data-key="blitz">
+      <div class="stage">
+        <div class="bubble"><b>Blitz</b>: "BLITZ here. No meetings, no fluff. Three swipes and I'll know your team better than your co-GM does. GO GO GO."</div>
+        <svg width="185" height="200" viewBox="0 0 150 160" role="img" aria-label="Blitz — football helmet character">
+          <!-- shell: side view, facing left -->
+          <path d="M27 96 a 48 46 0 0 1 96 0 l 0 18 q 0 8 -8 8 l -20 0 l -5 12 l -26 0 l -4 -12 l -25 0 q -8 0 -8 -8 Z"
+                fill="#4FD8EB" stroke="#1E6E7A" stroke-width="3.5"/>
+          <!-- center stripe front-to-back -->
+          <path d="M63 51 q 14 -4 28 2" stroke="#E8EDF2" stroke-width="8" fill="none" stroke-linecap="round"/>
+          <!-- ear hole -->
+          <circle cx="98" cy="104" r="5.5" fill="#1E6E7A"/>
+          <!-- rivets -->
+          <circle cx="34" cy="90" r="2.5" fill="#1E6E7A"/>
+          <circle cx="116" cy="90" r="2.5" fill="#1E6E7A"/>
+          <!-- facemask: bars protruding LEFT of the shell -->
+          <path d="M28 102 l -18 0 q -6 0 -6 6 q 0 6 6 6 l 20 0" fill="none" stroke="#E8EDF2" stroke-width="5.5" stroke-linecap="round"/>
+          <path d="M32 126 l -22 0" stroke="#E8EDF2" stroke-width="5.5" stroke-linecap="round"/>
+          <path d="M14 108 l 0 18" stroke="#E8EDF2" stroke-width="4.5" stroke-linecap="round"/>
+          <!-- eyes on the shell front -->
+          <ellipse cx="52" cy="94" rx="12.5" ry="15" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <ellipse cx="80" cy="92" rx="12.5" ry="15" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <circle cx="49" cy="97" r="5" fill="#151515"/>
+          <circle cx="77" cy="95" r="5" fill="#151515"/>
+          <!-- determined brows -->
+          <path d="M40 74 l 22 5" stroke="#173A43" stroke-width="4.5" stroke-linecap="round"/>
+          <path d="M92 79 l -22 -1" stroke="#173A43" stroke-width="4.5" stroke-linecap="round"/>
+          <!-- gritted mouth on the chin bar area -->
+          <path d="M54 124 l 22 -1" stroke="#173A43" stroke-width="4" stroke-linecap="round"/>
+          <line x1="61" y1="120" x2="61" y2="128" stroke="#173A43" stroke-width="2.5"/>
+          <line x1="69" y1="119" x2="69" y2="127" stroke="#173A43" stroke-width="2.5"/>
+          <!-- speed lines -->
+          <path d="M126 118 l 14 0 M124 130 l 12 4" stroke="#E8EDF2" stroke-width="3" stroke-linecap="round" opacity=".6"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="name">Blitz</span><span class="role">Football Helmet</span></div>
+      <p class="concept">Ice-cyan shell puts the brand color ON the character. High-energy drill-sergeant persona suits impatient power users; may read aggressive for a first-run guide. Eyes-in-the-helmet is the strongest silhouette after Pigskin.</p>
+      <textarea placeholder="Notes on Blitz…"></textarea>
+      <div class="row"><label class="pick"><input type="radio" name="fav" value="blitz">This one</label></div>
+    </div>
+
+    <!-- 6 · PLAYBOOK -->
+    <div class="card" data-key="playbook">
+      <div class="stage">
+        <div class="bubble"><b>Playbook</b>: "I'm Playbook — every trade in your league is diagrammed in here. First play: tell me who's untouchable on your roster."</div>
+        <svg width="160" height="200" viewBox="0 0 130 165" role="img" aria-label="Playbook — clipboard character with play diagrams">
+          <!-- board -->
+          <rect x="28" y="34" width="74" height="104" rx="8" fill="#B98A5A" stroke="#6E4A26" stroke-width="3.5"/>
+          <rect x="36" y="58" width="58" height="72" rx="4" fill="#F5EFE6" stroke="#6E4A26" stroke-width="2.5"/>
+          <!-- clip -->
+          <rect x="52" y="26" width="26" height="14" rx="4" fill="#8E9AA8" stroke="#4A5563" stroke-width="3"/>
+          <rect x="60" y="20" width="10" height="10" rx="5" fill="none" stroke="#4A5563" stroke-width="3"/>
+          <!-- eyes ON the paper top -->
+          <ellipse cx="52" cy="74" rx="11" ry="13" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <ellipse cx="78" cy="74" rx="11" ry="13" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <circle cx="55" cy="77" r="4.4" fill="#151515"/>
+          <circle cx="81" cy="77" r="4.4" fill="#151515"/>
+          <!-- brows drawn like pencil strokes -->
+          <path d="M42 58 q8 -5 18 -2" stroke="#333" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+          <path d="M70 56 q9 -3 18 2" stroke="#333" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+          <!-- play diagram as mouth/body: X's, O, arrow -->
+          <text x="44" y="106" font-family="IBM Plex Mono,monospace" font-size="12" font-weight="700" fill="#C4373C">✕</text>
+          <text x="58" y="112" font-family="IBM Plex Mono,monospace" font-size="12" font-weight="700" fill="#C4373C">✕</text>
+          <circle cx="80" cy="103" r="5" fill="none" stroke="#2E6E7E" stroke-width="2.5"/>
+          <path d="M78 108 q-10 12 -24 8" fill="none" stroke="#2E6E7E" stroke-width="2.5" stroke-dasharray="4 3" marker-end="none"/>
+          <path d="M56 118 l-6 -1 l4 -5" fill="none" stroke="#2E6E7E" stroke-width="2.5" stroke-linecap="round"/>
+          <!-- smile -->
+          <path d="M54 124 q11 7 24 1" stroke="#6E4A26" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <!-- pencil behind ear -->
+          <rect x="96" y="60" width="26" height="7" rx="3" fill="#F2B33D" stroke="#8A6516" stroke-width="2" transform="rotate(28 100 64)"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="name">Playbook</span><span class="role">Clipboard of Plays</span></div>
+      <p class="concept">The strategist — its face lives on the paper and its "body language" is X's-and-O's that can redraw per step (the play diagram becomes the tutorial pointer). Most flexible canvas for step-by-step guidance.</p>
+      <textarea placeholder="Notes on Playbook…"></textarea>
+      <div class="row"><label class="pick"><input type="radio" name="fav" value="playbook">This one</label></div>
+    </div>
+
+    <!-- ═══ WAVE 2 · THE AI HELPERS ═══ -->
+
+    <!-- 7 · MAINFRAME -->
+    <div class="card" data-key="mainframe">
+      <div class="stage">
+        <div class="bubble"><b>Mainframe</b>: "SYSTEM ONLINE. I've already run 4,096 trade simulations for your roster. Shall I display the three your league would accept?"</div>
+        <svg width="175" height="200" viewBox="0 0 150 165" role="img" aria-label="Mainframe — supercomputer character">
+          <!-- antenna -->
+          <line x1="75" y1="22" x2="75" y2="8" stroke="#4A5563" stroke-width="3.5"/>
+          <circle cx="75" cy="8" r="4.5" fill="#F25CA2"/>
+          <!-- monitor shell -->
+          <rect x="26" y="22" width="98" height="86" rx="10" fill="#8E9AA8" stroke="#4A5563" stroke-width="3.5"/>
+          <!-- screen -->
+          <rect x="36" y="32" width="78" height="62" rx="6" fill="#10141A" stroke="#4A5563" stroke-width="2.5"/>
+          <!-- scanline -->
+          <line x1="38" y1="42" x2="112" y2="42" stroke="#1E2833" stroke-width="3"/>
+          <line x1="38" y1="84" x2="112" y2="84" stroke="#1E2833" stroke-width="3"/>
+          <!-- face on screen (glowing) -->
+          <ellipse cx="61" cy="60" rx="11" ry="13" fill="#EAFBFF" stroke="#4FD8EB" stroke-width="2.5"/>
+          <ellipse cx="89" cy="60" rx="11" ry="13" fill="#EAFBFF" stroke="#4FD8EB" stroke-width="2.5"/>
+          <circle cx="64" cy="63" r="4.4" fill="#0B6E7E"/>
+          <circle cx="92" cy="63" r="4.4" fill="#0B6E7E"/>
+          <path d="M52 46 q8 -6 18 -3" stroke="#4FD8EB" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+          <path d="M80 43 q9 -3 18 2" stroke="#4FD8EB" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+          <path d="M62 80 q13 7 26 0" stroke="#4FD8EB" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <!-- base / tower -->
+          <rect x="42" y="112" width="66" height="30" rx="6" fill="#6E7B8A" stroke="#4A5563" stroke-width="3"/>
+          <!-- LED row -->
+          <circle cx="56" cy="127" r="3.5" fill="#4FD8EB"/>
+          <circle cx="70" cy="127" r="3.5" fill="#F25CA2"/>
+          <circle cx="84" cy="127" r="3.5" fill="#4FD8EB"/>
+          <rect x="94" y="122" width="8" height="10" rx="2" fill="#4A5563"/>
+          <!-- vents -->
+          <line x1="34" y1="100" x2="46" y2="100" stroke="#4A5563" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="104" y1="100" x2="116" y2="100" stroke="#4A5563" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="name">Mainframe</span><span class="role">Supercomputer</span></div>
+      <p class="concept">The war-room machine — face glows on a CRT, LEDs blink while it "computes." Leans hardest into raw analytical power ("4,096 simulations"); coldest personality of the set unless the copy keeps it warm.</p>
+      <textarea placeholder="Notes on Mainframe…"></textarea>
+      <div class="row"><label class="pick"><input type="radio" name="fav" value="mainframe">This one</label></div>
+    </div>
+
+    <!-- 8 · CIRCUIT -->
+    <div class="card" data-key="circuit">
+      <div class="stage">
+        <div class="bubble"><b>Circuit</b>: "BEEP. Hi! I'm Circuit. I crunch every roster in your league so you don't have to. First task: swipe on three trades. EASY."</div>
+        <svg width="165" height="200" viewBox="0 0 140 165" role="img" aria-label="Circuit — robot with a football">
+          <!-- antenna -->
+          <line x1="70" y1="26" x2="70" y2="12" stroke="#4A5563" stroke-width="3.5"/>
+          <circle cx="70" cy="10" r="5" fill="#4FD8EB"/>
+          <!-- head -->
+          <rect x="34" y="26" width="72" height="58" rx="12" fill="#B7C1CC" stroke="#4A5563" stroke-width="3.5"/>
+          <!-- ear bolts -->
+          <rect x="24" y="46" width="10" height="16" rx="4" fill="#6E7B8A" stroke="#4A5563" stroke-width="2.5"/>
+          <rect x="106" y="46" width="10" height="16" rx="4" fill="#6E7B8A" stroke="#4A5563" stroke-width="2.5"/>
+          <!-- eyes -->
+          <ellipse cx="56" cy="52" rx="11.5" ry="13.5" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <ellipse cx="84" cy="52" rx="11.5" ry="13.5" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <circle cx="59" cy="55" r="4.6" fill="#151515"/>
+          <circle cx="87" cy="55" r="4.6" fill="#151515"/>
+          <!-- brow panel -->
+          <path d="M46 36 q9 -5 19 -2" stroke="#4A5563" stroke-width="4" fill="none" stroke-linecap="round"/>
+          <path d="M76 34 q9 -2 18 3" stroke="#4A5563" stroke-width="4" fill="none" stroke-linecap="round"/>
+          <!-- grill mouth -->
+          <rect x="54" y="70" width="32" height="9" rx="4" fill="#10141A"/>
+          <line x1="62" y1="70" x2="62" y2="79" stroke="#B7C1CC" stroke-width="2"/>
+          <line x1="70" y1="70" x2="70" y2="79" stroke="#B7C1CC" stroke-width="2"/>
+          <line x1="78" y1="70" x2="78" y2="79" stroke="#B7C1CC" stroke-width="2"/>
+          <!-- body: jersey -->
+          <path d="M40 160 q-3 -50 12 -60 l36 0 q15 10 12 60 Z" fill="#2E6E7E" stroke="#173A43" stroke-width="3"/>
+          <rect x="62" y="112" width="16" height="18" rx="2" fill="#E8EDF2" opacity=".9"/>
+          <text x="65" y="126" font-family="IBM Plex Mono,monospace" font-size="13" font-weight="700" fill="#173A43">01</text>
+          <!-- arm holding football -->
+          <ellipse cx="110" cy="132" rx="18" ry="12" fill="#9C5528" stroke="#5C2E16" stroke-width="3" transform="rotate(-24 110 132)"/>
+          <line x1="103" y1="128" x2="117" y2="122" stroke="#F5EFE6" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="name">Circuit</span><span class="role">Robot · Jersey 01</span></div>
+      <p class="concept">The friendly droid teammate — robot head, team jersey, ball tucked like a running back. Most kid-friendly of the AI set; the BEEP verbal tic and LED antenna give cheap, charming animation hooks.</p>
+      <textarea placeholder="Notes on Circuit…"></textarea>
+      <div class="row"><label class="pick"><input type="radio" name="fav" value="circuit">This one</label></div>
+    </div>
+
+    <!-- 9 · CORTEX -->
+    <div class="card" data-key="cortex">
+      <div class="stage">
+        <div class="bubble"><b>Cortex</b>: "Fascinating roster. I'm Cortex — I think about dynasty value so hard my stitches hurt. Your WR room is inefficient. Shall we fix it?"</div>
+        <svg width="175" height="200" viewBox="0 0 150 165" role="img" aria-label="Cortex — brain with football laces">
+          <!-- brain body: football-brain fusion -->
+          <path d="M75 30 q34 0 42 30 q10 6 4 18 q6 14 -8 22 q-2 18 -22 18 l-32 0 q-20 0 -22 -18 q-14 -8 -8 -22 q-6 -12 4 -18 q8 -30 42 -30 Z"
+                fill="#E88AA8" stroke="#A84A68" stroke-width="3.5"/>
+          <!-- lobe squiggles -->
+          <path d="M42 62 q10 -8 18 2 M54 84 q8 -10 18 -2 M84 58 q10 -6 16 4 M84 88 q10 -8 18 0" fill="none" stroke="#A84A68" stroke-width="3" stroke-linecap="round"/>
+          <!-- the LACE down the middle (football fusion) -->
+          <line x1="75" y1="34" x2="75" y2="66" stroke="#F5EFE6" stroke-width="4" stroke-linecap="round"/>
+          <line x1="68" y1="40" x2="82" y2="40" stroke="#F5EFE6" stroke-width="3" stroke-linecap="round"/>
+          <line x1="68" y1="50" x2="82" y2="50" stroke="#F5EFE6" stroke-width="3" stroke-linecap="round"/>
+          <line x1="68" y1="60" x2="82" y2="60" stroke="#F5EFE6" stroke-width="3" stroke-linecap="round"/>
+          <!-- glasses + eyes -->
+          <ellipse cx="58" cy="96" rx="12" ry="13.5" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <ellipse cx="92" cy="96" rx="12" ry="13.5" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <circle cx="61" cy="99" r="4.6" fill="#151515"/>
+          <circle cx="95" cy="99" r="4.6" fill="#151515"/>
+          <rect x="42" y="82" width="32" height="28" rx="9" fill="none" stroke="#173A43" stroke-width="3.5"/>
+          <rect x="76" y="82" width="32" height="28" rx="9" fill="none" stroke="#173A43" stroke-width="3.5"/>
+          <line x1="74" y1="94" x2="76" y2="94" stroke="#173A43" stroke-width="3.5"/>
+          <!-- smart smirk -->
+          <path d="M62 124 q12 8 26 1" stroke="#A84A68" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+          <!-- thought sparks -->
+          <path d="M118 40 l6 -6 M124 52 l8 -2 M112 30 l2 -8" stroke="#4FD8EB" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="name">Cortex</span><span class="role">Brainiac · Laced Brain</span></div>
+      <p class="concept">A brain with football stitching — the smartest-guy-in-the-league-chat, wire-rim glasses and all. The visual pun (brain + ball are the same organ here) is the cleverest of the set; slightly gross to some audiences.</p>
+      <textarea placeholder="Notes on Cortex…"></textarea>
+      <div class="row"><label class="pick"><input type="radio" name="fav" value="cortex">This one</label></div>
+    </div>
+
+    <!-- 10 · QUANT -->
+    <div class="card" data-key="quant">
+      <div class="stage">
+        <div class="bubble"><b>Quant</b>: "Hi — Quant, lead scientist, Trade Lab. Hypothesis: your team improves in two moves. Care to review the evidence?"</div>
+        <svg width="165" height="200" viewBox="0 0 140 165" role="img" aria-label="Quant — data scientist character">
+          <!-- lab coat body -->
+          <path d="M36 162 q-2 -36 13 -44 q21 -10 42 0 q15 8 13 44 Z" fill="#F5F7FA" stroke="#8E9AA8" stroke-width="3"/>
+          <path d="M62 118 l8 12 l8 -12 l-2 44 l-12 0 Z" fill="#2E6E7E"/>
+          <path d="M62 118 l-12 22 l10 4 M78 118 l12 22 l-10 4" fill="none" stroke="#8E9AA8" stroke-width="2.5"/>
+          <!-- pocket + pen -->
+          <rect x="46" y="138" width="14" height="16" rx="2" fill="none" stroke="#8E9AA8" stroke-width="2.5"/>
+          <line x1="51" y1="132" x2="51" y2="144" stroke="#F25CA2" stroke-width="3.5" stroke-linecap="round"/>
+          <!-- head -->
+          <circle cx="70" cy="78" r="33" fill="#C98E5A" stroke="#7A4E28" stroke-width="3"/>
+          <!-- messy science hair -->
+          <path d="M40 62 q4 -18 16 -20 q4 -8 14 -6 q10 -4 16 4 q12 0 14 14 q4 4 2 10 l-10 -4 q-16 -10 -34 -4 q-10 2 -18 6 Z" fill="#4A5563" stroke="#333" stroke-width="2.5"/>
+          <!-- glasses + eyes -->
+          <ellipse cx="58" cy="80" rx="11" ry="13" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <ellipse cx="84" cy="80" rx="11" ry="13" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <circle cx="61" cy="83" r="4.4" fill="#151515"/>
+          <circle cx="87" cy="83" r="4.4" fill="#151515"/>
+          <rect x="44" y="66" width="29" height="27" rx="9" fill="none" stroke="#173A43" stroke-width="3.5"/>
+          <rect x="75" y="66" width="29" height="27" rx="9" fill="none" stroke="#173A43" stroke-width="3.5"/>
+          <!-- raised analytical brow -->
+          <path d="M48 60 q8 -7 19 -4" stroke="#333" stroke-width="4" fill="none" stroke-linecap="round"/>
+          <line x1="76" y1="58" x2="94" y2="58" stroke="#333" stroke-width="4" stroke-linecap="round"/>
+          <!-- considered smile -->
+          <path d="M60 100 q10 7 22 1" stroke="#7A4E28" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+          <!-- tablet with rising chart -->
+          <rect x="100" y="118" width="30" height="40" rx="4" fill="#10141A" stroke="#4A5563" stroke-width="3" transform="rotate(8 115 138)"/>
+          <path d="M106 148 l7 -8 l6 3 l9 -12" stroke="#4FD8EB" stroke-width="3" fill="none" stroke-linecap="round" transform="rotate(8 115 138)"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="name">Quant</span><span class="role">Data Scientist</span></div>
+      <p class="concept">Lab coat, chaos hair, a tablet with the line always going up. Frames every onboarding step as an experiment ("hypothesis → evidence"), which is honest to how the product actually works under the hood.</p>
+      <textarea placeholder="Notes on Quant…"></textarea>
+      <div class="row"><label class="pick"><input type="radio" name="fav" value="quant">This one</label></div>
+    </div>
+
+    <!-- 11 · THE ANALYST -->
+    <div class="card" data-key="analyst">
+      <div class="stage">
+        <div class="bubble"><b>The Analyst</b>: "Per my model — hi, I'm The Analyst — your RB2 is overvalued by 14%. I've drafted three sell-high packages. Swipe when ready."</div>
+        <svg width="185" height="200" viewBox="0 0 150 160" role="img" aria-label="The Analyst — football with glasses, tie and laptop">
+          <g transform="rotate(-4 75 84)">
+            <!-- football body -->
+            <ellipse cx="75" cy="84" rx="50" ry="36" fill="#9C5528" stroke="#5C2E16" stroke-width="3.5"/>
+            <path d="M33 70 q-3 8 0 24" stroke="#F5EFE6" stroke-width="4" fill="none" stroke-linecap="round"/>
+            <path d="M117 70 q3 8 0 24" stroke="#F5EFE6" stroke-width="4" fill="none" stroke-linecap="round"/>
+            <!-- lace -->
+            <line x1="57" y1="56" x2="95" y2="56" stroke="#F5EFE6" stroke-width="4" stroke-linecap="round"/>
+            <line x1="64" y1="51" x2="64" y2="61" stroke="#F5EFE6" stroke-width="3" stroke-linecap="round"/>
+            <line x1="75" y1="51" x2="75" y2="61" stroke="#F5EFE6" stroke-width="3" stroke-linecap="round"/>
+            <line x1="86" y1="51" x2="86" y2="61" stroke="#F5EFE6" stroke-width="3" stroke-linecap="round"/>
+          </g>
+          <!-- glasses + eyes -->
+          <ellipse cx="60" cy="82" rx="12.5" ry="14" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <ellipse cx="92" cy="80" rx="12.5" ry="14" fill="#fff" stroke="#222" stroke-width="2.5"/>
+          <circle cx="63" cy="85" r="4.8" fill="#151515"/>
+          <circle cx="95" cy="83" r="4.8" fill="#151515"/>
+          <rect x="44" y="68" width="33" height="28" rx="6" fill="none" stroke="#173A43" stroke-width="3.5"/>
+          <rect x="79" y="66" width="33" height="28" rx="6" fill="none" stroke="#173A43" stroke-width="3.5"/>
+          <line x1="77" y1="80" x2="79" y2="80" stroke="#173A43" stroke-width="3.5"/>
+          <!-- skeptical brow -->
+          <path d="M48 62 q9 -6 20 -3" stroke="#3A1F0F" stroke-width="4" fill="none" stroke-linecap="round"/>
+          <line x1="81" y1="58" x2="100" y2="59" stroke="#3A1F0F" stroke-width="4" stroke-linecap="round"/>
+          <!-- deadpan mouth -->
+          <path d="M66 104 l 20 -1" stroke="#3A1F0F" stroke-width="3.5" stroke-linecap="round"/>
+          <!-- laptop with bar chart -->
+          <path d="M34 142 l40 0 l6 14 l-52 0 Z" fill="#6E7B8A" stroke="#4A5563" stroke-width="2.5"/>
+          <rect x="38" y="118" width="34" height="24" rx="3" fill="#10141A" stroke="#4A5563" stroke-width="2.5"/>
+          <line x1="45" y1="137" x2="45" y2="130" stroke="#4FD8EB" stroke-width="3.5"/>
+          <line x1="53" y1="137" x2="53" y2="125" stroke="#4FD8EB" stroke-width="3.5"/>
+          <line x1="61" y1="137" x2="61" y2="122" stroke="#F25CA2" stroke-width="3.5"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="name">The Analyst</span><span class="role">Data Analyst · Football Guy</span></div>
+      <p class="concept">Pigskin's spreadsheet-brained cousin — glasses, laptop of bar charts, speaks in percentages. The literal fusion you asked for: football body, analyst soul. "Per my model" is a ready-made catchphrase.</p>
+      <textarea placeholder="Notes on The Analyst…"></textarea>
+      <div class="row"><label class="pick"><input type="radio" name="fav" value="analyst">This one</label></div>
+    </div>
+
+  </div>
+
+  <div class="toolbar">
+    <button class="btn" id="export">Export notes</button>
+  </div>
+  <div class="exported" id="out"></div>
+</div>
+
+<script>
+  const KEY='ftf_avatar_lab_v1';
+  const state=JSON.parse(localStorage.getItem(KEY)||'{}');
+  document.querySelectorAll('.card').forEach(card=>{
+    const k=card.dataset.key, ta=card.querySelector('textarea'), r=card.querySelector('input[type=radio]');
+    if(state[k]?.note) ta.value=state[k].note;
+    if(state.fav===k){r.checked=true;card.classList.add('picked');}
+    ta.addEventListener('input',()=>{state[k]={...(state[k]||{}),note:ta.value};localStorage.setItem(KEY,JSON.stringify(state));});
+    r.addEventListener('change',()=>{state.fav=k;localStorage.setItem(KEY,JSON.stringify(state));
+      document.querySelectorAll('.card').forEach(c=>c.classList.toggle('picked',c.dataset.key===k));});
+  });
+  document.getElementById('export').addEventListener('click',()=>{
+    const out={favorite:state.fav||null,notes:{}};
+    document.querySelectorAll('.card').forEach(c=>{const v=c.querySelector('textarea').value.trim();if(v)out.notes[c.dataset.key]=v;});
+    const s=JSON.stringify(out,null,2);
+    const el=document.getElementById('out');el.style.display='block';el.textContent=s;
+    navigator.clipboard?.writeText(s).catch(()=>{});
+  });
+</script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,10 @@ import { appleSignIn, resolveSmartStart, signIn } from '../api/auth';
 import { track } from '../api/events';
 import { NO_LEAGUE_ID, useSession } from '../state/useSession';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
+import { useGuide, requestGuideStep, advanceGuideIfActive, guidedAvatarActive } from '../state/useGuide';
+import { getOnboardingState } from '../state/useOnboardingState';
+import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
+import { S as GUIDE } from '../components/analystScript';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import { getLastUsername, setLastUsername } from '../api/client';
 
@@ -86,6 +90,29 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
       }
     });
   }, []);
+
+  // ── Guided tour S0 (The Analyst; guided-avatar-script.md) ──────────────
+  // Intro (s0.1) on mount, then the point-at-field step (s0.2) chains when
+  // the intro is advanced. Both once-ever; the chain effect re-fires off
+  // persisted guideSeen, so a backgrounded app re-offers at the same gate.
+  const guideActive = useGuide((s) => s.active);
+  const usernameFieldRef = useRef<View | null>(null);
+  useEffect(() => {
+    registerGuideTarget('signin.username-input', usernameFieldRef);
+    return () => unregisterGuideTarget('signin.username-input');
+  }, []);
+  useEffect(() => {
+    if (!landingOn || !guidedAvatarActive()) return;
+    const seen = getOnboardingState().guideSeen;
+    if (!seen['s0.1']) {
+      const t = setTimeout(() => requestGuideStep(GUIDE.s0_1()), 600);
+      return () => clearTimeout(t);
+    }
+    if (!guideActive && !seen['s0.2']) {
+      requestGuideStep(GUIDE.s0_2());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [landingOn, guideActive]);
 
   useEffect(() => {
     if (!accountsEnabled || Platform.OS !== 'ios') return;
@@ -180,6 +207,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     setBusy(true);
     setError(null);
     setErrorKind(null);
+    advanceGuideIfActive('s0.2');
     track('signin_attempted', { method }, 'SignIn');
     Keyboard.dismiss();
 
@@ -273,6 +301,11 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
       );
       const kind = classifySignInError(err);
       setErrorKind(kind);
+      // Guided tour: The Analyst delivers the error commentary (oops pose);
+      // the inline error text below still renders for accessibility parity.
+      if (landingOn && guidedAvatarActive()) {
+        requestGuideStep(kind === 'notfound' ? GUIDE.s0_err_notfound() : GUIDE.s0_err_down());
+      }
       if (landingOn && kind === 'notfound') {
         // Voice doc: username-vs-team-name confusion is the most likely
         // first-field failure — the copy must say what to fix.
@@ -370,6 +403,9 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 <Text style={styles.hintName}>@{hint}</Text>
               </Pressable>
             ) : null}
+            {/* Guide spotlight target — collapsable={false} so the wrapper
+                survives view-flattening and stays measurable. */}
+            <View ref={usernameFieldRef} collapsable={false}>
             <TextInput
               testID="signin.username-input"
               style={[styles.input, focused && styles.inputFocused]}
@@ -387,6 +423,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               editable={!busy && !demoBusy}
               inputMode="text"
             />
+            </View>
             {landingOn ? (
               <Text style={styles.fieldHint}>
                 No password. Your league's rosters do the talking.

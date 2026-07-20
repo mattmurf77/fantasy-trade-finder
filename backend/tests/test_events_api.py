@@ -314,3 +314,18 @@ def test_country_stamped_from_header(harness):
                   key=lambda m: m["event_id"])
     assert rows[0]["country"] == "US"      # normalized upper, 2 chars
     assert rows[1]["country"] is None      # no header → NULL, never guessed
+
+
+def test_guide_events_accepted(harness):
+    """Guided-avatar tour events (script §6) are in the taxonomy."""
+    client, engine = harness
+    body = _post(client, [
+        _envelope(0, event_type="guide_step_shown",
+                  props={"step": "s3.2", "pose": "thinking", "screen": "Trades"}),
+        _envelope(1, event_type="guide_step_advanced",
+                  props={"step": "s3.2", "via": "cta"}),
+        _envelope(2, event_type="guide_tour_completed",
+                  props={"steps_seen": 12}),
+    ]).get_json()
+    _assert_invariant(body, 3)
+    assert body["accepted"] == 3 and body["dropped"] == 0

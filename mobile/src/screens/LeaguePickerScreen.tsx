@@ -13,6 +13,8 @@ import { ink, chalk, ice, semantic, space, type } from '../theme/chalkline';
 import { Badge, Button, Icon } from '../components/chalkline';
 import { useSession } from '../state/useSession';
 import { useFlag, onboardingEnabled } from '../state/useFeatureFlags';
+import { requestGuideStep, advanceGuideIfActive, guidedAvatarActive } from '../state/useGuide';
+import { S as GUIDE } from '../components/analystScript';
 import { getLeagues } from '../api/sleeper';
 import { getEspnLeagues } from '../api/espn';
 import { getPlatformLeagues, LinkPlatform } from '../api/platformLink';
@@ -70,6 +72,13 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
   // removal). Once-only per mount; never when the user came here to link
   // ESPN. Failure falls back to this screen's existing inline error +
   // retry — the single league row on screen names the league.
+  // Guided tour S1 — only for pickers with a real choice (multi-league);
+  // auto-skip users never mount long enough to need it.
+  useEffect(() => {
+    if (!guidedAvatarActive() || loading || cached.length < 2) return;
+    requestGuideStep(GUIDE.s1_1());
+  }, [loading, cached.length]);
+
   const autoSkipTried = useRef(false);
   useEffect(() => {
     if (autoSkipTried.current) return;
@@ -179,6 +188,7 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
 
   async function pickLeague(lg: LeagueSummary, opts?: { auto?: boolean }) {
     if (!user || selectingId) return;
+    if (!opts?.auto) advanceGuideIfActive('s1.1');
     setSelectingId(lg.league_id);
     setError(null);
     track(

@@ -177,6 +177,7 @@ FLAG_KEYS: tuple[str, ...] = (
     "onboarding.rank_routing",     # item 9 — chooser demotion, Rank tab → QuickSet default, deck-exhausted → trio entry
     "onboarding.demo_bridge",      # item 10 — demo→real bar + redraft label/segment tag
     "onboarding.guided_layer",     # v2.1 — swipe hint, coach marks (≤4), celebration beats
+    "onboarding.guided_avatar",    # The Analyst guided tour (guided-avatar-script.md) — supersedes guided_layer surfaces when on
     "onboarding.keep_warm",        # item 3 — server-side keep-warm affordances (cron ping target)
     # ── Monetization platform (docs/plans/monetization/00-platform-foundation.md §1) ──
     # One flag per monetization strategy; everything ships dark. Rollout

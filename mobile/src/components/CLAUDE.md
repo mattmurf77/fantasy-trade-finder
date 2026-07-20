@@ -95,3 +95,5 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 - Rank stack (item 9, `onboarding.rank_routing`): `rank.more-ways` (QuickSetTiers header link → demoted RankHome chooser)
 
 Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). Full planned list: lld.md Appendix A (~90 IDs).
+
+**Guided avatar (The Analyst, flag `onboarding.guided_avatar`):** `analyst/` (six rn-svg pose components + `AnalystAvatar`; art source-of-truth = mockups/avatar-lab/analyst-poses.html) · `AnalystGuide.tsx` (RootNav-mounted overlay: scrim+cutout spotlight, bubble with in-bubble CTAs, ✕ skip / Skip-tour opt-out) · `analystScript.ts` (dialogue table = DATA; script doc: docs/plans/onboarding-conversion/guided-avatar-script.md). Guide testIDs: `guide.overlay` · `guide.bubble` · `guide.cta.<accept|dismiss>` · `guide.step-x` · `guide.skip-tour` · `guide.avatar.<pose>` · new targets `trades.card-body`

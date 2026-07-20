@@ -15,11 +15,12 @@ interface Props {
 }
 
 // Save-moment Apple ask (onboarding plan item 8, flag
-// onboarding.apple_save_moment; ADR-006). HONEST FRAMING ONLY — boards
-// persist server-side keyed to the Sleeper user with or without Apple, so
-// the pitch is cross-device durability, never loss ("save your board" is
-// prohibited copy, ADR-006). Copy = voice doc #12 verbatim. Decline is one
-// tap, recorded by the caller, never immediately re-asked.
+// onboarding.apple_save_moment; ADR-006 + operator direction 2026-07-19).
+// Rankings-first value prop: "save your rankings to your account" — TRUE
+// (the bind writes the board to a durable account and mints the verified-
+// controller lock that blocks squatters). Still prohibited: implying the
+// board is LOST without Apple (it persists keyed to the Sleeper user).
+// Decline is one tap, recorded by the caller, never immediately re-asked.
 //
 // Bind flow mirrors SettingsScreen.handleLinkApple: with a live session the
 // backend binds this Apple identity to the session's Sleeper user and marks
@@ -79,10 +80,10 @@ export default function AppleSaveMomentSheet({ visible, trigger, onClose }: Prop
       <View style={styles.scrim}>
         <View testID={`trades.apple-sheet.${trigger}`} style={styles.sheet}>
           <TickLabel>Your front office</TickLabel>
-          <Text style={styles.title}>Keep your board on every device.</Text>
+          <Text style={styles.title}>Save your rankings.</Text>
           <Text style={styles.body}>
-            Sign in with Apple links your board to you — new phone, same front
-            office.
+            Sign in with Apple to save your board to your account — and lock
+            it so only you can change it.
           </Text>
           {note ? <Text style={styles.note}>{note}</Text> : null}
           <AppleAuthentication.AppleAuthenticationButton

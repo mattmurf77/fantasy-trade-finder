@@ -22,6 +22,7 @@ import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
+import AnalystGuide from '../components/AnalystGuide';
 import VerifyAccountBanner from '../components/VerifyAccountBanner';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useLeagueFormatDefault } from '../hooks/useScoringFormat';
@@ -409,6 +410,11 @@ export default function RootNav({ booted }: { booted: boolean }) {
           }}
         />
       </Stack.Navigator>
+      {/* The Analyst — guided-tour overlay (onboarding.guided_avatar).
+          Container-level so S0 (sign-in) and S1 (league picker) are covered,
+          not just the authed tabs. Renders null unless a step is active;
+          native sheets/alerts still render above it (system modals win). */}
+      <AnalystGuide />
     </NavigationContainer>
   );
 }

@@ -9,3 +9,5 @@ Context-based state. Each file exports a hook + provider.
 - `useNotifications.ts` — in-app notification inbox state
 
 No Redux/Zustand — keep it Context until pain demands more.
+- `useGuide.ts` — The Analyst guided-tour engine (flag `onboarding.guided_avatar`): one-bubble-at-a-time step store, `guidedAvatarActive()` gate (supersedes passive guided-layer surfaces), guide_* analytics
+- `guideTargets.ts` — spotlight target registry: screens register views by testID, the overlay measures at show time (missing target → bubble-only, never a blank cutout)

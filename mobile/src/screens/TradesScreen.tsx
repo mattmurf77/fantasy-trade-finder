@@ -89,6 +89,14 @@ import IdentityConfirmStrip from '../components/IdentityConfirmStrip';
 import QuickSetPromptCard from '../components/QuickSetPromptCard';
 import AppleSaveMomentSheet from '../components/AppleSaveMomentSheet';
 import { consumePendingQuicksetRegen } from '../state/onboardingBus';
+import {
+  useGuide,
+  requestGuideStep,
+  advanceGuideIfActive,
+  guidedAvatarActive,
+} from '../state/useGuide';
+import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
+import { S as GUIDE, nextUnrankedPosition } from '../components/analystScript';
 import { useSession } from '../state/useSession';
 import { useTradeQueue } from '../state/useTradeQueue';
 import { useFlag, useOnboardingFeature, onboardingEnabled } from '../state/useFeatureFlags';
@@ -143,6 +151,11 @@ let identityStripDismissedThisSession = false;
 // once per app session, whatever the trigger path (module-level so a tab
 // remount can't re-fire it).
 let quicksetPromptShownThisSession = false;
+
+// Guided tour session caps (script §3): S5.5 next-position ask and the S7
+// trio ramp each show at most once per app session.
+let guideS55ShownThisSession = false;
+let guideS7ShownThisSession = false;
 
 // Onboarding item 8 (F4): at most one Apple save-moment ask per app session
 // across all trigger classes — asks never stack and never nag.
@@ -1101,6 +1114,7 @@ export default function TradesScreen({ navigation }: any) {
   // provenance mark waits for the next one.
   useEffect(() => {
     if (!guidedOn || !tradesFirstOn) return;
+    if (guidedAvatarActive()) return; // The Analyst owns these surfaces
     if (swipeHintDone || swipeHintShownThisMountRef.current) return;
     if (!topTradeId || deckIdx !== 0) return;
     swipeHintShownThisMountRef.current = true;
@@ -1117,6 +1131,7 @@ export default function TradesScreen({ navigation }: any) {
 
   useEffect(() => {
     if (!guidedOn || !tradesFirstOn) return;
+    if (guidedAvatarActive()) return; // s2.3 carries this line instead
     if (provenanceMarkDone || provenanceMarkShownRef.current) return;
     // Never stack: yield this mount to the swipe hint if it ran.
     if (swipeHintShownThisMountRef.current || swipeHintActive) return;
@@ -1134,6 +1149,106 @@ export default function TradesScreen({ navigation }: any) {
     track('coach_mark_dismissed', { mark: 'provenance_chip' }, 'Trades');
   }
 
+  // ── Guided tour (The Analyst; onboarding.guided_avatar) ──────────────
+  // Owns the S2/S3/S5/S5.5/S6/S7/S8 beats on this screen. Passive surfaces
+  // (swipe hint, coach marks, prompt card, diff banner, celebration toasts)
+  // are suppressed while he's active — same triggers, same funnel events.
+  const guideActive = useGuide((s) => s.active);
+  const [guidedS3Pending, setGuidedS3Pending] = useState(false);
+  const [guidedS55Done, setGuidedS55Done] = useState<string | null>(null);
+  const guidePromptPos = fitTargetPositions?.[0] ?? 'WR';
+
+  // Spotlight targets The Analyst points at on this screen.
+  const deckWrapRef = useRef<View | null>(null);
+  const chipWrapRef = useRef<View | null>(null);
+  const trioWrapRef = useRef<View | null>(null);
+  useEffect(() => {
+    registerGuideTarget('trades.card-body', deckWrapRef);
+    registerGuideTarget('trades.provenance-chip', chipWrapRef);
+    registerGuideTarget('trades.trio-entry', trioWrapRef);
+    return () => {
+      unregisterGuideTarget('trades.card-body');
+      unregisterGuideTarget('trades.provenance-chip');
+      unregisterGuideTarget('trades.trio-entry');
+    };
+  }, []);
+
+  // S2.wait — computing pose while the first deck generates.
+  useEffect(() => {
+    if (!guidedAvatarActive() || !firstRun) return;
+    if (deck.length === 0 && (job?.status === 'running' || generateMutation.isPending)) {
+      requestGuideStep(GUIDE.s2_wait(job?.opponents_total ?? null));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstRun, deck.length, job?.status, generateMutation.isPending]);
+
+  // Cards arrived: close S2.wait, open S2.1 (the market intro).
+  useEffect(() => {
+    if (deck.length === 0) return;
+    advanceGuideIfActive('s2.wait');
+    if (!guidedAvatarActive() || !firstRun) return;
+    if (!getOnboardingState().guideSeen['s2.1']) {
+      requestGuideStep(GUIDE.s2_1());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deck.length, firstRun]);
+
+  // Chain steps that wait for the bubble slot to free up (one at a time).
+  useEffect(() => {
+    if (guideActive || !guidedAvatarActive()) return;
+    const ob = getOnboardingState();
+    // s2.1 → s2.2 (swipe coaching; advances on the real first swipe)
+    if (ob.guideSeen['s2.1'] && !ob.guideSeen['s2.2'] && !ob.firstSwipeDone && topCard) {
+      requestGuideStep(GUIDE.s2_2());
+      return;
+    }
+    // s3.1 → s3.2 (the pitch, CTAs in the bubble)
+    if (guidedS3Pending) {
+      setGuidedS3Pending(false);
+      requestGuideStep(
+        GUIDE.s3_2(guidePromptPos, !!fitTargetPositions?.length),
+        {
+          onAccept: () => acceptQuicksetPrompt('prompt', guidePromptPos),
+          onDismiss: () => snoozeQuicksetPrompt(),
+        },
+      );
+      return;
+    }
+    // s5 reveal → s5.5 (directed next position; once per session)
+    if (guidedS55Done && !guideS55ShownThisSession) {
+      const done = getOnboardingState().quicksetCompletedPositions;
+      const next = nextUnrankedPosition(done);
+      const donePos = guidedS55Done;
+      setGuidedS55Done(null);
+      if (next) {
+        guideS55ShownThisSession = true;
+        requestGuideStep(GUIDE.s5_5(donePos, next), {
+          onAccept: () => {
+            track('quickset_prompt_accepted', { via: 'guide_next_pos' }, 'Trades');
+            navigation.navigate('Rank', {
+              screen: 'QuickSetTiers',
+              params: { onboardingReturn: true, position: next },
+            });
+          },
+        });
+      }
+      return;
+    }
+    // s6.1 seen → S8 sign-off (tour complete)
+    if (ob.guideSeen['s6.1'] && !ob.guideSeen['s8.1'] && !ob.guideTourCompleted) {
+      requestGuideStep(GUIDE.s8_1());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guideActive, guidedS3Pending, guidedS55Done, topCard]);
+
+  // S8 advanced → tour formally completes (reactive-only mode thereafter).
+  const s81Seen = useOnboardingState((s) => !!s.ob.guideSeen['s8.1']);
+  useEffect(() => {
+    if (s81Seen && !getOnboardingState().guideTourCompleted) {
+      useGuide.getState().completeTour();
+    }
+  }, [s81Seen]);
+
   // ── Onboarding item 7: contextual Quick Set prompt + regen aha ───────
   // Trigger (round-3 ruling D2): first pass after swipe 2, else after 3
   // swipes. One show per session; snooze → one re-offer in session 2 →
@@ -1148,12 +1263,22 @@ export default function TradesScreen({ navigation }: any) {
     const swipes = ob.totalSwipes; // includes the swipe that got us here
     if (!((decision === 'pass' && swipes >= 2) || swipes >= 3)) return;
     quicksetPromptShownThisSession = true;
-    setQuicksetPromptVisible(true);
     patchOnboardingState({
       quicksetPromptShows: ob.quicksetPromptShows + 1,
       ...(ob.quicksetPromptSnoozed ? { quicksetPromptSession2Shown: true } : {}),
     });
     track('quickset_prompt_shown', { show_count: ob.quicksetPromptShows + 1 }, 'Trades');
+    if (guidedAvatarActive()) {
+      // Guided arm: The Analyst delivers the pitch (s3.1 → s3.2 with
+      // in-bubble CTAs) instead of the inline prompt card. Same trigger,
+      // same bookkeeping, same funnel event above.
+      if (!getOnboardingState().guideSeen['s3.1']) {
+        requestGuideStep(GUIDE.s3_1());
+      }
+      setGuidedS3Pending(true);
+      return;
+    }
+    setQuicksetPromptVisible(true);
   }
 
   function snoozeQuicksetPrompt() {
@@ -1167,13 +1292,13 @@ export default function TradesScreen({ navigation }: any) {
     track('quickset_prompt_snoozed', { retired: retire }, 'Trades');
   }
 
-  function acceptQuicksetPrompt(via: 'prompt' | 'chip' = 'prompt') {
+  function acceptQuicksetPrompt(via: 'prompt' | 'chip' = 'prompt', position?: string) {
     setQuicksetPromptVisible(false);
     track('quickset_prompt_accepted', { via }, 'Trades');
     // Unknown routes bubble from the Trades stack up to the tab navigator.
     navigation.navigate('Rank', {
       screen: 'QuickSetTiers',
-      params: { onboardingReturn: true },
+      params: { onboardingReturn: true, ...(position ? { position } : {}) },
     });
   }
 
@@ -1219,6 +1344,16 @@ export default function TradesScreen({ navigation }: any) {
       { position: pending.position, new_trades: fresh },
       'Trades',
     );
+    if (guidedAvatarActive()) {
+      // Guided arm: The Analyst delivers the reveal himself — celebrate on
+      // new trades, honest oops on the null result (script S5.1/S5.0) —
+      // then arms the S5.5 next-position ask via the chain effect.
+      requestGuideStep(
+        fresh > 0 ? GUIDE.s5_1(fresh, pending.position) : GUIDE.s5_0(pending.position),
+      );
+      setGuidedS55Done(pending.position);
+      return;
+    }
     if (fresh > 0) {
       setQuicksetDiffBanner({ position: pending.position, count: fresh });
       if (guidedOn && !getOnboardingState().coachMarksShown.diff_banner) {
@@ -1254,18 +1389,28 @@ export default function TradesScreen({ navigation }: any) {
     exhaustedTrackedRef.current = true;
     track('deck_exhausted_viewed', { deck_size: deck.length }, 'Trades');
     maybeShowQuicksetPrompt('like'); // swipes ≥3 path; pass-trigger n/a here
+    // Guided tour S7 — the trio ramp, pointed at the real CTA below (once
+    // per session; never preempts an active bubble).
+    if (guidedAvatarActive() && !guideS7ShownThisSession) {
+      if (requestGuideStep(GUIDE.s7_1())) guideS7ShownThisSession = true;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deckExhausted]);
 
   // ── Onboarding item 8: save-moment Apple ask (ADR-006 policy) ────────
   // One auto-modal per save-moment class, ever; one ask per session across
   // classes; only for unverified, non-demo, Sleeper-keyed iOS sessions.
+  // Eligibility predicate shared with the guided tour (s6.2 must not run
+  // its setup line for an ask that will never fire).
+  function appleAskEligible(cls: 'like' | 'quickset_save'): boolean {
+    if (!appleSaveOn || appleAskShownThisSession || appleAsk) return false;
+    if (Platform.OS !== 'ios' || isDemo || user?.account_only) return false;
+    if (verification?.user_verified) return false;
+    return !getOnboardingState().applePromptShownFor[cls];
+  }
+
   function maybeAskApple(cls: 'like' | 'quickset_save') {
-    if (!appleSaveOn || appleAskShownThisSession || appleAsk) return;
-    if (Platform.OS !== 'ios' || isDemo || user?.account_only) return;
-    if (verification?.user_verified) return;
-    const ob = getOnboardingState();
-    if (ob.applePromptShownFor[cls]) return;
+    if (!appleAskEligible(cls)) return;
     appleAskShownThisSession = true;
     patchOnboardingState(
       cls === 'like'
@@ -1284,7 +1429,7 @@ export default function TradesScreen({ navigation }: any) {
     setAppleAsk(null);
     if (bound) {
       track('apple_prompt_accepted', { trigger: cls }, 'Trades');
-      setToast({ msg: 'Apple ID linked — your board follows you now.', tone: 'success' });
+      setToast({ msg: 'Apple ID linked — rankings saved to your account.', tone: 'success' });
     } else {
       patchOnboardingState({ applePromptDeclined: true });
       track('apple_prompt_declined', { trigger: cls }, 'Trades');
@@ -1433,6 +1578,15 @@ export default function TradesScreen({ navigation }: any) {
       });
     }
     maybeShowQuicksetPrompt(decision);
+    // Guided tour: the real swipe advances the s2.2 coaching step; s2.3
+    // (the provenance-chip beat) follows immediately in the freed slot.
+    if (guidedAvatarActive()) {
+      advanceGuideIfActive('s2.2');
+      const seen = getOnboardingState().guideSeen;
+      if (seen['s2.2'] && !seen['s2.3']) {
+        requestGuideStep(GUIDE.s2_3());
+      }
+    }
     // Guided layer: any disposition (swipe or button) retires an active
     // swipe hint — the card it pointed at is leaving.
     if (swipeHintActive) dismissSwipeHint();
@@ -1444,14 +1598,36 @@ export default function TradesScreen({ navigation }: any) {
       // first-like celebration beat (guided layer), then the Apple ask —
       // win-then-ask ordering, never two overlapping surfaces.
       setLastLikedCard(topCard);
-      let likeToast = 'Liked';
-      if (guidedOn && !getOnboardingState().celebrationsShown.first_like) {
-        likeToast = 'First target logged. Your front office is open for business.';
-        patchOnboardingState({ celebrationsShown: { first_like: true } });
-        track('celebration_fired', { beat: 'first_like' }, 'Trades');
+      const firstLike = !getOnboardingState().celebrationsShown.first_like;
+      if (guidedAvatarActive()) {
+        // Guided arm: s6.1 celebrate replaces the toast; the honest Apple
+        // setup line (s6.2) precedes the system sheet, which opens after
+        // the auto-step clears (never two overlapping surfaces).
+        if (firstLike) {
+          patchOnboardingState({ celebrationsShown: { first_like: true } });
+          track('celebration_fired', { beat: 'first_like' }, 'Trades');
+          requestGuideStep(GUIDE.s6_1());
+        } else {
+          setToast({ msg: 'Liked', tone: 'success' });
+        }
+        if (!getOnboardingState().guideSeen['s6.2'] && appleAskEligible('like')) {
+          setTimeout(() => {
+            requestGuideStep(GUIDE.s6_2());
+            setTimeout(() => maybeAskApple('like'), 2800);
+          }, firstLike ? 2400 : 0);
+        } else {
+          maybeAskApple('like');
+        }
+      } else {
+        let likeToast = 'Liked';
+        if (guidedOn && firstLike) {
+          likeToast = 'First target logged. Your front office is open for business.';
+          patchOnboardingState({ celebrationsShown: { first_like: true } });
+          track('celebration_fired', { beat: 'first_like' }, 'Trades');
+        }
+        setToast({ msg: likeToast, tone: 'success' });
+        maybeAskApple('like');
       }
-      setToast({ msg: likeToast, tone: 'success' });
-      maybeAskApple('like');
     } else {
       haptics.swipe();
     }
@@ -1981,6 +2157,7 @@ export default function TradesScreen({ navigation }: any) {
           </View>
         ) : null}
         {tradesFirstOn && topCard ? (
+          <View ref={chipWrapRef} collapsable={false} style={{ alignSelf: 'flex-start' }}>
           <ProvenanceChip
             personalized={quicksetPositions.length > 0}
             // Item 7 (F10): the chip is the evergreen Quick Set entry once
@@ -1992,6 +2169,7 @@ export default function TradesScreen({ navigation }: any) {
                 : undefined
             }
           />
+          </View>
         ) : null}
         {quicksetDiffBanner ? (
           <View testID="trades.diff-banner" style={styles.diffBanner}>
@@ -2017,8 +2195,8 @@ export default function TradesScreen({ navigation }: any) {
           <View testID="trades.apple-session2-banner" style={styles.appleBanner}>
             <Pressable style={styles.appleBannerBody} onPress={openSession2Banner} hitSlop={4}>
               <Text style={styles.appleBannerText}>
-                {obTotalSwipes} swipes on this board. Add Apple sign-in to
-                carry it across devices →
+                {obTotalSwipes} swipes on this board. Sign in with Apple to
+                save your rankings to your account →
               </Text>
             </Pressable>
             <Pressable
@@ -2042,7 +2220,7 @@ export default function TradesScreen({ navigation }: any) {
           />
         ) : null}
 
-        <View style={styles.deckWrap}>
+        <View style={styles.deckWrap} ref={deckWrapRef} collapsable={false}>
           {quicksetPromptVisible ? (
             // Item 7 — inline prompt card holds the top-of-deck slot until
             // answered; the deck resumes underneath on either action.
@@ -2245,16 +2423,19 @@ export default function TradesScreen({ navigation }: any) {
                       You've seen every trade. Sharpen your board with quick
                       head-to-heads →
                     </Text>
+                    <View ref={trioWrapRef} collapsable={false} style={{ alignSelf: 'center' }}>
                     <Button
                       testID="trades.trio-entry"
                       label="Quick head-to-heads"
                       variant="secondary"
                       compact
                       onPress={() => {
+                        advanceGuideIfActive('s7.1');
                         track('trio_entry_tapped', { from: 'deck_exhausted' }, 'Trades');
                         navigation.navigate('Rank', { screen: 'Trios' });
                       }}
                     />
+                    </View>
                   </>
                 ) : (
                   <Text style={styles.emptyBody}>
