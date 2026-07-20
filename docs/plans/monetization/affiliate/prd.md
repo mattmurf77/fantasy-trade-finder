@@ -59,6 +59,12 @@ DFS, not sportsbook).
 - Odds feeds, bet tracking, or any RMG functionality in FTF itself.
 - Paid media buying for partners.
 
+**Standing note (teardown 2026-07, both auditors):** **mobile stays ad-free** —
+display ads never ship in the iOS app regardless of this plan's phases
+(`monetize.ads_mobile` stays dark; the ads plan's mobile half is indefinitely
+deferred). The only affiliate presence in the binary remains the DFS info card
+and the neutral site link-out (FR-2/FR-2b).
+
 ## 3. Partner roster
 
 Publisher reward = what FTF earns. **User signup incentive = the headline of the
@@ -160,8 +166,16 @@ Every sportsbook placement MUST render, adjacent to the CTA:
 4. **No "risk-free" language anywhere** — in config copy or code. Lint the
    registry for the string.
 5. **FTC disclosure adjacent to every placement (all categories, DFS included):**
-   "FTF earns a commission if you sign up." Adjacent means visually attached to
-   the placement, not a footer link. "Affiliate link" alone is insufficient.
+   plain language, visually attached to the placement — "FTF earns a commission
+   if you sign up." Adjacent means part of the placement component, not a footer
+   link; "Affiliate link" alone is insufficient (teardown S9 PRD-03 confirms this
+   as the spec, not guidance).
+5b. **Independence statement:** "FTF's rankings, values, and trade suggestions are
+   independent of our partners — partners never influence them." Required verbatim
+   (or closer) on the `web/offers.html` hub header and reachable from every
+   placement (placement footnote or the disclosure line's second sentence). This
+   is the trust firewall between the affiliate layer and the product's core claim;
+   a placement without a path to it does not ship.
 6. **Geo-targeting to legal states**: IP-based on web/extension (mechanism in
    HLD §4); unknown geo fails closed (no gambling-adjacent placement).
 

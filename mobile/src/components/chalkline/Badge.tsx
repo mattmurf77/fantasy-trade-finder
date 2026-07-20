@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { ink, chalk, flare, semantic, radii, type, position, tier } from '../../theme/chalkline';
+import Text from './Text';
 
 interface Props {
   label: string;
@@ -14,7 +15,7 @@ interface Props {
 export default function Badge({ label, color = ink.lineStrong, colorText = false }: Props) {
   return (
     <View style={[styles.badge, { borderColor: color }]}>
-      <Text style={[type.label, styles.text, colorText && { color }]}>{label}</Text>
+      <Text scale="dense" style={[type.label, styles.text, colorText && { color }]}>{label}</Text>
     </View>
   );
 }

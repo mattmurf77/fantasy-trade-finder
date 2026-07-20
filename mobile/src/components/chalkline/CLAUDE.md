@@ -6,8 +6,9 @@ Tokens: `../../theme/chalkline.ts`. Specs: `docs/design/design-system.md` + `doc
 
 | Component | Use |
 |---|---|
+| `Text` | RN Text wrapper — per-style Dynamic Type caps (flag `a11y.text_scaling`; tiers in `theme/chalkline.ts → maxFontScale`). ALL new text goes through this; never hand-write `maxFontSizeMultiplier` |
 | `TickLabel` | Ice tick + uppercase label (section headers, column headers) |
-| `Button` | primary / secondary / like / pass / ghost |
+| `Button` | primary / secondary / like / pass / ghost; `compact`, `icon`, `loading` props; fixed height→minHeight under `a11y.text_scaling`, compact hitSlop under `ux.touch_polish` |
 | `Badge` (+ `PositionBadge`, `TierChalkBadge`, `RookieBadge`, `InjuryBadge`) | Border-in-encode-color + chalk text construction |
 | `Card` | ink-1 surface, hairline, optional position rail, ice selected state |
 | `Meter` (+ `fairnessColor`) | 4px square-end track; fairness/coverage/strength |

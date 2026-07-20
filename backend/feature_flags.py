@@ -205,6 +205,49 @@ FLAG_KEYS: tuple[str, ...] = (
     "marketplace.publisher_sets",  # publisher IAP + subscriber linking (phase 3)
     "marketplace.contributor_sales", # contributor credit-priced sales (phase 4)
     "marketplace.cash_payouts",    # Stripe Connect cash-out rung (phase 5)
+    # ── 2026-07-19 app-teardown remediation (branch teardown-remediation) ──
+    # PRDs live in gitignored app-teardown-review/. All default OFF; the
+    # matching keys are pre-registered (dark) in config/features.json.
+    # Unflagged-by-design exceptions: league-prefs authz fix (security),
+    # first_match/new_match dedup, AASA route (inert without the mobile
+    # entitlement), Apple token revocation on deletion.
+    "ux.sheet_guard",
+    "ux.rank_tab_destination",
+    "ux.retap_active_tab",
+    "ux.deeplink_router_v2",
+    "ux.player_context_menu",
+    "ux.swipe_undo",
+    "ux.toast_v2",
+    "ux.prompt_arbiter",
+    "ux.empty_state_ctas",
+    "ux.help_surface",
+    "ux.board_search",
+    "ux.touch_polish",
+    "ux.whats_new",
+    "ux.outlook_inline_default",
+    "a11y.text_scaling",
+    "a11y.reduce_motion",
+    "visual.chalkline_cleanup",
+    "notif.tz_sync",               # 05-01: adopt device X-User-TZ into notification_prefs.tz
+    "notif.tap_routing_v2",
+    "notif.denial_recovery",
+    "notif.reengagement_default_off",  # 05-04a: reengagement bucket defaults 0 w/o stored pref
+    "notif.honest_winbacks",       # 05-04b: winback_dormant truthful copy + lifetime stop
+    "growth.share_landing",
+    "growth.rating_prompt",
+    "account.data_export",         # 06-02: GET /api/account/export JSON archive
+    "account.sleeper_disconnect",
+    "account.settings_v2",
+    "profiles.user_toggle",
+    "auth.persistent_sessions",
+    "league.rookie_board_entry",
+    # ── QA / testing surfaces ──
+    # Kin of FTF_TEST_MODE, but runtime-flagged (not env-gated) so the
+    # operator's phone can exercise a prod-shaped build. Every consumer must
+    # ALSO require the tester allowlist (experiments.load_tester_allowlist)
+    # so the flag being on never exposes the surface to real users.
+    "testing.stage_users",   # POST/DELETE /api/test-users — synthetic stage-user
+                             # spawner for onboarding QA (backend/test_users.py)
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

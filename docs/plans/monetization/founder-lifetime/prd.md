@@ -8,29 +8,37 @@ Source plan: [Plan C](../../../business/product/2026-07-17-monetization-brainsto
 
 ## 1. Opportunity
 
-One-time **$79 "Founder" lifetime** offer, capped at **100**, TestFlight-exclusive
-window before public launch, then closed forever. Three jobs, in order of value:
+One-time **$99–119 "Founder" lifetime** offer (band; point price = operator decision
+D8 — repriced from $79, teardown 2026-07, see pricing rationale), capped at **100**,
+TestFlight-exclusive window before public launch, then closed forever. Three jobs, in
+order of value:
 
 1. **Willingness-to-pay probe.** The TestFlight list is the owned warm channel the
    research playbook prescribes (warm-list launches convert ~10x cold; founders
-   routinely sell ~50 LTDs to a ~1k list). An optional $79-vs-$59 A/B is the cheapest
+   routinely sell ~50 LTDs to a ~1k list). An optional $119-vs-$99 A/B is the cheapest
    price-elasticity test FTF can run before the public paywall exists.
-2. **Cash now.** 50–100 × $79 ≈ **$4–8k one-time**, ~85% net under the Small Business
-   Program. Peak season (Jul–Aug) is the demand window.
+2. **Cash now.** 50–100 × $99–119 ≈ **$5–12k one-time**, ~85% net under the Small
+   Business Program. Peak season (Jul–Aug) is the demand window.
 3. **Permanent paywall anchor.** On the eventual 3-option paywall (monthly decoy →
    annual hero → lifetime ceiling), a visible lifetime ceiling pushes annual selection
    to 69–74%. After the window closes, the sold-out Founder slot keeps anchoring.
 
-**Pricing rationale (appendix):** folk-wisdom 2–3x annual is the LOW end; RevenueCat
-observes 2x–12x and recommends pricing above expected LTV; Airbridge norm 3–5x;
-comps: Calm 5x, Flighty ~5x, Jumpspeak 3.6x. With intended annual at $20–25 (Plan A
-hero SKU $34.99 introduces later; Season Pass $19.99), **$79 ≈ 3.5–4x** sits in the
-researched band. $49 would only be defensible if annual ≤ $15.
+**Pricing rationale (appendix; repriced 2026-07-19, teardown S9 PRD-03):** folk-wisdom
+2–3x annual is the LOW end; RevenueCat observes 2x–12x and recommends pricing above
+expected LTV; Airbridge norm **3–5x**; comps: Calm 5x, Flighty ~5x, Jumpspeak 3.6x.
+The original **$79 ≈ 3.5–4x claim was computed against an intended $20–25 annual that
+Plan A superseded** — against the shipped $34.99 hero SKU, $79 is only ≈2.3x, below the
+3–5x floor, and the anchor teaches that "forever" costs two seasons. Repriced band:
+**$99 ≈ 2.8x · $109 ≈ 3.1x · $119 ≈ 3.4x** of the $34.99 annual. Recommend **$119**
+(inside the 3–5x band); $99 is the floor of the band, defensible only if warm-list
+price sensitivity demands it (still above folk-wisdom 2–3x, but under the 3x
+institutional floor). Cap-100 and the honest closed-forever window are unchanged —
+they, plus the multiple, are what keep lifetime an offer, not the business model.
 
 **Cannibalization is priced in, not wished away:** ~15–20% of lifetime buyers are
 warm leads who would have converted to annual within 60 days (pull-forward), and
 lifetime-dominant apps monetize roughly half as well as yearly-dominant ($0.19 vs
-$0.36 rev/install at D14). The 3.5–4x multiple + hard cap of 100 + closed-forever
+$0.36 rev/install at D14). The ≈3–3.4x multiple + hard cap of 100 + closed-forever
 window is what keeps lifetime an *offer*, never the business model.
 
 **Scarcity is honest:** real caps carry an 8–32% conversion lift; fake timers burn
@@ -67,8 +75,8 @@ The remaining count shown to users is the real server-side count, always.
 
 - **TestFlight tester (window open):** I open FTF during the founder window and see
   the Founder offer — value-first headline, real remaining count ("31 of 100 left"),
-  $79, what I get forever. I buy in two taps, see "You're Founder #17", and my badge
-  is live on my profile immediately.
+  the window price ($99–119 band, D8), what I get forever. I buy in two taps, see
+  "You're Founder #17", and my badge is live on my profile immediately.
 - **Founder, post-purchase:** My profile and my trade cards carry the Founder badge
   permanently. I appear on the founders wall as #17. When I re-link a different
   Sleeper account, the badge follows my account. I get first access to the give-get
@@ -128,10 +136,11 @@ the SKU while the flag is still ON; flag OFF closes regardless of count. Closed 
 - Deleted accounts drop off the wall (accounts.py delete matrix; LLD §7.3).
 
 ### FR6 — Price A/B (optional, operator decision D1)
-- $79 control vs $59 arm via RevenueCat offerings/experiments (two SKUs, one
-  entitlement; HLD §5). Web rail mirrors the split by tokenized checkout link.
+- $119 control vs $99 arm (both inside the repriced band — never test below $99) via
+  RevenueCat offerings/experiments (two SKUs, one entitlement; HLD §5). Web rail
+  mirrors the split by tokenized checkout link.
 - Both arms receive identical perpetual entitlement + badge. Cap counts both arms.
-- If declined, ship $79 single-price.
+- If declined, ship the single D8 point price (recommend $119).
 
 ### FR7 — Sub-overlap prompt
 Projector flags `active sub + founder` overlap (foundation projector extension);
@@ -188,22 +197,23 @@ manual grants; ASC paid-apps agreement + SBP enrollment; Stripe checkout (web ra
 
 | # | Risk | Mitigation |
 |---|---|---|
-| R1 | **Pull-forward cannibalization** — best 15–20% of would-be annual subs buy once | Priced in at 3.5–4x; hard cap 100; window closes forever; track founder share of paid |
+| R1 | **Pull-forward cannibalization** — best 15–20% of would-be annual subs buy once | Priced at ≈3–3.4x the shipped annual (2026-07 reprice); hard cap 100; window closes forever; track founder share of paid |
 | R2 | **Mispricing permanence** — lifetime holders never see price increases; every future feature ships to them free | Cap bounds total exposure to ≤100 users; "everything FTF ever ships" is the explicit promise — don't ship a carve-out later (trust) |
 | R3 | **App Review of a capped SKU** — server-hidden SKU + external purchase link scrutiny | Hiding via server paywall config is standard; SKU stays restorable (3.1.1); US external-link entitlement rules currently allow the Stripe link but SCOTUS risk ~mid-2027 — don't hard-depend, IAP rail is primary at launch |
-| R4 | **Warm list too small/cold** (riskiest assumption in Plan C) | The offer *is* the cheapest WTP test; 25 sales still = ~$1.7k + calibration data; cap unmet ≠ failure, close honestly |
+| R4 | **Warm list too small/cold** (riskiest assumption in Plan C) | The offer *is* the cheapest WTP test (plus the Van Westendorp pass in the Pro rollout, step 5); 25 sales still = ~$2.5–3k + calibration data; cap unmet ≠ failure, close honestly |
 | R5 | **TestFlight sandbox** — pre-launch IAP can't take real money | Stripe web rail during the window (FR3); if operator rejects link-out, shift window to launch day with TestFlight-list early access instead (D3) |
-| R6 | **A/B fairness blowback** — $79 buyer learns leaguemate paid $59 | Short A/B window, or decline D1; never A/B after public visibility grows |
+| R6 | **A/B fairness blowback** — $119 buyer learns leaguemate paid $99 | Short A/B window, or decline D1; never A/B after public visibility grows |
 | R7 | **Refund gaming at cap** (buy→refund→slot churn) | Refund reopens the slot naturally (honest count); volume too small to game profitably; operator can close window anytime |
 
 ## 8. Operator decisions
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D1 | Run the $79/$59 A/B? | Yes if TestFlight list ≥200; else ship $79 flat |
+| D1 | Run the $119/$99 A/B? | Yes if TestFlight list ≥200; else ship the D8 point price flat |
 | D2 | Cap size | 100 ("first 100 Founders") |
 | D3 | Window dates | Open early Aug; close at public launch or cap, whichever first |
 | D4 | Do manual comps consume cap slots? | No — comps are additive recognition, purchases fill the 100 |
 | D5 | Wall listing opt-in vs opt-out | Opt-in at purchase (privacy-safe default) |
 | D6 | Anchor-mode display after close | Show sold-out Founder row on the paywall ("100/100 — closed") for anchoring + social proof |
 | D7 | Refund policy at cap | Refund reopens the slot while window open; moot after close |
+| D8 | Point price within the $99–119 band (2026-07 teardown reprice) | $119 (≈3.4x annual — inside the 3–5x researched band); take $99 only on strong warm-list price-sensitivity signal (Van Westendorp readout, Pro rollout step 5) |

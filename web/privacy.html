@@ -1,7 +1,11 @@
 <!DOCTYPE html>
-<!-- Template — pending legal review. Drafted 2026-07-11 from code audit
-     (backend/database.py, backend/server.py, backend/sleeper_write.py,
-     mobile/src/observability/sentry.ts). Placeholders: support contact. -->
+<!-- Drafted 2026-07-11 from code audit (backend/database.py, backend/server.py,
+     backend/sleeper_write.py, mobile/src/observability/sentry.ts); §6 + retention
+     re-synced to backend/accounts.py delete_user_data matrix on 2026-07-19.
+     OPERATOR TODO before public launch:
+       1. Replace "the support contact on our App Store page" with a concrete
+          support contact (email or form URL) in §6 and §10.
+       2. Have a lawyer review this document (it has not had legal review). -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -59,7 +63,7 @@
 <body>
   <div class="wrap">
     <h1>Privacy Policy</h1>
-    <p class="updated">Effective date: July 17, 2026</p>
+    <p class="updated">Effective date: July 19, 2026</p>
 
     <p>
       Fantasy Trade Finder ("we", "us", or "the Service") operates
@@ -78,7 +82,10 @@
         username, display name, avatar), your fantasy leagues for the current
         season, league rosters, draft-pick assets, and the usernames and display
         names of your leaguemates. All of this is read from Sleeper's public,
-        read-only API — signing in never involves a password.
+        read-only API — signing in never involves a password. Because username
+        entry alone isn't authentication, one honest caveat: until you verify
+        with your Sleeper login, anyone who knows your username could open a
+        session that sees this board — verifying locks it to you.
       </li>
       <li>
         <strong>Sign-in identity (Apple or Google).</strong> If you sign in with
@@ -114,7 +121,12 @@
         about you or your device. If we run product experiments (showing
         different versions of a feature to different users), the variant you
         were shown is recorded with these events so we can tell whether the
-        change helped.
+        change helped. The event record also has room for a coarse two-letter
+        country code (e.g. "US") supplied by a CDN header; we never derive it
+        from your IP address ourselves, and because the service currently runs
+        without such a CDN, this field is empty today. If we put a CDN in
+        front of the service, usage events would start carrying that
+        country-level (never more precise) code.
       </li>
       <li>
         <strong>In-app feedback.</strong> If you submit feedback we store the
@@ -139,8 +151,9 @@
         environment, never in the database, and the token is never logged or
         returned to any client). This token is a full-account Sleeper credential:
         we use it only to submit or withdraw the trade proposals you explicitly
-        ask us to send. You can disconnect at any time in the app, which deletes
-        the stored token; it also expires on Sleeper's schedule (about one year).
+        ask us to send. You can disconnect at any time in the app's Settings
+        ("Disconnect Sleeper sending"), which deletes the stored token
+        immediately; it also expires on Sleeper's schedule (about one year).
       </li>
       <li>
         <strong>Crash and performance data (Sentry).</strong> The mobile app uses
@@ -165,9 +178,9 @@
     <h2>3. How we use your data</h2>
     <ul>
       <li>To run the product: build your rankings, generate trade suggestions, match you with leaguemates on mutually liked trades, show value trends, and send the notifications you opted into.</li>
-      <li><strong>Rankings and trade discovery.</strong> Trade suggestions work by comparing your player values with your leaguemates' values to find trades both sides should like. Your raw ranking list is never displayed to other users, but it does influence which trade suggestions your leaguemates see. When you "like" a trade, the other manager may see an interest indicator on the mirrored trade, and a mutual like creates a match visible to both of you.</li>
+      <li><strong>Rankings and trade discovery.</strong> Trade suggestions work by comparing your player values with your leaguemates' values to find trades both sides should like. Your raw ranking list is never displayed to other users, but it does influence which trade suggestions your leaguemates see. When you "like" a trade, the other manager may see an interest indicator on the mirrored trade, and a mutual like creates a match visible to both of you. Leaguemates can also see an aggregate "contrarian score" beside your username — a single number for how far your rankings deviate from the league consensus per position — never which players you rank high or low.</li>
       <li><strong>AI-assisted matchup selection.</strong> To pick informative ranking matchups, we may send player names, positions, and anonymous rating signals to Anthropic's Claude API. These requests contain no account identifiers — no username, user ID, or league name.</li>
-      <li><strong>Sharing features.</strong> Share images and (if the feature is enabled) public profile pages contain only content you created and choose to share; they never expose private league data or other users' rankings.</li>
+      <li><strong>Sharing features.</strong> Share images contain only content you created and choose to share. If the public-profile feature is enabled, your profile page (at /u/your-username) would show your display name, avatar, league count, your saved tier snapshot, and your top over/under-consensus takes; it never exposes private league data or other users' rankings. This feature is currently off.</li>
       <li>To debug and improve the Service (crash reports, feedback, activity events).</li>
     </ul>
 
@@ -186,7 +199,7 @@
     <ul>
       <li><strong>Account and league data</strong> (profile, leagues, rosters) is kept while your account is active so the Service works across sessions.</li>
       <li><strong>Rankings, rating history, and daily consensus value snapshots</strong> are retained indefinitely. This is deliberate: historical values power the trends, history charts, and season-recap features, and once a day passes those numbers cannot be reconstructed.</li>
-      <li><strong>Ranking comparisons, trade decisions, activity and usage events</strong> are append-only logs kept for product function and quality analysis. On account deletion these are anonymized rather than erased — see section 6.</li>
+      <li><strong>Ranking comparisons, trade decisions, activity and usage events</strong> are append-only logs kept for product function and quality analysis. On account deletion, the records keyed to your account are deleted outright; a small set of shared records is anonymized instead so the other manager's history stays intact — see section 6.</li>
       <li><strong>Feedback</strong> is kept through its triage lifecycle (new → planned/in&nbsp;progress → fixed/shipped or declined) and retained as a product record afterward.</li>
       <li><strong>Push tokens</strong> are kept until you sign out on that device, disable notifications, or your data is deleted.</li>
       <li><strong>Sleeper connection tokens</strong> are kept encrypted until you disconnect in the app (immediate deletion), the token expires (about one year), or your data is deleted.</li>
@@ -196,9 +209,26 @@
 
     <h2>6. Deletion and your choices</h2>
     <ul>
-      <li><strong>Delete your data:</strong> request deletion through the in-app feedback button (or the support contact on our App Store listing). Within 7 days we will remove your user record, rankings, push tokens, and any stored Sleeper connection token, and <strong>anonymize</strong> your activity and usage events: every identifier on those records is replaced with a random, irreversible token, so aggregate statistics (e.g. "how many users completed setup that week") survive but nothing links them to you. The app also clears its local analytics queue when your account is deleted.</li>
+      <li><strong>Delete your account:</strong> go to Settings &rarr; Delete
+        account in the app. Deletion is immediate and self-serve — no waiting
+        period and no support request needed. It removes your user record,
+        rankings and rating history, ranking comparisons, trade decisions,
+        preferences, notifications and push tokens, activity and usage events,
+        and any stored Sleeper connection token. A small set of
+        <em>shared</em> records is anonymized instead of erased so the other
+        manager's history stays intact: trade matches keep the other side's
+        record with your identifier replaced by a deleted-user placeholder,
+        references to you on other users' trade decks and "bad trade" flags
+        are cleared, and any feedback you submitted is kept as an anonymous
+        product record. The app also clears its local analytics queue when
+        your account is deleted. If you can't use the in-app path, you can
+        still request deletion through the in-app feedback button or the
+        support contact on our App Store listing.</li>
+      <li><strong>Export your data:</strong> you can download a copy of the
+        data we hold about you (profile, rankings, decisions, events) from
+        the app's Settings; it's returned as a machine-readable file.</li>
       <li><strong>Device identifier after deletion:</strong> the random install identifier lives in your device's secure storage, which apps cannot fully erase; it persists on the device even after account deletion (and survives reinstalls). It links to nothing on our servers after anonymization — if you sign up again from the same device, our systems see a new user on a previously seen device, nothing more. Erasing your device removes it entirely.</li>
-      <li><strong>Disconnect Sleeper sending:</strong> in the app at any time — the stored token is deleted immediately.</li>
+      <li><strong>Disconnect Sleeper sending:</strong> in the app's Settings at any time — the stored token is deleted immediately.</li>
       <li><strong>Push notifications:</strong> can be turned off per-category in Settings or entirely in your device settings.</li>
       <li><strong>Sign out:</strong> ends your session on that device and clears the Sentry account tag.</li>
     </ul>

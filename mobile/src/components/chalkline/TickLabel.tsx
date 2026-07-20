@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { ice, type, space } from '../../theme/chalkline';
+import Text from './Text';
 
 interface Props {
   children: string;
@@ -13,7 +14,7 @@ export default function TickLabel({ children, color = ice.base }: Props) {
   return (
     <View style={styles.row}>
       <View style={[styles.tick, { backgroundColor: color }]} />
-      <Text style={type.label}>{children}</Text>
+      <Text scale="dense" style={type.label}>{children}</Text>
     </View>
   );
 }

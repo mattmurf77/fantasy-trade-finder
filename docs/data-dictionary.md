@@ -518,9 +518,9 @@ Per-user push notification preferences. Buckets (`trade_matches` / `weekly_diges
 | `user_id` | str PK | |
 | `trade_matches` | int | 0/1, default 1 |
 | `weekly_digest` | int | 0/1, default 1 |
-| `reengagement` | int | 0/1, default 1 |
+| `reengagement` | int | 0/1, default 1 — served/persisted as **0** for users with no stored pref while `notif.reengagement_default_off` is on (teardown 05-04a: primer consent covers only transactional matches) |
 | `quiet_hours_enabled` | int | 0/1, default 1 |
-| `tz` | str | IANA, e.g. `America/New_York` |
+| `tz` | str | IANA, e.g. `America/New_York` (the default). While `notif.tz_sync` is on, session-init/register-device adopt the device's `X-User-TZ` header when the stored value is still the default and the header is a valid IANA tz; an explicit non-default value is never overwritten (teardown 05-01) |
 | `updated_at` | str | |
 
 ---

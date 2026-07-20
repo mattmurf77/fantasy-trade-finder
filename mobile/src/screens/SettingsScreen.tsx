@@ -66,6 +66,8 @@ export default function SettingsScreen({ navigation }: any) {
   // #130 — ESPN-link CTA row (flag `espn.link`): routes to the LeaguePicker
   // with the EspnLinkSheet auto-opened (the one place the import flow lives).
   const espnLinkEnabled = useFlag('espn.link');
+  // Operator QA tool (server also allowlist-gates the spawn route).
+  const stageUsersEnabled = useFlag('testing.stage_users');
   // Zero-auth platforms (MFL / Fleaflicker) share one CTA → the LeaguePicker
   // platform chooser, where each flag-gated link button lives.
   const mflLinkEnabled = useFlag('mfl.link');
@@ -547,6 +549,21 @@ export default function SettingsScreen({ navigation }: any) {
           </View>
           <Icon name="chevron-right" color={chalk.dim} size={16} />
         </Pressable>
+        {stageUsersEnabled ? (
+          <Pressable
+            testID="settings.test-stages"
+            onPress={() => navigation.navigate?.('TestStages')}
+            style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowKey}>Test stages</Text>
+              <Text style={styles.rowSub}>
+                Spawn a synthetic user at any adoption stage (operator QA).
+              </Text>
+            </View>
+            <Icon name="chevron-right" color={chalk.dim} size={16} />
+          </Pressable>
+        ) : null}
 
         <View style={styles.section}>
           <TickLabel>Account</TickLabel>

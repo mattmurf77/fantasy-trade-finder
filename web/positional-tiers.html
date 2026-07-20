@@ -4,28 +4,53 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Positional Tiers — Fantasy Trade Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:       #0f1117;
-      --surface:  #1a1d27;
-      --border:   #2a2d3a;
-      --text:     #e8eaf0;
-      --muted:    #7a7f96;
-      --accent:   #4f7cff;
-      --green:    #22c55e;
-      --red:      #ef4444;
-      --qb: #f97316;
-      --rb: #22c55e;
-      --wr: #3b82f6;
-      --te: #a855f7;
+      /* Chalkline tokens (docs/design/design-system.md) */
+      --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25; --ink-3: #232833;
+      --line: #262C35; --line-strong: #3D4654;
+      --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
+      --ice: #56D9EC; --ice-press: #3FC2D6; --on-ice: #071013;
+      --flare: #F0508C;
+      --pos: #22C55E; --neg: #EF4444; --warn: #F59E0B;
+      --qb: #F97316; --rb: #22C55E; --wr: #3B82F6; --te: #A855F7;
+      --r-xs: 2px; --r-sm: 4px; --r-md: 8px; --r-pill: 999px;
+      --shadow-sheet: 0 12px 32px rgba(0,0,0,0.55);
+      --font-ui: 'Archivo', sans-serif;
+      --font-display: 'Barlow Condensed', sans-serif;
+      --font-data: 'IBM Plex Mono', monospace;
+      /* Legacy aliases for the rules below */
+      --bg: var(--ink-0); --surface: var(--ink-1); --border: var(--line);
+      --text: var(--chalk); --muted: var(--chalk-dim);
+      --accent: var(--ice); --green: var(--pos); --red: var(--neg);
     }
+
+    :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+    .icon {
+      width: 20px; height: 20px;
+      stroke: currentColor; stroke-width: 1.75; fill: none;
+      stroke-linecap: square; flex-shrink: 0; vertical-align: -4px;
+    }
+    .icon-sm { width: 16px; height: 16px; vertical-align: -3px; }
+    .icon-xs { width: 12px; height: 12px; vertical-align: -1px; }
 
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-family: var(--font-ui);
       min-height: 100vh;
       display: flex;
       flex-direction: column;
@@ -104,7 +129,7 @@
     .pos-tab {
       padding: 10px 18px;
       min-height: 44px;
-      border-radius: 8px;
+      border-radius: var(--r-md);
       font-size: 13px;
       font-weight: 600;
       border: 1px solid var(--border);
@@ -113,13 +138,13 @@
       cursor: pointer;
       transition: all 0.15s;
     }
-    .pos-tab:hover { border-color: #3a3d4a; color: var(--text); }
-    .pos-tab.active { border-color: var(--accent); color: var(--accent); background: rgba(79,124,255,0.08); }
+    .pos-tab:hover { border-color: var(--line-strong); color: var(--text); }
+    .pos-tab.active { border-color: var(--accent); color: var(--accent); background: var(--ink-3); }
 
-    .pos-tab.active[data-pos="QB"] { border-color: var(--qb); color: var(--qb); background: rgba(249,115,22,0.08); }
-    .pos-tab.active[data-pos="RB"] { border-color: var(--rb); color: var(--rb); background: rgba(34,197,94,0.08); }
-    .pos-tab.active[data-pos="WR"] { border-color: var(--wr); color: var(--wr); background: rgba(59,130,246,0.08); }
-    .pos-tab.active[data-pos="TE"] { border-color: var(--te); color: var(--te); background: rgba(168,85,247,0.08); }
+    .pos-tab.active[data-pos="QB"] { border-color: var(--qb); color: var(--qb); background: transparent; }
+    .pos-tab.active[data-pos="RB"] { border-color: var(--rb); color: var(--rb); background: transparent; }
+    .pos-tab.active[data-pos="WR"] { border-color: var(--wr); color: var(--wr); background: transparent; }
+    .pos-tab.active[data-pos="TE"] { border-color: var(--te); color: var(--te); background: transparent; }
 
     /* ── Progress indicator ── */
     .progress-row {
@@ -136,14 +161,14 @@
       flex: 1;
       height: 6px;
       background: var(--border);
-      border-radius: 3px;
+      border-radius: var(--r-xs);
       overflow: hidden;
     }
 
     .progress-fill {
       height: 100%;
       background: var(--accent);
-      border-radius: 3px;
+      border-radius: var(--r-xs);
       transition: width 0.4s ease;
     }
 
@@ -178,7 +203,7 @@
     .tier-row {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 14px;
+      border-radius: var(--r-md);
       display: flex;
       align-items: stretch;
       min-height: 72px;
@@ -187,7 +212,7 @@
     }
     .tier-row.drag-over {
       border-color: var(--accent);
-      box-shadow: 0 0 16px rgba(79,124,255,0.15);
+      
     }
 
     .tier-label-area {
@@ -244,7 +269,7 @@
     .tier-row[data-tier="fourth"]  .tier-label-area { background: rgba(163,230,53,0.06); }
     .tier-row[data-tier="fourth"]  .tier-label-name { color: #a3e635; }
 
-    .tier-row[data-tier="waivers"] .tier-label-area { background: rgba(122,127,150,0.03); }
+    .tier-row[data-tier="waivers"] .tier-label-area { background: var(--line-strong); }
     .tier-row[data-tier="waivers"] .tier-label-name { color: #7a7f96; }
 
     /* Drop zone within each tier row */
@@ -303,7 +328,7 @@
       width: 100%;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 14px;
+      border-radius: var(--r-md);
       display: flex;
       flex-direction: column;
       max-height: 520px;
@@ -328,7 +353,7 @@
       justify-content: center;
       padding: 10px 8px;
       border-right: 1px solid var(--border);
-      background: rgba(255,255,255,0.02);
+      background: var(--ink-2);
       user-select: none;
     }
 
@@ -349,13 +374,12 @@
 
     .pool-search {
       width: 100%;
-      background: rgba(255,255,255,0.05);
+      background: var(--ink-2);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: var(--r-md);
       padding: 10px 12px;
       color: var(--text);
       font-size: 13px;
-      outline: none;
       transition: border-color 0.15s;
     }
     .pool-search:focus { border-color: var(--accent); }
@@ -385,8 +409,8 @@
       align-items: center;
       gap: 8px;
       padding: 7px 12px;
-      border-radius: 10px;
-      background: rgba(255,255,255,0.04);
+      border-radius: var(--r-sm);
+      background: var(--ink-2);
       border: 1px solid var(--border);
       cursor: grab;
       transition: border-color 0.15s, background 0.15s, transform 0.1s, opacity 0.15s;
@@ -395,8 +419,8 @@
       white-space: nowrap;
     }
     .player-chip:hover {
-      border-color: #3a3d4a;
-      background: rgba(255,255,255,0.07);
+      border-color: var(--line-strong);
+      background: var(--ink-2);
     }
     .player-chip:active { cursor: grabbing; }
     .player-chip.dragging {
@@ -409,13 +433,13 @@
       font-weight: 700;
       letter-spacing: 0.5px;
       padding: 2px 5px;
-      border-radius: 4px;
+      border-radius: var(--r-sm);
       flex-shrink: 0;
     }
-    .chip-pos.qb { background: rgba(249,115,22,0.15); color: var(--qb); }
-    .chip-pos.rb { background: rgba(34,197,94,0.15);  color: var(--rb); }
-    .chip-pos.wr { background: rgba(59,130,246,0.15); color: var(--wr); }
-    .chip-pos.te { background: rgba(168,85,247,0.15); color: var(--te); }
+    .chip-pos.qb { background: transparent; color: var(--qb); }
+    .chip-pos.rb { background: transparent;  color: var(--rb); }
+    .chip-pos.wr { background: transparent; color: var(--wr); }
+    .chip-pos.te { background: transparent; color: var(--te); }
 
     .chip-name {
       font-weight: 600;
@@ -432,9 +456,9 @@
       font-size: 10px;
       font-weight: 700;
       color: #555a6e;
-      background: rgba(255,255,255,0.04);
+      background: var(--ink-2);
       padding: 1px 5px;
-      border-radius: 4px;
+      border-radius: var(--r-sm);
       flex-shrink: 0;
     }
 
@@ -442,7 +466,7 @@
       width: 18px;
       height: 18px;
       border-radius: 50%;
-      background: rgba(239,68,68,0.12);
+      background: transparent;
       color: var(--red);
       border: none;
       cursor: pointer;
@@ -455,7 +479,7 @@
       line-height: 1;
       padding: 0;
     }
-    .chip-remove:hover { background: rgba(239,68,68,0.25); }
+    .chip-remove:hover { background: var(--neg); }
     .tier-drop-zone .player-chip .chip-remove { display: flex; }
 
     /* Tier chips fill the column width so the within-tier vertical order
@@ -507,8 +531,8 @@
     .chip-arrow-btn {
       width: 28px;
       height: 28px;
-      border-radius: 6px;
-      background: rgba(79,124,255,0.1);
+      border-radius: var(--r-sm);
+      background: var(--ink-3);
       color: var(--accent);
       border: none;
       cursor: pointer;
@@ -522,7 +546,7 @@
     @media (pointer: coarse) {
       .chip-arrow-btn { width: 36px; height: 36px; font-size: 13px; }
     }
-    .chip-arrow-btn:hover { background: rgba(79,124,255,0.22); }
+    .chip-arrow-btn:hover { background: var(--ink-3); }
 
     /* ── Pool player card (larger, with tier-assign tiles) ── */
     .pool-list .player-chip {
@@ -533,7 +557,7 @@
       flex: 1 1 170px;   /* grow to fill row, shrink allowed, min basis 170px */
       max-width: 240px;  /* cap so they don't get absurdly wide */
       min-width: 0;
-      border-radius: 12px;
+      border-radius: var(--r-md);
       overflow: hidden;
     }
     .pool-chip-top {
@@ -564,7 +588,7 @@
       min-width: 0;
       min-height: 32px;
       padding: 6px 2px;
-      border-radius: 5px;
+      border-radius: var(--r-sm);
       border: 1px solid;
       font-size: 9px;
       font-weight: 700;
@@ -588,7 +612,7 @@
     .tier-assign-btn[data-tier="second"]  { border-color: rgba(56,189,248,0.3); color: #38bdf8; background: rgba(56,189,248,0.06); }
     .tier-assign-btn[data-tier="third"]   { border-color: rgba(244,114,182,0.3); color: #f472b6; background: rgba(244,114,182,0.06); }
     .tier-assign-btn[data-tier="fourth"]  { border-color: rgba(163,230,53,0.3); color: #a3e635; background: rgba(163,230,53,0.06); }
-    .tier-assign-btn[data-tier="waivers"] { border-color: rgba(122,127,150,0.3); color: #7a7f96; background: rgba(122,127,150,0.04); }
+    .tier-assign-btn[data-tier="waivers"] { border-color: var(--line-strong); color: #7a7f96; background: var(--line-strong); }
     /* Hover — intensify */
     .tier-assign-btn[data-tier="firsts_4plus"]:hover { background: rgba(248,113,113,0.18); border-color: #f87171; }
     .tier-assign-btn[data-tier="firsts_3"]:hover { background: rgba(232,121,249,0.18); border-color: #e879f9; }
@@ -597,7 +621,7 @@
     .tier-assign-btn[data-tier="second"]:hover   { background: rgba(56,189,248,0.18); border-color: #38bdf8; }
     .tier-assign-btn[data-tier="third"]:hover    { background: rgba(244,114,182,0.18); border-color: #f472b6; }
     .tier-assign-btn[data-tier="fourth"]:hover   { background: rgba(163,230,53,0.18); border-color: #a3e635; }
-    .tier-assign-btn[data-tier="waivers"]:hover  { background: rgba(122,127,150,0.14); border-color: #7a7f96; }
+    .tier-assign-btn[data-tier="waivers"]:hover  { background: var(--line-strong); border-color: #7a7f96; }
 
     /* ── Tier legend/key — sits in the pool-header to the right of the title ── */
     .tier-legend {
@@ -615,10 +639,9 @@
       justify-content: flex-start;
       align-items: center;
       padding: 10px 14px;
-      border-radius: 10px;
-      background: linear-gradient(135deg, #1e2a4a 0%, #2a1e3a 50%, #3a2a1a 100%);
-      border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: 0 2px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);
+      border-radius: var(--r-md);
+      background: var(--ink-2);
+      border: 1px solid var(--line);
     }
     .tier-legend-item {
       display: inline-flex;
@@ -630,24 +653,23 @@
       align-items: center;
       justify-content: center;
       padding: 5px 12px;
-      border-radius: 7px;
+      border-radius: var(--r-sm);
       font-size: 11px;
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.4px;
-      border: 1.5px solid;
-      text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+      border: 1px solid;
     }
-    .tier-legend-swatch[data-tier="firsts_4plus"] { border-color: #f87171; color: #fca5a5; background: rgba(248,113,113,0.2); box-shadow: 0 0 8px rgba(248,113,113,0.25); }
-    .tier-legend-swatch[data-tier="firsts_3"] { border-color: #e879f9; color: #f0abfc; background: rgba(232,121,249,0.2); box-shadow: 0 0 8px rgba(232,121,249,0.25); }
-    .tier-legend-swatch[data-tier="firsts_2"] { border-color: #fbbf24; color: #fcd34d; background: rgba(251,191,36,0.2); box-shadow: 0 0 8px rgba(251,191,36,0.25); }
-    .tier-legend-swatch[data-tier="first_1"] { border-color: #2dd4bf; color: #5eead4; background: rgba(45,212,191,0.2); box-shadow: 0 0 8px rgba(45,212,191,0.25); }
-    .tier-legend-swatch[data-tier="second"]  { border-color: #38bdf8; color: #7dd3fc; background: rgba(56,189,248,0.2); box-shadow: 0 0 8px rgba(56,189,248,0.25); }
-    .tier-legend-swatch[data-tier="third"]   { border-color: #f472b6; color: #f9a8d4; background: rgba(244,114,182,0.2); box-shadow: 0 0 8px rgba(244,114,182,0.25); }
-    .tier-legend-swatch[data-tier="fourth"]  { border-color: #a3e635; color: #bef264; background: rgba(163,230,53,0.2); box-shadow: 0 0 8px rgba(163,230,53,0.25); }
-    .tier-legend-swatch[data-tier="waivers"] { border-color: #7a7f96; color: #9ca3af; background: rgba(122,127,150,0.2); box-shadow: 0 0 8px rgba(122,127,150,0.15); }
+    .tier-legend-swatch[data-tier="firsts_4plus"] { border-color: #f87171; color: #f87171; }
+    .tier-legend-swatch[data-tier="firsts_3"] { border-color: #e879f9; color: #e879f9; }
+    .tier-legend-swatch[data-tier="firsts_2"] { border-color: #fbbf24; color: #fbbf24; }
+    .tier-legend-swatch[data-tier="first_1"] { border-color: #2dd4bf; color: #2dd4bf; }
+    .tier-legend-swatch[data-tier="second"]  { border-color: #38bdf8; color: #38bdf8; }
+    .tier-legend-swatch[data-tier="third"]   { border-color: #f472b6; color: #f472b6; }
+    .tier-legend-swatch[data-tier="fourth"]  { border-color: #a3e635; color: #a3e635; }
+    .tier-legend-swatch[data-tier="waivers"] { border-color: #7a7f96; color: #7a7f96; }
     .tier-legend-desc {
-      color: rgba(255,255,255,0.6);
+      color: var(--chalk-dim);
       font-size: 11px;
       font-weight: 500;
     }
@@ -659,7 +681,7 @@
       z-index: 9999;
       opacity: 0.92;
       transform: rotate(2deg) scale(1.04);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+      box-shadow: var(--shadow-sheet);
     }
 
     /* ── Floating autosave status + reset — no manual save needed ── */
@@ -678,7 +700,7 @@
       align-items: center;
       gap: 6px;
       padding: 8px 14px;
-      border-radius: 20px;
+      border-radius: var(--r-md);
       font-size: 12px;
       font-weight: 700;
       opacity: 0;
@@ -695,18 +717,18 @@
     }
     .autosave-pill.pending,
     .autosave-pill.saving {
-      background: rgba(79,124,255,0.15);
-      border-color: rgba(79,124,255,0.3);
+      background: var(--ink-3);
+      border-color: var(--line-strong);
       color: var(--accent);
     }
     .autosave-pill.saved {
-      background: rgba(34,197,94,0.15);
-      border-color: rgba(34,197,94,0.3);
+      background: transparent;
+      border-color: var(--pos);
       color: var(--green);
     }
     .autosave-pill.error {
-      background: rgba(239,68,68,0.15);
-      border-color: rgba(239,68,68,0.3);
+      background: transparent;
+      border-color: var(--neg);
       color: var(--red);
     }
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
@@ -715,7 +737,7 @@
       pointer-events: auto;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 20px;
+      border-radius: var(--r-md);
       color: var(--muted);
       cursor: pointer;
       font-size: 12px;
@@ -737,9 +759,9 @@
       /* Filled accent-tinted background + bright text — was transparent
          + muted-grey text, which was nearly invisible against the
          tier-label-area's tier-color tint (per user feedback). */
-      background: rgba(79, 124, 255, 0.18);
+      background: var(--ink-3);
       border: 1px solid rgba(79, 124, 255, 0.55);
-      border-radius: 12px;
+      border-radius: var(--r-md);
       color: var(--text);
       cursor: pointer;
       font-size: 10px;
@@ -751,7 +773,7 @@
       user-select: none;
     }
     .tier-multiselect-btn:hover {
-      background: rgba(79, 124, 255, 0.32);
+      background: var(--line-strong);
       border-color: var(--accent);
       color: #fff;
     }
@@ -761,8 +783,8 @@
     .tier-multiselect-btn.active {
       background: var(--accent);
       border-color: var(--accent);
-      color: #fff;
-      box-shadow: 0 0 0 2px rgba(79, 124, 255, 0.35);
+      color: var(--on-ice);
+      border-color: var(--ice);
     }
 
     /* "Copy tier list from <other format>" button — sits next to the
@@ -776,7 +798,7 @@
       padding: 7px 12px;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 18px;
+      border-radius: var(--r-md);
       color: var(--text);
       cursor: pointer;
       font-size: 12px;
@@ -806,7 +828,7 @@
     /* Chip is currently in the selection set. Highlight is intentionally
        loud so a fast scan of the tier shows the group at a glance. */
     .player-chip.multi-selected {
-      background: rgba(79,124,255,0.18);
+      background: var(--ink-3);
       box-shadow: 0 0 0 2px var(--accent) inset;
     }
 
@@ -826,9 +848,8 @@
       padding: 8px 12px;
       background: var(--surface);
       border: 1px solid var(--accent);
-      border-radius: 24px;
-      box-shadow: 0 6px 24px rgba(0,0,0,0.45),
-                  0 0 0 4px rgba(79,124,255,0.12);
+      border-radius: var(--r-md);
+      box-shadow: var(--shadow-sheet);
       opacity: 0;
       transition: opacity 0.18s, transform 0.18s;
     }
@@ -848,8 +869,8 @@
     .multiselect-arrow-btn {
       background: var(--accent);
       border: none;
-      border-radius: 18px;
-      color: #fff;
+      border-radius: var(--r-md);
+      color: var(--on-ice);
       cursor: pointer;
       font-size: 16px;
       font-weight: 700;
@@ -866,7 +887,7 @@
     .multiselect-clear-btn {
       background: transparent;
       border: 1px solid var(--border);
-      border-radius: 16px;
+      border-radius: var(--r-md);
       color: var(--muted);
       cursor: pointer;
       font-size: 11px;
@@ -889,13 +910,13 @@
       transform: translateX(-50%) translateY(-80px);
       z-index: 600;
       padding: 12px 20px;
-      border-radius: 10px;
+      border-radius: var(--r-sm);
       background: var(--surface);
       border: 1px solid var(--border);
       color: var(--text);
       font-size: 13px;
       font-weight: 500;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      box-shadow: var(--shadow-sheet);
       opacity: 0;
       transition: opacity 0.25s, transform 0.25s;
       pointer-events: none;
@@ -906,9 +927,9 @@
       transform: translateX(-50%) translateY(0);
     }
     .tier-toast.error {
-      background: rgba(239,68,68,0.15);
+      background: transparent;
       border-color: var(--red);
-      color: #fca5a5;
+      color: var(--neg);
     }
 
     /* ── Undo toast ── */
@@ -917,16 +938,16 @@
       bottom: 80px;
       left: 50%;
       transform: translateX(-50%) translateY(20px);
-      background: #1e2130;
+      background: var(--ink-2);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: var(--r-sm);
       padding: 10px 18px;
       font-size: 13px;
       color: var(--text);
       display: flex;
       align-items: center;
       gap: 12px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      box-shadow: var(--shadow-sheet);
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.25s, transform 0.25s;
@@ -939,23 +960,23 @@
     }
 
     .undo-btn {
-      background: rgba(79,124,255,0.15);
+      background: var(--ink-3);
       color: var(--accent);
       border: none;
-      border-radius: 6px;
+      border-radius: var(--r-sm);
       padding: 5px 12px;
       font-size: 12px;
       font-weight: 700;
       cursor: pointer;
       transition: background 0.12s;
     }
-    .undo-btn:hover { background: rgba(79,124,255,0.28); }
+    .undo-btn:hover { background: var(--ink-3); }
 
     /* ── Scrollbar ── */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #3a3d4a; }
+    ::-webkit-scrollbar-thumb { background: var(--line); border-radius: var(--r-xs); }
+    ::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
 
     /* ── Touch / mobile responsive ── */
     @media (max-width: 768px) {
@@ -1009,7 +1030,7 @@
       align-items: center;
       gap: 6px;
       padding: 6px 12px;
-      border-radius: 999px;
+      border-radius: var(--r-pill);
       background: var(--surface);
       border: 1px solid var(--border);
       color: var(--muted);
@@ -1020,9 +1041,9 @@
       transition: border-color 0.15s, color 0.15s, background 0.15s;
       min-height: 32px;
     }
-    .community-diff-toggle:hover { color: var(--text); border-color: #3a3d4a; }
+    .community-diff-toggle:hover { color: var(--text); border-color: var(--line-strong); }
     .community-diff-toggle.active {
-      background: rgba(79,124,255,0.12);
+      background: var(--ink-3);
       border-color: var(--accent);
       color: var(--accent);
     }
@@ -1033,20 +1054,20 @@
       align-items: center;
       gap: 4px;
       padding: 1px 6px;
-      border-radius: 4px;
+      border-radius: var(--r-sm);
       font-size: 10px;
       font-weight: 700;
       letter-spacing: 0.3px;
       text-transform: uppercase;
-      background: rgba(255,255,255,0.04);
+      background: var(--ink-2);
       border: 1px solid var(--border);
       color: var(--muted);
       margin-left: 4px;
     }
     .community-diff-badge.agree {
       color: var(--green);
-      border-color: rgba(34,197,94,0.35);
-      background: rgba(34,197,94,0.08);
+      border-color: var(--pos);
+      background: transparent;
     }
     .community-diff-badge.divergent-1 {
       color: #fbbf24;
@@ -1060,8 +1081,8 @@
     }
     .community-diff-badge.divergent-3 {
       color: var(--red);
-      border-color: rgba(239,68,68,0.45);
-      background: rgba(239,68,68,0.12);
+      border-color: var(--neg);
+      background: transparent;
     }
 
     /* Stability indicator (flag: tiers.stability_indicator) */
@@ -1071,10 +1092,10 @@
       gap: 2px;
       margin-left: 4px;
       padding: 1px 5px;
-      border-radius: 4px;
+      border-radius: var(--r-sm);
       font-size: 10px;
       font-weight: 700;
-      background: rgba(255,255,255,0.04);
+      background: var(--ink-2);
       border: 1px solid var(--border);
       color: var(--muted);
     }
@@ -1089,15 +1110,15 @@
       top: 72px;
       transform: translateX(-50%);
       padding: 8px 14px;
-      border-radius: 999px;
-      background: rgba(79,124,255,0.14);
-      border: 1px solid rgba(79,124,255,0.4);
+      border-radius: var(--r-pill);
+      background: var(--ink-3);
+      border: 1px solid var(--line-strong);
       color: var(--accent);
       font-size: 12px;
       font-weight: 700;
       z-index: 900;
       pointer-events: none;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+      box-shadow: var(--shadow-sheet);
     }
     .swipe-hint.visible { display: inline-flex; animation: swipeHintFade 0.3s ease-out; }
     @keyframes swipeHintFade { from { opacity: 0; transform: translate(-50%, -4px); } to { opacity: 1; transform: translate(-50%, 0); } }
@@ -1111,13 +1132,13 @@
       display: inline-flex;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 999px;
+      border-radius: var(--r-pill);
       padding: 4px;
       gap: 2px;
     }
     .scoring-toggle-btn {
       padding: 7px 14px;
-      border-radius: 999px;
+      border-radius: var(--r-pill);
       border: none;
       background: transparent;
       color: var(--muted);
@@ -1131,7 +1152,7 @@
     .scoring-toggle-btn:hover:not(.active) { color: var(--text); }
     .scoring-toggle-btn.active {
       background: var(--accent);
-      color: #fff;
+      color: var(--on-ice);
     }
     .scoring-toggle-btn.switching { opacity: 0.6; cursor: wait; }
 
@@ -1171,7 +1192,7 @@
     .nav-subtab {
       background: transparent;
       border: 1px solid var(--border);
-      border-radius: 999px;
+      border-radius: var(--r-pill);
       color: var(--muted);
       font-size: 13px;
       font-weight: 600;
@@ -1180,9 +1201,9 @@
       text-decoration: none;
       transition: color 0.12s, border-color 0.12s, background 0.12s;
     }
-    .nav-subtab:hover { color: var(--text); border-color: #3a3d4a; }
+    .nav-subtab:hover { color: var(--text); border-color: var(--line-strong); }
     .nav-subtab.active {
-      color: #fff;
+      color: var(--on-ice);
       background: var(--accent);
       border-color: var(--accent);
     }
@@ -1214,7 +1235,7 @@
       display: inline-flex; align-items: center; gap: 4px;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: var(--r-md);
       color: var(--text);
       font-size: 13px;
       font-weight: 600;
@@ -1226,7 +1247,7 @@
     .app-header-chip {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 4px 8px;
-      border-radius: 999px;
+      border-radius: var(--r-pill);
       background: var(--surface);
       border: 1px solid var(--border);
       color: var(--text);
@@ -1236,9 +1257,9 @@
     .app-header-chip-avatar {
       width: 22px; height: 22px;
       border-radius: 50%;
-      background: linear-gradient(135deg, var(--accent), #7a7f96);
+      background: var(--ice);
       display: inline-flex; align-items: center; justify-content: center;
-      font-size: 11px; color: #fff; font-weight: 700;
+      font-size: 11px; color: var(--on-ice); font-weight: 700;
     }
   </style>
 </head>
@@ -1250,7 +1271,7 @@
       <a href="/">Dynasty <span>Trade Finder</span></a>
     </div>
     <div class="app-header-right">
-      <a class="app-header-league-btn" href="/?view=league">🏆 League</a>
+      <a class="app-header-league-btn" href="/?view=league"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg> League</a>
       <div class="app-header-chip" id="app-header-chip" style="display:none">
         <span class="app-header-chip-avatar" id="app-header-chip-avatar">?</span>
         <span id="app-header-chip-name">—</span>
@@ -1532,19 +1553,19 @@
     </div>
   </div>
   <style>
-    .celebration-overlay { position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);backdrop-filter:blur(6px); }
+    .celebration-overlay { position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(7,9,12,0.78); }
     .celebration-overlay.hidden { display:none; }
-    .celebration-card { background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px 28px 28px;max-width:400px;width:90%;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,0.6);animation:popIn 0.3s cubic-bezier(0.175,0.885,0.32,1.275); }
+    .celebration-card { background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:32px 28px 28px;max-width:400px;width:90%;text-align:center;box-shadow:var(--shadow-sheet);animation:popIn 0.3s cubic-bezier(0.175,0.885,0.32,1.275); }
     @keyframes popIn{from{transform:scale(0.8);opacity:0;}to{transform:scale(1);opacity:1;}}
     .celebration-emoji { font-size:56px;line-height:1;margin-bottom:12px; }
     .celebration-title { font-size:20px;font-weight:800;color:var(--text);margin-bottom:6px; }
     .celebration-sub { font-size:14px;color:var(--muted);margin-bottom:20px;line-height:1.5; }
     .celebration-actions { display:flex;gap:10px;justify-content:center;flex-wrap:wrap; }
-    .celebration-btn { padding:10px 20px;border-radius:10px;font-weight:600;cursor:pointer;border:none;font-size:0.95rem; }
-    .celebration-btn.primary { background:var(--accent);color:white; }
+    .celebration-btn { padding:10px 20px;border-radius:var(--r-sm);font-weight:600;cursor:pointer;border:none;font-size:0.95rem; }
+    .celebration-btn.primary { background:var(--accent);color:var(--on-ice); }
     .celebration-btn.primary:hover { filter:brightness(1.1); }
-    .celebration-btn.secondary { background:rgba(255,255,255,0.08);color:var(--text);border:1px solid rgba(255,255,255,0.15); }
-    .celebration-btn.secondary:hover { background:rgba(255,255,255,0.14); }
+    .celebration-btn.secondary { background:var(--ink-3);color:var(--text);border:1px solid var(--line-strong); }
+    .celebration-btn.secondary:hover { background:var(--ink-3);border-color:var(--ice); }
     .pos-tab .check { color:var(--green);margin-left:4px;font-size:12px; }
   </style>
 
@@ -1947,7 +1968,7 @@
           if (pill.textContent === '✓ Saved') pill.classList.remove('visible');
         }, 1500);
       } else if (state === 'error') {
-        pill.textContent = '⚠ Save failed';
+        pill.textContent = 'Save failed';
         pill.className = 'autosave-pill error visible';
       }
     }
@@ -2768,7 +2789,7 @@
 
     // ── Scoring format toggle (1QB PPR / SF TEP) ─────────────────────
     const FORMAT_KEYS   = ['1qb_ppr', 'sf_tep'];
-    const FORMAT_LABELS = { '1qb_ppr': '🏈 1QB PPR', 'sf_tep': '🏟 SF TEP' };
+    const FORMAT_LABELS = { '1qb_ppr': '1QB PPR', 'sf_tep': 'SF TEP' };
     const LS_ACTIVE_FORMAT = 'ftf_active_format';
 
     function tierGetActiveFormat() {
@@ -3054,10 +3075,10 @@
       const cache = _stabilityCache[currentPos] || {};
       const s = cache[playerId];
       if (s === 'stable') {
-        return `<span class="stability-badge stable" title="Stable — you've kept this player in one tier">🔒</span>`;
+        return `<span class="stability-badge stable" title="Stable — you've kept this player in one tier"><svg class="icon icon-xs" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 9V6a4 4 0 018 0v3M4 9h12v8H4z"/></svg></span>`;
       }
       if (s === 'volatile') {
-        return `<span class="stability-badge volatile" title="Volatile — this player has moved between 3+ tiers">🔄</span>`;
+        return `<span class="stability-badge volatile" title="Volatile — this player has moved between 3+ tiers"><svg class="icon icon-xs" viewBox="0 0 20 20" aria-hidden="true"><path d="M16 9a6 6 0 00-11-2M4 11a6 6 0 0011 2M5 3v4h4M15 17v-4h-4"/></svg></span>`;
       }
       return '';
     }

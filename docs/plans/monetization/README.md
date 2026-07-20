@@ -15,7 +15,7 @@ the growth-loop infrastructure (referrals, group unlock, share-card links).
 |---|---|---|---|
 | Pro subscription | [pro-subscription/](pro-subscription/) | `monetize.pro`, `monetize.paywall` | $4.99/mo decoy · $34.99/yr hero + 14-day trial; multi-league/knobs/alerts/ad-free; give-get referral months |
 | Season Pass | [season-pass/](season-pass/) | `monetize.season_pass` | Year-labeled non-consumable $19.99 + spring Rookie Pass; milestone league unlock |
-| Founder Lifetime | [founder-lifetime/](founder-lifetime/) | `monetize.founder` | $79 perpetual, cap 100, TestFlight-window (Stripe rail) → paywall anchor; Founder badge |
+| Founder Lifetime | [founder-lifetime/](founder-lifetime/) | `monetize.founder` | $99–119 perpetual (repriced 2026-07-19, PRD D8; was $79), cap 100, TestFlight-window (Stripe rail) → paywall anchor; Founder badge |
 | Affiliate layer | [affiliate/](affiliate/) | `monetize.affiliate` | DFS + sportsbooks (DK/Fanatics/Caesars/FD/theScore/bet365 + Underdog), CPA-only, web/extension first, geo-gated, config-driven partner registry; iOS promotes indirectly via a neutral link-out to the `web/offers.html` hub |
 | Hybrid ads | [ads/](ads/) | `monetize.ads_mobile`, `monetize.ads_web` | AdMob banner+rewarded / web network ladder; ad-free via Pro or `ad_free` referral reward |
 

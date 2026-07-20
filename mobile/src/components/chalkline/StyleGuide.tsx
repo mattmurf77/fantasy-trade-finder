@@ -1,7 +1,8 @@
 import React from 'react';
-import { ScrollView, View, Text, StyleSheet } from 'react-native';
-import { ink, chalk, ice, semantic, type, space, position } from '../../theme/chalkline';
+import { ScrollView, View, StyleSheet } from 'react-native';
+import { ink, semantic, space, position } from '../../theme/chalkline';
 import TickLabel from './TickLabel';
+import Text from './Text';
 import Button from './Button';
 import { PositionBadge, TierChalkBadge, RookieBadge, InjuryBadge } from './Badge';
 import Card from './Card';
@@ -12,22 +13,22 @@ import Meter, { fairnessColor } from './Meter';
 export default function StyleGuide() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={type.display}>Trade Finder</Text>
-      <Text style={type.bodySm}>
+      <Text variant="display">Trade Finder</Text>
+      <Text variant="bodySm">
         Chalkline RN reference — tokens: src/theme/chalkline.ts · specs: docs/design/
       </Text>
 
       <Section label="Typography">
-        <Text style={type.display}>Find the trade</Text>
-        <Text style={type.heading}>Positional tiers</Text>
-        <Text style={type.title}>Jahmyr Gibbs</Text>
-        <Text style={type.body}>
+        <Text variant="display">Find the trade</Text>
+        <Text variant="heading">Positional tiers</Text>
+        <Text variant="title">Jahmyr Gibbs</Text>
+        <Text variant="body">
           This leaguemate hasn't ranked players yet — balanced by consensus value.
         </Text>
-        <Text style={type.dataLg}>
-          1580 <Text style={{ color: semantic.pos }}>+14</Text>
+        <Text variant="dataLg">
+          1580 <Text scale="display" style={{ color: semantic.pos }}>+14</Text>
         </Text>
-        <Text style={type.data}>FAIR 92% · ELO 1462</Text>
+        <Text variant="data">FAIR 92% · ELO 1462</Text>
       </Section>
 
       <Section label="Buttons">
@@ -67,11 +68,11 @@ export default function StyleGuide() {
 
       <Section label="Player card">
         <Card rail={position.wr} selected>
-          <Text style={type.title}>Puka Nacua</Text>
+          <Text variant="title">Puka Nacua</Text>
           <View style={[styles.row, { marginTop: space.sm }]}>
             <PositionBadge pos="WR" />
             <TierChalkBadge t="firsts_2" />
-            <Text style={[type.data, { marginLeft: 'auto' }]}>1608</Text>
+            <Text variant="data" style={{ marginLeft: 'auto' }}>1608</Text>
           </View>
         </Card>
       </Section>

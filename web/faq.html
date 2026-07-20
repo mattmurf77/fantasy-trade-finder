@@ -4,20 +4,37 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FAQ — Fantasy Trade Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg:       #0f1117;
-      --surface:  #1a1d27;
-      --border:   #2a2d3a;
-      --text:     #e8eaf0;
-      --muted:    #7a7f96;
-      --accent:   #4f7cff;
+      /* Chalkline tokens (docs/design/design-system.md) */
+      --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25; --ink-3: #232833;
+      --line: #262C35; --line-strong: #3D4654;
+      --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
+      --ice: #56D9EC; --ice-press: #3FC2D6;
+      --r-xs: 2px; --r-sm: 4px; --r-md: 8px;
+      --font-ui: 'Archivo', sans-serif;
+      --font-display: 'Barlow Condensed', sans-serif;
+      --font-data: 'IBM Plex Mono', monospace;
+      /* Legacy aliases for the rules below */
+      --bg: var(--ink-0); --surface: var(--ink-1); --border: var(--line);
+      --text: var(--chalk); --muted: var(--chalk-dim); --accent: var(--ice);
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { max-width: 100vw; overflow-x: hidden; }
+    :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                   "Helvetica Neue", Arial, sans-serif;
+      font-family: var(--font-ui);
       background: var(--bg);
       color: var(--text);
       line-height: 1.55;
@@ -38,7 +55,10 @@
     }
     .back-link:hover { color: var(--accent); }
     h1 {
-      font-size: 1.9rem;
+      font-family: var(--font-display);
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      font-size: 2rem;
       font-weight: 700;
       margin-bottom: 8px;
       color: var(--text);
@@ -51,7 +71,7 @@
     .faq-item {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: var(--r-md);
       padding: 0;
       margin-bottom: 10px;
       overflow: hidden;
@@ -88,9 +108,10 @@
     .faq-body p:last-child { margin-bottom: 0; }
     .faq-body strong { color: var(--text); }
     .faq-body code {
-      background: #2a2d3a;
+      background: var(--ink-3);
+      font-family: var(--font-data);
       padding: 1px 5px;
-      border-radius: 3px;
+      border-radius: var(--r-xs);
       font-size: 0.86em;
     }
     .faq-footer {
@@ -145,20 +166,21 @@
       <summary>How do I sync my Sleeper league?</summary>
       <div class="faq-body">
         <p>Enter your Sleeper username on the login screen. We fetch your leagues via the public Sleeper API — no OAuth or password required. Pick a league from the list and we'll import your roster and every leaguemate's roster automatically.</p>
+        <p><strong>One honest caveat:</strong> entering a username doesn't prove you own it. Until you verify with your Sleeper login, anyone who knows your username could open a session that sees this board — verifying locks it to you.</p>
       </div>
     </details>
 
     <details class="faq-item">
       <summary>My league is private — what happens?</summary>
       <div class="faq-body">
-        <p>Sleeper's public API exposes roster data for every league, public or private, as long as you know the league ID. Because you're logged in via your own username, we can only see leagues you're actually a member of. Private leagues show up exactly like public ones.</p>
+        <p>Sleeper's public API exposes roster data for every league, public or private, as long as you know the league ID. The app looks up leagues for the username entered at sign-in, so it only surfaces leagues that account is actually a member of — but note that username entry alone isn't authentication (see the sync question above about verifying). Private leagues show up exactly like public ones.</p>
       </div>
     </details>
 
     <details class="faq-item">
       <summary>Do you share my data?</summary>
       <div class="faq-body">
-        <p>No. Your rankings are visible to leaguemates inside the same league (that's the whole point — the tool works by comparing valuations), but we don't sell or share data with third parties. See the privacy summary at the bottom of this page.</p>
+        <p>No — and your raw ranking list is <strong>never shown</strong> to leaguemates. The tool compares valuations server-side: your rankings influence which trade suggestions your leaguemates see, if you "like" a trade the other manager may see an interest indicator on the mirrored suggestion, and a mutual like reveals that matched trade to both of you. The League page also shows an aggregate "contrarian score" next to your username — how far your rankings deviate from the league consensus overall, not which players you're high or low on. We don't sell or share data with third parties. See the privacy summary at the bottom of this page.</p>
       </div>
     </details>
 
@@ -186,14 +208,14 @@
     <details class="faq-item">
       <summary>Is there a mobile app?</summary>
       <div class="faq-body">
-        <p>The web app is mobile-first and works great in any phone browser. A native iOS app is on the roadmap — for now, add the site to your home screen for an app-like experience.</p>
+        <p>Yes — Fantasy Trade Finder has a native mobile app, and the web app is mobile-first and works great in any phone browser. You can also add the site to your home screen for an app-like experience.</p>
       </div>
     </details>
 
     <details class="faq-item">
       <summary>Privacy policy summary</summary>
       <div class="faq-body">
-        <p>We store your Sleeper username, display name, avatar, league rosters, and ranking history so the tool can function across sessions. Rankings are shared with other members of leagues you're both in — that is the product. We do not sell, rent, or share your data with third parties outside of that use.</p>
+        <p>We store your Sleeper username, display name, avatar, league rosters, and ranking history so the tool can function across sessions. Your raw ranking list is never displayed to other users; it influences the trade suggestions your leaguemates see, and a mutual "like" reveals the matched trade to both sides. We do not sell, rent, or share your data with third parties outside of that use. Full details, including deletion and export, are in the <a href="/privacy">Privacy Policy</a>.</p>
       </div>
     </details>
 

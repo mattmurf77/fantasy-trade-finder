@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
 import {
   ink,
   chalk,
@@ -12,8 +12,9 @@ import {
   type,
   fonts,
 } from '../theme/chalkline';
-import { Badge, PositionBadge, TierChalkBadge, RookieBadge, InjuryBadge } from './chalkline';
+import { Badge, PositionBadge, TierChalkBadge, RookieBadge, InjuryBadge, Text } from './chalkline';
 import { colors } from '../theme/colors'; // medal tokens (gold/silver) for rank accents
+import { useFlag } from '../state/useFeatureFlags';
 import type { Player, Tier } from '../shared/types';
 
 export interface PlayerCardProps {
@@ -80,6 +81,8 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
   ref,
 ) {
   const ranked = rank != null;
+  // Teardown S2 PRD-04: dense micro-tags rise from 9px to the 11px floor.
+  const cleanup = useFlag('visual.chalkline_cleanup');
   const ageStr = player.age != null ? `${player.age} yo` : null;
   const teamStr = player.team || 'FA';
   const expStr =
@@ -132,19 +135,28 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
         {railColor ? <View style={[styles.rail, { backgroundColor: railColor }]} /> : null}
         <View style={styles.denseMain}>
           <View style={styles.denseLine1}>
-            <Text style={styles.denseName} numberOfLines={1}>
+            <Text scale="dense" style={styles.denseName} numberOfLines={1}>
               {player.name}
             </Text>
-            <Text style={styles.denseTeam}>{teamStr}</Text>
+            <Text scale="dense" style={styles.denseTeam}>{teamStr}</Text>
             {isRookie && (
-              <Text style={[styles.denseTag, { color: flare.base, borderColor: flare.base }]}>
+              <Text
+                scale="dense"
+                style={[
+                  styles.denseTag,
+                  cleanup && styles.denseTagFloor,
+                  { color: flare.base, borderColor: flare.base },
+                ]}
+              >
                 RK
               </Text>
             )}
             {injury ? (
               <Text
+                scale="dense"
                 style={[
                   styles.denseTag,
+                  cleanup && styles.denseTagFloor,
                   injCode === 'Q' || injCode === 'D'
                     ? { color: semantic.warn, borderColor: semantic.warn }
                     : { color: semantic.neg, borderColor: semantic.neg },
@@ -163,12 +175,12 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
         {posRank || value != null ? (
           <View style={styles.denseNums}>
             {posRank ? (
-              <Text style={[styles.densePosRank, railColor ? { color: railColor } : null]}>
+              <Text scale="dense" style={[styles.densePosRank, railColor ? { color: railColor } : null]}>
                 {posRank}
               </Text>
             ) : null}
             {value != null ? (
-              <Text style={styles.denseValue}>{value.toLocaleString('en-US')}</Text>
+              <Text scale="dense" style={styles.denseValue}>{value.toLocaleString('en-US')}</Text>
             ) : null}
           </View>
         ) : null}
@@ -200,7 +212,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
       {/* Rank badge floating in top-right */}
       {ranked && (
         <View style={[styles.rankBadge, rankFgStyle]}>
-          <Text style={styles.rankBadgeText}>{rank}</Text>
+          <Text scale="dense" style={styles.rankBadgeText}>{rank}</Text>
         </View>
       )}
 
@@ -222,22 +234,22 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
         ) : null}
       </View>
 
-      <Text style={[type.title, styles.name]} numberOfLines={1}>
+      <Text scale="body" style={[type.title, styles.name]} numberOfLines={1}>
         {player.name}
       </Text>
 
       <View style={styles.meta}>
-        <Text style={type.bodySm}>{teamStr}</Text>
+        <Text scale="body" style={type.bodySm}>{teamStr}</Text>
         {ageStr && (
           <>
-            <Text style={styles.metaDot}>·</Text>
-            <Text style={type.bodySm}>{ageStr}</Text>
+            <Text scale="body" style={styles.metaDot}>·</Text>
+            <Text scale="body" style={type.bodySm}>{ageStr}</Text>
           </>
         )}
         {expStr && !compact && (
           <>
-            <Text style={styles.metaDot}>·</Text>
-            <Text style={type.bodySm}>{expStr}</Text>
+            <Text scale="body" style={styles.metaDot}>·</Text>
+            <Text scale="body" style={type.bodySm}>{expStr}</Text>
           </>
         )}
       </View>
@@ -357,13 +369,19 @@ const styles = StyleSheet.create({
   // colored text) shrunk to fit line 1 of a 60px row.
   denseTag: {
     fontFamily: fonts.uiSemi,
-    fontSize: 9,
+    fontSize: 9, // legacy — flag off only; see denseTagFloor
     letterSpacing: 0.5,
     paddingHorizontal: 3,
     paddingVertical: 1,
     borderWidth: 1,
     borderRadius: radii.xs,
     overflow: 'hidden',
+  },
+  // S2 PRD-04 (`visual.chalkline_cleanup`): micro-tags — including injury
+  // status, a decision input — meet the 11px type floor. Padding stays; the
+  // ~2px taller tag still fits the 60px pitch (line 1 is baseline-aligned).
+  denseTagFloor: {
+    fontSize: 11,
   },
   denseLine2: {
     flexDirection: 'row',

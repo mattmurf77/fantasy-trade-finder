@@ -4,24 +4,47 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Set Your Rankings — Fantasy Trade Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:       #0f1117;
-      --surface:  #1a1d27;
-      --border:   #2a2d3a;
-      --text:     #e8eaf0;
-      --muted:    #7a7f96;
-      --accent:   #4f7cff;
-      --green:    #22c55e;
-      --red:      #ef4444;
+      /* Chalkline tokens (docs/design/design-system.md) */
+      --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25; --ink-3: #232833;
+      --line: #262C35; --line-strong: #3D4654;
+      --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
+      --ice: #56D9EC; --ice-press: #3FC2D6; --on-ice: #071013;
+      --pos: #22C55E; --neg: #EF4444;
+      --r-xs: 2px; --r-sm: 4px; --r-md: 8px; --r-pill: 999px;
+      --font-ui: 'Archivo', sans-serif;
+      --font-display: 'Barlow Condensed', sans-serif;
+      /* Legacy aliases for the rules below */
+      --bg: var(--ink-0); --surface: var(--ink-1); --border: var(--line);
+      --text: var(--chalk); --muted: var(--chalk-dim);
+      --accent: var(--ice); --green: var(--pos); --red: var(--neg);
+    }
+
+    :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+    .icon {
+      width: 20px; height: 20px;
+      stroke: currentColor; stroke-width: 1.75; fill: none;
+      stroke-linecap: square; flex-shrink: 0;
     }
 
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-family: var(--font-ui);
       min-height: 100vh;
       display: flex;
       flex-direction: column;
@@ -37,12 +60,14 @@
     }
 
     .page-logo {
-      font-size: 22px;
+      font-family: var(--font-display);
+      font-size: 24px;
       font-weight: 700;
-      letter-spacing: -0.4px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
       margin-bottom: 10px;
     }
-    .page-logo span { color: var(--accent); }
+    .page-logo span { color: var(--ice); }
 
     .page-title {
       font-size: 20px;
@@ -61,7 +86,7 @@
     .tile-wrapper {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 20px;
+      border-radius: var(--r-md);
       padding: 28px;
       width: 100%;
       max-width: 560px;
@@ -72,12 +97,12 @@
 
     /* ── Individual tiles ── */
     .tile {
-      background: rgba(255,255,255,0.04);
+      background: var(--ink-2);
       border: 1px solid var(--border);
-      border-radius: 14px;
+      border-radius: var(--r-md);
       padding: 22px 24px;
       cursor: pointer;
-      transition: border-color 0.2s, background 0.2s, transform 0.15s;
+      transition: border-color 0.2s, background 0.2s;
       display: flex;
       align-items: flex-start;
       gap: 18px;
@@ -87,28 +112,20 @@
 
     .tile:hover {
       border-color: var(--accent);
-      background: rgba(79, 124, 255, 0.06);
-      transform: translateY(-2px);
-    }
-
-    .tile:active {
-      transform: translateY(0);
+      background: var(--ink-3);
     }
 
     .tile-icon {
       width: 48px;
       height: 48px;
-      border-radius: 12px;
+      border-radius: var(--r-md);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 22px;
       flex-shrink: 0;
+      background: var(--ink-3);
+      color: var(--chalk-dim);
     }
-
-    .tile-icon.guided    { background: rgba(79, 124, 255, 0.15); }
-    .tile-icon.manual    { background: rgba(34, 197, 94, 0.15); }
-    .tile-icon.tiers     { background: rgba(168, 85, 247, 0.15); }
 
     .tile-content {
       display: flex;
@@ -140,19 +157,18 @@
 
     .tile:hover .tile-arrow {
       color: var(--accent);
-      transform: translateX(3px);
     }
 
     /* ── Recommended badge ── */
     .tile-badge {
       display: inline-block;
       font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: var(--accent);
-      background: rgba(79, 124, 255, 0.12);
-      border-radius: 6px;
+      color: var(--flare, #F0508C);
+      border: 1px solid var(--flare, #F0508C);
+      border-radius: var(--r-xs);
       padding: 3px 8px;
       margin-left: 8px;
       vertical-align: middle;
@@ -180,7 +196,7 @@
 
     <!-- Option 1: Guided Journey -->
     <a class="tile" href="#trio-ranking" onclick="navigateTo('trio')">
-      <div class="tile-icon guided">🧭</div>
+      <div class="tile-icon guided"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg></div>
       <div class="tile-content">
         <div class="tile-label">
           Guide me through the Journey
@@ -193,7 +209,7 @@
 
     <!-- Option 2: Manual Rankings -->
     <a class="tile" href="#manual-rankings" onclick="navigateTo('rankings')">
-      <div class="tile-icon manual">📋</div>
+      <div class="tile-icon manual"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10M3 5h.01M3 10h.01M3 15h.01"/></svg></div>
       <div class="tile-content">
         <div class="tile-label">Let me set the rankings myself</div>
         <div class="tile-desc">Jump straight into the full rankings list and drag players into your preferred order. Best if you already know your valuations.</div>
@@ -203,7 +219,7 @@
 
     <!-- Option 3: Positional Tiers -->
     <a class="tile" href="#positional-tiers" onclick="navigateTo('tiers')">
-      <div class="tile-icon tiers">🏷️</div>
+      <div class="tile-icon tiers"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6l7-3 7 3-7 3-7-3z"/><path d="M3 10l7 3 7-3M3 14l7 3 7-3"/></svg></div>
       <div class="tile-content">
         <div class="tile-label">Let me set positional tiers</div>
         <div class="tile-desc">Group players into tiers within each position — worth 4+ 1sts, 2 1sts, a 1st, etc. A fast way to express your rankings at a high level.</div>

@@ -42,6 +42,13 @@ consistency, and proactive bug discovery across each layer individually and the 
 8. **Ledger discipline.** Executed cases and outcomes are appended to
    `living-memory/TEST_LEDGER.md`; reusable automated cases graduate into `backend/tests/`.
 
+## Related checklists
+
+- [accessibility-release-checklist.md](accessibility-release-checklist.md) — per-release
+  mobile a11y regression pass (VoiceOver walk, AX5 screenshots, Reduce Motion / Increase
+  Contrast, token contrast). Client-side scope, but run records land in `qa/results/`
+  and findings use this charter's P0–P3 triage.
+
 ## Test ID convention
 
 `TC-<AREA>-<NNN>` where AREA ∈ ENG (trade engine), RNK (ranking/Elo), API, DB,

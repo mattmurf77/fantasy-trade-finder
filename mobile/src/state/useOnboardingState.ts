@@ -126,3 +126,12 @@ export function getOnboardingState(): OnboardingPersisted {
 export function patchOnboardingState(patch: Partial<OnboardingPersisted>): void {
   useOnboardingState.getState().patchOnboarding(patch);
 }
+
+/** FULL replace (defaults + given state) — the Test Stages QA tool uses
+ *  this to materialize a device at an exact adoption stage. Not for
+ *  product code: everything else patches. */
+export function replaceOnboardingState(state: Partial<OnboardingPersisted>): void {
+  const next = mergeState(DEFAULTS, state);
+  useOnboardingState.setState({ ob: next });
+  AsyncStorage.setItem(OB_KEY, JSON.stringify(next)).catch(() => {});
+}

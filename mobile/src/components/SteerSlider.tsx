@@ -1,6 +1,8 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { chalk, ice, ink, radii, space, type } from '../theme/chalkline';
+import { Text } from './chalkline';
+import { useFlag } from '../state/useFeatureFlags';
 import { haptics } from '../utils/haptics';
 import type { RankMethodPref } from '../state/useSession';
 
@@ -51,12 +53,18 @@ export default function SteerSlider({
   disabled?: boolean;
 }) {
   const active = STOPS.find((s) => s.pref === value) ?? null;
+  // S2 PRD-04 (`visual.chalkline_cleanup`): the axis labels carry content —
+  // chalk-faint (3.4:1) is reserved for placeholders/disabled; use chalk-dim.
+  const cleanup = useFlag('visual.chalkline_cleanup');
+  // S3 PRD-04 (`ux.touch_polish`): 12px dots + 16pt slop = 44pt effective
+  // targets (legacy 12pt slop gave only ~36pt).
+  const touchPolish = useFlag('ux.touch_polish');
 
   return (
     <View style={styles.wrap}>
       <View style={styles.labels}>
-        <Text style={styles.axisLabel}>WE STEER</Text>
-        <Text style={styles.axisLabel}>YOU STEER</Text>
+        <Text scale="dense" style={[styles.axisLabel, cleanup && styles.axisLabelDim]}>WE STEER</Text>
+        <Text scale="dense" style={[styles.axisLabel, cleanup && styles.axisLabelDim]}>YOU STEER</Text>
       </View>
 
       <View style={styles.trackRow}>
@@ -72,7 +80,7 @@ export default function SteerSlider({
                 haptics.selection();
                 onChange(s.pref);
               }}
-              hitSlop={space.md}
+              hitSlop={touchPolish ? 16 : space.md}
               accessibilityRole="radio"
               accessibilityState={{ selected }}
               accessibilityLabel={s.title}
@@ -86,11 +94,11 @@ export default function SteerSlider({
 
       {active ? (
         <>
-          <Text style={styles.activeTitle}>{active.title}</Text>
-          <Text style={styles.activeSub}>{active.sub}</Text>
+          <Text scale="body" style={styles.activeTitle}>{active.title}</Text>
+          <Text scale="body" style={styles.activeSub}>{active.sub}</Text>
         </>
       ) : (
-        <Text style={styles.activeSub}>
+        <Text scale="body" style={styles.activeSub}>
           Not chosen yet — the Rank tab opens on the chooser until you pick.
         </Text>
       )}
@@ -108,7 +116,8 @@ const styles = StyleSheet.create({
     gap: space.sm,
   },
   labels: { flexDirection: 'row', justifyContent: 'space-between' },
-  axisLabel: { ...type.label, color: chalk.faint },
+  axisLabel: { ...type.label, color: chalk.faint }, // legacy — flag off only
+  axisLabelDim: { color: chalk.dim }, // S2 PRD-04 content floor (6.9:1)
   trackRow: {
     flexDirection: 'row',
     alignItems: 'center',

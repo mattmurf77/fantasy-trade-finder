@@ -1,15 +1,13 @@
-// Mirrors the web app's dark theme palette (web/css/styles.css :root).
-// Keeping these identical so the mobile app visually matches the site.
+// DATA-ENCODING hexes only (teardown S2 PRD-03 slimmed this file — the old
+// chrome palette: bg/surface/border/text/muted/accent is gone; all chrome now
+// comes from theme/chalkline.ts). Position + tier values are cross-client
+// invariants (docs/cross-client-invariants.md); medal hues are documented in
+// docs/design/design-system.md → Medal (data). Never restyle any of these.
 
 export const colors = {
-  bg: '#0f1117',
-  surface: '#1a1d27',
-  border: '#2a2d3a',
-  text: '#e8eaf0',
-  muted: '#7a7f96',
-  accent: '#4f7cff',
-  green: '#22c55e',
-  red: '#ef4444',
+  // Medal accents — trio rank-1/2 card borders + badge fills (PlayerCard).
+  // Gold shares its hex with --warn (amber-500) intentionally; bronze is
+  // reserved (unused today) to complete the documented medal set.
   gold: '#f59e0b',
   silver: '#94a3b8',
   bronze: '#b45309',

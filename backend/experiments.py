@@ -117,6 +117,30 @@ def unit_type_of(unit_id: str) -> str:
     return "device" if unit_id.startswith("device:") else "account"
 
 
+def load_tester_allowlist() -> set[str]:
+    """Operator/tester allowlist — union of two sources (FR-33b):
+      1. FTF_TESTER_ALLOWLIST env var (comma-separated unit_ids)
+      2. config/tester_allowlist.json (JSON array; git-deployable —
+         needed because Render does NOT apply render.yaml envVars to a
+         dashboard-created service, observed 2026-07-19)
+    Unit ids are account ids and/or 'device:<id>' pseudo-ids. Not
+    model_config (value column is Float). Consumed by the is_tester_allowlist
+    targeting attribute (via _load_cache) and by the QA stage-user spawner
+    gate (server.py /api/test-users) so both share one definition."""
+    allowlist = {
+        s.strip() for s in os.environ.get("FTF_TESTER_ALLOWLIST", "").split(",")
+        if s.strip()
+    }
+    try:
+        with open(_ALLOWLIST_FILE) as f:
+            parsed = json.load(f)
+        if isinstance(parsed, list):
+            allowlist |= {str(x) for x in parsed}
+    except Exception:
+        pass   # file optional — env alone is a valid configuration
+    return allowlist
+
+
 # ---------------------------------------------------------------------------
 # Running-experiment cache (60 s TTL, LLD §4.4/FR-38)
 # ---------------------------------------------------------------------------
@@ -139,25 +163,10 @@ def _load_cache() -> dict:
                 select(db.experiments_table).where(
                     db.experiments_table.c.status == "running")).mappings().all()
         running = [_parse_row(r) for r in rows]
-        # is_tester_allowlist (_CONFIG source, FR-33b): union of two sources —
-        #   1. FTF_TESTER_ALLOWLIST env var (comma-separated unit_ids)
-        #   2. config/tester_allowlist.json (JSON array; git-deployable —
-        #      needed because Render does NOT apply render.yaml envVars to a
-        #      dashboard-created service, observed 2026-07-19)
-        # Unit ids are account ids and/or 'device:<id>' pseudo-ids. Not
-        # model_config (value column is Float). Resolved here (60s cache
-        # refresh) so _gather_attrs stays query-free on the hot flags path.
-        allowlist = {
-            s.strip() for s in os.environ.get("FTF_TESTER_ALLOWLIST", "").split(",")
-            if s.strip()
-        }
-        try:
-            with open(_ALLOWLIST_FILE) as f:
-                parsed = json.load(f)
-            if isinstance(parsed, list):
-                allowlist |= {str(x) for x in parsed}
-        except Exception:
-            pass   # file optional — env alone is a valid configuration
+        # is_tester_allowlist (_CONFIG source, FR-33b) — resolved here (60s
+        # cache refresh) so _gather_attrs stays query-free on the hot flags
+        # path. See load_tester_allowlist for the source-of-truth reader.
+        allowlist = load_tester_allowlist()
         # Stamp scope: event_type/screen → [keys] for FR-32 (funnel events
         # always stamped, plus each running experiment's declared scope).
         scope: dict[str, list] = {}

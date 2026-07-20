@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dynasty Rankings — Fantasy Trade Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
@@ -38,7 +41,7 @@
           <!-- Agent A7 · Smart-start CTA (flag: landing.smart_start_cta) -->
           <div class="smart-start hidden" id="smart-start-wrap">
             <button class="smart-start-toggle" id="smart-start-toggle" type="button" onclick="toggleSmartStart()">
-              <span class="smart-start-icon">🔗</span>
+              <span class="smart-start-icon"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg></span>
               <span class="smart-start-text">Got a league URL? Paste it</span>
               <span class="smart-start-arrow">→</span>
             </button>
@@ -87,11 +90,11 @@
           </div>
 
           <div class="cb-taglines">
-            <span class="cb-tagline"><span class="cb-tagline-icon">&#128200;</span> Rank</span>
+            <span class="cb-tagline"><span class="cb-tagline-icon"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg></span> Rank</span>
             <span class="cb-tagline-sep"></span>
-            <span class="cb-tagline"><span class="cb-tagline-icon">&#128279;</span> Match</span>
+            <span class="cb-tagline"><span class="cb-tagline-icon"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg></span> Match</span>
             <span class="cb-tagline-sep"></span>
-            <span class="cb-tagline"><span class="cb-tagline-icon">&#129309;</span> Trade</span>
+            <span class="cb-tagline"><span class="cb-tagline-icon"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg></span> Trade</span>
           </div>
           <div class="legal-links-row">
             <a href="/faq.html" class="faq-link">FAQ</a>
@@ -136,7 +139,7 @@
     </div>
     <div class="rm-tiles">
       <div class="rm-tile" onclick="selectRankingMethod('trio')">
-        <div class="rm-tile-icon guided">&#129517;</div>
+        <div class="rm-tile-icon guided"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg></div>
         <div class="rm-tile-content">
           <div class="rm-tile-label">Guide me through the Journey <span class="rm-badge">Recommended</span></div>
           <div class="rm-tile-desc">Rank players through quick 3-player matchups. We'll walk you through it position by position.</div>
@@ -144,7 +147,7 @@
         <div class="rm-tile-arrow">&#8250;</div>
       </div>
       <div class="rm-tile" onclick="selectRankingMethod('manual')">
-        <div class="rm-tile-icon manual">&#128203;</div>
+        <div class="rm-tile-icon manual"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10M3 5h.01M3 10h.01M3 15h.01"/></svg></div>
         <div class="rm-tile-content">
           <div class="rm-tile-label">Let me set the rankings myself</div>
           <div class="rm-tile-desc">Jump straight into the full rankings list and drag players into your preferred order.</div>
@@ -152,7 +155,7 @@
         <div class="rm-tile-arrow">&#8250;</div>
       </div>
       <div class="rm-tile" onclick="selectRankingMethod('tiers')">
-        <div class="rm-tile-icon tiers">&#127991;&#65039;</div>
+        <div class="rm-tile-icon tiers"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6l7-3 7 3-7 3-7-3z"/><path d="M3 10l7 3 7-3M3 14l7 3 7-3"/></svg></div>
         <div class="rm-tile-content">
           <div class="rm-tile-label">Let me set positional tiers</div>
           <div class="rm-tile-desc">Group players into tiers within each position — worth 4+ 1sts, 2 1sts, a 1st, etc.</div>
@@ -182,13 +185,13 @@
       <span class="demo-chip hidden" id="demo-chip">DEMO MODE</span>
     </div>
     <div class="header-right">
-      <button class="view-btn" onclick="switchView('league')">🏆 League<span class="nav-pill-unlock hidden" id="nav-pill-unlock-header" title=""></span></button>
+      <button class="view-btn" onclick="switchView('league')"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg> League<span class="nav-pill-unlock hidden" id="nav-pill-unlock-header" title=""></span></button>
 
       <!-- Notification bell -->
       <div class="notif-bell-wrap" id="notif-bell-wrap">
         <button class="notif-bell-btn" id="notif-bell-btn"
-                onclick="toggleNotifPanel(event)" title="Notifications">
-          🔔
+                onclick="toggleNotifPanel(event)" title="Notifications" aria-label="Notifications">
+          <svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
           <span class="notif-badge" id="notif-badge"></span>
         </button>
         <!-- Panel — slides down from the bell -->
@@ -212,29 +215,29 @@
   </header>
 
   <!-- Top-level nav — tier 1 -->
-  <div class="nav-tabs nav-tier-1" style="max-width:980px;width:100%;">
-    <button class="nav-tab active" data-group="rank"   onclick="switchTabGroup('rank', this)">Rank Players</button>
-    <button class="nav-tab"         data-group="trades" onclick="switchTabGroup('trades', this)">Find Trades</button>
+  <div class="nav-tabs nav-tier-1" role="tablist" aria-label="Main sections" style="max-width:980px;width:100%;">
+    <button class="nav-tab active" role="tab" aria-selected="true"  data-group="rank"   onclick="switchTabGroup('rank', this)">Rank Players</button>
+    <button class="nav-tab"         role="tab" aria-selected="false" data-group="trades" onclick="switchTabGroup('trades', this)">Find Trades</button>
   </div>
 
   <!-- Tier 2 — contextual sub-nav. Only one is visible at a time. -->
-  <div class="nav-subtabs" id="subtabs-rank" style="max-width:980px;width:100%;">
-    <button class="nav-subtab"        data-view="tiers"    onclick="goToTiers()">Tiers</button>
-    <button class="nav-subtab active" data-view="rank"     onclick="switchView('rank', this)">Trios</button>
-    <button class="nav-subtab"        data-view="rankings" onclick="switchView('rankings', this)">Manual</button>
-    <button class="nav-subtab"        data-view="trends"   onclick="switchView('trends', this)">Trends</button>
+  <div class="nav-subtabs" id="subtabs-rank" role="tablist" aria-label="Rank views" style="max-width:980px;width:100%;">
+    <button class="nav-subtab"        role="tab" aria-selected="false" data-view="tiers"    onclick="goToTiers()">Tiers</button>
+    <button class="nav-subtab active" role="tab" aria-selected="true" data-view="rank"     onclick="switchView('rank', this)">Trios</button>
+    <button class="nav-subtab"        role="tab" aria-selected="false" data-view="rankings" onclick="switchView('rankings', this)">Manual</button>
+    <button class="nav-subtab"        role="tab" aria-selected="false" data-view="trends"   onclick="switchView('trends', this)">Trends</button>
   </div>
 
-  <div class="nav-subtabs hidden" id="subtabs-trades" style="max-width:980px;width:100%;">
-    <button class="nav-subtab active" data-view="trades"  onclick="switchView('trades', this)">
+  <div class="nav-subtabs hidden" id="subtabs-trades" role="tablist" aria-label="Trade views" style="max-width:980px;width:100%;">
+    <button class="nav-subtab active" role="tab" aria-selected="true" data-view="trades"  onclick="switchView('trades', this)">
       Find a Trade
       <span class="liked-badge"   id="liked-badge">0</span>
     </button>
-    <button class="nav-subtab"        data-view="matches" onclick="switchView('matches', this)">
+    <button class="nav-subtab"        role="tab" aria-selected="false" data-view="matches" onclick="switchView('matches', this)">
       Matches
       <span class="matches-badge" id="matches-badge">0</span>
     </button>
-    <button class="nav-subtab hidden" data-view="portfolio" id="portfolio-subtab"
+    <button class="nav-subtab hidden" role="tab" aria-selected="false" data-view="portfolio" id="portfolio-subtab"
             onclick="switchView('portfolio', this)">Portfolio</button>
   </div>
 
@@ -249,7 +252,7 @@
   <!-- Empty-state nudge when the user navigates to a format they haven't
        started ranking in yet. Shown by checkFormatEmptyState(). -->
   <div class="format-empty-state hidden" id="format-empty-state-rank">
-    <div class="format-empty-state-icon">🎯</div>
+    <div class="format-empty-state-icon"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg></div>
     <div class="format-empty-state-title" id="format-empty-state-rank-title">
       Start ranking for this format
     </div>
@@ -279,7 +282,7 @@
     <!-- Overall unlock progress — segmented by position -->
     <div class="unlock-bar-wrap" id="unlock-bar-wrap">
       <div class="unlock-bar-header">
-        <span class="unlock-bar-title">🔓 Find a Trade</span>
+        <span class="unlock-bar-title"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 9V6a4 4 0 017.8-1.2M4 9h12v8H4z"/></svg> Find a Trade</span>
         <span class="unlock-bar-pct" id="unlock-bar-pct">0%</span>
       </div>
       <div class="unlock-bar-track">
@@ -347,7 +350,7 @@
   <div class="auto-confirm-row" style="text-align:center; margin-bottom:6px;">
     <button class="skip-btn" id="auto-confirm-toggle" onclick="toggleAutoConfirm()"
             style="font-size:0.82rem; padding:4px 14px; border-radius:8px; cursor:pointer;">
-      ⚡ I AM SPEED — OFF
+      I AM SPEED — OFF
     </button>
     <div class="speed-caption" id="speed-caption"
          style="font-size:0.72rem; color:var(--muted); margin-top:4px; line-height:1.25;">
@@ -369,8 +372,8 @@
   <div class="rookie-overlay" id="rookie-overlay" onclick="closeRookieBoard(event)">
     <div class="rookie-panel">
       <div class="rookie-panel-header">
-        <div class="panel-title">📋 Rookie Draft Board</div>
-        <button class="close-btn" onclick="closeRookieBoard()">✕</button>
+        <div class="panel-title"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10M3 5h.01M3 10h.01M3 15h.01"/></svg> Rookie Draft Board</div>
+        <button class="close-btn" onclick="closeRookieBoard()" aria-label="Close"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
       </div>
       <div class="rookie-filter-tabs" id="rookie-filter-tabs">
         <button class="rookie-filter-tab active" onclick="filterRookies('ALL', this)">All</button>
@@ -394,7 +397,7 @@
     <!-- Empty-state nudge when the user navigates to a format they haven't
          started ranking in yet. Shown by checkFormatEmptyState(). -->
     <div class="format-empty-state hidden" id="format-empty-state-rankings">
-      <div class="format-empty-state-icon">🎯</div>
+      <div class="format-empty-state-icon"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg></div>
       <div class="format-empty-state-title" id="format-empty-state-rankings-title">
         Start ranking for this format
       </div>
@@ -414,7 +417,7 @@
             <button class="tab" onclick="switchRankingsPos('WR', this)">WR</button>
             <button class="tab" onclick="switchRankingsPos('TE', this)">TE</button>
           </div>
-          <a class="tab tab-accent-purple" href="/positional-tiers.html">&#127991;&#65039; Positional Tiers</a>
+          <a class="tab tab-accent-purple" href="/positional-tiers.html"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6l7-3 7 3-7 3-7-3z"/><path d="M3 10l7 3 7-3M3 14l7 3 7-3"/></svg> Positional Tiers</a>
         </div>
       </div>
       <div class="rankings-table-empty hidden" id="rankings-table-empty">
@@ -531,14 +534,14 @@
       <div class="trades-header">
         <div class="trades-title">Find a Trade</div>
         <button class="generate-btn" id="gen-btn" onclick="generateTrades()">
-          ⚡ Find a Trade
+          Find a Trade
         </button>
       </div>
 
       <!-- ── New partners banner (flag trades.new_partners_alerts) ────────
            Populated client-side by renderNewPartnersBanner(). Hidden by default. -->
       <div class="new-partners-banner hidden" id="new-partners-banner" style="display:none">
-        <span class="new-partners-banner-icon">🎯</span>
+        <span class="new-partners-banner-icon"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg></span>
         <span class="new-partners-banner-text" id="new-partners-banner-text"></span>
         <button class="new-partners-banner-dismiss"
                 onclick="dismissNewPartnersBanner()"
@@ -619,7 +622,7 @@
         <span class="league-switch-status" id="league-switch-status"></span>
         <button class="outlook-gear-btn" id="outlook-gear-btn"
                 onclick="showOutlookModal(false)"
-                title="Team outlook settings">⚙</button>
+                title="Team outlook settings" aria-label="Team outlook settings"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3"/><circle cx="10" cy="10" r="5.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M15.7 4.3l-1.8 1.8M6.1 13.9l-1.8 1.8"/></svg></button>
         <span class="outlook-badge" id="outlook-badge"></span>
       </div>
 
@@ -714,7 +717,7 @@
     <div class="league-summary-wrap">
       <div class="league-summary-header">
         <div class="league-summary-title" id="league-summary-title">League</div>
-        <button class="invite-btn" id="invite-btn" onclick="openInviteModal()">&#128233; Invite</button>
+        <button class="invite-btn" id="invite-btn" onclick="openInviteModal()"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg> Invite</button>
       </div>
 
       <!-- In-place league switcher — visible when the user has 2+ leagues.
@@ -742,14 +745,14 @@
       <div class="league-roster-section" id="league-roster-section">
         <div class="league-roster-header">
           <div class="league-roster-titleblock">
-            <div class="league-roster-title">👥 Leaguemates</div>
+            <div class="league-roster-title"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg> Leaguemates</div>
             <div class="league-roster-sub">
               Who has and hasn't joined Trade Finder yet.
             </div>
           </div>
           <button class="invite-btn league-roster-invite-btn"
                   id="league-roster-invite-btn"
-                  onclick="openInviteModal()">&#128233; Invite</button>
+                  onclick="openInviteModal()"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg> Invite</button>
         </div>
         <div class="league-roster-list" id="league-roster-list">
           <div class="league-roster-loading">Loading…</div>
@@ -762,7 +765,7 @@
            renderLeaguematesUnlockList(). Hidden unless the flag is on. -->
       <div class="leaguemates-section hidden" id="leaguemates-section">
         <div class="leaguemates-header">
-          <div class="leaguemates-title">👥 Leaguemates</div>
+          <div class="leaguemates-title"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg> Leaguemates</div>
           <div class="leaguemates-sub">
             Who's joined Trade Finder and how far along they are.
           </div>
@@ -777,7 +780,7 @@
            the league. Populated by renderLeagueActivityFeed(). -->
       <div class="activity-feed-section hidden" id="activity-feed-section">
         <div class="activity-feed-header">
-          <div class="activity-feed-title">🕒 League Activity</div>
+          <div class="activity-feed-title"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 6v4l3 2"/></svg> League Activity</div>
           <div class="activity-feed-sub">
             Recent trades, tier saves, and sync-ups from your league.
           </div>
@@ -791,7 +794,7 @@
         <div class="league-scoring-label">League's default scoring</div>
         <div class="league-scoring-badges">
           <div class="scoring-toggle-wrap" data-view="league-default"></div>
-          <span class="detected-sleeper-badge" id="detected-sleeper-badge" title="This format was auto-detected from your Sleeper league settings.">🔒 Detected from Sleeper</span>
+          <span class="detected-sleeper-badge" id="detected-sleeper-badge" title="This format was auto-detected from your Sleeper league settings."><svg class="icon icon-xs" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 9V6a4 4 0 018 0v3M4 9h12v8H4z"/></svg> Detected from Sleeper</span>
         </div>
         <div class="league-scoring-note">
           Your own rank sets stay independent per format — this is just what this
@@ -804,7 +807,7 @@
            Populated by renderLeagueContrarianLeaderboard(). -->
       <div class="contrarian-leaderboard-section" id="contrarian-leaderboard-section">
         <div class="contrarian-leaderboard-header">
-          <div class="contrarian-leaderboard-title">🎯 Contrarian Leaderboard</div>
+          <div class="contrarian-leaderboard-title"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg> Contrarian Leaderboard</div>
           <div class="contrarian-leaderboard-sub">
             Who ranks most like the league — and who doesn't. Based on everyone's stored ELO.
           </div>
@@ -870,7 +873,6 @@
       <!-- ── STEP 1: Team Outlook ────────────────────────────────────── -->
       <div id="outlook-step-1">
         <div class="outlook-card-header">
-          <div class="outlook-card-icon">🏈</div>
           <div class="outlook-card-title" id="outlook-modal-title">
             What's your team outlook for this league?
           </div>
@@ -882,7 +884,6 @@
         <div class="outlook-options">
           <button class="outlook-option-btn" data-value="championship"
                   onclick="selectOutlookStep1('championship')">
-            <span class="outlook-option-emoji">🏆</span>
             <span class="outlook-option-text">
               <div class="outlook-option-name">Championship or Bust</div>
               <div class="outlook-option-desc">Strongly prefer proven veterans</div>
@@ -890,7 +891,6 @@
           </button>
           <button class="outlook-option-btn" data-value="contender"
                   onclick="selectOutlookStep1('contender')">
-            <span class="outlook-option-emoji">💪</span>
             <span class="outlook-option-text">
               <div class="outlook-option-name">Contender</div>
               <div class="outlook-option-desc">Slight lean toward veterans</div>
@@ -898,7 +898,6 @@
           </button>
           <button class="outlook-option-btn" data-value="rebuilder"
                   onclick="selectOutlookStep1('rebuilder')">
-            <span class="outlook-option-emoji">🔨</span>
             <span class="outlook-option-text">
               <div class="outlook-option-name">Rebuilder</div>
               <div class="outlook-option-desc">Prefer young talent over veterans</div>
@@ -906,7 +905,6 @@
           </button>
           <button class="outlook-option-btn" data-value="jets"
                   onclick="selectOutlookStep1('jets')">
-            <span class="outlook-option-emoji">🟢</span>
             <span class="outlook-option-text">
               <div class="outlook-option-name">NY Jets</div>
               <div class="outlook-option-desc">Young talent only — 25 and under</div>
@@ -914,7 +912,6 @@
           </button>
           <button class="outlook-option-btn" data-value="not_sure"
                   onclick="selectOutlookStep1('not_sure')">
-            <span class="outlook-option-emoji">🤷</span>
             <span class="outlook-option-text">
               <div class="outlook-option-name">Not Sure</div>
               <div class="outlook-option-desc">No adjustment — pure ELO scoring</div>
@@ -996,7 +993,7 @@
   <!-- Match overlay — shown when a mutual trade match is detected -->
   <div class="match-overlay hidden" id="match-overlay">
     <div class="match-card">
-      <div class="match-emoji">🎉</div>
+      <div class="match-emoji"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 11l4 4 8-9"/></svg></div>
       <div class="match-headline">It's a Match!</div>
       <div class="match-sub" id="match-sub">
         You and <strong id="match-partner-name"></strong> both want this trade!
@@ -1011,7 +1008,7 @@
   <!-- Ranking celebration overlay — shown when a position threshold is met -->
   <div class="celebration-overlay hidden" id="celebration-overlay">
     <div class="celebration-card">
-      <div class="celebration-emoji" id="celebration-emoji">🎉</div>
+      <div class="celebration-emoji" id="celebration-emoji"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 11l4 4 8-9"/></svg></div>
       <div class="celebration-title" id="celebration-title"></div>
       <div class="celebration-sub" id="celebration-sub"></div>
       <div class="celebration-actions" id="celebration-actions"></div>
@@ -1023,7 +1020,7 @@
     <div class="rankings-panel">
       <div class="panel-header">
         <div class="panel-title" id="panel-title">Rankings</div>
-        <button class="close-btn" onclick="closeRankings()">✕</button>
+        <button class="close-btn" onclick="closeRankings()" aria-label="Close"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
       </div>
       <div id="rankings-list"></div>
     </div>

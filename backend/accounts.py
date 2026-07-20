@@ -21,12 +21,15 @@ crypto-shaped lives here so it is unit-testable without Flask.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import os
 import secrets
 import ssl
 import threading
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
@@ -714,3 +717,269 @@ def delete_user_data(sleeper_user_id: str,
         counts["users_deleted"] = res.rowcount or 0
 
     return counts
+
+
+# ---------------------------------------------------------------------------
+# Data export (GDPR Art. 20 portability — teardown 06-02, flag
+# `account.data_export` on the route) — the deletion matrix above is the
+# manifest: every table the matrix DELETEs or ANONYMIZEs for this user is
+# exported here, so "Download my data" and "Delete account" describe the
+# same data set. Route in server.py (GET /api/account/export) applies the
+# same auth gates as deletion (demo-blocked, verified-user step-up).
+# ---------------------------------------------------------------------------
+
+# (table_key, table, user column, columns to omit from the export)
+# sleeper_credentials.token_encrypted is omitted: a Fernet-encrypted
+# full-account Sleeper credential is useless to the user and dangerous in a
+# plaintext archive. Everything else is the user's own data verbatim.
+_EXPORT_TABLES: tuple = (
+    ("users",                   "users_table",                   "sleeper_user_id", ()),
+    ("swipe_decisions",         "swipe_decisions_table",         "user_id",         ()),
+    ("trade_decisions",         "trade_decisions_table",         "user_id",         ()),
+    ("member_rankings",         "member_rankings_table",         "user_id",         ()),
+    ("elo_history",             "elo_history_table",             "user_id",         ()),
+    ("league_preferences",      "league_preferences_table",      "user_id",         ()),
+    ("asset_preferences",       "asset_preferences_table",       "user_id",         ()),
+    ("user_player_skips",       "user_player_skips_table",       "user_id",         ()),
+    ("notifications",           "notifications_table",           "user_id",         ()),
+    ("device_tokens",           "device_tokens_table",           "user_id",         ()),
+    ("notification_prefs",      "notification_prefs_table",      "user_id",         ()),
+    ("notification_events_log", "notification_events_log_table", "user_id",         ()),
+    ("notification_queue",      "notification_queue_table",      "user_id",         ()),
+    ("user_events",             "user_events_table",             "user_id",         ()),
+    ("wrapped_events",          "wrapped_events_table",          "user_id",         ()),
+    ("sleeper_credentials",     "sleeper_credentials_table",     "user_id",         ("token_encrypted",)),
+    ("league_members",          "league_members_table",          "user_id",         ()),
+    ("leagues",                 "leagues_table",                 "user_id",         ()),
+    ("bad_trade_flags",         "bad_trade_flags_table",         "user_id",         ()),
+    ("trade_impressions",       "trade_impressions_table",       "user_id",         ()),
+    ("app_feedback",            "app_feedback_table",            "user_id",         ()),
+)
+
+
+def _rows_as_dicts(rows, omit: tuple = ()) -> list[dict]:
+    return [
+        {k: v for k, v in r._mapping.items() if k not in omit}
+        for r in rows
+    ]
+
+
+def export_user_data(sleeper_user_id: str,
+                     account_id: str | None = None) -> dict:
+    """JSON-serializable archive of every user-keyed row (deletion-matrix
+    scope). `account_id`: also include an unbound session-attached account,
+    mirroring delete_user_data's account resolution.
+    """
+    uid = sleeper_user_id
+    out: dict = {
+        "export_version": 1,
+        "exported_at":    _now_iso(),
+        "user_id":        uid,
+        "tables":         {},
+    }
+    tables = out["tables"]
+    with db.engine.connect() as conn:
+        for key, tbl_attr, col, omit in _EXPORT_TABLES:
+            tbl = getattr(db, tbl_attr)
+            rows = conn.execute(
+                select(tbl).where(getattr(tbl.c, col) == uid)
+            ).fetchall()
+            tables[key] = _rows_as_dicts(rows, omit)
+
+        # Shared rows — the user's side of trade matches (the deletion
+        # matrix anonymizes these in place rather than deleting them).
+        rows = conn.execute(
+            select(db.trade_matches_table).where(
+                (db.trade_matches_table.c.user_a_id == uid)
+                | (db.trade_matches_table.c.user_b_id == uid)
+            )
+        ).fetchall()
+        tables["trade_matches"] = _rows_as_dicts(rows)
+
+        # Identity layer — bound account(s) + the session-attached one.
+        acct_ids = {
+            r.account_id for r in conn.execute(
+                select(db.accounts_table.c.account_id).where(
+                    db.accounts_table.c.sleeper_user_id == uid
+                )
+            ).fetchall()
+        }
+        if account_id:
+            acct_ids.add(account_id)
+        accounts_rows: list[dict] = []
+        identities_rows: list[dict] = []
+        for aid in sorted(acct_ids):
+            accounts_rows += _rows_as_dicts(conn.execute(
+                select(db.accounts_table).where(
+                    db.accounts_table.c.account_id == aid
+                )
+            ).fetchall())
+            identities_rows += _rows_as_dicts(conn.execute(
+                select(db.linked_identities_table).where(
+                    db.linked_identities_table.c.account_id == aid
+                )
+            ).fetchall())
+        tables["accounts"] = accounts_rows
+        tables["linked_identities"] = identities_rows
+
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Sign in with Apple token revocation (App Store 5.1.1(v) companion —
+# teardown 06-02, unflagged; called best-effort from DELETE /api/account)
+# ---------------------------------------------------------------------------
+#
+# Apple's /auth/revoke takes a refresh or access token from the
+# /auth/token code exchange. FTF never performs that exchange during
+# sign-in (it only verifies identity tokens against the JWKS), so nothing
+# revocable is stored server-side. Full revocation therefore needs the
+# client to send a FRESH `authorizationCode` from a Sign in with Apple
+# re-auth at deletion time; the deletion route passes it through as
+# `apple_authorization_code`. Without the code — or without the signing
+# env keys — this logs and returns False, and local deletion proceeds
+# (log-and-continue by design).
+#
+# Required env: APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY (the .p8
+# PEM contents; literal "\n" escapes accepted).
+
+APPLE_TOKEN_URL = "https://appleid.apple.com/auth/token"
+APPLE_REVOKE_URL = "https://appleid.apple.com/auth/revoke"
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _apple_client_secret() -> str | None:
+    """ES256 client-secret JWT per Apple's Sign in with Apple REST docs.
+    None when any required env key is missing or the key won't load."""
+    team_id = os.environ.get("APPLE_TEAM_ID", "").strip()
+    key_id = os.environ.get("APPLE_KEY_ID", "").strip()
+    pem = os.environ.get("APPLE_PRIVATE_KEY", "").strip()
+    if not (team_id and key_id and pem):
+        return None
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives.asymmetric.utils import (
+            decode_dss_signature,
+        )
+        from cryptography.hazmat.primitives.serialization import (
+            load_pem_private_key,
+        )
+        key = load_pem_private_key(
+            pem.replace("\\n", "\n").encode("utf-8"), password=None
+        )
+        now = int(time.time())
+        header = {"alg": "ES256", "kid": key_id, "typ": "JWT"}
+        claims = {
+            "iss": team_id,
+            "iat": now,
+            "exp": now + 600,
+            "aud": APPLE_ISSUER,
+            "sub": APPLE_AUDIENCE,
+        }
+        signing_input = (
+            _b64url_encode(json.dumps(header, separators=(",", ":")).encode())
+            + "."
+            + _b64url_encode(json.dumps(claims, separators=(",", ":")).encode())
+        )
+        der_sig = key.sign(signing_input.encode("ascii"),
+                           ec.ECDSA(hashes.SHA256()))
+        r, s = decode_dss_signature(der_sig)
+        raw_sig = r.to_bytes(32, "big") + s.to_bytes(32, "big")
+        return f"{signing_input}.{_b64url_encode(raw_sig)}"
+    except Exception as e:
+        print(f"[apple_revoke] client-secret build failed: {e}")
+        return None
+
+
+def _apple_form_post(url: str, fields: dict) -> tuple[int, dict]:
+    """POST a form to an Apple auth endpoint → (status, json body or {})."""
+    data = urllib.parse.urlencode(fields).encode("ascii")
+    req = urllib.request.Request(
+        url, data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(
+        req, timeout=10, context=ssl.create_default_context()
+    ) as resp:
+        raw = resp.read().decode("utf-8", "replace")
+    try:
+        return resp.status, (json.loads(raw) if raw else {})
+    except Exception:
+        return resp.status, {}
+
+
+def revoke_apple_tokens(authorization_code: str | None = None) -> bool:
+    """Best-effort SIWA revocation. True only when Apple confirmed the
+    revoke; never raises. See the section comment for why a fresh
+    `authorization_code` is required."""
+    try:
+        client_secret = _apple_client_secret()
+        if not client_secret:
+            print("[apple_revoke] skipped: APPLE_TEAM_ID/APPLE_KEY_ID/"
+                  "APPLE_PRIVATE_KEY not configured")
+            return False
+        if not authorization_code:
+            print("[apple_revoke] skipped: no apple_authorization_code "
+                  "supplied with the deletion request")
+            return False
+        status, body = _apple_form_post(APPLE_TOKEN_URL, {
+            "client_id":     APPLE_AUDIENCE,
+            "client_secret": client_secret,
+            "code":          authorization_code,
+            "grant_type":    "authorization_code",
+        })
+        token = body.get("refresh_token") or body.get("access_token")
+        if status != 200 or not token:
+            print(f"[apple_revoke] token exchange failed: status={status} "
+                  f"error={body.get('error')}")
+            return False
+        hint = "refresh_token" if body.get("refresh_token") else "access_token"
+        status, _ = _apple_form_post(APPLE_REVOKE_URL, {
+            "client_id":       APPLE_AUDIENCE,
+            "client_secret":   client_secret,
+            "token":           token,
+            "token_type_hint": hint,
+        })
+        if status == 200:
+            print("[apple_revoke] Apple token revoked")
+            return True
+        print(f"[apple_revoke] revoke call failed: status={status}")
+        return False
+    except Exception as e:
+        print(f"[apple_revoke] failed (non-fatal): {e}")
+        return False
+
+
+def has_apple_identity(sleeper_user_id: str,
+                       account_id: str | None = None) -> bool:
+    """True if the user's bound account (or the session-attached one) has a
+    linked Apple identity. Never raises."""
+    try:
+        with db.engine.connect() as conn:
+            acct_ids = {
+                r.account_id for r in conn.execute(
+                    select(db.accounts_table.c.account_id).where(
+                        db.accounts_table.c.sleeper_user_id == sleeper_user_id
+                    )
+                ).fetchall()
+            }
+            if account_id:
+                acct_ids.add(account_id)
+            if not acct_ids:
+                return False
+            for aid in acct_ids:
+                row = conn.execute(
+                    select(db.linked_identities_table.c.id).where(
+                        (db.linked_identities_table.c.account_id == aid)
+                        & (db.linked_identities_table.c.provider == "apple")
+                    ).limit(1)
+                ).fetchone()
+                if row is not None:
+                    return True
+    except Exception as e:
+        print(f"[apple_revoke] identity lookup failed: {e}")
+    return False

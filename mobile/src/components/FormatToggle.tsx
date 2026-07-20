@@ -1,6 +1,8 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
 import { ink, chalk, ice, radii, type } from '../theme/chalkline';
+import { Text } from './chalkline';
+import { useFlag } from '../state/useFeatureFlags';
 import type { ScoringFormat } from '../shared/types';
 
 // SF/1QB scoring-format toggle (feedback #80). Presentational only — the
@@ -27,6 +29,9 @@ interface FormatToggleProps {
 }
 
 export default function FormatToggle({ value, onChange, disabled }: FormatToggleProps) {
+  // S3 PRD-04 (`ux.touch_polish`): 36pt segments + 4pt vertical hitSlop =
+  // 44pt effective targets without shifting the host screen's layout.
+  const touchPolish = useFlag('ux.touch_polish');
   return (
     <View style={styles.group} accessibilityRole="tablist">
       {OPTIONS.map((opt, i) => {
@@ -38,6 +43,7 @@ export default function FormatToggle({ value, onChange, disabled }: FormatToggle
             accessibilityRole="tab"
             accessibilityState={{ selected: isActive }}
             accessibilityLabel={`${opt.label} scoring format`}
+            hitSlop={touchPolish ? { top: 4, bottom: 4 } : undefined}
             onPress={() => {
               if (!isActive) onChange(opt.key);
             }}
@@ -49,7 +55,7 @@ export default function FormatToggle({ value, onChange, disabled }: FormatToggle
               disabled && { opacity: 0.6 },
             ]}
           >
-            <Text style={[styles.segmentText, isActive && styles.segmentTextActive]}>
+            <Text scale="dense" style={[styles.segmentText, isActive && styles.segmentTextActive]}>
               {opt.label}
             </Text>
           </Pressable>

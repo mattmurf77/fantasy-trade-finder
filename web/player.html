@@ -4,29 +4,44 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Player Profile — Fantasy Trade Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:       #0f1117;
-      --surface:  #1a1d27;
-      --border:   #2a2d3a;
-      --text:     #e8eaf0;
-      --muted:    #7a7f96;
-      --accent:   #4f7cff;
-      --green:    #22c55e;
-      --red:      #ef4444;
-      --qb: #f97316;
-      --rb: #22c55e;
-      --wr: #3b82f6;
-      --te: #a855f7;
+      /* Chalkline tokens (docs/design/design-system.md) */
+      --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25; --ink-3: #232833;
+      --line: #262C35; --line-strong: #3D4654;
+      --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
+      --ice: #56D9EC; --ice-press: #3FC2D6; --on-ice: #071013;
+      --pos: #22C55E; --neg: #EF4444; --warn: #F59E0B;
+      --qb: #F97316; --rb: #22C55E; --wr: #3B82F6; --te: #A855F7;
+      --r-xs: 2px; --r-sm: 4px; --r-md: 8px; --r-pill: 999px;
+      --font-ui: 'Archivo', sans-serif;
+      --font-display: 'Barlow Condensed', sans-serif;
+      --font-data: 'IBM Plex Mono', monospace;
+      /* Legacy aliases for the rules below */
+      --bg: var(--ink-0); --surface: var(--ink-1); --border: var(--line);
+      --text: var(--chalk); --muted: var(--chalk-dim);
+      --accent: var(--ice); --green: var(--pos); --red: var(--neg);
     }
 
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-family: var(--font-ui);
       min-height: 100vh;
+    }
+    :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
     }
 
     .wrap { max-width: 720px; margin: 0 auto; padding: 20px 18px 60px; }
@@ -40,33 +55,40 @@
     /* ── Header ── */
     .ph { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
     .pos-chip {
-      font-size: 12px; font-weight: 700; color: #fff; padding: 3px 8px;
-      border-radius: 6px; letter-spacing: .02em;
+      font-size: 11px; font-weight: 600; padding: 3px 8px;
+      border-radius: var(--r-xs); letter-spacing: .08em;
+      border: 1px solid currentColor; text-transform: uppercase;
     }
-    .pos-QB { background: var(--qb); } .pos-RB { background: var(--rb); }
-    .pos-WR { background: var(--wr); } .pos-TE { background: var(--te); }
-    .pname { font-size: 24px; font-weight: 700; }
+    .pos-QB { color: var(--qb); } .pos-RB { color: var(--rb); }
+    .pos-WR { color: var(--wr); } .pos-TE { color: var(--te); }
+    .pname {
+      font-family: var(--font-display); text-transform: uppercase;
+      letter-spacing: 0.02em; font-size: 28px; font-weight: 700;
+    }
     .pmeta { color: var(--muted); font-size: 13px; margin-bottom: 22px; }
 
     /* ── Hero value ── */
     .hero { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
-    .hero-val { font-size: 40px; font-weight: 800; }
-    .delta { font-size: 14px; font-weight: 600; }
+    .hero-val { font-family: var(--font-data); font-variant-numeric: tabular-nums; font-size: 40px; font-weight: 600; }
+    .delta { font-family: var(--font-data); font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 500; }
     .delta.up { color: var(--green); } .delta.down { color: var(--red); }
     .delta.flat { color: var(--muted); }
     .hero-sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
 
     .card {
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: 12px; padding: 16px 18px; margin-bottom: 14px;
+      border-radius: var(--r-md); padding: 16px 18px; margin-bottom: 14px;
     }
-    .card h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
-               color: var(--muted); margin-bottom: 12px; font-weight: 600; }
+    .card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+               color: var(--muted); margin-bottom: 12px; font-weight: 600;
+               display: flex; align-items: center; gap: 8px; }
+    .card h3::before { content: ""; width: 3px; height: 14px; background: var(--ice); }
 
     .row { display: flex; justify-content: space-between; align-items: center;
            padding: 7px 0; font-size: 14px; }
     .row + .row { border-top: 1px solid var(--border); }
-    .row .k { color: var(--muted); } .row .v { font-weight: 600; }
+    .row .k { color: var(--muted); }
+    .row .v { font-family: var(--font-data); font-variant-numeric: tabular-nums; font-weight: 500; }
 
     /* ── You vs market ── */
     .yvm-headline { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
@@ -77,7 +99,7 @@
     svg { display: block; width: 100%; height: auto; }
     .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-top: 8px; }
     .legend span { display: inline-flex; align-items: center; gap: 5px; }
-    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .dot { width: 9px; height: 9px; display: inline-block; }
 
     .empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
     .sugg { font-size: 13px; }

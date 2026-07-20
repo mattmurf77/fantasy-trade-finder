@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
-import { colors } from '../theme/colors';
-import { spacing, radius, fontSize } from '../theme/spacing';
+import { View, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
+import { ink, semantic, radii, space } from '../theme/chalkline';
+import { Button, Text } from './chalkline';
+import { useFlag } from '../state/useFeatureFlags';
 import type { ScoringFormat } from '../shared/types';
 
 // FB4-59 — Single-format gate error on TradesHome.
@@ -10,6 +11,13 @@ import type { ScoringFormat } from '../shared/types';
 // copy from the set format, or set the needed format up manually. Detection
 // lives in TradesScreen (it owns the progress signal); this component is
 // purely presentational.
+//
+// Teardown S2 PRD-03: rebuilt on Chalkline primitives behind
+// `visual.chalkline_cleanup` (kills the banned #4f7cff indigo CTA, radius 14,
+// '#fff' literal and the "⇆" text glyph — Button's `swap` Icon instead) and
+// adds the S4B-09 jargon subline. Flag off renders the pre-teardown look
+// pixel-for-pixel via the LEGACY_* constants below (theme/colors.ts no longer
+// exports chrome hexes); delete the legacy branch at flag cleanup.
 
 // Human label for each format. Mirrors TiersScreen's FORMAT_LABELS so the
 // copy reads consistently across the Tiers and Trades surfaces.
@@ -35,7 +43,14 @@ interface FormatGateProps {
   onSetUpManually: () => void;
 }
 
-export default function FormatGate({
+export default function FormatGate(props: FormatGateProps) {
+  const cleanup = useFlag('visual.chalkline_cleanup');
+  return cleanup ? <ChalklineGate {...props} /> : <LegacyGate {...props} />;
+}
+
+// ── Chalkline branch (flag on) ──────────────────────────────────────────────
+
+function ChalklineGate({
   neededFormat,
   setFormat,
   copying,
@@ -44,8 +59,71 @@ export default function FormatGate({
 }: FormatGateProps) {
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>Set up {FORMAT_LABELS[neededFormat]} to trade here</Text>
-      <Text style={styles.body}>
+      <Text variant="title">Set up {FORMAT_LABELS[neededFormat]} to trade here</Text>
+      <Text variant="bodySm">
+        You've set up your {FORMAT_LABELS[setFormat]} rankings but not{' '}
+        {FORMAT_LABELS[neededFormat]}, which this league uses. Add it to start
+        finding trades.
+      </Text>
+      {/* S4B-09 — expand the format jargon once, right where it gates. */}
+      <Text variant="bodySm">SF TEP = Superflex, TE premium.</Text>
+
+      <Button
+        label={`Copy from ${FORMAT_LABELS[setFormat]}`}
+        icon="swap"
+        loading={copying}
+        onPress={onCopy}
+        style={styles.copyBtn}
+      />
+      <Button
+        label={`Set up ${FORMAT_LABELS[neededFormat]} manually`}
+        variant="secondary"
+        disabled={copying}
+        onPress={onSetUpManually}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: {
+    backgroundColor: ink.ink1,
+    // Warn border: this is a gate, not an error — solid encode color per the
+    // badge/border construction (replaces the legacy 45%-alpha gold tint).
+    borderColor: semantic.warn,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    padding: space.lg,
+    gap: space.sm,
+  },
+  copyBtn: { marginTop: space.xs },
+});
+
+// ── Legacy branch (flag off) — pre-teardown rendering, byte-for-byte ────────
+// Hexes/values inlined from the retired theme/colors.ts + spacing.ts scales.
+// DELETE this whole section when `visual.chalkline_cleanup` is removed.
+
+const LEGACY = {
+  surface: '#1a1d27',
+  border: '#2a2d3a',
+  text: '#e8eaf0',
+  muted: '#7a7f96',
+  accent: '#4f7cff', // banned indigo — survives only behind the flag-off branch
+} as const;
+
+function LegacyGate({
+  neededFormat,
+  setFormat,
+  copying,
+  onCopy,
+  onSetUpManually,
+}: FormatGateProps) {
+  return (
+    <View style={legacyStyles.card}>
+      <Text scale="body" style={legacyStyles.title}>
+        Set up {FORMAT_LABELS[neededFormat]} to trade here
+      </Text>
+      <Text scale="body" style={legacyStyles.body}>
         You've set up your {FORMAT_LABELS[setFormat]} rankings but not{' '}
         {FORMAT_LABELS[neededFormat]}, which this league uses. Add it to start
         finding trades.
@@ -55,7 +133,7 @@ export default function FormatGate({
         disabled={copying}
         onPress={onCopy}
         style={({ pressed }) => [
-          styles.primaryBtn,
+          legacyStyles.primaryBtn,
           pressed && { opacity: 0.85 },
           copying && { opacity: 0.5 },
         ]}
@@ -63,7 +141,7 @@ export default function FormatGate({
         {copying ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.primaryBtnText}>
+          <Text scale="body" style={legacyStyles.primaryBtnText}>
             ⇆ Copy from {FORMAT_LABELS[setFormat]}
           </Text>
         )}
@@ -73,12 +151,12 @@ export default function FormatGate({
         disabled={copying}
         onPress={onSetUpManually}
         style={({ pressed }) => [
-          styles.secondaryBtn,
+          legacyStyles.secondaryBtn,
           pressed && { opacity: 0.7 },
           copying && { opacity: 0.5 },
         ]}
       >
-        <Text style={styles.secondaryBtnText}>
+        <Text scale="body" style={legacyStyles.secondaryBtnText}>
           Set up {FORMAT_LABELS[neededFormat]} manually
         </Text>
       </Pressable>
@@ -86,35 +164,35 @@ export default function FormatGate({
   );
 }
 
-const styles = StyleSheet.create({
+const legacyStyles = StyleSheet.create({
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: LEGACY.surface,
     borderColor: 'rgba(245,158,11,0.45)', // gold-tinted border — reads as a gate, not an error
     borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    gap: spacing.sm,
+    borderRadius: 14,
+    padding: 16,
+    gap: 8,
   },
-  title: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
+  title: { color: LEGACY.text, fontSize: 18, fontWeight: '800' },
   body: {
-    color: colors.muted,
-    fontSize: fontSize.sm,
+    color: LEGACY.muted,
+    fontSize: 13,
     lineHeight: 22,
   },
   primaryBtn: {
-    backgroundColor: colors.accent,
+    backgroundColor: LEGACY.accent,
     paddingVertical: 14,
-    borderRadius: radius.md,
+    borderRadius: 10,
     alignItems: 'center',
-    marginTop: spacing.sm,
+    marginTop: 8,
   },
-  primaryBtnText: { color: '#fff', fontSize: fontSize.base, fontWeight: '800' },
+  primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
   secondaryBtn: {
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radius.md,
+    paddingVertical: 10,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: LEGACY.border,
     alignItems: 'center',
   },
-  secondaryBtnText: { color: colors.text, fontSize: fontSize.sm, fontWeight: '700' },
+  secondaryBtnText: { color: LEGACY.text, fontSize: 13, fontWeight: '700' },
 });

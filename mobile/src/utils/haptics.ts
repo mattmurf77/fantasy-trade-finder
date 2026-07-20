@@ -10,6 +10,15 @@ import * as Haptics from 'expo-haptics';
 //   warning   — destructive or undo (dismiss player, decline match)
 //
 // All calls are fire-and-forget; native APIs are async but we never await.
+//
+// Teardown S3 PRD-04 wiring guidance (wave-2 screen agents):
+//   • `pickup()` is defined but uncalled today — fire it in `onDragBegin` on
+//     BOTH drag boards (TiersScreen, ManualRanksScreen) so the 220ms lift
+//     gets tactile confirmation and scroll-vs-drag stops being ambiguous.
+//   • Drag END is routine — use `swipe()` (impact-light), NOT `success()`.
+//     Reserve `success()` for server-confirmed outcomes.
+//   • Zero direct expo-haptics imports outside this file: route
+//     SendInSleeperButton (current offender) through this taxonomy.
 
 export const haptics = {
   selection: () => {

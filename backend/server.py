@@ -4222,6 +4222,45 @@ def terms_page():
     return send_from_directory(app.static_folder, "terms.html")
 
 
+# Apple team id for Universal Links. The repo's canonical value lives in
+# mobile/eas.json (`appleTeamId`); env override so a fork/team change never
+# needs a code edit. Read at request time, not import time.
+_APPLE_TEAM_ID_DEFAULT = "N5Y4N2Q49A"
+
+
+@app.route("/.well-known/apple-app-site-association")
+def apple_app_site_association():
+    """Universal Links AASA file (teardown 01-nav PRD-03, backend half).
+
+    Deliberately UNFLAGGED and inert: iOS only consumes this once the
+    mobile build ships the `associatedDomains` entitlement (the mobile
+    half of the PRD). Apple's CDN requires application/json, HTTP 200,
+    and no redirect — a direct Flask route satisfies all three.
+
+    Declares the shared-surface paths: public profiles (/u/*), share
+    links (/s/*), and referral links (/?ref=*). `components` is the
+    modern matcher (iOS 13+; required for the ?ref query match);
+    `paths` is the legacy fallback for the path-only patterns.
+    """
+    team_id = os.environ.get("APPLE_TEAM_ID") or _APPLE_TEAM_ID_DEFAULT
+    app_id = f"{team_id}.{_accounts.APPLE_AUDIENCE}"
+    return jsonify({
+        "applinks": {
+            "apps": [],
+            "details": [{
+                "appID":  app_id,
+                "appIDs": [app_id],
+                "components": [
+                    {"/": "/u/*"},
+                    {"/": "/s/*"},
+                    {"/": "/", "?": {"ref": "?*"}},
+                ],
+                "paths": ["/u/*", "/s/*"],
+            }],
+        },
+    })
+
+
 # ---------------------------------------------------------------------------
 # Player DB Routes
 # ---------------------------------------------------------------------------
@@ -5235,10 +5274,11 @@ def swipe_trade():
                         # ── Push — typed dispatch to both match participants ──
                         # _send_typed_push handles prefs, freq caps, and
                         # quiet-hours bundling. Non-throwing.
-                        # Each recipient also gets a one-time `first_match`
-                        # push if this is their first-ever match (gated by
-                        # the dedup-cap on the `first_match` kind — fires
-                        # once per user, ever).
+                        # ONE push per recipient per match (teardown 05-04c):
+                        # a recipient's first-ever match gets the celebratory
+                        # `first_match` (lifetime dedup); later matches get
+                        # `new_match`. Previously both fired for the same
+                        # event on the first match.
                         for _recipient_id, _partner_name, _give, _recv in [
                             (g_user_id,           _partner_a,    _give_names,    _receive_names),
                             (card.target_user_id, _my_username,  _receive_names, _give_names),
@@ -5248,28 +5288,28 @@ def swipe_trade():
                                 if _give and _recv else
                                 "Tap to view the matched trade."
                             )
-                            _send_typed_push(
-                                _recipient_id,
-                                "new_match",
-                                title = f"🎯 Match with @{_partner_name}",
-                                body  = _body_detail,
-                                data  = {
-                                    "match_id":  match_data["id"],
-                                    "league_id": card.league_id,
-                                },
-                                dedup_key = str(match_data["id"]),
-                            )
-                            _send_typed_push(
-                                _recipient_id,
-                                "first_match",
-                                title = "🎉 You got your first trade match!",
-                                body  = f"@{_partner_name} matched a trade with you. Tap to review.",
-                                data  = {
-                                    "match_id":  match_data["id"],
-                                    "league_id": card.league_id,
-                                },
-                                dedup_key = "lifetime",
-                            )
+                            _push_data = {
+                                "match_id":  match_data["id"],
+                                "league_id": card.league_id,
+                            }
+                            if _match_push_kind(_recipient_id) == "first_match":
+                                _send_typed_push(
+                                    _recipient_id,
+                                    "first_match",
+                                    title = "🎉 You got your first trade match!",
+                                    body  = f"@{_partner_name} matched a trade with you. Tap to review.",
+                                    data  = _push_data,
+                                    dedup_key = "lifetime",
+                                )
+                            else:
+                                _send_typed_push(
+                                    _recipient_id,
+                                    "new_match",
+                                    title = f"🎯 Match with @{_partner_name}",
+                                    body  = _body_detail,
+                                    data  = _push_data,
+                                    dedup_key = str(match_data["id"]),
+                                )
 
         except Exception as db_err:
             log.warning("DB write failed for trade swipe (continuing): %s", db_err)
@@ -6411,6 +6451,10 @@ def get_league_preferences():
     GET /api/league/preferences?league_id=...
     Returns the logged-in user's stored preferences for the given league.
 
+    Always scoped to the SESSION user — a `user_id` query param is ignored
+    (teardown S6B-01: the old override let any session read another user's
+    outlook; no client ever sent it).
+
     Response:
         {
           "team_outlook":          "championship" | null,
@@ -6423,7 +6467,7 @@ def get_league_preferences():
     g_user_id = sess["user_id"]
     g_league  = sess["league"]
     league_id = request.args.get("league_id") or g_league.league_id
-    user_id   = request.args.get("user_id")   or g_user_id
+    user_id   = g_user_id
     try:
         prefs = load_league_preference(user_id=user_id, league_id=league_id)
         declared = (prefs or {}).get("team_outlook")
@@ -6435,7 +6479,7 @@ def get_league_preferences():
         # Backlog #8 — when no outlook is declared, surface the inferred one
         # (+ signals) so the client can render a one-tap confirm. Additive and
         # flag-gated; absent when trade.outlook_seed is off.
-        if not declared and user_id == g_user_id:
+        if not declared:
             inferred, signals = _infer_user_outlook(g_user_id, league_id, sess, g_league)
             if inferred:
                 payload = {**payload,
@@ -6461,6 +6505,11 @@ def set_league_preferences():
 
     Sets the user's team outlook and optional positional preferences for the
     given league. Persisted in DB.
+
+    Always writes the SESSION user's row — a body `user_id` is ignored
+    (teardown S6B-01: the old override let any authenticated session, incl.
+    a squatter grace session, overwrite another manager's outlook and thus
+    sabotage their trade suggestions; no client ever sent it).
     """
     sess = _require_initialized_session()
     sess["last_active"] = time.time()
@@ -6468,7 +6517,7 @@ def set_league_preferences():
     g_league  = sess["league"]
     body                 = request.get_json(force=True) or {}
     league_id            = body.get("league_id")    or g_league.league_id
-    user_id              = body.get("user_id")      or g_user_id
+    user_id              = g_user_id
     outlook              = body.get("team_outlook")
     acquire_positions    = body.get("acquire_positions")    # may be None or list
     trade_away_positions = body.get("trade_away_positions") # may be None or list
@@ -8098,6 +8147,15 @@ def session_init():
         verified_via = _accounts.get_user_verified_via(user_id)
     except Exception as verif_err:
         log.warning("session/init: verified_via lookup failed: %s", verif_err)
+
+    # notif.tz_sync (teardown 05-01) — adopt the device tz while the stored
+    # value is still the ET default. Must run here on the request thread
+    # (reads g.user_tz), not in the background-writes daemon. No-op while dark.
+    try:
+        _sync_tz_from_header(user_id)
+    except Exception as tz_err:
+        log.warning("session/init: tz sync failed (non-fatal): %s", tz_err)
+
     return jsonify({
         "ok":           True,
         "token":        token,
@@ -8380,6 +8438,20 @@ def _freq_cap_blocks(user_id: str, kind: str, dedup_key: str | None) -> bool:
     return sent >= max_count
 
 
+def _match_push_kind(user_id: str) -> str:
+    """Which single push a fresh trade match should produce for `user_id`.
+
+    Teardown 05-04c bug fix: the swipe-match path used to fire BOTH
+    `first_match` and `new_match` for the same event on a user's first
+    match (two pushes, one moment). A user's first-ever match now gets only
+    the celebratory `first_match`; every later match gets `new_match`.
+    Mirrors the `first_match` lifetime dedup gate in _freq_cap_blocks.
+    """
+    return ("new_match"
+            if notification_dedup_sent(user_id, "first_match", "lifetime")
+            else "first_match")
+
+
 def _send_typed_push(
     user_id: str,
     kind: str,
@@ -8451,6 +8523,52 @@ def _send_typed_push(
                     user_id, kind, e)
 
 
+def _valid_iana_tz(name) -> bool:
+    """True if `name` is a resolvable IANA timezone string."""
+    if not name or not isinstance(name, str):
+        return False
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(name)
+        return True
+    except Exception:
+        return False
+
+
+def _sync_tz_from_header(user_id: str) -> None:
+    """Adopt the device timezone into notification_prefs.tz (flag
+    `notif.tz_sync`, teardown 05-01).
+
+    Every client request already carries `X-User-TZ` (stored on `g.user_tz`
+    by the before_request hook); until now only streak analytics consumed
+    it, so quiet hours / digests ran in the ET default for everyone. Called
+    from session_init and register-device. Deliberately conservative:
+
+      * only while the stored tz is still the default (a user- or
+        device-set non-default value is never overwritten), and
+      * only for a valid IANA header value.
+
+    Must run on the request thread (reads `g`). Non-throwing.
+    """
+    if not is_enabled("notif.tz_sync"):
+        return
+    if not user_id or str(user_id).startswith("demo_user") or user_id == DEMO_USER_ID:
+        return
+    header_tz = (getattr(g, "user_tz", None) or "").strip()
+    if not header_tz or header_tz == NOTIF_PREF_DEFAULTS["tz"] \
+            or not _valid_iana_tz(header_tz):
+        return
+    try:
+        stored = get_notification_prefs(user_id).get("tz")
+        if stored and stored != NOTIF_PREF_DEFAULTS["tz"]:
+            return   # explicit (or previously synced) non-default value wins
+        upsert_notification_prefs(user_id, tz=header_tz)
+        log.info("notif tz synced from device header: user=%s tz=%s",
+                 user_id, header_tz)
+    except Exception as e:
+        log.warning("notif tz sync failed (non-fatal): user=%s err=%s", user_id, e)
+
+
 @app.route("/api/notifications/register-device", methods=["POST"])
 @_gate_unverified_write
 def register_device_for_push():
@@ -8479,6 +8597,7 @@ def register_device_for_push():
 
     try:
         save_device_token(user_id=g_user_id, device_token=token, platform=platform)
+        _sync_tz_from_header(g_user_id)   # notif.tz_sync (no-op while dark)
         return jsonify({"ok": True})
     except Exception as e:
         log.error("register-device failed: %s", e)
@@ -8512,12 +8631,8 @@ def update_notification_prefs_route():
     fields = {k: v for k, v in body.items() if k in allowed}
     if not fields:
         return jsonify({"error": "no_valid_fields"}), 400
-    if "tz" in fields:
-        try:
-            from zoneinfo import ZoneInfo
-            ZoneInfo(str(fields["tz"]))
-        except Exception:
-            return jsonify({"error": "invalid_tz"}), 400
+    if "tz" in fields and not _valid_iana_tz(str(fields["tz"])):
+        return jsonify({"error": "invalid_tz"}), 400
     try:
         out = upsert_notification_prefs(sess["user_id"], **fields)
         try:
@@ -8785,12 +8900,36 @@ def cron_daily_tick():
 
         # ── winback_dormant: 30d inactive ──
         if last_active and last_active < cutoff_30d:
-            _send_typed_push(
-                uid, "winback_dormant",
-                title = "👋 Your league misses you",
-                body  = "New trade matches are waiting when you're ready.",
-                data  = {},
-            )
+            if is_enabled("notif.honest_winbacks"):
+                # Teardown 05-04b. Two gates before any dormant winback:
+                #  1. Lifetime stop — ≥3 winback_dormant sends since the
+                #    user's last session means three consecutive nudges went
+                #    unanswered; stop forever (notification_events_log rows
+                #    after last_active_at ARE the consecutive-unanswered
+                #    count, so no schema change is needed).
+                #  2. Truthful copy — mirror the winback_matches gate below:
+                #    only claim waiting matches when unread matches exist;
+                #    otherwise send nothing.
+                if count_notification_sends_since(
+                        uid, "winback_dormant", last_active) >= 3:
+                    continue
+                unread = load_unread_match_count(uid)
+                if unread <= 0:
+                    continue
+                _send_typed_push(
+                    uid, "winback_dormant",
+                    title = "👋 Your league misses you",
+                    body  = (f"You have {unread} unreviewed trade "
+                             f"match{'es' if unread != 1 else ''} waiting."),
+                    data  = {"unread_count": unread},
+                )
+            else:
+                _send_typed_push(
+                    uid, "winback_dormant",
+                    title = "👋 Your league misses you",
+                    body  = "New trade matches are waiting when you're ready.",
+                    data  = {},
+                )
             counters["winback_dormant"] += 1
             continue
 
@@ -10563,17 +10702,12 @@ def link_sleeper_source():
     })
 
 
-@app.route("/api/account", methods=["DELETE"])
-def delete_account_route():
-    """In-app account deletion (App Store 5.1.1(v)) — NOT flag-gated.
-
-    Deletes/anonymizes per the matrix documented in accounts.delete_user_data
-    (honors web/privacy.html §6). When the user record has been verified
-    (users.verified_via set), the calling session must itself be verified —
-    a username-only squatter session cannot delete a verified user's data.
-    Also evicts every live session for the user (server-side sign-out).
+def _account_data_gates(sess) -> tuple | None:
+    """Shared auth gates for account deletion + export (teardown 06-02):
+    demo sessions have no stored data (400); a verified user's data can
+    only be touched by a verified session (403). Returns a (response,
+    status) tuple to short-circuit with, or None to proceed.
     """
-    sess = _require_session()
     user_id = sess.get("user_id")
     if sess.get("is_demo") or str(user_id or "").startswith("demo_user_"):
         return jsonify({"error": "demo_session",
@@ -10586,8 +10720,77 @@ def delete_account_route():
         return jsonify({
             "error": "verification_required",
             "message": "This account is verified — verify this session "
-                       "before deleting it.",
+                       "first.",
         }), 403
+    return None
+
+
+@app.route("/api/account/export")
+def export_account_route():
+    """GET /api/account/export — JSON archive of every user-keyed row
+    (teardown 06-02, flag `account.data_export`; 404 while dark).
+
+    Scope = the deletion matrix in accounts.delete_user_data (same table
+    list, so "Download my data" and "Delete account" describe the same data
+    set; sleeper_credentials ciphertext excluded). Same auth gates as
+    deletion: demo-blocked, verified-user step-up.
+    """
+    if not is_enabled("account.data_export"):
+        return jsonify({"error": "not_found"}), 404
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    user_id = sess.get("user_id")
+    gated = _account_data_gates(sess)
+    if gated is not None:
+        return gated
+    try:
+        archive = _accounts.export_user_data(
+            user_id, account_id=sess.get("account_id"))
+    except Exception as e:
+        log.exception("account/export failed for %s", user_id)
+        return jsonify({"error": "export_failed", "message": str(e)}), 500
+    log.info("account/export: user %s exported (%d tables)",
+             user_id, len(archive.get("tables", {})))
+    resp = jsonify(archive)
+    # Hint clients (and browsers) that this is a download artifact.
+    resp.headers["Content-Disposition"] = (
+        "attachment; filename=fantasy-trade-finder-export.json")
+    return resp
+
+
+@app.route("/api/account", methods=["DELETE"])
+def delete_account_route():
+    """In-app account deletion (App Store 5.1.1(v)) — NOT flag-gated.
+
+    Deletes/anonymizes per the matrix documented in accounts.delete_user_data
+    (honors web/privacy.html §6). When the user record has been verified
+    (users.verified_via set), the calling session must itself be verified —
+    a username-only squatter session cannot delete a verified user's data.
+    Also evicts every live session for the user (server-side sign-out).
+
+    SIWA revocation (5.1.1(v) companion, teardown 06-02): when a linked
+    Apple identity exists, best-effort revoke via Apple's /auth/revoke —
+    needs the APPLE_* signing env keys plus a fresh
+    `apple_authorization_code` in the (optional) request body; any failure
+    is logged and local deletion proceeds regardless.
+    """
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    gated = _account_data_gates(sess)
+    if gated is not None:
+        return gated
+    apple_revoked = False
+    try:
+        if _accounts.has_apple_identity(user_id,
+                                        account_id=sess.get("account_id")):
+            body = request.get_json(silent=True) or {}
+            apple_revoked = _accounts.revoke_apple_tokens(
+                body.get("apple_authorization_code"))
+            log.info("delete_account: apple revocation %s for %s",
+                     "succeeded" if apple_revoked else "not completed", user_id)
+    except Exception as revoke_err:
+        log.warning("delete_account: apple revocation errored (continuing): %s",
+                    revoke_err)
     try:
         counts = _accounts.delete_user_data(user_id,
                                             account_id=sess.get("account_id"))
@@ -10599,7 +10802,8 @@ def delete_account_route():
                   if s.get("user_id") == user_id]:
             _sessions.pop(t, None)
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
-    return jsonify({"ok": True, "deleted": counts})
+    return jsonify({"ok": True, "deleted": counts,
+                    "apple_revoked": apple_revoked})
 
 
 # ---------------------------------------------------------------------------

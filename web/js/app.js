@@ -32,6 +32,31 @@
     // Kick the fetch immediately; it resolves before most UI code runs.
     _loadFeatureFlags();
 
+    // ═══════════════════════════════════════════════════════════════
+    //  CHALKLINE ICONS — inline SVG (20×20, 1.75 stroke, square caps).
+    //  Replaces emoji-as-icons per docs/design/design-system.md.
+    //  Usage in template strings: ${ICON.check} / ICON sized via class.
+    // ═══════════════════════════════════════════════════════════════
+    const _svg = (paths, cls) =>
+      `<svg class="${cls || 'icon icon-sm'}" viewBox="0 0 20 20" aria-hidden="true">${paths}</svg>`;
+    const ICON = {
+      rank:   _svg('<path d="M3 17V9M10 17V3M17 17v-6"/>'),
+      trade:  _svg('<path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/>'),
+      match:  _svg('<path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/>'),
+      bell:   _svg('<path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/>'),
+      check:  _svg('<path d="M4 11l4 4 8-9"/>'),
+      x:      _svg('<path d="M5 5l10 10M15 5L5 15"/>'),
+      crown:  _svg('<path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/>'),
+      plus:   _svg('<path d="M10 4v12M4 10h12"/>'),
+      lock:   _svg('<path d="M6 9V6a4 4 0 018 0v3M4 9h12v8H4z"/>'),
+      unlock: _svg('<path d="M6 9V6a4 4 0 017.8-1.2M4 9h12v8H4z"/>'),
+      mail:   _svg('<path d="M3 5h14v10H3zM3 6l7 5 7-5"/>'),
+      chat:   _svg('<path d="M3 4h14v9H8l-4 3v-3H3z"/>'),
+      send:   _svg('<path d="M17 3L3 9l5 2 2 5 7-13zM8 11l9-8"/>'),
+      moon:   _svg('<path d="M16 12a7 7 0 01-8-8 7 7 0 108 8z"/>'),
+      copy:   _svg('<path d="M7 7h9v9H7zM4 13V4h9"/>'),
+    };
+
     // ── Mobile polish flag → body data-attribute wiring (Agent A6) ────
     // CSS rules scoped under body[data-ftf-flag-mobile-*="1"] become
     // active only when the corresponding flag is enabled. Flag-off =
@@ -150,7 +175,7 @@
         },
 
         error(msg) {
-          push('error', `<span class="err">✖ ${h(msg)}</span>`, msg);
+          push('error', `<span class="err">${h(msg)}</span>`, msg);
         },
 
         server(entry) {
@@ -181,7 +206,7 @@
         copy() {
           const text = buf.map(e => e.raw).join('\n');
           navigator.clipboard.writeText(text).then(
-            () => showToast('📋 Log copied to clipboard'),
+            () => showToast('Log copied to clipboard'),
             () => {
               // Fallback: open in new tab as text
               const w = window.open('','_blank');
@@ -521,7 +546,7 @@
       const sub    = document.getElementById('league-subtitle');
 
       sub.textContent = `Leagues for ${user.display_name}`;
-      list.innerHTML  = '<div class="league-loading">⏳ Loading your leagues…</div>';
+      list.innerHTML  = '<div class="league-loading">Loading your leagues…</div>';
       screen.classList.remove('hidden');
 
       try {
@@ -566,7 +591,7 @@
         // Pass only the numeric index — avoids any quoting/escaping issues with league names
         list.innerHTML = leagues.map((lg, i) => `
           <div class="league-item" id="li-${lg.league_id}" onclick="selectLeague(${i}, this)">
-            <div class="league-item-icon">🏈</div>
+            <div class="league-item-icon">${ICON.crown}</div>
             <div class="league-item-info">
               <div class="league-item-name">${escapeHtml(lg.name || 'Unnamed League')}</div>
               <div class="league-item-meta">${lg.total_rosters || '?'} teams · ${lg.scoring_settings?.rec ? 'PPR' : 'Standard'}</div>
@@ -677,7 +702,7 @@
       if (el) {
         el.classList.add('loading');
         const arrow = el.querySelector('.league-item-arrow');
-        if (arrow) arrow.textContent = '⏳';
+        if (arrow) arrow.textContent = '…';
       }
 
       const user = getSavedUser();
@@ -695,7 +720,7 @@
       } catch (e) {
         logDrawer.error(`Player cache failed: ${e.message}`);
         hideInitOverlay();
-        showToast('⚠️ Failed to load player database');
+        showToast('Failed to load player database');
         resetLeagueItem(el);
         showLeagueScreen(user);
         return;
@@ -717,7 +742,7 @@
       } catch (e) {
         logDrawer.error(`Roster/user fetch failed: ${e.message}`);
         hideInitOverlay();
-        showToast('⚠️ Failed to fetch roster data');
+        showToast('Failed to fetch roster data');
         resetLeagueItem(el);
         showLeagueScreen(user);
         return;
@@ -738,7 +763,7 @@
       if (!userRoster) {
         logDrawer.error(`No roster found for owner_id=${user.user_id} — owner_ids present: ${allOwnerIds}`);
         hideInitOverlay();
-        showToast('⚠️ Could not find your roster in this league');
+        showToast('Could not find your roster in this league');
         resetLeagueItem(el);
         showLeagueScreen(user);
         return;
@@ -769,7 +794,7 @@
 
       if (!ok) {
         logDrawer.error('initSession returned false — see log above for details');
-        showToast('⚠️ Failed to initialise session');
+        showToast('Failed to initialise session');
         resetLeagueItem(el);
         showLeagueScreen(user);
         return;
@@ -780,8 +805,8 @@
       currentLeagueId = leagueId;
       currentUserId   = user.user_id || null;
       renderAccountChip(user);
-      logDrawer.info(`✅ League initialised — ${userPlayerIds.length} players imported`);
-      showToast(`✅ Roster loaded — ${userPlayerIds.length} players imported`);
+      logDrawer.info(`League initialised — ${userPlayerIds.length} players imported`);
+      showToast(`Roster loaded — ${userPlayerIds.length} players imported`);
 
       // Check if user has unlocked the trade finder — if not, show ranking method selection
       let showMethodScreen = false;
@@ -890,7 +915,7 @@
             localStorage.setItem(LS_TOKEN, sessionToken);
             logDrawer.info(`Session token stored (${sessionToken.slice(0, 8)}…)`);
           }
-          logDrawer.info(`✅ session/init OK — ${data.player_count} players, ${data.opponents} opponents`);
+          logDrawer.info(`session/init OK — ${data.player_count} players, ${data.opponents} opponents`);
           // Store the user's roster for the player picker
           if (data.user_roster && Array.isArray(data.user_roster)) {
             _myRoster = data.user_roster;
@@ -934,12 +959,12 @@
       const leagueSection = league
         ? `<div class="account-menu-league">League</div>
            <div class="account-menu-item" style="cursor:default;color:var(--muted)">
-             🏈 ${escapeHtml(league.league_name || 'My League')}
+             ${ICON.crown} ${escapeHtml(league.league_name || 'My League')}
            </div>
            <div class="account-menu-item" onclick="switchLeague()">↔ Switch league</div>
-           <div class="account-menu-item" onclick="openConnectLeagueModal()">➕ Connect another league</div>
+           <div class="account-menu-item" onclick="openConnectLeagueModal()">${ICON.plus} Connect another league</div>
            <div class="account-menu-divider"></div>`
-        : `<div class="account-menu-item" onclick="openConnectLeagueModal()">➕ Connect another league</div>
+        : `<div class="account-menu-item" onclick="openConnectLeagueModal()">${ICON.plus} Connect another league</div>
            <div class="account-menu-divider"></div>`;
 
       document.getElementById('account-chip-container').innerHTML = `
@@ -948,7 +973,7 @@
           <div class="account-name">${escapeHtml(user.display_name || 'Unknown')}</div>
           <div class="account-menu">
             ${leagueSection}
-            <div class="account-menu-item danger" onclick="logout()">⎋ Log out</div>
+            <div class="account-menu-item danger" onclick="logout()">Log out</div>
           </div>
         </div>
       `;
@@ -1323,7 +1348,7 @@
       const btn = document.getElementById('auto-confirm-toggle');
       if (btn) {
         btn.classList.toggle('active', autoConfirmEnabled);
-        btn.textContent = autoConfirmEnabled ? '⚡ I AM SPEED — ON' : '⚡ I AM SPEED — OFF';
+        btn.textContent = autoConfirmEnabled ? 'I AM SPEED — ON' : 'I AM SPEED — OFF';
       }
       // When turning on auto-confirm, hide the submit button row
       const submitRow = document.querySelector('.submit-row');
@@ -1350,7 +1375,7 @@
       try {
         const res  = await apiFetch(`/api/trio?position=${currentPosition || ''}`);
         const data = await res.json();
-        if (data.error) { showToast('⚠️ ' + data.error); return; }
+        if (data.error) { showToast('' + data.error); return; }
         currentTrio = data;
         renderCard('a', data.player_a);
         renderCard('b', data.player_b);
@@ -1413,7 +1438,7 @@
       if      (remaining === 3) instr.innerHTML = 'Tap players in order of preference — <strong>best first</strong>';
       else if (remaining === 2) instr.innerHTML = 'Good — now tap your <strong>2nd choice</strong>';
       else if (remaining === 1) instr.innerHTML = 'Last one — tap your <strong>3rd choice</strong>';
-      else                      instr.innerHTML = '✓ All ranked — confirm when ready';
+      else                      instr.innerHTML = `${ICON.check} All ranked — confirm when ready`;
     }
 
     // ── Swipe-compare toast (Agent A1 — swipe.community_compare / qc_compliments) ──
@@ -1496,7 +1521,7 @@
           return;
         }
 
-        if (data.error) { showToast('⚠️ ' + data.error); locked = false; return; }
+        if (data.error) { showToast('' + data.error); locked = false; return; }
 
         updateProgress(data);
 
@@ -1917,9 +1942,9 @@
       // Update title based on progress
       const titleEl = wrap.querySelector('.unlock-bar-title');
       if (titleEl) {
-        titleEl.textContent = progress.unlocked
-          ? '✅ Find a Trade unlocked!'
-          : `🔓 Find a Trade`;
+        titleEl.innerHTML = progress.unlocked
+          ? `${ICON.check} Find a Trade unlocked!`
+          : `${ICON.unlock} Find a Trade`;
       }
     }
 
@@ -2433,7 +2458,7 @@
       logDrawer.action(`League switcher → "${lg.name}" (${lg.league_id})`);
       _setSwitcherDisabled(true);
       if (genBtn) genBtn.disabled = true;
-      _setSwitcherStatus('⏳ Switching…');
+      _setSwitcherStatus('Switching…');
 
       // Warm player cache (no-op if already loaded), then fetch new rosters
       try {
@@ -2441,13 +2466,13 @@
         if (!pr.ok) throw new Error(`Player cache HTTP ${pr.status}`);
       } catch (e) {
         logDrawer.error(`League switch — player cache failed: ${e.message}`);
-        _setSwitcherStatus('⚠️ Failed');
+        _setSwitcherStatus('Failed');
         _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
         // Revert visual selection to current league
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
         if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
-        showToast('⚠️ Could not load player database');
+        showToast('Could not load player database');
         return;
       }
 
@@ -2462,12 +2487,12 @@
         logDrawer.info(`Switch roster fetch: ${rosters?.length} rosters, ${leagueUsers?.length} users`);
       } catch (e) {
         logDrawer.error(`League switch — roster fetch failed: ${e.message}`);
-        _setSwitcherStatus('⚠️ Failed');
+        _setSwitcherStatus('Failed');
         _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
         if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
-        showToast('⚠️ Failed to fetch roster data');
+        showToast('Failed to fetch roster data');
         return;
       }
 
@@ -2479,12 +2504,12 @@
       const userRoster = (rosters || []).find(r => r.owner_id === user.user_id);
       if (!userRoster) {
         logDrawer.error(`League switch — no roster found for owner_id=${user.user_id}`);
-        _setSwitcherStatus('⚠️ No roster');
+        _setSwitcherStatus('No roster');
         _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
         if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
-        showToast('⚠️ Could not find your roster in this league');
+        showToast('Could not find your roster in this league');
         return;
       }
 
@@ -2498,7 +2523,7 @@
         }))
         .filter(r => r.player_ids.length > 0);
 
-      _setSwitcherStatus('⏳ Loading…');
+      _setSwitcherStatus('Loading…');
       const ok = await initSession(
         user,
         { league_id: lg.league_id, league_name: lg.name },
@@ -2510,10 +2535,10 @@
 
       if (!ok) {
         logDrawer.error(`League switch — initSession failed for ${lg.league_id}`);
-        _setSwitcherStatus('⚠️ Failed');
+        _setSwitcherStatus('Failed');
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
         if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
-        showToast('⚠️ Failed to switch league');
+        showToast('Failed to switch league');
         return;
       }
 
@@ -2524,7 +2549,7 @@
       // saved league from localStorage and rebuilds every view cleanly.
       saveLeague({ league_id: lg.league_id, league_name: lg.name });
       _setSwitcherStatus('✓ Switched — reloading…');
-      logDrawer.info(`✅ League switched to "${lg.name}" — reloading`);
+      logDrawer.info(`League switched to "${lg.name}" — reloading`);
       // Small delay so the status text is visible before the reload yanks
       // the page out from under the user.
       setTimeout(() => { location.reload(); }, 400);
@@ -2577,7 +2602,7 @@
           // Cold start: every card is a consensus-basis estimate. Make the
           // label actionable — same invite modal as the league screen.
           lbl.innerHTML = `<span class="coverage-none">0 of ${total} leaguemates ranked — trades use estimates</span>` +
-                          ` <button class="coverage-invite-btn" onclick="openInviteModal()">📨 Invite</button>`;
+                          ` <button class="coverage-invite-btn" onclick="openInviteModal()">${ICON.plus} Invite</button>`;
         } else if (ranked === total) {
           lbl.innerHTML = `<span class="coverage-real">All ${total} leaguemates ranked ✓</span>`;
         } else {
@@ -2648,7 +2673,7 @@
       const { QB = 0, RB = 0, WR = 0, TE = 0, threshold = 10 } = progress || {};
 
       gate.innerHTML = `
-        <div class="trades-gate-icon">🔒</div>
+        <div class="trades-gate-icon">${ICON.lock}</div>
         <div class="trades-gate-title">Complete your rankings to unlock Find a Trade</div>
         <div class="trades-gate-sub">Rank at least 10 players per position so we can find the best trade fits for you</div>
         <div class="trades-gate-positions">
@@ -2719,7 +2744,7 @@
         } else if (progress.unlocked && gateShowing) {
           // Just crossed the threshold — celebrate and reveal trades
           _hideTradesGate();
-          showToast('🎉 Find a Trade unlocked!');
+          showToast('Find a Trade unlocked!');
           // Give the animation a beat before loading trades
           setTimeout(() => {
             renderLeagueSwitcher();
@@ -2746,16 +2771,20 @@
       trades:    { group: 'trades', subView: 'trades' },
       matches:   { group: 'trades', subView: 'matches' },
       portfolio: { group: 'trades', subView: 'portfolio' },
-      // 'league' is reachable only via the 🏆 header chip; no tier-2 needed.
+      // 'league' is reachable only via the header League chip; no tier-2 needed.
       league:    { group: null,     subView: null },
     };
 
     function _syncNavActive(view) {
       const map = VIEW_TO_NAV[view];
-      // Tier 1
-      document.querySelectorAll('.nav-tier-1 .nav-tab').forEach(t => t.classList.remove('active'));
+      // Tier 1 — keep aria-selected in lockstep with .active (S8B-08)
+      document.querySelectorAll('.nav-tier-1 .nav-tab').forEach(t => {
+        t.classList.remove('active');
+        t.setAttribute('aria-selected', 'false');
+      });
       if (map && map.group) {
-        document.querySelector(`.nav-tier-1 .nav-tab[data-group="${map.group}"]`)?.classList.add('active');
+        const t1 = document.querySelector(`.nav-tier-1 .nav-tab[data-group="${map.group}"]`);
+        if (t1) { t1.classList.add('active'); t1.setAttribute('aria-selected', 'true'); }
       }
       // Tier 2 visibility + active sub-tab
       document.querySelectorAll('.nav-subtabs').forEach(s => s.classList.add('hidden'));
@@ -2763,9 +2792,13 @@
         const subs = document.getElementById(`subtabs-${map.group}`);
         if (subs) subs.classList.remove('hidden');
       }
-      document.querySelectorAll('.nav-subtab').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.nav-subtab').forEach(s => {
+        s.classList.remove('active');
+        s.setAttribute('aria-selected', 'false');
+      });
       if (map && map.subView) {
-        document.querySelector(`.nav-subtabs:not(.hidden) .nav-subtab[data-view="${map.subView}"]`)?.classList.add('active');
+        const t2 = document.querySelector(`.nav-subtabs:not(.hidden) .nav-subtab[data-view="${map.subView}"]`);
+        if (t2) { t2.classList.add('active'); t2.setAttribute('aria-selected', 'true'); }
       }
     }
 
@@ -3020,7 +3053,7 @@
         _leaguematePoolLeague = leagueId;
       } catch (e) {
         logDrawer.error(`Leaguemate pool fetch failed: ${e.message}`);
-        showToast('⚠️ Could not load leaguemate rosters');
+        showToast('Could not load leaguemate rosters');
       } finally {
         _leaguematePoolLoading = false;
         renderPlayerPicker();
@@ -3183,7 +3216,7 @@
       try { if (window.FTFTrack) window.FTFTrack('find_trades_tapped', null, 'trades'); } catch (e) {}
       const btn = document.getElementById('gen-btn');
       btn.disabled = true;
-      btn.textContent = '⏳ Generating…';
+      btn.textContent = 'Generating…';
 
       const leagueId         = currentLeagueId || 'league_demo';
       const fairnessThreshold = getFairnessThreshold();
@@ -3223,7 +3256,7 @@
           cards = body;
         } else if (body && typeof body === 'object' && body.job_id) {
           if (body.status === 'error') {
-            showToast('⚠️ ' + (body.error || 'Trade generation failed'));
+            showToast('' + (body.error || 'Trade generation failed'));
             return;
           }
           if (body.status === 'complete') {
@@ -3235,23 +3268,23 @@
             if (cards == null) return;          // user-visible error already toasted
           }
         } else if (body && body.error) {
-          showToast('⚠️ ' + body.error);
+          showToast('' + body.error);
           return;
         } else {
-          showToast('⚠️ Unexpected response from trade engine');
+          showToast('Unexpected response from trade engine');
           return;
         }
 
         const pinnedTotal = pinnedGive.length + pinnedReceive.length;
         const pinnedLabel = pinnedTotal > 0 ? ` for ${pinnedTotal} pinned player(s)` : '';
-        showToast(`✅ Found ${cards.length} trade ideas${pinnedLabel}`);
+        showToast(`Found ${cards.length} trade ideas${pinnedLabel}`);
         renderTrades(cards);
         updateLikedBadge();
       } catch {
         showToast('Could not reach server');
       } finally {
         btn.disabled = false;
-        btn.textContent = '⚡ Find a Trade';
+        btn.textContent = 'Find a Trade';
       }
     }
 
@@ -3273,8 +3306,8 @@
         const tot  = snap.opponents_total || '?';
         const n    = Array.isArray(snap.cards) ? snap.cards.length : 0;
         btn.textContent = n > 0
-          ? `⏳ Searching… ${done}/${tot} · ${n} found`
-          : `⏳ Searching… ${done}/${tot}`;
+          ? `Searching… ${done}/${tot} · ${n} found`
+          : `Searching… ${done}/${tot}`;
       };
       updateBtnText();
 
@@ -3287,7 +3320,7 @@
           if (!r.ok) {
             // 404 = job evicted. Treat as terminal failure.
             if (r.status === 404) {
-              showToast('⚠️ Trade job expired — try again');
+              showToast('Trade job expired — try again');
               return null;
             }
             throw new Error(`status ${r.status}`);
@@ -3297,7 +3330,7 @@
         } catch {
           fails++;
           if (fails >= MAX_FAILS) {
-            showToast('⚠️ Network hiccup — try Find a Trade again');
+            showToast('Network hiccup — try Find a Trade again');
             return null;
           }
           continue;       // try one more poll
@@ -3307,13 +3340,13 @@
           return Array.isArray(snap.cards) ? snap.cards : [];
         }
         if (snap.status === 'error') {
-          showToast('⚠️ ' + (snap.error || 'Trade generation failed'));
+          showToast('' + (snap.error || 'Trade generation failed'));
           return null;
         }
       }
       // Timed out waiting. Return whatever cards have arrived so far —
       // user can re-tap to keep waiting.
-      showToast('⌛ Still searching — tap again in a moment');
+      showToast('Still searching — tap again in a moment');
       return Array.isArray(snap.cards) ? snap.cards : [];
     }
 
@@ -3424,7 +3457,7 @@
 
       const _rankNudgeHTML = `
         <div class="rank-more-nudge">
-          <span class="rank-more-nudge-text">Not happy with your offers? Rank more players so Find a Trade can think like you! 📊</span>
+          <span class="rank-more-nudge-text">Not happy with your offers? Rank more players so Find a Trade can think like you!</span>
           <button class="rank-more-nudge-btn" onclick="switchToRankView()">Rank more →</button>
         </div>`;
 
@@ -3448,7 +3481,7 @@
           : '';
         const actionBtns   = decided
           ? `<div style="font-size:13px;color:var(--muted);text-align:center;padding:4px 0;">
-               ${card.decision === 'like' ? '✅ Interested' : '✗ Passed'}
+               ${card.decision === 'like' ? '✓ Interested' : '✗ Passed'}
              </div>`
           : `<div class="trade-actions">
                ${queueBtn}
@@ -4024,7 +4057,7 @@
           body:    JSON.stringify({ trade_id: tradeId, decision }),
         });
         const card = await res.json();
-        if (card.error) { showToast('⚠️ ' + card.error); return; }
+        if (card.error) { showToast('' + card.error); return; }
 
         const el = document.getElementById('tc-' + tradeId);
         if (el) {
@@ -4032,10 +4065,10 @@
           if (decision === 'like') {
             el.classList.add('liked');
             el.querySelector('.trade-actions').outerHTML =
-              `<div style="font-size:13px;color:var(--green);text-align:center;padding:4px 0;">✅ Interested</div>`;
+              `<div style="font-size:13px;color:var(--green);text-align:center;padding:4px 0;">✓ Interested</div>`;
             const recvNames = card.receive.map(p => p.name.split(' ').pop()).join(' & ');
             const giveNames = card.give.map(p => p.name.split(' ').pop()).join(' & ');
-            showToast(`✅ Interested — rankings nudged: ${recvNames} ↑  ${giveNames} ↓`);
+            showToast(`Interested — rankings nudged: ${recvNames} ↑  ${giveNames} ↓`);
           } else {
             el.classList.add('passed');
             el.querySelector('.trade-actions').outerHTML =
@@ -4167,13 +4200,13 @@
 
       if (pending.length > 0) {
         html += `<div class="match-sub-section">
-          <div class="match-sub-header pending">⏳ Pending (${pending.length})</div>
+          <div class="match-sub-header pending">Pending (${pending.length})</div>
           ${pending.map(renderMatchCard).join('')}
         </div>`;
       }
       if (accepted.length > 0) {
         html += `<div class="match-sub-section">
-          <div class="match-sub-header accepted">✅ Accepted (${accepted.length})</div>
+          <div class="match-sub-header accepted">✓ Accepted (${accepted.length})</div>
           ${accepted.map(renderMatchCard).join('')}
         </div>`;
       }
@@ -4215,7 +4248,7 @@
         } else {
           // User decided, waiting for partner
           const myLabel = m.my_decision === 'accept'
-            ? `<span class="dec-accept">✅ You accepted</span>`
+            ? `<span class="dec-accept">✓ You accepted</span>`
             : `<span class="dec-decline">✗ You declined</span>`;
           decisionHtml = `
             <div class="match-decision-status">
@@ -4226,10 +4259,10 @@
       } else {
         // Both decided — reveal both
         const myLabel = m.my_decision === 'accept'
-          ? `<span class="dec-accept">✅ You accepted</span>`
+          ? `<span class="dec-accept">✓ You accepted</span>`
           : `<span class="dec-decline">✗ You declined</span>`;
         const theirLabel = m.their_decision === 'accept'
-          ? `<span class="dec-accept">✅ ${partner} accepted</span>`
+          ? `<span class="dec-accept">✓ ${partner} accepted</span>`
           : `<span class="dec-decline">✗ ${partner} declined</span>`;
         decisionHtml = `
           <div class="match-decision-status">
@@ -4268,7 +4301,7 @@
         const data = await res.json();
 
         if (data.error) {
-          showToast('⚠️ ' + data.error);
+          showToast('' + data.error);
           // Re-enable buttons on error
           if (card) card.querySelectorAll('button').forEach(b => b.disabled = false);
           return;
@@ -4276,12 +4309,12 @@
 
         // Toast based on outcome
         if (data.outcome === 'accepted') {
-          showToast('🎉 Trade accepted! Rankings updated.');
+          showToast('Trade accepted! Rankings updated.');
         } else if (data.outcome === 'declined') {
           showToast('Trade declined. Rankings corrected.');
         } else {
           showToast(decision === 'accept'
-            ? '✅ Accepted — waiting for partner'
+            ? '✓ Accepted — waiting for partner'
             : '✗ Declined — waiting for partner');
         }
 
@@ -4313,11 +4346,11 @@
     // ── Team Outlook ─────────────────────────────────────────────────────
 
     const OUTLOOK_META = {
-      championship: { emoji: '🏆', short: 'Win Now',   label: 'Championship or Bust' },
-      contender:    { emoji: '💪', short: 'Contender', label: 'Contender'             },
-      rebuilder:    { emoji: '🔨', short: 'Rebuild',   label: 'Rebuilder'             },
-      jets:         { emoji: '🟢', short: 'Jets Mode', label: 'NY Jets'               },
-      not_sure:     { emoji: '🤷', short: 'No Adj.',   label: 'Not Sure'              },
+      championship: { emoji: '', short: 'Win Now',   label: 'Championship or Bust' },
+      contender:    { emoji: '', short: 'Contender', label: 'Contender'             },
+      rebuilder:    { emoji: '', short: 'Rebuild',   label: 'Rebuilder'             },
+      jets:         { emoji: '', short: 'Jets Mode', label: 'NY Jets'               },
+      not_sure:     { emoji: '', short: 'No Adj.',   label: 'Not Sure'              },
     };
 
     // Positional preferences state (parallel to currentOutlook)
@@ -4459,7 +4492,7 @@
           }),
         });
         const data = await res.json();
-        if (data.error) { showToast('⚠️ ' + data.error); if (btn) btn.disabled = false; return; }
+        if (data.error) { showToast('' + data.error); if (btn) btn.disabled = false; return; }
 
         currentOutlook            = _pendingOutlookValue;
         currentAcquirePositions   = acquire;
@@ -4468,7 +4501,7 @@
         dismissOutlookModal();
 
         const meta = OUTLOOK_META[_pendingOutlookValue] || { emoji: '', short: _pendingOutlookValue };
-        showToast(`${meta.emoji} Preferences saved`);
+        showToast('Preferences saved');
 
         // Auto-generate trades so the new prefs take effect immediately
         generateTrades();
@@ -4495,7 +4528,7 @@
           }),
         });
         const data = await res.json();
-        if (data.error) { showToast('⚠️ ' + data.error); return; }
+        if (data.error) { showToast('' + data.error); return; }
 
         currentOutlook            = _pendingOutlookValue;
         currentAcquirePositions   = [];
@@ -4504,7 +4537,7 @@
         dismissOutlookModal();
 
         const meta = OUTLOOK_META[_pendingOutlookValue] || { emoji: '', short: _pendingOutlookValue };
-        showToast(`${meta.emoji} Outlook set: ${meta.label}`);
+        showToast(`Outlook set: ${meta.label}`);
 
         generateTrades();
       } catch {
@@ -4516,8 +4549,8 @@
       const badge = document.getElementById('outlook-badge');
       if (!badge) return;
       if (currentOutlook && OUTLOOK_META[currentOutlook]) {
-        const { emoji, short } = OUTLOOK_META[currentOutlook];
-        badge.textContent = `${emoji} ${short}`;
+        const { short } = OUTLOOK_META[currentOutlook];
+        badge.textContent = short;
         badge.classList.add('show');
       } else {
         badge.textContent = '';
@@ -4595,10 +4628,10 @@
     }
 
     function notifTypeIcon(type) {
-      if (type === 'trade_match')    return '🤝';
-      if (type === 'trade_accepted') return '✅';
-      if (type === 'trade_declined') return '❌';
-      return '🔔';
+      if (type === 'trade_match')    return ICON.match;
+      if (type === 'trade_accepted') return ICON.check;
+      if (type === 'trade_declined') return ICON.x;
+      return ICON.bell;
     }
 
     async function fetchNotifications() {
@@ -4648,7 +4681,7 @@
         // twice alongside the visual icon badge (legacy notifications stored
         // an emoji prefix in the body; new notifications no longer do).
         const rawBody   = (n.body || n.title || '');
-        const cleanBody = rawBody.replace(/^\s*(?:🤝|✅|❌|🎯|🔔)\s*/u, '');
+        const cleanBody = rawBody.replace(/^\s*(?:\u{1F91D}|\u2705|\u274C|\u{1F3AF}|\u{1F514})\s*/u, '');
         const body      = escapeHtml(cleanBody);
         const rel  = relativeTime(n.created_at);
         const abs  = absoluteTime(n.created_at);
@@ -4778,8 +4811,8 @@
 
     const FORMAT_KEYS = ['1qb_ppr', 'sf_tep'];
     const FORMAT_LABELS = {
-      '1qb_ppr': '🏈 1QB PPR',
-      'sf_tep':  '🏟 SF TEP',
+      '1qb_ppr': '1QB PPR',
+      'sf_tep':  'SF TEP',
     };
     const LS_ACTIVE_FORMAT = 'ftf_active_format';
 
@@ -5080,13 +5113,13 @@
         if (!m.joined) {
           stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-none">— Not joined</span>`;
         } else if (m.unlocked_count >= 2) {
-          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-full">🔓 Unlocked · 2/2 formats</span>`;
+          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-full">Unlocked · 2/2 formats</span>`;
         } else if (m.unlocked_count === 1) {
-          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-partial">🔓 Unlocked · 1/2</span>`;
+          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-partial">Unlocked · 1/2</span>`;
         } else if (m.has_ranking_method) {
-          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-ranking">⏳ Signed up · ranking</span>`;
+          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-ranking">Signed up · ranking</span>`;
         } else {
-          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-joined">⏳ Signed up</span>`;
+          stateHtml = `<span class="leaguemate-row-state leaguemate-row-state-joined">Signed up</span>`;
         }
 
         return `<div class="leaguemate-row">
@@ -5161,7 +5194,7 @@
         unlockedSet.add(_rankingProgress.scoring_format);
       }
       const count = unlockedSet.size;
-      pill.textContent = '🔓 ' + count + '/2';
+      pill.textContent = count + '/2';
       pill.classList.remove('hidden', 'nav-pill-unlock-partial', 'nav-pill-unlock-none');
       if (count === 0) {
         pill.classList.add('nav-pill-unlock-none');
@@ -5300,7 +5333,7 @@
         barPct = Math.max(0, Math.min(100, Math.round((joined / cap) * 100)));
         nextLabel = `${joined}/${cap} → ${next.badge}`;
       } else {
-        nextLabel = '👑 Max level reached';
+        nextLabel = 'Max level reached';
       }
 
       // Primary headline — keeps the short sentence structure from the spec.
@@ -5353,7 +5386,7 @@
       const toast = document.createElement('div');
       toast.className = 'milestone-badge-toast';
       toast.innerHTML = `
-        <div class="milestone-badge-toast-emoji">🎉</div>
+        <div class="milestone-badge-toast-emoji">${ICON.check}</div>
         <div class="milestone-badge-toast-text">
           <div class="milestone-badge-toast-title">New badge unlocked!</div>
           <div class="milestone-badge-toast-badge">${badge}</div>
@@ -5375,14 +5408,14 @@
       const grid = document.getElementById('invite-grid');
       if (!grid) return;
       const channels = [
-        { key: 'email',    label: 'Email',      icon: '✉️' },
-        { key: 'sms',      label: 'SMS',        icon: '💬' },
-        { key: 'whatsapp', label: 'WhatsApp',   icon: '🟢' },
-        { key: 'telegram', label: 'Telegram',   icon: '✈️' },
+        { key: 'email',    label: 'Email',      icon: ICON.mail },
+        { key: 'sms',      label: 'SMS',        icon: ICON.chat },
+        { key: 'whatsapp', label: 'WhatsApp',   icon: ICON.chat },
+        { key: 'telegram', label: 'Telegram',   icon: ICON.send },
         { key: 'x',        label: 'X',          icon: '𝕏' },
-        { key: 'groupme',  label: 'GroupMe',    icon: '👥' },
-        { key: 'sleeper',  label: 'Sleeper',    icon: '😴' },
-        { key: 'copy',     label: 'Copy Link',  icon: '🔗' },
+        { key: 'groupme',  label: 'GroupMe',    icon: ICON.trade },
+        { key: 'sleeper',  label: 'Sleeper',    icon: ICON.moon },
+        { key: 'copy',     label: 'Copy Link',  icon: ICON.copy },
       ];
       grid.innerHTML = channels.map(ch => `
         <button class="share-button" onclick="shareVia('${ch.key}')">
@@ -5439,7 +5472,7 @@
           break;
         case 'x':
         case 'twitter':
-          body = `Joined @FantasyTradeFinder to find trades in ${leagueName}. Come ruin the league with me 🏈 ${url}`;
+          body = `Joined @FantasyTradeFinder to find trades in ${leagueName}. Come ruin the league with me: ${url}`;
           break;
         case 'whatsapp':
           body = `Hey! Been using Fantasy Trade Finder for ${leagueName} — it finds trades both sides actually like. Join me: ${url}`;
@@ -5596,10 +5629,10 @@
     // ══════════════════════════════════════════════════════════════════
 
     const _POS_META = [
-      { key: 'qb', label: 'QB', emoji: '🎯' },
-      { key: 'rb', label: 'RB', emoji: '🏃' },
-      { key: 'wr', label: 'WR', emoji: '🙌' },
-      { key: 'te', label: 'TE', emoji: '💪' },
+      { key: 'qb', label: 'QB' },
+      { key: 'rb', label: 'RB' },
+      { key: 'wr', label: 'WR' },
+      { key: 'te', label: 'TE' },
     ];
 
     /**
@@ -5639,13 +5672,13 @@
         const needed = (data && data.needed) || Math.max(3 - ranked, 1);
         body.innerHTML = `
           <div class="contrarian-leaderboard-empty">
-            <div class="contrarian-leaderboard-empty-icon">🤝</div>
+            <div class="contrarian-leaderboard-empty-icon">${ICON.match}</div>
             <div class="contrarian-leaderboard-empty-title">Invite leaguemates to unlock.</div>
             <div class="contrarian-leaderboard-empty-sub">
               Need ${needed} more ranked leaguemate${needed === 1 ? '' : 's'} to compute the
               contrarian leaderboard (currently ${ranked} / 3).
             </div>
-            <button class="contrarian-leaderboard-invite-btn" onclick="openInviteModal()">📨 Invite</button>
+            <button class="contrarian-leaderboard-invite-btn" onclick="openInviteModal()">${ICON.plus} Invite</button>
           </div>`;
         return;
       }
@@ -5656,8 +5689,7 @@
           return `
             <div class="contrarian-leaderboard-row">
               <div class="contrarian-leaderboard-row-pos">
-                <span class="contrarian-leaderboard-pos-emoji">${pos.emoji}</span>
-                <span class="contrarian-leaderboard-pos-label">${pos.label}</span>
+                                <span class="contrarian-leaderboard-pos-label">${pos.label}</span>
               </div>
               <div class="contrarian-leaderboard-row-body">
                 <div class="contrarian-leaderboard-nodata">Not enough ${pos.label} rankings yet.</div>
@@ -5683,8 +5715,7 @@
         return `
           <div class="contrarian-leaderboard-row">
             <div class="contrarian-leaderboard-row-pos">
-              <span class="contrarian-leaderboard-pos-emoji">${pos.emoji}</span>
-              <span class="contrarian-leaderboard-pos-label">${pos.label}</span>
+                            <span class="contrarian-leaderboard-pos-label">${pos.label}</span>
             </div>
             <div class="contrarian-leaderboard-row-body">
               ${cHtml}
@@ -5772,7 +5803,7 @@
       if (card.querySelector('.invited-banner')) return;  // already shown
       const banner = document.createElement('div');
       banner.className = 'invited-banner';
-      banner.textContent = `🤝 Invited by @${ref}`;
+      banner.textContent = `Invited by @${ref}`;
       card.appendChild(banner);
     }
 

@@ -28,6 +28,9 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 | `ANALYTICS_TESTER_DEVICE_IDS` | `backend/analytics_queries.py` (`_tester_device_ids`) | Optional comma-separated device-id allowlist excluded from cohort reports (operator/tester traffic). Empty by default. |
 | `REVENUECAT_WEBHOOK_SECRET` | `backend/server.py` (`/api/billing/revenuecat/webhook`) | Bearer token RevenueCat sends in `Authorization` on webhooks. Prod unset → the route fails closed (503); SQLite dev unset → check disabled (same posture as `CRON_SECRET`). Set in `secrets.local.env` + Render when RevenueCat is configured. |
 | `STRIPE_WEBHOOK_SECRET` | `backend/server.py` (`/api/billing/stripe/webhook`) | Stripe webhook signing secret (`whsec_…`) for `Stripe-Signature` v1 verification. Same fail-closed posture as above. |
+| `APPLE_TEAM_ID` | `backend/server.py` (AASA route; SIWA revocation) | Apple Developer team ID. Overrides the in-repo default (`N5Y4N2Q49A` from `mobile/eas.json`) in the served `/.well-known/apple-app-site-association`; also part of the ES256 client secret for Sign in with Apple token revocation on account deletion. Unset → AASA serves the in-repo default; revocation is skipped with a log line (deletion never blocks). |
+| `APPLE_KEY_ID` | `backend/server.py` (SIWA revocation) | Key ID of the Sign in with Apple .p8 private key. Unset → revocation skipped, logged; deletion proceeds. |
+| `APPLE_PRIVATE_KEY` | `backend/server.py` (SIWA revocation) | PEM contents of the Sign in with Apple .p8 key (ES256 client secret). Store in `secrets.local.env` / Render env only. Unset → revocation skipped, logged; deletion proceeds. |
 
 ---
 
@@ -147,6 +150,47 @@ One flag per monetization strategy — each independently flippable, ALL default
 | `marketplace.publisher_sets` | false | Publisher IAP + subscriber account-linking (phase 3). |
 | `marketplace.contributor_sales` | false | Contributor credit-priced sales (phase 4). |
 | `marketplace.cash_payouts` | false | Stripe Connect cash-out rung (phase 5). |
+
+### App-teardown remediation (2026-07, branch `teardown-remediation` — all dark)
+
+Registered under the `_comment_teardown` block in `config/features.json`; source PRDs live in the gitignored `app-teardown-review/` (per-section `prds/` folders; see [ADR-008](adr/adr-008-teardown-remediation-wave.md)). ALL default false pending operator review; implementations land flag-gated on branch `teardown-remediation`. Deliberate unflagged exceptions (per the features.json comment): the league-prefs authz fix (security), doc/legal-copy corrections, and inert accessibility annotations (labels/roles/traits).
+
+| Flag | Default | Gates (source PRD) |
+|---|---|---|
+| `ux.sheet_guard` | false | Unsaved-input protection on sheet dismiss — FeedbackSheet draft persist/confirm, EspnLinkSheet keeps step + fields across close (01/prd-01). |
+| `ux.rank_tab_destination` | false | Rank tab-press navigates to the preferred/last-used rank surface instead of opening the 7-row menu; in-screen mode switcher; RankHome back header; chevron removed (01/prd-02). |
+| `ux.retap_active_tab` | false | Focused-tab re-tap pops the tab's stack to root / scrolls the primary list to top on Trades, Matches, League (01/prd-05). |
+| `ux.deeplink_router_v2` | false | Single deep-link route table covering every screen; push taps + share links through one path; unroutable-link home-plus-toast fallback; pre-`navigationRef.isReady()` intents buffered and replayed (01/prd-04). |
+| `ux.player_context_menu` | false | One player long-press vocabulary — context menu on the player card + visible twins for gesture-only actions (untouchables, trio info sheet) (03/prd-02). |
+| `ux.swipe_undo` | false | Undo for the triage loop: pass/like swipe rewind + match-dismiss take-back via a toast action slot (03/prd-03). |
+| `ux.toast_v2` | false | Tone-based toast durations (errors persist long enough to read), action slot, VoiceOver announcements via `AccessibilityInfo` (04/prd-03). |
+| `ux.prompt_arbiter` | false | Global one-prompt-at-a-time arbiter across instructional families (banners, coach marks, prompt cards, modals) + push-primer backoff after "Maybe later" (04/prd-04). |
+| `ux.empty_state_ctas` | false | Empty states offer the action their copy names (e.g. Matches empty → "Go to Trades" instead of Refresh) (04/prd-05). |
+| `ux.help_surface` | false | In-app help surface — FAQ/ranking-method content reachable from mobile + contextual ⓘ at moments of doubt (04/prd-01). |
+| `ux.board_search` | false | Name search (Quick Set pattern: scroll-to + highlight) on ManualRanks and Tiers boards (07/prd-04 item 6). |
+| `ux.touch_polish` | false | Touch-target & drag bundle: 44pt floors (chips, slider dots, segments, pills, compact Button), ManualRanks `activationDistance` 5→18, haptics-at-lift taxonomy (03/prd-04). |
+| `ux.whats_new` | false | One versioned what's-new CoachMark per release, anchored where the headline change lives, shown-once persisted; never a modal (07/prd-04 item 5). |
+| `ux.outlook_inline_default` | false | Flags-off default path fix: inline inferred-outlook confirm banner replaces the forced OutlookSheet modal on first Trades visit (04/prd-02). |
+| `a11y.text_scaling` | false | Dynamic Type support — scalable type/containers, `maxFontSizeMultiplier` policy, AX-size layout adaptation (02/prd-01). |
+| `a11y.reduce_motion` | false | Reduce Motion — mobile `useReducedMotion` branches (card fling, toasts, modals) + web `prefers-reduced-motion` on all animation, incl. the infinite loops (02/prd-02). |
+| `visual.chalkline_cleanup` | false | Retire the legacy theme: migrate the four stragglers (FormatGate, TierStickyHeader, TierTargetChips, TileStats) to Chalkline tokens + contrast/type floors (02/prd-03, 02/prd-04). |
+| `notif.tz_sync` | false | Write the client's `X-User-TZ` into `notification_prefs.tz` so quiet hours/digests deliver recipient-local (05/prd-01). |
+| `notif.tap_routing_v2` | false | Notification tap routing: cold-start handling (`useLastNotificationResponse`), exact-screen landing (stop discarding `match_id`), bundle/bell routing, pre-ready buffer (05/prd-02; consumes `ux.deeplink_router_v2`). |
+| `notif.denial_recovery` | false | Denied-permission recovery: `Linking.openSettings()` path at want-it moments; Settings toggles reflect real OS permission state (05/prd-03). |
+| `notif.reengagement_default_off` | false | `reengagement` push bucket defaults to 0 and is separately consented — the primer's transactional consent no longer opts users into winbacks/season pushes (05/prd-04; Guideline 4.5.4). |
+| `notif.honest_winbacks` | false | `winback_dormant` fires only on a real match lookup (like `winback_matches`) + lifetime stop after unanswered winbacks; primer overpromise copy removed (05/prd-04). |
+| `growth.share_landing` | false | Close the share loop: mobile shares compose the `/s/trade/<id>` / `/s/tiers/...` OG landing URLs; universal links (AASA + associatedDomains) open them in-app (07/prd-01, 01/prd-03). |
+| `growth.rating_prompt` | false | `StoreReview` rating prompt at demonstrated-satisfaction moments (tier save, Nth liked trade, first Sleeper send); once/version, 3/365 budget; unhappy paths keep routing to feedback (07/prd-02). |
+| `account.data_export` | false | Download-my-data export (the deletion matrix as export manifest), surfaced beside Delete in Settings → Account (06/prd-02; GDPR Art. 20). |
+| `account.sleeper_disconnect` | false | "Disconnect Sleeper sending" row in Settings → Account (status from `GET /api/sleeper/link`, wired to `unlinkSleeper()`) — the control the privacy policy already promises (09/prd-01, 06/prd-04). |
+| `account.settings_v2` | false | Settings IA regroup to five frequency-ordered groups, Testing section gated to TestFlight builds, instant ranking-method preference apply (06/prd-04). |
+| `profiles.user_toggle` | false | Per-user public-profile visibility opt-out under `profiles.public_pages` — the global flag alone never publishes a user who opted out (06/prd-04). |
+| `auth.persistent_sessions` | false | Durable sessions for account-only (Apple) users — refresh-token model with server-side revocation, replacing the 4h in-memory dict (06/prd-03; the codebase's own "P3"). |
+| `league.rookie_board_entry` | false | Mounts the fully-built-but-orphaned RookieDraftBoardSheet as a League Explore row during draft season (07/prd-04 item 2). |
+
+#### Ship-by / kill-by review convention (07/prd-04)
+
+Dark flags are inventory, not archive. **Every flag dark ≥90 days gets a recorded decision at a quarterly flag review: schedule a canary via the experiments engine, or delete the code path.** "Still thinking" is not a decision — the review's exit criterion is zero flags >90 days old without one. Record the decision as a one-line ship-by/kill-by note in the flag's `features.json` comment block (or the table above). The teardown block's clock starts 2026-07-19.
 
 ---
 

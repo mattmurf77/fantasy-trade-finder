@@ -6965,11 +6965,33 @@ NOTIF_KIND_TO_BUCKET: dict[str, str] = {
     "season_start":                    "reengagement",
 }
 
-def get_notification_prefs(user_id: str) -> dict:
-    """Return the user's prefs row merged onto NOTIF_PREF_DEFAULTS. Always
-    returns a complete dict — callers don't need to handle missing rows.
+def _notif_pref_effective_defaults() -> dict:
+    """NOTIF_PREF_DEFAULTS adjusted for feature flags.
+
+    `notif.reengagement_default_off` (teardown 05-04a): the push primer's
+    consent language promises only transactional match events, so the
+    re-engagement bucket must not default ON — users with no stored pref
+    are served (and, on first row write, persisted) reengagement=0.
+    Stored values always win. Lazy import + swallow, mirroring
+    accounts._email_capture_enabled: a flags problem must never break
+    notification reads.
     """
     out = dict(NOTIF_PREF_DEFAULTS)
+    try:
+        from .feature_flags import is_enabled
+        if is_enabled("notif.reengagement_default_off"):
+            out["reengagement"] = 0
+    except Exception:
+        pass
+    return out
+
+
+def get_notification_prefs(user_id: str) -> dict:
+    """Return the user's prefs row merged onto NOTIF_PREF_DEFAULTS (flag-
+    adjusted — see _notif_pref_effective_defaults). Always returns a
+    complete dict — callers don't need to handle missing rows.
+    """
+    out = _notif_pref_effective_defaults()
     if not user_id:
         return out
     try:
@@ -6995,7 +7017,7 @@ def upsert_notification_prefs(user_id: str, **fields) -> dict:
     post-update merged prefs dict. Booleans accepted as 0/1/True/False.
     """
     if not user_id:
-        return dict(NOTIF_PREF_DEFAULTS)
+        return _notif_pref_effective_defaults()
     allowed = {"trade_matches", "weekly_digest", "reengagement",
                "quiet_hours_enabled", "tz"}
     updates: dict = {}
@@ -7024,7 +7046,7 @@ def upsert_notification_prefs(user_id: str, **fields) -> dict:
                 )
             else:
                 # Fill missing columns with defaults so the row is complete.
-                row = dict(NOTIF_PREF_DEFAULTS)
+                row = _notif_pref_effective_defaults()
                 row.update(updates)
                 conn.execute(insert(notification_prefs_table).values(**row))
     except Exception as e:

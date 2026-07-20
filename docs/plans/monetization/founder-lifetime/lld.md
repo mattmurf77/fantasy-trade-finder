@@ -21,7 +21,7 @@ landed yet. No founder-specific flags beyond it.
 `backend/entitlements.py`:
 
 ```python
-FOUNDER_PRODUCT_IDS = {"ftf_founder", "ftf_founder_b"}   # b = $59 A/B arm (D1)
+FOUNDER_PRODUCT_IDS = {"ftf_founder", "ftf_founder_b"}   # b = $99 A/B arm (D1; prices per PRD D8 reprice)
 FOUNDER_CAP = int(os.environ.get("FTF_FOUNDER_CAP", "100"))   # D2; env so the
     # operator can adjust without a deploy-code change; document in config-reference
 ```
@@ -171,7 +171,7 @@ the founder offering purchase call.
 ```
 GET /api/paywall/config            (window open, arm B)
 → { ..., "founder": {"state": "open", "product_id": "ftf_founder_b",
-       "price_display": "$59", "price_arm": "b", "cap": 100, "remaining": 31,
+       "price_display": "$99", "price_arm": "b", "cap": 100, "remaining": 31,
        "headline": "Everything FTF ever ships. One price. Locked forever.",
        "sub_line": "Founder badge + wall spot. Supports a solo dev.",
        "checkout_url": "https://checkout.stripe.com/c/pay/cs_..." } }

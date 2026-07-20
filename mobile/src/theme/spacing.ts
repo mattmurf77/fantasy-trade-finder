@@ -1,4 +1,8 @@
 // 4-point spacing scale so everything lines up.
+// NOTE (teardown S2 PRD-03): the legacy `radius` and `fontSize` scales are
+// deleted — radii and type come from theme/chalkline.ts (`radii`, `type`,
+// `maxFontScale`). This numeric scale is identical to chalkline's `space`
+// (which adds xxxl 48); prefer importing `space` from chalkline in new code.
 export const spacing = {
   xs: 4,
   sm: 8,
@@ -6,22 +10,4 @@ export const spacing = {
   lg: 16,
   xl: 24,
   xxl: 32,
-} as const;
-
-export const radius = {
-  sm: 6,
-  md: 10,
-  lg: 14,
-  xl: 20,
-  pill: 999,
-} as const;
-
-export const fontSize = {
-  xs: 11,
-  sm: 13,
-  base: 15,
-  lg: 18,
-  xl: 22,
-  xxl: 28,
-  hero: 34,
 } as const;

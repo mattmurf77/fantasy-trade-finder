@@ -18,6 +18,7 @@ import SettingsScreen from '../screens/SettingsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import FeedbackInboxScreen from '../screens/FeedbackInboxScreen';
 import SleeperConnectScreen from '../screens/SleeperConnectScreen';
+import TestStagesScreen from '../screens/TestStagesScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
@@ -43,6 +44,8 @@ type AuthStack = {
   // the League tab's Explore rows.
   LeagueSummary: undefined;
   FreeAgents: undefined;
+  // Operator QA (flag testing.stage_users): synthetic adoption-stage users.
+  TestStages: undefined;
 };
 
 const Stack = createNativeStackNavigator<AuthStack>();
@@ -393,6 +396,17 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerShown: true,
             title: 'Free agents',
             headerTitle: () => <HeaderTitle>Free agents</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+          }}
+        />
+        <Stack.Screen
+          name="TestStages"
+          component={TestStagesScreen}
+          options={{
+            headerShown: true,
+            title: 'Test stages',
+            headerTitle: () => <HeaderTitle>Test stages</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
           }}

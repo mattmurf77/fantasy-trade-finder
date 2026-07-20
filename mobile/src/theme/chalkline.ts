@@ -1,6 +1,8 @@
 // Chalkline design tokens — React Native mirror of docs/design/design-system.md.
-// Status: reference implementation. Existing screens still use colors.ts/spacing.ts;
-// migrate screen-by-screen by swapping imports to this module (ADR-004).
+// Status: live token source. The screen migration (ADR-004) is complete — all
+// UI imports THIS module. colors.ts survives only as the data-encoding source
+// (position/tier/medal hexes, re-exported below); spacing.ts's legacy
+// radius/fontSize scales are gone. Do not add new imports of the legacy files.
 //
 // Fonts: install once with
 //   npx expo install @expo-google-fonts/barlow-condensed @expo-google-fonts/archivo @expo-google-fonts/ibm-plex-mono expo-font
@@ -23,7 +25,13 @@ export const ink = {
   ink2: '#1A1E25', // sheets, menus, input fill
   ink3: '#232833', // pressed, wells
   line: '#262C35', // hairlines, default borders
-  lineStrong: '#3D4654', // interactive borders
+  lineStrong: '#3D4654', // interactive borders (legacy value — 2.03:1 on ink-0)
+  // Contrast-raised interactive border (teardown S2 PRD-04): ≥3:1 non-text
+  // contrast — 3.25:1 on ink-0, 3.05:1 on ink-1 (2.81:1 on ink-2, where the
+  // input FILL also separates the control). Components pick this over
+  // lineStrong when the `visual.chalkline_cleanup` flag is on; at flag
+  // cleanup it becomes the only lineStrong value.
+  lineStrongA11y: '#59647A',
 } as const;
 
 export const chalk = {
@@ -146,6 +154,31 @@ export const type = {
   },
 } as const satisfies Record<string, TextStyle>;
 
+// ── Dynamic Type caps (teardown S2 PRD-01, flag `a11y.text_scaling`) ────────
+// Per-style `maxFontSizeMultiplier` tiers applied by the chalkline Text
+// primitive (components/chalkline/Text.tsx) when the flag is on. Flag off =
+// RN default (unlimited OS scaling) — today's behavior, unchanged.
+//   body    2.0  — reading copy + control labels (WCAG 1.4.4 needs ≥200%)
+//   dense   1.35 — data numerals, micro-labels, fixed-pitch rows (60px tiles)
+//   display 1.2  — decorative display/heading + hero numbers
+export const maxFontScale = {
+  body: 2.0,
+  dense: 1.35,
+  display: 1.2,
+} as const;
+
+// Default cap tier for each `type` style above.
+export const typeMaxFontScale: Record<keyof typeof type, keyof typeof maxFontScale> = {
+  display: 'display',
+  heading: 'display',
+  label: 'dense',
+  title: 'body',
+  body: 'body',
+  bodySm: 'body',
+  dataLg: 'display',
+  data: 'dense',
+};
+
 // One shadow, sheets/menus/toasts only. Everything else: surface step + hairline.
 export const shadowSheet = {
   shadowColor: '#000',
@@ -163,3 +196,10 @@ export const duration = {
 
 // Solid scrim — no blur (prohibition #3).
 export const scrim = 'rgba(7,9,12,0.78)';
+
+// Drag-to-reorder activation distance (px) for DraggableFlatList boards.
+// 18 is the value Tiers landed on after the scroll-steal bug (#57); ManualRanks
+// ships 5 today — the same bug. Teardown S3 PRD-04: both boards (and any
+// future drag list) must pass THIS constant as `activationDistance` so
+// vertical scrolling never initiates a drag. Screen wiring is wave-2 work.
+export const DRAG_ACTIVATION_DISTANCE = 18;

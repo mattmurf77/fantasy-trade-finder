@@ -10,6 +10,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FTF Analytics</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
   <style>
     :root {
       --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
@@ -21,7 +24,7 @@
     }
     *{box-sizing:border-box;margin:0;padding:0}
     body{background:var(--ink-0);color:var(--chalk);
-      font-family:'Archivo','Barlow Condensed',system-ui,sans-serif;
+      font-family:'Archivo','Barlow Condensed',sans-serif;
       font-size:13px;line-height:1.5;padding:0 0 80px}
     header{background:var(--ink-1);border-bottom:1px solid var(--line);
       padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;
@@ -112,7 +115,7 @@
     function cell(v){
       var td = el("td","num");
       if(v && typeof v==="object" && ("value" in v || "caveat" in v || "error" in v)){
-        if(v.error){ td.textContent="⚠ "+v.error; td.classList.add("err"); return td; }
+        if(v.error){ td.textContent="ERR: "+v.error; td.classList.add("err"); return td; }
         if(v.caveat==="dark"){ td.textContent="—"; td.className="num dash"; return td; }
         if(v.caveat==="n_too_small"){
           var s=el("span","small","n="+(v.n==null?"?":v.n)+" (<20)"); td.appendChild(s); return td; }

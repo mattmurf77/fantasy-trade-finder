@@ -6,3 +6,5 @@ export { default as Meter, fairnessColor } from './Meter';
 export { default as StyleGuide } from './StyleGuide';
 export { default as Icon } from './Icon';
 export type { IconName } from './Icon';
+export { default as Text } from './Text';
+export type { ChalkTextProps, TypeVariant, ScaleTier } from './Text';

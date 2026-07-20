@@ -37,7 +37,7 @@ Palette v2 ("ice/flare", ADR-005) — graphite ink, ice-cyan primary, flare-pink
 | `--ink-2` | `#1A1E25` | Raised: sheets, menus, popovers, input fill |
 | `--ink-3` | `#232833` | Hover fill, wells, pressed |
 | `--line` | `#262C35` | Hairline rules, default borders |
-| `--line-strong` | `#3D4654` | Interactive borders (inputs, secondary buttons) |
+| `--line-strong` | `#59647A` | Interactive borders (inputs, secondary buttons). Raised from `#3D4654` (2.03:1) on 2026-07-19 for the ≥3:1 non-text floor — 3.25:1 on ink-0, 3.05:1 on ink-1 (2.81:1 on ink-2, where the input fill also separates the control). Mobile rollout: `ink.lineStrongA11y` behind flag `visual.chalkline_cleanup`; the old value remains as `ink.lineStrong` until flag cleanup |
 
 ### Chalk (text)
 
@@ -73,6 +73,16 @@ Division of labor: **ice = what you can do** (CTAs, active states, focus, ticks,
 | `--neg` | `#EF4444` | Pass/decline, errors, destructive |
 | `--warn` | `#F59E0B` | Warnings, injury Q (amber-500 — deeper than the tier gold `#fbbf24`) |
 
+### Medal (data)
+
+Trio-ranking rank accents (rank-1/2 card borders + badge fills — web `.ranked-1/2/3`, mobile `PlayerCard`). Data encodings on ink surfaces, never chrome. Source: `mobile/src/theme/colors.ts`.
+
+| Token | Hex | Use |
+|---|---|---|
+| `gold` | `#F59E0B` | Rank-1 border + badge fill (shared hex with `--warn` — intentional) |
+| `silver` | `#94A3B8` | Rank-2 border + badge fill |
+| `bronze` | `#B45309` | Reserved (rank-3 currently renders neutral: `--line-strong` border, chalk-faint fill) |
+
 ### Preserved invariants (do not restyle — see `docs/cross-client-invariants.md`)
 
 Positions: QB `#F97316` · RB `#22C55E` · WR `#3B82F6` · TE `#A855F7`.
@@ -94,7 +104,9 @@ Web: load via Google Fonts (`Barlow Condensed:600,700`, `Archivo:400,500,600,700
 | `data-lg` | IBM Plex Mono 600 | 22/26 | — | Hero numbers (Elo, fairness %) |
 | `data` | IBM Plex Mono 500 | 13/18 | — | Inline values, ranks, deltas |
 
-Rules: numerals that represent data are always Plex Mono with `font-variant-numeric: tabular-nums`. Barlow Condensed never below 16px and never for body copy.
+Rules: numerals that represent data are always Plex Mono with `font-variant-numeric: tabular-nums`. Barlow Condensed never below 16px and never for body copy. Type floor: no text below 11px anywhere (micro-tags included — teardown S2 PRD-04).
+
+Dynamic Type (mobile, flag `a11y.text_scaling`): OS text-size scaling is capped per style via the chalkline `Text` primitive — body/controls ×2.0, dense data/micro-labels ×1.35, display/heading/hero numbers ×1.2 (`maxFontScale` in `mobile/src/theme/chalkline.ts`). Fixed-height controls convert to `minHeight` + padding so capped text can still grow.
 
 ## Spacing
 
@@ -131,7 +143,8 @@ Exception: the `👀 They're interested` pill copy is a verbatim cross-client st
 
 ## Accessibility floors
 
-- Text contrast ≥ 4.5:1 on its surface (chalk on ink-0 ≈ 13:1; chalk-dim on ink-1 ≈ 5.5:1 — don't put chalk-faint on ink-3).
+- Text contrast ≥ 4.5:1 on its surface (computed 2026-07-19: chalk on ink-0 ≈ 16.8:1; chalk-dim ≈ 7.4:1 on ink-0 / 6.9:1 on ink-1 / 5.6:1 on ink-3). Chalk-faint is 3.4:1 on ink-1 — placeholders/disabled ONLY, never content-carrying text (timestamps, hints, labels use chalk-dim).
+- Non-text contrast ≥ 3:1 for interactive boundaries: `--line-strong` `#59647A` is 3.25:1 on ink-0 / 3.05:1 on ink-1 (`--line` is decorative-only at 1.38:1).
 - Focus: 2px ice ring, 2px offset, on every interactive element.
 - Hit targets ≥ 44px on touch clients.
 - Position/tier color is never the only encoding — always paired with the text label (QB/RB/WR/TE, tier name).

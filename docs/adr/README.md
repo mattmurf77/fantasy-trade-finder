@@ -40,3 +40,4 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 - [ADR-005 Chalkline Palette v2: ice/flare](adr-005-palette-v2-ice-flare.md)
 - [ADR-006 Account-Later Onboarding](adr-006-account-later-onboarding.md)
 - [ADR-007 First-Party Analytics Platform + Layered Experimentation](adr-007-first-party-analytics-experimentation.md)
+- [ADR-008 Teardown Remediation Wave (2026-07)](adr-008-teardown-remediation-wave.md)

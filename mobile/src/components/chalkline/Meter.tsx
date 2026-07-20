@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { ink, ice, semantic, type, space } from '../../theme/chalkline';
+import Text from './Text';
 
 interface Props {
   /** 0–1 fill fraction. Fairness meters receive fairness_score directly (invariant: ×100 for display only). */
@@ -18,11 +19,11 @@ export default function Meter({ value, color = ice.base, label, showPercent = fa
   const clamped = Math.max(0, Math.min(1, value));
   return (
     <View style={styles.row}>
-      {label ? <Text style={type.label}>{label}</Text> : null}
+      {label ? <Text scale="dense" style={type.label}>{label}</Text> : null}
       <View style={styles.track}>
         <View style={[styles.fill, { width: `${clamped * 100}%`, backgroundColor: color }]} />
       </View>
-      {showPercent ? <Text style={type.data}>{Math.round(clamped * 100)}%</Text> : null}
+      {showPercent ? <Text scale="dense" style={type.data}>{Math.round(clamped * 100)}%</Text> : null}
     </View>
   );
 }

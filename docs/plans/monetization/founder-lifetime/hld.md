@@ -105,7 +105,8 @@ window-phase-only dependency — acceptable because the window is weeks long.
 ## 5. A/B price mechanics (D1)
 
 - **RevenueCat Experiments** assigns each user an offering: `founder_default`
-  (contains `ftf_founder`, $79) vs `founder_b` (contains `ftf_founder_b`, $59).
+  (contains `ftf_founder`, $119) vs `founder_b` (contains `ftf_founder_b`, $99)
+  — arm prices per the 2026-07-19 reprice (PRD §1 pricing rationale, D8).
   Apple prices are per-SKU, so two SKUs are required; both map to the same
   RevenueCat "pro" entitlement and the projector treats both as founder products.
 - Paywall config echoes the assigned arm (`price_arm` in the founder block) so web

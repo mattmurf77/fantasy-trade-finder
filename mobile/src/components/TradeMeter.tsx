@@ -1,6 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { ink, chalk, flare, fonts } from '../theme/chalkline';
+import { Text } from './chalkline';
+import { useFlag } from '../state/useFeatureFlags';
 
 interface Props {
   /** Which meter this is: 'trade' = tradeability (player the user owns),
@@ -20,6 +22,11 @@ interface Props {
 // the 60px pitch, hence this minimal inline variant — see
 // docs/design/components.md → Meters → TradeMeter.
 export default function TradeMeter({ kind, score }: Props) {
+  // Teardown S2 PRD-04 (`visual.chalkline_cleanup`): the 9px caps label rises
+  // to the 11px floor; the fixed label column widens 34→42 so "TRADE" still
+  // fits and the tracks stay a scannable aligned column. Flag off = 9px/34,
+  // the pre-teardown look.
+  const cleanup = useFlag('visual.chalkline_cleanup');
   const clamped = Math.max(0, Math.min(1, score || 0));
   const label = kind === 'trade' ? 'TRADE' : 'GET';
   return (
@@ -31,7 +38,7 @@ export default function TradeMeter({ kind, score }: Props) {
         kind === 'trade' ? 'Tradeability' : 'Acquirability'
       }
     >
-      <Text style={styles.label}>{label}</Text>
+      <Text scale="dense" style={[styles.label, cleanup && styles.labelFloor]}>{label}</Text>
       <View style={styles.track}>
         <View style={[styles.fill, { width: `${clamped * 100}%` }]} />
       </View>
@@ -45,7 +52,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  // Same construction as TileStats' labels, one step smaller (9px caps).
+  // Same construction as TileStats' labels (9px = legacy, flag off only).
   label: {
     fontFamily: fonts.uiSemi,
     fontSize: 9,
@@ -54,6 +61,11 @@ const styles = StyleSheet.create({
     // Fixed width so the tracks align into a scannable column across tiles
     // ("TRADE" is wider than "GET").
     width: 34,
+  },
+  // S2 PRD-04 (`visual.chalkline_cleanup`): 11px type floor + widened column.
+  labelFloor: {
+    fontSize: 11,
+    width: 42,
   },
   track: {
     flex: 1,

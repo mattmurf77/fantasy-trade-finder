@@ -69,7 +69,8 @@ Account-auth plan P2 + P2.6 account-first (docs/plans/account-auth-plan-2026-07-
 | POST | `/api/auth/google` | Same flow, Google JWKS + `GOOGLE_OAUTH_CLIENT_ID` as `aud`. 503 `not_configured` until that env var is set. 404 while flag off. |
 | GET | `/api/account` | Current account: `{sleeper_user_id, verified_via, account: {account_id, sleeper_user_id, identities:[{provider, linked_at}]} \| null, account_only, sleeper_username}`. 404 while flag off. |
 | POST | `/api/account/link-sleeper` | **P2.6.** Link a Sleeper username as a source on the session's account. Body `{username, strategy?}`; requires `sess.account_id` (400 `no_account`). Rules: sticky binding (409 `sleeper_conflict` if bound elsewhere); **first-verified-wins** — target id already has a verified controller → 403 `sleeper_already_claimed`, no takeover; both boards have data and no `strategy` → 409 `merge_choice_required` + `{account_board, sleeper_board}` summaries; `strategy='keep_sleeper'` wipes the account board, `'keep_account'` wipes the Sleeper board and migrates the account board in; account-board-only → migrated automatically. On success: binds, marks the Sleeper user `verified_via=<provider>`, evicts the `acct_*` sessions, returns a fresh session for the Sleeper user `{session_token, user_id, username, merge}`. 404 while flag off. |
-| DELETE | `/api/account` | **In-app account deletion (App Store 5.1.1(v)) — NOT flag-gated.** Deletes/anonymizes per the matrix in `accounts.delete_user_data` (honors `web/privacy.html` §6): own rows deleted; shared rows (trade matches, others' impressions/flags naming this user) anonymized so counterparties keep their records; feedback anonymized; non-user-keyed aggregates kept. If `users.verified_via` is set, the calling session must itself be verified (403 `verification_required` otherwise). Evicts all of the user's live sessions. |
+| GET | `/api/account/export` | **Data export (teardown 06-02, flag `account.data_export`; 404 while dark).** JSON archive of every user-keyed row — the deletion matrix in `accounts.delete_user_data` is the manifest (same table set, plus the user's side of `trade_matches` and the account/identity rows; `sleeper_credentials.token_encrypted` excluded). Same gates as deletion: 400 `demo_session`; verified user + unverified session → 403 `verification_required`. → `{export_version, exported_at, user_id, tables:{...}}` with a `Content-Disposition: attachment` hint. |
+| DELETE | `/api/account` | **In-app account deletion (App Store 5.1.1(v)) — NOT flag-gated.** Deletes/anonymizes per the matrix in `accounts.delete_user_data` (honors `web/privacy.html` §6): own rows deleted; shared rows (trade matches, others' impressions/flags naming this user) anonymized so counterparties keep their records; feedback anonymized; non-user-keyed aggregates kept. If `users.verified_via` is set, the calling session must itself be verified (403 `verification_required` otherwise). Evicts all of the user's live sessions. **SIWA revocation (teardown 06-02, unflagged):** when a linked Apple identity exists, best-effort revoke via Apple `/auth/token` + `/auth/revoke` — requires env `APPLE_TEAM_ID`/`APPLE_KEY_ID`/`APPLE_PRIVATE_KEY` plus a fresh `apple_authorization_code` in the optional request body; failures are logged and never block local deletion. Response gains additive `apple_revoked: bool`. |
 
 ## Sleeper passthrough
 
@@ -249,8 +250,8 @@ Verdict math is `trade_service.classify_verdict(give_value, receive_value)` (no 
 |---|---|---|
 | GET | `/api/leagues` | User's leagues |
 | GET | `/api/league/picks` | Draft picks in current league |
-| GET | `/api/league/preferences` | Read outlook + position prefs. When `trade.outlook_seed` is on and no outlook is declared, adds `inferred_outlook` + `inferred_signals` (#8) |
-| POST | `/api/league/preferences` | Write outlook + position prefs |
+| GET | `/api/league/preferences` | Read the **session user's** outlook + position prefs (a `user_id` query param is ignored — teardown S6B-01 closed the cross-user override). When `trade.outlook_seed` is on and no outlook is declared, adds `inferred_outlook` + `inferred_signals` (#8) |
+| POST | `/api/league/preferences` | Write the **session user's** outlook + position prefs (a body `user_id` is ignored — teardown S6B-01; the old override allowed cross-user writes) |
 | GET | `/api/league/asset-prefs` | Read untouchables + targets (#2) → `{untouchables:[], targets:[]}` |
 | POST | `/api/league/asset-prefs` | Tag a player: body `{league_id, player_id, list: "untouchable"\|"target"\|"none"}`; single membership; invalidates the league's cached deck (#2) |
 | GET | `/api/league/summary` | League summary roll-up. Match tiles (#91): `matches_mutual` (non-dismissed `trade_matches` rows involving the caller, any status — equals the Matches tab's "Mutual matches" segment for the league) + `matches_awaiting` (caller's one-sided likes not yet matured — equals "Awaiting them"). Every trade is in exactly one bucket. Legacy `matches_pending`/`matches_accepted` (status-split, dismissal-blind) still emitted for pre-1.4 clients — do not use in new UI. `total_teams` (FB #41): TOTAL teams in the league, caller included — Sleeper's `total_rosters` when persisted, else `leaguemates_total + 1`; clients must show this in the teams tile, not a derived count |
@@ -308,8 +309,8 @@ Error contract (shared, `{platform}` = `mfl`\|`fleaflicker`): 404 `feature_disab
 | GET | `/api/notifications` | Inbox |
 | POST | `/api/notifications/read` | Mark one read |
 | POST | `/api/notifications/read-all` | Mark all read |
-| POST | `/api/notifications/register-device` | Register Expo push token (writes `device_tokens`) |
-| GET | `/api/notifications/prefs` | Read push preferences (`notification_prefs`) |
+| POST | `/api/notifications/register-device` | Register Expo push token (writes `device_tokens`). While `notif.tz_sync` is on, also adopts the request's `X-User-TZ` header into `notification_prefs.tz` when the stored value is still the ET default and the header is a valid IANA tz (teardown 05-01; `/api/session/init` does the same) |
+| GET | `/api/notifications/prefs` | Read push preferences (`notification_prefs`). While `notif.reengagement_default_off` is on, users with no stored pref are served `reengagement: 0` (teardown 05-04a) |
 | PUT | `/api/notifications/prefs` | Update push preferences (buckets + quiet hours) |
 
 ## Cron ticks
@@ -320,7 +321,7 @@ Triggered by an external scheduler (Render cron). All POST.
 |---|---|---|
 | POST | `/api/cron/realtime-tick` | Real-time event hook drains (queued pushes ready to deliver) |
 | POST | `/api/cron/hourly-tick` | Hourly bundle drain + quiet-hours summary push at user's local 8am |
-| POST | `/api/cron/daily-tick` | Daily digests + re-engagement scans |
+| POST | `/api/cron/daily-tick` | Daily digests + re-engagement scans. While `notif.honest_winbacks` is on (teardown 05-04b), `winback_dormant` only fires when the user has unread matches (truthful count copy, mirroring `winback_matches`) and stops for life after 3 consecutive winbacks with no subsequent session (`notification_events_log` rows newer than `users.last_active_at`) |
 | POST | `/api/cron/value-snapshot` | Daily consensus value snapshot → `player_value_history` (#57). Dedicated (not in daily-tick) so a push-scan bug can't stop history collection. Idempotent per UTC day. |
 
 ## Trends
@@ -380,6 +381,7 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 | GET | `/` | Serve `web/index.html` |
 | GET | `/privacy` | Serve `web/privacy.html` (clean URL; App Store Connect privacy-policy URL) |
 | GET | `/terms` | Serve `web/terms.html` (clean URL) |
+| GET | `/.well-known/apple-app-site-association` | Universal Links AASA file (teardown 01-nav PRD-03, backend half — unflagged, inert until the mobile `associatedDomains` entitlement ships). `application/json`, direct 200, no redirect. Declares appID `<APPLE_TEAM_ID>.com.fantasytradefinder.app` (team id defaults to the repo's `mobile/eas.json` value; `APPLE_TEAM_ID` env overrides) with paths `/u/*`, `/s/*`, and `/?ref=*` (query match via `components`). |
 | GET | `/api/invite/impact` | Invite-program impact stats |
 | GET | `/api/me/streak` | Current user's daily-activity streak |
 

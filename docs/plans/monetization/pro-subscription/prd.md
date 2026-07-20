@@ -114,6 +114,12 @@ R7. Chalkline: ink surfaces, ice CTAs only, no gradients/emoji-icons; hero SKU p
 with an ice tick; flare only for informational highlights (e.g. "most popular" tag is a
 flare-bordered chip, never the buy button).
 R8. Restore purchases affordance on the paywall (guideline 3.1.1).
+R18. **Trial-timeline visualization** (teardown 2026-07, S9 PRD-03): the paywall page for
+the annual/hero SKU renders a three-step timeline — **"Today — full access → Day 12 — we
+remind you → Day 14 — you're charged"** — with the real charge date computed client-side.
+This is the single most-proven honest-conversion pattern (Blinkist: +23% trial starts,
+−55% billing complaints) and matches the brand's honesty posture exactly. Chalkline: ice
+step markers, no gradients; the timeline is informational, never the buy button.
 
 ### 4.5 Trial + cancel flow
 
@@ -125,6 +131,20 @@ one-screen exit survey + **one** win-back offer (annual discount or pause-equiva
 grant) shown within the same session as cancel intent. No confirm-shaming; the store link
 is always visible. [Offer mechanics via store promotional offer — assumption: RevenueCat
 promotional offer support; fallback = skip offer v1.]
+R19. **Committed day-12 pre-charge push** (the reminder R18's timeline promises): a new
+typed push kind **`trial_ending`** through the existing dispatcher (`server.py` push
+stack), fired by the daily cron from webhook-projected trial state on trial day 12.
+Dedup-capped once per trial (`_NOTIF_DEDUP_CAPS`, dedup_key = the trial's original
+transaction/entitlement id); body states the charge date and billed amount; tap
+deep-links to the in-app subscription management surface. Transactional bucket — not
+gated on the `reengagement` pref, but respects quiet hours. Shipping the trial without
+this push is a launch blocker: the timeline page (R18) commits to it in user-facing copy.
+R20. **Billing grace period + soft failure state** (involuntary churn is ~14% of App
+Store cancels): enable App Store Billing Grace Period in ASC and Stripe smart retries;
+the webhook projector treats grace/retry states as **still entitled** (entitlement row
+stays active through the grace window). In-app, a soft dismissible banner — "We couldn't
+renew your subscription — you keep access while we retry. Update payment?" — links to
+Manage Subscriptions / the Stripe portal. Never a hard mid-retry lockout, never a modal.
 
 ### 4.6 Growth-loop program rules (Pro give-get)
 
@@ -189,10 +209,22 @@ Flag sequence (all default False in `FLAG_KEYS`; foundation §1 order):
    + goodwill.
 4. Review observe data → finalize gate list (drop any gate that would block a top-decile
    retention behavior).
-5. `monetize.paywall` ON (TestFlight window; shares the surface with the Founder offer per
-   Plan C sequencing).
-6. `monetize.pro` ON at public launch (Aug–Sep) → enforcement + purchasable SKUs.
-7. `growth.referral` ON post-launch once share-card + attribution verified;
+5. **Pricing research (pre-paywall, teardown 2026-07):** Van Westendorp price-sensitivity
+   survey on the TestFlight cohort (4 questions, in-app or lifecycle email) before the
+   public paywall flips — validates the $34.99/$4.99 points and the Founder band against
+   measured WTP instead of comp inference. Readout is an operator input to Q2, not a gate.
+6. `monetize.paywall` ON (TestFlight window; shares the surface with the Founder offer per
+   Plan C sequencing). **Same-release checklist item:** update `web/privacy.html` (§ "No
+   email addresses, phone numbers, or payment information — … no billing, and no in-app
+   purchases") and any matching terms language in the SAME release that ships purchase UI
+   — the legal docs must never lag the paywall (teardown S9 PRD-01/03). Verify 3.1.2
+   plumbing at review time: billed amount most legible on the paywall, Restore present,
+   terms + privacy linked.
+7. `monetize.pro` ON at public launch (Aug–Sep) → enforcement + purchasable SKUs. **At
+   launch:** PPP (purchasing-power-parity) price localization via App Store per-storefront
+   pricing + Stripe adaptive pricing — the highest-win-rate paywall lever (~62% of
+   localization experiments win).
+8. `growth.referral` ON post-launch once share-card + attribution verified;
    `growth.group_unlock` A/B after that.
 
 Kill switches: `monetize.entitlements` OFF reverts the entire product to today's behavior;
