@@ -77,6 +77,13 @@ Pre-existing flags (sprint UX + trade-math): see `config/features.json` directly
 | `trade.aggression_ab` | Interview phase 2 ("test all three"): stable per-user opening-offer bucket — `light` / `fair` / `generous` via md5(user_id) % 3 — that reweights which ACCEPTABLE offers lead the deck: light boosts consensus-tilt-toward-user offers, generous the reverse, fair prefers balance (`composite ×= 1 ± aggression_weight · tilt`, applied after all gates). Cards carry `aggression_variant`; swipe events log it (plus `lane` and `fit_premium`) so acceptance rates can be compared per bucket. Default **false**; **enabled 2026-07-17**. `model_config` key: `aggression_weight` (0.20). |
 | `calc.open_calculator` | Backlog #27 ([prd](../staged-work/backlog-21-30/prds/27-open-trade-calculator.md)): gates the **public, no-session** open-trade-calculator compute routes `POST /api/calc/score` + `GET /api/calc/values` (both 404 when off). The static `web/calculator.html` SEO page ships **unflagged** (like `faq.html`); when the flag is off its Score button degrades to a "coming soon" state via the self-fetched `/api/feature-flags`. No new endpoint config keys — reuses the backlog #6 `verdict_*` `model_config` keys for band thresholds so the public calc and in-app trade cards agree on the same trade. Default **false**. |
 
+### Owned draft picks in calculator + suggestions (#158/#170/#171 — ship dark)
+
+| Flag | Default | Gates |
+|---|---|---|
+| `picks.owned_sync` | false | Revives the per-league owned-pick sync (`database.sync_draft_picks` on the session_init daemon for Sleeper; `server._sync_mfl_owned_picks` at MFL link/import) + normalizes MFL picks into `draft_picks` + enriches `GET /api/league/picks` with `pool_value`/`label`/`picks_supported` + the mobile In-league calculator's owned-pick rows. Off ⇒ no owned-pick rows written or surfaced (byte-identical to today; the sync was dead code since the trade-engine-v2 rebuild). ESPN leagues never write rows (`picks_supported:false`). |
+| `trade.picks_in_pool` | false | Injects each team's owned picks (capped `picks_pool_cap`, top-N by `pool_value`) as priced `position="PICK"` pseudo-assets into the suggestion candidate pool in `_run_trade_job`, so a generated trade can send/receive a pick (#170/#171). **Data inclusion only** — the engine already prices PICK assets (`dynasty_value`); scoring/weighting is unchanged. Off ⇒ no pick ever appears in a suggestion. `model_config`: `picks_pool_cap` (6). |
+
 ### Send in Sleeper (flagged beta)
 
 | Flag | Default | Gates |
@@ -296,6 +303,7 @@ The per-position age NOW/FUTURE curves are deliberately a code constant table (`
 | Key | Default | Meaning |
 |---|---|---|
 | `v3_pool_size` | 12 | Candidate pool size per side for the exact per-pair search |
+| `picks_pool_cap` | 6 | **#170/#171** — max owned draft picks per team injected into the suggestion candidate pool (top-N by `pool_value`) when `trade.picks_in_pool` is on. Bounds package enumeration. `0` disables injection. |
 | `sweetener_band` | 0.15 | Fairness shortfall band in which a sweetener pass is attempted |
 | `sweetener_max_cards` | 2 | Max sweetener-balanced cards per deck |
 | `cycle_edge_min_gain` | 100.0 | Min per-edge value gain for a 3-team cycle edge |

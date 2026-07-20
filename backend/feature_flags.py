@@ -252,6 +252,18 @@ FLAG_KEYS: tuple[str, ...] = (
     # so the flag being on never exposes the surface to real users.
     "testing.stage_users",   # POST/DELETE /api/test-users — synthetic stage-user
                              # spawner for onboarding QA (backend/test_users.py)
+    # ── #158/#170/#171 — owned draft picks in calculator + suggestions ──
+    # picks.owned_sync: revive sync_draft_picks on the league-sync path
+    # (session_init daemon for Sleeper; link/import for MFL) + normalize MFL
+    # picks + enrich GET /api/league/picks with pool_value/label + the
+    # In-league calculator's owned-pick rows. Off ⇒ no owned-pick rows written
+    # or shown (byte-identical today).
+    "picks.owned_sync",
+    # trade.picks_in_pool: inject each team's owned picks (capped picks_pool_cap)
+    # as priced PICK pseudo-assets into the suggestion candidate pool so a card
+    # can send/receive a pick (#170/#171). DATA inclusion only — scoring
+    # unchanged. Off ⇒ no pick ever appears in a suggestion.
+    "trade.picks_in_pool",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

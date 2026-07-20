@@ -45,6 +45,8 @@
   "trade.send_in_sleeper": true,
   "sleeper.trade_block": true,
   "trade.block_boost": true,
+  "picks.owned_sync": false,
+  "trade.picks_in_pool": false,
   "auth.accounts": true,
   "auth.enforce_verified_writes": false,
   "auth.email_capture": false,

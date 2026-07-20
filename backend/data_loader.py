@@ -65,8 +65,8 @@ ELO_MIN   = 1200.0     # seed Elo at DP value 0 (the affine map's low anchor)
 VALUE_MAX = 10_000.0
 
 # Default elo_value_* curve constants (trade_service._DEFAULT_CFG). Hardcoded
-# here — like GENERIC_PICK_SEEDS in server.py — because seeds are baked at
-# pool build; the ≈-Elo anchors above assume this default curve.
+# here — like GENERIC_PICK_SEEDS in backend/pick_values.py — because seeds are
+# baked at pool build; the ≈-Elo anchors above assume this default curve.
 _SEED_VALUE_K    = 0.005
 _SEED_VALUE_REF  = 1500.0
 _SEED_VALUE_BASE = 1000.0

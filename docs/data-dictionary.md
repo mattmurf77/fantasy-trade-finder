@@ -259,8 +259,12 @@ Dynasty pick assets across upcoming seasons. `pick_id = "{league}_{season}_{roun
 | `owner_user_id`, `owner_username` | str | current owner |
 | `original_roster_id`, `original_user_id`, `original_username` | str | |
 | `is_traded` | int | 1 if ownership changed |
-| `pick_value` | float | `compute_pick_value()` output at sync time, on the **0–100 round-tier scale** (mid-1st ≈ 67.5), NOT the 0–10000 player value space. The v2 engine bridges it via `elo_to_value(1200 + 6·pick_value)` in `trade_service.dynasty_value` so a league pick prices like its universal-pool generic-pick twin. |
+| `pick_value` | float | `compute_pick_value()` output at sync time, on the **0–100 round-tier scale** (mid-1st ≈ 67.5), NOT the 0–10000 player value space. Kept for **pick-share** ratios (`_user_pick_share`, outlook seeds). The v2 engine bridges it via `elo_to_value(1200 + 6·pick_value)` in `trade_service.dynasty_value`. |
+| `pool_value` | float | **#158** — pick value on the **engine/calculator scale** (`elo_to_value` units), = `pick_pool_value(round, years_out)` = the generic-ladder **Mid**-tier value of the round, year-discounted (0.85/yr) in value space. `years_out=0` equals the generic "Mid <round>" pool pick exactly. This is what the calculator + suggestions price on (distinct from the legacy `pick_value`). Shared ladder lives in `backend/pick_values.py`. |
+| `platform` | str | **#158** — provenance: `'sleeper'` or `'mfl'`. ESPN never writes rows (players-only). |
 | `synced_at` | str | |
+
+**Sync (revived #158):** `sync_draft_picks()` (Sleeper: pristine grid × traded-picks overlay) runs on the **session_init background daemon** per league; MFL picks normalize into the same table via `server._sync_mfl_owned_picks()` at link/import. Both gated on `picks.owned_sync` (default off). Delete+bulk-insert per league via `replace_draft_picks()`. `rounds` comes from Sleeper `settings.draft_rounds` (was hard-coded 3, which dropped 4th-round picks in 4-round leagues).
 
 ---
 

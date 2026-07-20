@@ -92,7 +92,7 @@ from .database import (
     sync_players, needs_player_sync,
     load_players, load_player, load_players_by_ids,
     load_rookies,
-    sync_draft_picks, load_draft_picks,
+    sync_draft_picks, load_draft_picks, replace_draft_picks, compute_pick_value,
     create_notification, get_notifications, mark_notifications_read,
     # M5 Push additions — device tokens
     save_device_token, load_device_tokens_for_users,
@@ -723,33 +723,15 @@ g_universal_players: list[Player] = []
 g_universal_seed: dict[str, float] = {}
 
 # ── Generic draft-pick assets (shared constants) ───────────────────────────
-# Elo seeds for the 12 generic Early/Mid/Late picks (rounds 1–4) injected into
-# the universal pool, calibrated to typical dynasty trade values. Module-scoped
-# because they double as the reference ladder for pick-denominated features:
-# the pick-anchor wizard (/api/anchor/save) and the calculator's gap-to-pick
-# equivalence (/api/trade/evaluate `gap`). The MID column of each round is the
-# canonical "a 1st / a 2nd / …" anchor; a generic Mid 1st is the base unit.
-GENERIC_PICK_SEEDS: dict[tuple[int, str], float] = {
-    # (round, tier): elo_seed
-    (1, "Early"):  1720,   # ~top-3 pick: elite rookie prospect
-    (1, "Mid"):    1650,   # ~mid-1st: solid first-round value (BASE FIRST)
-    (1, "Late"):   1580,   # ~late-1st: still premium but less certain
-    (2, "Early"):  1520,   # ~early-2nd: solid starter potential
-    (2, "Mid"):    1460,   # ~mid-2nd: depth/upside piece
-    (2, "Late"):   1400,   # ~late-2nd: dart throw
-    (3, "Early"):  1360,   # ~early-3rd: longshot upside
-    (3, "Mid"):    1320,   # ~mid-3rd: roster filler
-    (3, "Late"):   1280,   # ~late-3rd: minimal value
-    (4, "Early"):  1260,   # ~early-4th: very speculative
-    (4, "Mid"):    1240,   # ~mid-4th: low value
-    (4, "Late"):   1220,   # ~late-4th: minimal
-}
-_PICK_ORDINALS = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}
-
-
-def generic_pick_label(rnd: int, tier: str) -> str:
-    """Display label matching the universal pool's pick naming."""
-    return f"{tier} {_PICK_ORDINALS[rnd]} Round Pick"
+# The generic Early/Mid/Late pick ladder (GENERIC_PICK_SEEDS), its ordinals,
+# the label helper, and the owned-pick `pool_value` reconciliation now live in
+# backend/pick_values.py so database.sync_draft_picks can share them without an
+# import cycle (server → database only, never the reverse). Re-imported here so
+# every existing `GENERIC_PICK_SEEDS` / `generic_pick_label` reference (and
+# `server.GENERIC_PICK_SEEDS` in tests) resolves unchanged.
+from .pick_values import (
+    GENERIC_PICK_SEEDS, _PICK_ORDINALS, generic_pick_label, pick_pool_value,
+)
 
 
 def _pick_gap_equivalent(gap_value: float) -> dict:
@@ -2282,6 +2264,42 @@ def _run_trade_job(
         # v2 confidence-shrinkage step (Tier 1, Change 4). None when the
         # session has no ranking service for this format.
         confidence_counts = service.comparison_counts() if service else None
+
+        # #170/#171 — inject each team's owned draft picks as priced PICK
+        # pseudo-assets so a suggestion can send OR receive a pick. Pure DATA
+        # inclusion: the engine already prices PICK assets (dynasty_value); how
+        # strongly a pick sways ranking/consolidation is the trade-logic
+        # thread's, unchanged here. Gated on trade.picks_in_pool; capped per
+        # team (picks_pool_cap) so package enumeration stays bounded.
+        if (FLAGS.trade_picks_in_pool
+                and getattr(g_league, "platform", None) != "espn"
+                and league_id != "league_demo"):
+            try:
+                pick_assets = _owned_pick_assets(league_id, active_format)
+                # g_league.members are shared session objects reused across jobs,
+                # so injection must be IDEMPOTENT: strip any owned-pick ids this
+                # league injected on a prior run (they alone start with
+                # "{league_id}_" — real player ids are digit-only, generics are
+                # "generic_pick_*") before appending the freshly-synced set. This
+                # also self-corrects ownership changes between runs.
+                _pfx = f"{league_id}_"
+                _strip = lambda ids: [i for i in ids if not i.startswith(_pfx)]
+                n_inj = 0
+                for _assets in pick_assets.values():
+                    for pa in _assets:
+                        trade_service._players[pa.id] = pa
+                        players_dict[pa.id] = pa
+                        n_inj += 1
+                g_user_roster = _strip(g_user_roster) + [
+                    pa.id for pa in pick_assets.get(g_user_id, [])]
+                for _m in g_league.members:
+                    _m.roster = _strip(_m.roster) + [
+                        pa.id for pa in pick_assets.get(_m.user_id, [])]
+                log.info("trade-job: injected %d owned-pick assets across %d teams (cap=%d)",
+                         n_inj, len(pick_assets), _picks_pool_cap())
+            except Exception as pick_inj_err:
+                log.warning("trade-job: owned-pick injection failed (continuing): %s",
+                            pick_inj_err)
 
         final_cards = trade_service.generate_trades(
             user_id              = g_user_id,
@@ -4652,12 +4670,28 @@ def trade_evaluate_route():
         _pool_players, seed = _get_universal_pool(fmt)
         e2v = _trade_service_mod.elo_to_value
 
+        # #158 — league-scoped owned picks (e.g. "2027 1st") are NOT in the
+        # universal-pool `seed`, so they'd otherwise be silently dropped. When a
+        # league_id rides along, resolve each owned pick_id to its pool_value
+        # (already in elo_to_value units, so it composes directly with player
+        # values). Generic picks (generic_pick_*) still resolve via `seed`.
+        league_pick_vals: dict[str, float] = {}
+        if league_id and league_id != "league_demo":
+            try:
+                for _p in load_draft_picks(league_id=league_id):
+                    league_pick_vals[_p["pick_id"]] = float(_p.get("pool_value") or 0.0)
+            except Exception as _lp_err:
+                log.warning("evaluate: owned-pick load failed (continuing): %s", _lp_err)
+
         def seed_value(pid: str) -> float:
+            if pid in league_pick_vals:
+                return league_pick_vals[pid]        # already in value space
             return e2v(seed.get(pid, 1500.0))
 
-        give    = [p for p in give_raw if p in seed]
-        recv    = [p for p in recv_raw if p in seed]
-        dropped = [p for p in give_raw + recv_raw if p not in seed]
+        give    = [p for p in give_raw if p in seed or p in league_pick_vals]
+        recv    = [p for p in recv_raw if p in seed or p in league_pick_vals]
+        dropped = [p for p in give_raw + recv_raw
+                   if p not in seed and p not in league_pick_vals]
 
         per_player = [
             {"player_id": pid, "side": side, "value": round(seed_value(pid), 1)}
@@ -4723,7 +4757,14 @@ def trade_evaluate_route():
             opp_has_rankings = bool(opp_elo)
 
             def _board_value(elo_map):
-                return lambda pid: e2v(elo_map.get(pid, seed.get(pid, 1500.0)))
+                # League picks aren't on anyone's personal Elo board — price
+                # them at the consensus pool_value on both boards (acceptable
+                # v1; owners rarely rank picks individually).
+                def _val(pid):
+                    if pid in league_pick_vals:
+                        return league_pick_vals[pid]
+                    return e2v(elo_map.get(pid, seed.get(pid, 1500.0)))
+                return _val
 
             gv_u = rv_u = gv_o = rv_o = 0.0
             if give or recv:
@@ -4974,15 +5015,172 @@ def get_league_picks():
     g_league  = sess["league"]
     g_user_id = sess["user_id"]
     league_id = request.args.get("league_id") or (g_league.league_id if g_league else None)
+    # #158 — ESPN carries no future-pick ownership (players-only adapter), so
+    # surface the gap honestly rather than a silent empty list. Sleeper/MFL/demo
+    # support picks (demo simply has no rows).
+    platform = getattr(g_league, "platform", None) if g_league else None
+    supported = platform != "espn"
     if not league_id or league_id == "league_demo":
-        return jsonify({"my_picks": [], "all_picks": []})
+        return jsonify({"my_picks": [], "all_picks": [], "picks_supported": supported})
     try:
-        all_picks = load_draft_picks(league_id=league_id)
+        raw = load_draft_picks(league_id=league_id)
+        all_picks = [{**p, "label": _owned_pick_label(p)} for p in raw]
         my_picks  = [p for p in all_picks if p.get("owner_user_id") == g_user_id]
-        return jsonify({"my_picks": my_picks, "all_picks": all_picks})
+        return jsonify({
+            "my_picks": my_picks,
+            "all_picks": all_picks,
+            "picks_supported": supported,
+        })
     except Exception as e:
         log.error("get_league_picks error: %s", e)
         return jsonify({"error": "internal_error"}), 500
+
+
+def _owned_pick_label(p: dict) -> str:
+    """Display label for an owned pick, e.g. "2027 1st" or
+    "2026 2nd (from Jared)" when the pick was acquired via trade."""
+    season = p.get("season")
+    ordinal = _PICK_ORDINALS.get(int(p.get("round") or 0), str(p.get("round")))
+    base = f"{season} {ordinal}"
+    if p.get("is_traded") and p.get("original_username"):
+        return f"{base} (from {p['original_username']})"
+    return base
+
+
+# search_rank per round for injected pick pseudo-players — mirrors the generic
+# picks in build_universal_pool so owned picks slot alongside players sanely.
+_OWNED_PICK_SEARCH_RANK = {1: 10, 2: 50, 3: 100, 4: 200}
+
+
+def _picks_pool_cap() -> int:
+    """Max owned picks per team injected into the suggestion candidate pool
+    (Decision D4). Model-config knob `picks_pool_cap` (default 6) so the
+    trade-logic thread can tune it against v3 enumeration without a deploy."""
+    try:
+        return max(0, int(get_config().get("picks_pool_cap", 6)))
+    except Exception:
+        return 6
+
+
+def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
+    """Build capped PICK pseudo-Players per owner for suggestion injection.
+
+    Returns {owner_user_id: [Player(position="PICK"), ...]} — the top-N picks
+    by pool_value per team (N = picks_pool_cap). The engine's dynasty_value
+    prices a PICK via elo_to_value(1200 + 6*pick_value), so we set
+    pick_value = (value_to_elo(pool_value) - 1200)/6 to make that round-trip
+    reproduce pool_value exactly — keeping the engine untouched (LLD §9).
+    """
+    cap = _picks_pool_cap()
+    if cap <= 0:
+        return {}
+    v2e = _trade_service_mod.value_to_elo
+    by_owner: dict[str, list[dict]] = {}
+    for p in load_draft_picks(league_id=league_id):
+        owner = p.get("owner_user_id")
+        if owner:
+            by_owner.setdefault(owner, []).append(p)
+
+    out: dict[str, list] = {}
+    for owner, picks in by_owner.items():
+        picks.sort(key=lambda p: (p.get("pool_value") or 0.0), reverse=True)
+        assets = []
+        for p in picks[:cap]:
+            pool_v = float(p.get("pool_value") or 0.0)
+            if pool_v <= 0:
+                continue
+            # Inverse of dynasty_value's PICK bridge so the engine reproduces
+            # pool_v exactly from pick_value.
+            inv_pick_value = (v2e(pool_v) - 1200.0) / 6.0
+            assets.append(Player(
+                id               = p["pick_id"],
+                name             = _owned_pick_label(p),
+                position         = "PICK",
+                team             = "PICK",
+                age              = 0,
+                years_experience = 0,
+                pick_value       = round(inv_pick_value, 3),
+                search_rank      = _OWNED_PICK_SEARCH_RANK.get(int(p.get("round") or 4), 200),
+            ))
+        if assets:
+            out[owner] = assets
+    return out
+
+
+def _sync_mfl_owned_picks(league_id: str) -> int:
+    """Normalize a linked MFL league's stored future picks into draft_picks.
+
+    MFL gives the owned list directly (leagues.platform_future_picks, populated
+    by mfl_service.parse_bundle): each entry is {franchise_id (current owner),
+    year, round, original_owner}. Map franchise→user with the same scheme the
+    MFL link route uses (the linking user's own franchise → their user_id;
+    every other franchise → the synthetic mfl:<league>.f<fid> member id), then
+    replace-sync into the same normalized store Sleeper writes. Returns the row
+    count. Best-effort — callers wrap in try/except.
+    """
+    from .database import get_platform_league
+    row = get_platform_league(league_id, "mfl")
+    if not row:
+        return 0
+    try:
+        picks = json.loads(row.get("platform_future_picks") or "[]")
+    except (TypeError, ValueError):
+        picks = []
+    if not isinstance(picks, list) or not picks:
+        replace_draft_picks(league_id, [])
+        return 0
+
+    my_team   = str(row.get("platform_my_team") or "")
+    link_user = str(row.get("user_id") or "")
+    try:
+        cur_season = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
+    except (TypeError, ValueError):
+        cur_season = _MFL_DEFAULT_YEAR
+
+    def _fr_to_user(fid: str) -> str:
+        fid = str(fid)
+        if fid and fid == my_team:
+            return link_user
+        return _mfl_member_id(league_id, fid) if fid else ""
+
+    members_by_uid = {str(m.get("user_id")): m for m in load_league_members(league_id)}
+
+    def _name(uid: str, fid: str) -> str:
+        m = members_by_uid.get(uid)
+        if m:
+            return m.get("username") or m.get("display_name") or f"Team {fid}"
+        return f"Team {fid}"
+
+    now = datetime.now(timezone.utc).isoformat()
+    rows = []
+    for pk in picks:
+        try:
+            yr  = int(pk["year"])
+            rnd = int(pk["round"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        cur_fid  = str(pk.get("franchise_id") or "")
+        orig_fid = str(pk.get("original_owner") or cur_fid)
+        owner_uid = _fr_to_user(cur_fid)
+        orig_uid  = _fr_to_user(orig_fid)
+        rows.append({
+            "pick_id":            f"{league_id}_{yr}_{rnd}_{orig_fid}",
+            "league_id":          league_id,
+            "season":             yr,
+            "round":              rnd,
+            "owner_user_id":      owner_uid,
+            "owner_username":     _name(owner_uid, cur_fid),
+            "original_roster_id": orig_fid,
+            "original_user_id":   orig_uid,
+            "original_username":  _name(orig_uid, orig_fid),
+            "is_traded":          int(orig_fid != cur_fid),
+            "pick_value":         compute_pick_value(rnd, yr, cur_season),
+            "pool_value":         pick_pool_value(rnd, yr - cur_season),
+            "platform":           "mfl",
+            "synced_at":          now,
+        })
+    replace_draft_picks(league_id, rows)
+    return len(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -5699,6 +5897,22 @@ def _fetch_league_rosters(league_id: str):
     except Exception:
         return None
     return rosters if isinstance(rosters, list) else None
+
+
+def _fetch_sleeper_traded_picks(league_id: str) -> list[dict]:
+    """Public traded-picks list for a Sleeper league (fail-soft → []).
+
+    Endpoint: https://api.sleeper.app/v1/league/<id>/traded_picks — unauth,
+    same trust level as _fetch_league_rosters. Each entry is roster_id-keyed:
+    {round, season(str), roster_id(orig), owner_id(current), previous_owner_id}.
+    """
+    if not league_id or not str(league_id).isdigit():
+        return []
+    try:
+        tp = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/traded_picks")
+    except Exception:
+        return []
+    return tp if isinstance(tp, list) else []
 
 
 def _roster_id_for_owner(rosters, owner_id) -> int | None:
@@ -8333,6 +8547,63 @@ def session_init():
                     log.info("  ✅ trade block synced (%d assets on the block)", _n_blk)
             except Exception as blk_err:
                 log.warning("  trade-block sync failed (continuing): %s", blk_err)
+
+            # ── #158: revive owned draft-pick sync ───────────────────
+            # The historical sync was dropped in the trade-engine-v2
+            # rebuild (sync_draft_picks imported but never called), so
+            # GET /api/league/picks returned empty for every league
+            # synced after April. Rebuild the pick grid here, off the
+            # request's critical path, per-league, best-effort. Sleeper
+            # only in this daemon (session/init is the Sleeper login path;
+            # MFL normalizes at link/import time). Gated on
+            # picks.owned_sync; a flake just leaves the prior snapshot.
+            try:
+                if is_enabled("picks.owned_sync") and str(league_id).isdigit():
+                    _tp = _fetch_sleeper_traded_picks(league_id)
+                    _prosters = _fetch_league_rosters(league_id) or []
+                    _pmeta = _fetch_sleeper_league_meta(league_id) or {}
+                    _rid_to_user = {
+                        str(r.get("roster_id")): str(r.get("owner_id") or "")
+                        for r in _prosters if isinstance(r, dict)
+                    }
+                    _uid_to_name = {
+                        str(m.user_id): (m.username or "")
+                        for m in (members or []) if getattr(m, "user_id", None)
+                    }
+                    # Include the logged-in user (not part of `members`).
+                    _uid_to_name[str(user_id)] = display_name or username or str(user_id)
+                    _rounds = 3
+                    try:
+                        _rounds = int((_pmeta.get("settings") or {}).get("draft_rounds") or 3)
+                    except (TypeError, ValueError):
+                        _rounds = 3
+                    _cur_season = 2026
+                    try:
+                        _cur_season = int(_pmeta.get("season") or 2026)
+                    except (TypeError, ValueError):
+                        _cur_season = 2026
+                    _lsize = 12
+                    try:
+                        _lsize = int(_pmeta.get("total_rosters") or len(_prosters) or 12)
+                    except (TypeError, ValueError):
+                        _lsize = len(_prosters) or 12
+                    _n_picks = sync_draft_picks(
+                        league_id         = league_id,
+                        roster_ids        = [r.get("roster_id") for r in _prosters
+                                             if isinstance(r, dict) and r.get("roster_id") is not None],
+                        traded_picks      = _tp,
+                        roster_id_to_user = _rid_to_user,
+                        user_id_to_name   = _uid_to_name,
+                        current_season    = _cur_season,
+                        rounds            = max(1, _rounds),
+                        seasons_ahead     = 3,
+                        league_size       = _lsize,
+                        scoring_format    = active_format,
+                    )
+                    log.info("  ✅ owned draft picks synced (%d picks, %d rounds, season %d)",
+                             len(_n_picks), _rounds, _cur_season)
+            except Exception as pk_err:
+                log.warning("  owned-pick sync failed (continuing): %s", pk_err)
         except Exception:
             # Daemon top-level catch — see docstring. Never silently die.
             log.exception("session/init background writes crashed")
@@ -12345,6 +12616,16 @@ def mfl_link():
         log.exception("mfl_link: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
+    # #158 — normalize MFL owned picks into draft_picks (same store Sleeper
+    # writes). Best-effort, gated on picks.owned_sync; runs after members are
+    # persisted so franchise→user name resolution has the member snapshot.
+    if is_enabled("picks.owned_sync"):
+        try:
+            _npk = _sync_mfl_owned_picks(league_id)
+            log.info("mfl_link: normalized %d owned picks", _npk)
+        except Exception as _mpk_err:
+            log.warning("mfl_link: owned-pick normalization failed (continuing): %s", _mpk_err)
+
     r = mapped["report"]
     log.info("mfl_link: user=%s league=%s year=%s teams=%d match_rate=%.1f%% "
              "unmatched=%d picks=%d", user_id, league_id, year, len(members),
@@ -12437,6 +12718,14 @@ def mfl_import():
     except Exception:
         log.exception("mfl_import: persistence failed")
         return jsonify({"error": "store_failed"}), 500
+
+    # #158 — re-normalize MFL owned picks on manual refresh (see mfl_link).
+    if is_enabled("picks.owned_sync"):
+        try:
+            _npk = _sync_mfl_owned_picks(league_id)
+            log.info("mfl_import: normalized %d owned picks", _npk)
+        except Exception as _mpk_err:
+            log.warning("mfl_import: owned-pick normalization failed (continuing): %s", _mpk_err)
 
     return jsonify({
         "ok": True, "league_id": league_id, "name": parsed["name"],
