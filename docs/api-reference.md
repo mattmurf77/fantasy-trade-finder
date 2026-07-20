@@ -169,7 +169,16 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
   "give":            [ player, ... ],          // player objects, user's give side
   "receive":         [ player, ... ],
   "mismatch_score":  float,                    // v2: harmonic mean of the two sides' surpluses
-  "fairness_score":  float,                    // 0–1, ALWAYS serialized; clients render as a percent meter
+  "fairness_score":  float,                    // 0–1, ALWAYS serialized; legacy signal (web meter +
+                                               // trade_narrative). Mobile deck now renders the value bar below
+  "give_value":      float,                    // consensus package value of the give side (value space,
+                                               // = the calculator's number); OPTIONAL — absent on echo-rebuilt cards
+  "receive_value":   float,                    // consensus package value of the receive side
+  "favors":          "give"|"receive"|"even",  // who the value leans to (present with give_value/receive_value)
+  "gap":             { "value": float,         // pick-denominated delta — SAME shape as /api/trade/evaluate
+                       "add_to": "give"|"receive"|null,  // the LIGHTER side (needs the sweetener); null when even
+                       "firsts": float,        // gap in units of a generic Mid 1st
+                       "pick_equivalent": { "pick_id": "...", "label": "...", "value": float } | null },
   "composite_score": float,
   "basis":           "divergence" | "consensus",  // consensus = opponent has no real rankings
   "decision":        "like" | "pass" | null,
@@ -190,7 +199,8 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
 ```
 
 Notes:
-- `fairness_score` is true consensus fairness in `[0, 1]` (lesser/greater package-value ratio). Mobile and web both multiply by 100 for the fairness meter — see [cross-client-invariants.md](cross-client-invariants.md).
+- `fairness_score` is true consensus fairness in `[0, 1]` (lesser/greater package-value ratio). The web still renders it as a percent meter; **mobile (1.10.0+) renders the pick-denominated value bar** from `give_value`/`receive_value`/`favors`/`gap` instead — see [cross-client-invariants.md](cross-client-invariants.md).
+- `give_value`/`receive_value`/`favors`/`gap` are the **same value-verdict shape** `POST /api/trade/evaluate` returns, built by the shared `_value_verdict_payload` helper from each card's consensus package values (value space, matching the calculator). Present on every card the live engine paths build; **omitted** (all four) on cards reconstructed from client echo (server-restart FB-46 path), so a client must gate on their presence. `gap` is `null` only on a one-sided read; on an exactly-even trade `gap.value` is 0 and `pick_equivalent` is `null` while `favors` is `"even"`.
 - `basis: "consensus"` cards are fair-by-consensus ideas generated for opponents with no rankings; clients show the "Fair-value idea" label.
 - The job snapshot additionally sets `real_opponent` (bool) and `outlook` per card.
 - **FB-147** (flag `sleeper.trade_block`): player objects inside `give`/`receive` gain `"on_block": true` when the league's synced Sleeper trade block names that player. Omit-when-absent — never `false`, and flag-off payloads are byte-identical to pre-147. Mobile renders the "ON THE BLOCK" badge from it.
