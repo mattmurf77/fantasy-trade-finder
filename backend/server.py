@@ -10251,6 +10251,158 @@ def session_demo():
         return jsonify({"error": "internal_error"}), 500
 
 
+# ─── Test users (QA) — synthetic stage-user spawner ────────────────────────
+# Onboarding QA (docs/plans/onboarding-conversion/plan.md): the operator
+# spawns qa_* users at a preset adoption stage without touching real Sleeper
+# users. Gated on the `testing.stage_users` flag AND the tester allowlist —
+# deliberately NOT the cron secret (the operator's phone calls this), the
+# allowlist keeps it operator-only even with the flag on. Sessions ride the
+# demo-league build path but are NOT marked is_demo: the client must treat
+# them as normal signed-in sessions. Logic lives in backend/test_users.py.
+
+from . import test_users as _test_users
+from .experiments import load_tester_allowlist as _load_tester_allowlist
+
+
+def _test_users_denied():
+    """Gate for /api/test-users — returns an error response, or None to
+    proceed. ALLOWLIST-ONLY, fail closed: any caller whose device
+    ('device:<X-Device-Id>') or session user_id is off the tester allowlist
+    gets a 404 (the surface stays invisible — no existence signal). The
+    `testing.stage_users` flag is deliberately NOT consulted here: it gates
+    only the client Settings row, and ships per-device via the experiment
+    overlay so the global flag can stay dark (operator direction
+    2026-07-19; allowlist doc: docs/config-reference.md)."""
+    allow = _load_tester_allowlist()
+    device_id = (request.headers.get("X-Device-Id") or "").strip()
+    if device_id and f"device:{device_id}" in allow:
+        return None
+    with _sessions_lock:
+        sess = _sessions.get(request.headers.get("X-Session-Token", ""))
+    if sess is not None and sess.get("user_id") in allow:
+        return None
+    return jsonify({"error": "not_found"}), 404
+
+
+@app.route("/api/test-users", methods=["POST"])
+def spawn_test_user():
+    """POST /api/test-users {"stage": "fresh"|"activated"|"board_owner"|
+    "converted"|"power"} — mint a synthetic qa_* user pre-seeded to that
+    adoption stage, with a live demo-league session. Returns the session
+    token + the ftf_onboarding_state the client should adopt."""
+    denied = _test_users_denied()
+    if denied is not None:
+        return denied
+    body = request.get_json(force=True, silent=True) or {}
+    stage = body.get("stage")
+    if stage not in _test_users.STAGES:
+        return jsonify({"error": f"Invalid stage: {stage!r}",
+                        "stages": list(_test_users.STAGES)}), 400
+    try:
+        user_id = "qa_" + uuid.uuid4().hex[:8]
+        username = f"qa_{stage}_{secrets.token_hex(2)}"
+        upsert_user(sleeper_user_id=user_id, username=username,
+                    display_name=username)
+
+        # Demo-league session build — same path as /api/session/demo, keyed
+        # to the synthetic user. Unlike demo: the users row persists, boards
+        # replay, and there is no is_demo key on the session.
+        from .database import SCORING_FORMATS as DB_SCORING_FORMATS
+        new_services: dict = {}
+        new_trade_svcs: dict = {}
+        final_league = None
+        for fmt in DB_SCORING_FORMATS:
+            svc = RankingService(
+                players=list(DEMO_PLAYERS),
+                matchup_generator=matchup_gen,
+                seed_ratings=seed,
+            )
+            svc._user_id = user_id
+            svc._scoring_format = fmt
+            new_services[fmt] = svc
+
+            tsvc = TradeService(players={p.id: p for p in DEMO_PLAYERS})
+            dl, _dr = _build_demo_league(DEMO_PLAYERS, seed)
+            tsvc.add_league(dl)
+            new_trade_svcs[fmt] = tsvc
+            final_league = dl
+
+        # Stage seeding — boards go onto the live default-format service AND
+        # into users.tier_overrides/tiers_saved (the /api/tiers/save storage).
+        notes = _test_users.seed_stage(
+            user_id, stage,
+            service=new_services[DEFAULT_SCORING],
+            players=list(DEMO_PLAYERS),
+            seed_ratings=seed,
+            scoring_format=DEFAULT_SCORING,
+        )
+
+        token = secrets.token_urlsafe(32)
+        payload = {   # mirrors session_init's payload shape — NO is_demo key
+            "user_id":       user_id,
+            "league":        final_league,
+            "players":       list(DEMO_PLAYERS),
+            "user_roster":   list(DEMO_USER_ROSTER),
+            "services":      new_services,
+            "service":       new_services[DEFAULT_SCORING],
+            "trade_svcs":    new_trade_svcs,
+            "trade_svc":     new_trade_svcs[DEFAULT_SCORING],
+            "active_format": DEFAULT_SCORING,
+            "display_name":  username,
+            "last_active":   time.time(),
+        }
+        if stage in _test_users.VERIFIED_STAGES:
+            # users.verified_via is stamped, so an UNVERIFIED session would
+            # trip the P2.5 read gate (verified-controller branch). Mark the
+            # session verified — mirrors a real post-Apple-bind session.
+            payload["verified"] = True
+            payload["verified_via"] = "apple"
+        with _sessions_lock:
+            _sessions[token] = payload
+
+        log.info("test-users: spawned %s (%s) stage=%s", user_id, username, stage)
+        return jsonify({
+            "session_token": token,
+            "user_id":       user_id,
+            "username":      username,
+            "display_name":  username,
+            "league_id":     final_league.league_id,
+            "league_name":   final_league.name,
+            "stage":         stage,
+            "client_state":  _test_users.client_state_for(stage),
+            "notes":         notes,
+        })
+    except Exception as e:
+        log.error("test-users spawn failed: %s\n%s", e, traceback.format_exc())
+        return jsonify({"error": "internal_error"}), 500
+
+
+@app.route("/api/test-users/<user_id>", methods=["DELETE"])
+def delete_test_user_route(user_id: str):
+    """DELETE /api/test-users/<user_id> — remove a qa_* user's rows (users,
+    swipe_decisions, member_rankings) and evict any live session. Refuses
+    anything without the qa_ prefix."""
+    denied = _test_users_denied()
+    if denied is not None:
+        return denied
+    if not user_id.startswith("qa_"):
+        return jsonify({"error": "not_a_test_user",
+                        "message": "Only qa_* users can be deleted here."}), 400
+    try:
+        with _sessions_lock:
+            stale = [t for t, s in _sessions.items()
+                     if s.get("user_id") == user_id]
+            for t in stale:
+                _sessions.pop(t, None)
+        counts = _test_users.delete_test_user(user_id)
+        counts["sessions_evicted"] = len(stale)
+        log.info("test-users: deleted %s — %s", user_id, counts)
+        return jsonify({"ok": True, "user_id": user_id, "deleted": counts})
+    except Exception as e:
+        log.error("test-users delete failed: %s\n%s", e, traceback.format_exc())
+        return jsonify({"error": "internal_error"}), 500
+
+
 # ─── Account auth — Apple/Google identity anchors + in-app deletion ────────
 # Account-auth plan P2 (docs/plans/account-auth-plan-2026-07-11.md §3-P2).
 # Thin wrappers over backend/accounts.py. The sign-in surface is gated on

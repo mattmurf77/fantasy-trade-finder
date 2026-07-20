@@ -140,6 +140,8 @@ def device_exclusion(alias="ue", id_col=None, include_demo=False,
     if not include_demo:
         parts.append(f"{idc} NOT LIKE 'demo\\_%' ESCAPE '\\'")
         parts.append(f"{idc} NOT LIKE 'test\\_user\\_fp\\_%' ESCAPE '\\'")
+        # Synthetic QA stage-users (backend/test_users.py) — never cohort data.
+        parts.append(f"{idc} NOT LIKE 'qa\\_%' ESCAPE '\\'")
         # NULL-safe windowed demo-session exclusion (server rows have NULL
         # session_id → NOT EXISTS is true for them, correctly kept).
         parts.append(

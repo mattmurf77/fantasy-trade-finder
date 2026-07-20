@@ -192,6 +192,12 @@ Registered under the `_comment_teardown` block in `config/features.json`; source
 
 Dark flags are inventory, not archive. **Every flag dark ≥90 days gets a recorded decision at a quarterly flag review: schedule a canary via the experiments engine, or delete the code path.** "Still thinking" is not a decision — the review's exit criterion is zero flags >90 days old without one. Record the decision as a one-line ship-by/kill-by note in the flag's `features.json` comment block (or the table above). The teardown block's clock starts 2026-07-19.
 
+### QA / testing surfaces
+
+| Flag | Default | Gates |
+|---|---|---|
+| `testing.stage_users` | false | `POST`/`DELETE /api/test-users` (`backend/test_users.py`) — synthetic `qa_*` stage-user spawner for onboarding QA. Runtime-flagged kin of `FTF_TEST_MODE` so the operator's phone can hit a prod-shaped build. The flag alone is **not sufficient**: callers must also be on the tester allowlist (`experiments.load_tester_allowlist()` — `FTF_TESTER_ALLOWLIST` env ∪ `config/tester_allowlist.json`), so flipping it on never exposes the surface to real users. Flip only during onboarding QA windows. See [api-reference.md → Test users (QA)](api-reference.md). |
+
 ---
 
 ## `model_config` keys
