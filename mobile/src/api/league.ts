@@ -97,6 +97,40 @@ export async function getLeagueCoverage(leagueId: string) {
   );
 }
 
+// ── Owned draft picks (#158) ──────────────────────────────────────
+// Backend: GET /api/league/picks. Each pick is a per-league owned asset
+// priced on the engine value scale (pool_value) with a display label
+// ("2027 1st", "2026 2nd (from Jared)"). picks_supported=false for ESPN
+// leagues (players-only) so the calculator can show an honest note.
+export interface OwnedPick {
+  pick_id: string;
+  league_id: string;
+  season: number;
+  round: number;
+  owner_user_id: string;
+  owner_username?: string | null;
+  original_user_id?: string | null;
+  original_username?: string | null;
+  is_traded?: number;
+  /** Legacy 0-100 round-tier value (pick-share ratios). */
+  pick_value?: number | null;
+  /** Engine/calculator value scale — what the calculator prices on. */
+  pool_value?: number | null;
+  /** Display label, e.g. "2027 1st". */
+  label: string;
+}
+export interface LeaguePicksResponse {
+  my_picks: OwnedPick[];
+  all_picks: OwnedPick[];
+  /** false for ESPN leagues — clients show a "picks unavailable" note. */
+  picks_supported: boolean;
+}
+export async function getLeaguePicks(leagueId: string) {
+  return api.get<LeaguePicksResponse>(
+    `/api/league/picks?league_id=${encodeURIComponent(leagueId)}`,
+  );
+}
+
 // ── League summary ────────────────────────────────────────────────
 // Roll-up shown on the League tab. Backend: GET /api/league/summary
 //

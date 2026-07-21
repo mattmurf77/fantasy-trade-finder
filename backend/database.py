@@ -29,6 +29,11 @@ from sqlalchemy import (
 from sqlalchemy import event as sa_event
 from datetime import timedelta
 
+# #158 — shared pick ladder + owned-pick pool_value reconciliation. Lives in a
+# tiny standalone module (no cycle: pick_values imports trade_service lazily,
+# and never imports database) so sync_draft_picks can price on the engine scale.
+from .pick_values import pick_pool_value
+
 # ---------------------------------------------------------------------------
 # Engine — SQLite by default, PostgreSQL if DATABASE_URL is set
 # ---------------------------------------------------------------------------
@@ -496,7 +501,9 @@ draft_picks_table = Table("draft_picks", metadata,
     Column("original_user_id",  String),                    # original team's user_id
     Column("original_username", String),                    # original team display name
     Column("is_traded",         Integer, default=0),        # 1 if ownership changed
-    Column("pick_value",        Float),                     # computed dynasty value
+    Column("pick_value",        Float),                     # legacy 0-100 round-tier scale (pick-share ratios)
+    Column("pool_value",        Float),                     # #158: engine/calculator value scale (elo_to_value units)
+    Column("platform",          String),                    # #158: 'sleeper' | 'mfl' provenance (ESPN never writes rows)
     Column("synced_at",         String),
     UniqueConstraint("pick_id", name="uq_draft_pick_id"),
 )
@@ -1388,6 +1395,8 @@ _MODEL_CONFIG_DEFAULTS = [
     ("cycle_max_results",        3.0,   "v3: max 3-team cycles returned per league"),
     ("v3_diversity_max_overlap", 0.4,   "v3: max asset Jaccard between two cards from one opponent pair"),
     ("consensus_score_scale",    0.3,   "v2: composite multiplier keeping consensus fallback cards below divergence finds"),
+    # ── #170/#171 owned draft picks in the candidate pool (flag trade.picks_in_pool) ──
+    ("picks_pool_cap",           6.0,   "#170: max owned picks per team injected into the suggestion candidate pool (top-N by pool_value)"),
     # ── Backlog #1 opponent outlook inference (flag trade.outlook_infer) ──
     ("infer_w_vet_share",        1.0,   "#1: weight on vet (age≥vet_age) value share in outlook inference"),
     ("infer_w_youth_share",      1.0,   "#1: weight on youth (age≤youth_age) value share in outlook inference"),
@@ -1515,6 +1524,9 @@ def _migrate_db() -> None:
         ("leagues",            "platform_auth",         "VARCHAR"),
         ("leagues",            "platform_my_team",      "VARCHAR"),
         ("leagues",            "platform_future_picks", "TEXT"),
+        # #158 — owned draft picks: engine-scale value + platform provenance.
+        ("draft_picks",        "pool_value",            "FLOAT"),
+        ("draft_picks",        "platform",              "TEXT"),
         # Tracking plan v2 §S1 envelope columns (all nullable — v1 rows and
         # v1 record_event() call sites are untouched).
         ("user_events",        "event_id",              "VARCHAR"),
@@ -5662,6 +5674,7 @@ def sync_draft_picks(
     rounds: int = 3,
     seasons_ahead: int = 3,
     league_size: int = 12,
+    scoring_format: str = "1qb_ppr",
 ) -> list[dict]:
     """
     Build the full pick grid for a dynasty league and persist it to the DB.
@@ -5708,6 +5721,8 @@ def sync_draft_picks(
                     "original_username":  username,
                     "is_traded":          0,
                     "pick_value":         compute_pick_value(rnd, season, current_season, league_size),
+                    "pool_value":         pick_pool_value(rnd, season - current_season, scoring_format),
+                    "platform":           "sleeper",
                 }
 
     # Step 2: overlay traded picks
@@ -5745,6 +5760,8 @@ def sync_draft_picks(
                 "original_username":  orig_username,
                 "is_traded":          0,
                 "pick_value":         compute_pick_value(rnd, season, current_season, league_size),
+                "pool_value":         pick_pool_value(rnd, season - current_season, scoring_format),
+                "platform":           "sleeper",
             }
 
         is_traded = int(new_rid != orig_rid)
@@ -5754,14 +5771,25 @@ def sync_draft_picks(
             "is_traded":      is_traded,
         })
 
-    # Step 3: upsert all picks into the DB
+    # Step 3: replace-sync all picks for this league (delete + bulk-insert)
     rows = [
         {**p, "synced_at": now}
         for p in picks.values()
     ]
+    replace_draft_picks(league_id, rows)
+    return rows
 
+
+def replace_draft_picks(league_id: str, rows: list[dict]) -> None:
+    """Snapshot-replace every draft-pick row for one league.
+
+    Delete the league's existing rows, then bulk-insert `rows` fresh. Shared by
+    the Sleeper grid+overlay sync (`sync_draft_picks`) and the MFL normalization
+    path (`server._sync_mfl_owned_picks`) so both write through one code path.
+    Rows are expected to carry `synced_at`; callers that build rows outside
+    sync_draft_picks stamp it themselves.
+    """
     with engine.begin() as conn:
-        # Remove stale picks for this league then bulk-insert fresh state
         conn.execute(
             delete(draft_picks_table).where(
                 draft_picks_table.c.league_id == league_id
@@ -5771,8 +5799,6 @@ def sync_draft_picks(
             chunk_size = 200
             for i in range(0, len(rows), chunk_size):
                 conn.execute(insert(draft_picks_table), rows[i: i + chunk_size])
-
-    return rows
 
 
 def load_draft_picks(

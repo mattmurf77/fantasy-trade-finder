@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { useQuery } from '@tanstack/react-query';
 
 import { getLeagueRosters } from '../api/sleeper';
-import { getLeagueCoverage } from '../api/league';
+import { getLeagueCoverage, getLeaguePicks } from '../api/league';
 import {
   evaluateTradeInLeague,
   evaluateTradesInLeague,
@@ -77,10 +77,46 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
     queryFn: () => getLeagueCoverage(leagueId),
     staleTime: 5 * 60_000,
   });
+  // #158 — owned draft picks for this league (per-owner, engine-scale values).
+  // Empty when the picks.owned_sync flag is off (no rows synced); ESPN leagues
+  // return picks_supported=false so we can render an honest note.
+  const picksQ = useQuery({
+    queryKey: ['league-picks', leagueId],
+    queryFn: () => getLeaguePicks(leagueId),
+    staleTime: 5 * 60_000,
+  });
+
+  // A CalcPlayer per owned pick, keyed by pick_id, priced at pool_value.
+  const pickById = useMemo(() => {
+    const m: Record<string, CalcPlayer> = {};
+    for (const p of picksQ.data?.all_picks ?? []) {
+      m[p.pick_id] = {
+        id: p.pick_id,
+        name: p.label,
+        pos: 'PICK',
+        nflTeam: 'PICK',
+        age: 0,
+        base: p.pool_value ?? 0,
+      };
+    }
+    return m;
+  }, [picksQ.data]);
+  const picksByOwner = useMemo(() => {
+    const m: Record<string, CalcPlayer[]> = {};
+    for (const p of picksQ.data?.all_picks ?? []) {
+      const cp = pickById[p.pick_id];
+      if (cp) (m[p.owner_user_id] ??= []).push(cp);
+    }
+    return m;
+  }, [picksQ.data, pickById]);
+  const picksSupported = picksQ.data?.picks_supported ?? true;
 
   const board = useMemo<Record<string, number>>(
-    () => Object.fromEntries((valuesQ.data?.players ?? []).map((r) => [r.id, r.value])),
-    [valuesQ.data],
+    () => ({
+      ...Object.fromEntries((valuesQ.data?.players ?? []).map((r) => [r.id, r.value])),
+      ...Object.fromEntries(Object.values(pickById).map((p) => [p.id, p.base])),
+    }),
+    [valuesQ.data, pickById],
   );
   const playerById = useMemo(() => {
     const m: Record<string, CalcPlayer> = {};
@@ -94,8 +130,11 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
         base: r.value,
       };
     }
+    // Owned picks are selectable assets too — merge so TradeSide + evaluate
+    // resolve their labels/values alongside players.
+    for (const p of Object.values(pickById)) m[p.id] = p;
     return m;
-  }, [valuesQ.data]);
+  }, [valuesQ.data, pickById]);
 
   const rosterByOwner = useMemo(() => {
     const m: Record<string, string[]> = {};
@@ -120,12 +159,16 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
   }, [opponentId]);
 
   const opponent = opponents.find((o) => o.user_id === opponentId) ?? null;
-  const myPoolPlayers = (rosterByOwner[userId] ?? [])
-    .map((id) => playerById[id])
-    .filter(Boolean) as CalcPlayer[];
-  const oppPoolPlayers = (opponentId ? rosterByOwner[opponentId] ?? [] : [])
-    .map((id) => playerById[id])
-    .filter(Boolean) as CalcPlayer[];
+  const myPoolPlayers = [
+    ...((rosterByOwner[userId] ?? []).map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]),
+    ...(picksByOwner[userId] ?? []),
+  ];
+  const oppPoolPlayers = [
+    ...((opponentId ? rosterByOwner[opponentId] ?? [] : [])
+      .map((id) => playerById[id])
+      .filter(Boolean) as CalcPlayer[]),
+    ...(opponentId ? picksByOwner[opponentId] ?? [] : []),
+  ];
 
   const debGive = useDebounced(giveIds, 250);
   const debReceive = useDebounced(receiveIds, 250);
@@ -330,6 +373,9 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
       ) : (
         <Text style={styles.note}>Priced by your rankings and @{opponent?.username}'s.</Text>
       )}
+      {!picksSupported ? (
+        <Text style={styles.note}>Draft picks aren't available for ESPN leagues.</Text>
+      ) : null}
 
       <TradeSide
         title="You send"
