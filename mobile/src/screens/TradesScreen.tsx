@@ -50,6 +50,7 @@ import SendInSleeperButton from '../components/SendInSleeperButton';
 import Toast from '../components/Toast';
 import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
 import HelpSheet, { InfoButton } from '../components/HelpSheet';
+import { registerScrollToTop } from '../navigation/scrollToTop';
 import OutlookSheet from '../components/OutlookSheet';
 import TradeFinderModeBar from '../components/TradeFinderModeBar';
 import LeaguePill from '../components/LeaguePill';
@@ -317,6 +318,20 @@ export default function TradesScreen({ navigation, route }: any) {
   // byte-identical behavior) ──────────────────────────────────────────
   const swipeUndoOn = useFlag('ux.swipe_undo');           // S3 PRD-03
   const menuOn = useFlag('ux.player_context_menu');       // S3 PRD-02
+  // S1 PRD-05 (flag ux.retap_active_tab) — when the Trades stack is already
+  // at TradesHome, a focused re-tap scrolls the main list to top. (TabNav
+  // pops any pushed Portfolio/Calculator screen first.)
+  const retapOn = useFlag('ux.retap_active_tab');
+  const mainScrollRef = useRef<ScrollView>(null);
+  useEffect(
+    () =>
+      retapOn
+        ? registerScrollToTop('Trades', () =>
+            mainScrollRef.current?.scrollTo({ y: 0, animated: true }),
+          )
+        : undefined,
+    [retapOn],
+  );
   const outlookInlineOn = useFlag('ux.outlook_inline_default'); // S4 PRD-02
   const helpOn = useFlag('ux.help_surface');              // S4 PRD-01
   const shareLandingOn = useFlag('growth.share_landing'); // S7 PRD-01
@@ -2050,6 +2065,7 @@ export default function TradesScreen({ navigation, route }: any) {
       ) : null}
 
       <ScrollView
+        ref={mainScrollRef}
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!topCard || !generateMutation.isPending}

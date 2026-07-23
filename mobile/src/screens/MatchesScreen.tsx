@@ -26,6 +26,7 @@ import { getAssetPrefs, setAssetPref } from '../api/league';
 import { useSession } from '../state/useSession';
 import { usePushPriming } from '../state/usePushPriming';
 import { useFlag } from '../state/useFeatureFlags';
+import { registerScrollToTop } from '../navigation/scrollToTop';
 import { relativeTime } from '../utils/relativeTime';
 import { readErrorCopy } from '../utils/verification';
 import type { TradeMatch, AwaitingTrade, Player } from '../shared/types';
@@ -66,6 +67,22 @@ export default function MatchesScreen() {
   // byte-identical behavior) ──────────────────────────────────────────
   const swipeUndoOn = useFlag('ux.swipe_undo');           // S3 PRD-03
   const menuOn = useFlag('ux.player_context_menu');       // S3 PRD-02
+  // S1 PRD-05 (flag ux.retap_active_tab) — focused Matches re-tap scrolls
+  // the active segment's list to top. Only one FlatList is mounted at a
+  // time (segment toggle), so scroll whichever ref is live.
+  const retapOn = useFlag('ux.retap_active_tab');
+  const matchesListRef = useRef<FlatList<any> | null>(null);
+  const awaitingListRef = useRef<FlatList<any> | null>(null);
+  useEffect(
+    () =>
+      retapOn
+        ? registerScrollToTop('Matches', () => {
+            matchesListRef.current?.scrollToOffset({ offset: 0, animated: true });
+            awaitingListRef.current?.scrollToOffset({ offset: 0, animated: true });
+          })
+        : undefined,
+    [retapOn],
+  );
   const emptyCtasOn = useFlag('ux.empty_state_ctas');     // S4 PRD-05
   const helpOn = useFlag('ux.help_surface');              // S4 PRD-01
   const cleanupOn = useFlag('visual.chalkline_cleanup');  // S2 PRD-04 ride-along
@@ -508,6 +525,7 @@ export default function MatchesScreen() {
           </View>
         ) : (
           <FlatList
+            ref={matchesListRef}
             contentContainerStyle={styles.list}
             data={visibleMatches}
             keyExtractor={(m) => m.match_id}
@@ -596,6 +614,7 @@ export default function MatchesScreen() {
           </View>
         ) : (
           <FlatList
+            ref={awaitingListRef}
             contentContainerStyle={styles.list}
             data={visibleAwaiting}
             keyExtractor={(a) => `${a.league_id}:${a.trade_id}`}

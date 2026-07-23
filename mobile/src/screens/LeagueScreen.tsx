@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -51,6 +51,7 @@ import ActivityFeed from '../components/ActivityFeed';
 import ContrarianLeaderboard from '../components/ContrarianLeaderboard';
 import CoachMark from '../components/CoachMark';
 import RookieDraftBoardSheet from '../components/RookieDraftBoardSheet';
+import { registerScrollToTop } from '../navigation/scrollToTop';
 
 // League tab v1 — replaces the prior PlaceholderScreen. Pulls
 // /api/league/summary + /api/league/coverage and renders:
@@ -70,6 +71,19 @@ export default function LeagueScreen() {
   // orphaned RookieDraftBoardSheet mounts behind an Explore row.
   const showRookieBoard = useFlag('league.rookie_board_entry');
   const [rookieOpen, setRookieOpen] = useState(false);
+  // S1 PRD-05 (flag ux.retap_active_tab) — register this tab-root's
+  // scroll-to-top handler so a focused League re-tap returns to the top.
+  const retapOn = useFlag('ux.retap_active_tab');
+  const scrollRef = useRef<ScrollView>(null);
+  useEffect(
+    () =>
+      retapOn
+        ? registerScrollToTop('League', () =>
+            scrollRef.current?.scrollTo({ y: 0, animated: true }),
+          )
+        : undefined,
+    [retapOn],
+  );
   // S7 PRD-04 item 5 (flag ux.whats_new) — one version-keyed inline tip,
   // shown once per release (see useWhatsNew for the contract).
   const { entry: whatsNew, dismiss: dismissWhatsNew } = useWhatsNew();
@@ -232,6 +246,7 @@ export default function LeagueScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.scroll}
         refreshControl={
           <RefreshControl
