@@ -14,6 +14,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 | `CRON_SECRET` | `backend/server.py` | Shared secret (`X-Cron-Secret` header) for all operator endpoints: `/api/cron/*`, `/api/feedback/admin/*`, `/api/admin/*` (config + engine-metrics), `/api/debug/log`, `/api/feature-flags/reload`. In a non-SQLite (prod) env these **fail closed** (503) when it's unset; in SQLite dev an unset secret disables the check. Compared with `hmac.compare_digest`. |
 | `FTF_TESTER_ALLOWLIST` | `backend/experiments.py` | Comma-separated experiment unit ids (account ids and/or `device:<id>` pseudo-ids) that resolve the `is_tester_allowlist` targeting attribute to true. **Unioned with `config/tester_allowlist.json`** (JSON array, git-deployable — required in practice: Render does not apply `render.yaml` envVars to a dashboard-created service). Read on the engine's 60s cache refresh; not `model_config` because its value column is a Float. Powers operator-targeted rollouts (e.g. `onboarding_v2_rollout`). |
 | `SCORING_FORMAT` | `backend/server.py` | Default scoring format override |
+| `FTF_OUTLOOK_STRENGTH_SOURCE` | `backend/outlook/config.py` | **#169** — selects the outlook-odds `StrengthProvider`: `auto` (default; roster-value preseason → `trailing_scores`/`blended` in-season), `roster_value`, `trailing_scores`, `blended`, `sleeper_projections` (stub), `own_model` (stub). String-valued, so it lives here rather than `model_config` (whose value column is a Float). This is the operator's swap seam: change one value to repoint the projection/points source; nothing downstream imports a concrete provider. |
 | `SLEEPER_TOKEN_KEY` | `backend/sleeper_write.py` | Fernet key encrypting stored Sleeper write tokens (`trade.send_in_sleeper`). Unset/invalid → the link + propose routes fail closed (503 `sleeper_unconfigured`). Generate with `cryptography.fernet.Fernet.generate_key()`; set in `secrets.local.env` + Render. |
 | `FTF_TEST_MODE` | `backend/server.py` + `backend/test_support.py` | `1` → mounts the `/__test__/*` UI-test blueprint and makes `/api/trades/propose` fail closed (599). **Startup-aborts unless `FTF_SLEEPER_FIXTURES_DIR` and `FTF_PLAYERS_CACHE_FILE` are also set.** Never set in prod. See `docs/plans/mobile-testing/` |
 | `FTF_SLEEPER_FIXTURES_DIR` | `backend/server.py` `_sleeper_get` | Fixture seam: serve Sleeper responses from canned JSON in this dir (path-keyed, e.g. `user/qa_standard.json`); a miss raises HTTP 599 (fail-closed, never live) |
@@ -83,6 +84,7 @@ Pre-existing flags (sprint UX + trade-math): see `config/features.json` directly
 |---|---|---|
 | `picks.owned_sync` | false | Revives the per-league owned-pick sync (`database.sync_draft_picks` on the session_init daemon for Sleeper; `server._sync_mfl_owned_picks` at MFL link/import) + normalizes MFL picks into `draft_picks` + enriches `GET /api/league/picks` with `pool_value`/`label`/`picks_supported` + the mobile In-league calculator's owned-pick rows. Off ⇒ no owned-pick rows written or surfaced (byte-identical to today; the sync was dead code since the trade-engine-v2 rebuild). ESPN leagues never write rows (`picks_supported:false`). |
 | `trade.picks_in_pool` | false | Injects each team's owned picks (capped `picks_pool_cap`, top-N by `pool_value`) as priced `position="PICK"` pseudo-assets into the suggestion candidate pool in `_run_trade_job`, so a generated trade can send/receive a pick (#170/#171). **Data inclusion only** — the engine already prices PICK assets (`dynasty_value`); scoring/weighting is unchanged. Off ⇒ no pick ever appears in a suggestion. `model_config`: `picks_pool_cap` (6). |
+| `outlook.odds` | false | **#169** — gates `GET /api/league/outlook` (playoff/championship odds pipeline, `backend/outlook/`). Off ⇒ the route 404s and nothing else changes. Source selection via `FTF_OUTLOOK_STRENGTH_SOURCE`; numeric knobs under `model_config` (`outlook_*`). Preseason payloads are flagged `beta`. |
 
 ### Send in Sleeper (flagged beta)
 
@@ -309,6 +311,19 @@ The per-position age NOW/FUTURE curves are deliberately a code constant table (`
 | `cycle_edge_min_gain` | 100.0 | Min per-edge value gain for a 3-team cycle edge |
 | `cycle_min_net` | 200.0 | Min net surplus per participating team in a cycle |
 | `cycle_max_results` | 3 | Max 3-team cycle cards surfaced |
+
+### Outlook odds (#169) — `backend/outlook/`
+
+Numeric knobs for the playoff/championship-odds pipeline (gated by `outlook.odds`; string source select is the `FTF_OUTLOOK_STRENGTH_SOURCE` env var). **The roster-value→points calibration (`outlook_mean_points`/`outlook_points_per_value_sd`/`outlook_sigma_default`) is a documented heuristic, not an empirically fit model — flagged for operator tuning via the offline backtest scaffold in `test_outlook_odds.py`.**
+
+| Key | Default | Meaning |
+|---|---|---|
+| `outlook_mean_points` | 110.0 | Assumed league-average weekly fantasy score — the affine anchor for `RosterValueStrength` μ. **Heuristic.** |
+| `outlook_points_per_value_sd` | 12.0 | Weekly points added per 1 SD of (cross-league) starting-lineup roster value — `RosterValueStrength` slope. **Heuristic.** |
+| `outlook_sigma_default` | 25.0 | Default weekly-score standard deviation when not derived from played games. **Heuristic.** |
+| `outlook_trailing_min_weeks` | 3.0 | K — minimum completed weeks before `TrailingScoresStrength` is usable and `auto` switches off roster-value (1..K-1 uses `blended`). |
+| `outlook_sim_count` | 10000.0 | Monte-Carlo season simulations per request. |
+| `outlook_seed` | 0.0 | Config seed XORed with `stable_hash(league_id)` for the deterministic RNG (same league+seed → identical odds). |
 
 ### Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`
 

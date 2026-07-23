@@ -264,6 +264,12 @@ FLAG_KEYS: tuple[str, ...] = (
     # can send/receive a pick (#170/#171). DATA inclusion only — scoring
     # unchanged. Off ⇒ no pick ever appears in a suggestion.
     "trade.picks_in_pool",
+    # ── #169 — League "outlook odds" (playoff/championship-odds pipeline) ──
+    # Gates GET /api/league/outlook (backend/outlook/). Off (default) ⇒ the
+    # route 404s and nothing else changes. Componentized behind swappable
+    # Protocol providers; the projection/points source is config-selected via
+    # FTF_OUTLOOK_STRENGTH_SOURCE. Preseason payloads are flagged beta.
+    "outlook.odds",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
