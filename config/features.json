@@ -47,6 +47,7 @@
   "trade.block_boost": true,
   "picks.owned_sync": false,
   "trade.picks_in_pool": false,
+  "outlook.odds": false,
   "auth.accounts": true,
   "auth.enforce_verified_writes": false,
   "auth.email_capture": false,

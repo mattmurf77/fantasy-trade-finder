@@ -12246,6 +12246,115 @@ def league_power_rankings_route():
 
 
 # ---------------------------------------------------------------------------
+# League "outlook odds" (#169) — playoff/championship odds. Componentized
+# pipeline in backend/outlook/. Dark behind the `outlook.odds` flag (404 off).
+# ---------------------------------------------------------------------------
+
+@app.route("/api/league/outlook")
+def league_outlook_route():
+    """GET /api/league/outlook?league_id=...&basis=consensus|personal
+
+    Monte-Carlo playoff/championship odds for every team in the league. The
+    pipeline (backend/outlook/) ingests schedule + standings (Phase 1),
+    estimates each team's weekly-scoring model (Phase 2 — config-selected
+    StrengthProvider), simulates the remaining season (Phase 3, seeded), seeds
+    the bracket (Phase 4), and serializes (Phase 5).
+
+    `basis` chooses the value basis for the preseason roster-value strength
+    source: consensus (default, league-shared) or personal (the caller's
+    board, P2.5 read-gated). basis=redraft → 501 (no redraft value source).
+
+    Dark by default: 404 while the `outlook.odds` flag is off. Preseason
+    payloads (completed_weeks==0) carry meta.is_preseason / meta.beta = true.
+    """
+    if not is_enabled("outlook.odds"):
+        return jsonify({"error": "not_found"}), 404
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess.get("league")
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+
+    basis = (request.args.get("basis") or "consensus").strip().lower()
+    if basis == "redraft":
+        return jsonify({
+            "error":   "not_available",
+            "message": ("Redraft outlook isn't available — FTF values are "
+                        "dynasty-only. Use basis=consensus or basis=personal."),
+        }), 501
+    if basis not in ("consensus", "personal"):
+        return jsonify({"error": "basis must be one of consensus, personal, redraft"}), 400
+
+    board_elo = None
+    if basis == "personal":
+        denial = _verified_read_denial(sess)
+        if denial is not None:
+            return denial
+        service = sess["service"]
+        board_elo = {
+            rp.player.id: rp.elo
+            for rp in service.get_rankings(position=None).rankings
+        }
+
+    fmt = _active_format(sess)
+    platform = (getattr(g_league, "platform", None) or "sleeper")
+    try:
+        from . import outlook as outlook_pkg
+        state = outlook_pkg.build_league_state(
+            league_id, platform=platform, fetch=_sleeper_get)
+        if not state.teams:
+            return jsonify({"error": "league_not_found"}), 404
+
+        # Resolve per-player value (same basis machinery as power-rankings) and
+        # position, for the roster-value strength source.
+        pool_players, seed = _get_universal_pool(fmt)
+        svc_seed = getattr(sess.get("service"), "_seed", None) or {}
+        if svc_seed:
+            seed = {**svc_seed, **seed}
+        players_meta = {p.id: p for p in pool_players}
+        for p in (sess.get("players") or []):
+            players_meta.setdefault(p.id, p)
+        e2v = _trade_service_mod.elo_to_value
+
+        def _value_of(pid: str) -> float:
+            if board_elo is not None and pid in board_elo:
+                return e2v(board_elo[pid])
+            if pid in seed:
+                return e2v(seed[pid])
+            return 0.0
+
+        player_value: dict[str, float] = {}
+        player_pos: dict[str, str] = {}
+        for t in state.teams:
+            for raw_pid in t.player_ids:
+                pid = str(raw_pid)
+                if pid in player_value:
+                    continue
+                player_value[pid] = round(_value_of(pid), 1)
+                p = players_meta.get(pid)
+                player_pos[pid] = getattr(p, "position", None) or "?"
+
+        payload = outlook_pkg.run_outlook(
+            state,
+            player_value=player_value,
+            player_pos=player_pos,
+            model_cfg=get_config(),
+            basis=basis,
+            scoring_format=fmt,
+            you_user_id=g_user_id,
+        )
+        return jsonify(payload)
+    except NotImplementedError as e:
+        return jsonify({"error": "not_supported", "message": str(e)}), 501
+    except Exception as e:
+        log.error("league/outlook error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+
+
+# ---------------------------------------------------------------------------
 # Free-agent finder (feedback #143) — logic in backend/free_agent_service.py
 # ---------------------------------------------------------------------------
 

@@ -1428,6 +1428,15 @@ _MODEL_CONFIG_DEFAULTS = [
     ("analytics_events_per_hr", 600.0,  "P1 ingest: per-device client-event budget per hour; over-budget batches are accepted-and-dropped (never 429)"),
     # ── Deck-eval 2026-07-17 — consensus consolidation sanity gate ───────
     ("consolidation_raw_loss_frac", 0.15, "deck-eval: max RAW consensus loss on a user-give-side consolidation as a fraction of the raw give total (consensus path); 0 disables"),
+    # ── #169 Outlook odds pipeline (backend/outlook/) — numeric knobs ─────
+    # (The STRING knob outlook_strength_source lives in env FTF_OUTLOOK_STRENGTH_SOURCE
+    #  because model_config.value is Float-typed; see docs/config-reference.md.)
+    ("outlook_mean_points",          110.0, "#169: assumed league-average weekly fantasy score (RosterValueStrength affine anchor); FLAGGED heuristic"),
+    ("outlook_points_per_value_sd",   12.0, "#169: weekly points added per 1 SD of starting-lineup roster value (RosterValueStrength slope); FLAGGED heuristic"),
+    ("outlook_sigma_default",         25.0, "#169: default weekly-score standard deviation when not derived from data; FLAGGED heuristic"),
+    ("outlook_trailing_min_weeks",     3.0, "#169: K — min completed weeks before TrailingScoresStrength/auto switch off roster-value"),
+    ("outlook_sim_count",          10000.0, "#169: Monte-Carlo season simulations per outlook request"),
+    ("outlook_seed",                   0.0, "#169: config seed XORed with stable_hash(league_id) for the deterministic RNG"),
 ]
 
 
