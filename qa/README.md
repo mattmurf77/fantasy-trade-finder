@@ -48,6 +48,10 @@ consistency, and proactive bug discovery across each layer individually and the 
   mobile a11y regression pass (VoiceOver walk, AX5 screenshots, Reduce Motion / Increase
   Contrast, token contrast). Client-side scope, but run records land in `qa/results/`
   and findings use this charter's P0–P3 triage.
+- [teardown-remediation-qa.md](teardown-remediation-qa.md) — device-QA tracker for the
+  30 flag-gated features (+ unflagged fixes) from the app-teardown wave (branch
+  `teardown-remediation`). Per-feature verify steps, cross-feature interaction watch-list,
+  and an issue log. Catalog: [`../FEATURES.md`](../FEATURES.md).
 
 ## Test ID convention
 
