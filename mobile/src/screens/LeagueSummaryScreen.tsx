@@ -10,12 +10,13 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
 import {
   ink,
   chalk,
   ice,
+  semantic,
   space,
   radii,
   type,
@@ -23,14 +24,19 @@ import {
   shadowSheet,
   scrim,
 } from '../theme/chalkline';
-import { Badge, Icon } from '../components/chalkline';
+import { Badge, Icon, TickLabel } from '../components/chalkline';
 import PlayerCard from '../components/PlayerCard';
 import {
   getPowerRankings,
+  getOutlook,
   type PowerRankedPlayer,
   type PowerRankedTeam,
+  type LeagueOutlookResponse,
+  type OutlookTeam,
+  type OutlookMeta,
 } from '../api/league';
 import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
 
 // League rankings ("power rankings", #142/#144/#169) — every team in the league
 // as a stacked bar in a value-ranked chart, from GET /api/league/power-rankings.
@@ -47,12 +53,22 @@ import { useSession } from '../state/useSession';
 //     own values, consensus fallback for unranked players). Redraft is a
 //     disabled "(soon)" chip — the backend reserves basis=redraft but answers
 //     501 not_available (FTF's value source is dynasty-only today), so the
-//     client never requests it. The odds/projection layer from the mockup's
-//     vision is DEFERRED; this delivers the dynasty near-term slice only.
+//     client never requests it.
 // Tapping a team's bar opens its roster grouped by position, sorted by value
 // within each group (#144), itself position-filterable.
 // Entered from the League tab's "League rankings" row (root-stack route
 // 'LeagueSummary').
+//
+// #169 OUTLOOK ODDS layer (flag `outlook.odds`, DARK): the playoff/title-odds
+// view lives between the basis toggle and the dynasty chart. It is a SEPARATE
+// gated section — when `outlook.odds` is off (the default; the flag is absent
+// from LAUNCHED_FLAG_DEFAULTS) the section does NOT render and GET
+// /api/league/outlook is NOT called (it 404s while the modeling backend is
+// dark). Only when on do we fetch + render. Every odds figure is a projection:
+// the section carries a "Projected · preseason · beta" ribbon + a strength-
+// source caption so no percentage ever reads as authoritative (see
+// mockups/outlook-odds/outlook-card.html — the amber "Season outlook" block).
+// The basis toggle governs BOTH the odds fetch and the dynasty chart.
 
 type UiBasis = 'consensus' | 'personal';
 type CorePos = 'QB' | 'RB' | 'WR' | 'TE';
@@ -97,6 +113,21 @@ export default function LeagueSummaryScreen() {
     queryKey: ['league-power-rankings', leagueId, basis],
     queryFn: () => getPowerRankings(leagueId!, basis),
     enabled: !!leagueId,
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+
+  // #169 outlook odds — DARK behind `outlook.odds`. `enabled` is false unless
+  // the flag is on AND a league is selected, so GET /api/league/outlook never
+  // fires while the layer is dark (the endpoint 404s). Shares the `basis` state
+  // with the dynasty chart. Off by default: the flag is absent from
+  // LAUNCHED_FLAG_DEFAULTS, so `useFlag` returns false until a live map turns
+  // it on.
+  const oddsEnabled = useFlag('outlook.odds');
+  const outlookQuery = useQuery({
+    queryKey: ['league-outlook', leagueId, basis],
+    queryFn: () => getOutlook(leagueId!, basis),
+    enabled: oddsEnabled && !!leagueId,
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
@@ -181,6 +212,11 @@ export default function LeagueSummaryScreen() {
             disabled
           />
         </View>
+
+        {/* #169 outlook-odds layer — gated on `outlook.odds` (dark). Rendered
+            only when the flag is on; the fetch is likewise gated so nothing
+            fires while dark. Basis-driven (shares the toggle above). */}
+        {oddsEnabled ? <OddsSection query={outlookQuery} /> : null}
 
         {/* Position filter — single or multi select; "All" clears. Reorders +
             rescales the chart live over the already-returned per-position
@@ -475,6 +511,135 @@ function BarRow({ team, rank, active, maxActive, filter, onPress }: {
   );
 }
 
+// ── #169 outlook odds ────────────────────────────────────────────────────
+// Friendly captions for the backend's roster-strength source. Unknown keys
+// degrade to a generic projection caption rather than leaking a raw enum.
+const STRENGTH_SOURCE_CAPTION: Record<string, string> = {
+  roster_value: 'Preseason roster-value projection',
+  trailing_scores: 'Based on recent scoring',
+  blended: 'Blended projection',
+};
+function sourceCaption(src: string): string {
+  return STRENGTH_SOURCE_CAPTION[src] ?? 'Projected from team strength';
+}
+
+// The load-bearing honesty label. `meta.beta`/`meta.is_preseason` are true
+// today (July, zero games), so this reads "Projected · preseason · beta" —
+// never a bare authoritative percentage.
+function betaRibbonLabel(meta: OutlookMeta): string {
+  const parts = ['Projected'];
+  if (meta.is_preseason) parts.push('preseason');
+  if (meta.beta) parts.push('beta');
+  return parts.join(' · ');
+}
+
+// 0..1 fraction → whole-percent string. Preseason values are 0.0 → "0%".
+function pct(frac: number): string {
+  return `${Math.round((frac ?? 0) * 100)}%`;
+}
+
+function record(t: OutlookTeam): string {
+  const base = `${t.wins}-${t.losses}`;
+  return t.ties > 0 ? `${base}-${t.ties}` : base;
+}
+
+// The playoff/title-odds section. Rendered only when `outlook.odds` is on;
+// degrades quietly (renders nothing) while the endpoint is dark/404s so the
+// screen never shows a broken projection block.
+function OddsSection({ query }: { query: UseQueryResult<LeagueOutlookResponse> }) {
+  const data = query.data;
+
+  if (query.isLoading && !data) {
+    return (
+      <View style={styles.oddsSection} testID="league-summary.odds.section">
+        <TickLabel color={semantic.warn}>Playoff picture</TickLabel>
+        <View style={styles.oddsLoading}>
+          <ActivityIndicator color={semantic.warn} />
+        </View>
+      </View>
+    );
+  }
+
+  // No data (dark endpoint / error / empty league) → render nothing. Better a
+  // missing section than a fabricated or broken one.
+  if (!data || data.teams.length === 0) return null;
+
+  const { meta, teams } = data;
+
+  return (
+    <View style={styles.oddsSection} testID="league-summary.odds.section">
+      <View style={styles.oddsHead}>
+        <TickLabel color={semantic.warn}>Playoff picture</TickLabel>
+        <View
+          style={styles.betaRibbon}
+          testID="league-summary.odds.beta-ribbon"
+          accessibilityRole="text"
+        >
+          <Text style={styles.betaRibbonText}>{betaRibbonLabel(meta)}</Text>
+        </View>
+      </View>
+      <Text
+        style={[type.bodySm, styles.oddsSource]}
+        testID="league-summary.odds.source"
+      >
+        {`${sourceCaption(meta.strength_source)} · ${meta.sims.toLocaleString('en-US')} sims · top ${meta.playoff_slots} make the playoffs`}
+      </Text>
+
+      <View style={styles.oddsList}>
+        {teams.map((t, idx) => (
+          <OddsRow key={t.roster_id} team={t} rank={idx + 1} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// One team's projected odds: order numeral (payload is pre-sorted by
+// playoff_pct desc), name + You badge, record + projected seed, then the two
+// headline odds (playoff / title) as figure + thin warn meter.
+function OddsRow({ team, rank }: { team: OutlookTeam; rank: number }) {
+  return (
+    <View
+      style={styles.oddsRow}
+      testID={`league-summary.odds.row.${team.roster_id}`}
+    >
+      <Text style={[styles.oddsRank, team.is_you && { color: ice.base }]}>{rank}</Text>
+      <View style={styles.oddsMid}>
+        <View style={styles.oddsNameRow}>
+          <Text style={[type.title, styles.oddsName]} numberOfLines={1}>
+            {team.display_name || team.username || String(team.roster_id)}
+          </Text>
+          {team.is_you ? <Badge label="You" color={ice.base} colorText /> : null}
+        </View>
+        <Text style={[type.data, styles.oddsSub]}>
+          {`${record(team)} · proj seed ${team.odds.projected_seed.toFixed(1)}`}
+        </Text>
+        <View style={styles.oddsStats}>
+          <OddStat label="Playoff" frac={team.odds.playoff_pct} />
+          <OddStat label="Title" frac={team.odds.title_pct} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// A single projected-odds figure with a thin warn meter. Warn (amber) is the
+// "this is projected, not settled" signal — matches the mockup's amber block.
+function OddStat({ label, frac }: { label: string; frac: number }) {
+  const fillPct = Math.max(0, Math.min(1, frac ?? 0)) * 100;
+  return (
+    <View style={styles.oddStat}>
+      <Text style={styles.oddStatLabel}>{label}</Text>
+      <Text style={[type.data, styles.oddStatValue]}>{pct(frac)}</Text>
+      <View style={styles.oddStatTrack}>
+        {fillPct > 0 ? (
+          <View style={[styles.oddStatFill, { width: `${fillPct}%` }]} />
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
   scroll: { padding: space.lg, paddingBottom: space.xxl },
@@ -511,6 +676,64 @@ const styles = StyleSheet.create({
   pillTextAllOn: { color: ice.base },
 
   hint: { marginTop: space.sm, marginBottom: space.md },
+
+  // #169 outlook odds section — sits between the basis toggle and the chart,
+  // fenced off with a bottom hairline. Warn (amber) is the projection signal.
+  oddsSection: {
+    marginBottom: space.lg,
+    paddingBottom: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
+  },
+  oddsHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+  },
+  betaRibbon: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: semantic.warn,
+    borderRadius: radii.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  betaRibbonText: { ...type.label, color: semantic.warn },
+  oddsSource: { marginTop: space.sm, color: chalk.dim },
+  oddsLoading: { paddingVertical: space.xl, alignItems: 'center' },
+
+  oddsList: { marginTop: space.md, gap: 2 },
+  oddsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space.sm,
+    paddingVertical: space.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
+  },
+  oddsRank: {
+    ...type.data,
+    width: 22,
+    textAlign: 'center',
+    color: chalk.dim,
+    marginTop: 2,
+  },
+  oddsMid: { flex: 1, gap: 5 },
+  oddsNameRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  oddsName: { flexShrink: 1 },
+  oddsSub: { color: chalk.dim },
+  oddsStats: { flexDirection: 'row', gap: space.md, marginTop: 2 },
+  oddStat: { flex: 1, gap: 4 },
+  oddStatLabel: { ...type.label, color: chalk.faint },
+  oddStatValue: { color: chalk.base },
+  oddStatTrack: {
+    height: 5,
+    backgroundColor: ink.ink3,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  oddStatFill: { height: '100%', backgroundColor: semantic.warn, borderRadius: 3 },
 
   chart: { gap: 2 },
   barRow: {
