@@ -532,6 +532,80 @@ export async function getPowerRankings(
   );
 }
 
+// ── League outlook — playoff / championship odds (#169, flag `outlook.odds`) ──
+// Backend: GET /api/league/outlook?league_id=...&basis=consensus|personal
+// The playoff/title-odds layer from the #169 "outlook odds" vision. Behind the
+// DARK `outlook.odds` flag — the endpoint 404s until the modeling backend
+// (league-state season simulator) ships, so callers MUST gate on the flag
+// before requesting (see LeagueSummaryScreen). Never add `outlook.odds` to the
+// launched-flag defaults.
+//
+// Every odds figure is a PROJECTION, not a settled fact. `meta.beta` /
+// `meta.is_preseason` mark the numbers provisional; the UI labels the whole
+// layer "Projected · preseason · beta" and NEVER shows a bare authoritative
+// percentage. Percentages are 0..1 fractions. Teams arrive pre-sorted by
+// `odds.playoff_pct` descending.
+export type OutlookBasis = 'consensus' | 'personal';
+
+// Backend strength-source keys → friendly captions are mapped in the screen.
+// Kept an open union (`string & {}`) so an unrecognised future key degrades to
+// a generic caption instead of breaking the type.
+export type OutlookStrengthSource =
+  | 'roster_value'
+  | 'trailing_scores'
+  | 'blended'
+  | (string & {});
+
+export interface OutlookMeta {
+  strength_source: OutlookStrengthSource;
+  completed_weeks: number;
+  regular_season_weeks: number;
+  playoff_slots: number;
+  byes: number;
+  sims: number;
+  seed: number;
+  is_preseason: boolean;
+  beta: boolean;
+}
+
+export interface OutlookTeam {
+  roster_id: number;
+  user_id: string;
+  username: string;
+  display_name: string;
+  is_you: boolean;
+  wins: number;
+  losses: number;
+  ties: number;
+  points_for: number;
+  strength: { mu: number; sigma: number };
+  odds: {
+    playoff_pct: number; // 0..1
+    bye_pct: number;     // 0..1
+    title_pct: number;   // 0..1
+    projected_wins: number;
+    projected_seed: number;
+  };
+}
+
+export interface LeagueOutlookResponse {
+  league_id: string;
+  platform: string;
+  basis: OutlookBasis;
+  scoring_format: string;
+  meta: OutlookMeta;
+  teams: OutlookTeam[];
+}
+
+export async function getOutlook(
+  leagueId: string,
+  basis: OutlookBasis = 'consensus',
+) {
+  return api.get<LeagueOutlookResponse>(
+    `/api/league/outlook?league_id=${encodeURIComponent(leagueId)}&basis=${basis}`,
+  );
+}
+
 export async function connectLeague(sleeperUrl: string): Promise<ConnectLeagueResult> {
   const res = await api.post<{
     platform: string;
