@@ -4116,6 +4116,10 @@ def save_anchor_route():
                 source="api",
                 props={"player_id": player_id, "pick_value": anchor,
                        "skipped": False},
+                # #152 — anchor_answered is a rank-class streak event now,
+                # so tz rides along for local-day streak math (same as
+                # trio_swipe / tier_save).
+                tz=getattr(g, "user_tz", None),
                 **(getattr(g, "device_info", {}) or {}),
             )
         except Exception as ev_err:
@@ -4417,6 +4421,10 @@ def reorder_rankings():
                 g_user_id, "ranking_reorder",
                 league_id=getattr(g_league, "league_id", None),
                 source="api", props={"moves_count": len(ordered_ids)},
+                # #152 — ranking_reorder is a rank-class streak event now,
+                # so tz rides along for local-day streak math (same as
+                # trio_swipe / tier_save).
+                tz=getattr(g, "user_tz", None),
                 **(getattr(g, "device_info", {}) or {}),
             )
         except Exception as ev_err:
@@ -8564,7 +8572,14 @@ def session_init():
                         "user_id":      user_id,
                         "username":     display_name or username or user_id,
                         "display_name": display_name,
-                        "player_ids":   new_user_roster,
+                        # #151 — store the RAW client-sent ids, matching the
+                        # opponent rows below. `new_user_roster` is filtered
+                        # to the default-format pool, which made the caller's
+                        # own off-pool players (e.g. SF-only QBs) invisible
+                        # to the free-agent exclusion set. Consumers that
+                        # need pool membership already filter on read
+                        # (session init's DB-member merge, compute_free_agents).
+                        "player_ids":   user_player_ids,
                     }
                 ] + [
                     {
@@ -12547,7 +12562,22 @@ def league_free_agents_route():
                               if r.get("user_id") != g_user_id]
             user_roster    = next((r.get("player_ids") or [] for r in rows
                                    if r.get("user_id") == g_user_id), [])
-        rostered = {pid for roster in member_rosters for pid in roster}
+        rostered = {str(pid) for roster in member_rosters for pid in roster}
+        # #151 — the in-session rosters were filtered against the DEFAULT
+        # (1qb_ppr) pool at session init (`if str(x) in players_dict`), so a
+        # player who exists only in the ACTIVE format's pool (e.g. low-end
+        # QBs with an SF value but a zero 1QB value) was dropped from the
+        # exclusion set and surfaced as a "free agent" while rostered. The
+        # league_members snapshot stores the RAW ids the client sent — union
+        # it in so every rostered player is excluded regardless of format.
+        # Best-effort: a missing/failed snapshot leaves the session-derived
+        # set (the pre-#151 behavior), never errors the route.
+        if g_league and league_id == g_league.league_id:
+            try:
+                for r in load_league_members(league_id):
+                    rostered.update(str(pid) for pid in (r.get("player_ids") or []))
+            except Exception:
+                pass
 
         free_agents = compute_free_agents(
             pool_players = pool_players,

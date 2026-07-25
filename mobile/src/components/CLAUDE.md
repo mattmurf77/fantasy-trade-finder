@@ -76,7 +76,7 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 - FeedbackSheet: `feedback.severity.<bug|polish|idea>` · `feedback.note-input` · `feedback.save-btn`
 
 **Free-agent finder tranche (2026-07-17, #143):**
-- FreeAgentsScreen: `free-agents.pos-tab.<all|qb|rb|wr|te>` (filter pills) · `free-agents.list` (FlatList) · `free-agents.row.<player_id>` (dense PlayerCard) · `free-agents.empty-text` (no-league AND empty-list states)
+- FreeAgentsScreen: `free-agents.pos-tab.<all|qb|rb|wr|te>` (filter pills) · `free-agents.list` (FlatList) · `free-agents.row.<player_id>` (dense PlayerCard) · `free-agents.empty-text` (no-league AND empty-list states) · `free-agents.back-btn` (#151 explicit header back — native back dead on iOS 26, RNS#3294)
 
 **Quick-walk format + search tranche (2026-07-17, #137/#138):**
 - QuickSetTiersScreen: `quick-set.format-toggle` (View hosting the SF/1QB FormatToggle — the segments themselves carry accessibilityLabel "<1QB PPR|SF TEP> scoring format", which is what Maestro text-matches) · `quick-set.search` (per-step name filter TextInput)

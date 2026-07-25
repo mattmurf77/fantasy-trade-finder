@@ -2007,10 +2007,18 @@ _EVENT_TO_USER_COL: dict[str, str] = {
 #
 # tier_save joined at the P0 cutover: the tiers-save route now records it
 # via record_event(), so tier saves advance the streak like trio swipes.
+#
+# anchor_answered + ranking_reorder joined for #152: the Pick Anchor wizard
+# and the manual board (which Quick Rank also posts through) are first-class
+# ranking surfaces, but they never advanced the streak — a user who ranked
+# daily via anchors or reorders was stuck at whatever streak an earlier
+# trio/tier day had left behind ("my streak always stays at 1").
 _RANK_STREAK_EVENTS: frozenset[str] = frozenset({
     "trio_swipe",
     "tier_save",
     "ranking_complete_first_time",
+    "anchor_answered",
+    "ranking_reorder",
 })
 
 
