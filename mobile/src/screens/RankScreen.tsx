@@ -358,7 +358,9 @@ export default function RankScreen() {
                 // hosted by the Tab navigator — getParent() returns the
                 // tab nav directly. Cast because @react-navigation's
                 // generic `navigate` doesn't know our route names here.
-                (navigation.getParent() as any)?.navigate('League');
+                // #181: the League tab now lands on the rankings stack root;
+                // the leaderboards live on the classic page (LeagueHome).
+                (navigation.getParent() as any)?.navigate('League', { screen: 'LeagueHome' });
               }}
               style={({ pressed }) => [
                 styles.streakChip,
