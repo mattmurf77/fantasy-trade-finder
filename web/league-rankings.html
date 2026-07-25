@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>League Rankings — Fantasy Trade Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      /* Chalkline tokens (docs/design/design-system.md) */
+      --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25; --ink-3: #232833;
+      --line: #262C35; --line-strong: #59647A;
+      --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
+      --ice: #56D9EC; --ice-press: #3FC2D6; --on-ice: #071013;
+      --flare: #F0508C;
+      --pos: #22C55E; --neg: #EF4444; --warn: #F59E0B;
+      /* Position hexes — data encodings, docs/cross-client-invariants.md */
+      --qb: #F97316; --rb: #22C55E; --wr: #3B82F6; --te: #A855F7;
+      /* Picks segment — neutral ink-family tone (line-strong), NOT a new hue */
+      --picks: #59647A;
+      --r-xs: 2px; --r-sm: 4px; --r-md: 8px; --r-pill: 999px;
+      --shadow-sheet: 0 12px 32px rgba(0,0,0,0.55);
+      --font-ui: 'Archivo', sans-serif;
+      --font-display: 'Barlow Condensed', sans-serif;
+      --font-data: 'IBM Plex Mono', monospace;
+      /* Legacy aliases shared with positional-tiers.html rules */
+      --bg: var(--ink-0); --surface: var(--ink-1); --border: var(--line);
+      --text: var(--chalk); --muted: var(--chalk-dim);
+      --accent: var(--ice);
+    }
+
+    :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    .icon {
+      width: 20px; height: 20px;
+      stroke: currentColor; stroke-width: 1.75; fill: none;
+      stroke-linecap: square; flex-shrink: 0; vertical-align: -4px;
+    }
+    .icon-sm { width: 16px; height: 16px; vertical-align: -3px; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── App header — mirrors positional-tiers.html ── */
+    .app-header {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 14px 16px 8px;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .app-header-logo { font-size: 1.05rem; font-weight: 800; letter-spacing: -0.3px; }
+    .app-header-logo a { color: var(--text); text-decoration: none; }
+    .app-header-logo span { color: var(--accent); }
+    .app-header-right { display: flex; align-items: center; gap: 8px; }
+    .app-header-league-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 12px;
+      text-decoration: none;
+      transition: border-color 0.12s;
+    }
+    .app-header-league-btn:hover { border-color: var(--accent); }
+    .app-header-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 8px;
+      border-radius: var(--r-pill);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .app-header-chip-avatar {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: var(--ice);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 11px; color: var(--on-ice); font-weight: 700;
+    }
+
+    /* ── Tier-1 + Tier-2 nav — mirrors positional-tiers.html ── */
+    .nav-tabs.nav-tier-1 {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      padding: 0 12px;
+    }
+    .nav-tier-1 .nav-tab {
+      flex: 1;
+      background: transparent;
+      border: none;
+      padding: 12px 16px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      text-align: center;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.12s, border-color 0.12s;
+    }
+    .nav-tier-1 .nav-tab:hover { color: var(--text); }
+    .nav-tier-1 .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .nav-subtabs {
+      display: flex;
+      gap: 4px;
+      padding: 6px 12px 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .nav-subtab {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--r-pill);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 14px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: color 0.12s, border-color 0.12s, background 0.12s;
+    }
+    .nav-subtab:hover { color: var(--text); border-color: var(--line-strong); }
+    .nav-subtab.active {
+      color: var(--on-ice);
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    /* ── Page header ── */
+    .pr-header {
+      padding: 20px 24px 0;
+      max-width: 980px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .pr-header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color 0.15s;
+      cursor: pointer;
+    }
+    .back-link:hover { color: var(--accent); }
+    .page-logo { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+    .page-logo span { color: var(--accent); }
+
+    .pr-title-row {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .pr-title-group { display: flex; flex-direction: column; gap: 4px; }
+    .pr-page-title { font-size: 20px; font-weight: 700; }
+    .pr-page-subtitle { font-size: 13px; color: var(--muted); line-height: 1.5; max-width: 560px; }
+
+    /* ── Controls row: league select · basis toggle · updated/refresh ── */
+    .pr-controls {
+      max-width: 980px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 12px 24px 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .league-select {
+      background: var(--ink-2);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--r-sm);
+      color: var(--chalk);
+      font-family: var(--font-ui);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 10px;
+      max-width: 260px;
+    }
+    .league-select:focus { border-color: var(--ice); outline: none; }
+
+    .basis-toggle { display: flex; gap: 4px; align-items: center; }
+    .basis-pill {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--r-pill);
+      color: var(--muted);
+      font-family: var(--font-ui);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 7px 14px;
+      cursor: pointer;
+      transition: color 0.12s, border-color 0.12s, background 0.12s;
+    }
+    .basis-pill:hover:not(:disabled) { color: var(--text); border-color: var(--line-strong); }
+    .basis-pill.active {
+      color: var(--on-ice);
+      background: var(--ice);
+      border-color: var(--ice);
+    }
+    .basis-pill:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .pr-meta {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .pr-updated { font-size: 12px; color: var(--chalk-dim); white-space: nowrap; }
+    .refresh-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: transparent;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--r-sm);
+      color: var(--chalk);
+      font-family: var(--font-ui);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 7px 12px;
+      cursor: pointer;
+      transition: border-color 0.12s, color 0.12s;
+    }
+    .refresh-btn:hover { border-color: var(--ice); }
+    .refresh-btn:disabled { opacity: 0.45; cursor: wait; }
+
+    /* ── Chart ── */
+    .pr-body {
+      max-width: 980px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 16px 24px 40px;
+      flex: 1;
+    }
+    .pr-chart { display: flex; flex-direction: column; }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 6px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--line);
+      transition: background 0.12s;
+    }
+    .bar-row:hover { background: var(--ink-1); }
+    .bar-row:focus-visible { outline: 2px solid var(--ice); outline-offset: -2px; }
+    .bar-rank {
+      font-family: var(--font-data);
+      font-weight: 600;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      color: var(--chalk-dim);
+      text-align: center;
+    }
+    .bar-row.you .bar-rank { color: var(--ice); }
+    .bar-mid { min-width: 0; }
+    .bar-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+    .bar-name {
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .you-badge {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--on-ice);
+      background: var(--ice);
+      border-radius: var(--r-xs);
+      padding: 1px 5px;
+      flex-shrink: 0;
+    }
+    .bar-track {
+      height: 16px;
+      background: var(--ink-2);
+      border-radius: 3px;
+      overflow: hidden;
+      display: flex;
+    }
+    .bar-seg { height: 100%; position: relative; }
+    .bar-seg.qb { background: var(--qb); }
+    .bar-seg.rb { background: var(--rb); }
+    .bar-seg.wr { background: var(--wr); }
+    .bar-seg.te { background: var(--te); }
+    .bar-seg.picks { background: var(--picks); }
+    .bar-seg-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-ui);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      color: var(--chalk);
+      pointer-events: none;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .bar-value {
+      font-family: var(--font-data);
+      font-weight: 600;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      color: var(--chalk);
+      text-align: right;
+      white-space: nowrap;
+    }
+    .bar-value .chev { color: var(--chalk-faint); margin-left: 4px; transition: transform 0.15s; display: inline-block; }
+    .bar-row[aria-expanded="true"] .bar-value .chev { transform: rotate(90deg); }
+
+    /* ── Legend ── */
+    .pr-legend { display: flex; gap: 14px; margin-top: 14px; flex-wrap: wrap; }
+    .pr-legend span {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 500; color: var(--chalk-dim);
+      letter-spacing: 0.04em;
+    }
+    .pr-legend i { width: 10px; height: 10px; border-radius: var(--r-xs); }
+    .pr-legend .qb { background: var(--qb); }
+    .pr-legend .rb { background: var(--rb); }
+    .pr-legend .wr { background: var(--wr); }
+    .pr-legend .te { background: var(--te); }
+    .pr-legend .picks { background: var(--picks); }
+
+    /* ── Drill-down panel (inline accordion under a bar row) ── */
+    .drill-panel {
+      border-bottom: 1px solid var(--line);
+      background: var(--ink-1);
+      border-left: 2px solid var(--line-strong);
+      padding: 4px 16px 16px;
+    }
+    .drill-group { margin-top: 12px; }
+    .drill-group-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 0 5px;
+      border-bottom: 1px solid var(--line);
+    }
+    .drill-group-name {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .drill-group-name.qb { color: var(--qb); }
+    .drill-group-name.rb { color: var(--rb); }
+    .drill-group-name.wr { color: var(--wr); }
+    .drill-group-name.te { color: var(--te); }
+    .drill-group-name.other { color: var(--chalk-dim); }
+    .drill-group-name.picks { color: var(--chalk-dim); }
+    .drill-group-meta {
+      font-family: var(--font-data);
+      font-weight: 500;
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      color: var(--chalk-dim);
+    }
+    .drill-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .drill-row:last-child { border-bottom: none; }
+    .drill-rail { width: 4px; height: 24px; border-radius: var(--r-xs); flex: none; background: var(--line-strong); }
+    .drill-rail.qb { background: var(--qb); }
+    .drill-rail.rb { background: var(--rb); }
+    .drill-rail.wr { background: var(--wr); }
+    .drill-rail.te { background: var(--te); }
+    .drill-player { flex: 1; min-width: 0; }
+    .drill-player-name {
+      font-size: 13px;
+      font-weight: 600;
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .drill-player-meta {
+      font-family: var(--font-data);
+      font-weight: 500;
+      font-size: 11px;
+      color: var(--chalk-dim);
+    }
+    .drill-value {
+      font-family: var(--font-data);
+      font-weight: 600;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      color: var(--chalk);
+      text-align: right;
+      flex: none;
+    }
+    .drill-empty { font-size: 12px; color: var(--chalk-faint); padding: 8px 0; }
+
+    /* ── States (loading / error / notice) ── */
+    .pr-state {
+      max-width: 560px;
+      margin: 32px auto;
+      background: var(--ink-1);
+      border: 1px solid var(--line);
+      border-radius: var(--r-md);
+      padding: 24px;
+      text-align: center;
+    }
+    .pr-state-title {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 22px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .pr-state-body { font-size: 13px; color: var(--chalk-dim); line-height: 1.55; margin-bottom: 14px; }
+    .pr-state .primary-btn {
+      background: var(--ice);
+      border: none;
+      border-radius: var(--r-sm);
+      color: var(--on-ice);
+      font-family: var(--font-ui);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 16px;
+      cursor: pointer;
+    }
+    .pr-state .primary-btn:hover { background: var(--ice-press); }
+    .pr-state a { color: var(--ice); }
+
+    .spinner {
+      width: 20px; height: 20px;
+      border: 2px solid var(--line);
+      border-top-color: var(--ice);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .hidden { display: none !important; }
+
+    /* ── Responsive collapse ── */
+    @media (max-width: 640px) {
+      .pr-header, .pr-controls, .pr-body { padding-left: 14px; padding-right: 14px; }
+      .pr-meta { margin-left: 0; width: 100%; justify-content: space-between; }
+      .bar-row { grid-template-columns: 24px 1fr auto; gap: 8px; }
+      .league-select { max-width: 100%; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── App header — logo + League button + account chip ── -->
+  <header class="app-header">
+    <div class="app-header-logo">
+      <a href="/">Dynasty <span>Trade Finder</span></a>
+    </div>
+    <div class="app-header-right">
+      <a class="app-header-league-btn" href="/?view=league"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg> League</a>
+      <div class="app-header-chip" id="app-header-chip" style="display:none">
+        <span class="app-header-chip-avatar" id="app-header-chip-avatar">?</span>
+        <span id="app-header-chip-name">—</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Tier-1 + Tier-2 nav — mirrors index.html so users can cross over ── -->
+  <div class="nav-tabs nav-tier-1" style="max-width:980px;width:100%;margin:0 auto;">
+    <a class="nav-tab" href="/?view=rank">Rank Players</a>
+    <a class="nav-tab" href="/?view=trades">Find Trades</a>
+  </div>
+  <div class="nav-subtabs" style="max-width:980px;width:100%;margin:0 auto;">
+    <a class="nav-subtab"        href="/?view=league">League Summary</a>
+    <a class="nav-subtab active" href="/league-rankings.html">League Rankings</a>
+  </div>
+
+  <!-- ── Page header ── -->
+  <div class="pr-header">
+    <div class="pr-header-top">
+      <a class="back-link" href="/?view=league">&#8249; Back</a>
+      <div class="page-logo">Dynasty <span>Trade Finder</span></div>
+    </div>
+    <div class="pr-title-row">
+      <div class="pr-title-group">
+        <div class="pr-page-title">League Rankings</div>
+        <div class="pr-page-subtitle">Every team's roster value stacked by position — priced by market consensus, or by your own board.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Controls: league picker · basis toggle · updated + refresh ── -->
+  <div class="pr-controls">
+    <select class="league-select hidden" id="league-select" aria-label="Choose league"></select>
+    <div class="basis-toggle" role="tablist" aria-label="Value basis">
+      <button class="basis-pill active" id="basis-consensus" role="tab" aria-selected="true"
+              onclick="setBasis('consensus')">Consensus</button>
+      <button class="basis-pill" id="basis-personal" role="tab" aria-selected="false"
+              onclick="setBasis('personal')">My board</button>
+      <button class="basis-pill" disabled
+              title="Redraft values are coming soon — dynasty values only for now.">Redraft (soon)</button>
+    </div>
+    <div class="pr-meta">
+      <span class="pr-updated" id="pr-updated"></span>
+      <button class="refresh-btn" id="refresh-btn" onclick="refreshRankings()">
+        <svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M16 10a6 6 0 11-2-4.5M14 3v3h3"/></svg>
+        Refresh
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Chart / states ── -->
+  <div class="pr-body">
+    <div id="pr-state-slot"></div>
+    <div class="pr-chart" id="pr-chart"></div>
+    <div class="pr-legend hidden" id="pr-legend">
+      <span><i class="qb"></i>QB</span>
+      <span><i class="rb"></i>RB</span>
+      <span><i class="wr"></i>WR</span>
+      <span><i class="te"></i>TE</span>
+      <span><i class="picks"></i>PICKS</span>
+    </div>
+  </div>
+
+  <script>
+    'use strict';
+
+    // ── Session context — shared localStorage keys with web/js/app.js ──
+    const LS_USER   = 'sleeper_user';
+    const LS_LEAGUE = 'sleeper_league';
+    const LS_TOKEN  = 'fumble_session_token';
+
+    function sessionToken() {
+      try { return localStorage.getItem(LS_TOKEN) || ''; } catch (_) { return ''; }
+    }
+    function savedUser() {
+      try { return JSON.parse(localStorage.getItem(LS_USER) || 'null'); } catch (_) { return null; }
+    }
+    function savedLeague() {
+      try { return JSON.parse(localStorage.getItem(LS_LEAGUE) || 'null'); } catch (_) { return null; }
+    }
+
+    // Populate the account chip from localStorage without needing app.js.
+    (function () {
+      const u = savedUser();
+      if (!u) return;
+      const name = u.display_name || u.username || 'User';
+      const chip = document.getElementById('app-header-chip');
+      const avatar = document.getElementById('app-header-chip-avatar');
+      const nameEl = document.getElementById('app-header-chip-name');
+      if (chip) chip.style.display = '';
+      if (nameEl) nameEl.textContent = name;
+      if (avatar) avatar.textContent = (name[0] || '?').toUpperCase();
+    })();
+
+    function escapeHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function fmt(n) {
+      return (typeof n === 'number' && isFinite(n)) ? Math.round(n).toLocaleString('en-US') : '—';
+    }
+    function relTime(iso) {
+      if (!iso) return '';
+      const t = Date.parse(iso);
+      if (isNaN(t)) return '';
+      const s = Math.max(0, (Date.now() - t) / 1000);
+      if (s < 60) return 'just now';
+      if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+      if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+      return `${Math.floor(s / 86400)}d ago`;
+    }
+
+    // ── State ──────────────────────────────────────────────────────
+    const qs = new URLSearchParams(window.location.search);
+    // MOCK MODE (?mock=1) — dev/QA only: renders a fixture payload instead
+    // of calling the API. Harmless in prod: it only activates via the
+    // explicit query param and touches no network or storage.
+    const MOCK = qs.get('mock') === '1';
+
+    let leagueId  = qs.get('league_id') || (savedLeague() && savedLeague().league_id) || null;
+    let basis     = 'consensus';
+    let lastData  = null;
+    let expandedUserId = null;
+
+    const POSITIONS = ['QB', 'RB', 'WR', 'TE'];  // canonical order (invariants)
+    const POS_LABEL = { QB: 'Quarterbacks', RB: 'Running backs', WR: 'Wide receivers', TE: 'Tight ends' };
+
+    // ── League picker ──────────────────────────────────────────────
+    async function initLeaguePicker() {
+      const sel = document.getElementById('league-select');
+      if (MOCK) {
+        sel.innerHTML = '<option value="mock-league">Mock Dynasty League</option>';
+        sel.classList.remove('hidden');
+        return;
+      }
+      const u = savedUser();
+      if (!u || !u.user_id) return;  // no picker — rely on ?league_id / saved league
+      try {
+        const res = await fetch(`/api/sleeper/leagues/${encodeURIComponent(u.user_id)}`, {
+          headers: sessionToken() ? { 'X-Session-Token': sessionToken() } : {},
+        });
+        if (!res.ok) return;
+        const leagues = await res.json();
+        if (!Array.isArray(leagues) || !leagues.length) return;
+        if (!leagueId) leagueId = leagues[0].league_id;
+        sel.innerHTML = leagues.map(lg =>
+          `<option value="${escapeHtml(lg.league_id)}"${lg.league_id === leagueId ? ' selected' : ''}>${escapeHtml(lg.name || 'Unnamed League')}</option>`
+        ).join('');
+        sel.classList.remove('hidden');
+        sel.onchange = () => {
+          leagueId = sel.value;
+          expandedUserId = null;
+          const url = new URL(window.location.href);
+          url.searchParams.set('league_id', leagueId);
+          window.history.replaceState({}, document.title, url.toString());
+          loadRankings();
+        };
+      } catch (_) { /* silent — picker is a convenience */ }
+    }
+
+    // ── Basis toggle ───────────────────────────────────────────────
+    function setBasis(next) {
+      if (next === basis) return;
+      basis = next;
+      expandedUserId = null;
+      for (const [id, b] of [['basis-consensus', 'consensus'], ['basis-personal', 'personal']]) {
+        const el = document.getElementById(id);
+        el.classList.toggle('active', b === basis);
+        el.setAttribute('aria-selected', b === basis ? 'true' : 'false');
+      }
+      loadRankings();
+    }
+    window.setBasis = setBasis;
+
+    function refreshRankings() { loadRankings(); }
+    window.refreshRankings = refreshRankings;
+
+    // ── States ─────────────────────────────────────────────────────
+    function showState(html) {
+      document.getElementById('pr-state-slot').innerHTML = html;
+      document.getElementById('pr-chart').innerHTML = '';
+      document.getElementById('pr-legend').classList.add('hidden');
+      document.getElementById('pr-updated').textContent = '';
+    }
+    function clearState() {
+      document.getElementById('pr-state-slot').innerHTML = '';
+    }
+    function stateCard(title, body, extra) {
+      return `<div class="pr-state">
+        <div class="pr-state-title">${escapeHtml(title)}</div>
+        <div class="pr-state-body">${body}</div>
+        ${extra || ''}
+      </div>`;
+    }
+
+    // ── Fetch + render ─────────────────────────────────────────────
+    async function loadRankings() {
+      const btn = document.getElementById('refresh-btn');
+      btn.disabled = true;
+      showState('<div class="pr-state"><div class="spinner"></div><div class="pr-state-body">Loading league rankings…</div></div>');
+      try {
+        if (MOCK) {
+          lastData = mockPayload();
+          clearState();
+          renderChart(lastData);
+          return;
+        }
+        if (!leagueId) {
+          showState(stateCard('No league selected',
+            'Open the app and pick a league first, or pass <span style="font-family:var(--font-data)">?league_id=…</span> in the URL.',
+            '<a href="/">Back to the app</a>'));
+          return;
+        }
+        const res = await fetch(
+          `/api/league/power-rankings?league_id=${encodeURIComponent(leagueId)}&basis=${encodeURIComponent(basis)}`,
+          { headers: sessionToken() ? { 'X-Session-Token': sessionToken() } : {} }
+        );
+        let body = null;
+        try { body = await res.json(); } catch (_) { /* non-JSON */ }
+
+        if (res.status === 403 && body && body.error === 'verification_required') {
+          // Personal basis needs a verified account — no web verify flow
+          // exists yet, so route the user to the app's account settings.
+          showState(stateCard('Verification required',
+            'Pricing the league by your own board needs a verified account. Verify in the mobile app (Settings &rarr; Account), then come back.',
+            '<button class="primary-btn" onclick="setBasis(\'consensus\')">View by consensus instead</button>'));
+          return;
+        }
+        if (!res.ok) {
+          const msg = (body && (body.message || body.error)) || `HTTP ${res.status}`;
+          showState(stateCard('Rankings unavailable',
+            `Couldn't load power rankings for this league (${escapeHtml(String(msg))}). It may not be enabled yet — try again shortly.`));
+          return;
+        }
+        if (!body || !Array.isArray(body.teams) || !body.teams.length) {
+          showState(stateCard('Nothing to rank yet',
+            'No teams came back for this league. Re-sync the league from the app and try again.'));
+          return;
+        }
+        lastData = body;
+        clearState();
+        renderChart(body);
+      } catch (e) {
+        showState(stateCard('Connection problem',
+          'Couldn’t reach the server. Check your connection and try Refresh.'));
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function teamSegments(team) {
+      // Position segments in canonical order + a PICKS segment. Sizes are
+      // shares of the segment sum so segments fill the track exactly.
+      const segs = [];
+      const positions = team.positions || {};
+      for (const pos of POSITIONS) {
+        const v = positions[pos] && positions[pos].value;
+        if (typeof v === 'number' && v > 0) segs.push({ key: pos.toLowerCase(), value: v, label: null });
+      }
+      const pickVal = team.picks && typeof team.picks.value === 'number' ? team.picks.value : 0;
+      if (pickVal > 0) segs.push({ key: 'picks', value: pickVal, label: 'PICKS' });
+      return segs;
+    }
+
+    function renderChart(data) {
+      const chart = document.getElementById('pr-chart');
+      const teams = (data.teams || []).slice().sort((a, b) => (a.rank || 0) - (b.rank || 0));
+      const me = savedUser();
+      const myId = me && me.user_id != null ? String(me.user_id) : null;
+      const maxTotal = Math.max(1, ...teams.map(t => t.total_value || 0));
+
+      chart.innerHTML = teams.map(team => {
+        const isYou = myId !== null && String(team.user_id) === myId;
+        const name  = team.display_name || team.username || 'Unknown team';
+        const segs  = teamSegments(team);
+        const segSum = segs.reduce((s, x) => s + x.value, 0);
+        // Fill width = team total ÷ league max, floor 4% so a bar always shows.
+        const fillPct = Math.max(4, ((team.total_value || 0) / maxTotal) * 100);
+        const segHtml = segSum > 0 ? segs.map(s => {
+          const w = (s.value / segSum) * 100;
+          const label = s.label ? `<span class="bar-seg-label" data-seg-label>${s.label}</span>` : '';
+          return `<div class="bar-seg ${s.key}" style="width:${w.toFixed(2)}%" title="${s.key === 'picks' ? 'Draft picks' : s.key.toUpperCase()}: ${fmt(s.value)}">${label}</div>`;
+        }).join('') : '';
+        const expanded = expandedUserId === String(team.user_id);
+        return `
+          <div class="bar-row${isYou ? ' you' : ''}" role="button" tabindex="0"
+               aria-expanded="${expanded}"
+               data-user-id="${escapeHtml(String(team.user_id))}"
+               onclick="toggleDrill('${escapeHtml(String(team.user_id))}')"
+               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleDrill('${escapeHtml(String(team.user_id))}')}">
+            <div class="bar-rank">${team.rank != null ? team.rank : '—'}</div>
+            <div class="bar-mid">
+              <div class="bar-name-row">
+                <span class="bar-name">${escapeHtml(name)}</span>
+                ${isYou ? '<span class="you-badge">You</span>' : ''}
+              </div>
+              <div class="bar-track" style="width:${fillPct.toFixed(2)}%">${segHtml}</div>
+            </div>
+            <div class="bar-value">${fmt(team.total_value)}<span class="chev">&#8250;</span></div>
+          </div>
+          ${expanded ? renderDrill(team) : ''}`;
+      }).join('');
+
+      // Hide the in-segment PICKS label when the segment is too narrow.
+      requestAnimationFrame(() => {
+        chart.querySelectorAll('[data-seg-label]').forEach(el => {
+          if (el.parentElement && el.parentElement.offsetWidth < 46) el.style.display = 'none';
+        });
+      });
+
+      document.getElementById('pr-legend').classList.remove('hidden');
+      const upd = document.getElementById('pr-updated');
+      upd.textContent = data.updated_at ? `Updated ${relTime(data.updated_at)}` : '';
+    }
+
+    function toggleDrill(userId) {
+      expandedUserId = expandedUserId === userId ? null : userId;
+      if (lastData) renderChart(lastData);
+    }
+    window.toggleDrill = toggleDrill;
+
+    function renderDrill(team) {
+      const roster = Array.isArray(team.roster) ? team.roster : [];
+      const positions = team.positions || {};
+      const groups = [];
+
+      for (const pos of POSITIONS) {
+        const players = roster.filter(p => (p.position || '').toUpperCase() === pos)
+                              .sort((a, b) => (b.value || 0) - (a.value || 0));
+        const meta = positions[pos] || {};
+        groups.push({ key: pos.toLowerCase(), label: POS_LABEL[pos], count: meta.count != null ? meta.count : players.length,
+                      value: meta.value, players });
+      }
+      const other = roster.filter(p => !POSITIONS.includes((p.position || '').toUpperCase()))
+                          .sort((a, b) => (b.value || 0) - (a.value || 0));
+      if (other.length) {
+        groups.push({ key: 'other', label: 'Other', count: other.length,
+                      value: other.reduce((s, p) => s + (p.value || 0), 0), players: other });
+      }
+
+      const groupHtml = groups.map(g => {
+        const rows = g.players.length ? g.players.map(p => `
+          <div class="drill-row">
+            <div class="drill-rail ${g.key === 'other' ? '' : g.key}"></div>
+            <div class="drill-player">
+              <span class="drill-player-name">${escapeHtml(p.name || 'Unknown')}</span>
+              <span class="drill-player-meta">${escapeHtml([(p.position || '').toUpperCase(), p.team, p.age != null ? `${p.age}y` : null].filter(Boolean).join(' · '))}</span>
+            </div>
+            <div class="drill-value">${fmt(p.value)}</div>
+          </div>`).join('')
+          : '<div class="drill-empty">No players in this group.</div>';
+        return `
+          <div class="drill-group">
+            <div class="drill-group-header">
+              <span class="drill-group-name ${g.key}">${escapeHtml(g.label)} (${g.count != null ? g.count : g.players.length})</span>
+              <span class="drill-group-meta">${fmt(g.value)}</span>
+            </div>
+            ${rows}
+          </div>`;
+      }).join('');
+
+      // Draft capital group — picks.items from the payload.
+      const picks = team.picks || {};
+      const pickItems = Array.isArray(picks.items) ? picks.items : [];
+      const pickRows = pickItems.length ? pickItems.map(it => `
+        <div class="drill-row">
+          <div class="drill-rail"></div>
+          <div class="drill-player">
+            <span class="drill-player-name">${escapeHtml(it.label || 'Pick')}</span>
+          </div>
+          <div class="drill-value">${fmt(it.value)}</div>
+        </div>`).join('')
+        : '<div class="drill-empty">No draft picks recorded.</div>';
+      const picksHtml = `
+        <div class="drill-group">
+          <div class="drill-group-header">
+            <span class="drill-group-name picks">Draft capital (${picks.count != null ? picks.count : pickItems.length})</span>
+            <span class="drill-group-meta">${fmt(picks.value)}</span>
+          </div>
+          ${pickRows}
+        </div>`;
+
+      return `<div class="drill-panel">${groupHtml}${picksHtml}</div>`;
+    }
+
+    // ── MOCK fixture (?mock=1 only — see MOCK flag above) ──────────
+    function mockPayload() {
+      const mk = (rank, user, name, qb, rb, wr, te, picks) => {
+        const positions = {
+          QB: { count: 3 + (rank % 2), value: qb },
+          RB: { count: 6, value: rb },
+          WR: { count: 8, value: wr },
+          TE: { count: 3, value: te },
+        };
+        const roster = [];
+        for (const pos of POSITIONS) {
+          for (let i = 1; i <= positions[pos].count; i++) {
+            roster.push({
+              player_id: `${user}-${pos}${i}`,
+              name: `${name.split(' ')[0]} ${pos}${i}`,
+              position: pos,
+              team: ['KC', 'BUF', 'DET', 'PHI', 'CIN'][i % 5],
+              age: 22 + ((rank + i) % 8),
+              value: Math.round(positions[pos].value * (0.42 - i * 0.05 > 0.04 ? 0.42 - i * 0.05 : 0.04)),
+            });
+          }
+        }
+        roster.push({ player_id: `${user}-K1`, name: `${name.split(' ')[0]} K1`, position: 'K', team: 'BAL', age: 27, value: 120 });
+        return {
+          rank, user_id: user, username: user, display_name: name,
+          total_value: qb + rb + wr + te + picks,
+          positions_value: qb + rb + wr + te,
+          positions,
+          picks: {
+            count: 4, value: picks,
+            items: [
+              { label: '2027 1st (Mid)', value: Math.round(picks * 0.45) },
+              { label: '2027 2nd (Late)', value: Math.round(picks * 0.25) },
+              { label: '2028 1st (Mid)', value: Math.round(picks * 0.2) },
+              { label: '2028 3rd (Early)', value: Math.round(picks * 0.1) },
+            ],
+          },
+          roster,
+        };
+      };
+      const me = savedUser();
+      const myId = me && me.user_id ? String(me.user_id) : 'u3';
+      return {
+        basis,
+        updated_at: new Date(Date.now() - 7 * 60 * 1000).toISOString(),
+        teams: [
+          mk(1, 'u1', 'Gridiron Goblins', 9200, 14100, 19800, 3400, 9100),
+          mk(2, 'u2', 'Waiver Wire Wizards', 11400, 9800, 17200, 5100, 7400),
+          mk(3, myId, 'My Squad', 7600, 12800, 15900, 4200, 8200),
+          mk(4, 'u4', 'Route Runners', 8800, 10400, 14100, 2900, 6100),
+          mk(5, 'u5', 'End Zone Elite', 6200, 11900, 12800, 3800, 5400),
+          mk(6, 'u6', 'The Rebuilders', 4100, 6200, 10900, 2400, 14800),
+          mk(7, 'u7', 'Chalk Talkers', 7100, 8300, 11200, 3100, 3900),
+          mk(8, 'u8', 'Fourth and Long', 5400, 7800, 9800, 2600, 4200),
+          mk(9, 'u9', 'Bench Warmers', 4800, 6900, 8400, 1900, 3100),
+          mk(10, 'u10', 'Taxi Squad', 3900, 5100, 7200, 1600, 2800),
+        ],
+      };
+    }
+
+    // ── Boot ───────────────────────────────────────────────────────
+    initLeaguePicker();
+    loadRankings();
+  </script>
+</body>
+</html>

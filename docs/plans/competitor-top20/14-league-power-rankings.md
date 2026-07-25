@@ -47,12 +47,15 @@ As a league member, I want to see where every team stands — overall and per po
 - Click-through from a team drill-down to trade generation (CTA "find trades with this team") ≥10% of drill-down views.
 
 ### Acceptance criteria
-- [ ] Totals on the page reconcile with the values the v2 engine uses for the same rosters (same `elo_to_value` space, same format handling).
-- [ ] Personal basis with zero user rankings ≈ consensus basis (shrinkage guarantees this) — verified by test.
-- [ ] Pick group totals match `/api/league/picks` data for the same league.
-- [ ] Superflex leagues rank QB groups using `sf_tep` seed (universal pool is per-format).
-- [ ] Rank chips render on web + mobile league cards and agree with the page.
-- [ ] `docs/api-reference.md`, `docs/cross-client-invariants.md` (chip colors, tier names), `docs/glossary.md` ("power rank", "basis") updated.
+- [x] Totals on the page reconcile with the values the v2 engine uses for the same rosters (same `elo_to_value` space, same format handling). *(test: `test_route_totals_reconcile_with_elo_to_value`)*
+- [x] Personal basis with zero user rankings ≈ consensus basis (shrinkage guarantees this) — verified by test. *(exact equality: `test_personal_basis_zero_board_equals_consensus_exactly` + route-level)*
+- [x] Pick group totals match `/api/league/picks` data for the same league. *(test: `test_route_picks_group_matches_pick_pool_value_and_picks_route`)*
+- [x] Superflex leagues rank QB groups using `sf_tep` seed (universal pool is per-format). *(test: `test_route_superflex_uses_sf_seed`)*
+- [ ] Rank chips render on web + mobile league cards and agree with the page. *(backend `GET /api/league/rank-chip` shipped + tested; web/mobile chip rendering lands in parallel client tasks)*
+- [ ] `docs/api-reference.md` ✅, `docs/glossary.md` ("power rank", "basis", "draft capital (picks group)") ✅; `docs/cross-client-invariants.md` (chip colors, tier names) pending the client chip work.
+
+### 2026-07-20 completion note (backend scope)
+Backend scope of #14 is done: picks/draft-capital group per team (FR1 — `picks:{count,value,items}`, `total_value = positions_value + picks.value`, priced via `pick_values.pick_pool_value`; ESPN/demo → empty group), top-level `updated_at` (FR6), and `GET /api/league/rank-chip` (consensus-only, ~60s per-league in-process cache, deliberately open read per `docs/api-reference.md`). Acceptance tests in `backend/tests/test_power_rankings.py`. Still open: web/mobile rank-chip rendering + chip color bands in `docs/cross-client-invariants.md` (parallel client tasks); per-group league ranks + tier-depth annotation from FR1; tier chips (FR4, waits on #1); `redraft` stays 501 — no redraft value source exists.
 
 ## HLD
 

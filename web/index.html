@@ -8,6 +8,32 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    /* League-card rank chip (#14/#21 — flag league.power_rankings).
+       Badge construction per docs/design/components.md: 1px border in
+       the encode color + label type (11px Archivo 600 caps), radius
+       --r-xs. Band colors: top third --pos, middle --warn, bottom --neg.
+       Populated lazily by _loadLeagueRankChips() in web/js/app.js. */
+    .league-rank-chip {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--r-xs);
+      font-family: 'Archivo', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-variant-numeric: tabular-nums;
+      vertical-align: 1px;
+      color: var(--chalk-dim);
+      white-space: nowrap;
+    }
+    .league-rank-chip.lrc-top    { border-color: var(--pos);  color: var(--pos); }
+    .league-rank-chip.lrc-mid    { border-color: var(--warn); color: var(--warn); }
+    .league-rank-chip.lrc-bottom { border-color: var(--neg);  color: var(--neg); }
+  </style>
 </head>
 <body>
 
@@ -717,7 +743,14 @@
     <div class="league-summary-wrap">
       <div class="league-summary-header">
         <div class="league-summary-title" id="league-summary-title">League</div>
-        <button class="invite-btn" id="invite-btn" onclick="openInviteModal()"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg> Invite</button>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <!-- #14 League power rankings — hidden unless flag
+               league.power_rankings is on (toggled by
+               _applyPowerRankingsFlag() in web/js/app.js). Mirrors the
+               positional-tiers tab-link pattern. -->
+          <a class="tab hidden" id="league-rankings-link" href="/league-rankings.html"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg> League rankings</a>
+          <button class="invite-btn" id="invite-btn" onclick="openInviteModal()"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg> Invite</button>
+        </div>
       </div>
 
       <!-- In-place league switcher — visible when the user has 2+ leagues.

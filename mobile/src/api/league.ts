@@ -514,6 +514,11 @@ export interface PowerRankedTeam {
   positions: Record<'QB' | 'RB' | 'WR' | 'TE', { count: number; value: number }>;
   /** Grouped QB→RB→WR→TE→other, value-desc within each group (#144). */
   roster: PowerRankedPlayer[];
+  /** #14 FR1 — draft-capital group, priced via the generic pick ladder
+   *  (pick_pool_value; year-discounted Mid tier). total_value INCLUDES this;
+   *  positions_value is the positions-only sum. Absent on old servers. */
+  picks?: { count: number; value: number; items: Array<{ label: string; value: number }> };
+  positions_value?: number;
 }
 
 export interface PowerRankingsResponse {
@@ -521,6 +526,23 @@ export interface PowerRankingsResponse {
   basis: PowerRankingsBasis;
   scoring_format: string;
   teams: PowerRankedTeam[];
+  /** #14 FR6 — server compute time (ISO). Absent on old servers. */
+  updated_at?: string;
+}
+
+/** #14 — rank chip for league cards. Consensus basis; deliberately open
+ *  read (league-shared aggregate, no personal data). */
+export interface RankChip {
+  rank: number;
+  team_count: number;
+  basis: 'consensus';
+  updated_at?: string;
+}
+
+export async function getRankChip(leagueId: string) {
+  return api.get<RankChip>(
+    `/api/league/rank-chip?league_id=${encodeURIComponent(leagueId)}`,
+  );
 }
 
 export async function getPowerRankings(

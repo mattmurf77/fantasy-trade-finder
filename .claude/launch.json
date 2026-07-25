@@ -24,7 +24,7 @@
     },
     {
       "name": "mockups-preview",
-      "runtimeExecutable": "python3",
+      "runtimeExecutable": "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3",
       "runtimeArgs": [
         "-m",
         "http.server",

@@ -37,6 +37,7 @@ import {
 } from '../api/league';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { relativeTime } from '../utils/relativeTime';
 
 // League rankings ("power rankings", #142/#144/#169) — every team in the league
 // as a stacked bar in a value-ranked chart, from GET /api/league/power-rankings.
@@ -72,8 +73,13 @@ import { useFlag } from '../state/useFeatureFlags';
 
 type UiBasis = 'consensus' | 'personal';
 type CorePos = 'QB' | 'RB' | 'WR' | 'TE';
+// #14 FR1 — the filterable chart keys: the four positions plus the
+// draft-capital group ("Picks"). Picks isn't a position, so it renders in a
+// neutral ink tone, never a position hex (cross-client-invariants).
+type FilterKey = CorePos | 'PICKS';
 
 const CORE_POSITIONS = ['QB', 'RB', 'WR', 'TE'] as const satisfies readonly CorePos[];
+const PICKS_COLOR = chalk.faint;
 
 // Compact 0–10k value for chart bar labels + the per-group mini-summary.
 function fmtK(v: number): string {
@@ -85,14 +91,16 @@ function posColor(pos: string): string {
   return positionColors[pos.toLowerCase() as keyof typeof positionColors] ?? chalk.dim;
 }
 
-// The value a team contributes under the active position filter. Empty filter
-// ("All") = the team's authoritative total roster value (matches the backend
-// rank). A non-empty filter = the summed value of just the selected positions.
-function filteredTotal(team: PowerRankedTeam, filter: Set<CorePos>): number {
+// The value a team contributes under the active filter. Empty filter ("All")
+// = the team's authoritative total (matches the backend rank; includes draft
+// capital once the server ships it). A non-empty filter = the summed value of
+// the selected position groups, plus the picks group when "Picks" is on.
+function filteredTotal(team: PowerRankedTeam, filter: Set<FilterKey>): number {
   if (filter.size === 0) return team.total_value;
   let sum = 0;
   filter.forEach((p) => {
-    sum += team.positions?.[p]?.value ?? 0;
+    if (p === 'PICKS') sum += team.picks?.value ?? 0;
+    else sum += team.positions?.[p]?.value ?? 0;
   });
   return sum;
 }
@@ -102,12 +110,12 @@ export default function LeagueSummaryScreen() {
   const leagueId = league?.league_id || null;
   const [basis, setBasis] = useState<UiBasis>('consensus');
   // Empty set = "All" (unfiltered). Non-empty = single/multi position select.
-  const [posFilter, setPosFilter] = useState<Set<CorePos>>(new Set());
+  const [posFilter, setPosFilter] = useState<Set<FilterKey>>(new Set());
   // Store the selected team's id (not the object) so a basis switch while
   // the roster overlay is open re-derives the team from fresh data.
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Drill-in overlay's own position filter (independent of the chart filter).
-  const [drillPos, setDrillPos] = useState<Set<CorePos>>(new Set());
+  const [drillPos, setDrillPos] = useState<Set<FilterKey>>(new Set());
 
   const query = useQuery({
     queryKey: ['league-power-rankings', leagueId, basis],
@@ -136,6 +144,9 @@ export default function LeagueSummaryScreen() {
   const selected = selectedId
     ? teams.find((t) => t.user_id === selectedId) ?? null
     : null;
+  // Picks pill/segments only when the league actually carries draft capital
+  // (ESPN + demo leagues report zero; old servers omit the field entirely).
+  const hasPicks = teams.some((t) => (t.picks?.value ?? 0) > 0);
 
   // Client-side re-value + re-sort for the active position filter. Teams tie
   // -break on user_id asc so the order is deterministic (mirrors the backend).
@@ -152,8 +163,8 @@ export default function LeagueSummaryScreen() {
     [ranked],
   );
 
-  const togglePos = (setter: React.Dispatch<React.SetStateAction<Set<CorePos>>>) =>
-    (pos: CorePos | 'ALL') => {
+  const togglePos = (setter: React.Dispatch<React.SetStateAction<Set<FilterKey>>>) =>
+    (pos: FilterKey | 'ALL') => {
       setter((prev) => {
         if (pos === 'ALL') return new Set();
         const next = new Set(prev);
@@ -221,10 +232,18 @@ export default function LeagueSummaryScreen() {
         {/* Position filter — single or multi select; "All" clears. Reorders +
             rescales the chart live over the already-returned per-position
             values (no refetch). */}
+        {/* #14 FR6 — compute freshness + the pull-to-refresh above. */}
+        {query.data?.updated_at ? (
+          <Text testID="league-summary.updated-at" style={[type.data, styles.updatedAt]}>
+            {`Updated ${relativeTime(query.data.updated_at)} · pull to refresh`}
+          </Text>
+        ) : null}
+
         <PosFilterPills
           idPrefix="league-summary.posfilter"
           filter={posFilter}
           onToggle={togglePos(setPosFilter)}
+          showPicks={hasPicks}
         />
         <Text style={[type.bodySm, styles.hint]}>
           {posFilter.size === 0
@@ -323,6 +342,7 @@ export default function LeagueSummaryScreen() {
               filter={drillPos}
               onToggle={togglePos(setDrillPos)}
               style={styles.drillFilter}
+              showPicks={(selected.picks?.items?.length ?? 0) > 0}
             />
             <ScrollView style={styles.overlayList} contentContainerStyle={{ gap: space.xs }}>
               {groupRoster(selected, drillPos).map((g) => (
@@ -352,6 +372,28 @@ export default function LeagueSummaryScreen() {
                   ))}
                 </View>
               ))}
+              {/* #14 FR1 — draft capital: the team's owned picks, priced on
+                  the generic ladder. Shown in the All view or when the Picks
+                  pill is selected; hidden for leagues without pick data. */}
+              {(drillPos.size === 0 || drillPos.has('PICKS')) &&
+              (selected.picks?.items?.length ?? 0) > 0 ? (
+                <View testID="league-summary.roster-picks">
+                  <View style={styles.groupHead}>
+                    <Text style={[styles.groupLabel, { color: PICKS_COLOR }]}>
+                      Draft capital
+                    </Text>
+                    <Text style={[type.data, styles.groupMeta]}>
+                      {`${selected.picks!.count} · ${fmtK(selected.picks!.value)}`}
+                    </Text>
+                  </View>
+                  {selected.picks!.items.map((p, i) => (
+                    <View key={`${p.label}-${i}`} style={styles.pickRow}>
+                      <Text style={type.title} numberOfLines={1}>{p.label}</Text>
+                      <Text style={type.data}>{Math.round(p.value).toLocaleString('en-US')}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
             </ScrollView>
           </View>
         ) : null}
@@ -363,10 +405,11 @@ export default function LeagueSummaryScreen() {
 // Bucket a team's (already server-ordered) roster into position sections for
 // the drill-in headers. Rows keep their value-desc order within each group.
 // A non-empty `filter` limits the sections to the selected core positions
-// (the "Other" bucket only ever appears in the unfiltered "All" view).
+// (the "Other" bucket only ever appears in the unfiltered "All" view; the
+// PICKS key is not a roster section — draft capital renders separately).
 function groupRoster(
   team: PowerRankedTeam,
-  filter: Set<CorePos>,
+  filter: Set<FilterKey>,
 ): Array<{ pos: string; rows: PowerRankedPlayer[]; value: number }> {
   const buckets = new Map<string, PowerRankedPlayer[]>();
   for (const r of team.roster) {
@@ -375,7 +418,9 @@ function groupRoster(
     if (arr) arr.push(r);
     else buckets.set(key, [r]);
   }
-  const order: string[] = filter.size > 0 ? [...filter] : [...CORE_POSITIONS, 'Other'];
+  const selected = [...filter].filter((k): k is CorePos => k !== 'PICKS');
+  const order: string[] =
+    filter.size > 0 ? selected : [...CORE_POSITIONS, 'Other'];
   return order
     .filter((k) => buckets.has(k))
     .map((k) => ({
@@ -411,13 +456,15 @@ function BasisChip({ label, active, onPress, disabled, testID }: {
   );
 }
 
-// Shared position-filter pill row (chart + drill-in). "All" pill clears the
-// set; each position pill is a color-dotted toggle. Multi-select.
-function PosFilterPills({ idPrefix, filter, onToggle, style }: {
+// Shared filter pill row (chart + drill-in). "All" pill clears the set; each
+// position pill is a color-dotted toggle; the neutral "Picks" pill (#14 FR1)
+// appears only when the league actually has draft capital. Multi-select.
+function PosFilterPills({ idPrefix, filter, onToggle, style, showPicks }: {
   idPrefix: string;
-  filter: Set<CorePos>;
-  onToggle: (pos: CorePos | 'ALL') => void;
+  filter: Set<FilterKey>;
+  onToggle: (pos: FilterKey | 'ALL') => void;
   style?: any;
+  showPicks?: boolean;
 }) {
   const allOn = filter.size === 0;
   return (
@@ -447,6 +494,18 @@ function PosFilterPills({ idPrefix, filter, onToggle, style }: {
           </Pressable>
         );
       })}
+      {showPicks ? (
+        <Pressable
+          testID={`${idPrefix}.picks`}
+          onPress={() => onToggle('PICKS')}
+          accessibilityRole="button"
+          accessibilityState={{ selected: filter.has('PICKS') }}
+          style={[styles.pill, filter.has('PICKS') && { borderColor: PICKS_COLOR, backgroundColor: ink.ink3 }]}
+        >
+          <View style={[styles.pillDot, { backgroundColor: PICKS_COLOR }]} />
+          <Text style={[styles.pillText, filter.has('PICKS') && { color: chalk.base }]}>Picks</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -458,14 +517,20 @@ function BarRow({ team, rank, active, maxActive, filter, onPress }: {
   rank: number;
   active: number;
   maxActive: number;
-  filter: Set<CorePos>;
+  filter: Set<FilterKey>;
   onPress: () => void;
 }) {
-  const shown: CorePos[] = filter.size > 0 ? [...filter] : [...CORE_POSITIONS];
+  // Segments: selected keys, or all groups in the "All" view. Picks (#14 FR1)
+  // renders as a neutral trailing segment; on servers without the picks field
+  // its value is 0 and the segment simply never draws.
+  const shown: FilterKey[] =
+    filter.size > 0 ? [...filter] : [...CORE_POSITIONS, 'PICKS'];
+  const segValue = (p: FilterKey): number =>
+    p === 'PICKS' ? team.picks?.value ?? 0 : team.positions?.[p]?.value ?? 0;
+  const segColor = (p: FilterKey): string => (p === 'PICKS' ? PICKS_COLOR : posColor(p));
   // Segment denominator = the same value the bar length encodes, so segments
-  // always fill the track exactly (for "All" this is the sum of the four core
-  // positions, which equals total roster value in the shared value space).
-  const segSum = shown.reduce((s, p) => s + (team.positions?.[p]?.value ?? 0), 0);
+  // always fill the track exactly.
+  const segSum = shown.reduce((s, p) => s + segValue(p), 0);
   const fillPct = active > 0 ? Math.max((active / maxActive) * 100, 4) : 0;
 
   return (
@@ -489,12 +554,12 @@ function BarRow({ team, rank, active, maxActive, filter, onPress }: {
             <View style={[styles.fill, { width: `${fillPct}%` }]}>
               {segSum > 0
                 ? shown.map((p) => {
-                    const v = team.positions?.[p]?.value ?? 0;
+                    const v = segValue(p);
                     if (v <= 0) return null;
                     return (
                       <View
                         key={p}
-                        style={{ width: `${(v / segSum) * 100}%`, backgroundColor: posColor(p) }}
+                        style={{ width: `${(v / segSum) * 100}%`, backgroundColor: segColor(p) }}
                       />
                     );
                   })
@@ -798,6 +863,16 @@ const styles = StyleSheet.create({
   overlayClosePressed: { backgroundColor: ink.ink3 },
   overlaySub: { color: chalk.dim },
   drillFilter: { marginTop: space.xs },
+  updatedAt: { color: chalk.faint, marginBottom: space.xs },
+  pickRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    minHeight: 40,
+    paddingHorizontal: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
+  },
   overlayList: { marginTop: space.xs },
 
   groupHead: {

@@ -12133,8 +12133,93 @@ def espn_import():
 
 
 # ---------------------------------------------------------------------------
-# League power rankings (#142/#144) — math in backend/power_rankings.py
+# League power rankings (#142/#144/#14) — math in backend/power_rankings.py
 # ---------------------------------------------------------------------------
+
+def _power_ranking_inputs(sess: dict, league_id: str):
+    """Shared input loading for /api/league/power-rankings and
+    /api/league/rank-chip (so chip ranks always agree with the page).
+
+    Returns (members, seed, players_meta, fmt); members is None when the
+    league can't be resolved. members comes from the league_members snapshot,
+    falling back to the in-session league for fresh/demo leagues.
+    """
+    fmt = _active_format(sess)
+    g_league = sess.get("league")
+    members = load_league_members(league_id)
+    if not members and g_league and g_league.league_id == league_id:
+        # Fresh/demo leagues may not have a league_members snapshot yet —
+        # fall back to the in-session league (leaguemates) + the caller's
+        # own roster (session league members exclude the caller).
+        members = [{
+            "user_id":      m.user_id,
+            "username":     m.username,
+            "display_name": m.username,
+            "player_ids":   list(m.roster),
+        } for m in g_league.members]
+        members.append({
+            "user_id":      sess["user_id"],
+            "username":     sess.get("display_name") or sess["user_id"],
+            "display_name": sess.get("display_name") or sess["user_id"],
+            "player_ids":   list(sess.get("user_roster") or []),
+        })
+    if not members:
+        return None, {}, {}, fmt
+
+    pool_players, seed = _get_universal_pool(fmt)
+    # Demo-style sessions rank a synthetic player pool whose ids never
+    # appear in the universal pool; their consensus lives in the session
+    # service's seed ratings. Merge those in as a FALLBACK (pool seed
+    # wins) so demo consensus totals aren't all-zero. Real leagues are
+    # unaffected — their session ranking pool is the universal pool.
+    svc_seed = getattr(sess.get("service"), "_seed", None) or {}
+    if svc_seed:
+        seed = {**svc_seed, **seed}
+    # Metadata: universal pool first, session players filling any gaps
+    # (league roster players outside the pool still need name/position).
+    players_meta = {p.id: p for p in pool_players}
+    for p in (sess.get("players") or []):
+        players_meta.setdefault(p.id, p)
+    return members, seed, players_meta, fmt
+
+
+def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
+    """Owned-pick items per owner_user_id for the power-rankings picks group
+    (#14 FR1): {owner_user_id: [{label, value}, ...]}.
+
+    Same source as /api/league/picks (load_draft_picks + _owned_pick_label).
+    ESPN leagues carry no pick ownership (#158) and demo leagues have no
+    rows — both yield {} so every team gets an empty picks group and totals
+    stay players-only. Value is the stored pool_value (written at sync via
+    pick_values.pick_pool_value); rows synced before the pool_value column
+    existed are re-priced via pick_pool_value directly, years_out relative
+    to the earliest synced season (sync writes seasons starting at the
+    league's current season, so min(season) recovers it).
+    """
+    if not league_id or league_id == "league_demo":
+        return {}
+    try:
+        rows = load_draft_picks(league_id=league_id)
+    except Exception as e:
+        log.warning("power-rankings pick load failed (continuing): %s", e)
+        return {}
+    seasons = [int(r["season"]) for r in rows if r.get("season") is not None]
+    cur_season = min(seasons) if seasons else 0
+    out: dict[str, list[dict]] = {}
+    for p in rows:
+        owner = str(p.get("owner_user_id") or "")
+        if not owner:
+            continue
+        val = p.get("pool_value")
+        if val is None:
+            years_out = max(0, int(p.get("season") or cur_season) - cur_season)
+            val = pick_pool_value(int(p.get("round") or 4), years_out, fmt)
+        out.setdefault(owner, []).append({
+            "label": _owned_pick_label(p),
+            "value": round(float(val), 1),
+        })
+    return out
+
 
 @app.route("/api/league/power-rankings")
 def league_power_rankings_route():
@@ -12194,54 +12279,87 @@ def league_power_rankings_route():
             for rp in service.get_rankings(position=None).rankings
         }
 
-    fmt = _active_format(sess)
     try:
-        members = load_league_members(league_id)
-        if not members and g_league and g_league.league_id == league_id:
-            # Fresh/demo leagues may not have a league_members snapshot yet —
-            # fall back to the in-session league (leaguemates) + the caller's
-            # own roster (session league members exclude the caller).
-            members = [{
-                "user_id":      m.user_id,
-                "username":     m.username,
-                "display_name": m.username,
-                "player_ids":   list(m.roster),
-            } for m in g_league.members]
-            members.append({
-                "user_id":      g_user_id,
-                "username":     sess.get("display_name") or g_user_id,
-                "display_name": sess.get("display_name") or g_user_id,
-                "player_ids":   list(sess.get("user_roster") or []),
-            })
-        if not members:
+        members, seed, players_meta, fmt = _power_ranking_inputs(sess, league_id)
+        if members is None:
             return jsonify({"error": "league_not_found"}), 404
 
-        pool_players, seed = _get_universal_pool(fmt)
-        # Demo-style sessions rank a synthetic player pool whose ids never
-        # appear in the universal pool; their consensus lives in the session
-        # service's seed ratings. Merge those in as a FALLBACK (pool seed
-        # wins) so demo consensus totals aren't all-zero. Real leagues are
-        # unaffected — their session ranking pool is the universal pool.
-        svc_seed = getattr(sess.get("service"), "_seed", None) or {}
-        if svc_seed:
-            seed = {**svc_seed, **seed}
-        # Metadata: universal pool first, session players filling any gaps
-        # (league roster players outside the pool still need name/position).
-        players_meta = {p.id: p for p in pool_players}
-        for p in (sess.get("players") or []):
-            players_meta.setdefault(p.id, p)
-
-        teams = compute_power_rankings(members, seed, players_meta, board_elo=board_elo)
+        teams = compute_power_rankings(
+            members, seed, players_meta, board_elo=board_elo,
+            picks_by_owner=_power_picks_by_owner(league_id, fmt))
         for t in teams:
             t["is_you"] = (t["user_id"] == g_user_id)
         return jsonify({
             "league_id":      league_id,
             "basis":          basis,
             "scoring_format": fmt,
+            "updated_at":     datetime.now(timezone.utc).isoformat(),
             "teams":          teams,
         })
     except Exception as e:
         log.error("league/power-rankings error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+
+
+# #14/#21 rank chips — per-league consensus-rank cache so a fan of home
+# league cards costs one power-rankings computation per league per minute,
+# not one per card render. In-process only (fine across Render restarts —
+# it just recomputes).
+_RANK_CHIP_TTL_S = 60.0
+_rank_chip_cache: dict[str, tuple[float, dict]] = {}
+
+
+@app.route("/api/league/rank-chip")
+def league_rank_chip_route():
+    """GET /api/league/rank-chip?league_id=... → the SESSION user's consensus
+    power rank in that league (#14/#21 home-card chips):
+      {rank, team_count, basis: "consensus", updated_at}
+
+    Slim companion to /api/league/power-rankings. Consensus basis only — the
+    payload is derived from league-shared consensus values and exposes no
+    board content, so like /api/league/summary this is a deliberately open
+    read (no P2.5 gate; see docs/api-reference.md "deliberately left open").
+    Cached per league_id for ~60s; the cached entry stores every member's
+    rank, so leaguemates hitting the same league share one computation.
+    """
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess.get("league")
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+
+    from .power_rankings import compute_power_rankings
+    try:
+        cached = _rank_chip_cache.get(league_id)
+        if cached is not None and (time.monotonic() - cached[0]) < _RANK_CHIP_TTL_S:
+            entry = cached[1]
+        else:
+            members, seed, players_meta, fmt = _power_ranking_inputs(sess, league_id)
+            if members is None:
+                return jsonify({"error": "league_not_found"}), 404
+            teams = compute_power_rankings(
+                members, seed, players_meta,
+                picks_by_owner=_power_picks_by_owner(league_id, fmt))
+            entry = {
+                "ranks":      {t["user_id"]: t["rank"] for t in teams},
+                "team_count": len(teams),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            _rank_chip_cache[league_id] = (time.monotonic(), entry)
+
+        rank = entry["ranks"].get(g_user_id)
+        if rank is None:
+            return jsonify({"error": "not_in_league"}), 404
+        return jsonify({
+            "rank":       rank,
+            "team_count": entry["team_count"],
+            "basis":      "consensus",
+            "updated_at": entry["updated_at"],
+        })
+    except Exception as e:
+        log.error("league/rank-chip error: %s", e)
         return jsonify({"error": "internal_error"}), 500
 
 

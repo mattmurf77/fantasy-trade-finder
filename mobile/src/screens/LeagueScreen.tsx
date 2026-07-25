@@ -46,6 +46,7 @@ import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { useWhatsNew } from '../hooks/useWhatsNew';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
+import RankChipBadge from '../components/RankChipBadge';
 import LeaderboardsSection from '../components/LeaderboardsSection';
 import ActivityFeed from '../components/ActivityFeed';
 import ContrarianLeaderboard from '../components/ContrarianLeaderboard';
@@ -302,6 +303,9 @@ export default function LeagueScreen() {
                     leaguemates_total + 1 undercounted when a roster was
                     ownerless (departed manager never reaches
                     league_members). Fallback keeps old backends working. */}
+                {/* #14 — your consensus power rank in this league (open
+                    read; renders nothing on error/old servers). */}
+                {league?.league_id ? <RankChipBadge leagueId={league.league_id} /> : null}
                 <Badge
                   label={
                     summary

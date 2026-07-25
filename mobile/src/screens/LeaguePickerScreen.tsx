@@ -22,6 +22,7 @@ import { buildSessionInitBody, submitSessionInit } from '../api/auth';
 import { maybePregenTrades } from '../api/tradePregen';
 import { track } from '../api/events';
 import EspnLinkSheet from '../components/EspnLinkSheet';
+import RankChipBadge from '../components/RankChipBadge';
 import PlatformLinkSheet from '../components/PlatformLinkSheet';
 import type { LeagueSummary } from '../shared/types';
 
@@ -323,9 +324,13 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
                       <Badge label={PLATFORM_BADGE[item.platform]} />
                     ) : null}
                   </View>
-                  <Text style={styles.rowMeta}>
-                    {item.total_rosters || 12} teams
-                  </Text>
+                  <View style={styles.rowMetaRow}>
+                    <Text style={styles.rowMeta}>
+                      {item.total_rosters || 12} teams
+                    </Text>
+                    {/* #14 — consensus power rank in this league (silent-fail). */}
+                    <RankChipBadge leagueId={item.league_id} />
+                  </View>
                 </View>
                 {isBusy ? (
                   <ActivityIndicator color={chalk.dim} />
@@ -439,6 +444,7 @@ const styles = StyleSheet.create({
   },
   rowNameText: { flexShrink: 1 },
   rowMeta: { ...type.bodySm, marginTop: 2 },
+  rowMetaRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   espnFooter: {
     paddingHorizontal: space.xl,
     paddingVertical: space.md,

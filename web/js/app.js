@@ -28,6 +28,7 @@
         }
       } catch (_) { /* ignore */ }
       _applyMobilePolishFlags();
+      _applyPowerRankingsFlag();
     }
     // Kick the fetch immediately; it resolves before most UI code runs.
     _loadFeatureFlags();
@@ -73,12 +74,23 @@
           window.FTF_FLAG('mobile.rankings_card_view') ? '1' : '0';
       } catch (_) { /* ignore */ }
     }
+    // ── League rankings link (#14 — flag league.power_rankings) ──────
+    // Unhides the "League rankings" link in the League Summary header
+    // when the flag is on. Default-dark: link stays hidden otherwise.
+    function _applyPowerRankingsFlag() {
+      try {
+        const link = document.getElementById('league-rankings-link');
+        if (link) link.classList.toggle('hidden', !window.FTF_FLAG('league.power_rankings'));
+      } catch (_) { /* ignore */ }
+    }
+
     // Apply immediately in case the fetch is slow — attrs start at "0"
     // and get re-applied once flags resolve.
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', _applyMobilePolishFlags);
+      document.addEventListener('DOMContentLoaded', () => { _applyMobilePolishFlags(); _applyPowerRankingsFlag(); });
     } else {
       _applyMobilePolishFlags();
+      _applyPowerRankingsFlag();
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -593,12 +605,14 @@
           <div class="league-item" id="li-${lg.league_id}" onclick="selectLeague(${i}, this)">
             <div class="league-item-icon">${ICON.crown}</div>
             <div class="league-item-info">
-              <div class="league-item-name">${escapeHtml(lg.name || 'Unnamed League')}</div>
+              <div class="league-item-name">${escapeHtml(lg.name || 'Unnamed League')}<span class="league-rank-chip hidden" id="lrc-${lg.league_id}"></span></div>
               <div class="league-item-meta">${lg.total_rosters || '?'} teams · ${lg.scoring_settings?.rec ? 'PPR' : 'Standard'}</div>
             </div>
             <div class="league-item-arrow">›</div>
           </div>
         `).join('');
+
+        _loadLeagueRankChips(leagues);
 
       } catch (e) {
         logDrawer.error(`showLeagueScreen fetch error: ${e.message}`);
@@ -608,6 +622,36 @@
 
     function hideLeagueScreen() {
       document.getElementById('league-screen').classList.add('hidden');
+    }
+
+    // ── League-card rank chips (#14/#21 — flag league.power_rankings) ──
+    // Lazy per-card fetch of /api/league/rank-chip (open read). Any
+    // failure is silent → the card simply shows no chip. Band colors
+    // (top third green / middle amber / bottom red) via lrc-* classes
+    // defined in index.html.
+    function _loadLeagueRankChips(leagues) {
+      if (!window.FTF_FLAG('league.power_rankings')) return;
+      for (const lg of (leagues || [])) {
+        if (!lg || !lg.league_id) continue;
+        (async () => {
+          try {
+            const headers = sessionToken ? { 'X-Session-Token': sessionToken } : {};
+            const res = await fetch(
+              `/api/league/rank-chip?league_id=${encodeURIComponent(lg.league_id)}`,
+              { headers });
+            if (!res.ok) return;
+            const body = await res.json().catch(() => null);
+            if (!body || typeof body.rank !== 'number' ||
+                typeof body.team_count !== 'number' || body.team_count < 1) return;
+            const el = document.getElementById(`lrc-${lg.league_id}`);
+            if (!el) return;  // list re-rendered meanwhile — skip
+            const frac = body.rank / body.team_count;
+            el.classList.add(frac <= 1 / 3 ? 'lrc-top' : frac <= 2 / 3 ? 'lrc-mid' : 'lrc-bottom');
+            el.textContent = `#${body.rank} of ${body.team_count}`;
+            el.classList.remove('hidden');
+          } catch (_) { /* silent — no chip */ }
+        })();
+      }
     }
 
     // ── Ranking Method Selection Screen ──────────────────────────────

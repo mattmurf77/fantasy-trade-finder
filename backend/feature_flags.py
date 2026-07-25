@@ -245,6 +245,11 @@ FLAG_KEYS: tuple[str, ...] = (
     "profiles.user_toggle",
     "auth.persistent_sessions",
     "league.rookie_board_entry",
+    # #14 League power rankings — WEB surface kill-switch only (nav link +
+    # league-card rank chips in web/js/app.js). The routes themselves ship
+    # unflagged (open-by-design consensus aggregates, docs/api-reference.md)
+    # and mobile's silent-fail chip is likewise unflagged.
+    "league.power_rankings",
     # ── QA / testing surfaces ──
     # Kin of FTF_TEST_MODE, but runtime-flagged (not env-gated) so the
     # operator's phone can exercise a prod-shaped build. Every consumer must

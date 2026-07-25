@@ -35,9 +35,10 @@ def compute_power_rankings(
     seed_elo: dict[str, float],
     players: dict,
     board_elo: dict[str, float] | None = None,
+    picks_by_owner: dict[str, list[dict]] | None = None,
 ) -> list[dict]:
     """
-    Rank league teams by summed roster value.
+    Rank league teams by summed roster value (players + draft capital).
 
     members:   [{user_id, username, display_name, player_ids: [pid, ...]}, ...]
                (load_league_members shape; works for ESPN-imported leagues too —
@@ -45,14 +46,21 @@ def compute_power_rankings(
     seed_elo:  {player_id: consensus seed Elo} (universal pool)
     players:   {player_id: Player} metadata for name/position/team/age
     board_elo: {player_id: personal Elo} — basis=personal; None = consensus
+    picks_by_owner: {owner_user_id: [{label, value}, ...]} — owned draft picks
+               already priced in value space (the route prices them via
+               pick_values.pick_pool_value; this module stays DB-free).
+               None/missing owner → empty picks group, total unchanged.
 
     Returns teams in rank order (total_value desc, user_id asc tiebreak —
     deterministic), each:
-      {rank, user_id, username, display_name, total_value,
+      {rank, user_id, username, display_name, total_value, positions_value,
        positions: {QB|RB|WR|TE: {count, value}},
+       picks: {count, value, items: [{label, value}, ...]},
        roster: [{player_id, name, position, team, age, value}, ...]}
-    with roster grouped by position (QB→RB→WR→TE→other) and sorted by value
-    desc within each group (#144).
+    where positions_value is the players-only sum, picks.value the draft
+    capital sum, and total_value = positions_value + picks.value (FR1) so
+    clients can decompose. Roster is grouped by position (QB→RB→WR→TE→other)
+    and sorted by value desc within each group (#144).
     """
 
     def value_of(pid: str) -> float:
@@ -95,13 +103,24 @@ def compute_power_rankings(
         ))
         for pos in pos_totals:
             pos_totals[pos]["value"] = round(pos_totals[pos]["value"], 1)
+        pick_items = [
+            {"label": str(i.get("label") or ""),
+             "value": round(float(i.get("value") or 0.0), 1)}
+            for i in (picks_by_owner or {}).get(user_id) or []
+        ]
+        picks_value = round(sum(i["value"] for i in pick_items), 1)
+        positions_value = round(total, 1)
         teams.append({
-            "user_id":      user_id,
-            "username":     m.get("username") or "",
-            "display_name": m.get("display_name") or m.get("username") or user_id,
-            "total_value":  round(total, 1),
-            "positions":    pos_totals,
-            "roster":       roster,
+            "user_id":         user_id,
+            "username":        m.get("username") or "",
+            "display_name":    m.get("display_name") or m.get("username") or user_id,
+            "total_value":     round(positions_value + picks_value, 1),
+            "positions_value": positions_value,
+            "positions":       pos_totals,
+            "picks":           {"count": len(pick_items),
+                                "value": picks_value,
+                                "items": pick_items},
+            "roster":          roster,
         })
 
     teams.sort(key=lambda t: (-t["total_value"], t["user_id"]))
