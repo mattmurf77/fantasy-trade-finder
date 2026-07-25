@@ -264,6 +264,13 @@ FLAG_KEYS: tuple[str, ...] = (
     # can send/receive a pick (#170/#171). DATA inclusion only — scoring
     # unchanged. Off ⇒ no pick ever appears in a suggestion.
     "trade.picks_in_pool",
+    # ── Feedback #175 — directional outlook weighting ────────────────────
+    # When the user's resolved outlook is rebuild-side (rebuilder/jets),
+    # cards acquiring win-now/older production are strongly penalized and
+    # cards acquiring future capital (younger players, picks) are boosted;
+    # an unrescued older-primary return past ~1 year is near-excluded.
+    # Contend-side gets only the mild mirror. Off ⇒ composites byte-identical.
+    "trade.outlook_direction",
     # ── #169 — League "outlook odds" (playoff/championship-odds pipeline) ──
     # Gates GET /api/league/outlook (backend/outlook/). Off (default) ⇒ the
     # route 404s and nothing else changes. Componentized behind swappable

@@ -1424,6 +1424,13 @@ _MODEL_CONFIG_DEFAULTS = [
     ("lane_shift_frac",          0.10,  "phase2: min value-weighted now-lean shift for a card to label as a window move"),
     ("fit_premium_max_loss",   300.0,   "phase2: max raw-board value a flagged need-fill 1-for-1 may pay"),
     ("aggression_weight",        0.20,  "phase2: composite reweight strength for the light/fair/generous offer buckets"),
+    # ── Feedback #175 directional outlook weighting (flag trade.outlook_direction) ──
+    ("outlook_dir_penalty",      3.0,   "#175: rebuild-side composite penalty weight on a positive (win-now-acquiring) now-lean shift"),
+    ("outlook_dir_boost",        1.0,   "#175: rebuild-side composite boost weight on a negative (future-capital-acquiring) now-lean shift"),
+    ("outlook_dir_contend_weight", 0.5, "#175: contend-side mild mirror weight (symmetric term only, no age-gap rule)"),
+    ("outlook_dir_age_tolerance", 1.0,  "#175: years an older primary return may exceed the primary give before the age-gap rule fires"),
+    ("outlook_dir_age_gap_mult", 0.15,  "#175: near-exclusion composite multiplier for unrescued older-primary returns (rebuild-side only)"),
+    ("outlook_dir_rescue_frac",  0.5,   "#175: min fraction of the primary give's consensus value a pick/younger return component needs to rescue the age-gap rule"),
     # ── Analytics platform P1 (docs/plans/analytics-platform/lld.md §3.4) ─
     ("analytics_events_per_hr", 600.0,  "P1 ingest: per-device client-event budget per hour; over-budget batches are accepted-and-dropped (never 429)"),
     # ── Deck-eval 2026-07-17 — consensus consolidation sanity gate ───────
