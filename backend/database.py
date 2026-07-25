@@ -4376,6 +4376,26 @@ def load_local_league_users(league_id: str) -> list[dict]:
     ]
 
 
+def is_linked_platform_league(league_id: str) -> bool:
+    """True when this id belongs to a platform-imported league (ESPN / MFL /
+    Fleaflicker — a leagues row whose `platform` column was set by the link
+    routes).
+
+    Their platform-NATIVE ids are numeric, so the isdigit() "local vs
+    Sleeper" split in the /api/sleeper/rosters|league_users proxies would
+    misroute them to Sleeper, which 404s (feedback #149/#150 — empty
+    trade-away picker + swap sheet on ESPN leagues). Callers use this to
+    serve the DB membership snapshot instead.
+    """
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(leagues_table.c.platform).where(
+                leagues_table.c.sleeper_league_id == str(league_id)
+            )
+        ).fetchone()
+    return bool(row) and (row.platform or "sleeper") != "sleeper"
+
+
 # ---------------------------------------------------------------------------
 # Member rankings operations
 # ---------------------------------------------------------------------------
