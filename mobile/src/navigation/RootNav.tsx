@@ -415,7 +415,7 @@ export default function RootNav({ booted }: { booted: boolean }) {
         <Stack.Screen
           name="Profile"
           component={ProfileScreen}
-          options={({ route }) => ({
+          options={({ navigation, route }) => ({
             headerShown: true,
             // route.params is typed via AuthStack; cast to a known shape
             // so we can read username without unsafe `any`.
@@ -427,6 +427,20 @@ export default function RootNav({ booted }: { booted: boolean }) {
             ),
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
+            // #151 pattern — native back is dead on iOS 26 when the previous
+            // screen (Main tabs) runs headerShown: false (RNS#3294). Explicit
+            // JS back; canGoBack guards the /u/:username cold-start deep link.
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="profile.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
           })}
         />
         <Stack.Screen
@@ -442,18 +456,30 @@ export default function RootNav({ booted }: { booted: boolean }) {
           }}
         />
         {/* #142/#144 — League rankings, pushed from the League tab's
-            "League rankings" Explore row. Standard (non-modal) push, so the
-            native back control applies. */}
+            "League rankings" Explore row. Standard (non-modal) push; explicit
+            JS back per the #151 pattern (native back dead over headerShown:
+            false — RNS#3294). */}
         <Stack.Screen
           name="LeagueSummary"
           component={LeagueSummaryScreen}
-          options={{
+          options={({ navigation }) => ({
             headerShown: true,
             title: 'League rankings',
             headerTitle: () => <HeaderTitle>League rankings</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
-          }}
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="league-summary.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
+          })}
         />
         {/* FA finder — pushed from the League tab's "Free agents" row. */}
         <Stack.Screen
@@ -486,13 +512,25 @@ export default function RootNav({ booted }: { booted: boolean }) {
         <Stack.Screen
           name="TestStages"
           component={TestStagesScreen}
-          options={{
+          options={({ navigation }) => ({
             headerShown: true,
             title: 'Test stages',
             headerTitle: () => <HeaderTitle>Test stages</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
-          }}
+            // #151 pattern — see FreeAgents above (RNS#3294).
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="test-stages.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
+          })}
         />
         <Stack.Screen
           name="SleeperConnect"
