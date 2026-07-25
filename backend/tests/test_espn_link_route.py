@@ -304,3 +304,59 @@ def test_get_crosswalk_falls_back_to_snapshot_when_fetch_fails(monkeypatch):
         raise OSError("offline")
     assert es.get_crosswalk(_opener=_counting_opener) is xw
     assert calls["n"] == 0
+
+
+# ---------------------------------------------------------------------------
+# /api/sleeper/* proxies serve imported leagues from the DB (#149/#150)
+#
+# ESPN platform-native league ids are NUMERIC, so before the
+# is_linked_platform_league() check the proxies misrouted them to Sleeper
+# (404 → empty rosterByOwner → empty trade-away picker + swap sheet on
+# mobile). These pin that imported leagues are served from league_members
+# without touching Sleeper.
+# ---------------------------------------------------------------------------
+
+def _no_sleeper(*a, **kw):
+    raise AssertionError("imported league must not hit Sleeper")
+
+
+def test_rosters_proxy_serves_imported_espn_league_from_db(client):
+    c, token, _ = client
+    assert _link(c, token, team_id=1).status_code == 200
+    with patch.object(server, "_sleeper_get", _no_sleeper):
+        r = c.get(f"/api/sleeper/rosters/{ESPN_LEAGUE}")
+    assert r.status_code == 200
+    rosters = r.get_json()
+    assert len(rosters) == 3
+    by_owner = {row["owner_id"]: row["players"] for row in rosters}
+    assert USER in by_owner                    # my team keeps the real FTF id
+    assert len(by_owner[USER]) == 8            # crosswalked Sleeper player ids
+    assert all(len(p) == 8 for p in by_owner.values())
+    # counterparties keep their synthetic espn: ids
+    assert all(uid.startswith("espn:") for uid in by_owner if uid != USER)
+
+
+def test_league_users_proxy_serves_imported_espn_league_from_db(client):
+    c, token, _ = client
+    assert _link(c, token, team_id=1).status_code == 200
+    with patch.object(server, "_sleeper_get", _no_sleeper):
+        r = c.get(f"/api/sleeper/league_users/{ESPN_LEAGUE}")
+    assert r.status_code == 200
+    users = r.get_json()
+    assert len(users) == 3
+    assert USER in {u["user_id"] for u in users}
+    assert all(u["display_name"] for u in users)
+
+
+def test_rosters_proxy_still_hits_sleeper_for_unlinked_numeric_ids(client):
+    c, token, _ = client                       # nothing linked in this variant
+    hit = {"n": 0}
+
+    def _fake_sleeper(url, *a, **kw):
+        hit["n"] += 1
+        return []
+
+    with patch.object(server, "_sleeper_get", _fake_sleeper):
+        r = c.get("/api/sleeper/rosters/555555555")
+    assert r.status_code == 200
+    assert hit["n"] == 1                       # unlinked numeric id → Sleeper

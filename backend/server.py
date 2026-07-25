@@ -104,6 +104,7 @@ from .database import (
     load_local_leagues_for_user,
     load_local_league_rosters,
     load_local_league_users,
+    is_linked_platform_league,
     set_ranking_method, get_ranking_method,
     get_profile_public, set_profile_public,
     save_tiers_position, get_tiers_saved,
@@ -7772,7 +7773,11 @@ def sleeper_rosters(league_id):
     """Fetch all rosters for a league — serves DB data for local non-Sleeper leagues."""
     log.info("=== /api/sleeper/rosters  league_id=%r", league_id)
     try:
-        if not league_id.isdigit():
+        # Platform-imported leagues (ESPN/MFL/Fleaflicker) have NUMERIC
+        # platform-native ids, so the isdigit() split alone would misroute
+        # them to Sleeper → 404 → empty rosters on the trade-away picker and
+        # swap sheet (feedback #149/#150). Serve their DB snapshot instead.
+        if not league_id.isdigit() or is_linked_platform_league(league_id):
             data = load_local_league_rosters(league_id)
             log.info("  local league: returning %d rosters from DB", len(data))
             return jsonify(data)
@@ -7802,7 +7807,8 @@ def sleeper_league_users(league_id):
     """Fetch all users for a league — serves DB data for local non-Sleeper leagues."""
     log.info("=== /api/sleeper/league_users  league_id=%r", league_id)
     try:
-        if not league_id.isdigit():
+        # Same platform-imported split as /api/sleeper/rosters (#149/#150).
+        if not league_id.isdigit() or is_linked_platform_league(league_id):
             data = load_local_league_users(league_id)
             log.info("  local league: returning %d users from DB", len(data))
             return jsonify(data)
