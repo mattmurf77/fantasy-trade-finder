@@ -272,6 +272,29 @@ _DEFAULT_CFG: dict[str, float] = {
     # trade.aggression_ab — composite reweight strength for the
     # light/fair/generous opening-offer buckets (± at full ±45% tilt).
     "aggression_weight":          0.20,
+    # ------------------------------------------------------------------
+    # Feedback #175 — directional outlook weighting
+    # (flag: trade.outlook_direction — see outlook_direction_mult)
+    # ------------------------------------------------------------------
+    # Rebuild-side (rebuilder/jets), on the card's value-weighted now-lean
+    # shift from the USER's perspective (received − given, classify_lane's
+    # exact shift): positive shift (acquiring win-now production) ⇒
+    # composite *= max(0.05, 1 − penalty·shift); negative shift (acquiring
+    # future capital: younger players, picks) ⇒ *= 1 + boost·(−shift).
+    "outlook_dir_penalty":        3.0,
+    "outlook_dir_boost":          1.0,
+    # Contend-side (championship/contender) mild symmetric mirror:
+    # composite *= 1 + w·shift. No age-gap rule (contenders buy vets).
+    "outlook_dir_contend_weight": 0.5,
+    # The ~1-year-gap rule (rebuild-side only): when the primary give is a
+    # player and the primary return is an OLDER player past this tolerance
+    # (years), with no comparable-value pick / younger-player component in
+    # the return, the card is near-excluded: composite *= age_gap_mult.
+    # A component "comparable" ⇔ its consensus value ≥ rescue_frac × the
+    # primary give's consensus value.
+    "outlook_dir_age_tolerance":  1.0,
+    "outlook_dir_age_gap_mult":   0.15,
+    "outlook_dir_rescue_frac":    0.5,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -1016,6 +1039,109 @@ def classify_lane(give_ids: list[str], recv_ids: list[str], players: dict,
         else "value"
 
 
+# ---------------------------------------------------------------------------
+# Feedback #175 — directional outlook weighting (flag: trade.outlook_direction)
+# "A rebuilder should get back a younger player or a pick for the player
+# they give away; rarely an older player (outside ~a 1-year gap)."
+# ---------------------------------------------------------------------------
+
+def _primary_asset(ids: list[str], players: dict, value_of):
+    """(pid, player, consensus value) of the highest-value asset on a side.
+
+    "Primary" is defined pragmatically as the single most valuable asset on
+    the side — the piece the trade is ABOUT from that side's perspective.
+    (Ties keep the first-listed asset; good enough for a steering heuristic.)
+    """
+    best_pid, best_v = None, float("-inf")
+    for pid in ids:
+        v = value_of(pid)
+        if v > best_v:
+            best_pid, best_v = pid, v
+    return best_pid, players.get(best_pid), best_v
+
+
+def outlook_direction_mult(give_ids: list[str], recv_ids: list[str],
+                           players: dict, outlook: str | None,
+                           value_of) -> float:
+    """#175 — directional composite multiplier from the user's resolved
+    outlook. Reuses the lane machinery: the shift is classify_lane's exact
+    value-weighted mean now-lean of what changes hands (received +, given −),
+    on CONSENSUS values (the card's shape, not either private board).
+
+    Rebuild-side (rebuilder/jets):
+      * shift > 0 (user acquiring win-now/older production) → strong
+        penalty: max(0.05, 1 − outlook_dir_penalty·shift)
+      * shift < 0 (acquiring future capital — younger players, picks; a
+        PICK's now-lean is negative, so #170 pool picks compose naturally)
+        → boost: 1 + outlook_dir_boost·(−shift)
+      * the ~1-year-gap rule: primary give is a player, primary return is
+        an OLDER player beyond outlook_dir_age_tolerance years, and no
+        other return component is a pick or tolerance-younger player worth
+        ≥ outlook_dir_rescue_frac of the primary give → composite further
+        *= outlook_dir_age_gap_mult. Implemented as a large PENALTY, not a
+        hard filter, so a genuinely lopsided-value win can still surface.
+
+    Contend-side (championship/contender): ONLY the mild symmetric mirror
+    1 + outlook_dir_contend_weight·shift — no age-gap rule (contenders
+    legitimately buy older players).
+
+    not_sure / None outlook → exactly 1.0 (no directional effect).
+    """
+    sign = _LANE_SIGN.get(outlook or "")
+    if sign is None:
+        return 1.0
+    shift = 0.0
+    total = 0.0
+    for direction, ids in ((1.0, recv_ids), (-1.0, give_ids)):
+        for pid in ids:
+            p = players.get(pid)
+            v = value_of(pid)
+            total += v
+            shift += direction * v * _now_lean(
+                getattr(p, "position", None) if p else None,
+                getattr(p, "age", None) if p else None)
+    if total <= 0:
+        return 1.0
+    shift /= total
+
+    if sign > 0:    # contend side — mild mirror only
+        return max(0.0, 1.0 + _c("outlook_dir_contend_weight") * shift)
+
+    # Rebuild side — directional scoring term…
+    if shift > 0:
+        mult = max(0.05, 1.0 - _c("outlook_dir_penalty") * shift)
+    else:
+        mult = 1.0 - _c("outlook_dir_boost") * shift
+
+    # …plus the ~1-year-gap rule. Ages unknown on either primary, or a
+    # pick primary on either side, ⇒ the rule can't judge and stays out.
+    g_pid, g_p, g_v = _primary_asset(give_ids, players, value_of)
+    r_pid, r_p, _r_v = _primary_asset(recv_ids, players, value_of)
+    g_pos = getattr(g_p, "position", None) if g_p else None
+    r_pos = getattr(r_p, "position", None) if r_p else None
+    g_age = getattr(g_p, "age", None) if g_p else None
+    r_age = getattr(r_p, "age", None) if r_p else None
+    tol = _c("outlook_dir_age_tolerance")
+    if (g_pos and g_pos != "PICK" and r_pos and r_pos != "PICK"
+            and g_age and r_age and r_age > g_age + tol):
+        rescue_floor = _c("outlook_dir_rescue_frac") * g_v
+        rescued = False
+        for pid in recv_ids:
+            if pid == r_pid:
+                continue    # the older primary can't rescue itself
+            if value_of(pid) < rescue_floor:
+                continue
+            p = players.get(pid)
+            pos = getattr(p, "position", None) if p else None
+            age = getattr(p, "age", None) if p else None
+            if pos == "PICK" or (age and age <= g_age + tol):
+                rescued = True
+                break
+        if not rescued:
+            mult *= _c("outlook_dir_age_gap_mult")
+    return mult
+
+
 def aggression_variant(user_id: str) -> str:
     """Interview phase 2 (flag trade.aggression_ab) — stable opening-offer
     bucket per user: "light" (open a touch light, room to add), "fair"
@@ -1490,6 +1616,14 @@ class TradeCard:
     # client inspectability rides the existing per-player `on_block` receive-row
     # flag (#147), so no separate serialization is added (never duplicated).
     block_boosted: bool = False
+    # #175 (flag trade.outlook_direction) — the directional composite
+    # multiplier this card received from the user's resolved outlook
+    # (rebuild-side: future-capital returns boosted, win-now returns
+    # penalized, unrescued older-primary returns near-excluded; contend-side
+    # mild mirror). In-process/QA record only, never serialized. None when
+    # the flag is off, the outlook has no direction (not_sure/None), or the
+    # multiplier came out exactly 1.0.
+    outlook_dir: Optional[float] = None
     # Interview phase 2 (flag trade.lanes) — "window" | "value" | None:
     # which deck lane the card belongs to, from the user's resolved
     # window (declared or seeded). None = user has no window → no lanes.
@@ -1801,6 +1935,8 @@ class TradeService:
         # Knob 0 ⇒ skip entirely (composite byte-identical, no stamp).
         _block_boost_w = _c("block_boost_weight") if FLAGS.trade_block_boost else 0.0
         _on_block_by_uid = _load_on_block_by_uid(league_id) if _block_boost_w else {}
+        # #175 — directional outlook weighting (see outlook_direction_mult).
+        _outlook_dir_on = FLAGS.trade_outlook_direction
         acquire_targets: list[str] = []
         sell_targets: list[str] = []
         if _targeting:
@@ -2027,6 +2163,29 @@ class TradeService:
                             c.block_boosted = True
                             c.composite_score = round(
                                 c.composite_score * (1.0 + _block_boost_w), 3)
+            # #175 — directional outlook weighting (flag
+            # trade.outlook_direction): steer the deck by the USER's resolved
+            # window. Rebuild-side outlooks strongly penalize cards acquiring
+            # win-now/older production, boost cards returning future capital
+            # (younger players, picks), and near-exclude unrescued
+            # older-primary returns past ~1 year; contend-side gets only the
+            # mild mirror. Computed on CONSENSUS values like classify_lane
+            # (the card's shape, not either private board). Bounded
+            # multiplier applied AFTER all gates (fairness / user-gain /
+            # surplus are settled) — it reorders acceptable trades and, by
+            # design, penalizes rather than filters, so a genuinely
+            # lopsided-value win can still surface. Applies uniformly to
+            # divergence (v2/v3) and consensus cards since all flow through
+            # this loop. Flag off / directionless outlook ⇒ no-op
+            # (composite byte-identical, nothing stamped).
+            if _outlook_dir_on:
+                for c in cards:
+                    _m = outlook_direction_mult(
+                        c.give_player_ids, c.receive_player_ids,
+                        self._players, outlook, _vs)
+                    if _m != 1.0:
+                        c.outlook_dir = round(_m, 4)
+                        c.composite_score = round(c.composite_score * _m, 3)
             # Interview phase 2 — two-lane labels (flag trade.lanes): stamp
             # each card "window" / "value" from the user's resolved window.
             # Pure label on consensus values; never touches gates/scores.
