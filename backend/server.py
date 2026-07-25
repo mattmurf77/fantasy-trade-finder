@@ -13111,10 +13111,14 @@ def mfl_import():
 
     year = row.get("platform_season") or _MFL_DEFAULT_YEAR
     host = row.get("platform_host")
+    # #177 — leagues linked via the authed flow (auth='cookie') may be private:
+    # re-sync with the user's MFL cookie when one is stored (None otherwise).
+    cookie = (_mfl_cookie_for(sess, user_id)
+              if row.get("platform_auth") == "cookie" else None)
     try:
         if not host:
             host = _mfl.resolve_host(league_id, year)
-        raw = _mfl.fetch_league_bundle(league_id, year, host)
+        raw = _mfl.fetch_league_bundle(league_id, year, host, cookie=cookie)
     except _mfl.MflError as e:
         return _platform_error_response(e, "mfl")
 
@@ -13161,6 +13165,366 @@ def mfl_import():
         "future_picks_stored": len(parsed["future_picks"]),
         "report": _platform_report_json(mapped["report"]),
     })
+
+
+# ── MFL authenticated linking (#177, flag `mfl.auth_link`) ───────────────────
+#
+#   POST /api/mfl/auth-link   {username, password, year?} → MFL login +
+#                             myleagues (the user's leagues w/ franchise ids)
+#   POST /api/mfl/auth-import {league_ids?, year?}        → import leagues
+#                             (default: ALL from myleagues), franchise
+#                             auto-bound from myleagues — no choose-team step.
+#
+# The password is used for the single MFL login call and is NEVER persisted
+# and NEVER logged (no log line in these routes carries username or password).
+# What we keep is the MFL_USER_ID session cookie MFL returns: Fernet-encrypted
+# at rest (mfl_credentials, SLEEPER_TOKEN_KEY — same key as sleeper/espn
+# credentials). If the key is not configured we fail closed to SESSION-ONLY
+# storage: the cookie lives in the in-memory session dict (never part of the
+# persisted-session row, which serializes named identity fields only) and dies
+# with it. Imports reuse the public-import persistence path with the cookie
+# attached, so private leagues work.
+
+def _mfl_cookie_for(sess, user_id: str) -> str | None:
+    """The user's MFL session cookie: encrypted row first, in-memory session
+    fallback (key-less deployments). None when never signed in."""
+    from .database import get_mfl_credential
+    try:
+        cred = get_mfl_credential(user_id)
+    except Exception:
+        cred = None
+    if cred:
+        try:
+            return _sleeper_write.decrypt_token(cred["cookie_encrypted"])
+        except _sleeper_write.SleeperWriteError as e:
+            log.warning("mfl auth: stored cookie undecryptable for %s: %s",
+                        user_id, e)
+    return sess.get("mfl_cookie")
+
+
+_MFL_AUTH_ERROR_CODES = {
+    "auth":      ("mfl_auth_required", "MFL wouldn't share this league — the sign-in may have expired."),
+    "not_found": ("mfl_league_not_found", "MFL has no league with that ID."),
+}
+
+
+def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
+                              host: str | None, cookie: str | None,
+                              franchise_id: str) -> dict:
+    """Fetch + persist ONE MFL league with the user's cookie, binding
+    `franchise_id` (from myleagues) as the user's team. Returns the per-league
+    summary dict. Raises MflError on fetch/franchise problems — the caller
+    turns those into `failed` entries instead of aborting the batch."""
+    from . import mfl_service as _mfl
+    from .database import upsert_platform_league, replace_espn_league_members
+
+    if not host:
+        host = _mfl.resolve_host(league_id, year)
+    raw = _mfl.fetch_league_bundle(league_id, year, host, cookie=cookie)
+    parsed = _mfl.parse_bundle(raw)
+    mapped = _mfl.map_franchises(parsed, _shared_crosswalk())
+
+    if franchise_id not in {fr["franchise_id"] for fr in parsed["franchises"]}:
+        raise _mfl.MflError(
+            "couldn't match your franchise in this league", kind="franchise")
+
+    members = []
+    for fr in parsed["franchises"]:
+        fid = fr["franchise_id"]
+        mid = user_id if fid == franchise_id else _mfl_member_id(league_id, fid)
+        members.append({"user_id": mid, "username": fr["name"],
+                        "display_name": fr["name"],
+                        "player_ids": mapped["rosters"].get(fid, [])})
+    upsert_platform_league(
+        league_id=league_id, user_id=user_id,
+        name=parsed["name"] or f"MFL league {league_id}", platform="mfl",
+        season=year, auth="cookie", my_team=franchise_id,
+        total_rosters=parsed["total_teams"], host=host,
+        future_picks=parsed["future_picks"])
+    replace_espn_league_members(league_id, members)
+
+    # #158 — same best-effort owned-pick normalization as the public path.
+    if is_enabled("picks.owned_sync"):
+        try:
+            _npk = _sync_mfl_owned_picks(league_id)
+            log.info("mfl_auth_import: normalized %d owned picks (league=%s)",
+                     _npk, league_id)
+        except Exception as _mpk_err:
+            log.warning("mfl_auth_import: owned-pick normalization failed "
+                        "(continuing): %s", _mpk_err)
+
+    r = mapped["report"]
+    return {
+        "league_id": league_id, "name": parsed["name"], "season": year,
+        "my_team_id": franchise_id, "teams_imported": len(members),
+        "total_teams": parsed["total_teams"],
+        "future_picks_stored": len(parsed["future_picks"]),
+        "match_rate": round(r["match_rate"], 4),
+    }
+
+
+@app.route("/api/mfl/auth-link", methods=["POST"])
+@_gate_unverified_write
+def mfl_auth_link():
+    """Sign in with MFL and list the user's leagues (no import yet)."""
+    if not is_enabled("mfl.auth_link"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from . import mfl_service as _mfl
+
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    body = request.get_json(force=True) or {}
+    username = str(body.get("username") or "").strip()
+    password = body.get("password") or ""
+    try:
+        year = int(body.get("year") or _MFL_DEFAULT_YEAR)
+    except (TypeError, ValueError):
+        return jsonify({"error": "mfl_bad_year",
+                        "message": "year must be numeric"}), 400
+    if not username or not password:
+        return jsonify({"error": "mfl_missing_credentials",
+                        "message": "MFL username and password are required."}), 400
+
+    try:
+        auth = _mfl.login(username, password, year)
+        del password  # transient use only — never persisted, never logged
+        leagues = _mfl.fetch_my_leagues(auth["cookie"], year)
+    except _mfl.MflAuthError:
+        return jsonify({"error": "mfl_bad_credentials",
+                        "message": "MFL didn't accept that username and password."}), 403
+    except _mfl.MflError as e:
+        return _platform_error_response(e, "mfl")
+
+    # Store ONLY the returned cookie — encrypted at rest when the key exists,
+    # otherwise session-only (fail closed: plaintext never reaches the DB).
+    storage = "session"
+    if _sleeper_write.token_encryption_available():
+        try:
+            from .database import upsert_mfl_credential
+            upsert_mfl_credential(
+                user_id, username,
+                _sleeper_write.encrypt_token(auth["cookie"]), year)
+            storage = "encrypted"
+        except Exception:
+            log.exception("mfl_auth_link: credential store failed "
+                          "(falling back to session-only)")
+    if storage == "session":
+        sess["mfl_cookie"] = auth["cookie"]
+
+    log.info("mfl_auth_link: user=%s year=%s leagues=%d storage=%s",
+             user_id, year, len(leagues), storage)
+    return jsonify({"ok": True, "year": year, "storage": storage,
+                    "leagues": leagues})
+
+
+@app.route("/api/mfl/auth-import", methods=["POST"])
+@_gate_unverified_write
+def mfl_auth_import():
+    """Import the signed-in user's MFL leagues — default ALL from myleagues.
+
+    Body: {league_ids?: [..], year?}. Franchise binding comes from myleagues
+    (franchise-scoped), so there is no choose-team step; a league whose
+    franchise can't be matched lands in `failed` (linkable via the manual
+    flow). Imports run sequentially (MFL rate guidance) and one league's
+    failure never aborts the rest."""
+    if not is_enabled("mfl.auth_link"):
+        return jsonify({"error": "feature_disabled"}), 404
+    from . import mfl_service as _mfl
+
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    body = request.get_json(force=True) or {}
+    try:
+        year = int(body.get("year") or _MFL_DEFAULT_YEAR)
+    except (TypeError, ValueError):
+        return jsonify({"error": "mfl_bad_year",
+                        "message": "year must be numeric"}), 400
+
+    cookie = _mfl_cookie_for(sess, user_id)
+    if not cookie:
+        return jsonify({"error": "mfl_not_connected",
+                        "message": "Sign in with MFL first."}), 409
+
+    try:
+        my_leagues = _mfl.fetch_my_leagues(cookie, year)
+    except _mfl.MflAuthError:
+        # Dead cookie — drop the stored copy so the client re-prompts sign-in.
+        from .database import delete_mfl_credential
+        delete_mfl_credential(user_id)
+        sess.pop("mfl_cookie", None)
+        return jsonify({"error": "mfl_auth_expired",
+                        "message": "Your MFL sign-in expired — sign in again."}), 409
+    except _mfl.MflError as e:
+        return _platform_error_response(e, "mfl")
+
+    by_id = {lg["league_id"]: lg for lg in my_leagues}
+    requested = [str(x).strip() for x in (body.get("league_ids") or []) if str(x).strip()]
+    if not requested:                       # default: import ALL
+        requested = list(by_id.keys())
+
+    imported, failed = [], []
+    for i, league_id in enumerate(requested):
+        if i > 0 and not app.config.get("TESTING"):
+            time.sleep(1.0)                 # MFL guidance: space requests ≥1s
+        lg = by_id.get(league_id)
+        if lg is None:
+            failed.append({"league_id": league_id, "error": "mfl_not_your_league",
+                           "message": "MFL doesn't list you in that league."})
+            continue
+        if not lg.get("franchise_id"):
+            failed.append({"league_id": league_id, "error": "mfl_franchise_unknown",
+                           "message": "Couldn't auto-detect your team — link this "
+                                      "league manually to pick it."})
+            continue
+        try:
+            imported.append(_mfl_import_league_authed(
+                user_id, league_id, year, lg.get("host"), cookie,
+                str(lg["franchise_id"])))
+        except _mfl.MflError as e:
+            kind = getattr(e, "kind", "http")
+            if kind == "franchise":
+                failed.append({"league_id": league_id, "error": "mfl_franchise_unknown",
+                               "message": "Couldn't auto-detect your team — link "
+                                          "this league manually to pick it."})
+            else:
+                code, msg = _MFL_AUTH_ERROR_CODES.get(
+                    kind, ("mfl_unavailable", "Couldn't reach MFL — try again shortly."))
+                failed.append({"league_id": league_id, "error": code, "message": msg})
+        except Exception:
+            log.exception("mfl_auth_import: persistence failed (league=%s)", league_id)
+            failed.append({"league_id": league_id, "error": "store_failed",
+                           "message": "Import failed — try again."})
+
+    log.info("mfl_auth_import: user=%s year=%s requested=%d imported=%d failed=%d",
+             user_id, year, len(requested), len(imported), len(failed))
+    return jsonify({"ok": True, "year": year, "requested": len(requested),
+                    "imported": imported, "failed": failed})
+
+
+# ── Trade-send pre-flight validation (#180) ──────────────────────────────────
+#
+# The Sleeper send is ultimately enforced by Sleeper (its API rejects what its
+# rules forbid), so FTF's job is to catch what's knowable BEFORE the handoff
+# and say so honestly. This read-only route re-fetches the league's live meta
+# + rosters from Sleeper's public API and reports advisory findings; it NEVER
+# blocks — the client decides how loudly to warn. Checked here: league season
+# closed, traded players no longer on the expected rosters, post-trade roster
+# counts vs the league's roster limit. Everything else (locked players, trade
+# deadline, review/veto windows, FAAB validity) is delegated to Sleeper.
+# Docs: docs/feedback/items/180-trade-send-validation/status.md
+
+@app.route("/api/trades/validate", methods=["POST"])
+def trades_validate():
+    """Pre-send checks for a Sleeper trade. Body mirrors /api/trades/propose:
+    {league_id, their_user_id (or their_roster_id), give_player_ids[],
+    receive_player_ids[]}. → {ok, checked, warnings:[{code,severity,message}]}.
+    `checked:false` = Sleeper data unreachable (nothing validated)."""
+    if not is_enabled("trade.send_in_sleeper"):
+        return jsonify({"error": "feature_disabled"}), 404
+    sess = _require_session()
+    user_id = sess.get("user_id")
+    if not user_id:
+        return jsonify({"error": "no_user"}), 401
+
+    body = request.get_json(force=True) or {}
+    league_id = str(body.get("league_id") or "").strip()
+    their_user_id = body.get("their_user_id")
+    their_roster_id_in = body.get("their_roster_id")
+    give = [str(p) for p in (body.get("give_player_ids") or [])]
+    receive = [str(p) for p in (body.get("receive_player_ids") or [])]
+    if not league_id.isdigit() or (their_user_id is None and their_roster_id_in is None):
+        return jsonify({"error": "bad_request"}), 400
+
+    warnings: list[dict] = []
+
+    meta = _fetch_sleeper_league_meta(league_id)
+    rosters = _fetch_league_rosters(league_id)
+    if not isinstance(meta, dict) or not rosters:
+        # Non-Sleeper league id or Sleeper unreachable — nothing checkable.
+        return jsonify({"ok": True, "checked": False, "warnings": []})
+
+    if (meta.get("status") or "") == "complete":
+        warnings.append({
+            "code": "league_archived", "severity": "blocking",
+            "message": "This league's season is closed on Sleeper — trades can't be sent.",
+        })
+
+    # My roster: for Sleeper leagues the FTF user_id IS the Sleeper user_id.
+    # Prefer the linked write-credential account when present (matches how
+    # /api/trades/propose resolves the proposing roster).
+    my_owner = user_id
+    cred = get_sleeper_credential(user_id)
+    if cred and cred.get("sleeper_user_id"):
+        my_owner = cred["sleeper_user_id"]
+    my_rid = _roster_id_for_owner(rosters, my_owner)
+    if their_roster_id_in is not None:
+        try:
+            their_rid = int(their_roster_id_in)
+        except (TypeError, ValueError):
+            return jsonify({"error": "bad_request"}), 400
+    else:
+        their_rid = _roster_id_for_owner(rosters, their_user_id)
+
+    by_rid = {}
+    for r in rosters:
+        try:
+            by_rid[int(r.get("roster_id"))] = r
+        except (TypeError, ValueError):
+            continue
+    mine = by_rid.get(my_rid)
+    theirs = by_rid.get(their_rid)
+    if mine is None or theirs is None:
+        warnings.append({
+            "code": "roster_not_found", "severity": "blocking",
+            "message": "Couldn't match one of the teams to a roster in this "
+                       "Sleeper league — a re-sync may be needed.",
+        })
+        return jsonify({"ok": True, "checked": True, "warnings": warnings})
+
+    my_players = {str(p) for p in (mine.get("players") or [])}
+    their_players = {str(p) for p in (theirs.get("players") or [])}
+    moved_give = [p for p in give if p not in my_players]
+    moved_receive = [p for p in receive if p not in their_players]
+    if moved_give or moved_receive:
+        n = len(moved_give) + len(moved_receive)
+        warnings.append({
+            "code": "player_moved", "severity": "blocking",
+            "message": (f"{n} player{'s' if n != 1 else ''} in this trade "
+                        "are no longer on the expected roster (dropped or "
+                        "already traded) — Sleeper will reject the offer."),
+        })
+
+    # Roster-limit check: Sleeper's max roster = lineup slots (incl. bench)
+    # + reserve (IR) + taxi. roster.players includes reserve+taxi players.
+    settings = meta.get("settings") or {}
+    try:
+        max_roster = (len(meta.get("roster_positions") or [])
+                      + int(settings.get("reserve_slots") or 0)
+                      + int(settings.get("taxi_slots") or 0))
+    except (TypeError, ValueError):
+        max_roster = 0
+    if max_roster > 0:
+        for label, players, out_ids, in_ids in (
+            ("Your", my_players, give, receive),
+            ("Their", their_players, receive, give),
+        ):
+            post = len(players) - len([p for p in out_ids if p in players]) + len(in_ids)
+            if post > max_roster:
+                warnings.append({
+                    "code": "roster_limit", "severity": "warning",
+                    "message": (f"{label} roster would have {post} players — "
+                                f"over the league limit of {max_roster}. "
+                                "Sleeper may require a drop before this can "
+                                "be accepted."),
+                })
+
+    return jsonify({"ok": True, "checked": True, "warnings": warnings})
 
 
 # ── Fleaflicker ──────────────────────────────────────────────────────────────

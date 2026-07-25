@@ -233,6 +233,7 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 | GET | `/api/sleeper/link` | Link status (never returns the token): `{connected, sleeper_user_id, expires_at, expired}` |
 | DELETE | `/api/sleeper/link` | Disconnect — deletes the stored token → `{connected: false}`. Standard write gate (grace applies) |
 | POST | `/api/trades/propose` | Send a trade. **Hard-verified: requires a verified session (403 `verification_required`), no grace** — highest blast radius (writes into the user's real Sleeper league). Body `{league_id, their_user_id (or their_roster_id), give_player_ids[], receive_player_ids[], draft_picks?[]}`. Server resolves **both** roster_ids from one public-rosters fetch (caller's from the linked Sleeper account, counterparty's from `their_user_id` — FTF user_id == Sleeper user_id); the client never asserts its own roster_id. → `{status: "proposed", transaction_id}` |
+| POST | `/api/trades/validate` | **#180 pre-send validation** (same flag; read-only, session-authed, no verification needed, never blocks). Body mirrors propose (players only). Re-fetches live Sleeper league meta + rosters and reports advisory findings → `{ok, checked, warnings:[{code, severity: "blocking"\|"warning", message}]}`. Codes: `league_archived` (season `complete`), `player_moved` (a traded player is no longer on the expected roster), `roster_limit` (post-trade count > lineup+IR+taxi slots), `roster_not_found`. `checked:false` = Sleeper data unreachable / non-Sleeper league — nothing validated. Everything else (locks, deadline, veto, FAAB) is delegated to Sleeper. See [items/180](feedback/items/180-trade-send-validation/status.md) |
 
 `/api/trades/propose` error contract (client maps these to a reconnect prompt / deep-link fallback):
 
@@ -310,7 +311,16 @@ Read-only import of MyFantasyLeague leagues via MFL's **official, sanctioned** e
 |---|---|---|
 | POST | `/api/mfl/link` | Body `{mfl_league_url? \| mfl_league_id?, year?, franchise_id?}`. Without `franchise_id` → **preview**: `{status:"choose_team", league:{mfl_league_id,name,season,total_teams,host}, teams:[{team_id,name,mapped_players}], report}`. With `franchise_id` → **import**: persists the league (`platform='mfl'`) + membership; chosen franchise binds to the session `user_id`, counterparties get synthetic `mfl:{L}.f{franchise}` ids; futureDraftPicks stored. Idempotent re-link. → `{ok, league_id, name, platform, season, auth, total_teams, teams_imported, my_team_id, my_roster, future_picks_stored, report}` |
 | GET | `/api/mfl/leagues` | Linked MFL leagues for the session user + full `members` snapshot (Sleeper ids) — client builds a standard `/api/session/init` body from it |
-| POST | `/api/mfl/import` | Re-sync rosters. Body `{league_id}`. Re-resolves host if needed; preserves the franchise binding. → same summary shape |
+| POST | `/api/mfl/import` | Re-sync rosters. Body `{league_id}`. Re-resolves host if needed; preserves the franchise binding. Leagues linked via the authed flow (`platform_auth='cookie'`) re-sync with the caller's stored MFL cookie so private leagues keep working. → same summary shape |
+
+### MFL authenticated linking (#177, flag `mfl.auth_link`)
+
+Sign-in flow on top of the same import path — for **private leagues** and **import-all-at-once**. The password is used for the single MFL `login` call (POSTed to MFL, never in a URL) and is **never persisted and never logged**; the only thing stored is the `MFL_USER_ID` session cookie MFL returns — Fernet-encrypted (`mfl_credentials`, reuses `SLEEPER_TOKEN_KEY`). No key configured → **session-only** fallback (cookie held in the in-memory session, dies with it; `storage:"session"` in the response). Both routes 404 dark while the flag (default **false**) is off; standard unverified-write gate applies.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/mfl/auth-link` | Body `{username, password, year?}`. MFL login → `myleagues` (franchise-scoped). → `{ok, year, storage: "encrypted"\|"session", leagues:[{league_id, name, host, franchise_id, franchise_name}]}`. Errors: 400 `mfl_missing_credentials`/`mfl_bad_year` · 403 `mfl_bad_credentials` · 502 `mfl_unavailable` |
+| POST | `/api/mfl/auth-import` | Body `{league_ids?, year?}` — **default: ALL leagues from `myleagues`**. Imports sequentially (MFL ≥1s spacing), franchise **auto-bound** from `myleagues` (no choose-team step); bundle fetches carry the cookie so private leagues work. Per-league failures never abort the batch. → `{ok, year, requested, imported:[{league_id, name, season, my_team_id, teams_imported, total_teams, future_picks_stored, match_rate}], failed:[{league_id, error, message}]}` with per-league errors `mfl_not_your_league` / `mfl_franchise_unknown` (→ manual link flow) / `mfl_auth_required` / `mfl_league_not_found` / `mfl_unavailable` / `store_failed`. Route-level: 409 `mfl_not_connected` (never signed in) · 409 `mfl_auth_expired` (cookie rejected — stored copy dropped, client re-prompts sign-in) |
 
 ## Fleaflicker league linking (flag `fleaflicker.link`)
 

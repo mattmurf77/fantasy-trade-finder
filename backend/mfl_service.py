@@ -156,6 +156,116 @@ def resolve_host(league_id: str, year: int, timeout: int = 15, _opener=None) -> 
 
 
 # ---------------------------------------------------------------------------
+# Authenticated linking (#177, flag `mfl.auth_link`)
+# ---------------------------------------------------------------------------
+#
+# MFL's sanctioned credentialed flow (api_info, verified 2026-07-25):
+#   POST https://api.myfantasyleague.com/{year}/login  USERNAME/PASSWORD/XML=1
+#     → <status MFL_USER_ID="…">OK</status> on success. The MFL_USER_ID value
+#       is a Base64 session credential ("may contain '+', '/' and/or '='");
+#       it rides verbatim in later requests as `Cookie: MFL_USER_ID=<value>`.
+#   GET  …/export?TYPE=myleagues&YEAR=…&FRANCHISE_NAMES=1&JSON=1  (+ cookie)
+#     → the user's leagues, each carrying url/league_id/name/franchise_id.
+#
+# The docs recommend POST for login ("for better security") — we POST so the
+# password never appears in a URL. The password is used for that single
+# request and MUST never be persisted or logged by any caller.
+
+def login(username: str, password: str, year: int, timeout: int = 15,
+          _opener=None) -> dict:
+    """Authenticate against MFL. Returns {"cookie": "MFL_USER_ID=<value>",
+    "mfl_user_id": "<value>"}.
+
+    The password is sent once in the POST body (never a URL) and is not
+    retained by this function. Raises MflAuthError when MFL rejects the
+    credentials (no MFL_USER_ID in the response), MflError otherwise.
+    """
+    if not (username or "").strip() or not password:
+        raise MflError("username and password are required", kind="input")
+    url = f"https://{MFL_API_HOST}/{int(year)}/login"
+    data = urllib.parse.urlencode({
+        "USERNAME": username.strip(), "PASSWORD": password, "XML": "1",
+    }).encode("utf-8")
+    headers = {"User-Agent": MFL_USER_AGENT,
+               "Content-Type": "application/x-www-form-urlencoded"}
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    opener = _opener or urllib.request.urlopen
+    try:
+        with opener(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise MflAuthError("MFL rejected the username/password") from e
+        raise MflError(f"MFL login HTTP {e.code}", kind="http") from e
+    except urllib.error.URLError as e:
+        raise MflError(f"MFL login failed: {e}", kind="http") from e
+
+    import re
+    m = re.search(r'MFL_USER_ID\s*=\s*"([^"]+)"', raw)
+    if not m:
+        # <error>…</error> body, or any response without a cookie — bad creds.
+        raise MflAuthError("MFL rejected the username/password")
+    value = m.group(1)
+    return {"cookie": f"MFL_USER_ID={value}", "mfl_user_id": value}
+
+
+def fetch_my_leagues(cookie: str, year: int, timeout: int = 15,
+                     _opener=None) -> list[dict]:
+    """List the authenticated user's leagues via `export?TYPE=myleagues`.
+
+    Returns [{"league_id", "name", "host", "franchise_id", "franchise_name"}].
+    `host` is the league's wwwNN host parsed from the returned URL (None when
+    absent — callers fall back to resolve_host). `franchise_id` is the user's
+    franchise in that league (myleagues is franchise-scoped), which is what
+    lets auth imports skip the manual choose-team step. Raises MflAuthError
+    on a rejected/expired cookie, MflError otherwise.
+    """
+    if not cookie:
+        raise MflAuthError("no MFL cookie")
+    url = (f"https://{MFL_API_HOST}/{int(year)}/export?TYPE=myleagues"
+           f"&YEAR={int(year)}&FRANCHISE_NAMES=1&JSON=1")
+    headers = dict(BROWSER_HEADERS)
+    headers["Cookie"] = cookie
+    req = urllib.request.Request(url, headers=headers)
+    opener = _opener or urllib.request.urlopen
+    try:
+        with opener(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise MflAuthError() from e
+        raise MflError(f"MFL myleagues HTTP {e.code}", kind="http") from e
+    except urllib.error.URLError as e:
+        raise MflError(f"MFL myleagues failed: {e}", kind="http") from e
+    try:
+        data = json.loads(raw)
+    except ValueError as e:
+        raise MflError("MFL returned non-JSON", kind="parse") from e
+    if isinstance(data, dict) and data.get("error"):
+        # e.g. {"error": "...cookie..."} — treat as an auth problem.
+        raise MflAuthError(str(data.get("error"))[:200])
+
+    out: list[dict] = []
+    for lg in _as_list((data.get("leagues") or {}).get("league")):
+        if not isinstance(lg, dict):
+            continue
+        url_field = lg.get("url") or ""
+        league_id = str(lg.get("league_id") or "").strip() \
+            or (parse_league_id_from_url(url_field) or "")
+        if not league_id:
+            continue
+        fid = str(lg.get("franchise_id") or "").strip()
+        out.append({
+            "league_id": league_id,
+            "name": lg.get("name") or f"MFL league {league_id}",
+            "host": parse_host_from_url(url_field),
+            "franchise_id": fid or None,
+            "franchise_name": lg.get("franchise_name") or None,
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Fetch (live path — CLI/route; tests inject _opener)
 # ---------------------------------------------------------------------------
 

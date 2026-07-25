@@ -142,6 +142,76 @@ export async function importPlatformLeague(
   return api.post<PlatformImportSummary>(`/api/${platform}/import`, { league_id: leagueId });
 }
 
+// ── MFL authenticated linking (#177, flag `mfl.auth_link`) ───────────────────
+// POST /api/mfl/auth-link {username, password, year?} → MFL login + the
+// user's league list (franchise ids included — no choose-team step).
+// POST /api/mfl/auth-import {league_ids?, year?} → import (default ALL).
+// The password goes to OUR backend only, is used for the single MFL login
+// call, and is never persisted or logged anywhere; the server keeps only the
+// MFL session cookie (encrypted at rest). Never echo it into logs/analytics.
+
+export interface MflAuthLeague {
+  league_id: string;
+  name: string;
+  host: string | null;
+  franchise_id: string | null;     // the user's franchise (null = can't auto-bind)
+  franchise_name: string | null;
+}
+
+export interface MflAuthLinkResult {
+  ok: boolean;
+  year: number;
+  storage: 'encrypted' | 'session';
+  leagues: MflAuthLeague[];
+}
+
+export interface MflAuthImportedLeague {
+  league_id: string;
+  name: string;
+  season: number;
+  my_team_id: string;
+  teams_imported: number;
+  total_teams: number;
+  future_picks_stored: number;
+  match_rate: number;              // 0..1
+}
+
+export interface MflAuthImportFailure {
+  league_id: string;
+  error: string;                   // mfl_franchise_unknown | mfl_unavailable | …
+  message: string;
+}
+
+export interface MflAuthImportResult {
+  ok: boolean;
+  year: number;
+  requested: number;
+  imported: MflAuthImportedLeague[];
+  failed: MflAuthImportFailure[];
+}
+
+export async function mflAuthLink(
+  username: string,
+  password: string,
+  year?: number,
+): Promise<MflAuthLinkResult> {
+  return api.post<MflAuthLinkResult>('/api/mfl/auth-link', {
+    username,
+    password,
+    year,
+  });
+}
+
+export async function mflAuthImport(
+  leagueIds?: string[],
+  year?: number,
+): Promise<MflAuthImportResult> {
+  return api.post<MflAuthImportResult>('/api/mfl/auth-import', {
+    league_ids: leagueIds && leagueIds.length ? leagueIds : undefined,
+    year,
+  });
+}
+
 export interface FleaflickerDiscovered {
   league_id: string;
   name: string;

@@ -1012,6 +1012,31 @@ espn_credentials_table = Table("espn_credentials", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# mfl_credentials_table — encrypted MFL session cookies (#177, flag mfl.auth_link)
+# ---------------------------------------------------------------------------
+#
+# Backs authenticated MFL linking. One row per FTF user_id who signed in with
+# MFL credentials via POST /api/mfl/auth-link. The user's PASSWORD is used
+# transiently for the single MFL login call and is NEVER stored or logged —
+# what we keep is the MFL_USER_ID session cookie MFL returns, which is a
+# full-session credential: Fernet-encrypted at rest with the SAME key as
+# sleeper/espn credentials (SLEEPER_TOKEN_KEY — one credential-encryption key
+# per deployment), never logged. mfl_username is the login handle (an
+# identifier, not a secret) kept for "connected as" display. Cookie lifetime
+# is undocumented; MFL auth errors (401/403) drive the reconnect UX. Folds
+# into the auth epic's `linked_sources` when that lands.
+# ---------------------------------------------------------------------------
+
+mfl_credentials_table = Table("mfl_credentials", metadata,
+    Column("user_id",          String,  primary_key=True),  # FTF user_id (one link per user)
+    Column("mfl_username",     String),                      # MFL login handle — identifier only
+    Column("cookie_encrypted", Text,    nullable=False),     # Fernet ciphertext — never plaintext
+    Column("year",             Integer),                     # season the cookie was minted for
+    Column("created_at",       String,  nullable=False),
+    Column("updated_at",       String,  nullable=False),
+)
+
+# ---------------------------------------------------------------------------
 # accounts + linked_identities — identity anchor layer (account-auth plan P2)
 # ---------------------------------------------------------------------------
 #
@@ -6923,6 +6948,81 @@ def delete_espn_credential(user_id: str) -> None:
         conn.execute(
             delete(espn_credentials_table)
             .where(espn_credentials_table.c.user_id == user_id)
+        )
+
+
+# ---------------------------------------------------------------------------
+# MFL authenticated linking (#177, flag `mfl.auth_link`) — cookie credentials.
+# These take the ciphertext already produced by sleeper_write.encrypt_token;
+# this module never sees the plaintext cookie (and never the password at all).
+# ---------------------------------------------------------------------------
+
+def upsert_mfl_credential(user_id: str, mfl_username: str | None,
+                          cookie_encrypted: str, year: int | None = None) -> None:
+    """Insert or replace a user's MFL session cookie (one row per user_id).
+    Mirrors upsert_espn_credential — created_at survives re-links."""
+    if not user_id or not cookie_encrypted:
+        raise ValueError("user_id and cookie_encrypted are required")
+    now = _now()
+    payload = {
+        "user_id":          user_id,
+        "mfl_username":     mfl_username,
+        "cookie_encrypted": cookie_encrypted,
+        "year":             year,
+        "created_at":       now,
+        "updated_at":       now,
+    }
+    with engine.begin() as conn:
+        existing = conn.execute(
+            select(mfl_credentials_table.c.created_at)
+            .where(mfl_credentials_table.c.user_id == user_id)
+        ).fetchone()
+        if existing and existing[0]:
+            payload["created_at"] = existing[0]
+        if DATABASE_URL.startswith("sqlite"):
+            conn.execute(text(
+                "INSERT OR REPLACE INTO mfl_credentials "
+                "(user_id, mfl_username, cookie_encrypted, year, created_at, updated_at) "
+                "VALUES (:user_id, :mfl_username, :cookie_encrypted, :year, :created_at, :updated_at)"
+            ), payload)
+        else:
+            conn.execute(text(
+                "INSERT INTO mfl_credentials "
+                "(user_id, mfl_username, cookie_encrypted, year, created_at, updated_at) "
+                "VALUES (:user_id, :mfl_username, :cookie_encrypted, :year, :created_at, :updated_at) "
+                "ON CONFLICT (user_id) DO UPDATE SET "
+                "mfl_username = EXCLUDED.mfl_username, "
+                "cookie_encrypted = EXCLUDED.cookie_encrypted, "
+                "year = EXCLUDED.year, "
+                "updated_at = EXCLUDED.updated_at"
+            ), payload)
+
+
+def get_mfl_credential(user_id: str) -> dict | None:
+    """Return {mfl_username, cookie_encrypted, year, created_at, updated_at}
+    for a user, or None if they haven't signed in with MFL."""
+    if not user_id:
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(mfl_credentials_table)
+            .where(mfl_credentials_table.c.user_id == user_id)
+        ).fetchone()
+    if not row:
+        return None
+    d = dict(row._mapping)
+    d.pop("user_id", None)
+    return d
+
+
+def delete_mfl_credential(user_id: str) -> None:
+    """Remove a user's stored MFL cookie (disconnect / dead-cookie cleanup)."""
+    if not user_id:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            delete(mfl_credentials_table)
+            .where(mfl_credentials_table.c.user_id == user_id)
         )
 
 
