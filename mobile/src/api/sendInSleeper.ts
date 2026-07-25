@@ -197,3 +197,38 @@ export async function proposeTradeToSleeper(
 ): Promise<ProposeTradeResult> {
   return api.post<ProposeTradeResult>('/api/trades/propose', payload);
 }
+
+// ── #180 — pre-send validation (advisory, never blocking) ────────────────────
+// The server re-fetches live Sleeper league meta + rosters and reports what's
+// knowable BEFORE the handoff: season closed, traded players no longer on the
+// expected rosters, post-trade roster counts vs the league limit. Sleeper
+// remains the authority — `severity: 'blocking'` means "Sleeper will reject
+// this", 'warning' means "may need a drop / review". checked:false = Sleeper
+// data unreachable (nothing validated).
+
+export interface TradeSendWarning {
+  code: string;                    // league_archived | player_moved | roster_limit | roster_not_found
+  severity: 'blocking' | 'warning';
+  message: string;
+}
+
+export interface TradeSendValidation {
+  checked: boolean;
+  warnings: TradeSendWarning[];
+}
+
+/** Never throws — validation must not break the send flow. Any failure
+ *  (network, flag off, old server) degrades to checked:false. */
+export async function validateTradeSend(
+  payload: ProposeTradePayload,
+): Promise<TradeSendValidation> {
+  try {
+    const res = await api.post<{ checked: boolean; warnings: TradeSendWarning[] }>(
+      '/api/trades/validate',
+      payload,
+    );
+    return { checked: !!res?.checked, warnings: res?.warnings || [] };
+  } catch {
+    return { checked: false, warnings: [] };
+  }
+}

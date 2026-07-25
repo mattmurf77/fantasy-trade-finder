@@ -6,7 +6,11 @@ import { haptics } from '../utils/haptics';
 import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag } from '../state/useFeatureFlags';
 import { useSession } from '../state/useSession';
-import { proposeTradeToSleeper, getSleeperLinkStatus } from '../api/sendInSleeper';
+import {
+  proposeTradeToSleeper,
+  getSleeperLinkStatus,
+  validateTradeSend,
+} from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
 
 // "Send in Sleeper". Renders on any real trade surface (found / matched /
@@ -170,7 +174,33 @@ export default function SendInSleeperButton({
     }
   }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, goConnect]);
 
-  const confirmSend = useCallback(() => {
+  // #180 — pre-flight validation before the confirm. validateTradeSend never
+  // throws (unreachable/flag-off degrades to checked:false → plain confirm);
+  // findings are surfaced honestly but the user can still send — Sleeper is
+  // the final authority on its own rules.
+  const confirmSend = useCallback(async () => {
+    setState('checking');
+    const { warnings } = await validateTradeSend({
+      league_id: leagueId,
+      their_user_id: theirUserId,
+      give_player_ids: givePlayerIds,
+      receive_player_ids: receivePlayerIds,
+    });
+    setState('idle');
+
+    if (warnings.length > 0) {
+      const blocking = warnings.some((w) => w.severity === 'blocking');
+      Alert.alert(
+        blocking ? 'This trade will likely fail' : 'Heads up before sending',
+        warnings.map((w) => `• ${w.message}`).join('\n\n'),
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Send anyway', onPress: () => { void doPropose(); } },
+        ],
+      );
+      return;
+    }
+
     Alert.alert(
       'Send this trade?',
       'This proposes the trade directly in Sleeper — your leaguemate gets it as a pending offer.',
@@ -179,7 +209,7 @@ export default function SendInSleeperButton({
         { text: 'Send', onPress: () => { void doPropose(); } },
       ],
     );
-  }, [doPropose]);
+  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
 
   const onPress = useCallback(async () => {
     if (state !== 'idle') return;

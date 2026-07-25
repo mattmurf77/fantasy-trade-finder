@@ -151,6 +151,12 @@ FLAG_KEYS: tuple[str, ...] = (
     # own /api/{platform}/* routes + the mobile link option; both default OFF
     # and are the kill switch if the vendor changes or Apple objects.
     "mfl.link",           # MFL: public zero-auth import; futureDraftPicks stored (not engine-wired)
+    # #177 — MFL authenticated linking: POST /api/mfl/auth-link (MFL login →
+    # myleagues) + /api/mfl/auth-import (import ALL leagues at once, private
+    # leagues included, franchise auto-detected). Password used transiently,
+    # never stored; only the MFL session cookie is kept (Fernet-encrypted via
+    # SLEEPER_TOKEN_KEY, session-only when the key is absent). Default OFF.
+    "mfl.auth_link",
     "fleaflicker.link",   # Fleaflicker: public zero-auth import via sportradar_id crosswalk
     # ── Onboarding & conversion redesign (docs/plans/onboarding-conversion/plan.md v2.1) ──
     # Semantics: each onboarding.* feature is live iff `onboarding.v2` (the

@@ -12,7 +12,7 @@ import {
   Platform,
   Alert,
 } from 'react-native';
-import { ink, chalk, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
 import { Button, Icon } from './chalkline';
 import { useFlag } from '../state/useFeatureFlags';
 import { ApiError } from '../api/client';
@@ -26,6 +26,10 @@ import {
   parseFleaflickerLeagueInput,
   discoverFleaflickerLeagues,
   FleaflickerDiscovered,
+  MflAuthLeague,
+  MflAuthImportResult,
+  mflAuthLink,
+  mflAuthImport,
 } from '../api/platformLink';
 
 interface Props {
@@ -45,7 +49,7 @@ const LABEL: Record<LinkPlatform, string> = { mfl: 'MFL', fleaflicker: 'Fleaflic
 //   2. team  — preview came back; "which team is yours?"
 //   3. done  — import summary: teams, match rate, skipped players, read-only note
 export default function PlatformLinkSheet({ visible, platform, onClose, onLinked }: Props) {
-  const [step, setStep] = useState<'input' | 'team' | 'done'>('input');
+  const [step, setStep] = useState<'input' | 'team' | 'done' | 'auth-pick' | 'auth-done'>('input');
   const [input, setInput] = useState('');
   const [year, setYear] = useState('2026');
   const [email, setEmail] = useState('');
@@ -57,6 +61,18 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
   const [preview, setPreview] = useState<PlatformLinkPreview | null>(null);
   const [summary, setSummary] = useState<PlatformImportSummary | null>(null);
 
+  // #177 — "Sign in with MFL" path (flag `mfl.auth_link`, MFL only).
+  // The password lives in component state just long enough to make the ONE
+  // auth-link call (our backend uses it for MFL's login and never stores it);
+  // it is cleared the moment the call returns and never logged or echoed.
+  const mflAuthEnabled = useFlag('mfl.auth_link') && platform === 'mfl';
+  const [showMflAuth, setShowMflAuth] = useState(false);
+  const [mflUser, setMflUser] = useState('');
+  const [mflPass, setMflPass] = useState('');
+  const [authLeagues, setAuthLeagues] = useState<MflAuthLeague[] | null>(null);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [authResult, setAuthResult] = useState<MflAuthImportResult | null>(null);
+
   // Teardown PRD 01-01 audit hit (same hazard as EspnLinkSheet), flag
   // `ux.sheet_guard`: OFF — every close resets (backdrop tap wipes typed
   // league ID / lookup email mid-flow). ON — close keeps state so reopening
@@ -65,7 +81,8 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
   const guardOn = useFlag('ux.sheet_guard');
   const dirty =
     step === 'team' ||
-    (step === 'input' && !!(input.trim() || email.trim()));
+    step === 'auth-pick' ||
+    (step === 'input' && !!(input.trim() || email.trim() || mflUser.trim() || mflPass));
 
   function reset() {
     setStep('input');
@@ -79,6 +96,12 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
     setError(null);
     setPreview(null);
     setSummary(null);
+    setShowMflAuth(false);
+    setMflUser('');
+    setMflPass('');
+    setAuthLeagues(null);
+    setSelected({});
+    setAuthResult(null);
   }
 
   function close() {
@@ -213,6 +236,86 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
     onLinked(lg);
   }
 
+  // ── #177 Sign in with MFL ──────────────────────────────────────────────────
+
+  async function mflSignIn() {
+    if (!mflUser.trim() || !mflPass) {
+      setError('Enter your MFL username and password.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await mflAuthLink(mflUser.trim(), mflPass, parseInt(year, 10) || undefined);
+      setMflPass(''); // transient — done with it the moment the call returns
+      setAuthLeagues(res.leagues);
+      // Default: import ALL leagues at once (auto-bindable ones pre-checked).
+      const pre: Record<string, boolean> = {};
+      for (const lg of res.leagues) pre[lg.league_id] = !!lg.franchise_id;
+      setSelected(pre);
+      if (res.leagues.length === 0) {
+        setError(`No MFL leagues found for ${year}.`);
+      } else {
+        setStep('auth-pick');
+      }
+    } catch (e: any) {
+      setMflPass('');
+      if (e instanceof ApiError && (e.body as any)?.error === 'mfl_bad_credentials') {
+        setError("MFL didn't accept that username and password.");
+      } else if (e instanceof ApiError && e.isVerificationRequired) {
+        setError('Verify your account to link a league.');
+      } else {
+        setError(e?.message || "Couldn't reach MFL — try again shortly.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function mflImportSelected() {
+    const ids = (authLeagues || [])
+      .map((lg) => lg.league_id)
+      .filter((id) => selected[id]);
+    if (ids.length === 0) {
+      setError('Pick at least one league to import.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await mflAuthImport(ids, parseInt(year, 10) || undefined);
+      setAuthResult(res);
+      setStep('auth-done');
+    } catch (e: any) {
+      if (e instanceof ApiError && (e.body as any)?.error === 'mfl_auth_expired') {
+        setAuthLeagues(null);
+        setStep('input');
+        setError('Your MFL sign-in expired — sign in again.');
+      } else if (e instanceof ApiError && e.isVerificationRequired) {
+        setError('Verify your account to link a league.');
+      } else {
+        setError(e?.message || 'Import failed — try again.');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openAuthImported() {
+    const first = authResult?.imported?.[0];
+    reset();
+    if (first) {
+      onLinked({
+        league_id: first.league_id,
+        name: first.name,
+        total_rosters: first.total_teams,
+        platform,
+      });
+    } else {
+      onClose();
+    }
+  }
+
   const report = step === 'done' ? summary?.report : preview?.report;
 
   return (
@@ -263,6 +366,62 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
                   keyboardType="number-pad"
                   editable={!busy}
                 />
+              ) : null}
+
+              {mflAuthEnabled ? (
+                <>
+                  <Pressable
+                    testID="platform-link.mfl-auth-toggle"
+                    onPress={() => setShowMflAuth((v) => !v)}
+                    style={styles.cookieToggle}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: showMflAuth }}
+                  >
+                    <Icon name={showMflAuth ? 'chevron-down' : 'chevron-right'} size={14} color={chalk.dim} />
+                    <Text style={type.bodySm}>Or sign in with MFL to import all your leagues</Text>
+                  </Pressable>
+                  {showMflAuth ? (
+                    <>
+                      <Text style={[type.bodySm, styles.skipNote]}>
+                        Your password goes to MFL's sign-in only — we keep just
+                        the session it returns, never the password. Private
+                        leagues work too.
+                      </Text>
+                      <TextInput
+                        testID="platform-link.mfl-username"
+                        style={styles.field}
+                        value={mflUser}
+                        onChangeText={setMflUser}
+                        placeholder="MFL username"
+                        placeholderTextColor={chalk.dim}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        editable={!busy}
+                      />
+                      <TextInput
+                        testID="platform-link.mfl-password"
+                        style={styles.field}
+                        value={mflPass}
+                        onChangeText={setMflPass}
+                        placeholder="MFL password"
+                        placeholderTextColor={chalk.dim}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        secureTextEntry
+                        textContentType="password"
+                        editable={!busy}
+                      />
+                      <Button
+                        testID="platform-link.mfl-signin"
+                        label={busy ? 'Signing in…' : 'Sign in & find my leagues'}
+                        variant="secondary"
+                        compact
+                        onPress={() => { void mflSignIn(); }}
+                        disabled={busy}
+                      />
+                    </>
+                  ) : null}
+                </>
               ) : null}
 
               {platform === 'fleaflicker' ? (
@@ -412,6 +571,110 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
             </>
           ) : null}
 
+          {step === 'auth-pick' && authLeagues ? (
+            <>
+              <Text style={[type.bodySm, styles.sub]}>
+                Found {authLeagues.length} MFL league{authLeagues.length === 1 ? '' : 's'} for {year}.
+                All are selected — uncheck any you don't want.
+              </Text>
+              {error ? (
+                <Text testID="platform-link.error" style={styles.error}>{error}</Text>
+              ) : null}
+              <ScrollView style={styles.teamList}>
+                {authLeagues.map((lg, idx) => {
+                  const bindable = !!lg.franchise_id;
+                  const isOn = !!selected[lg.league_id];
+                  return (
+                    <Pressable
+                      key={lg.league_id}
+                      testID={`platform-link.mfl-league.${lg.league_id}`}
+                      accessibilityRole="checkbox"
+                      accessibilityLabel={lg.name}
+                      accessibilityState={{ checked: isOn, disabled: !bindable || busy }}
+                      onPress={() =>
+                        setSelected((s) => ({ ...s, [lg.league_id]: !s[lg.league_id] }))
+                      }
+                      disabled={!bindable || busy}
+                      style={({ pressed }) => [
+                        styles.teamRow,
+                        idx === authLeagues.length - 1 && styles.teamRowLast,
+                        !bindable && styles.rowDim,
+                        pressed && bindable && styles.rowPressed,
+                      ]}
+                    >
+                      <View style={[styles.checkbox, isOn && styles.checkboxOn]}>
+                        {isOn ? <Icon name="check" size={12} color={chalk.base} /> : null}
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={type.title} numberOfLines={1}>{lg.name}</Text>
+                        <Text style={[type.bodySm, styles.rowMeta]}>
+                          {bindable
+                            ? `Your team: ${lg.franchise_name || `franchise ${lg.franchise_id}`}`
+                            : "Couldn't detect your team — link this one manually"}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <Button
+                testID="platform-link.mfl-import"
+                label={
+                  busy
+                    ? 'Importing…'
+                    : `Import ${Object.values(selected).filter(Boolean).length} league${
+                        Object.values(selected).filter(Boolean).length === 1 ? '' : 's'
+                      }`
+                }
+                onPress={() => { void mflImportSelected(); }}
+                disabled={busy}
+                style={styles.cta}
+              />
+            </>
+          ) : null}
+
+          {step === 'auth-done' && authResult ? (
+            <>
+              <Text style={[type.bodySm, styles.sub]}>
+                Imported {authResult.imported.length} of {authResult.requested} league
+                {authResult.requested === 1 ? '' : 's'}.
+              </Text>
+              <ScrollView style={styles.teamList}>
+                {authResult.imported.map((lg) => (
+                  <View key={lg.league_id} style={styles.teamRow}>
+                    <Icon name="check" size={16} color={semantic.pos} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={type.title} numberOfLines={1}>{lg.name}</Text>
+                      <Text style={[type.bodySm, styles.rowMeta]}>
+                        {lg.teams_imported} teams · {Math.round(lg.match_rate * 100)}% of
+                        players matched
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+                {authResult.failed.map((f) => (
+                  <View key={f.league_id} style={styles.teamRow}>
+                    <Icon name="x" size={16} color={semantic.neg} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={type.title} numberOfLines={1}>League {f.league_id}</Text>
+                      <Text style={[type.bodySm, styles.rowMeta]}>{f.message}</Text>
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+              <Text style={[type.bodySm, styles.readOnlyNote]}>
+                MFL leagues are read-only imports. Rankings, tiers, and trios
+                fully work today; trade features come later.
+              </Text>
+              <Button
+                testID="platform-link.mfl-open"
+                label={authResult.imported.length > 0 ? 'Open league' : 'Close'}
+                onPress={openAuthImported}
+                style={styles.cta}
+              />
+            </>
+          ) : null}
+
           <Button
             label="Cancel"
             variant="ghost"
@@ -480,6 +743,16 @@ const styles = StyleSheet.create({
     borderBottomColor: ink.line,
   },
   teamRowLast: { borderBottomWidth: 0 },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxOn: { borderColor: ice.base, backgroundColor: ink.ink3 },
   rowPressed: { backgroundColor: ink.ink3 },
   rowDim: { opacity: 0.45 },
   rowMeta: { marginTop: 2 },

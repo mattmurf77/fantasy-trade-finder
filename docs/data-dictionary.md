@@ -487,6 +487,22 @@ Interim home; folds into the auth epic's `linked_sources` when that lands.
 
 ---
 
+## `mfl_credentials`
+
+MFL authenticated linking (#177, `mfl.auth_link`). Encrypted MFL session cookies — one row per FTF `user_id` who signed in via `POST /api/mfl/auth-link`. The user's **password is never stored** (transient, single MFL login call); what's kept is the `MFL_USER_ID` cookie MFL returns. Written by `upsert_mfl_credential`; read/deleted by `get_mfl_credential` / `delete_mfl_credential`. Crypto reuses `backend/sleeper_write.py`'s Fernet helpers (same `SLEEPER_TOKEN_KEY`); if the key is absent the route falls back to session-only storage and this table stays empty.
+
+| Column | Type | Notes |
+|---|---|---|
+| `user_id` | str PK | FTF user_id (one MFL link per user) |
+| `mfl_username` | str | MFL login handle — identifier only (for "connected as" display), not a secret |
+| `cookie_encrypted` | text | **Fernet ciphertext** of `MFL_USER_ID=<value>` — never plaintext, never logged |
+| `year` | int | Season the cookie was minted for |
+| `created_at`, `updated_at` | str | |
+
+Interim home; folds into the auth epic's `linked_sources` when that lands.
+
+---
+
 ## `accounts`
 
 Identity-anchor layer above the app's working key (`sleeper_user_id`) — account-auth plan P2 (docs/plans/account-auth-plan-2026-07-11.md). One row per durable account; provider identities hang off it via `linked_identities`. Managed by `backend/accounts.py` (`find_or_create_account`, `bind_sleeper_user`, `delete_user_data`).
