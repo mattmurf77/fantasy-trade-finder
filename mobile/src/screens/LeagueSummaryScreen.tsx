@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
 import {
@@ -38,6 +39,7 @@ import {
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { relativeTime } from '../utils/relativeTime';
+import { registerScrollToTop } from '../navigation/scrollToTop';
 
 // League rankings ("power rankings", #142/#144/#169) — every team in the league
 // as a stacked bar in a value-ranked chart, from GET /api/league/power-rankings.
@@ -57,8 +59,15 @@ import { relativeTime } from '../utils/relativeTime';
 //     client never requests it.
 // Tapping a team's bar opens its roster grouped by position, sorted by value
 // within each group (#144), itself position-filterable.
-// Entered from the League tab's "League rankings" row (root-stack route
-// 'LeagueSummary').
+//
+// #181 — this screen now serves TWO routes:
+//   • 'LeagueRankings' — the League TAB's root (TabNav's LeagueStack): the
+//     primary page the tab lands on. Adds a "League home" entry row (the
+//     classic league page, pushed as 'LeagueHome') and registers the
+//     focused-re-tap scroll-to-top handler for the League tab.
+//   • 'LeagueSummary' — the legacy ROOT-stack push (RootNav), kept for old
+//     entry points (deep link app/league/summary, stored whats-new routes).
+//     No home row, no re-tap registration (it isn't the tab root).
 //
 // #169 OUTLOOK ODDS layer (flag `outlook.odds`, DARK): the playoff/title-odds
 // view lives between the basis toggle and the dynasty chart. It is a SEPARATE
@@ -108,6 +117,25 @@ function filteredTotal(team: PowerRankedTeam, filter: Set<FilterKey>): number {
 export default function LeagueSummaryScreen() {
   const league = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
+  // #181 — which of the two registrations is rendering (see header comment).
+  const navigation = useNavigation<any>();
+  const route = useRoute();
+  const isTabRoot = route.name === 'LeagueRankings';
+  // S1 PRD-05 (flag ux.retap_active_tab) — as the League tab's root, this
+  // screen owns the tab's focused-re-tap scroll-to-top handler (moved here
+  // from LeagueScreen with #181). The root-stack variant must NOT register:
+  // it would clobber the tab root's handler while both are mounted.
+  const retapOn = useFlag('ux.retap_active_tab');
+  const scrollRef = useRef<ScrollView>(null);
+  useEffect(
+    () =>
+      isTabRoot && retapOn
+        ? registerScrollToTop('League', () =>
+            scrollRef.current?.scrollTo({ y: 0, animated: true }),
+          )
+        : undefined,
+    [isTabRoot, retapOn],
+  );
   const [basis, setBasis] = useState<UiBasis>('consensus');
   // Empty set = "All" (unfiltered). Non-empty = single/multi position select.
   const [posFilter, setPosFilter] = useState<Set<FilterKey>>(new Set());
@@ -190,6 +218,7 @@ export default function LeagueSummaryScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.scroll}
         refreshControl={
           <RefreshControl
@@ -199,6 +228,28 @@ export default function LeagueSummaryScreen() {
           />
         }
       >
+        {/* #181 — the classic league page's entry point, tab-root variant
+            only (the root-stack push still exits via its back control).
+            LeagueRow construction: hairline list row, title + body-sm
+            chalk-dim meta + chevron. */}
+        {isTabRoot ? (
+          <Pressable
+            testID="league-summary.league-home"
+            onPress={() => navigation.navigate('LeagueHome')}
+            accessibilityRole="button"
+            accessibilityLabel="League home"
+            style={({ pressed }) => [styles.homeRow, pressed && { backgroundColor: ink.ink3 }]}
+          >
+            <View style={styles.homeMain}>
+              <Text style={type.title}>League home</Text>
+              <Text style={[type.bodySm, styles.homeSub]}>
+                Matches, members, coverage, leaderboards & league tools
+              </Text>
+            </View>
+            <Icon name="chevron-right" size={16} color={chalk.dim} />
+          </Pressable>
+        ) : null}
+
         {/* Basis toggle — subnav-pill construction (hairline chip, active =
             ink-3 well + line-strong border). Redraft is informational-only:
             disabled with a "(soon)" suffix until a redraft value source
@@ -708,6 +759,20 @@ function OddStat({ label, frac }: { label: string; frac: number }) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
   scroll: { padding: space.lg, paddingBottom: space.xxl },
+
+  // #181 — League home entry row (LeagueRow construction, mirrors
+  // LeagueScreen's explore rows).
+  homeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingVertical: space.md,
+    marginBottom: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
+  },
+  homeMain: { flex: 1, gap: 2 },
+  homeSub: { color: chalk.dim },
 
   basisRow: { flexDirection: 'row', gap: space.sm, marginBottom: space.md },
   basisChip: {
