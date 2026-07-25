@@ -12502,6 +12502,37 @@ def league_outlook_route():
 # Free-agent finder (feedback #143) — logic in backend/free_agent_service.py
 # ---------------------------------------------------------------------------
 
+# #179 — Sleeper league-meta cache for the free-agents roster-capacity block.
+# Meta (roster_positions + settings) is effectively static per league; a
+# small TTL keeps the FA route at one live Sleeper call per request (the
+# rosters read) instead of two.
+_FA_LEAGUE_META_CACHE: dict[str, tuple[float, dict]] = {}
+_FA_LEAGUE_META_TTL = 900.0  # 15 min
+
+
+def _sleeper_roster_limit(league_id: str) -> int | None:
+    """Total roster capacity for a Sleeper league: lineup+bench slots
+    (roster_positions) plus IR (reserve_slots) and taxi (taxi_slots) —
+    the same headcount Sleeper's `players` list can grow to. None when the
+    meta can't be fetched or has no roster_positions."""
+    now = time.time()
+    hit = _FA_LEAGUE_META_CACHE.get(league_id)
+    if hit is not None and (now - hit[0]) < _FA_LEAGUE_META_TTL:
+        meta = hit[1]
+    else:
+        meta = _fetch_sleeper_league_meta(league_id) or {}
+        _FA_LEAGUE_META_CACHE[league_id] = (now, meta)
+    slots = len(meta.get("roster_positions") or [])
+    if not slots:
+        return None
+    settings = meta.get("settings") or {}
+    try:
+        return (slots + int(settings.get("reserve_slots") or 0)
+                      + int(settings.get("taxi_slots") or 0))
+    except (TypeError, ValueError):
+        return slots
+
+
 @app.route("/api/league/free-agents")
 @_gate_unverified_read
 def league_free_agents_route():
@@ -12510,11 +12541,15 @@ def league_free_agents_route():
     Best available free agents in the league, ranked by the CALLER'S board
     value (personal Elo, consensus seed fallback for anything they haven't
     ranked). FA pool = active format's universal pool minus every rostered
-    player in the league — session-league rosters when league_id matches the
-    session (Sleeper / ESPN-imported / demo alike), league_members snapshot
-    otherwise. Each row may carry a drop_suggestion: the caller's lowest-
-    valued same-position rostered player whose value is strictly below the
-    FA's, with the add/drop delta.
+    player in the league. The exclusion set unions every roster source the
+    route can reach: session-league rosters (when league_id matches the
+    session), the raw league_members snapshot (#151), and — for Sleeper
+    leagues — a LIVE Sleeper rosters read (#178: the client-built snapshot
+    drops ownerless rosters, so an orphaned team's players leaked into the
+    list). An empty exclusion set is a hard 503 rosters_unavailable, never
+    a full-pool listing. Each row may carry a drop_suggestion: the caller's
+    lowest-valued same-position rostered player whose value is strictly
+    below the FA's, with the add/drop delta.
 
     Query params:
       league_id  — optional, defaults to the session league.
@@ -12532,8 +12567,14 @@ def league_free_agents_route():
            "pos_rank": int,         # 1-based rank within position among FAs
            "drop_suggestion": {"player_id", "name", "position",
                                "value", "delta"} | null}, ...
-        ]  # top 50 after the position filter
+        ],  # top 50 after the position filter
+        "roster_capacity": {"my_count": int|null, "limit": int|null} | null
+          # #179 — Sleeper leagues only; feeds the client's add pre-check
+          # (limit = lineup+bench+IR+taxi slots from league meta).
       }
+
+    Errors: 503 rosters_unavailable when NO roster source yielded a single
+    rostered player (unsynced snapshot + session mismatch + live read down).
 
     Read-gated (@_gate_unverified_read): the list is priced by the caller's
     board, so it's board-derived content like /api/rankings.
@@ -12561,9 +12602,24 @@ def league_free_agents_route():
         user_elo = {rp.player.id: rp.elo
                     for rp in service.get_rankings(position=None).rankings}
 
-        # Rosters: the in-session league object when it matches (covers
-        # Sleeper, ESPN-imported and demo leagues — session init builds all
-        # three); DB league_members snapshot for any other league_id.
+        # ── Roster exclusion set (#151 / #178) — sources, UNIONED: ─────────
+        #  1. In-session league rosters when league_id matches the session
+        #     (Sleeper / platform-imported / demo alike — session init
+        #     builds all three). NOTE: these were filtered against the
+        #     DEFAULT (1qb_ppr) pool at init, hence source 2.
+        #  2. The league_members snapshot — RAW client-sent ids, unfiltered
+        #     (#151: covers players that exist only in the active format's
+        #     pool). Best-effort: a failed read leaves the other sources.
+        #  3. Sleeper leagues only: the LIVE Sleeper rosters read (#178).
+        #     Sources 1 and 2 both descend from the CLIENT-built session
+        #     payload, and the clients drop rosters with no owner
+        #     (owner_id=None after a manager leaves the league) — so an
+        #     orphaned team's entire roster, stars included, surfaced as
+        #     "free agents". The live read is roster-shaped, not owner-
+        #     shaped: every rostered player counts, owned or not.
+        # Platform-imported leagues (ESPN/MFL/Fleaflicker) need no live
+        # read: their snapshot is written server-side at link/import time
+        # from the platform's own team list (every team, no owner filter).
         if g_league and league_id == g_league.league_id:
             member_rosters = [list(m.roster or []) for m in g_league.members]
             user_roster    = list(sess.get("user_roster") or [])
@@ -12574,21 +12630,69 @@ def league_free_agents_route():
             user_roster    = next((r.get("player_ids") or [] for r in rows
                                    if r.get("user_id") == g_user_id), [])
         rostered = {str(pid) for roster in member_rosters for pid in roster}
-        # #151 — the in-session rosters were filtered against the DEFAULT
-        # (1qb_ppr) pool at session init (`if str(x) in players_dict`), so a
-        # player who exists only in the ACTIVE format's pool (e.g. low-end
-        # QBs with an SF value but a zero 1QB value) was dropped from the
-        # exclusion set and surfaced as a "free agent" while rostered. The
-        # league_members snapshot stores the RAW ids the client sent — union
-        # it in so every rostered player is excluded regardless of format.
-        # Best-effort: a missing/failed snapshot leaves the session-derived
-        # set (the pre-#151 behavior), never errors the route.
-        if g_league and league_id == g_league.league_id:
+
+        my_roster_count: int | None = None
+        try:
+            for r in load_league_members(league_id):
+                ids = [str(pid) for pid in (r.get("player_ids") or [])]
+                rostered.update(ids)
+                if r.get("user_id") == g_user_id and ids:
+                    my_roster_count = len(ids)
+        except Exception as e:
+            log.warning("free-agents: league_members snapshot read failed "
+                        "for %s (continuing on session rosters): %s",
+                        league_id, e)
+
+        is_sleeper_league = False
+        try:
+            is_sleeper_league = (league_id.isdigit()
+                                 and not is_linked_platform_league(league_id))
+        except Exception as e:
+            log.warning("free-agents: platform lookup failed for %s: %s",
+                        league_id, e)
+            is_sleeper_league = league_id.isdigit()
+        if is_sleeper_league:
             try:
-                for r in load_league_members(league_id):
-                    rostered.update(str(pid) for pid in (r.get("player_ids") or []))
-            except Exception:
-                pass
+                live = _sleeper_get(
+                    f"https://api.sleeper.app/v1/league/{league_id}/rosters"
+                ) or []
+                for r in live:
+                    ids = [str(pid) for pid in (r.get("players") or [])]
+                    rostered.update(ids)
+                    if str(r.get("owner_id") or "") == str(g_user_id):
+                        my_roster_count = len(ids)
+            except Exception as e:
+                log.warning("free-agents: live Sleeper rosters read failed "
+                            "for %s (serving snapshot-derived exclusion): %s",
+                            league_id, e)
+
+        # #178 — fail LOUD on an empty exclusion set. Every league this
+        # route serves has rostered players; an empty union means every
+        # roster source failed (unsynced snapshot + no session league +
+        # platform fetch down), and serving would list the entire universal
+        # pool — rostered stars included — as "free agents". Wrong data
+        # silently is worse than no data.
+        if not rostered and not user_roster:
+            log.error("free-agents: EMPTY roster exclusion for league %s "
+                      "(session league=%r) — refusing to serve",
+                      league_id, g_league.league_id if g_league else None)
+            return jsonify({
+                "error":   "rosters_unavailable",
+                "message": ("Couldn't load this league's rosters, so the "
+                            "free-agent list can't be built right now — "
+                            "try again shortly."),
+            }), 503
+
+        # #179 — roster-capacity context for the client's add pre-check
+        # (Sleeper leagues only; both fields best-effort/nullable).
+        roster_capacity = None
+        if is_sleeper_league:
+            if my_roster_count is None and user_roster:
+                my_roster_count = len(user_roster)
+            roster_capacity = {
+                "my_count": my_roster_count,
+                "limit":    _sleeper_roster_limit(league_id),
+            }
 
         free_agents = compute_free_agents(
             pool_players = pool_players,
@@ -12604,6 +12708,9 @@ def league_free_agents_route():
             "position":          position or "ALL",
             "user_has_rankings": board_is_personalized(user_elo, seed),
             "free_agents":       free_agents,
+            # #179 — {my_count, limit} for Sleeper leagues (fields nullable
+            # when unknown); null for platform/demo leagues.
+            "roster_capacity":   roster_capacity,
         })
     except Exception as e:
         log.error("league/free-agents error: %s", e)
