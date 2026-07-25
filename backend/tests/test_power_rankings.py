@@ -146,6 +146,42 @@ def test_position_summary_counts_and_values():
     assert "K" not in a["positions"]
 
 
+# ---------------------------------------------------------------------------
+# #183 — roster ids with no player metadata (IDP / team-DST ids outside the
+# pool) are hidden from the roster listing; totals unchanged.
+# ---------------------------------------------------------------------------
+
+def test_unknown_roster_ids_hidden_from_roster():
+    members = [{
+        "user_id": "u_a", "username": "alice", "display_name": "Alice",
+        # "4987" = an IDP-style Sleeper id, "SEA" = a team DST id — neither
+        # has metadata in the pool. k1 has metadata but no value.
+        "player_ids": ["qb1", "rb1", "k1", "4987", "SEA"],
+    }]
+    teams = compute_power_rankings(members, SEED, PLAYERS)
+    roster_ids = [r["player_id"] for r in teams[0]["roster"]]
+    assert "4987" not in roster_ids
+    assert "SEA" not in roster_ids
+    # Known-position players stay, even out of the value pool (K).
+    assert roster_ids == ["qb1", "rb1", "k1"]
+
+
+def test_unknown_roster_ids_do_not_move_totals():
+    with_idp = [{
+        "user_id": "u_a", "username": "alice",
+        "player_ids": ["qb1", "rb1", "k1", "4987", "SEA"],
+    }]
+    without_idp = [{
+        "user_id": "u_a", "username": "alice",
+        "player_ids": ["qb1", "rb1", "k1"],
+    }]
+    a = compute_power_rankings(with_idp, SEED, PLAYERS)[0]
+    b = compute_power_rankings(without_idp, SEED, PLAYERS)[0]
+    assert a["total_value"] == b["total_value"]
+    assert a["positions_value"] == b["positions_value"]
+    assert a["positions"] == b["positions"]
+
+
 def test_member_without_valid_user_id_skipped():
     members = MEMBERS + [{"user_id": "", "username": "ghost", "player_ids": ["qb1"]}]
     teams = compute_power_rankings(members, SEED, PLAYERS)

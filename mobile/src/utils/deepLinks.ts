@@ -129,7 +129,17 @@ const V2_SCREENS = {
         },
       },
       Matches: 'matches/:match_id?',
-      League: 'league',
+      // #181 — the League tab is a stack: rankings at the root (the tab's
+      // primary page), the classic league page pushed as LeagueHome. A bare
+      // app/league lands on the rankings root. The legacy root-stack
+      // LeagueSummary path above still resolves for old share links.
+      League: {
+        path: 'league',
+        screens: {
+          LeagueRankings: '',
+          LeagueHome: 'home',
+        },
+      },
     },
   },
 } as const;

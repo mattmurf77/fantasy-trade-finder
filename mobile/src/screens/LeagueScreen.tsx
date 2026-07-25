@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -52,9 +52,10 @@ import ActivityFeed from '../components/ActivityFeed';
 import ContrarianLeaderboard from '../components/ContrarianLeaderboard';
 import CoachMark from '../components/CoachMark';
 import RookieDraftBoardSheet from '../components/RookieDraftBoardSheet';
-import { registerScrollToTop } from '../navigation/scrollToTop';
 
-// League tab v1 — replaces the prior PlaceholderScreen. Pulls
+// League home (tab v1; since #181 the pushed 'LeagueHome' sub-route of the
+// League tab's stack — the tab now LANDS on the rankings view, and this
+// classic page is reached from its "League home" row). Pulls
 // /api/league/summary + /api/league/coverage and renders:
 //   • League name + scoring + scoring chip
 //   • Matches stats (mutual matches / awaiting them — FB-91: tiles mirror
@@ -72,19 +73,9 @@ export default function LeagueScreen() {
   // orphaned RookieDraftBoardSheet mounts behind an Explore row.
   const showRookieBoard = useFlag('league.rookie_board_entry');
   const [rookieOpen, setRookieOpen] = useState(false);
-  // S1 PRD-05 (flag ux.retap_active_tab) — register this tab-root's
-  // scroll-to-top handler so a focused League re-tap returns to the top.
-  const retapOn = useFlag('ux.retap_active_tab');
-  const scrollRef = useRef<ScrollView>(null);
-  useEffect(
-    () =>
-      retapOn
-        ? registerScrollToTop('League', () =>
-            scrollRef.current?.scrollTo({ y: 0, animated: true }),
-          )
-        : undefined,
-    [retapOn],
-  );
+  // (#181) The ux.retap_active_tab scroll-to-top registration moved to
+  // LeagueSummaryScreen's tab-root variant — this screen is no longer the
+  // League tab's root, and a focused re-tap pops back to it instead.
   // S7 PRD-04 item 5 (flag ux.whats_new) — one version-keyed inline tip,
   // shown once per release (see useWhatsNew for the contract).
   const { entry: whatsNew, dismiss: dismissWhatsNew } = useWhatsNew();
@@ -247,7 +238,6 @@ export default function LeagueScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView
-        ref={scrollRef}
         contentContainerStyle={styles.scroll}
         refreshControl={
           <RefreshControl
@@ -364,15 +354,16 @@ export default function LeagueScreen() {
 
         {/* #142/#144 (League rankings) + FA finder — league-wide explore
             rows, LeagueRow construction (hairline list rows, not cards).
-            Both destinations are ROOT-stack routes (see RootNav), so
-            navigate() bubbles up from the tab navigator. */}
+            #181: the rankings row now returns to the League tab's rankings
+            root (this screen sits above it in the same stack); Free agents
+            stays a ROOT-stack route, so navigate() bubbles up. */}
         <TickLabel>Explore</TickLabel>
         <View>
           <ExploreRow
             testID="league.rankings-row"
             label="League rankings"
             sub="Every team ranked by total roster value"
-            onPress={() => navigation.navigate('LeagueSummary')}
+            onPress={() => navigation.navigate('LeagueRankings')}
           />
           <ExploreRow
             testID="league.free-agents-row"

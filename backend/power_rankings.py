@@ -60,7 +60,9 @@ def compute_power_rankings(
     where positions_value is the players-only sum, picks.value the draft
     capital sum, and total_value = positions_value + picks.value (FR1) so
     clients can decompose. Roster is grouped by position (QB→RB→WR→TE→other)
-    and sorted by value desc within each group (#144).
+    and sorted by value desc within each group (#144). Roster ids with no
+    entry in `players` (IDP / team-DST ids outside the pool) are omitted from
+    the roster listing (#183) — they hold zero value, so totals don't move.
     """
 
     def value_of(pid: str) -> float:
@@ -81,6 +83,15 @@ def compute_power_rankings(
         for raw_pid in m.get("player_ids") or []:
             pid = str(raw_pid)
             p = players.get(pid)
+            # #183 — roster ids with no metadata at all (IDP players — LB/DB/
+            # DL — and team-DST ids are excluded from the player pool) used to
+            # serialize as id-only rows that clients rendered as "Other"
+            # entries with a nonsensical id and no name/position. Hide them:
+            # they carry no seed and no board entry, so their value is 0.0 by
+            # construction and totals are unchanged. Known players with a
+            # non-core position (K, DEF with metadata) still serialize.
+            if p is None:
+                continue
             val = round(value_of(pid), 1)
             pos = getattr(p, "position", None) or "?"
             total += val

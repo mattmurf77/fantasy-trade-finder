@@ -26,6 +26,7 @@ import PortfolioScreen from '../screens/PortfolioScreen';
 import TradeCalculatorScreen from '../screens/TradeCalculatorScreen';
 import MatchesScreen from '../screens/MatchesScreen';
 import LeagueScreen from '../screens/LeagueScreen';
+import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import TopBar from '../components/TopBar';
 
 // Tab definitions. The "Rank" tab fans out into 4 sub-screens — Trios swipe,
@@ -38,6 +39,10 @@ const RankStack = createNativeStackNavigator();
 // sub-route. TradesScreen renders its own in-screen pill that pushes
 // Portfolio; the bottom-nav still surfaces just four tabs.
 const TradesStack = createNativeStackNavigator();
+// #181 — League tab becomes a small stack so the tab can LAND on the
+// rankings view (LeagueSummaryScreen) with the classic league page
+// (LeagueScreen) pushed as a sub-route from its "League home" entry row.
+const LeagueStack = createNativeStackNavigator();
 
 export type RankRoute =
   | 'RankHome'
@@ -328,6 +333,35 @@ function TradesStackNav() {
   );
 }
 
+function LeagueStackNav() {
+  // #181 — the League tab lands on the rankings view (the primary page);
+  // the classic league page is a pushed sub-route reached from the rankings
+  // screen's "League home" row. The rankings screen keeps its title via a
+  // stack header (no back control — it's the stack root, so the native
+  // header simply has no headerLeft; never a back button to nowhere). The
+  // legacy ROOT-stack 'LeagueSummary' route (RootNav) stays registered for
+  // old entry points (deep link app/league/summary, stored whats-new
+  // routes); this tab-root variant is the same component under a different
+  // route name.
+  return (
+    <LeagueStack.Navigator screenOptions={{ headerShown: false }}>
+      <LeagueStack.Screen
+        name="LeagueRankings"
+        component={LeagueSummaryScreen}
+        options={chalklineHeader('League rankings')}
+      />
+      <LeagueStack.Screen
+        name="LeagueHome"
+        component={LeagueScreen}
+        // Shared always-on back control (#51/#52 pattern), falling back to
+        // the rankings root — covers the cold-start deep-link case where
+        // LeagueHome is the stack's only route.
+        options={subScreenOptions('League home', 'LeagueRankings')}
+      />
+    </LeagueStack.Navigator>
+  );
+}
+
 // Chalkline tab icons — stroke SVG set from src/components/chalkline. The
 // navigator passes the active/inactive tint (ice / chalk-dim) as `color`.
 const tabIcon = (name: IconName) =>
@@ -492,12 +526,16 @@ export default function TabNav() {
         />
         <Tab.Screen
           name="League"
-          component={LeagueScreen}
+          component={LeagueStackNav}
           options={{ tabBarIcon: tabIcon('crown'), tabBarButtonTestID: 'tab.league' }}
-          listeners={({ navigation }) => ({
-            // PRD 01-05: no nested stack — focused re-tap scrolls to top.
+          listeners={({ navigation, route }) => ({
+            // PRD 01-05 (#181): the tab is a stack now — focused re-tap pops
+            // LeagueHome back to the rankings root; at root, scroll to top
+            // (the rankings screen registers the 'League' handler).
             tabPress: () => {
-              if (retapOn && navigation.isFocused()) requestScrollToTop('League');
+              if (retapOn && navigation.isFocused()) {
+                if (!popNestedToTop(navigation, route)) requestScrollToTop('League');
+              }
             },
           })}
         />
