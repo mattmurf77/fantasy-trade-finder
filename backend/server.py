@@ -2821,11 +2821,15 @@ def get_me_streak():
     """GET /api/me/streak → {current, longest, last_rank_local_date}.
 
     The streak counter advances inside record_event() whenever a rank-class
-    event fires (see _RANK_STREAK_EVENTS). This endpoint just reads the
-    denormalized columns on `users`.
+    event fires (see _RANK_STREAK_EVENTS). This endpoint reads the
+    denormalized columns on `users`; `current` is the effective streak —
+    0 once the last rank is >1 local day old (#152 residual). The local-day
+    frame comes from the X-User-TZ header (g.user_tz), same source the
+    write side uses; get_user_streak falls back to the stored last_rank_tz,
+    then UTC, when the header is absent.
     """
     sess = _require_session()
-    return jsonify(get_user_streak(sess["user_id"]))
+    return jsonify(get_user_streak(sess["user_id"], tz=getattr(g, "user_tz", None)))
 
 
 @app.route("/api/rank3", methods=["POST"])
@@ -2949,7 +2953,8 @@ def post_rank3():
         # Inline the post-rank streak from record_event's return value (same
         # transaction). Fall back to a fresh read only if the dual-write
         # itself failed — rare and already logged.
-        streak = post_streak if post_streak is not None else get_user_streak(g_user_id)
+        streak = post_streak if post_streak is not None else get_user_streak(
+            g_user_id, tz=getattr(g, "user_tz", None))
         return jsonify({
             "interaction_count": rank_set.interaction_count,
             "threshold":         rank_set.threshold,

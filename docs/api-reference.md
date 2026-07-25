@@ -280,7 +280,7 @@ Verdict math is `trade_service.classify_verdict(give_value, receive_value)` (no 
 | GET | `/api/league/coverage` | Member ranking coverage (the excluded "current user" is always the session user — a `user_id` query param is ignored, teardown W2C hygiene) |
 | GET | `/api/league/member-unlock-states` | Per-member unlock badges |
 | GET | `/api/league/members` | League member roster + invite metadata (League Summary "Leaguemates Joined") |
-| GET | `/api/leaderboard` | League + Universal leaderboards (rendered inside the League tab) |
+| GET | `/api/leaderboard` | League + Universal leaderboards (rendered inside the League tab). `metric=streak` ranks **effective** streaks (#152 residual): a user whose `last_rank_local_date` is >1 day behind their local today (frame = their stored `last_rank_tz`, UTC fallback) decays to 0 and drops off the board — lapsed users can't squat on top spots. `self_row` applies the same rule |
 | GET | `/api/league/activity` | Activity feed |
 | GET | `/api/league/contrarian` | Contrarian rankings within league |
 | GET | `/api/league/format-stats` | Scoring format breakdown |
@@ -411,7 +411,7 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 | GET | `/terms` | Serve `web/terms.html` (clean URL) |
 | GET | `/.well-known/apple-app-site-association` | Universal Links AASA file (teardown 01-nav PRD-03, backend half — unflagged, inert until the mobile `associatedDomains` entitlement ships). `application/json`, direct 200, no redirect. Declares appID `<APPLE_TEAM_ID>.com.fantasytradefinder.app` (team id defaults to the repo's `mobile/eas.json` value; `APPLE_TEAM_ID` env overrides) with paths `/u/*`, `/s/*`, and `/?ref=*` (query match via `components`). |
 | GET | `/api/invite/impact` | Invite-program impact stats |
-| GET | `/api/me/streak` | Current user's daily-activity streak |
+| GET | `/api/me/streak` | Current user's daily-activity streak → `{current, longest, last_rank_local_date}`. `current` is the **effective** streak (#152 residual): 0 once the last rank is >1 local day old — the stored counter is never mutated on read. Local-day frame: `X-User-TZ` header, else stored `users.last_rank_tz`, else UTC |
 
 ## In-app feedback
 

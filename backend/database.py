@@ -1993,6 +1993,11 @@ _EVENT_TO_USER_COL: dict[str, str] = {
     "trio_swipe":                   "last_rank_at",
     "tier_save":                    "last_rank_at",
     "ranking_complete_first_time":  "last_rank_at",
+    # #152 residual: the anchor wizard + manual board are rank surfaces too —
+    # without these, notification-nudge gating (keyed off last_rank_at)
+    # undercounted users who rank exclusively via anchors or reorders.
+    "anchor_answered":              "last_rank_at",
+    "ranking_reorder":              "last_rank_at",
     "match_viewed":                 "last_match_seen_at",
     "trade_proposed":               "last_trade_proposed_at",
     "counter_sent":                 "last_trade_proposed_at",
@@ -2264,8 +2269,46 @@ def link_identity(
         print(f"[link_identity] {device_id} failed: {e}")
 
 
-def get_user_streak(user_id: str) -> dict:
-    """Read-only streak snapshot for the streak chip + leaderboard."""
+def _streak_lapsed(last_local_date_str: str | None, tz: str | None) -> bool:
+    """True when a stored streak is stale for display: last_rank_local_date
+    is missing/unparseable, or more than 1 day behind "today" in `tz`
+    (IANA name; missing/invalid falls back to UTC — same rule as the write
+    side). Mirrors the write-side transition exactly — a gap > 1 local day
+    is what resets the counter — so "yesterday" still displays (ranking
+    today would increment it), and a date at/ahead of today displays too
+    (tz-frame skew, e.g. reading in UTC a date written in UTC+14).
+    """
+    if not last_local_date_str:
+        return True
+    try:
+        last_date = datetime.strptime(last_local_date_str, "%Y-%m-%d").date()
+    except Exception:
+        return True
+    zone = None
+    if tz and ZoneInfo is not None:
+        try:
+            zone = ZoneInfo(tz)
+        except Exception:
+            zone = None
+    today_local = datetime.now(zone or timezone.utc).date()
+    return (today_local - last_date).days > 1
+
+
+def get_user_streak(user_id: str, tz: str | None = None) -> dict:
+    """Read-only streak snapshot for the streak chip + leaderboard.
+
+    `current` is the EFFECTIVE streak: the stored counter decays to 0 at
+    display time once the last rank is more than 1 local day old (the next
+    rank event would reset it to 1 anyway — the stored row only rewrites
+    then, so without read-time decay a lapsed user shows their old streak
+    forever). The stored row is never mutated here; write-side math in
+    _recompute_streak_on_rank_event() keys off the stored value + date and
+    is unaffected. `longest` never decays.
+
+    Local-day frame: `tz` (the viewer's X-User-TZ header, threaded by the
+    routes) when provided, else the stored last_rank_tz the date was
+    written in, else UTC.
+    """
     try:
         with engine.begin() as conn:
             row = conn.execute(
@@ -2273,12 +2316,17 @@ def get_user_streak(user_id: str) -> dict:
                     users_table.c.current_streak,
                     users_table.c.longest_streak,
                     users_table.c.last_rank_local_date,
+                    users_table.c.last_rank_tz,
                 ).where(users_table.c.sleeper_user_id == user_id)
             ).first()
         if row is None:
             return {"current": 0, "longest": 0, "last_rank_local_date": None}
+        current = row.current_streak or 0
+        if current and _streak_lapsed(row.last_rank_local_date,
+                                      tz or row.last_rank_tz):
+            current = 0
         return {
-            "current":              row.current_streak or 0,
+            "current":              current,
             "longest":              row.longest_streak or 0,
             "last_rank_local_date": row.last_rank_local_date,
         }
@@ -2405,19 +2453,39 @@ def _streak_top(
     league_user_ids: list[str] | None,
     limit: int,
 ) -> list[tuple[str, int]]:
-    """Top-N (user_id, current_streak) ordered DESC, ties broken by user_id ASC."""
+    """Top-N (user_id, current_streak) ordered DESC, ties broken by user_id ASC.
+
+    Only EFFECTIVE (non-lapsed) streaks make the board: the stored counter
+    only rewrites on a user's next rank event, so without read-time decay a
+    user who stopped ranking would squat on top spots forever. Each row is
+    checked against its own local today (frame = the row's stored
+    last_rank_tz, UTC fallback — see _streak_lapsed). SQL prefilters to
+    last_rank_local_date within 2 UTC days — a date older than that is
+    lapsed in EVERY timezone (offsets span UTC-12..+14) — so the fetch is
+    bounded by recently-active users; Python then applies the exact
+    per-row tz check. Survivors keep effective == stored value, so the SQL
+    ordering is already final — filter and slice, no re-sort needed.
+    """
     try:
+        cutoff = (datetime.now(timezone.utc).date() - timedelta(days=2)).isoformat()
         with engine.begin() as conn:
             stmt = select(
                 users_table.c.sleeper_user_id,
                 users_table.c.current_streak,
+                users_table.c.last_rank_local_date,
+                users_table.c.last_rank_tz,
             ).where(users_table.c.current_streak.is_not(None)) \
              .where(users_table.c.current_streak > 0) \
-             .order_by(users_table.c.current_streak.desc(), users_table.c.sleeper_user_id.asc()) \
-             .limit(limit)
+             .where(users_table.c.last_rank_local_date >= cutoff) \
+             .order_by(users_table.c.current_streak.desc(), users_table.c.sleeper_user_id.asc())
             if league_user_ids is not None:
                 stmt = stmt.where(users_table.c.sleeper_user_id.in_(league_user_ids))
-            return [(r.sleeper_user_id, r.current_streak) for r in conn.execute(stmt).fetchall()]
+            rows = conn.execute(stmt).fetchall()
+        return [
+            (r.sleeper_user_id, r.current_streak)
+            for r in rows
+            if not _streak_lapsed(r.last_rank_local_date, r.last_rank_tz)
+        ][:limit]
     except Exception as e:
         print(f"[_streak_top] failed: {e}")
         return []
@@ -2428,21 +2496,36 @@ def _streak_self_rank(
     league_user_ids: list[str] | None,
 ) -> tuple[int, int] | None:
     """Return (rank, current_streak) for the user, or None if their
-    streak is null/0 or the user row is missing. Computes rank in SQL via
-    a single count-of-better-positions instead of re-ranking everyone:
+    streak is null/0/lapsed or the user row is missing. Rank is
+    1 + count-of-better-positions:
         rank = 1 + COUNT(WHERE streak > mine OR (streak == mine AND uid < mine))
+    restricted to non-lapsed rows so the rank lines up with _streak_top's
+    board. The lapse check needs each row's own last_rank_tz frame, so the
+    "better" rows are fetched (bounded by the same 2-UTC-day prefilter as
+    _streak_top) and counted in Python instead of a pure SQL COUNT.
     """
     try:
+        cutoff = (datetime.now(timezone.utc).date() - timedelta(days=2)).isoformat()
         with engine.begin() as conn:
             row = conn.execute(
-                select(users_table.c.current_streak)
-                .where(users_table.c.sleeper_user_id == user_id)
+                select(
+                    users_table.c.current_streak,
+                    users_table.c.last_rank_local_date,
+                    users_table.c.last_rank_tz,
+                ).where(users_table.c.sleeper_user_id == user_id)
             ).first()
             if row is None or not row.current_streak or row.current_streak <= 0:
                 return None
+            if _streak_lapsed(row.last_rank_local_date, row.last_rank_tz):
+                return None  # lapsed viewers aren't on the board at all
             my_streak = row.current_streak
 
-            stmt = select(func.count()).select_from(users_table).where(
+            stmt = select(
+                users_table.c.sleeper_user_id,
+                users_table.c.last_rank_local_date,
+                users_table.c.last_rank_tz,
+            ).where(users_table.c.last_rank_local_date >= cutoff) \
+             .where(
                 or_(
                     users_table.c.current_streak > my_streak,
                     and_(
@@ -2453,7 +2536,11 @@ def _streak_self_rank(
             )
             if league_user_ids is not None:
                 stmt = stmt.where(users_table.c.sleeper_user_id.in_(league_user_ids))
-            ahead = conn.execute(stmt).scalar() or 0
+            better = conn.execute(stmt).fetchall()
+            ahead = sum(
+                1 for r in better
+                if not _streak_lapsed(r.last_rank_local_date, r.last_rank_tz)
+            )
             return (ahead + 1, int(my_streak))
     except Exception as e:
         print(f"[_streak_self_rank] {user_id} failed: {e}")

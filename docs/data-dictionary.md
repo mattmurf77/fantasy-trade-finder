@@ -23,7 +23,11 @@ Sleeper user identities + denormalized hot-read activity columns.
 | `anchor_scale` | JSON text | Per-format pick-value scale (1.5.4 #111): `{"1qb_ppr": 3, "sf_tep": 2}` — "a top-tier asset is worth N firsts" (N ∈ 2/3/4). Absent key = default 4 since the #117 re-derivation (2026-07-12; = the plain `m × base` anchor math). Stored values keep their semantics across the re-derivation — only the neutral point moved. Read/written by `load_anchor_scale` / `save_anchor_scale` via `/api/anchor/scale`. |
 | `last_active_at` | str | denormalized from `user_events` for hot reads |
 | `last_login_at` | str | |
-| `last_rank_at` | str | |
+| `last_rank_at` | str | Bumped by every rank-class event in `_EVENT_TO_USER_COL`: `trio_swipe`, `tier_save`, `ranking_complete_first_time`, and since the #152 residual fix also `anchor_answered` + `ranking_reorder` (notification-nudge gating undercounted anchor-wizard/manual-board users before) |
+| `current_streak` | int | Daily ranking streak, advanced by `_recompute_streak_on_rank_event()` on `_RANK_STREAK_EVENTS`. **Stored value only rewrites on the next rank event** — readers (`get_user_streak`, streak leaderboard) compute the *effective* streak, reporting 0 when `last_rank_local_date` is >1 day behind local today (#152 residual) |
+| `longest_streak` | int | High-water mark; never decays |
+| `last_rank_local_date` | str | `YYYY-MM-DD` of the last rank in the **user's local-day frame** (`last_rank_tz`), so DST shifts and travel don't reset |
+| `last_rank_tz` | str | IANA tz (`X-User-TZ` header) the date above was written in; also the read-side decay frame (UTC fallback when null/invalid) |
 | `last_match_seen_at` | str | |
 | `last_trade_proposed_at` | str | |
 | `last_push_sent_at` | str | |
