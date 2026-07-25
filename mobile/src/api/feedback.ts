@@ -50,6 +50,8 @@ export type FeedbackStatus =
 // notes whose last-merged status is already terminal. 'fixed' stays visible
 // ("Fixed — in next update") until the operator flips it to 'shipped'.
 export const CLOSED_FEEDBACK_STATUSES: readonly FeedbackStatus[] = ['shipped', 'declined'];
+// The FAB badge additionally excludes 'fixed' — see the pure module
+// utils/feedbackBadge.ts (RESOLVED_FEEDBACK_STATUSES, #184).
 
 export interface MyFeedbackItem {
   server_id: number;
