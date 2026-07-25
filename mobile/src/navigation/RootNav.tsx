@@ -89,6 +89,27 @@ function HeaderClose({ onPress, testID }: { onPress: () => void; testID: string 
   );
 }
 
+// #151 — explicit JS back control for pushed screens. The NATIVE header back
+// button goes unresponsive on iOS 26 when the previous screen hides its
+// header (react-native-screens#3294 — our root stack's Main tabs run with
+// headerShown: false), which testers hit on Free Agents. A JS Pressable
+// wired straight to navigation.goBack() sidesteps the native control
+// entirely. Same Icon Button construction as HeaderClose.
+function HeaderBack({ onPress, testID }: { onPress: () => void; testID: string }) {
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel="Back"
+      onPress={onPress}
+      hitSlop={8}
+      style={({ pressed }) => [styles.headerClose, pressed && { backgroundColor: ink.ink3 }]}
+    >
+      <Icon name="chevron-left" size={20} color={chalk.base} />
+    </Pressable>
+  );
+}
+
 export default function RootNav({ booted }: { booted: boolean }) {
   const user = useSession((s) => s.user);
   const league = useSession((s) => s.league);
@@ -438,13 +459,29 @@ export default function RootNav({ booted }: { booted: boolean }) {
         <Stack.Screen
           name="FreeAgents"
           component={FreeAgentsScreen}
-          options={{
+          options={({ navigation }) => ({
             headerShown: true,
             title: 'Free agents',
             headerTitle: () => <HeaderTitle>Free agents</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
-          }}
+            // #151 — the native back control is unresponsive here on iOS 26
+            // (react-native-screens#3294: previous screen has headerShown:
+            // false). Hide it and mount our own JS back control. canGoBack
+            // guards the cold-start deep-link case (FreeAgents as the only
+            // route) by falling back to the Main tabs.
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="free-agents.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
+          })}
         />
         <Stack.Screen
           name="TestStages"
