@@ -5,7 +5,9 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
+  Alert,
   FlatList,
+  Linking,
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,7 +26,14 @@ import {
 } from '../theme/chalkline';
 import { Button } from '../components/chalkline';
 import PlayerCard from '../components/PlayerCard';
-import { getFreeAgents, type FreeAgentRow } from '../api/league';
+import {
+  getFreeAgents,
+  type FreeAgentRow,
+  type FreeAgentRosterCapacity,
+} from '../api/league';
+import { ApiError } from '../api/client';
+import { isEspnLeague } from '../api/espn';
+import { isMflLeague, isFleaflickerLeague } from '../api/platformLink';
 import { readErrorCopy } from '../utils/verification';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
@@ -32,6 +41,102 @@ import type { Position } from '../shared/types';
 
 type PositionFilter = Position | 'ALL';
 const FILTERS: PositionFilter[] = ['ALL', 'QB', 'RB', 'WR', 'TE'];
+
+// #179 — where an "Add" can actually be executed. Sleeper publishes no
+// write API for roster moves, so the honest Sleeper v1 is a deep-link into
+// the league's players page in the Sleeper app/site (same pragmatic pattern
+// as the trade-propose deep-link in TradesScreen). Platform-linked leagues
+// (ESPN / MFL / Fleaflicker) are read-only imports today — no write path,
+// so the Add affordance renders dimmed and explains why on tap. 'local'
+// covers demo/local leagues that exist nowhere outside FTF.
+type AddPlatform = 'sleeper' | 'espn' | 'mfl' | 'fleaflicker' | 'local';
+
+function resolveAddPlatform(leagueId: string | undefined, isDemo: boolean): AddPlatform {
+  if (!leagueId || isDemo) return 'local';
+  if (isEspnLeague(leagueId)) return 'espn';
+  if (isMflLeague(leagueId)) return 'mfl';
+  if (isFleaflickerLeague(leagueId)) return 'fleaflicker';
+  // Real Sleeper league ids are numeric; anything else is a local league.
+  return /^\d+$/.test(leagueId) ? 'sleeper' : 'local';
+}
+
+const NO_ADD_REASON: Record<Exclude<AddPlatform, 'sleeper'>, { title: string; body: string }> = {
+  espn: {
+    title: "Can't add in ESPN leagues yet",
+    body:
+      'This league is imported from ESPN with read-only access, so ' +
+      'Fantasy Trade Finder can’t make roster moves there. Open the ' +
+      'ESPN Fantasy app to add this player.',
+  },
+  mfl: {
+    title: "Can't add in MFL leagues yet",
+    body:
+      'This league is linked to MyFantasyLeague with read-only access, so ' +
+      'Fantasy Trade Finder can’t make roster moves there. Open MFL ' +
+      'to add this player.',
+  },
+  fleaflicker: {
+    title: "Can't add in Fleaflicker leagues yet",
+    body:
+      'This league is linked to Fleaflicker with read-only access, so ' +
+      'Fantasy Trade Finder can’t make roster moves there. Open ' +
+      'Fleaflicker to add this player.',
+  },
+  local: {
+    title: "Can't add in this league",
+    body:
+      'This league isn’t connected to a fantasy platform, so there’s ' +
+      'no roster to add this player to.',
+  },
+};
+
+// #179 — per-platform Add handling. Sleeper: explain the hand-off (and warn
+// on a full roster when capacity data exists) before deep-linking to the
+// league's players page; everything else: honest "why not" alert.
+function handleAdd(
+  row: FreeAgentRow,
+  leagueId: string,
+  addPlatform: AddPlatform,
+  capacity: FreeAgentRosterCapacity | null | undefined,
+) {
+  if (addPlatform !== 'sleeper') {
+    const reason = NO_ADD_REASON[addPlatform];
+    Alert.alert(reason.title, reason.body);
+    return;
+  }
+  const openSleeper = () => {
+    // Lands on the league's Players (available players) surface — Sleeper
+    // has no public write API, so the add itself happens in Sleeper.
+    Linking.openURL(`https://sleeper.com/leagues/${leagueId}/players`).catch(() => {});
+  };
+  const rosterFull =
+    capacity != null &&
+    capacity.limit != null &&
+    capacity.my_count != null &&
+    capacity.my_count >= capacity.limit;
+  if (rosterFull) {
+    Alert.alert(
+      'Your roster is full',
+      `You're at ${capacity!.my_count}/${capacity!.limit} players, so Sleeper ` +
+        `will block this add until you drop someone. Open Sleeper to make ` +
+        `the drop and add ${row.name}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Sleeper', onPress: openSleeper },
+      ],
+    );
+    return;
+  }
+  Alert.alert(
+    `Add ${row.name}`,
+    'Sleeper doesn’t let other apps make roster moves, so we’ll ' +
+      'open your league in Sleeper to finish the add there.',
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Open Sleeper', onPress: openSleeper },
+    ],
+  );
+}
 
 // Free-agent finder (#143) — League-stack route 'FreeAgents' (entered from
 // the League tab's "Free agents" row). Best available players in the
@@ -43,6 +148,7 @@ export default function FreeAgentsScreen() {
   const navigation = useNavigation<any>();
   const [filter, setFilter] = useState<PositionFilter>('ALL');
   const leagueId = useSession((s) => s.league?.league_id);
+  const isDemo = useSession((s) => s.isDemo);
   // S4 PRD-05 (ux.empty_state_ctas): the no-league state gets the action
   // its copy describes. Flag off: copy-only, as before.
   const emptyCtasOn = useFlag('ux.empty_state_ctas');
@@ -62,6 +168,16 @@ export default function FreeAgentsScreen() {
 
   const rows = query.data?.free_agents ?? [];
   const consensusOnly = !!query.data && !query.data.user_has_rankings;
+  // #179 — Add affordance context (platform + Sleeper roster capacity).
+  const addPlatform = resolveAddPlatform(leagueId, isDemo);
+  const capacity = query.data?.roster_capacity;
+  const onAdd = useCallback(
+    (row: FreeAgentRow) => {
+      if (!leagueId) return;
+      handleAdd(row, leagueId, addPlatform, capacity);
+    },
+    [leagueId, addPlatform, capacity],
+  );
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -116,7 +232,13 @@ export default function FreeAgentsScreen() {
       ) : query.isError ? (
         <View style={styles.centerFill}>
           <Text style={styles.errorText}>
-            {readErrorCopy(query.error, "Couldn't load free agents.")}
+            {/* #178 — the backend refuses to serve (503 rosters_unavailable)
+                rather than list rostered players as FAs; surface its honest
+                message instead of the generic copy. */}
+            {query.error instanceof ApiError &&
+            (query.error.body as any)?.error === 'rosters_unavailable'
+              ? query.error.message
+              : readErrorCopy(query.error, "Couldn't load free agents.")}
           </Text>
           <Button label="Try again" variant="ghost" compact onPress={() => query.refetch()} />
         </View>
@@ -157,7 +279,9 @@ export default function FreeAgentsScreen() {
               </Text>
             </View>
           }
-          renderItem={({ item }) => <FreeAgentRowCard row={item} />}
+          renderItem={({ item }) => (
+            <FreeAgentRowCard row={item} addPlatform={addPlatform} onAdd={onAdd} />
+          )}
         />
       )}
     </SafeAreaView>
@@ -166,11 +290,23 @@ export default function FreeAgentsScreen() {
 
 // One FA row: dense PlayerCard (60px two-line) — line 2 carries the drop
 // suggestion; right cluster = positional FA rank over the caller-board value.
-function FreeAgentRowCard({ row }: { row: FreeAgentRow }) {
+// #179: rightSlot carries the Add affordance — secondary for Sleeper leagues
+// (deep-link hand-off), ghost/dim for platforms with no write path (tap
+// explains why).
+function FreeAgentRowCard({
+  row,
+  addPlatform,
+  onAdd,
+}: {
+  row: FreeAgentRow;
+  addPlatform: AddPlatform;
+  onAdd: (row: FreeAgentRow) => void;
+}) {
   const drop = row.drop_suggestion;
   // S2 PRD-04 ride-along (visual.chalkline_cleanup): "No drop worth making"
   // is content, not a placeholder — faint → dim.
   const cleanupOn = useFlag('visual.chalkline_cleanup');
+  const canDeepLink = addPlatform === 'sleeper';
   return (
     <View style={styles.rowWrap}>
       <PlayerCard
@@ -185,6 +321,15 @@ function FreeAgentRowCard({ row }: { row: FreeAgentRow }) {
         }}
         posRank={`${row.position}${row.pos_rank}`}
         value={row.value}
+        rightSlot={
+          <Button
+            testID={`free-agents.add.${row.player_id}`}
+            label="Add"
+            variant={canDeepLink ? 'secondary' : 'ghost'}
+            compact
+            onPress={() => onAdd(row)}
+          />
+        }
         statsSlot={
           drop ? (
             <Text style={styles.dropLine} numberOfLines={1}>

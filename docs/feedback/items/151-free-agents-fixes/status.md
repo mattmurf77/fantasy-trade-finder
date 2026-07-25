@@ -81,3 +81,21 @@ when confirmed.
 - `backend/tests/test_free_agents_route.py` — NEW (3 tests).
 - `mobile/src/navigation/RootNav.tsx` — `HeaderBack` + FreeAgents options.
 - `mobile/src/components/CLAUDE.md` — testID registry (`free-agents.back-btn`).
+
+## 2026-07-25 addendum — #178 reopened the filtering half
+
+The operator re-reported on v1.11.0 ("all players are showing") with this
+fix live. Re-root-caused from scratch against his real league
+(`1312140920132497408`, public Sleeper API): the (a) fix above was correct
+but INCOMPLETE. Both exclusion sources — the in-session rosters AND the raw
+`league_members` snapshot this fix unioned in — descend from the same
+CLIENT-built session payload, and the clients drop rosters whose
+`owner_id` is null (`initLeagueSession` filters `r.owner_id &&` before
+building `opponent_rosters`). His league has an orphaned roster
+(roster_id 6, `owner_id: null`, 39 players) holding Ja'Marr Chase, Bijan
+Robinson, Jayden Daniels, Joe Burrow, Amon-Ra St. Brown, Sam LaPorta —
+so the TOP of his FA list was elite rostered players, which reads as "not
+filtering at all". See
+`docs/feedback/items/178-fa-filter-regression/status.md` for the fix
+(live Sleeper rosters read unioned into the exclusion + fail-loud 503 on
+an empty exclusion set).

@@ -671,12 +671,22 @@ export interface FreeAgentRow {
   pos_rank: number;
   drop_suggestion: FreeAgentDropSuggestion | null;
 }
+// #179 — roster-capacity context for the Add pre-check. Sleeper leagues
+// only (null for platform/demo leagues); both fields best-effort — null
+// when the backend couldn't resolve them. `limit` counts lineup+bench+IR+
+// taxi slots; `my_count` is the caller's current Sleeper roster headcount.
+export interface FreeAgentRosterCapacity {
+  my_count: number | null;
+  limit: number | null;
+}
 export interface FreeAgentsResponse {
   league_id: string;
   scoring_format: ScoringFormat;
   position: 'QB' | 'RB' | 'WR' | 'TE' | 'ALL';
   user_has_rankings: boolean;
   free_agents: FreeAgentRow[];
+  /** Absent on pre-#179 servers. */
+  roster_capacity?: FreeAgentRosterCapacity | null;
 }
 export async function getFreeAgents(
   leagueId: string,

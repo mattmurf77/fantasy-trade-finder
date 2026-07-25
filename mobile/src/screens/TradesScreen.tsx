@@ -2862,6 +2862,37 @@ export default function TradesScreen({ navigation, route }: any) {
         </View>
         </>
         )}
+
+        {/* #182 — Free-agents entry from the find-a-trade surface. Same
+            explore-row construction as the League tab's Explore list
+            (hairline list row, title + body-sm meta + chevron); FreeAgents
+            is a ROOT-stack route, so navigate() bubbles up from the tab
+            navigator exactly as it does from LeagueScreen. Hidden during
+            first-run (collapsed chrome) and in hub-launched deck modes
+            (focused surface). */}
+        {!firstRun && !finderMode && (
+          <View style={styles.exploreSection}>
+            <TickLabel>Explore</TickLabel>
+            <Pressable
+              testID="trades.explore.free-agents"
+              accessibilityRole="button"
+              accessibilityLabel="Free agents"
+              onPress={() => navigation.navigate('FreeAgents')}
+              style={({ pressed }) => [
+                styles.exploreRow,
+                pressed && { backgroundColor: ink.ink3 },
+              ]}
+            >
+              <View style={styles.exploreMain}>
+                <Text style={type.title}>Free agents</Text>
+                <Text style={[type.bodySm, styles.exploreSub]}>
+                  Best available players in this league
+                </Text>
+              </View>
+              <Icon name="chevron-right" size={16} color={chalk.dim} />
+            </Pressable>
+          </View>
+        )}
       </ScrollView>
 
       {/* Queue footer bar — anchored above the bottom tab nav. Tap the
@@ -3210,6 +3241,20 @@ function cap(s: string) {
 
 // ── Styles — Chalkline (docs/design/design-system.md) ───────────────
 const styles = StyleSheet.create({
+  // #182 — explore-row construction (mirrors LeagueScreen's Explore list).
+  exploreSection: {
+    marginTop: space.lg,
+  },
+  exploreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingVertical: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
+  },
+  exploreMain: { flex: 1, gap: 2 },
+  exploreSub: { color: chalk.dim },
   safe: { flex: 1, backgroundColor: ink.ink0 },
   scroll: { padding: space.lg, gap: space.lg, paddingBottom: 96 },
   // B3 — sub-route pill row (Trades / Portfolio / Calculator).
