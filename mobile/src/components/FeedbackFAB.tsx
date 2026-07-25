@@ -5,6 +5,7 @@ import { ink, chalk, semantic, radii, fonts, shadowSheet } from '../theme/chalkl
 import { Icon } from './chalkline';
 import FeedbackSheet from './FeedbackSheet';
 import { useFeedback } from '../state/useFeedback';
+import { openFeedbackCount } from '../utils/feedbackBadge';
 import { useFlag } from '../state/useFeatureFlags';
 
 interface Props {
@@ -50,9 +51,11 @@ export function setPinnedBottomBarHeight(key: string, height: number) {
 // authed screen during TestFlight. Tap opens the FeedbackSheet, pre-
 // populated with the screen name.
 //
-// The count pill shows the inbox count so the user can see at a glance
-// how much feedback is pending export. Tap the count to jump to inbox
-// directly; tap the body to open the capture sheet.
+// The count pill shows how many notes are still awaiting action (#184):
+// closed notes (shipped/declined or no longer served to this account) and
+// resolved statuses (fixed/shipped/declined) don't count — otherwise a
+// long-time tester stares at "150+" forever. The inbox LIST still shows
+// 'fixed' notes ("Fixed — in next update"); only the badge excludes them.
 //
 // Production-build exclusion (S3 PRD-01 item 3 — PLANNED, not implemented
 // here): the existing removal note lives at the RootNav mount site
@@ -65,14 +68,19 @@ export default function FeedbackFAB({ activeScreen }: Props) {
   const insets = useSafeAreaInsets();
   const items  = useFeedback((s) => s.items);
   const hydrate = useFeedback((s) => s.hydrate);
+  const refreshStatuses = useFeedback((s) => s.refreshStatuses);
   const [sheetOpen, setSheetOpen] = useState(false);
   // S3 PRD-01 — content-aware offset. Flag off → 0 extra offset always.
   const touchPolish = useFlag('ux.touch_polish');
   const [barHeight, setBarHeight] = useState(() => maxBarHeight());
 
   useEffect(() => {
-    void hydrate();
-  }, [hydrate]);
+    // Hydrate the local notes, then pull operator-set statuses so the badge
+    // drops for closed/resolved notes without the user opening the inbox
+    // (#184). refreshStatuses is best-effort and silent on failure; the FAB
+    // mounts once in RootNav, so this is one GET per launch.
+    void hydrate().then(() => refreshStatuses());
+  }, [hydrate, refreshStatuses]);
 
   useEffect(() => {
     const listener = (h: number) => setBarHeight(h);
@@ -85,6 +93,7 @@ export default function FeedbackFAB({ activeScreen }: Props) {
   }, []);
 
   const extraOffset = touchPolish ? barHeight : 0;
+  const openCount = openFeedbackCount(items);
 
   return (
     <>
@@ -103,15 +112,15 @@ export default function FeedbackFAB({ activeScreen }: Props) {
           style={({ pressed }) => [styles.fab, pressed && styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel={
-            items.length > 0
-              ? `Capture feedback, ${items.length} saved`
+            openCount > 0
+              ? `Capture feedback, ${openCount} open`
               : 'Capture feedback'
           }
         >
           <Icon name="flag" size={20} color={chalk.base} />
-          {items.length > 0 ? (
+          {openCount > 0 ? (
             <View style={styles.badge}>
-              <Text style={styles.badgeText}>{items.length}</Text>
+              <Text style={styles.badgeText}>{openCount}</Text>
             </View>
           ) : null}
         </Pressable>
