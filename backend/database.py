@@ -449,15 +449,18 @@ league_preferences_table = Table("league_preferences", metadata,
 
 
 # ---------------------------------------------------------------------------
-# asset_preferences — per-player trade preferences (backlog #2)
+# asset_preferences — per-player trade preferences (backlog #2, #163)
 # ---------------------------------------------------------------------------
 # Where league_preferences expresses intent at POSITION granularity, this
 # table expresses it at PLAYER granularity, per league:
-#   list_type='untouchable' → never suggest trading this player AWAY
-#                             (hard filter on the give side, all gen paths)
-#   list_type='target'      → bias suggestions toward ACQUIRING this player
-#                             (survives the prune + composite multiplier)
-# A player can't be on both lists in the same league (the unique constraint
+#   list_type='untouchable'    → never suggest trading this player AWAY
+#                                (hard filter on the give side, all gen paths)
+#   list_type='target'         → bias suggestions toward ACQUIRING this player
+#                                (survives the prune + composite multiplier)
+#   list_type='not_interested' → never suggest ACQUIRING this player (#163 —
+#                                hard filter on the receive side; give side
+#                                untouched)
+# A player can't be on two lists in the same league (the unique constraint
 # is on the player; the route enforces single membership). Add/remove history
 # for the #65 label stream is captured via record_event (user_events), not here.
 # ---------------------------------------------------------------------------
@@ -1439,6 +1442,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("asset_floor_abs",        450.0,   "interview: absolute value floor for non-headliner pieces (max-of-boards); 0 disables"),
     ("crown_elite_value",     6000.0,   "interview: crown-asset value earning the full crown_rate; premium scales linearly below it; <=0 disables scaling"),
     ("fairness_floor_divergence", 0.55, "interview: consensus fairness gate for divergence cards = min(fairness_threshold, this) — extreme-case veto only"),
+    # ── #189 — relaxed fallback for empty targeted sweeps ────────────────
+    ("relaxed_fairness_threshold", 0.55, "#189: stage-1 fairness bar for the relaxed fallback pass on empty targeted jobs (never tightens below the caller's threshold)"),
+    ("relaxed_surplus_floor",      0.0,  "#189: stage-2 value for min_side_surplus(_marginal) in the relaxed pass; 0 still requires non-negative surplus both sides"),
     ("bench_credit_qb",          0.10,  "interview: bench credit for QB depth in 1QB formats"),
     ("bench_credit_rb",          0.30,  "interview: bench credit for RB depth (near-startable insurance)"),
     ("bench_credit_wr",          0.30,  "interview: bench credit for WR depth (near-startable insurance)"),
@@ -5531,16 +5537,17 @@ def load_league_preference(user_id: str, league_id: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# Asset preferences — untouchables + targets (backlog #2)
+# Asset preferences — untouchables + targets + not-interested (backlog #2, #163)
 # ---------------------------------------------------------------------------
 
-ASSET_PREF_LISTS = ("untouchable", "target")
+ASSET_PREF_LISTS = ("untouchable", "target", "not_interested")
 
 
 def load_asset_preferences(user_id: str, league_id: str) -> dict:
-    """Return {"untouchables": [player_id, ...], "targets": [player_id, ...]}
-    for (user_id, league_id). Empty lists when none saved."""
-    out = {"untouchables": [], "targets": []}
+    """Return {"untouchables": [player_id, ...], "targets": [...],
+    "not_interested": [...]} for (user_id, league_id). Empty lists when none
+    saved."""
+    out = {"untouchables": [], "targets": [], "not_interested": []}
     with engine.connect() as conn:
         rows = conn.execute(
             select(asset_preferences_table).where(
@@ -5555,6 +5562,8 @@ def load_asset_preferences(user_id: str, league_id: str) -> dict:
             out["untouchables"].append(r.player_id)
         elif r.list_type == "target":
             out["targets"].append(r.player_id)
+        elif r.list_type == "not_interested":
+            out["not_interested"].append(r.player_id)
     return out
 
 
@@ -5562,9 +5571,9 @@ def set_asset_preference(
     user_id: str, league_id: str, player_id: str, list_type: str | None,
 ) -> dict:
     """Add/move/remove a player's tag for a league, returning the refreshed
-    lists. `list_type` ∈ {'untouchable','target'} adds (replacing any prior
-    tag for that player — single membership), None removes. Idempotent.
-    Raises ValueError on an unknown list_type."""
+    lists. `list_type` ∈ {'untouchable','target','not_interested'} adds
+    (replacing any prior tag for that player — single membership), None
+    removes. Idempotent. Raises ValueError on an unknown list_type."""
     if list_type is not None and list_type not in ASSET_PREF_LISTS:
         raise ValueError(f"list_type must be one of {ASSET_PREF_LISTS} or None")
     pid = str(player_id)

@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from './chalkline';
 import PositionChip from './PositionChip';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
+import { setAssetPref, type AssetPrefs } from '../api/league';
 import {
   chalk,
   ink,
@@ -97,6 +98,38 @@ export default function PlayerContextMenu({ visible, player, actions, onClose }:
       </View>
     </Modal>
   );
+}
+
+// ── "Not interested" action (#163) ───────────────────────────────────────
+// Canonical menu action for OTHER-roster players (Trades deck receive side,
+// Matches YOU GET tiles, opponent rosters): tagging a player `not_interested`
+// tells the engine to never offer him TO the caller (receive-side hard
+// exclusion via /api/league/asset-prefs; the caller can still trade him
+// away). Mirrors the untouchable/target action pattern — callers own the
+// menu mount, refresh state and toasts; this factory owns the canonical
+// copy, testID keys (`player-menu.not-interested-add|remove`) and API call.
+export function notInterestedAction(opts: {
+  leagueId: string;
+  playerId: string;
+  /** Whether the player is currently on the caller's not_interested list. */
+  isNotInterested: boolean;
+  /** Called with the server's refreshed lists after the tag flips. */
+  onDone?: (prefs: AssetPrefs) => void;
+  onError?: (err: unknown) => void;
+}): PlayerMenuAction {
+  const { leagueId, playerId, isNotInterested, onDone, onError } = opts;
+  return {
+    key: isNotInterested ? 'not-interested-remove' : 'not-interested-add',
+    label: isNotInterested ? 'Remove not interested' : 'Not interested',
+    hint: isNotInterested
+      ? 'Trade ideas can offer this player to you again'
+      : 'Never suggest trades that bring this player to you',
+    onPress: () => {
+      setAssetPref(leagueId, playerId, isNotInterested ? 'none' : 'not_interested')
+        .then((prefs) => onDone?.(prefs))
+        .catch((err) => onError?.(err));
+    },
+  };
 }
 
 // ── Lock glyph — untouchable visible twin (S3 PRD-02) ────────────────────

@@ -56,17 +56,23 @@ export async function saveLeaguePreferences(leagueId: string, prefs: LeaguePrefe
   });
 }
 
-// ── Asset preferences (untouchables + targets, backlog #2) ────────
+// ── Asset preferences (untouchables + targets + not-interested, #2/#163) ──
 // Backend: GET/POST /api/league/asset-prefs. `untouchable` = never offer
 // this player FROM the caller's roster in generated trades (feedback #95);
-// `target` = bias suggestions toward acquiring the player. A player holds
-// at most one tag per league; list: 'none' removes the tag.
+// `target` = bias suggestions toward acquiring the player;
+// `not_interested` = never offer this player TO the caller (receive-side
+// exclusion, #163 — the caller can still trade the player away). A player
+// holds at most one tag per league; list: 'none' removes the tag.
 // Enum strings are a cross-client contract (docs/cross-client-invariants.md).
 
 export interface AssetPrefs {
   untouchables: string[];
   targets: string[];
+  /** #163 — absent on pre-#163 servers; treat missing as []. */
+  not_interested?: string[];
 }
+
+export type AssetPrefList = 'untouchable' | 'target' | 'not_interested' | 'none';
 
 export async function getAssetPrefs(leagueId: string) {
   return api.get<AssetPrefs>(
@@ -77,7 +83,7 @@ export async function getAssetPrefs(leagueId: string) {
 export async function setAssetPref(
   leagueId: string,
   playerId: string,
-  list: 'untouchable' | 'target' | 'none',
+  list: AssetPrefList,
 ) {
   return api.post<{ ok: boolean } & AssetPrefs>('/api/league/asset-prefs', {
     league_id: leagueId,

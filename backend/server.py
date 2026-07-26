@@ -1855,6 +1855,7 @@ def _inject_likes_you_cards(
     user_roster: list,
     seed_map: dict,
     untouchable_ids: set | None = None,
+    not_interested_ids: set | None = None,
 ) -> list:
     """Tier 2 work item 2.3a — surface trades the counterparty already liked.
 
@@ -1913,6 +1914,10 @@ def _inject_likes_you_cards(
         # roster, even when the counterparty already liked the mirror. Their
         # receive side IS the user's give side after mirroring.
         if untouchable_ids and set(their_recv) & untouchable_ids:
+            continue
+        # #163 — not-interested players are never offered TO the user, even
+        # via a counterparty like. Their give side IS the user's receive side.
+        if not_interested_ids and set(their_give) & not_interested_ids:
             continue
 
         my_give, my_recv = list(their_recv), list(their_give)
@@ -2289,16 +2294,19 @@ def _run_trade_job(
             except Exception as outlook_err:
                 log.warning("trade-job: opponent outlook assembly failed: %s", outlook_err)
 
-        # Backlog #2 — asset preference lists (untouchables + targets). Loaded
-        # only when the flag is on. Sets flow into the engine as a give-side
-        # hard filter (untouchables) + a receive-side reward (targets).
+        # Backlog #2 / #163 — asset preference lists (untouchables + targets +
+        # not-interested). Loaded only when the flag is on. Sets flow into the
+        # engine as a give-side hard filter (untouchables), a receive-side
+        # reward (targets) and a receive-side hard filter (not_interested).
         untouchable_ids: set = set()
         target_ids: set = set()
+        not_interested_ids: set = set()
         if FLAGS.trade_preference_lists:
             try:
                 ap = load_asset_preferences(user_id=g_user_id, league_id=league_id)
                 untouchable_ids = set(ap.get("untouchables", []))
                 target_ids = set(ap.get("targets", []))
+                not_interested_ids = set(ap.get("not_interested", []))
             except Exception as ap_err:
                 log.warning("trade-job: asset prefs load failed: %s", ap_err)
 
@@ -2311,37 +2319,28 @@ def _run_trade_job(
         confidence_counts = service.comparison_counts() if service else None
 
         # #170/#171 — inject each team's owned draft picks as priced PICK
-        # pseudo-assets so a suggestion can send OR receive a pick. Pure DATA
-        # inclusion: the engine already prices PICK assets (dynasty_value); how
-        # strongly a pick sways ranking/consolidation is the trade-logic
-        # thread's, unchanged here. Gated on trade.picks_in_pool; capped per
-        # team (picks_pool_cap) so package enumeration stays bounded.
+        # pseudo-assets so a suggestion can send OR receive a pick, and (#185)
+        # prime every Elo map the engine reads with each pick's bridged Elo so
+        # picks price at pool_value in ALL engine math. Gated on
+        # trade.picks_in_pool; capped per team (picks_pool_cap) so package
+        # enumeration stays bounded.
         if (FLAGS.trade_picks_in_pool
                 and getattr(g_league, "platform", None) != "espn"
                 and league_id != "league_demo"):
             try:
-                pick_assets = _owned_pick_assets(league_id, active_format)
-                # g_league.members are shared session objects reused across jobs,
-                # so injection must be IDEMPOTENT: strip any owned-pick ids this
-                # league injected on a prior run (they alone start with
-                # "{league_id}_" — real player ids are digit-only, generics are
-                # "generic_pick_*") before appending the freshly-synced set. This
-                # also self-corrects ownership changes between runs.
-                _pfx = f"{league_id}_"
-                _strip = lambda ids: [i for i in ids if not i.startswith(_pfx)]
-                n_inj = 0
-                for _assets in pick_assets.values():
-                    for pa in _assets:
-                        trade_service._players[pa.id] = pa
-                        players_dict[pa.id] = pa
-                        n_inj += 1
-                g_user_roster = _strip(g_user_roster) + [
-                    pa.id for pa in pick_assets.get(g_user_id, [])]
-                for _m in g_league.members:
-                    _m.roster = _strip(_m.roster) + [
-                        pa.id for pa in pick_assets.get(_m.user_id, [])]
-                log.info("trade-job: injected %d owned-pick assets across %d teams (cap=%d)",
-                         n_inj, len(pick_assets), _picks_pool_cap())
+                seed_map, g_user_roster, n_inj = _inject_owned_picks(
+                    league_id      = league_id,
+                    scoring_format = active_format,
+                    trade_service  = trade_service,
+                    players_dict   = players_dict,
+                    seed_map       = seed_map,
+                    user_elo       = elo_map_rt,
+                    user_id        = g_user_id,
+                    user_roster    = g_user_roster,
+                    league         = g_league,
+                )
+                log.info("trade-job: injected %d owned-pick assets (cap=%d)",
+                         n_inj, _picks_pool_cap())
             except Exception as pick_inj_err:
                 log.warning("trade-job: owned-pick injection failed (continuing): %s",
                             pick_inj_err)
@@ -2366,6 +2365,7 @@ def _run_trade_job(
             opponent_pick_shares = opponent_pick_shares or None,
             untouchable_ids      = untouchable_ids or None,
             target_ids           = target_ids or None,
+            not_interested_ids   = not_interested_ids or None,
         )
 
         # Tier 2 (2.3a) — likes-you queue. Inject/boost cards league-mates
@@ -2386,6 +2386,7 @@ def _run_trade_job(
                     user_roster   = g_user_roster,
                     seed_map      = seed_map,
                     untouchable_ids = untouchable_ids or None,
+                    not_interested_ids = not_interested_ids or None,
                 )
                 snapshot = []
                 for c in final_cards:
@@ -5263,10 +5264,13 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     """Build capped PICK pseudo-Players per owner for suggestion injection.
 
     Returns {owner_user_id: [Player(position="PICK"), ...]} — the top-N picks
-    by pool_value per team (N = picks_pool_cap). The engine's dynasty_value
-    prices a PICK via elo_to_value(1200 + 6*pick_value), so we set
-    pick_value = (value_to_elo(pool_value) - 1200)/6 to make that round-trip
-    reproduce pool_value exactly — keeping the engine untouched (LLD §9).
+    by pool_value per team (N = picks_pool_cap). The LEGACY engine's
+    dynasty_value prices a PICK via elo_to_value(1200 + 6*pick_value), so we
+    set pick_value = (value_to_elo(pool_value) - 1200)/6 to make that
+    round-trip reproduce pool_value exactly. NOTE (#185): the v2/v3 engine
+    does NOT price through dynasty_value — it reads Elo maps, which must be
+    primed with these picks via _pick_asset_elos (see _inject_owned_picks) or
+    every pick silently defaults to Elo 1500.
     """
     cap = _picks_pool_cap()
     if cap <= 0:
@@ -5302,6 +5306,77 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
         if assets:
             out[owner] = assets
     return out
+
+
+def _pick_asset_elos(pick_assets: dict) -> dict[str, float]:
+    """Engine-space Elo for each injected PICK pseudo-asset (#185).
+
+    Inverse of dynasty_value's PICK bridge: elo = 1200 + 6*pick_value, so
+    elo_to_value(elo) reproduces the pick's pool_value exactly (pick_value was
+    itself set to (value_to_elo(pool_value) - 1200)/6 in _owned_pick_assets).
+    Used to prime the v2/v3 engine's Elo maps — that engine prices assets
+    through Elo maps (consensus seed + each member's board), NOT through
+    dynasty_value, and an id absent from a map silently defaults to Elo 1500
+    (~value 1000), which made a 2029 1st/2nd/3rd all price identically.
+    """
+    return {pa.id: 1200.0 + 6.0 * float(pa.pick_value or 0.0)
+            for assets in pick_assets.values() for pa in assets}
+
+
+def _inject_owned_picks(*, league_id: str, scoring_format: str, trade_service,
+                        players_dict: dict, seed_map: dict, user_elo: dict,
+                        user_id: str, user_roster: list, league):
+    """#170/#171 + #185 — owned-pick injection for one trade job.
+
+    1. Injects each team's capped owned picks as PICK pseudo-Players into the
+       player maps and member rosters (idempotent — see the strip note below).
+    2. (#185) Primes every Elo map the v2/v3 engine reads with each pick's
+       bridged Elo (_pick_asset_elos), so picks price at pool_value in the
+       fairness gate, give/receive_value payloads and both boards' surplus
+       math. Without this the engine's `.get(pid, 1500.0)` defaults made every
+       pick worth ~value-1000 regardless of round/season.
+
+    The user board gets the same consensus Elo as the seed (picks aren't
+    matchup-rankable, so user/consensus divergence on a pick is zero by
+    construction). Member boards are updated in place: ranked members' dicts
+    are rebuilt fresh each job from member_rankings, and re-running .update()
+    self-corrects values for persistent dicts (stale pick ids are never looked
+    up — rosters are stripped and re-injected every run).
+
+    Returns (seed_map, user_roster, n_injected). seed_map is returned as a
+    job-local COPY when picks were injected, so the session's shared
+    service._seed is never polluted with pick ids.
+    """
+    pick_assets = _owned_pick_assets(league_id, scoring_format)
+    # league.members are shared session objects reused across jobs, so
+    # injection must be IDEMPOTENT: strip any owned-pick ids this league
+    # injected on a prior run (they alone start with "{league_id}_" — real
+    # player ids are digit-only, generics are "generic_pick_*") before
+    # appending the freshly-synced set. This also self-corrects ownership
+    # changes between runs.
+    _pfx = f"{league_id}_"
+    _strip = lambda ids: [i for i in ids if not i.startswith(_pfx)]
+    n_inj = 0
+    for _assets in pick_assets.values():
+        for pa in _assets:
+            trade_service._players[pa.id] = pa
+            players_dict[pa.id] = pa
+            n_inj += 1
+    user_roster = _strip(user_roster) + [
+        pa.id for pa in pick_assets.get(user_id, [])]
+    for _m in league.members:
+        _m.roster = _strip(_m.roster) + [
+            pa.id for pa in pick_assets.get(_m.user_id, [])]
+
+    pick_elos = _pick_asset_elos(pick_assets)
+    if pick_elos:
+        seed_map = dict(seed_map)          # never mutate service._seed
+        seed_map.update(pick_elos)
+        user_elo.update(pick_elos)         # user board: consensus for picks
+        for _m in league.members:
+            if _m.elo_ratings:
+                _m.elo_ratings.update(pick_elos)
+    return seed_map, user_roster, n_inj
 
 
 def _sync_mfl_owned_picks(league_id: str) -> int:
@@ -5467,6 +5542,15 @@ def trade_card_to_dict(card, players: dict) -> dict:
     sweetener = getattr(card, "sweetener", None)
     if sweetener:
         out["sweetener"] = sweetener
+    # #189 — relaxed-fallback annotation, only when the relaxed pass emitted
+    # this card (targeted job, zero cards under normal gates). Additive:
+    # ordinary cards' payloads stay byte-identical. Clients label these
+    # honestly (e.g. "Stretch idea — outside your usual fairness band").
+    if getattr(card, "relaxed", False):
+        out["relaxed"] = True
+        _rr = getattr(card, "relaxed_reason", None)
+        if _rr:
+            out["relaxed_reason"] = _rr
     # FB-47 — counterparty positional fit, only when targeting stamped it.
     partner_fit = getattr(card, "partner_fit", None)
     if partner_fit is not None:
@@ -7230,9 +7314,10 @@ def set_league_preferences():
 @_gate_unverified_read
 def get_asset_prefs():
     """GET /api/league/asset-prefs?league_id=... — the caller's untouchables +
-    targets for a league (backlog #2).
+    targets + not-interested list for a league (backlog #2, #163).
 
-    Response: {"untouchables": [player_id, ...], "targets": [player_id, ...]}
+    Response: {"untouchables": [player_id, ...], "targets": [player_id, ...],
+               "not_interested": [player_id, ...]}
     """
     sess = _require_initialized_session()
     sess["last_active"] = time.time()
@@ -7249,10 +7334,10 @@ def get_asset_prefs():
 @app.route("/api/league/asset-prefs", methods=["POST"])
 @_gate_unverified_write
 def set_asset_prefs():
-    """POST /api/league/asset-prefs — tag/untag one player for a league (#2).
+    """POST /api/league/asset-prefs — tag/untag one player for a league (#2, #163).
 
     Body: {"league_id": "...", "player_id": "4046",
-           "list": "untouchable" | "target" | "none"}
+           "list": "untouchable" | "target" | "not_interested" | "none"}
     "none" removes any tag. A player can hold only one tag per league (setting
     a new one replaces the old). Returns the refreshed lists.
     """
