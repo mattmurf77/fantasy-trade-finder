@@ -25,6 +25,11 @@ and by mid-deck the user sees evidence the deck noticed their swipes.
    "Noticed you're liking pick-heavy deals — more of those ahead." Requires F4/F5 when available;
    without them, the moment triggers off the session tally alone and simply *describes* what was
    already generated later in the deck (honest — never claims adaptation that didn't happen).
+   **Board-sourced variant (amended 2026-07-26):** when the deck was generated from a board updated
+   since the user's last deck (cache invalidation already tracks this), the deck header cites it —
+   "Built from your updated board" (+ count of ranked players when personal basis). Ranks are the
+   user's loudest explicit input; the deck visibly honoring them is the same anti-control-theater
+   rule applied to ranking. Applies beyond session one (every board-refreshed deck), still flag-gated.
 3. **First-deck size guard:** first deck targets the smaller end (8–10 cards) so completion — and
    F10's completion moment — happens in session one.
 4. Instrument activation explicitly: log `first_session_like_position` (position of first like) and

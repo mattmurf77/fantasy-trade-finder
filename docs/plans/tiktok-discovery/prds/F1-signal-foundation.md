@@ -27,6 +27,10 @@ Monolith's online-joiner pattern, miniaturized to SQL:
    features_json (frozen at serve time), propensity (the Thompson multiplier actually drawn),
    base_score, final_score, archetype, shape_bucket, served_at`.
    Features are **frozen at serve time** — never recomputed at label time (training/serving skew).
+   `features_json` also carries **board-state-at-serve** fields (amended 2026-07-26 — the ranks
+   input): `ranked_player_count`, `last_board_update_at`, and value basis (personal vs consensus
+   fallback) per side. Board recency/coverage is a feature F6/F8 need frozen at serve time — a deck
+   generated right after a ranking session is built on fresher values than one from a stale board.
 2. **New table `deck_outcomes`** — joined by `impression_id`:
    `impression_id (fk), action (viewed|like|pass|not_interested|propose|undo), dwell_ms,
    detail_expanded (bool), calc_opened (bool), acted_at`. Late labels are fine (append-only).

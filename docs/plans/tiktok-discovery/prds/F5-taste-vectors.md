@@ -32,13 +32,22 @@ long/short interest split without embeddings.
 5. **Blend with declared prefs:** vectors *modulate within* the declared-pref envelope (outlook,
    untouchables, #168-style intents when they land) — declared always wins conflicts. This is the
    learned complement to the operator's intents PRD, not a replacement.
-6. **Cold vector = neutral:** all-ε vector yields multiplier 1.0 everywhere (consensus-quality deck),
-   preserving today's cold-start behavior exactly.
+6. **Board-derived prior (the ranks input — amended 2026-07-26):** the user's board is taste signal
+   available *before a single swipe*. Initialize the long-τ vector from systematic board-vs-consensus
+   deltas, aggregated per attribute: for each ranked player, `delta = user_value − consensus_value`,
+   averaged over the player's attributes (position, age band, value tier, pick proxies), shrunk by
+   ranked-count `w = n/(n+20)`, and scaled so a strong board prior ≈ the weight of ~10 swipes. Refresh
+   the prior on board saves (the deck-cache invalidation path already fires there). Swipe-learned
+   weights accumulate on top and dominate with volume — the prior is a warm start, not a ceiling.
+7. **Cold vector = neutral:** a user with no board AND no swipes has an all-ε vector yielding
+   multiplier 1.0 everywhere (consensus-quality deck), preserving today's cold-start behavior exactly.
 
 ## Acceptance criteria
 - [ ] 20 simulated likes on pick-heavy rebuilds measurably raise pick-heavy candidates' final scores
       for that user only.
-- [ ] Zero-history user: all multipliers = 1.0 (bitwise-comparable ordering to flag-off).
+- [ ] Zero-history user (no board, no swipes): all multipliers = 1.0 (bitwise-comparable to flag-off).
+- [ ] A user whose board systematically values rookie picks above consensus gets a positive pick-
+      involvement prior before their first swipe; the prior refreshes after a board save.
 - [ ] A March-strong signal with no reinforcement is near-neutral in short-τ by May, retained in long-τ.
 - [ ] Vector never overrides untouchables/not-interested/outlook filters (test each).
 - [ ] Rows GC'd below ε; table size bounded per user.
