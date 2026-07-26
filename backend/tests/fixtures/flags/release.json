@@ -123,5 +123,15 @@
   "league.power_rankings": false,
   "rankings.cross_format_derive": true,
   "_comment_testing": "QA/testing surfaces. testing.stage_users gates the synthetic stage-user spawner (POST/DELETE /api/test-users, backend/test_users.py) used to QA the onboarding flow with qa_* users at preset adoption stages. Requests must ALSO come from a tester-allowlist device/user (config/tester_allowlist.json or FTF_TESTER_ALLOWLIST), so flipping this on never exposes the surface to real users. Default false; flip only during onboarding QA windows.",
-  "testing.stage_users": false
+  "testing.stage_users": false,
+  "_comment_tiktok_discovery": "2026-07-26 TikTok-discovery deck engine (docs/plans/tiktok-discovery/). Flags flipped ON per-wave at each TestFlight ship. deck.value_model stays dark until an F8 replay win (PRD F6 gate). F8 eval harness is unflagged operator tooling.",
+  "deck.signal_v2": false,
+  "deck.thompson_v2": false,
+  "deck.fatigue": false,
+  "deck.session_rerank": false,
+  "deck.taste_vectors": false,
+  "deck.exploration": false,
+  "deck.value_model": false,
+  "deck.first_session": false,
+  "deck.replenishment": false
 }

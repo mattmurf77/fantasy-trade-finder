@@ -206,6 +206,24 @@ Registered under the `_comment_teardown` block in `config/features.json`; source
 | `league.rookie_board_entry` | false | Mounts the fully-built-but-orphaned RookieDraftBoardSheet as a League Explore row during draft season (07/prd-04 item 2). |
 | `rankings.cross_format_derive` | false (true in `features.json`) | **FB-191** — read-time cross-format board derivation: a member with rankings only in the OTHER scoring format gets a value-mapped (#124 math) board for reads that need this format (`/api/trade/evaluate` Mode B — the in-league calculator). Explicit rankings always win; nothing materialized; responses carry additive `*_derived` markers (the calculator's R* badge, FB-192). Off ⇒ pre-#191 consensus fallback for format-unranked members. |
 
+### TikTok-discovery deck engine (2026-07-26)
+
+Registered under the `_comment_tiktok_discovery` block in `config/features.json`; source PRDs in
+[docs/plans/tiktok-discovery/prds/](plans/tiktok-discovery/prds/). Built wave-by-wave, each wave's
+flags flipped ON at its TestFlight ship. F8 (offline eval harness) is unflagged operator tooling.
+
+| Flag | Default | Gates |
+|---|---|---|
+| `deck.signal_v2` | false | F1 impression_id logging spine: `deck_impressions`/`deck_outcomes` tables, per-card impression_id in `/api/trades/generate`, dwell/viewed capture, propensity persistence. Inert (logging only). |
+| `deck.thompson_v2` | false | F2 bandit hygiene: pessimistic base-rate priors, posterior decay γ=0.995/day, viewed-only (cascade) updates, archetype×shape arms with parent warm-start. |
+| `deck.fatigue` | false | F3 per-user impression discounting, decline ⇒ 30-day near-duplicate suppression (+1 retest), suppression note + undo, deck refresh (soft-layer reset). |
+| `deck.session_rerank` | false | F4 client-side re-rank of remaining deck after each disposition (last-k session boost vector; peeked card/pins/wildcard never move). |
+| `deck.taste_vectors` | false | F5 per-user decayed attribute-preference vectors (short τ=21d / long τ=180d) applied as bounded multiplicative re-rank at generation. |
+| `deck.exploration` | false | F7 one labeled Wildcard slot per deck (positions 4–6), archetype audition pools, exploration propensity logging. |
+| `deck.value_model` | false | F6 learned P(like)/P(propose) heads × hand-set V-vector as base ordering. **Stays dark until an F8 replay win with adequate ESS (PRD gate).** |
+| `deck.first_session` | false | F9 confidence-weighted first-5 cards on a user's first deck + honest visible-adaptation moment. |
+| `deck.replenishment` | false | F10 deck-completion summary card + weekly post-waivers pre-generation (daily-tick hook) + 1/week preference-gated fresh-deck push. |
+
 #### Ship-by / kill-by review convention (07/prd-04)
 
 Dark flags are inventory, not archive. **Every flag dark ≥90 days gets a recorded decision at a quarterly flag review: schedule a canary via the experiments engine, or delete the code path.** "Still thinking" is not a decision — the review's exit criterion is zero flags >90 days old without one. Record the decision as a one-line ship-by/kill-by note in the flag's `features.json` comment block (or the table above). The teardown block's clock starts 2026-07-19.
