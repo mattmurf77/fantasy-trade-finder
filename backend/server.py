@@ -2183,6 +2183,7 @@ def _run_trade_job(
     pinned_give: list,
     pinned_receive: list | None = None,
     opponent_user_id: str | None = None,
+    pinned_give_mode: str = "any",
 ):
     """Daemon-thread entry point. Resolves the session itself (rather than
     capturing closures over per-request state) so the request that kicked
@@ -2358,6 +2359,7 @@ def _run_trade_job(
             trade_away_positions = trade_away_positions,
             pinned_give_players  = pinned_give or None,
             pinned_receive_players = pinned_receive or None,
+            pinned_give_mode     = pinned_give_mode,
             opponent_user_id     = opponent_user_id,
             scoring_format       = active_format,
             on_opponent_done     = progress_cb,
@@ -2524,6 +2526,7 @@ def _kickoff_trade_job(
     fairness_threshold: float = 0.75,
     pinned_give: list | None = None,
     pinned_receive: list | None = None,
+    pinned_give_mode: str = "any",
     opponent_user_id: str | None = None,
     opponents_total: int | None = None,
 ) -> str:
@@ -2558,7 +2561,8 @@ def _kickoff_trade_job(
     threading.Thread(
         target=_run_trade_job,
         args=(job_id, sess_token, league_id, fairness_threshold,
-              pinned_give or [], pinned_receive or [], opponent_user_id),
+              pinned_give or [], pinned_receive or [], opponent_user_id,
+              pinned_give_mode),
         daemon=True,
     ).start()
     return job_id
@@ -5641,6 +5645,14 @@ def generate_trades():
     # is on so flag-off behavior stays byte-identical for any early client.
     pinned_receive     = (body.get("pinned_receive_players") or []
                           if is_enabled("trade.finder_targeting") else [])
+    # #174 — package constraint. "all" ⇒ every generated card's give side
+    # must include EVERY pinned give player ("trade this package away");
+    # anything else (absent, "any", junk) keeps the historical ≥1
+    # semantics. Meaningless without pinned_give_players — normalized to
+    # "any" so the byte-identical default holds.
+    pinned_give_mode   = ("all" if (pinned_give
+                                    and body.get("pinned_give_mode") == "all")
+                          else "any")
     # FB #156 (Trade-Finding Hub, "Specific Team" mode) — scope generation to
     # a single league-mate. Additive: absent ⇒ the full league-wide sweep,
     # byte-identical to before. An opponent-scoped job answers a specific
@@ -5711,6 +5723,7 @@ def generate_trades():
         fairness_threshold = fairness_threshold,
         pinned_give        = pinned_give or None,
         pinned_receive     = pinned_receive or None,
+        pinned_give_mode   = pinned_give_mode,
         opponent_user_id   = opponent_user_id,
         opponents_total    = opponents_total,
     )

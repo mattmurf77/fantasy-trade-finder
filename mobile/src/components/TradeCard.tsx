@@ -52,6 +52,14 @@ interface Props {
   // partner-fit line's copy ("They're deep at WR"); the line itself
   // renders whenever the card carries `partner_fit`.
   fitTargetPositions?: string[];
+  // #186 — per-side "keep this side" affordance (swipe deck only). When
+  // set, each side gets a compact action that pins that side's players
+  // (the existing pinned_give/pinned_receive machinery) and regenerates
+  // the deck, so a user who likes ONE side sees other offers around it.
+  onKeepSide?: (side: 'give' | 'receive') => void;
+  // #190 — "Edit in calculator": opens the manual calculator prefilled
+  // with this card's opponent + both sides (swipe deck only).
+  onEditInCalculator?: () => void;
 }
 
 // FB-47 — partner-fit line copy. `partner_fit` is a 0–1 scalar; the exact
@@ -91,6 +99,8 @@ function TradeCardComp({
   repricing = false,
   onPlayerMenu,
   fitTargetPositions,
+  onKeepSide,
+  onEditInCalculator,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
   // The pick-denominated TradeValueBar (feedback #157) is the universal
@@ -199,6 +209,26 @@ function TradeCardComp({
           </Pressable>
         );
       })()
+    ) : null;
+
+  // #186 — per-side keep affordance (swipe deck only): pins that side's
+  // players and regenerates, so the OTHER side gets re-shopped. Compact
+  // bordered-chalk construction (ice stays on the deck's primary actions).
+  const keepSlot = (side: 'give' | 'receive') =>
+    variant === 'swipe' && onKeepSide ? (
+      <Pressable
+        testID={side === 'give' ? 'trade-card.keep-give' : 'trade-card.keep-receive'}
+        accessibilityRole="button"
+        accessibilityLabel={
+          side === 'give'
+            ? 'Keep the players you send and see other returns'
+            : 'Keep the players you get and see other offers'
+        }
+        onPress={() => onKeepSide(side)}
+        style={({ pressed }) => [styles.keepBtn, pressed && styles.keepBtnPressed]}
+      >
+        <Text style={styles.keepBtnText}>Keep · more offers</Text>
+      </Pressable>
     ) : null;
 
   // Command long-press: the shared context menu (flag on via onPlayerMenu)
@@ -356,6 +386,7 @@ function TradeCardComp({
               + {sweetenerPlayer.name} added to balance the deal
             </Text>
           )}
+          {keepSlot('give')}
         </View>
         <View style={styles.divider} />
         <View style={styles.side}>
@@ -384,8 +415,28 @@ function TradeCardComp({
               + {sweetenerPlayer.name} added to balance the deal
             </Text>
           )}
+          {keepSlot('receive')}
         </View>
       </View>
+
+      {/* #190 — full-editor path: the manual calculator, prefilled with
+          this exact package. Sits at hint-tier prominence below the sides;
+          the in-place swap affordances above remain the quick edit. */}
+      {variant === 'swipe' && onEditInCalculator ? (
+        <Pressable
+          testID="trade-card.edit-in-calc"
+          accessibilityRole="button"
+          accessibilityLabel="Edit this trade in the calculator"
+          onPress={onEditInCalculator}
+          style={({ pressed }) => [
+            styles.editCalcBtn,
+            pressed && styles.keepBtnPressed,
+          ]}
+        >
+          <Icon name="trade" size={14} color={chalk.dim} />
+          <Text style={styles.editCalcText}>Edit in calculator</Text>
+        </Pressable>
+      ) : null}
 
       {hasValueVerdict && !repricing && (
         <TradeValueBar
@@ -591,6 +642,40 @@ const styles = StyleSheet.create({
   // (ice border) from the queue button's queued state.
   lockBtnMarked: {
     borderColor: ice.base,
+  },
+  // #186 — per-side keep affordance: compact bordered-chalk button.
+  keepBtn: {
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: space.sm,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    backgroundColor: ink.ink1,
+  },
+  keepBtnPressed: {
+    backgroundColor: ink.ink3,
+  },
+  keepBtnText: {
+    ...type.bodySm,
+    color: chalk.dim,
+  },
+  // #190 — edit-in-calculator row: hint-tier inline action.
+  editCalcBtn: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: ink.line,
+    backgroundColor: ink.ink1,
+  },
+  editCalcText: {
+    ...type.bodySm,
+    color: chalk.dim,
   },
   repricingRow: {
     flexDirection: 'row',

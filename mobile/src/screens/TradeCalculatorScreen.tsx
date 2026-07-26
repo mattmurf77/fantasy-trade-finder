@@ -98,8 +98,15 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-export default function TradeCalculatorScreen() {
-  const [mode, setMode] = useState<CalcMode>('live');
+export default function TradeCalculatorScreen({ route }: any) {
+  // #190 — deck "Edit in calculator": land in In-league mode with the
+  // card's opponent + both sides preloaded. Route param only — no
+  // calculator restructuring (InLeagueCalculator accepts the initial
+  // values as optional props and owns everything after mount).
+  const prefill = route?.params?.prefill as
+    | { opponentUserId?: string; giveIds?: string[]; receiveIds?: string[] }
+    | undefined;
+  const [mode, setMode] = useState<CalcMode>(prefill ? 'league' : 'live');
   const [format, setFormat] = useState<ScoringFormat>('1qb_ppr');
   // Demo-mode trade state.
   const [partnerId, setPartnerId] = useState(CALC_PARTNERS[0].id);
@@ -124,6 +131,14 @@ export default function TradeCalculatorScreen() {
     action?: { label: string; onPress: () => void };
   } | null>(null);
 
+  // #190 — a NEW prefill arriving on an already-mounted screen (deck →
+  // edit → back → edit another card) re-asserts In-league mode; the key
+  // on InLeagueCalculator below remounts it with the new package.
+  const prefillKey = prefill ? JSON.stringify(prefill) : null;
+  useEffect(() => {
+    if (prefillKey) setMode('league');
+  }, [prefillKey]);
+
   // In-league mode (Mode B) is only offered when a real league is active.
   const league = useSession((s) => s.league);
   const user = useSession((s) => s.user);
@@ -143,7 +158,11 @@ export default function TradeCalculatorScreen() {
         const raw = await AsyncStorage.getItem(DRAFT_KEY);
         if (!cancelled && raw) {
           const draft = JSON.parse(raw);
-          if (draft?.mode === 'demo' || draft?.mode === 'live') setMode(draft.mode);
+          // #190 — a prefilled launch stays in In-league mode; the stored
+          // draft's mode must not yank the user away from the handed-off
+          // package (list drafts still restore for later manual visits).
+          if (!prefill && (draft?.mode === 'demo' || draft?.mode === 'live'))
+            setMode(draft.mode);
           if (draft?.format === '1qb_ppr' || draft?.format === 'sf_tep') setFormat(draft.format);
           const savedPartner = CALC_PARTNERS.find((o) => o.id === draft?.partnerId);
           if (savedPartner) {
@@ -520,7 +539,21 @@ export default function TradeCalculatorScreen() {
         </View>
 
         {mode === 'league' && league && user ? (
-          <InLeagueCalculator leagueId={league.league_id} userId={user.user_id} />
+          <InLeagueCalculator
+            // #190 — remount when a different card is handed off so a
+            // second "Edit in calculator" from the deck re-applies its
+            // prefill (navigate() to a mounted route only swaps params).
+            key={
+              prefill
+                ? `prefill-${prefill.opponentUserId}-${(prefill.giveIds ?? []).join('.')}-${(prefill.receiveIds ?? []).join('.')}`
+                : 'manual'
+            }
+            leagueId={league.league_id}
+            userId={user.user_id}
+            initialOpponentId={prefill?.opponentUserId}
+            initialGiveIds={prefill?.giveIds}
+            initialReceiveIds={prefill?.receiveIds}
+          />
         ) : (
         <>
         {isLive ? (

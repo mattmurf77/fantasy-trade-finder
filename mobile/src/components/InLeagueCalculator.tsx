@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 
@@ -39,6 +39,12 @@ import type { ScoringFormat } from '../shared/types';
 interface Props {
   leagueId: string;
   userId: string;
+  // #190 — optional prefill from the trade deck's "Edit in calculator"
+  // (TradeCalculatorScreen threads route params through). Initial values
+  // only — this component owns all state after mount.
+  initialOpponentId?: string;
+  initialGiveIds?: string[];
+  initialReceiveIds?: string[];
 }
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
@@ -82,7 +88,13 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-export default function InLeagueCalculator({ leagueId, userId }: Props) {
+export default function InLeagueCalculator({
+  leagueId,
+  userId,
+  initialOpponentId,
+  initialGiveIds,
+  initialReceiveIds,
+}: Props) {
   // #166/#167 — the format defaults to the LEAGUE's detected scoring
   // format (useSession.activeFormat, kept league-accurate by
   // useLeagueFormatDefault in RootNav), not a hard-coded 1QB PPR. A chip
@@ -91,9 +103,10 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
   const sessionFormat = useSession((s) => s.activeFormat);
   const [formatChoice, setFormatChoice] = useState<ScoringFormat | null>(null);
   const format: ScoringFormat = formatChoice ?? sessionFormat ?? '1qb_ppr';
-  const [opponentId, setOpponentId] = useState<string | null>(null);
-  const [giveIds, setGiveIds] = useState<string[]>([]);
-  const [receiveIds, setReceiveIds] = useState<string[]>([]);
+  // #190 — "Edit in calculator" prefill from a suggested trade card.
+  const [opponentId, setOpponentId] = useState<string | null>(initialOpponentId ?? null);
+  const [giveIds, setGiveIds] = useState<string[]>(initialGiveIds ?? []);
+  const [receiveIds, setReceiveIds] = useState<string[]>(initialReceiveIds ?? []);
   const [picker, setPicker] = useState<'give' | 'receive' | null>(null);
 
   const valuesQ = useQuery({
@@ -187,8 +200,13 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
     if (!opponentId && opponents.length) setOpponentId(opponents[0].user_id);
   }, [opponents, opponentId]);
 
-  // Their roster changed → what you'd receive no longer applies.
+  // Their roster changed → what you'd receive no longer applies. Skips
+  // the mount run (guard ref) so a #190 prefill isn't wiped before it
+  // renders — the mount run was always a no-op before prefill existed.
+  const prevOpponentRef = useRef(opponentId);
   useEffect(() => {
+    if (prevOpponentRef.current === opponentId) return;
+    prevOpponentRef.current = opponentId;
     setReceiveIds([]);
     setPicker(null);
   }, [opponentId]);

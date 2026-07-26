@@ -10,6 +10,11 @@ export interface GenerateBody {
   // Honored by the backend only when flag trade.finder_targeting is on;
   // every returned card's receive side then includes at least one of them.
   pinned_receive_players?: string[];
+  // #174 package constraint: 'all' ⇒ every returned card's give side must
+  // include EVERY pinned give player ("trade this package away"). Absent
+  // or 'any' keeps the historical ≥1 semantics. Only meaningful alongside
+  // pinned_give_players (the server normalizes it away otherwise).
+  pinned_give_mode?: 'all' | 'any';
   // FB #156 (Trade-Finding Hub, "Specific Team" mode): scope generation to a
   // single league-mate. Absent ⇒ the full league-wide sweep. Opponent-scoped
   // jobs bypass the shared server cache (like pinned jobs).

@@ -1,9 +1,64 @@
 # #156 — Trade-Finding Hub · status
 
-**State:** Built (flag-dark), tests green. Branch: `teardown-remediation`.
+**State:** FINISHED + **flag flipped ON** (2026-07-25, operator-approved).
+Branch: `teardown-remediation`.
 **Variant:** B — Launcher Hub (operator-approved). Mockup:
 `mockups/trade-finding-hub/variant-b-launcher-hub.html`.
-**Flag:** `trades.finder_hub` — **default false** (justification below).
+**Flag:** `trades.finder_hub` — **true** in `config/features.json` +
+`backend/tests/fixtures/flags/release.json` (was default-false; see the
+original justification below, now superseded by the finish batch).
+
+## Finish batch (2026-07-25)
+
+Everything in the "Deferred / notes" list below that the operator approved
+is now built:
+
+1. **Two-column FOR/AWAY board (item 1)** — Specific Player mode
+   (`TradeDeck` with `mode:'player'`) renders the mockup's two-column
+   board in `TradesScreen`: TRADE FOR column (pinned_receive, pos-green
+   top rule) + TRADE AWAY column (pinned_give, flare top rule), mini
+   chips with per-chip remove, per-column dashed add buttons that open
+   the existing FB-47 picker pre-directed. All other surfaces (standalone
+   Trades home, Guided/Team modes) keep the original single-column
+   direction-toggle section byte-for-byte.
+2. **#174 package toggle (item 2)** — "Trade as one package"
+   (`PackageToggle`, testID `trades.package-toggle`) renders whenever 2+
+   give players are pinned (both board layouts). Default **ON**; ON sends
+   `pinned_give_mode:'all'` so every generated card's give side carries
+   EVERY pinned player. See `../174-package-constraint/status.md`.
+3. **Live pin counts (item 3)** — pins moved from TradesScreen local
+   state to the session-only zustand store
+   `mobile/src/state/useFinderTargets.ts` (cleared on league switch via a
+   `useSession` subscription — works even when the deck screen is
+   unmounted). The hub's Specific Player card shows "N to trade for · M
+   to trade away" (mono/chalk) whenever anything is pinned.
+4. **Team-mode in-place switch (item 4)** — the mode bar's Team chip now
+   opens an in-screen manager-picker sheet in `TradesScreen`
+   (`trades.team-picker.<user_id>`) and lands via
+   `navigation.setParams` — same screen instance, no re-navigation. An
+   in-place scope change resets the deck AND auto-kicks generation for
+   the new opponent; first entry from the hub keeps the manual
+   Find-a-Trade start. The hub's own picker is unchanged.
+
+Also on the deck card (operator feedback): **#186** per-side
+"Keep · more offers" actions (`trade-card.keep-give`/`.keep-receive`) —
+see `../186-see-other-side/status.md`; **#190** "Edit in calculator"
+(`trade-card.edit-in-calc`) — see `../190-edit-in-calculator/status.md`.
+Hub additions: **#173** untouchables management sheet from the Trade DNA
+row (`finder-hub.dna.untouchables`) — see
+`../173-untouchables-discoverability/status.md`; `FeedbackFAB` mounted on
+the hub screen.
+
+**#168/#172 (stretch)** — NOT built: the generate API exposes no intent
+knobs (only fairness/pins/opponent scope), so an intent chip would need
+new engine params — out of scope this round. PRD written instead:
+`../168-looking-for-intents/prd.md`.
+
+**On-device QA flag interaction:** the operator's allowlisted device runs
+the `onboarding.trades_first` experiment arm, whose Trades-home behavior
+(first-run auto-generate on the deck) the hub now displaces — QA that
+combination on-device before release. The experiment itself was NOT
+changed.
 
 ## What shipped, per mode
 
@@ -56,24 +111,22 @@ chips), the RankHome card-launcher pattern.
 
 ## Verification
 
-- `cd mobile && npx tsc --noEmit` — clean.
-- `python3 -m pytest backend/tests/ -q` — 967 passed (incl. new
-  `test_opponent_scope_limits_generation_to_one_leaguemate` in
-  `test_trade_phase2.py`; `release.json` mirror fixture updated for the new flag).
+- Original build: `tsc --noEmit` clean; 967 passed (incl.
+  `test_opponent_scope_limits_generation_to_one_leaguemate`).
+- Finish batch (2026-07-25): `cd mobile && npx tsc --noEmit` — clean;
+  `python3 -m pytest backend/tests/ -q` — **1086 passed, 1 skipped**
+  (baseline 1083 + 3 new `pinned_give_mode` tests in
+  `backend/tests/test_finder_targeting.py`, flag fixtures flipped).
 
-## Deferred / notes
+## Deferred / notes (historical — resolved by the finish batch above)
 
-- Specific Player reuses the existing single-column FB-47 direction-toggle
-  board rather than the mockup's two-column FOR/AWAY board — functional parity
-  (both-side pinning works); two-column visual is polish, not wired.
-- The "require both sides in every package" toggle from the mockup is not
-  implemented as a hard backend constraint (pinning both sides already works).
-- The finder-card verdict value bar (shared `TradeValueBar`, another agent's
-  component) is **not** wired — `TradeCard.tsx` was left untouched.
-- Live pin-count summary on the hub's Specific Player card is static copy (pins
-  live in `TradesScreen` session state, not readable from the hub).
-- Mode-switch persistence: Guided/Player switch in place (setParams) so pinned
-  targets persist; changing team scope re-navigates and resets the deck.
+- ~~Specific Player single-column board~~ → two-column FOR/AWAY board (item 1).
+- ~~"Require both sides in every package" toggle~~ → shipped as the #174
+  "Trade as one package" toggle + `pinned_give_mode:'all'` backend constraint.
+- ~~Live pin-count static copy~~ → live counts via `useFinderTargets` (item 3).
+- ~~Team scope re-navigates~~ → in-place setParams + auto-regen (item 4).
+- Still open: the finder-card verdict value bar note is obsolete —
+  `TradeValueBar` has been wired on deck cards since #157.
 
 ## Files
 

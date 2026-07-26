@@ -199,6 +199,7 @@ def generate_pair_trades_v3(
     trade_away_positions: list[str] | None = None,
     pinned_give_players: list[str] | None = None,
     pinned_receive_players: list[str] | None = None,
+    pinned_give_mode: str = "any",
     players: dict,
     alpha_opp: float | None = None,
     untouchable_ids: set | None = None,
@@ -236,6 +237,9 @@ def generate_pair_trades_v3(
     """
     opp_elo    = opponent.elo_ratings
     pinned_set = set(pinned_give_players) if pinned_give_players else None
+    # #174 — "all" ⇒ the give side must include EVERY pinned player
+    # (trade-as-one-package); "any" keeps the historical ≥1 semantics.
+    pinned_all = pinned_set is not None and pinned_give_mode == "all"
     # FB-47 — pinned ACQUIRE targets: cards must receive at least one.
     pinned_recv_set = (set(pinned_receive_players)
                        if pinned_receive_players else None)
@@ -444,8 +448,12 @@ def generate_pair_trades_v3(
     order = 0
 
     for give_ids in give_subsets:
-        if pinned_set and not (set(give_ids) & pinned_set):
-            continue
+        if pinned_set:
+            if pinned_all:
+                if not pinned_set <= set(give_ids):
+                    continue
+            elif not (set(give_ids) & pinned_set):
+                continue
         for recv_ids in recv_subsets:
             if pinned_recv_set and not (set(recv_ids) & pinned_recv_set):
                 continue
