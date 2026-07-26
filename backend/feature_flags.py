@@ -282,6 +282,15 @@ FLAG_KEYS: tuple[str, ...] = (
     # an unrescued older-primary return past ~1 year is near-excluded.
     # Contend-side gets only the mild mirror. Off ⇒ composites byte-identical.
     "trade.outlook_direction",
+    # ── #191 — cross-format board derivation (read-time auto-sync) ───────
+    # When a member has rankings in one scoring format and none in the
+    # other, reads that need the missing format (trade/evaluate Mode B —
+    # the in-league calculator) derive it on the fly via the #124 value-
+    # rank mapping (same math as /api/tiers/copy-from-format). Read-time
+    # only — nothing is materialized, explicit rankings always win, and
+    # responses mark derived boards (opponent_board_derived etc.). Off ⇒
+    # unranked-in-this-format members degrade to consensus as before.
+    "rankings.cross_format_derive",
     # ── #169 — League "outlook odds" (playoff/championship-odds pipeline) ──
     # Gates GET /api/league/outlook (backend/outlook/). Off (default) ⇒ the
     # route 404s and nothing else changes. Componentized behind swappable

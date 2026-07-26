@@ -89,7 +89,17 @@ export async function setAssetPref(
 export interface LeagueCoverage {
   ranked: number;
   total: number;
-  members?: Array<{ user_id: string; username: string; has_rankings: boolean }>;
+  // ranked_formats (#191/#192, additive — absent on old servers): which
+  // scoring formats the member has stored rankings in, so clients can
+  // distinguish ranked-in-this-format (R) from ranked-in-the-other-only
+  // (derivable, R*) from never-ranked (NR). has_rankings stays the
+  // format-blind any-format boolean.
+  members?: Array<{
+    user_id: string;
+    username: string;
+    has_rankings: boolean;
+    ranked_formats?: string[];
+  }>;
 }
 export async function getLeagueCoverage(leagueId: string) {
   return api.get<LeagueCoverage>(

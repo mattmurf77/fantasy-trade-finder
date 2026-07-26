@@ -1251,12 +1251,20 @@ class RankingService:
                 return tier
         return None
 
+    # #161 — demotion target for players explicitly passed over during a
+    # Quick Set tier save: below every tier band (the waivers floor is 1150
+    # in every format/position cell), so they render UNRANKED — pending
+    # placement — rather than keeping a stale higher tier. Same Elo the
+    # anchor wizard's "no value" answer pins (server.ANCHOR_NO_VALUE_ELO).
+    DEMOTED_ELO = 1100.0
+
     def apply_tiers(
         self,
         position: Optional[str],
         tiers: dict[str, list[str]],
         scoring_format: str = "1qb_ppr",
         cleared_pids: Optional[list[str]] = None,
+        demoted_pids: Optional[list[str]] = None,
     ) -> None:
         """
         Apply a positional-tier save by setting ELO overrides that fall
@@ -1270,6 +1278,16 @@ class RankingService:
         can DELETE the override from the in-memory dict. Without this,
         the player's old override survived and re-bucketed them on the
         next refresh, snapping them right back into their previous tier.
+
+        ``demoted_pids`` (#161) — players the user explicitly passed over
+        in a Quick Set tier save (visible in the step's grid, previously
+        bucketed in the saved tier or higher, left unselected). Their
+        override is pinned to ``DEMOTED_ELO`` — below every band — so they
+        read as unranked until the user places them, instead of silently
+        keeping the old higher tier. Distinct from ``cleared_pids``, which
+        restores the consensus-suggested tier. If a pid appears in both,
+        demotion wins; a pid both demoted and assigned to a tier in the
+        same save takes the tier (the tier loop runs last).
         """
         pool_ids = {p.id for p in self._pool(position)}
         bands = self.tier_bands_for(position, scoring_format)
@@ -1281,6 +1299,13 @@ class RankingService:
         if cleared_pids:
             for pid in cleared_pids:
                 self._elo_overrides.pop(pid, None)
+
+        # Pin demoted pids below every band (after clears, before tier
+        # writes — see the precedence note in the docstring).
+        if demoted_pids:
+            for pid in demoted_pids:
+                if pid in pool_ids:
+                    self._elo_overrides[pid] = self.DEMOTED_ELO
 
         for tier_name, player_ids in tiers.items():
             band = bands.get(tier_name)

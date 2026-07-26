@@ -35,6 +35,7 @@ Radius `--r-xs`, `label` type (11px Archivo 600 caps), 2px 6px padding. Construc
 | **ConsensusTag** | `label` type, chalk-faint, no border | `.consensus-tag` |
 | **LikesYouPill** | `--r-pill`, flare border + flare `eye` icon + `They're interested` | `.likes-you-pill` |
 | **CountBadge** | `--r-pill`, `--neg` fill, on-neg chalk, Plex Mono 11 | `.notif-badge` |
+| **RankedBadge** (FB-192) | partner ranked-status on the in-league calculator's partner chips — standard Badge construction, border+text colored: `R` = ranked in the active calculator format (`--pos`), `R*` = ranked only in the other format, board derived via FB-191 cross-format value mapping (`--pos`, the `*` marks derivation), `NR` = never ranked (chalk-dim). Accessibility labels spell it out ("ranked" / "ranked in another format, values converted" / "not ranked"). Replaces the flare dot that only ever meant "not ranked" | the `InLeagueCalculator` unranked flare dot |
 
 ## Cards
 

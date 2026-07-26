@@ -133,6 +133,10 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 
 **Guided avatar (The Analyst, flag `onboarding.guided_avatar`):** `analyst/` (six rn-svg pose components + `AnalystAvatar`; art source-of-truth = mockups/avatar-lab/analyst-poses.html) · `AnalystGuide.tsx` (RootNav-mounted overlay: scrim+cutout spotlight, bubble with in-bubble CTAs, ✕ skip / Skip-tour opt-out) · `analystScript.ts` (dialogue table = DATA; script doc: docs/plans/onboarding-conversion/guided-avatar-script.md). Guide testIDs: `guide.overlay` · `guide.bubble` · `guide.cta.<accept|dismiss>` · `guide.step-x` · `guide.skip-tour` · `guide.avatar.<pose>` · new targets `trades.card-body`
 
+**Rank-nav + calculator tranche (2026-07-25, #162/#165/#192):**
+- TabNav shared HeaderBack (Rank/Trades/League stack sub-screens): `stack.back-btn` — always-on JS back control, falls back to the stack's home route (Rank surfaces → `RankHome`, the chooser, per #162/#165)
+- InLeagueCalculator partner chips: the ranked-status flare dot is replaced by the RankedBadge text badge (`R` / `R*` derived / `NR`) — no new testID; chips assert via accessibilityLabel `@<user>, ranked|ranked in another format, values converted|not ranked`
+
 **MFL auth-link tranche (2026-07-25, #177, flag `mfl.auth_link`):**
 - PlatformLinkSheet (MFL only): `platform-link.mfl-auth-toggle` (reveals the sign-in fields) · `platform-link.mfl-username` · `platform-link.mfl-password` (secureTextEntry) · `platform-link.mfl-signin` · `platform-link.mfl-league.<league_id>` (checkbox row, pre-checked when the franchise auto-binds) · `platform-link.mfl-import` · `platform-link.mfl-open` (auth-done summary CTA); errors reuse `platform-link.error`
 
