@@ -198,6 +198,11 @@ const V2_LEAGUE_KINDS = new Set([
   'league_member_joined', 'league_member_unlocked_trades',
 ]);
 const V2_RANK_KINDS = new Set(['finish_ranking']);
+// F10 (flag deck.replenishment): the weekly fresh-deck push lands on the
+// Trades tab (hub home when trades.finder_hub is on, the deck otherwise —
+// where the pre-generated deck is served from the job cache). Inert while
+// the backend flag is off: the kind is never pushed.
+const V2_TRADE_KINDS = new Set(['deck_replenished']);
 
 export type NotificationTab = 'Matches' | 'League' | 'Rank' | 'Trades';
 
@@ -219,6 +224,7 @@ export function resolveNotificationTarget(
   }
   if (V2_LEAGUE_KINDS.has(kind)) return { tab: 'League' };
   if (V2_RANK_KINDS.has(kind)) return { tab: 'Rank' };
+  if (V2_TRADE_KINDS.has(kind)) return { tab: 'Trades' };
   return null;
 }
 

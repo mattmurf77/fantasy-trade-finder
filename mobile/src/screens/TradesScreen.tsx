@@ -332,6 +332,14 @@ export default function TradesScreen({ navigation, route }: any) {
   // engagement bits through dispositions/events. Off ⇒ no timers, no extra
   // fields, byte-identical behavior.
   const signalV2On = useFlag('deck.signal_v2');
+  // F10 (flag deck.replenishment, PRD F10): deck-done summary card. Session
+  // disposition tallies feed the "N passed, M liked, K proposed" copy; both
+  // reset whenever a new job starts / the deck resets (job_id effect below).
+  // Off ⇒ tallies never update and the summary never renders — the existing
+  // exhausted state is byte-identical.
+  const replenishmentOn = useFlag('deck.replenishment');
+  const [sessionTally, setSessionTally] = useState({ passed: 0, liked: 0, proposed: 0 });
+  const [summaryDismissed, setSummaryDismissed] = useState(false);
   // S1 PRD-05 (flag ux.retap_active_tab) — when the Trades stack is already
   // at TradesHome, a focused re-tap scrolls the main list to top. (TabNav
   // pops any pushed Portfolio/Calculator screen first.)
@@ -908,6 +916,16 @@ export default function TradesScreen({ navigation, route }: any) {
     setAutoGenFailed(false);
   }, [leagueId]);
 
+  // F10 (deck.replenishment): a new job (fresh generation) or any deck
+  // reset (job → null: league switch, fairness toggle, target change) starts
+  // a new tally episode. Keying on job_id + league covers every reset site
+  // without touching them individually.
+  useEffect(() => {
+    if (!replenishmentOn) return;
+    setSessionTally({ passed: 0, liked: 0, proposed: 0 });
+    setSummaryDismissed(false);
+  }, [replenishmentOn, job?.job_id, leagueId]);
+
   // ── Onboarding item 4: first-run auto-start ──────────────────────────
   // On a first-run mount with no deck, kick generation immediately (the
   // pregen hook usually already warmed the server job — this call adopts
@@ -1095,6 +1113,10 @@ export default function TradesScreen({ navigation, route }: any) {
     pendingPassRef.current = null;
     clearTimeout(p.timer);
     lastDispositionedRef.current = null;
+    // F10 (deck.replenishment): an undone pass leaves the tally episode.
+    if (replenishmentOn) {
+      setSessionTally((t) => ({ ...t, passed: Math.max(0, t.passed - 1) }));
+    }
     setDeckIdx((cur) => {
       const idx = sortedDeckRef.current.findIndex((c) => c.trade_id === p.rawId);
       return idx >= 0 ? idx : Math.max(0, cur - 1);
@@ -1832,6 +1854,40 @@ export default function TradesScreen({ navigation, route }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deckExhausted]);
 
+  // ── F10 (flag deck.replenishment): deck-done summary card ─────────────
+  // Renders IN PLACE of the exhausted state when the user finished this
+  // deck in this session (≥1 disposition tallied). Terminate on success:
+  // no auto-regeneration, ever — "Done" returns to the hub (hub-launched
+  // decks) or settles into the standalone exhausted state. Flag off ⇒
+  // summaryVisible is always false and the exhausted state is untouched.
+  const summaryVisible =
+    replenishmentOn &&
+    deckExhausted &&
+    !summaryDismissed &&
+    sessionTally.passed + sessionTally.liked > 0;
+  const summaryTrackedRef = useRef(false);
+  useEffect(() => {
+    if (!summaryVisible) {
+      summaryTrackedRef.current = false;
+      return;
+    }
+    if (summaryTrackedRef.current) return;
+    summaryTrackedRef.current = true;
+    track('deck_summary_viewed', { ...sessionTally, deck_size: deck.length }, 'Trades');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summaryVisible]);
+
+  function handleSummaryDone() {
+    haptics.selection();
+    if (finderMode) {
+      // Hub-launched deck → back to the launcher hub.
+      navigation.navigate('TradesHome');
+    } else {
+      // Standalone home: settle into the regular exhausted state.
+      setSummaryDismissed(true);
+    }
+  }
+
   // ── Onboarding item 8: save-moment Apple ask (ADR-006 policy) ────────
   // One auto-modal per save-moment class, ever; one ask per session across
   // classes; only for unverified, non-demo, Sleeper-keyed iOS sessions.
@@ -2078,6 +2134,14 @@ export default function TradesScreen({ navigation, route }: any) {
       };
     } else {
       swipeMutation.mutate({ card: topCard, decision, signal: dispatchSignal });
+    }
+    // F10 (deck.replenishment): session tally for the deck-done summary.
+    if (replenishmentOn) {
+      setSessionTally((t) =>
+        decision === 'like'
+          ? { ...t, liked: t.liked + 1 }
+          : { ...t, passed: t.passed + 1 },
+      );
     }
     setDeckIdx((i) => i + 1);
     if (decision === 'like') {
@@ -3046,6 +3110,13 @@ export default function TradesScreen({ navigation, route }: any) {
                 givePlayerIds={topCard.give_player_ids}
                 receivePlayerIds={topCard.receive_player_ids}
                 impressionId={signalV2On ? rawTopCard?.impression_id : undefined}
+                onSent={
+                  // F10 — deck-done summary "proposed" tally.
+                  replenishmentOn
+                    ? () =>
+                        setSessionTally((t) => ({ ...t, proposed: t.proposed + 1 }))
+                    : undefined
+                }
                 compact
                 style={styles.sendInSleeper}
               />
@@ -3163,6 +3234,37 @@ export default function TradesScreen({ navigation, route }: any) {
                 <Text style={styles.emptyBody}>
                   Cards will appear here as they're found. First few should land within a few seconds.
                 </Text>
+              </View>
+            </Card>
+          ) : deck.length > 0 && summaryVisible ? (
+            // F10 (deck.replenishment) — completion moment: deck ENDS on a
+            // summary, never auto-advances into a new deck. Chalkline: ink
+            // surfaces, mono tallies, ice only on the actions.
+            <Card>
+              <View style={styles.emptyInner} testID="trades.deck-summary">
+                <Text style={styles.emptyTitle}>Deck done</Text>
+                <Text style={styles.summaryTally}>
+                  {sessionTally.passed} passed · {sessionTally.liked} liked ·{' '}
+                  {sessionTally.proposed} proposed
+                </Text>
+                <Text style={styles.emptyBody}>
+                  Fresh trades arrive after waivers.
+                </Text>
+                <View style={styles.summaryBtnRow}>
+                  <Button
+                    testID="trades.deck-summary.see-liked"
+                    label="See liked"
+                    variant="secondary"
+                    compact
+                    onPress={() => navigation.navigate('Portfolio')}
+                  />
+                  <Button
+                    testID="trades.deck-summary.done"
+                    label="Done"
+                    compact
+                    onPress={handleSummaryDone}
+                  />
+                </View>
               </View>
             </Card>
           ) : deck.length > 0 ? (
@@ -4017,6 +4119,17 @@ const styles = StyleSheet.create({
   emptyBody: {
     ...type.bodySm,
     textAlign: 'center',
+  },
+  // F10 — deck-done summary card. Tallies are data numerals → Plex Mono.
+  summaryTally: {
+    ...type.data,
+    color: chalk.base,
+    textAlign: 'center',
+  },
+  summaryBtnRow: {
+    flexDirection: 'row',
+    gap: space.sm,
+    marginTop: space.xs,
   },
   // Onboarding item 7 — post-Quick-Set regeneration receipt. Flare =
   // informational highlight per Chalkline (never an action color).

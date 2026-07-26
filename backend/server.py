@@ -78,6 +78,9 @@ from .database import (
     load_engine_telemetry,
     # F1 (deck.signal_v2) — impression_id spine
     save_deck_impressions, save_deck_outcome, load_board_state,
+    # F10 (deck.replenishment) — weekly deck pre-generation
+    load_active_deck_user_leagues, load_latest_trade_impression_batch,
+    replenish_week_done, log_deck_replenish,
     set_feedback_status, list_feedback_for_user, FEEDBACK_STATUSES, FEEDBACK_SEVERITIES,
     upsert_league_members, upsert_member_rankings,
     load_member_rankings, load_league_members, get_ranking_coverage,
@@ -2014,6 +2017,14 @@ def _deck_signal_v2_enabled() -> bool:
     return getattr(FLAGS, "deck_signal_v2", False)
 
 
+def _deck_replenishment_enabled() -> bool:
+    """F10 — weekly deck replenishment (docs/plans/tiktok-discovery/prds/
+    F10-deck-replenishment.md). Every replenishment code path checks this;
+    off ⇒ byte-identical behavior (no cron work, no pushes, no payload
+    changes)."""
+    return getattr(FLAGS, "deck_replenishment", False)
+
+
 def _deck_cfg(key: str, default: float) -> float:
     """model_config key via trade_service's live config dict (same pattern
     as _fuzzy_match_tau). Defaults inline so a missing key never breaks
@@ -2183,6 +2194,7 @@ def _log_deck_signal_impressions(
     players_dict: dict,
     capture: dict | None,
     scoring_format: str,
+    source: str | None = None,
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -2251,6 +2263,11 @@ def _log_deck_signal_impressions(
             "last_board_update_at": last_board_update,
             "user_value_basis":     "personal" if ranked_count > 0 else "consensus",
         }
+        # F10 — deck provenance ("replenish" for cron-pre-generated decks).
+        # Key added only when a source marker exists, so pull-generated
+        # decks' features_json stays byte-identical to pre-F10.
+        if source:
+            features["deck_source"] = source
         base = float(getattr(card, "composite_score", 0.0) or 0.0)
         impression_id = uuid.uuid4().hex
         imp_by_card[id(card)] = impression_id
@@ -2621,6 +2638,12 @@ def _run_trade_job(
         # stamped per card so /generate + /status responses carry it. Flag off
         # ⇒ this block is a no-op (no rows, payload byte-identical). Never
         # allowed to break generation.
+        # F10 — provenance marker set by the replenishment cron's kickoff
+        # (absent on every pull-generated job).
+        with _trade_jobs_lock:
+            _j = _trade_jobs.get(job_id)
+            job_source = (_j or {}).get("source")
+
         try:
             if league_id != "league_demo" and _deck_signal_v2_enabled():
                 imp_by_card = _log_deck_signal_impressions(
@@ -2631,6 +2654,7 @@ def _run_trade_job(
                     players_dict   = players_dict,
                     capture        = signal_capture,
                     scoring_format = active_format,
+                    source         = job_source,
                 )
                 if imp_by_card:
                     snapshot = []
@@ -2672,12 +2696,17 @@ def _run_trade_job(
             _engine_version = ("v3" if is_enabled("trade_engine.v3")
                                else "v2" if is_enabled("trade_engine.v2")
                                else "v1")
+            _ev_props = {"count": len(final_cards), "gen_ms": gen_ms,
+                         "engine_version": _engine_version, "lanes": _lanes}
+            # F10 — replenish-generated jobs are distinguishable in analytics
+            # (pull jobs carry no marker; props stay byte-identical for them).
+            if job_source:
+                _ev_props["deck_source"] = job_source
             record_event(
                 g_user_id, "trades_generated",
                 league_id=league_id,
                 source="api",
-                props={"count": len(final_cards), "gen_ms": gen_ms,
-                       "engine_version": _engine_version, "lanes": _lanes},
+                props=_ev_props,
             )
         except Exception as ev_err:
             log.warning("record_event(trades_generated) failed: %s", ev_err)
@@ -2735,10 +2764,23 @@ def _kickoff_trade_job(
     pinned_give_mode: str = "any",
     opponent_user_id: str | None = None,
     opponents_total: int | None = None,
+    source: str | None = None,
+    synchronous: bool = False,
 ) -> str:
     """Register a new job in _trade_jobs and start its worker thread.
     Returns the job_id. Caller is responsible for any pre-existing-job
-    deduplication; this always creates a fresh one."""
+    deduplication; this always creates a fresh one.
+
+    F10 additions (both default to the historical behavior):
+      source      — provenance marker stored on the job dict (e.g.
+                    "replenish"); threaded into the F1 impression features
+                    + the trades_generated event so pull-vs-replenish
+                    engagement is comparable. Never serialized to clients
+                    (_trade_job_public_view picks its keys explicitly).
+      synchronous — run the worker inline instead of spawning a thread.
+                    Used by the replenishment cron, which processes
+                    user-leagues one at a time inside the tick handler.
+    """
     job_id = uuid.uuid4().hex
     # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
     # Team) bypass the shared per-key cache — they answer a specific
@@ -2758,11 +2800,19 @@ def _kickoff_trade_job(
         "outlook_value":      None,    # populated when the worker reads prefs
         "is_pinned":          is_pinned,
     }
+    if source:
+        job["source"] = source
     with _trade_jobs_lock:
         _trade_jobs[job_id] = job
         if not is_pinned:
             # Pin into the per-key index so future generate calls dedupe.
             _trade_jobs_by_key[job["key"]] = job_id
+
+    if synchronous:
+        _run_trade_job(job_id, sess_token, league_id, fairness_threshold,
+                       pinned_give or [], pinned_receive or [],
+                       opponent_user_id, pinned_give_mode)
+        return job_id
 
     threading.Thread(
         target=_run_trade_job,
@@ -9437,12 +9487,16 @@ _NOTIF_FREQ_CAPS: dict[str, tuple[int, int]] = {
 #   match_accepted                  → dedup_key = "accept:{match_id}:{actor_uid}"
 #   league_member_joined            → dedup_key = "joined:{joiner_uid}:{leaguemate_uid}"
 #   league_member_unlocked_trades   → dedup_key = "unlock:{user_uid}:{leaguemate_uid}"
+#   deck_replenished                → dedup_key = "{league_id}:{iso_week}"
+#                                     (F10 — hard 1/week/league backstop on
+#                                     top of the deck_replenish_log marker)
 _NOTIF_DEDUP_CAPS: set[str] = {
     "match_expiring",
     "first_match",
     "match_accepted",
     "league_member_joined",
     "league_member_unlocked_trades",
+    "deck_replenished",
 }
 
 
@@ -9744,6 +9798,277 @@ def update_notification_prefs_route():
 
 
 # ---------------------------------------------------------------------------
+# F10 — weekly deck replenishment (flag deck.replenishment)
+# ---------------------------------------------------------------------------
+# docs/plans/tiktok-discovery/prds/F10-deck-replenishment.md. Runs INSIDE
+# /api/cron/daily-tick (no new external schedule): once per ISO week per
+# active user-league (deck disposition or generation in the trailing 30d),
+# pre-generate a fresh deck through the existing job machinery and send ONE
+# preference-gated push. The weekly gate unlocks on `replenish_weekday`
+# (model_config, default 2 = Wednesday, post-waivers) and stays open for the
+# rest of the week so a missed cron day self-heals; the deck_replenish_log
+# marker makes every rerun idempotent. Decks are pre-generated into the
+# normal _trade_jobs cache — ready, never pushed onto screen, and the client
+# NEVER auto-advances into them.
+
+_REPLENISH_DEFAULT_WEEKDAY = 2   # Python weekday(): 2 = Wednesday
+
+
+def _find_live_session_token(user_id: str, league_id: str) -> str | None:
+    """Token of an in-memory session already initialized for this
+    user-league (league-backed, trade services present), or None. The
+    replenishment cron prefers a live session so the job runs against the
+    user's real in-session ranking state."""
+    with _sessions_lock:
+        for tok, s in _sessions.items():
+            lg = s.get("league")
+            if (s.get("user_id") == user_id
+                    and lg is not None
+                    and getattr(lg, "league_id", None) == league_id
+                    and s.get("trade_svcs")
+                    and s.get("user_roster")):
+                return tok
+    return None
+
+
+def _build_replenish_session(user_id: str, league_id: str) -> str | None:
+    """Headless league-backed session for the replenishment cron, built
+    entirely from the DB: rosters from league_members (session_init persists
+    the user's own row too), ranking services with replayed swipes/overrides
+    via _extension_build_session, league members carrying consensus seeds
+    (the job worker injects real member_rankings itself, exactly like the
+    interactive path). Registered in _sessions under a fresh token — the
+    normal 4h idle sweep evicts it. Returns the token, or None when the
+    league can't be reconstructed (no stored rosters). Never raises."""
+    try:
+        members_rows = load_league_members(league_id)
+        user_row = next((m for m in members_rows
+                         if m.get("user_id") == user_id), None)
+        if not user_row or not user_row.get("player_ids"):
+            return None
+
+        from . import accounts as _accts
+        profile = {}
+        try:
+            profile = _accts.get_user_profile(user_id) or {}
+        except Exception:
+            pass
+        token, payload = _extension_build_session(
+            user_id      = user_id,
+            username     = profile.get("username") or user_row.get("username") or "",
+            display_name = (profile.get("display_name")
+                            or user_row.get("display_name") or ""),
+            avatar       = profile.get("avatar"),
+        )
+        payload.pop("extension", None)
+    except Exception as e:
+        log.warning("replenish: base session build failed for %s/%s: %s",
+                    user_id, league_id, e)
+        return None
+
+    try:
+        # League membership — mirrors session_init's v2 construction: real
+        # members carry the consensus seed verbatim (has_rankings stays
+        # False); _run_trade_job overwrites with saved member_rankings.
+        default_pool, default_seed = _get_universal_pool("1qb_ppr")
+        players_dict = {p.id: p for p in default_pool}
+        members: list[LeagueMember] = []
+        for m in members_rows:
+            if m.get("user_id") == user_id:
+                continue
+            ids = [str(x) for x in m.get("player_ids", []) if str(x) in players_dict]
+            if not ids:
+                continue
+            members.append(LeagueMember(
+                user_id     = m["user_id"],
+                username    = m.get("username") or m.get("display_name") or m["user_id"],
+                roster      = ids,
+                elo_ratings = {pid: default_seed.get(pid, 1500) for pid in ids},
+            ))
+        if not members:
+            raise RuntimeError("no opposing rosters stored for league")
+
+        league = League(league_id=league_id, name="League",
+                        platform="sleeper", members=members)
+        user_roster = [str(x) for x in user_row.get("player_ids", [])
+                       if str(x) in players_dict]
+        if not user_roster:
+            raise RuntimeError("user roster empty after pool filter")
+
+        # 7-day deck memory, same as session_init.
+        past_decision_keys: set = set()
+        try:
+            for td in load_trade_decisions(user_id=user_id,
+                                           league_id=league_id, since_days=7):
+                past_decision_keys.add((frozenset(td["give_player_ids"]),
+                                        frozenset(td["receive_player_ids"])))
+        except Exception:
+            pass
+
+        try:
+            fmt = get_league_scoring(league_id)
+        except Exception:
+            fmt = DEFAULT_SCORING
+        fmt_pool, _ = _get_universal_pool(fmt)
+        tsvc = TradeService(players={p.id: p for p in fmt_pool},
+                            past_decision_keys=past_decision_keys)
+        tsvc.add_league(league)
+
+        payload.update({
+            "league":        league,
+            "players":       list(default_pool),
+            "user_roster":   user_roster,
+            "trade_svcs":    {fmt: tsvc},
+            "trade_svc":     tsvc,
+            "active_format": fmt,
+            "service":       (payload.get("services") or {}).get(fmt)
+                             or payload.get("service"),
+        })
+        return token
+    except Exception as e:
+        log.warning("replenish: league session build failed for %s/%s: %s",
+                    user_id, league_id, e)
+        with _sessions_lock:
+            _sessions.pop(token, None)
+        return None
+
+
+def _count_expired_dropped(prior_rows: list[dict], new_cards: list[dict]) -> int:
+    """Expiry honesty: how many cards of the user's most recent PRIOR deck
+    are past the 7-day TradeCard expiry AND absent from the replenished
+    deck. 0 when there is no prior deck or it is still fresh — the push
+    only mentions expiries when true."""
+    if not prior_rows:
+        return 0
+    shown = prior_rows[0].get("shown_at") or ""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    if not shown or shown >= cutoff:
+        return 0
+    new_keys = {
+        (frozenset(c.get("give_player_ids") or []),
+         frozenset(c.get("receive_player_ids") or []))
+        for c in new_cards
+    }
+    return sum(
+        1 for r in prior_rows
+        if (frozenset(r.get("give_player_ids") or []),
+            frozenset(r.get("receive_player_ids") or [])) not in new_keys
+    )
+
+
+def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
+    """Ensure a fresh deck exists for this user-league. Reuses a fresh
+    cached job when one exists (deck already ready); otherwise runs the
+    normal job machinery synchronously — against the user's live session
+    when present, else a headless DB-built one. Returns (deck_size,
+    expired_count) on success, None on failure."""
+    try:
+        fmt = get_league_scoring(league_id)
+    except Exception:
+        fmt = DEFAULT_SCORING
+    key = _trade_job_key(user_id, league_id, fmt)
+
+    # Prior deck snapshot BEFORE generation appends a new impression batch.
+    try:
+        prior_rows = load_latest_trade_impression_batch(user_id, league_id)
+    except Exception:
+        prior_rows = []
+
+    cards: list | None = None
+    with _trade_jobs_lock:
+        jid = _trade_jobs_by_key.get(key)
+        job = _trade_jobs.get(jid) if jid else None
+        if (job and job.get("status") == "complete"
+                and not job.get("is_pinned")
+                and (time.monotonic() - (job.get("finished_at") or 0))
+                    <= _PREGEN_TTL_SECONDS):
+            cards = list(job.get("cards") or [])   # cached deck still fresh
+
+    if cards is None:
+        token = (_find_live_session_token(user_id, league_id)
+                 or _build_replenish_session(user_id, league_id))
+        if not token:
+            return None
+        job_id = _kickoff_trade_job(
+            sess_token     = token,
+            user_id        = user_id,
+            league_id      = league_id,
+            scoring_format = fmt,
+            source         = "replenish",
+            synchronous    = True,
+        )
+        with _trade_jobs_lock:
+            job = _trade_jobs.get(job_id) or {}
+            if job.get("status") != "complete":
+                log.warning("replenish: job failed for %s/%s: %s",
+                            user_id, league_id, job.get("error"))
+                return None
+            cards = list(job.get("cards") or [])
+
+    return len(cards), _count_expired_dropped(prior_rows, cards)
+
+
+def _run_weekly_replenishment(now: datetime) -> dict:
+    """The daily-tick replenishment pass. Flag-gated by the caller. Returns
+    operator counters (serialized into the tick response only when the flag
+    is on)."""
+    stats = {"eligible": 0, "generated": 0, "pushed": 0,
+             "skipped_done": 0, "errors": 0}
+    weekday_gate = int(_deck_cfg("replenish_weekday", _REPLENISH_DEFAULT_WEEKDAY))
+    if now.weekday() < weekday_gate:
+        # Before this week's replenish day. >= (not ==) keeps the rest of
+        # the week eligible so one missed cron run doesn't skip the week —
+        # the per-week marker still caps everything at once.
+        return {**stats, "gated": True}
+
+    iso_year, iso_week_num, _ = now.isocalendar()
+    iso_week = f"{iso_year}-W{iso_week_num:02d}"
+
+    try:
+        pairs = load_active_deck_user_leagues(days=30)
+    except Exception as e:
+        log.warning("replenish: activity query failed: %s", e)
+        return stats
+
+    for pair in pairs:
+        uid, lid = pair["user_id"], pair["league_id"]
+        stats["eligible"] += 1
+        try:
+            if replenish_week_done(uid, lid, iso_week):
+                stats["skipped_done"] += 1
+                continue
+            result = _replenish_deck_for(uid, lid)
+            if result is None:
+                stats["errors"] += 1
+                continue
+            deck_size, expired_count = result
+            # Marker BEFORE the push: it is the idempotency gate for both,
+            # and a marker-without-push beats a push-without-marker (which
+            # could re-push next tick). The dedup_key backstops 1/wk/league.
+            log_deck_replenish(uid, lid, iso_week, deck_size, expired_count)
+            stats["generated"] += 1
+            if deck_size > 0:
+                # Copy names concrete inventory, never bare "come back";
+                # expiry mentioned only when true (PRD guardrails).
+                body = (f"{deck_size} fresh trade"
+                        f"{'s' if deck_size != 1 else ''} for your league.")
+                if expired_count > 0:
+                    body += (f" {expired_count} expired — values moved.")
+                _send_typed_push(
+                    uid, "deck_replenished",
+                    title = "Your new deck is ready",
+                    body  = body,
+                    data  = {"league_id": lid},
+                    dedup_key = f"{lid}:{iso_week}",
+                )
+                stats["pushed"] += 1
+        except Exception as e:
+            log.warning("replenish: %s/%s failed: %s", uid, lid, e)
+            stats["errors"] += 1
+    return stats
+
+
+# ---------------------------------------------------------------------------
 # Cron-tick endpoints — called by Render Cron jobs over HTTP
 # ---------------------------------------------------------------------------
 # Three endpoints:
@@ -10040,7 +10365,20 @@ def cron_daily_tick():
                 )
                 counters["winback_matches"] += 1
 
+    # ── F10 (flag deck.replenishment) — weekly deck pre-generation ──
+    # Flag off ⇒ this block is a no-op and the response stays byte-identical.
+    replenish_stats: dict | None = None
+    if _deck_replenishment_enabled():
+        try:
+            replenish_stats = _run_weekly_replenishment(now)
+        except Exception as e:
+            log.warning("daily-tick: replenishment pass failed: %s", e)
+            replenish_stats = {"error": str(e)}
+
     log.info("daily-tick: %s", counters)
+    if replenish_stats is not None:
+        log.info("daily-tick replenish: %s", replenish_stats)
+        return jsonify({"ok": True, **counters, "replenish": replenish_stats})
     return jsonify({"ok": True, **counters})
 
 

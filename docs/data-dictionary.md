@@ -254,6 +254,24 @@ Indexes: `ix_deck_outcomes_impression` on `impression_id`.
 
 ---
 
+## `deck_replenish_log`
+
+TikTok-discovery **F10 deck replenishment** (flag `deck.replenishment`, `docs/plans/tiktok-discovery/prds/F10-deck-replenishment.md`). One row per (user, league, ISO week) the weekly replenishment pass inside `/api/cron/daily-tick` pre-generated a deck for. The unique constraint is the idempotency gate: re-running the tick in the same week skips both regeneration and the `deck_replenished` push (hard 1/week/league cap).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `user_id` | str | recipient |
+| `league_id` | str | league the deck was generated for |
+| `iso_week` | str | e.g. `2026-W30` |
+| `deck_size` | int | cards in the pre-generated deck (0 = generated empty, no push sent) |
+| `expired_count` | int | prior-deck cards past the 7-day `TradeCard` expiry that dropped from the new deck (only mentioned in push copy when > 0) |
+| `created_at` | str | ISO UTC |
+
+Unique: `uq_deck_replenish_week` on `(user_id, league_id, iso_week)`.
+
+---
+
 ## `players`
 
 Canonical player reference, synced from Sleeper bulk payload (skill positions, Active or prospects). Re-synced if empty or `last_synced` > 24h.

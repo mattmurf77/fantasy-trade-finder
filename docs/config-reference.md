@@ -327,6 +327,7 @@ The per-position age NOW/FUTURE curves are deliberately a code constant table (`
 | `diversity_penalty` | 0.6 | Ordering-key multiplier for saturated targets |
 | `deck_max_per_target` | 3.0 | Intra-deck cap: cards per top receive asset (deck never shrinks below 5) |
 | `fuzzy_match_tau` | 0.8 | Min Jaccard similarity per side for a fuzzy mirror match (read inline in `server._fuzzy_match_tau`) |
+| `replenish_weekday` | 2.0 | **F10** (flag `deck.replenishment`) — Python `weekday()` on which the weekly replenishment pass inside `/api/cron/daily-tick` unlocks (2 = Wednesday, post-waivers). The gate is `>=`, so later days of the same ISO week self-heal a missed cron run; the `deck_replenish_log` marker keeps everything 1/week. Read via `server._deck_cfg` |
 
 ### Tier 3 (flag-gated, landing imminently)
 

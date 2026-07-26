@@ -240,6 +240,11 @@ _DEFAULT_CFG: dict[str, float] = {
     "diversity_penalty":          0.6,   # ordering-key multiplier for saturated targets
     "deck_max_per_target":        3.0,   # intra-deck cap: cards per top receive asset
     # ------------------------------------------------------------------
+    # F10 — weekly deck replenishment (flag: deck.replenishment —
+    # consumed by server._run_weekly_replenishment inside daily-tick)
+    # ------------------------------------------------------------------
+    "replenish_weekday":          2.0,   # Python weekday the weekly run unlocks (2 = Wednesday, post-waivers)
+    # ------------------------------------------------------------------
     # Tier 3 — trade_optimizer.py (flags: trade_engine.v3, trade.three_team)
     # ------------------------------------------------------------------
     "v3_pool_size":              12.0,   # per-side candidate pool for exact enumeration

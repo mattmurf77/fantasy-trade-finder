@@ -36,6 +36,10 @@ interface Props {
   // impression_id so a successful propose appends a `propose` outcome
   // server-side. Undefined (flag off / non-deck mounts) changes nothing.
   impressionId?: string;
+  // F10 (flag deck.replenishment): fires once after a SUCCESSFUL propose —
+  // TradesScreen counts it into the deck-done summary's "proposed" tally.
+  // Undefined (flag off / non-deck mounts) changes nothing.
+  onSent?: () => void;
   compact?: boolean;
   style?: ViewStyle;
 }
@@ -48,6 +52,7 @@ export default function SendInSleeperButton({
   givePlayerIds,
   receivePlayerIds,
   impressionId,
+  onSent,
   compact,
   style,
 }: Props) {
@@ -121,6 +126,12 @@ export default function SendInSleeperButton({
       });
       setState('sent');
       haptics.success();
+      // F10 — deck-done summary tally (no-op when the caller passed nothing).
+      try {
+        onSent?.();
+      } catch {
+        /* tally must never break the send flow */
+      }
       // Emoji strip (W1B handoff ride-along). S7 PRD-02: a successful send
       // is the primary demonstrated-satisfaction moment — evaluate the
       // rating-prompt gate once the user acknowledges the alert
@@ -178,7 +189,7 @@ export default function SendInSleeperButton({
         );
       }
     }
-  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, goConnect]);
+  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, goConnect]);
 
   // #180 — pre-flight validation before the confirm. validateTradeSend never
   // throws (unreachable/flag-off degrades to checked:false → plain confirm);

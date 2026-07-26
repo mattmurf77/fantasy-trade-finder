@@ -194,12 +194,18 @@ export function usePushNotifications(
           'league_member_joined', 'league_member_unlocked_trades',
         ]);
         const rankKinds = new Set(['finish_ranking']);
+        // F10 (deck.replenishment): fresh-deck push → the Trades tab, where
+        // the pre-generated deck is served from the job cache. Inert unless
+        // the backend flag is on (the kind is never pushed otherwise).
+        const tradeKinds = new Set(['deck_replenished']);
         if (matchKinds.has(kind)) {
           onTapMatchNotification('Matches', data.match_id);
         } else if (leagueKinds.has(kind)) {
           onTapMatchNotification('League', undefined);
         } else if (rankKinds.has(kind)) {
           onTapMatchNotification('Rank', undefined);
+        } else if (tradeKinds.has(kind)) {
+          onTapMatchNotification('Trades', undefined);
         }
       } catch {
         // ignore

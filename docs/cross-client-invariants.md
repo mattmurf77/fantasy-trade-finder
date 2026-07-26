@@ -91,7 +91,7 @@ Allowed values: `'1qb_ppr'`, `'sf_tep'`. Null in legacy rows is treated as `'1qb
 |---|---|---|
 | `trade_matches` | `notification_prefs.trade_matches` | `new_match`, match dispositions |
 | `weekly_digest` | `notification_prefs.weekly_digest` | weekly summary kinds |
-| `reengagement` | `notification_prefs.reengagement` | `winback_dormant`, similar |
+| `reengagement` | `notification_prefs.reengagement` | `winback_dormant`, `deck_replenished` (F10 weekly fresh-deck push — deliberately in this bucket so `notif.reengagement_default_off` applies), similar |
 
 Mapping lives in `get_pref_bucket()` in `backend/server.py`. **Add a new kind in two places:** the dispatcher (so it routes correctly) and `notification_events_log` consumers that filter by kind.
 

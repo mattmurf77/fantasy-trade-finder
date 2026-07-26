@@ -464,6 +464,25 @@ Index(
     deck_outcomes_table.c.impression_id,
 )
 
+# ── TikTok-discovery F10 (flag deck.replenishment) — weekly marker ──────────
+# docs/plans/tiktok-discovery/prds/F10-deck-replenishment.md. One row per
+# (user, league, ISO week) the weekly replenishment cron pre-generated a deck
+# for. The unique constraint IS the idempotency gate: re-running daily-tick
+# in the same week finds the row and skips both the regeneration and the
+# push (hard 1/week/league cap). deck_size / expired_count are kept for
+# operator inspection of what the push claimed.
+deck_replenish_log_table = Table("deck_replenish_log", metadata,
+    Column("id",            Integer, primary_key=True, autoincrement=True),
+    Column("user_id",       String,  nullable=False),
+    Column("league_id",     String,  nullable=False),
+    Column("iso_week",      String,  nullable=False),   # e.g. "2026-W30"
+    Column("deck_size",     Integer),                   # cards in the pre-generated deck
+    Column("expired_count", Integer),                   # prior-deck cards dropped past 7d expiry
+    Column("created_at",    String,  nullable=False),   # ISO UTC
+    UniqueConstraint("user_id", "league_id", "iso_week",
+                     name="uq_deck_replenish_week"),
+)
+
 
 # ---------------------------------------------------------------------------
 # Canonical player reference table — synced from Sleeper bulk payload.
@@ -3582,6 +3601,105 @@ def log_trade_impressions(user_id: str, league_id: str, cards: list) -> None:
             conn.execute(insert(trade_impressions_table), rows)
     except Exception:
         pass  # training-data logging is strictly best-effort
+
+
+# ── TikTok-discovery F10 (flag deck.replenishment) — weekly replenishment ───
+
+def load_active_deck_user_leagues(days: int = 30) -> list[dict]:
+    """Distinct (user_id, league_id) pairs with deck activity in the trailing
+    `days` window — a trade disposition (trade_decisions) or a deck
+    generation (trade_impressions). The F10 replenishment cron's eligibility
+    query: only these pairs get a weekly pre-generated deck (no zombie
+    churn). Demo league excluded, matching the impression writers.
+
+    Naive-UTC cutoff mirrors load_recent_league_likes — trade_decisions
+    stores naive ISO timestamps, trade_impressions stores +00:00-suffixed
+    ones; both compare correctly against the naive prefix lexically.
+    """
+    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None)
+              - timedelta(days=days)).isoformat()
+    pairs: set[tuple] = set()
+    with engine.connect() as conn:
+        for tbl, ts_col in (
+            (trade_decisions_table,   trade_decisions_table.c.created_at),
+            (trade_impressions_table, trade_impressions_table.c.shown_at),
+        ):
+            rows = conn.execute(
+                select(tbl.c.user_id, tbl.c.league_id)
+                .where(and_(ts_col >= cutoff,
+                            tbl.c.league_id != "league_demo"))
+                .distinct()
+            ).fetchall()
+            for r in rows:
+                if r.user_id and r.league_id:
+                    pairs.add((r.user_id, r.league_id))
+    return [{"user_id": u, "league_id": l} for u, l in sorted(pairs)]
+
+
+def load_latest_trade_impression_batch(user_id: str, league_id: str) -> list[dict]:
+    """Rows of the MOST RECENT generation batch for this user-league —
+    log_trade_impressions stamps every row of a job with one shared
+    shown_at, so `shown_at == max(shown_at)` selects exactly the last
+    served deck. Feeds F10's expiry-honesty count (cards older than the
+    7-day TradeCard expiry that dropped out of the replenished deck).
+    Give/receive JSON decoded; empty list when the user has no deck history.
+    """
+    with engine.connect() as conn:
+        latest = conn.execute(
+            select(func.max(trade_impressions_table.c.shown_at)).where(
+                and_(trade_impressions_table.c.user_id   == user_id,
+                     trade_impressions_table.c.league_id == league_id)
+            )
+        ).scalar()
+        if not latest:
+            return []
+        rows = conn.execute(
+            select(trade_impressions_table).where(
+                and_(trade_impressions_table.c.user_id   == user_id,
+                     trade_impressions_table.c.league_id == league_id,
+                     trade_impressions_table.c.shown_at  == latest)
+            )
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r._mapping)
+        try:
+            d["give_player_ids"]    = json.loads(d["give_player_ids"])
+            d["receive_player_ids"] = json.loads(d["receive_player_ids"])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        out.append(d)
+    return out
+
+
+def replenish_week_done(user_id: str, league_id: str, iso_week: str) -> bool:
+    """True when this user-league already has a replenishment marker for
+    `iso_week` — the F10 idempotency check (skip regeneration AND push)."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(deck_replenish_log_table.c.id).where(
+                and_(deck_replenish_log_table.c.user_id   == user_id,
+                     deck_replenish_log_table.c.league_id == league_id,
+                     deck_replenish_log_table.c.iso_week  == iso_week)
+            )
+        ).fetchone()
+    return row is not None
+
+
+def log_deck_replenish(user_id: str, league_id: str, iso_week: str,
+                       deck_size: int, expired_count: int) -> None:
+    """Write the F10 weekly marker row. Callers check replenish_week_done
+    first; the uq_deck_replenish_week constraint backstops a race by
+    raising, which the cron loop treats as already-done."""
+    with engine.begin() as conn:
+        conn.execute(insert(deck_replenish_log_table).values(
+            user_id       = user_id,
+            league_id     = league_id,
+            iso_week      = iso_week,
+            deck_size     = int(deck_size),
+            expired_count = int(expired_count),
+            created_at    = _now(),
+        ))
 
 
 def save_deck_impressions(rows: list[dict]) -> None:
@@ -7488,6 +7606,10 @@ NOTIF_KIND_TO_BUCKET: dict[str, str] = {
     "winback_dormant":                 "reengagement",
     "finish_ranking":                  "reengagement",
     "season_start":                    "reengagement",
+    # F10 (flag deck.replenishment) — weekly fresh-deck push. Deliberately
+    # in the re-engagement bucket so `notif.reengagement_default_off`
+    # applies: without a stored opt-in the push is skipped.
+    "deck_replenished":                "reengagement",
 }
 
 def _notif_pref_effective_defaults() -> dict:

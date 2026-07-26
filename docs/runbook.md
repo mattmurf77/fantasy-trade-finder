@@ -166,6 +166,19 @@ If these stop firing, queued pushes pile up in `notification_queue` and digests/
 
 ---
 
+## Weekly deck replenishment (F10, flag `deck.replenishment`, 2026-07-26)
+
+Runs **inside** `POST /api/cron/daily-tick` — no separate schedule. Dark by default; flag off is byte-identical (no work, no pushes, no `replenish` key in the tick response).
+
+- **Weekly gate:** the pass unlocks when `now.weekday() >= replenish_weekday` (`model_config`, default `2` = Wednesday, chosen post-waivers). The gate is `>=` on purpose: a missed Wednesday cron run self-heals Thu–Sun. **Tune the day** by setting the `replenish_weekday` model_config key (0 = Monday … 6 = Sunday); no deploy needed.
+- **Idempotency:** one `deck_replenish_log` row per (user, league, ISO week) is written *before* the push; reruns in the same week skip both regeneration and push. The `deck_replenished` dedup key (`{league_id}:{iso_week}`) is a second, independent 1/week/league backstop in `notification_events_log`.
+- **Eligibility:** user-leagues with a trade disposition or deck generation in the trailing 30 days (`load_active_deck_user_leagues`). Everyone else is untouched — no zombie churn.
+- **Generation:** the existing job machinery, run synchronously per pair — a live session is reused when present, otherwise a headless session is rebuilt from `league_members` + replayed swipes. Decks land in the normal 30-min pre-gen cache (`_PREGEN_TTL_SECONDS`), so a push tapped hours later triggers a normal fresh generation rather than serving the cached one — acceptable; the push copy claims inventory, not a frozen deck.
+- **Push policy:** kind `deck_replenished`, **reengagement bucket** — with `notif.reengagement_default_off` on (the shipping default) users must have opted in. Empty decks write the marker but never push; the expired-card count appears in copy only when > 0.
+- **Monitoring:** the tick response's `replenish` object (`eligible / generated / pushed / skipped_done / errors`). `pushed` counts dispatcher *attempts* — preference-gated skips still decrement nothing there; check `notification_events_log` kind `deck_replenished` for actual sends. Sustained `errors` usually means a league whose `league_members` rosters were never persisted.
+
+---
+
 ## Reset / wipe
 
 ```
