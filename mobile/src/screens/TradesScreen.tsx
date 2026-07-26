@@ -10,6 +10,7 @@ import {
   Dimensions,
   Modal,
   Alert,
+  AppState,
   Platform,
   Share,
   type LayoutChangeEvent,
@@ -66,6 +67,7 @@ import {
   swipeTrade,
   flagBadTrade,
   getLikedTrades,
+  type SwipeSignal,
 } from '../api/trades';
 import {
   getLeaguePreferences,
@@ -127,6 +129,12 @@ const SWIPE_THRESHOLD = 120;
 // Triage undo (S3 PRD-03, flag ux.swipe_undo): how long a pass swipe's
 // disposition POST is held (and the Undo toast shown) before committing.
 const UNDO_HOLD_MS = 5000;
+
+// F1 signal spine (flag deck.signal_v2, PRD F1): dwell timer cap (guards
+// against left-open decks inflating dwell) and the front-of-deck threshold
+// after which a card counts as `viewed` (served ≠ seen).
+const DWELL_CAP_MS = 120_000;
+const VIEWED_MIN_MS = 500;
 
 // Stable empty-array reference so the zustand selector doesn't return a
 // brand-new `[]` on every render (which would trigger an infinite re-render
@@ -320,6 +328,10 @@ export default function TradesScreen({ navigation, route }: any) {
   // byte-identical behavior) ──────────────────────────────────────────
   const swipeUndoOn = useFlag('ux.swipe_undo');           // S3 PRD-03
   const menuOn = useFlag('ux.player_context_menu');       // S3 PRD-02
+  // F1 signal spine (flag deck.signal_v2): thread impression_id + dwell +
+  // engagement bits through dispositions/events. Off ⇒ no timers, no extra
+  // fields, byte-identical behavior.
+  const signalV2On = useFlag('deck.signal_v2');
   // S1 PRD-05 (flag ux.retap_active_tab) — when the Trades stack is already
   // at TradesHome, a focused re-tap scrolls the main list to top. (TabNav
   // pops any pushed Portfolio/Calculator screen first.)
@@ -921,8 +933,14 @@ export default function TradesScreen({ navigation, route }: any) {
   );
 
   const swipeMutation = useMutation({
-    mutationFn: ({ card, decision }: { card: TradeCard; decision: 'like' | 'pass' }) =>
-      swipeTrade(card, decision),
+    mutationFn: ({ card, decision, signal }: {
+      card: TradeCard;
+      decision: 'like' | 'pass';
+      // F1 (deck.signal_v2): optional per-disposition signal fields; only
+      // populated by advance() when the flag is on AND the card carries an
+      // impression_id. Absent ⇒ the POST body is byte-identical to pre-F1.
+      signal?: SwipeSignal;
+    }) => swipeTrade(card, decision, signal),
     onMutate: ({ card }) => {
       const tradeId = card.trade_id;
       // Edited cards (player swap, feedback #86) carry a derived trade_id
@@ -998,6 +1016,10 @@ export default function TradesScreen({ navigation, route }: any) {
     card: TradeCard;
     rawId: string;
     timer: ReturnType<typeof setTimeout>;
+    // F1 (deck.signal_v2): dwell/engagement captured at disposition time —
+    // the held POST must carry the numbers from when the swipe happened,
+    // not from when the undo window expires.
+    signal?: SwipeSignal;
   } | null>(null);
   // Double-fire guard (S3B-08): last-dispositioned RAW trade_id — the tap
   // and gesture paths can both fire advance() for the same top card.
@@ -1008,12 +1030,59 @@ export default function TradesScreen({ navigation, route }: any) {
   // Undo toast action outlives the render that created it).
   const sortedDeckRef = useRef<TradeCard[]>([]);
 
+  // ── F1 signal spine (flag deck.signal_v2) ────────────────────────────
+  // Dwell = card fronted → disposition, paused while the app is
+  // backgrounded, capped at DWELL_CAP_MS. Engagement bits reset per
+  // fronted card. Ref-only bookkeeping — nothing is sent unless the flag
+  // is on AND the served card carried an impression_id (signalForCard).
+  const dwellRef = useRef<{
+    startedAt: number;
+    pausedAt: number | null;
+    pausedTotal: number;
+  }>({ startedAt: Date.now(), pausedAt: null, pausedTotal: 0 });
+  const engagementRef = useRef({ detailExpanded: false, calcOpened: false });
+  const viewedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function currentDwellMs(): number {
+    const d = dwellRef.current;
+    const end = d.pausedAt ?? Date.now();
+    return Math.max(0, Math.min(DWELL_CAP_MS, end - d.startedAt - d.pausedTotal));
+  }
+
+  function signalForCard(card: TradeCard | undefined): SwipeSignal | undefined {
+    if (!signalV2On || !card?.impression_id) return undefined;
+    return {
+      impression_id: card.impression_id,
+      dwell_ms: currentDwellMs(),
+      detail_expanded: engagementRef.current.detailExpanded,
+      calc_opened: engagementRef.current.calcOpened,
+    };
+  }
+
+  // Pause/resume the dwell timer on app background (PRD F1: backgrounding
+  // must not inflate dwell). Flag off ⇒ no listener at all.
+  useEffect(() => {
+    if (!signalV2On) return;
+    const sub = AppState.addEventListener('change', (st) => {
+      const d = dwellRef.current;
+      if (st === 'active') {
+        if (d.pausedAt != null) {
+          d.pausedTotal += Date.now() - d.pausedAt;
+          d.pausedAt = null;
+        }
+      } else if (d.pausedAt == null) {
+        d.pausedAt = Date.now();
+      }
+    });
+    return () => sub.remove();
+  }, [signalV2On]);
+
   function flushPendingPass() {
     const p = pendingPassRef.current;
     if (!p) return;
     pendingPassRef.current = null;
     clearTimeout(p.timer);
-    swipeMutation.mutate({ card: p.card, decision: 'pass' });
+    swipeMutation.mutate({ card: p.card, decision: 'pass', signal: p.signal });
   }
   // Latest-instance ref so the unmount cleanup can flush without a stale
   // closure over swipeMutation.
@@ -1030,7 +1099,18 @@ export default function TradesScreen({ navigation, route }: any) {
       const idx = sortedDeckRef.current.findIndex((c) => c.trade_id === p.rawId);
       return idx >= 0 ? idx : Math.max(0, cur - 1);
     });
-    track('swipe_undone', { trade_id: p.rawId }, 'Trades');
+    // F1 (deck.signal_v2): the undo outcome rides the existing event as an
+    // additive prop — the server's /api/events hook appends an `undo`
+    // deck_outcomes row. (The held pass never POSTed, so no pass outcome
+    // exists for this card; undo appends, nothing is mutated.)
+    track(
+      'swipe_undone',
+      {
+        trade_id: p.rawId,
+        ...(p.signal?.impression_id ? { impression_id: p.signal.impression_id } : {}),
+      },
+      'Trades',
+    );
   }
 
   // Commit any pending pass on unmount — leaving the screen ends the undo
@@ -1047,7 +1127,11 @@ export default function TradesScreen({ navigation, route }: any) {
   // a failed flag just toasts instead of rewinding (the pass swipe carries
   // the "not interested" signal regardless).
   const flagMutation = useMutation({
-    mutationFn: (card: TradeCard) => flagBadTrade(card),
+    // F1 (deck.signal_v2): impressionId joins the flag to its impression as
+    // a `not_interested` outcome; undefined (flag off / no id) is dropped
+    // at the API layer so the body stays byte-identical to pre-F1.
+    mutationFn: ({ card, impressionId }: { card: TradeCard; impressionId?: string }) =>
+      flagBadTrade(card, undefined, impressionId),
     onError: () => {
       setToast({ msg: "Flag didn't save — try again.", tone: 'warn' });
     },
@@ -1217,6 +1301,8 @@ export default function TradesScreen({ navigation, route }: any) {
   // receive pins the get side (cards must return ≥1 of them).
   function handleKeepSide(card: TradeCard, side: 'give' | 'receive') {
     haptics.selection();
+    // F1 (deck.signal_v2): a keep-side tap is deeper-than-glance engagement.
+    if (signalV2On) engagementRef.current.detailExpanded = true;
     useFinderTargets
       .getState()
       .setSide(side, side === 'give' ? card.give_players : card.receive_players);
@@ -1230,6 +1316,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // in-place edit stays; this is the "full editor" path.
   function handleEditInCalculator(card: TradeCard) {
     haptics.selection();
+    // F1 (deck.signal_v2): calc_opened engagement bit for this card's
+    // eventual disposition outcome.
+    if (signalV2On) engagementRef.current.calcOpened = true;
     track('trade_edit_in_calculator_tapped', undefined, 'Trades');
     navigation?.navigate?.('TradeCalculator', {
       prefill: {
@@ -1415,6 +1504,43 @@ export default function TradesScreen({ navigation, route }: any) {
     // card that was already counted as viewed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topTradeId]);
+
+  // ── F1 (flag deck.signal_v2): dwell reset + the ≥500ms `viewed` outcome.
+  // The unflagged trade_card_viewed event above keeps its exact timing and
+  // props; this ADDITIONALLY fires deck_card_viewed (impression-joined)
+  // only when the card is still front-of-deck after VIEWED_MIN_MS, so the
+  // backend can distinguish served-vs-seen. Keyed like the event above:
+  // per fronted trade_id, not per index change.
+  const topImpressionId = signalV2On ? rawTopCard?.impression_id : undefined;
+  useEffect(() => {
+    if (!signalV2On) return;
+    dwellRef.current = { startedAt: Date.now(), pausedAt: null, pausedTotal: 0 };
+    engagementRef.current = { detailExpanded: false, calcOpened: false };
+    if (viewedTimerRef.current) {
+      clearTimeout(viewedTimerRef.current);
+      viewedTimerRef.current = null;
+    }
+    if (!topImpressionId || !topTradeId) return;
+    const impressionId = topImpressionId;
+    const tradeId = topTradeId;
+    const cardIndex = deckIdx;
+    viewedTimerRef.current = setTimeout(() => {
+      viewedTimerRef.current = null;
+      track(
+        'deck_card_viewed',
+        { impression_id: impressionId, trade_id: tradeId, card_index: cardIndex },
+        'Trades',
+      );
+    }, VIEWED_MIN_MS);
+    return () => {
+      if (viewedTimerRef.current) {
+        clearTimeout(viewedTimerRef.current);
+        viewedTimerRef.current = null;
+      }
+    };
+    // deckIdx intentionally omitted (see the effect above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signalV2On, topTradeId, topImpressionId]);
 
   // ── Onboarding guided layer (onboarding.guided_layer AND .trades_first,
   // v2.1): coach marks 1–2. Each shows once ever (persisted at show time),
@@ -1938,6 +2064,9 @@ export default function TradesScreen({ navigation, route }: any) {
     // Guided layer: any disposition (swipe or button) retires an active
     // swipe hint — the card it pointed at is leaving.
     if (swipeHintActive) dismissSwipeHint();
+    // F1 (deck.signal_v2): freeze dwell/engagement at disposition time —
+    // undefined when the flag is off or the card has no impression_id.
+    const dispatchSignal = signalForCard(rawTopCard);
     if (swipeUndoOn && decision === 'pass') {
       // Hold the POST for the undo window (design note at pendingPassRef).
       const card = topCard;
@@ -1945,9 +2074,10 @@ export default function TradesScreen({ navigation, route }: any) {
         card,
         rawId: dispatchRawId,
         timer: setTimeout(() => flushPendingPassRef.current(), UNDO_HOLD_MS),
+        signal: dispatchSignal,
       };
     } else {
-      swipeMutation.mutate({ card: topCard, decision });
+      swipeMutation.mutate({ card: topCard, decision, signal: dispatchSignal });
     }
     setDeckIdx((i) => i + 1);
     if (decision === 'like') {
@@ -2010,7 +2140,10 @@ export default function TradesScreen({ navigation, route }: any) {
     // No reason field in the mobile flag flow (flagBadTrade's `reason`
     // param is unused here), so the event carries the trade id only.
     track('trade_flagged', { trade_id: topCard.trade_id }, 'Trades');
-    flagMutation.mutate(topCard);
+    flagMutation.mutate({
+      card: topCard,
+      impressionId: signalV2On ? rawTopCard?.impression_id : undefined,
+    });
     advance('pass');
     // Flagging is deliberate — commit the pass immediately (no undo window;
     // the flag toast below replaces the pass-undo toast anyway).
@@ -2842,11 +2975,17 @@ export default function TradesScreen({ navigation, route }: any) {
                 onToggleUntouchable={
                   untouchablesEnabled ? handleToggleUntouchable : undefined
                 }
-                onSwapPlayer={(player, side) => setSwapTarget({ player, side })}
+                onSwapPlayer={(player, side) => {
+                  // F1 (deck.signal_v2): swap sheet = detail engagement.
+                  if (signalV2On) engagementRef.current.detailExpanded = true;
+                  setSwapTarget({ player, side });
+                }}
                 onPlayerMenu={
                   menuOn
                     ? (player, side) => {
                         haptics.selection();
+                        // F1 (deck.signal_v2): menu open = detail engagement.
+                        if (signalV2On) engagementRef.current.detailExpanded = true;
                         track(
                           'player_menu_opened',
                           { surface: 'trades', side },
@@ -2906,6 +3045,7 @@ export default function TradesScreen({ navigation, route }: any) {
                 theirUserId={topCard.opponent_user_id}
                 givePlayerIds={topCard.give_player_ids}
                 receivePlayerIds={topCard.receive_player_ids}
+                impressionId={signalV2On ? rawTopCard?.impression_id : undefined}
                 compact
                 style={styles.sendInSleeper}
               />

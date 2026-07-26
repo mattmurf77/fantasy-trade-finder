@@ -402,6 +402,69 @@ Index(
 )
 
 
+# ── TikTok-discovery F1 (flag deck.signal_v2) — impression_id spine ─────────
+# docs/plans/tiktok-discovery/prds/F1-signal-foundation.md. Additive tables:
+# trade_impressions / trade_decisions / the Elo pipeline are untouched.
+#
+# deck_impressions: ONE row per card in the FINAL SERVED deck order, written
+# once per completed generation job by server._run_trade_job (never per
+# /status poll), only when the flag is on. features_json is FROZEN at serve
+# time (never recomputed at label time — training/serving skew) and carries
+# the card attributes the generation path already computed (shape, archetype/
+# lane, basis, positions, values + bands, pick involvement, partner id,
+# surplus margin) plus board-state-at-serve (ranked_player_count,
+# last_board_update_at, user_value_basis). `propensity` is the Thompson
+# sort-key multiplier ACTUALLY applied to this card (1.0 when ordering was
+# off/deterministic) — the off-policy-evaluation prerequisite.
+deck_impressions_table = Table("deck_impressions", metadata,
+    Column("impression_id", String,  primary_key=True),  # uuid4 hex, minted at serve
+    Column("user_id",       String,  nullable=False),    # user the deck was served to
+    Column("league_id",     String,  nullable=False),
+    Column("deck_job_id",   String,  nullable=False),    # _trade_jobs job_id
+    Column("card_index",    Integer, nullable=False),    # 0 = top card, final served order
+    Column("trade_hash",    String),                     # stable hash of give|receive|partner
+    Column("features_json", Text),                       # frozen at serve time (JSON object)
+    Column("propensity",    Float,   nullable=False),    # Thompson multiplier drawn for this card
+    Column("base_score",    Float),                      # composite_score before presentation
+    Column("final_score",   Float),                      # ordering key after multipliers/penalties
+    Column("archetype",     String),                     # lane/basis-derived label when available
+    Column("shape_bucket",  String),                     # "1x1", "2x1", … (Thompson arm)
+    Column("served_at",     String,  nullable=False),    # ISO UTC
+)
+
+Index(
+    "ix_deck_impressions_user_league",
+    deck_impressions_table.c.user_id,
+    deck_impressions_table.c.league_id,
+)
+Index(
+    "ix_deck_impressions_job",
+    deck_impressions_table.c.deck_job_id,
+)
+
+# deck_outcomes: append-only labels joined to deck_impressions by
+# impression_id (soft reference — no FK constraint, matching this schema's
+# style; late/duplicate labels are legal and rows are NEVER mutated).
+# action ∈ viewed | like | pass | not_interested | propose | undo.
+# `viewed` = card was front-of-deck ≥500ms client-side (served ≠ viewed);
+# `not_interested` rides the bad-trade flag; `undo` appends alongside (not
+# instead of) whatever the original outcome row was.
+deck_outcomes_table = Table("deck_outcomes", metadata,
+    Column("id",              Integer, primary_key=True, autoincrement=True),
+    Column("impression_id",   String,  nullable=False),  # deck_impressions.impression_id
+    Column("action",          String,  nullable=False),
+    Column("dwell_ms",        Integer),                  # card-front → disposition, capped 120s
+    Column("detail_expanded", Integer),                  # 0|1|NULL — opened menu/swap/keep-side
+    Column("calc_opened",     Integer),                  # 0|1|NULL — edit-in-calculator (#190)
+    Column("acted_at",        String,  nullable=False),  # ISO UTC (server clock)
+)
+
+Index(
+    "ix_deck_outcomes_impression",
+    deck_outcomes_table.c.impression_id,
+)
+
+
 # ---------------------------------------------------------------------------
 # Canonical player reference table — synced from Sleeper bulk payload.
 # Contains all skill-position players (QB/RB/WR/TE) that are Active or
@@ -3519,6 +3582,83 @@ def log_trade_impressions(user_id: str, league_id: str, cards: list) -> None:
             conn.execute(insert(trade_impressions_table), rows)
     except Exception:
         pass  # training-data logging is strictly best-effort
+
+
+def save_deck_impressions(rows: list[dict]) -> None:
+    """F1 (deck.signal_v2) — batch-insert pre-built deck_impressions rows.
+
+    Row assembly (features_json freezing, propensity capture, trade hashing)
+    lives in server._log_deck_signal_impressions where the card objects,
+    players_dict and the ordering-capture map are in scope; this is the thin
+    write. Caller wraps in try/except — like log_trade_impressions, signal
+    logging must never break trade generation.
+    """
+    if not rows:
+        return
+    with engine.begin() as conn:
+        conn.execute(insert(deck_impressions_table), rows)
+
+
+def save_deck_outcome(
+    impression_id: str,
+    action: str,
+    dwell_ms: int | None = None,
+    detail_expanded: bool | None = None,
+    calc_opened: bool | None = None,
+) -> None:
+    """F1 (deck.signal_v2) — append ONE deck_outcomes row.
+
+    Append-only by design: an undo appends alongside the original outcome,
+    never mutates it; duplicate/late labels are legal. `action` is validated
+    here (closed enum) so a malformed client payload can't mint junk labels.
+    """
+    if action not in ("viewed", "like", "pass", "not_interested", "propose", "undo"):
+        raise ValueError(f"unknown deck outcome action: {action!r}")
+    with engine.begin() as conn:
+        conn.execute(insert(deck_outcomes_table).values(
+            impression_id   = impression_id,
+            action          = action,
+            dwell_ms        = int(dwell_ms) if dwell_ms is not None else None,
+            detail_expanded = (None if detail_expanded is None
+                               else (1 if detail_expanded else 0)),
+            calc_opened     = (None if calc_opened is None
+                               else (1 if calc_opened else 0)),
+            acted_at        = datetime.now(timezone.utc).isoformat(),
+        ))
+
+
+def load_board_state(
+    user_id: str,
+    league_id: str,
+    scoring_format: str = DEFAULT_SCORING,
+) -> tuple[int, str | None]:
+    """F1 (deck.signal_v2) — board-state-at-serve, one query.
+
+    Returns (ranked_player_count, last_board_update_at) from the user's
+    member_rankings snapshot for this league+format (legacy NULL-format rows
+    count toward the default format, mirroring load_swipe_decisions). Feeds
+    the frozen features_json: a deck generated right after a ranking session
+    is built on fresher values than one from a stale board.
+    """
+    with engine.connect() as conn:
+        q = select(
+            func.count(member_rankings_table.c.id),
+            func.max(member_rankings_table.c.updated_at),
+        ).where(
+            and_(
+                member_rankings_table.c.user_id   == user_id,
+                member_rankings_table.c.league_id == league_id,
+            )
+        )
+        if scoring_format == DEFAULT_SCORING:
+            q = q.where(
+                (member_rankings_table.c.scoring_format == scoring_format) |
+                (member_rankings_table.c.scoring_format.is_(None))
+            )
+        else:
+            q = q.where(member_rankings_table.c.scoring_format == scoring_format)
+        row = conn.execute(q).first()
+    return (int(row[0] or 0), row[1]) if row else (0, None)
 
 
 def load_trade_decision_shape_counts(

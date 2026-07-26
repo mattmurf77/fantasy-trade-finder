@@ -26,6 +26,10 @@ export interface ProposeTradePayload {
   their_user_id: string;          // opponent's Sleeper user_id (== FTF user_id)
   give_player_ids: string[];      // players I send
   receive_player_ids: string[];   // players I receive
+  // F1 signal spine (flag deck.signal_v2): joins a deck-sourced send to its
+  // deck_impressions row as a `propose` outcome. Optional/additive — old
+  // servers ignore it; only set when the flag is on.
+  impression_id?: string;
 }
 
 export interface ProposeTradeResult {

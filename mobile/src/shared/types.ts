@@ -135,6 +135,11 @@ export interface TradeCard {
   // Backend serializes `likes_you` only when true; normalizer defaults
   // to false.
   likesYou?: boolean;
+  // F1 signal spine (flag deck.signal_v2): server-minted id joining this
+  // served card to its deck_impressions row. Present only when the flag was
+  // on at generation time; echoed back (with dwell/engagement fields) on
+  // dispositions + events so the backend can append deck_outcomes rows.
+  impression_id?: string;
   // Low-value player added by the engine to balance an otherwise-unfair
   // trade. The player is ALREADY in give_players/receive_players — this
   // just identifies which one, so the UI can call it out.

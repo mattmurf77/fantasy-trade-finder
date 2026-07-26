@@ -291,6 +291,28 @@ FLAG_KEYS: tuple[str, ...] = (
     # responses mark derived boards (opponent_board_derived etc.). Off ⇒
     # unranked-in-this-format members degrade to consensus as before.
     "rankings.cross_format_derive",
+    # ── TikTok-discovery deck engine (docs/plans/tiktok-discovery/) ────────
+    # All pre-registered dark in config/features.json (2026-07-26); flipped
+    # ON per-wave at each TestFlight ship. Only deck.signal_v2 (F1) has code
+    # behind it so far — the rest are reserved for waves F2–F8 (without a
+    # FLAG_KEYS entry the JSON loader would ignore/typo-warn on them and
+    # test_entitlements' features-json-keys-known guard fails).
+    #
+    # F1 — signal foundation (prds/F1-signal-foundation.md). When ON, each
+    # completed trade-generation job writes one deck_impressions row per card
+    # (frozen features + Thompson propensity + served position), the generate
+    # /status card payloads carry `impression_id`, and the decision/event
+    # routes append deck_outcomes rows keyed by it. OFF (default) ⇒ zero new
+    # rows, byte-identical payloads, old-client behavior everywhere.
+    "deck.signal_v2",
+    "deck.thompson_v2",     # F2 — reserved (no consumer yet)
+    "deck.fatigue",         # F3 — reserved (no consumer yet)
+    "deck.session_rerank",  # F4 — reserved (no consumer yet)
+    "deck.taste_vectors",   # F5 — reserved (no consumer yet)
+    "deck.exploration",     # F7 — reserved (no consumer yet)
+    "deck.value_model",     # F6 — reserved; stays dark until an F8 replay win
+    "deck.first_session",   # reserved (no consumer yet)
+    "deck.replenishment",   # reserved (no consumer yet)
     # ── #169 — League "outlook odds" (playoff/championship-odds pipeline) ──
     # Gates GET /api/league/outlook (backend/outlook/). Off (default) ⇒ the
     # route 404s and nothing else changes. Componentized behind swappable

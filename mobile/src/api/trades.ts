@@ -176,6 +176,9 @@ function normalizeTradeCard(raw: any): TradeCard {
     //   sweetener — validated above; undefined when absent/malformed.
     basis:              raw?.basis === 'consensus' ? 'consensus' : 'divergence',
     likesYou:           raw?.likes_you === true,
+    // F1 signal spine (flag deck.signal_v2): server sends impression_id per
+    // card only when the flag is on; absent → undefined and nothing changes.
+    impression_id:      typeof raw?.impression_id === 'string' ? raw.impression_id : undefined,
     sweetener,
     partner_fit:        partnerFit,
     match_context:      matchContext,
@@ -232,10 +235,22 @@ export async function getRecentTrades(leagueId: string): Promise<TradeCard[]> {
   return asArray<any>(res).map(normalizeTradeCard);
 }
 
+// F1 signal spine (flag deck.signal_v2) — optional per-disposition signal
+// fields, sent ONLY when TradesScreen passes them (flag on AND the served
+// card carried an impression_id). Additive body fields on the existing
+// endpoint; old servers ignore them.
+export interface SwipeSignal {
+  impression_id: string;
+  dwell_ms?: number;          // card fronted → disposition, bg-paused, ≤120s
+  detail_expanded?: boolean;  // opened player menu / swap sheet / keep-side
+  calc_opened?: boolean;      // edit-in-calculator (#190) from this card
+}
+
 // POST /api/trades/swipe  body: { trade_id, decision: 'like' | 'pass' }
 export async function swipeTrade(
   card: TradeCard,
   decision: 'like' | 'pass',
+  signal?: SwipeSignal,
 ) {
   // FB-46: echo the card context so the server can reconstruct the card
   // when its in-memory deck was lost (Render deploy / session re-init)
@@ -248,6 +263,7 @@ export async function swipeTrade(
     receive_player_ids: card.receive_player_ids,
     target_user_id:     card.opponent_user_id || undefined,
     target_username:    card.opponent_username || undefined,
+    ...(signal ?? {}),
   });
 }
 
@@ -257,7 +273,13 @@ export async function swipeTrade(
 // idempotent per (user, league, give set, receive set), so re-flagging the
 // same package is safe. Card context + telemetry are echoed so the server
 // can persist a reviewable snapshot even after its in-memory deck is gone.
-export async function flagBadTrade(card: TradeCard, reason?: string) {
+export async function flagBadTrade(
+  card: TradeCard,
+  reason?: string,
+  // F1 (deck.signal_v2): joins the flag to its deck_impressions row as a
+  // `not_interested` outcome. Only passed when the flag is on.
+  impressionId?: string,
+) {
   return api.post<any>('/api/trades/flag', {
     trade_id:           card.trade_id,
     league_id:          card.league_id || undefined,
@@ -268,6 +290,7 @@ export async function flagBadTrade(card: TradeCard, reason?: string) {
     fairness_score:     typeof card.fairness === 'number' ? card.fairness : undefined,
     basis:              card.basis,
     reason:             reason || undefined,
+    impression_id:      impressionId || undefined,
   });
 }
 

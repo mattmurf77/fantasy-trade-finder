@@ -76,6 +76,8 @@ from .database import (
     load_recent_league_likes, log_trade_impressions,
     load_trade_decision_shape_counts, load_recent_impression_target_user_counts,
     load_engine_telemetry,
+    # F1 (deck.signal_v2) — impression_id spine
+    save_deck_impressions, save_deck_outcome, load_board_state,
     set_feedback_status, list_feedback_for_user, FEEDBACK_STATUSES, FEEDBACK_SEVERITIES,
     upsert_league_members, upsert_member_rankings,
     load_member_rankings, load_league_members, get_ranking_coverage,
@@ -2006,6 +2008,12 @@ def _deck_diversity_enabled() -> bool:
     return getattr(FLAGS, "trade_deck_diversity", False)
 
 
+def _deck_signal_v2_enabled() -> bool:
+    """F1 — impression_id spine (docs/plans/tiktok-discovery/prds/F1-*.md).
+    Every signal-v2 code path checks this; off ⇒ byte-identical behavior."""
+    return getattr(FLAGS, "deck_signal_v2", False)
+
+
 def _deck_cfg(key: str, default: float) -> float:
     """model_config key via trade_service's live config dict (same pattern
     as _fuzzy_match_tau). Defaults inline so a missing key never breaks
@@ -2077,11 +2085,18 @@ def _order_deck(
     league_id: str,
     job_id: str,
     seed_map: dict,
+    capture: dict | None = None,
 ) -> list:
     """Apply A5 (Thompson ordering) and A6 (diversification) to a generated
     deck. Returns a new list; the input is never mutated. Both flags off →
     the input list is returned untouched. Likes-you cards stay pinned to
-    the top regardless of sampling or penalties."""
+    the top regardless of sampling or penalties.
+
+    `capture` (F1, deck.signal_v2): when a dict is passed, it is filled with
+    {"propensity": {id(card): multiplier}, "final_key": {id(card): key}} —
+    the Thompson multiplier ACTUALLY applied per card and the post-multiplier
+    ordering key, for deck_impressions logging. Pure out-param: ordering math
+    is untouched and callers that pass None see identical behavior."""
     thompson  = _thompson_deck_enabled()
     diversity = _deck_diversity_enabled()
     if not cards or not (thompson or diversity):
@@ -2108,6 +2123,10 @@ def _order_deck(
             # Bounded multiplier in (0.5, 1.5) — exploration reorders across
             # buckets but never fully inverts quality.
             key[id(c)] *= 0.5 + sample_by_shape[_card_shape(c)]
+        if capture is not None:
+            capture["propensity"] = {
+                id(c): 0.5 + sample_by_shape[_card_shape(c)] for c in cards
+            }
 
     if diversity:
         user_cap = int(_deck_cfg("diversity_user_cap", 3))
@@ -2132,10 +2151,156 @@ def _order_deck(
         reverse=True,
     )
 
+    if capture is not None:
+        capture["final_key"] = dict(key)
+
     if diversity:
         ordered = _cap_per_target(ordered, seed_map, int(_deck_cfg("deck_max_per_target", 3)))
 
     return ordered
+
+
+# ── F1 (flag deck.signal_v2) — impression_id spine ──────────────────────────
+# One deck_impressions row per card in FINAL SERVED order, once per completed
+# job, features frozen at serve time. Called from _run_trade_job only when
+# the flag is on; the existing trade_impressions pipeline is untouched.
+
+def _signal_value_band(value) -> str | None:
+    """Coarse package-value band (500-wide buckets) for features_json —
+    bounded-cardinality version of the raw pick-denominated value."""
+    if not isinstance(value, (int, float)):
+        return None
+    lo = int(value // 500) * 500
+    return f"{lo}-{lo + 500}"
+
+
+def _log_deck_signal_impressions(
+    *,
+    user_id: str,
+    league_id: str,
+    job_id: str,
+    cards: list,
+    players_dict: dict,
+    capture: dict | None,
+    scoring_format: str,
+) -> dict[int, str]:
+    """Write one deck_impressions row per card (final served order) and
+    return {id(card): impression_id} so the caller can stamp the ids into
+    the published job snapshot. Features are the attributes the generation
+    path ALREADY computed (no new heavy computation) plus board-state-at-
+    serve, frozen here so label-time reads never re-derive them.
+
+    `capture` comes from _order_deck: propensity is the Thompson multiplier
+    actually applied (1.0 when ordering didn't run — a deterministic serve
+    is a propensity-1 policy), final_score the post-multiplier ordering key
+    (falls back to the composite when ordering didn't run)."""
+    if not cards:
+        return {}
+
+    prop_by_card  = (capture or {}).get("propensity") or {}
+    final_by_card = (capture or {}).get("final_key") or {}
+
+    # Board-state-at-serve (PRD amendment 2026-07-26): one query; failure
+    # degrades to the cold-board shape rather than aborting the spine.
+    try:
+        ranked_count, last_board_update = load_board_state(
+            user_id, league_id, scoring_format)
+    except Exception as bs_err:
+        log.warning("deck signal: board-state read failed: %s", bs_err)
+        ranked_count, last_board_update = 0, None
+
+    served_at = datetime.now(timezone.utc).isoformat()
+    imp_by_card: dict[int, str] = {}
+    rows: list[dict] = []
+    for pos, card in enumerate(cards):
+        give = list(getattr(card, "give_player_ids", None) or [])
+        recv = list(getattr(card, "receive_player_ids", None) or [])
+        target = getattr(card, "target_user_id", None)
+
+        def _positions(pids):
+            return [getattr(players_dict.get(p), "position", None) or "?" for p in pids]
+
+        give_pos = _positions(give)
+        recv_pos = _positions(recv)
+        give_value = getattr(card, "give_value", None)
+        recv_value = getattr(card, "receive_value", None)
+        lane = getattr(card, "lane", None)
+        features = {
+            # Card attributes (already computed by the generation path)
+            "shape":              _card_shape(card),
+            "basis":              getattr(card, "basis", "divergence"),
+            "likes_you":          bool(getattr(card, "likes_you", False)),
+            "lane":               lane,
+            "give_positions":     give_pos,
+            "receive_positions":  recv_pos,
+            "give_value":         give_value,
+            "receive_value":      recv_value,
+            "give_value_band":    _signal_value_band(give_value),
+            "receive_value_band": _signal_value_band(recv_value),
+            "involves_pick":      ("PICK" in give_pos) or ("PICK" in recv_pos),
+            "partner_user_id":    target,
+            "surplus_margin":     getattr(card, "mismatch_score", None),
+            "fairness_score":     getattr(card, "fairness_score", None),
+            "need_fit":           getattr(card, "need_fit", None),
+            "partner_fit":        getattr(card, "partner_fit", None),
+            "fit_premium":        bool(getattr(card, "fit_premium", None)),
+            "aggression_variant": getattr(card, "aggression_variant", None),
+            "relaxed":            bool(getattr(card, "relaxed", False)),
+            # Board-state-at-serve (frozen: F6/F8 need serve-time recency)
+            "ranked_player_count":  ranked_count,
+            "last_board_update_at": last_board_update,
+            "user_value_basis":     "personal" if ranked_count > 0 else "consensus",
+        }
+        base = float(getattr(card, "composite_score", 0.0) or 0.0)
+        impression_id = uuid.uuid4().hex
+        imp_by_card[id(card)] = impression_id
+        rows.append({
+            "impression_id": impression_id,
+            "user_id":       user_id,
+            "league_id":     league_id,
+            "deck_job_id":   job_id,
+            "card_index":    pos,
+            "trade_hash":    hashlib.sha256(
+                f"{','.join(sorted(give))}|{','.join(sorted(recv))}|{target or ''}"
+                .encode()).hexdigest()[:16],
+            "features_json": json.dumps(features),
+            "propensity":    float(prop_by_card.get(id(card), 1.0)),
+            "base_score":    base,
+            "final_score":   float(final_by_card.get(id(card), base)),
+            "archetype":     lane,   # lane is today's closest archetype label
+            "shape_bucket":  _card_shape(card),
+            "served_at":     served_at,
+        })
+    save_deck_impressions(rows)
+    return imp_by_card
+
+
+def _save_deck_outcome_safe(
+    impression_id,
+    action: str,
+    *,
+    dwell_ms=None,
+    detail_expanded=None,
+    calc_opened=None,
+) -> None:
+    """Flag-gated, never-throwing deck_outcomes append. The single call
+    idiom for every route that accepts an optional impression_id: absent id
+    or flag off ⇒ exact pre-F1 behavior (no write, no error path)."""
+    if not impression_id or not isinstance(impression_id, str):
+        return
+    if not _deck_signal_v2_enabled():
+        return
+    try:
+        dw = int(dwell_ms) if isinstance(dwell_ms, (int, float)) and not isinstance(dwell_ms, bool) else None
+        save_deck_outcome(
+            impression_id   = impression_id[:64],
+            action          = action,
+            dwell_ms        = dw,
+            detail_expanded = bool(detail_expanded) if detail_expanded is not None else None,
+            calc_opened     = bool(calc_opened) if calc_opened is not None else None,
+        )
+    except Exception as out_err:
+        log.warning("deck signal outcome write failed (non-fatal): %s", out_err)
 
 
 def _user_pick_share(user_id: str, league_id: str) -> float:
@@ -2409,14 +2574,21 @@ def _run_trade_job(
         # trade_impressions records true served positions). Deterministically
         # seeded per job, so /status re-polls see a stable order. Non-fatal:
         # any failure serves the deck exactly as generated.
+        signal_capture: dict | None = None
         if league_id != "league_demo" and (_thompson_deck_enabled() or _deck_diversity_enabled()):
             try:
+                # F1: capture the drawn Thompson multipliers + final ordering
+                # keys for deck_impressions. None when the flag is off — the
+                # ordering call is then byte-identical to pre-F1.
+                if _deck_signal_v2_enabled():
+                    signal_capture = {}
                 ordered = _order_deck(
                     final_cards,
                     user_id   = g_user_id,
                     league_id = league_id,
                     job_id    = job_id,
                     seed_map  = seed_map,
+                    capture   = signal_capture,
                 )
                 if [id(c) for c in ordered] != [id(c) for c in final_cards]:
                     final_cards = ordered
@@ -2442,6 +2614,40 @@ def _run_trade_job(
                 log_trade_impressions(g_user_id, league_id, final_cards)
         except Exception as imp_err:
             log.warning("trade impression logging failed (non-fatal): %s", imp_err)
+
+        # F1 (flag deck.signal_v2) — impression_id spine: one deck_impressions
+        # row per card in FINAL SERVED order with frozen features + the drawn
+        # Thompson propensity, then republish the snapshot with impression_id
+        # stamped per card so /generate + /status responses carry it. Flag off
+        # ⇒ this block is a no-op (no rows, payload byte-identical). Never
+        # allowed to break generation.
+        try:
+            if league_id != "league_demo" and _deck_signal_v2_enabled():
+                imp_by_card = _log_deck_signal_impressions(
+                    user_id        = g_user_id,
+                    league_id      = league_id,
+                    job_id         = job_id,
+                    cards          = final_cards,
+                    players_dict   = players_dict,
+                    capture        = signal_capture,
+                    scoring_format = active_format,
+                )
+                if imp_by_card:
+                    snapshot = []
+                    for c in final_cards:
+                        d = trade_card_to_dict(c, players_dict)
+                        d["real_opponent"] = c.target_user_id in real_user_ids
+                        d["outlook"]       = outlook_value
+                        iid = imp_by_card.get(id(c))
+                        if iid:
+                            d["impression_id"] = iid
+                        snapshot.append(d)
+                    with _trade_jobs_lock:
+                        j = _trade_jobs.get(job_id)
+                        if j is not None and j["status"] == "running":
+                            j["cards"] = snapshot
+        except Exception as sig_err:
+            log.warning("deck signal-v2 impression logging failed (non-fatal): %s", sig_err)
 
         # Mark complete. Final card snapshot was already published by the
         # last on_opponent_done invocation (or the likes-you republish above).
@@ -3790,6 +3996,34 @@ def ingest_client_events_route():
             sess = _sessions.get(token)
         if sess:
             user_id = sess.get("user_id")
+    # F1 (deck.signal_v2) — deck-outcome side-channel: the client's viewed
+    # (deck_card_viewed, fired after ≥500ms front-of-deck) and undo
+    # (swipe_undone) signals ride the existing event batches, carrying
+    # props.impression_id. Independent of the analytics pipeline's own
+    # acceptance (taxonomy/rate-limit/ingest-flag): this only ever APPENDS
+    # deck_outcomes rows and never alters the ingest response. Flag off or
+    # no impression_id props ⇒ nothing happens.
+    if _deck_signal_v2_enabled():
+        try:
+            _body = request.get_json(force=True, silent=True) or {}
+            _events = _body.get("events")
+            if isinstance(_events, list):
+                _action_by_type = {"deck_card_viewed": "viewed",
+                                   "swipe_undone":     "undo"}
+                for _env in _events[:_analytics_ingest.MAX_BATCH]:
+                    if not isinstance(_env, dict):
+                        continue
+                    _action = _action_by_type.get(_env.get("event_type"))
+                    _props = _env.get("props")
+                    if not _action or not isinstance(_props, dict):
+                        continue
+                    _save_deck_outcome_safe(
+                        _props.get("impression_id"),
+                        _action,
+                        dwell_ms=_props.get("dwell_ms"),
+                    )
+        except Exception as sig_err:
+            log.warning("deck signal-v2 event outcome scan failed: %s", sig_err)
     return _analytics_ingest.ingest_request(user_id)
 
 
@@ -5863,6 +6097,17 @@ def swipe_trade():
             k_factor = _rs_c("trade_k_pass")
             win_ids, lose_ids = card.give_player_ids, card.receive_player_ids
 
+        # F1 (deck.signal_v2) — outcome join. Optional additive body fields
+        # (impression_id, dwell_ms, detail_expanded, calc_opened); absent →
+        # exact pre-F1 behavior (old clients unaffected). Never throws.
+        _save_deck_outcome_safe(
+            body.get("impression_id"),
+            decision,   # 'like' | 'pass' (validated by record_decision above)
+            dwell_ms        = body.get("dwell_ms"),
+            detail_expanded = body.get("detail_expanded"),
+            calc_opened     = body.get("calc_opened"),
+        )
+
         # Persist to DB — write-through
         match_data = None
         try:
@@ -6155,6 +6400,11 @@ def flag_bad_trade():
     except Exception:
         log.exception("save_bad_trade_flag failed")
         return jsonify({"error": "internal"}), 500
+
+    # F1 (deck.signal_v2) — a bad-trade flag is the deck's explicit
+    # "not interested" signal (the accompanying pass swipe records its own
+    # outcome). Optional additive field; absent/flag-off ⇒ no-op.
+    _save_deck_outcome_safe(body.get("impression_id"), "not_interested")
 
     status = 200 if result.get("duplicate") else 201
     return jsonify({
@@ -6475,6 +6725,10 @@ def propose_trade_to_sleeper():
     if _TEST_MODE:  # pragma: no cover — defense-in-depth, structurally dead
         from . import test_support as _ts
         _ts.counters["completed_proposes"] += 1
+    # F1 (deck.signal_v2) — proposal-sent outcome when the deck card that
+    # sourced this send carried an impression_id. Additive/optional; only
+    # reached on a successful Sleeper propose.
+    _save_deck_outcome_safe(body.get("impression_id"), "propose")
     return jsonify({
         "status": result.get("status") or "proposed",
         "transaction_id": result.get("transaction_id"),

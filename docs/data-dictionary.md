@@ -212,6 +212,48 @@ Indexes: `ix_trade_impressions_user_league` on `(user_id, league_id)` — traini
 
 ---
 
+## `deck_impressions`
+
+TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-discovery/prds/F1-signal-foundation.md`). One row per card in the **final served deck order**, written once per completed generation job by `server._log_deck_signal_impressions` (→ `save_deck_impressions`), **only when the flag is on**. Additive: `trade_impressions` keeps writing unchanged. Demo league excluded. The row's `impression_id` is returned per card in `/api/trades/generate` + `/status` snapshots and echoed back by flag-on clients so `deck_outcomes` rows join to it.
+
+| Column | Type | Notes |
+|---|---|---|
+| `impression_id` | str PK | uuid4 hex, minted at serve time |
+| `user_id` | str | user the deck was served to |
+| `league_id` | str | |
+| `deck_job_id` | str | generation job id (`_trade_jobs`) |
+| `card_index` | int | 0 = top card, final served order |
+| `trade_hash` | str | sha256[:16] of sorted give ids \| sorted receive ids \| partner |
+| `features_json` | JSON text | **frozen at serve time** — shape, basis, likes_you, lane, give/receive positions, values + 500-wide value bands, `involves_pick`, `partner_user_id`, surplus margin (mismatch), fairness, need/partner fit, fit_premium, aggression_variant, relaxed, plus board-state-at-serve: `ranked_player_count`, `last_board_update_at`, `user_value_basis` (`personal`/`consensus`) |
+| `propensity` | float NOT NULL | the Thompson multiplier **actually applied** to this card's sort key (`0.5 + beta draw`, in (0.5, 1.5)); `1.0` when ordering was off (deterministic serve) |
+| `base_score` | float | `composite_score` before presentation multipliers |
+| `final_score` | float | ordering key after Thompson/diversity multipliers (= base when ordering off) |
+| `archetype` | str | lane label when stamped (`window`/`value`), else null |
+| `shape_bucket` | str | `"1x1"`, `"2x1"`, … (the Thompson arm) |
+| `served_at` | str | ISO UTC |
+
+Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`.
+
+---
+
+## `deck_outcomes`
+
+F1 labels, **append-only**, joined to `deck_impressions` by `impression_id` (soft reference, no FK — late/duplicate labels legal, rows never mutated). Written by `server._save_deck_outcome_safe` from: `/api/trades/swipe` (`like`/`pass` + dwell/engagement fields), `/api/trades/flag` (`not_interested`), `/api/trades/propose` (`propose`), and the `/api/events` side-channel (`deck_card_viewed` → `viewed` — client fires it after a card is front-of-deck ≥500 ms — and `swipe_undone` → `undo`). An undo **appends alongside** whatever the original outcome was. All writes require flag `deck.signal_v2` on AND a client-supplied `impression_id`; absent either, zero rows (old clients unaffected).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `impression_id` | str | `deck_impressions.impression_id` |
+| `action` | str | `viewed` \| `like` \| `pass` \| `not_interested` \| `propose` \| `undo` (enum enforced in `save_deck_outcome`) |
+| `dwell_ms` | int | card fronted → disposition, paused on app background, capped 120 s client-side |
+| `detail_expanded` | int | 0/1/NULL — opened player menu / swap sheet / keep-side on the card |
+| `calc_opened` | int | 0/1/NULL — edit-in-calculator (#190) from the card |
+| `acted_at` | str | ISO UTC (server clock) |
+
+Indexes: `ix_deck_outcomes_impression` on `impression_id`.
+
+---
+
 ## `players`
 
 Canonical player reference, synced from Sleeper bulk payload (skill positions, Active or prospects). Re-synced if empty or `last_synced` > 24h.

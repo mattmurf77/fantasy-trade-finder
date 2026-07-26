@@ -32,6 +32,10 @@ interface Props {
   theirUserId: string;
   givePlayerIds: string[];
   receivePlayerIds: string[];
+  // F1 signal spine (flag deck.signal_v2): deck-served cards pass their
+  // impression_id so a successful propose appends a `propose` outcome
+  // server-side. Undefined (flag off / non-deck mounts) changes nothing.
+  impressionId?: string;
   compact?: boolean;
   style?: ViewStyle;
 }
@@ -43,6 +47,7 @@ export default function SendInSleeperButton({
   theirUserId,
   givePlayerIds,
   receivePlayerIds,
+  impressionId,
   compact,
   style,
 }: Props) {
@@ -112,6 +117,7 @@ export default function SendInSleeperButton({
         their_user_id: theirUserId,
         give_player_ids: givePlayerIds,
         receive_player_ids: receivePlayerIds,
+        impression_id: impressionId,
       });
       setState('sent');
       haptics.success();
@@ -172,7 +178,7 @@ export default function SendInSleeperButton({
         );
       }
     }
-  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, goConnect]);
+  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, goConnect]);
 
   // #180 — pre-flight validation before the confirm. validateTradeSend never
   // throws (unreachable/flag-off degrades to checked:false → plain confirm);
