@@ -140,6 +140,24 @@ export function patchOnboardingState(patch: Partial<OnboardingPersisted>): void 
   useOnboardingState.getState().patchOnboarding(patch);
 }
 
+/** #187 — Settings re-enable of The Analyst tour (full-replay semantics).
+ *  Clears the permanent opt-out AND the seen-step/completion memory in one
+ *  persisted write. A dedicated function because patchOnboarding can only
+ *  MERGE `guideSeen` (mergeState keeps old keys), never clear it. */
+export function resetGuideProgress(): void {
+  const cur = useOnboardingState.getState().ob;
+  const next: OnboardingPersisted = {
+    ...cur,
+    guideDismissed: false,
+    guideSeen: {},
+    guideTourCompleted: false,
+  };
+  useOnboardingState.setState({ ob: next });
+  AsyncStorage.setItem(OB_KEY, JSON.stringify(next)).catch(() => {
+    /* non-fatal — worst case the re-enable lasts only this session */
+  });
+}
+
 /** FULL replace (defaults + given state) — the Test Stages QA tool uses
  *  this to materialize a device at an exact adoption stage. Not for
  *  product code: everything else patches. */

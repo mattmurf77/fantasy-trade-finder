@@ -25,6 +25,7 @@ import {
   type,
 } from '../theme/chalkline';
 import { Button } from '../components/chalkline';
+import FeedbackFAB from '../components/FeedbackFAB';
 import PlayerCard from '../components/PlayerCard';
 import {
   getFreeAgents,
@@ -284,6 +285,9 @@ export default function FreeAgentsScreen() {
           )}
         />
       )}
+      {/* #188 — root-stack push covers RootNav's FAB mount; carry our own.
+          No tab bar under this screen → aboveTabBar={false}. */}
+      <FeedbackFAB activeScreen="FreeAgents" aboveTabBar={false} />
     </SafeAreaView>
   );
 }

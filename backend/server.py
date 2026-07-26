@@ -3911,6 +3911,34 @@ def _link_device_identity(sleeper_user_id: str | None = None,
         log.debug("identity link skipped: %s", e)
 
 
+def _record_trends_snapshot(service, user_id, league, fmt, changed_pids) -> None:
+    """Best-effort elo_history append so ALL ranking flows feed the Trends
+    tab (#164). Historically only the trio-swipe route (/api/rank3) wrote
+    elo_history, so users who ranked exclusively via Quick Set / Quick Rank /
+    manual reorder / Pick Anchor saw an empty Trends screen ("Keep ranking to
+    see trends here") no matter how much they ranked. Mirrors the rank3
+    snapshot block: write only the players this submission actually changed;
+    failures never block the save."""
+    try:
+        pid_set = {str(p) for p in changed_pids if p}
+        if not pid_set:
+            return
+        changed = {
+            rp.player.id: rp.elo
+            for rp in service.get_rankings(position=None).rankings
+            if rp.player.id in pid_set
+        }
+        if changed:
+            record_elo_snapshot(
+                user_id         = user_id,
+                league_id       = league.league_id if league else None,
+                scoring_format  = fmt,
+                changed_ratings = changed,
+            )
+    except Exception as db_err:
+        log.warning("elo_history snapshot failed (continuing): %s", db_err)
+
+
 @app.route("/api/tiers/save", methods=["POST"])
 @_gate_unverified_write
 def save_tiers_route():
@@ -3982,6 +4010,15 @@ def save_tiers_route():
                 )
         except Exception as db_err:
             log.warning("member_rankings publish after tiers save failed: %s", db_err)
+
+        # #164 — feed the Trends tab: tier placements (and clears, whose ELO
+        # reverted) are ranking changes and must land in elo_history.
+        assigned_pids = [
+            str(pid) for ids in tiers.values() if isinstance(ids, list)
+            for pid in ids
+        ]
+        _record_trends_snapshot(
+            service, g_user_id, g_league, fmt, assigned_pids + cleared_pids)
 
         # Mark this position as saved for the active format
         saved = save_tiers_position(g_user_id, position, scoring_format=fmt)
@@ -4110,6 +4147,9 @@ def save_anchor_route():
                 )
         except Exception as db_err:
             log.warning("member_rankings publish after anchor failed: %s", db_err)
+
+        # #164 — feed the Trends tab (see _record_trends_snapshot).
+        _record_trends_snapshot(service, g_user_id, g_league, fmt, [player_id])
 
         tier = service.tier_for_elo(target_elo, player.position, fmt)
 
@@ -4477,6 +4517,9 @@ def reorder_rankings():
                 )
         except Exception as db_err:
             log.warning("member_rankings publish after reorder failed: %s", db_err)
+
+        # #164 — feed the Trends tab (see _record_trends_snapshot).
+        _record_trends_snapshot(service, g_user_id, g_league, fmt, ordered_ids)
 
         return jsonify({"ok": True, "count": len(ordered_ids), "scoring_format": fmt})
     except Exception as e:

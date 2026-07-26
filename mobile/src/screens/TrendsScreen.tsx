@@ -39,6 +39,14 @@ const TOP_N_MOVERS = 10;
 const TOP_N_GAP    = 5;
 const WINDOW_DAYS  = 30;
 
+// #164 — honest no-history copy. Every ranking flow (trios, Quick Set,
+// Quick Rank, manual board, anchors) now writes value history server-side,
+// so "no history" genuinely means no recorded changes yet — say when data
+// will appear rather than showing a bare empty view.
+const NO_HISTORY_COPY =
+  'No ranking history yet — it records each time you rank or adjust ' +
+  `players, in any flow. Movement shows here across a ${WINDOW_DAYS}-day window.`;
+
 // Trends sub-screen of the Rank stack. Three stacked sections:
 //   1. Risers (top-N over the last 30 days by ELO delta)
 //   2. Fallers (top-N over the last 30 days by ELO delta)
@@ -149,7 +157,7 @@ export default function TrendsScreen() {
           retry={() => moversQuery.refetch()}
           empty={
             !moversQuery.data?.has_history
-              ? 'Keep ranking to see trends here.'
+              ? NO_HISTORY_COPY
               : risers.length === 0
                 ? 'No risers in this window.'
                 : null
@@ -169,7 +177,7 @@ export default function TrendsScreen() {
           retry={() => moversQuery.refetch()}
           empty={
             !moversQuery.data?.has_history
-              ? 'Keep ranking to see trends here.'
+              ? NO_HISTORY_COPY
               : fallers.length === 0
                 ? 'No fallers in this window.'
                 : null
