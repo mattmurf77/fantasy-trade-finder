@@ -187,6 +187,11 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                // pre-liked the mirror trade); absent otherwise
   "sweetener":       { "player_id": "...",     // OPTIONAL — Tier 3 (trade_engine.v3): low-value
                        "side": "give"|"receive" }, // asset already in give/receive, added to balance
+  "relaxed":         true,                     // OPTIONAL — #189: present only when the card came from the
+                                               // relaxed fallback pass (targeted job, zero cards under normal
+                                               // gates). Clients label these ("Stretch idea — outside your
+                                               // usual fairness band")
+  "relaxed_reason":  "fairness_band" | "fairness_band+surplus_floor",  // OPTIONAL — which relax stage emitted it
   "reasons":         [ "...", ... ],           // optional, flag trade_math.human_explanations
   "narrative":       "...",                    // optional templated rationale
   "match_context":   { ... },                  // optional roster-fit context
@@ -274,8 +279,8 @@ Verdict math is `trade_service.classify_verdict(give_value, receive_value)` (no 
 | GET | `/api/league/picks` | Owned draft picks in a league (#158). Query `league_id` (default: session league). → `{my_picks, all_picks, picks_supported}`. Each pick carries `pool_value` (engine/calculator value scale) + a display `label` ("2027 1st", or "2026 2nd (from <orig>)" when `is_traded`), alongside the stored columns. `picks_supported: false` for ESPN leagues (players-only) so clients render a "picks unavailable" note instead of a blank. `my_picks` = `all_picks` filtered to the caller's `owner_user_id`. Empty until `picks.owned_sync` is on and the league has synced. Pick pseudo-ids (the stored `pick_id`) are accepted by `POST /api/trade/evaluate`. |
 | GET | `/api/league/preferences` | Read the **session user's** outlook + position prefs (a `user_id` query param is ignored — teardown S6B-01 closed the cross-user override). When `trade.outlook_seed` is on and no outlook is declared, adds `inferred_outlook` + `inferred_signals` (#8). Always adds `position_needs` + `position_surplus` (FB #156) — the caller's own roster needs/surplus from `analyze_roster_strengths`, powering the Trade-Finding Hub's recommendation chips (scoped to the session roster, like `inferred_outlook`; best-effort, omitted on a profiling error) |
 | POST | `/api/league/preferences` | Write the **session user's** outlook + position prefs (a body `user_id` is ignored — teardown S6B-01; the old override allowed cross-user writes) |
-| GET | `/api/league/asset-prefs` | Read untouchables + targets (#2) → `{untouchables:[], targets:[]}` |
-| POST | `/api/league/asset-prefs` | Tag a player: body `{league_id, player_id, list: "untouchable"\|"target"\|"none"}`; single membership; invalidates the league's cached deck (#2) |
+| GET | `/api/league/asset-prefs` | Read untouchables + targets + not-interested (#2, #163) → `{untouchables:[], targets:[], not_interested:[]}` |
+| POST | `/api/league/asset-prefs` | Tag a player: body `{league_id, player_id, list: "untouchable"\|"target"\|"not_interested"\|"none"}`; single membership; invalidates the league's cached deck (#2, #163). `not_interested` = never offer this player TO the caller (receive-side hard filter; give side untouched) |
 | GET | `/api/league/summary` | League summary roll-up. Match tiles (#91): `matches_mutual` (non-dismissed `trade_matches` rows involving the caller, any status — equals the Matches tab's "Mutual matches" segment for the league) + `matches_awaiting` (caller's one-sided likes not yet matured — equals "Awaiting them"). Every trade is in exactly one bucket. Legacy `matches_pending`/`matches_accepted` (status-split, dismissal-blind) still emitted for pre-1.4 clients — do not use in new UI. `total_teams` (FB #41): TOTAL teams in the league, caller included — Sleeper's `total_rosters` when persisted, else `leaguemates_total + 1`; clients must show this in the teams tile, not a derived count |
 | POST | `/api/league/scoring` | Set scoring format |
 | GET | `/api/league/coverage` | Member ranking coverage (the excluded "current user" is always the session user — a `user_id` query param is ignored, teardown W2C hygiene) |

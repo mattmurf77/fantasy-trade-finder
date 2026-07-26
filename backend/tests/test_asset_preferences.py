@@ -176,7 +176,7 @@ def test_set_asset_preference_single_membership_and_validation():
     db.set_asset_preference(uid, lid, "p1", "untouchable")
     db.set_asset_preference(uid, lid, "p2", "target")
     assert db.load_asset_preferences(uid, lid) == {
-        "untouchables": ["p1"], "targets": ["p2"]}
+        "untouchables": ["p1"], "targets": ["p2"], "not_interested": []}
 
     # Moving p1 to target removes it from untouchables (single membership).
     db.set_asset_preference(uid, lid, "p1", "target")

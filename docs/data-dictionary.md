@@ -263,7 +263,7 @@ Dynasty pick assets across upcoming seasons. `pick_id = "{league}_{season}_{roun
 | `owner_user_id`, `owner_username` | str | current owner |
 | `original_roster_id`, `original_user_id`, `original_username` | str | |
 | `is_traded` | int | 1 if ownership changed |
-| `pick_value` | float | `compute_pick_value()` output at sync time, on the **0–100 round-tier scale** (mid-1st ≈ 67.5), NOT the 0–10000 player value space. Kept for **pick-share** ratios (`_user_pick_share`, outlook seeds). The v2 engine bridges it via `elo_to_value(1200 + 6·pick_value)` in `trade_service.dynasty_value`. |
+| `pick_value` | float | `compute_pick_value()` output at sync time, on the **0–100 round-tier scale** (mid-1st ≈ 67.5), NOT the 0–10000 player value space. Kept for **pick-share** ratios (`_user_pick_share`, outlook seeds). The LEGACY engine bridges it via `elo_to_value(1200 + 6·pick_value)` in `trade_service.dynasty_value`; the v2/v3 engine instead reads Elo maps primed with `1200 + 6·pick_value` per injected pick (`server._pick_asset_elos`, #185). |
 | `pool_value` | float | **#158** — pick value on the **engine/calculator scale** (`elo_to_value` units), = `pick_pool_value(round, years_out)` = the generic-ladder **Mid**-tier value of the round, year-discounted (0.85/yr) in value space. `years_out=0` equals the generic "Mid <round>" pool pick exactly. This is what the calculator + suggestions price on (distinct from the legacy `pick_value`). Shared ladder lives in `backend/pick_values.py`. |
 | `platform` | str | **#158** — provenance: `'sleeper'` or `'mfl'`. ESPN never writes rows (players-only). |
 | `synced_at` | str | |

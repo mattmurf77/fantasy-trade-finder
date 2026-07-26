@@ -203,6 +203,7 @@ def generate_pair_trades_v3(
     alpha_opp: float | None = None,
     untouchable_ids: set | None = None,
     target_ids: set | None = None,
+    not_interested_ids: set | None = None,
     raw_user_elo: dict[str, float] | None = None,
     user_needs: set | None = None,
 ) -> list[TradeCard]:
@@ -336,8 +337,11 @@ def generate_pair_trades_v3(
     known_user = [p for p in user_roster
                   if p in shrunk_user_elo and p in opp_elo
                   and not (untouchable_ids and p in untouchable_ids)]  # #2
+    # #163 — not-interested players never enter the receive pool (dropped at
+    # the source; the pinned/target re-adds below iterate this filtered list).
     known_opp = [p for p in opponent.roster
-                 if p in shrunk_user_elo and p in opp_elo]
+                 if p in shrunk_user_elo and p in opp_elo
+                 and not (not_interested_ids and p in not_interested_ids)]
     give_pool = sorted(known_user, key=lambda p: _vo(p) - _uv(p),
                        reverse=True)[:POOL_P]
     if pinned_set:
@@ -558,6 +562,7 @@ def generate_pair_trades_v3(
                 min_side=MIN_SIDE, surpluses=_surpluses, gap_ok=_gap_ok,
                 both_feasible=_both_feasible, players=players,
                 untouchable_ids=untouchable_ids,
+                not_interested_ids=not_interested_ids,               # #163
                 filler_ok_fn=lambda g, r: filler_ok(g, r, _uv, _vo),  # #141
             )
             if sweet is None:
@@ -580,7 +585,7 @@ def generate_pair_trades_v3(
 def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
                  fairness_threshold, min_side, surpluses, gap_ok,
                  both_feasible, players, untouchable_ids=None,
-                 filler_ok_fn=None):
+                 not_interested_ids=None, filler_ok_fn=None):
     """3.4 — close a near-miss by adding ONE cheap player from the
     under-paying side's roster.
 
@@ -606,7 +611,9 @@ def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
 
     candidates = sorted((p for p in roster if p not in in_trade
                          and not (side == "give" and untouchable_ids
-                                  and p in untouchable_ids)),   # #2 never sweeten with an untouchable
+                                  and p in untouchable_ids)     # #2 never sweeten with an untouchable
+                         and not (side == "receive" and not_interested_ids
+                                  and p in not_interested_ids)),  # #163 never sweeten INTO the user
                         key=seed_value)
     for s_pid in candidates:
         if side == "give":

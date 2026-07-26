@@ -19,8 +19,10 @@ Core algorithm:
 import hashlib
 import heapq
 import math
+import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from itertools import combinations
@@ -128,6 +130,20 @@ _DEFAULT_CFG: dict[str, float] = {
     # min(fairness_threshold, this). Consensus-basis cards keep the full
     # fairness_threshold (consensus IS the board there).
     "fairness_floor_divergence":  0.55,
+    # ------------------------------------------------------------------
+    # #189 — relaxed fallback for targeted jobs (pinned players and/or
+    # acquire / trade-away positions) that produce ZERO cards under the
+    # normal gates. Behavior only activates on otherwise-empty targeted
+    # results (no flag needed); cards from a relaxed pass carry
+    # relaxed=True + relaxed_reason so clients can label them honestly.
+    # Stage 1 widens the fairness band to relaxed_fairness_threshold
+    # (never tightening below the caller's request); stage 2 additionally
+    # drops the both-sides surplus minimums to relaxed_surplus_floor
+    # (0 still requires NON-NEGATIVE surplus on both boards). The #108
+    # user-board epsilon gate and untouchables are NEVER relaxed.
+    # ------------------------------------------------------------------
+    "relaxed_fairness_threshold": 0.55,
+    "relaxed_surplus_floor":       0.0,
     # Waiver/roster-slot cost (amendment A3, FantasyCalc-derived ≈ rank-300 value)
     "waiver_slot_cost":    425.0,     # value cost per extra player received
     # Confidence shrinkage + range-overlap fairness (Change 4 + amendment A4)
@@ -317,8 +333,31 @@ def reload_config() -> None:
         pass  # DB unavailable — keep existing values
 
 
+# #189 — per-thread config overlay for the relaxed fallback pass. A relaxed
+# re-run must loosen gate knobs (fairness floor, surplus minimums) WITHOUT
+# touching the process-global _cfg: trade jobs run concurrently on daemon
+# threads, so a global mutation would leak relaxed gates into normal jobs.
+# Overrides apply only to _c() reads on the thread that entered the context
+# (trade_optimizer imports _c from here, so v3 reads them too).
+_cfg_local = threading.local()
+
+
+@contextmanager
+def _cfg_override(overrides: dict):
+    prev = getattr(_cfg_local, "map", None)
+    _cfg_local.map = {**(prev or {}), **overrides}
+    try:
+        yield
+    finally:
+        _cfg_local.map = prev
+
+
 def _c(key: str) -> float:
-    """Convenience accessor: return live config value with default fallback."""
+    """Convenience accessor: return live config value with default fallback.
+    Thread-local overrides (#189 relaxed pass) win over both."""
+    ov = getattr(_cfg_local, "map", None)
+    if ov is not None and key in ov:
+        return ov[key]
     return _cfg.get(key, _DEFAULT_CFG[key])
 
 
@@ -341,6 +380,15 @@ def dynasty_value(player, rank_override: int | None = None) -> float:
     server.py): elo = 1200 + 6*pick_value, then elo_to_value(elo). A
     league mid-1st therefore prices identically to its generic-pick twin
     instead of at ~67 (near-zero next to players in the thousands).
+
+    NOTE (#185): this PICK branch serves the LEGACY engine path and any
+    caller that prices a pick pseudo-Player directly. The v2/v3 engine
+    prices assets through Elo maps (seed_elo + per-board), NOT through
+    dynasty_value — injected picks must be primed into those maps
+    (server._pick_asset_elos / _inject_owned_picks) or they silently
+    default to Elo 1500. Two scales coexist on draft_picks rows:
+    `pick_value` (legacy 0-100 round-tier) and `pool_value` (engine value
+    space) — see docs/cross-client-invariants.md.
 
     For regular players: uses player.search_rank (1-based, lower = better).
     Falls back to ktc_fallback_rank config if no rank is stored.
@@ -1645,6 +1693,13 @@ class TradeCard:
     # gates the bar on their presence.
     give_value: Optional[float] = None
     receive_value: Optional[float] = None
+    # #189 — set on cards produced by the relaxed fallback pass (a targeted
+    # job that yielded zero cards under normal gates). Additive: normal cards
+    # never carry these; clients label relaxed cards ("Stretch idea — outside
+    # your usual fairness band"). relaxed_reason ∈
+    # {"fairness_band", "fairness_band+surplus_floor"} — which stage emitted.
+    relaxed: bool = False
+    relaxed_reason: Optional[str] = None
 
 
 @dataclass
@@ -1717,6 +1772,7 @@ class TradeService:
         opponent_pick_shares: dict[str, float] | None = None,  # uid → pick-capital share (#1)
         untouchable_ids: set | None = None,    # never trade these away (#2)
         target_ids: set | None = None,         # bias toward acquiring these (#2)
+        not_interested_ids: set | None = None, # never offer these TO the user (#163)
     ) -> list[TradeCard]:
         """
         Generate trade cards for the user against all league members
@@ -1743,7 +1799,7 @@ class TradeService:
         # Trade engine v2 — entirely separate scoring path so the legacy
         # branch below stays byte-for-byte identical when the flag is off.
         if FLAGS.trade_engine_v2:
-            return self._generate_trades_v2(
+            _v2_kwargs = dict(
                 user_id              = user_id,
                 user_elo             = user_elo,
                 user_roster          = user_roster,
@@ -1766,7 +1822,19 @@ class TradeService:
                 opponent_pick_shares = opponent_pick_shares,
                 untouchable_ids      = untouchable_ids,
                 target_ids           = target_ids,
+                not_interested_ids   = not_interested_ids,
             )
+            cards = self._generate_trades_v2(**_v2_kwargs)
+            # #189 — a targeted job (pinned players and/or acquire /
+            # trade-away positions) should always present SOMETHING when
+            # anything defensible exists: rerun with staged, labeled gate
+            # relaxation only when the normal pass came up empty. Normal
+            # jobs and non-empty results are byte-identical.
+            targeted = bool(pinned_give_players or pinned_receive_players
+                            or acquire_positions or trade_away_positions)
+            if targeted and not cards:
+                cards = self._relaxed_targeted_pass(_v2_kwargs)
+            return cards
 
         new_cards: list[TradeCard] = []
 
@@ -1862,6 +1930,61 @@ class TradeService:
         return sorted(cards, key=lambda c: c.composite_score, reverse=True)
 
     # ------------------------------------------------------------------
+    # #189 — relaxed fallback for empty targeted sweeps
+    # ------------------------------------------------------------------
+
+    def _relaxed_targeted_pass(self, v2_kwargs: dict) -> list[TradeCard]:
+        """Staged re-run of the v2 path after a targeted job yielded zero
+        cards. Stages, in order (first stage that yields cards wins):
+
+          1. "fairness_band" — widen the consensus fairness band: the
+             effective threshold drops to relaxed_fairness_threshold (both
+             the caller's threshold and the divergence floor), never
+             TIGHTENING below what the caller asked for.
+          2. "fairness_band+surplus_floor" — additionally drop the weakest
+             non-safety gate: the both-sides surplus minimums fall to
+             relaxed_surplus_floor (default 0.0 — mutual gain must still be
+             non-negative on both boards).
+
+        NEVER relaxed: the #108 user-board gates (user_gain_epsilon,
+        fit_premium_1for1 / user_gain_ok_1for1) and untouchable_ids — those
+        are safety properties, not taste. Past-decision dedup also still
+        applies, so already-swiped trades never resurface as "relaxed".
+
+        Overrides ride the thread-local _cfg overlay (_cfg_override), so
+        concurrent normal jobs on other threads are untouched. The relaxed
+        pass never streams progress (on_opponent_done=None) — the caller's
+        progress bar already completed during the normal pass.
+
+        Every returned card is stamped relaxed=True + relaxed_reason so
+        clients can label it (e.g. "Stretch idea — outside your usual
+        fairness band").
+        """
+        relaxed_thr = min(float(v2_kwargs["fairness_threshold"]),
+                          _c("relaxed_fairness_threshold"))
+        floor = _c("relaxed_surplus_floor")
+        stages = [
+            ("fairness_band",
+             {"fairness_floor_divergence": relaxed_thr}),
+            ("fairness_band+surplus_floor",
+             {"fairness_floor_divergence": relaxed_thr,
+              "min_side_surplus":          floor,
+              "min_side_surplus_marginal": floor}),
+        ]
+        for reason, overrides in stages:
+            kwargs = dict(v2_kwargs)
+            kwargs["fairness_threshold"] = relaxed_thr
+            kwargs["on_opponent_done"] = None
+            with _cfg_override(overrides):
+                cards = self._generate_trades_v2(**kwargs)
+            if cards:
+                for c in cards:
+                    c.relaxed = True
+                    c.relaxed_reason = reason
+                return cards
+        return []
+
+    # ------------------------------------------------------------------
     # Trade engine v2 (flag: trade_engine.v2)
     # Tier 1 plan (docs/plans/trade-engine-tier1-fixes.md) with research
     # amendments A1–A4 (docs/reviews/trade-engine-external-research.md §6):
@@ -1914,6 +2037,7 @@ class TradeService:
         opponent_pick_shares: dict[str, float] | None = None,
         untouchable_ids: set | None = None,
         target_ids: set | None = None,
+        not_interested_ids: set | None = None,
     ) -> list[TradeCard]:
         """v2 orchestration: mirrors the legacy loop structure (profiles,
         narrative, streaming callback, global target, dedup) but routes each
@@ -2072,6 +2196,7 @@ class TradeService:
                         alpha_opp            = alpha_opp,
                         untouchable_ids      = untouchable_ids,
                         target_ids           = target_ids,
+                        not_interested_ids   = not_interested_ids,
                         raw_user_elo         = user_elo,
                         user_needs           = _user_needs,
                     )
@@ -2095,6 +2220,7 @@ class TradeService:
                         alpha_opp            = alpha_opp,
                         untouchable_ids      = untouchable_ids,
                         target_ids           = target_ids,
+                        not_interested_ids   = not_interested_ids,
                         raw_user_elo         = user_elo,
                         user_needs           = _user_needs,
                     )
@@ -2116,6 +2242,7 @@ class TradeService:
                     pinned_receive_players = pinned_receive_players,
                     untouchable_ids      = untouchable_ids,
                     target_ids           = target_ids,
+                    not_interested_ids   = not_interested_ids,
                     raw_user_elo         = user_elo,
                 )
             # FB-47 — stamp partner fit and blend it into the composite:
@@ -2283,6 +2410,7 @@ class TradeService:
         alpha_opp: float | None = None,
         untouchable_ids: set | None = None,
         target_ids: set | None = None,
+        not_interested_ids: set | None = None,
         raw_user_elo: dict[str, float] | None = None,
         user_needs: set | None = None,
     ) -> list[TradeCard]:
@@ -2551,7 +2679,12 @@ class TradeService:
         _known_user = [p for p in user_roster
                        if p in shrunk_user_elo and p in opp_elo
                        and not (untouchable_ids and p in untouchable_ids)]
-        _known_opp  = [p for p in opponent.roster if p in shrunk_user_elo and p in opp_elo]
+        # #163 — not-interested players never enter the receive pool (dropped
+        # at the source, so no combo — nor the pinned/target re-adds below,
+        # which iterate this filtered list — can offer them to the user).
+        _known_opp  = [p for p in opponent.roster
+                       if p in shrunk_user_elo and p in opp_elo
+                       and not (not_interested_ids and p in not_interested_ids)]
         _PRUNE_MIN_SIZE = 5
         _give = [p for p in _known_user if _vo(p) >= user_value[p] * 0.97]
         _recv = [p for p in _known_opp if user_value[p] >= _vo(p) * 0.97]
@@ -2673,6 +2806,7 @@ class TradeService:
         pinned_receive_players: list[str] | None = None,
         untouchable_ids: set | None = None,
         target_ids: set | None = None,
+        not_interested_ids: set | None = None,
         raw_user_elo: dict[str, float] | None = None,
     ) -> list[TradeCard]:
         """Consensus-basis fallback cards for an opponent with NO rankings.
@@ -2703,7 +2837,12 @@ class TradeService:
         need_positions = list(acquire_positions) or list(user_profile.get("position_needs", []))
         shed_positions = list(trade_away_positions) or list(opp_profile.get("position_needs", []))
 
-        recv_pool = list(opponent.roster)
+        # #163 — not-interested players never enter the receive pool (filtered
+        # at the source; the target re-add below iterates this filtered list
+        # too, so an exclusion always wins).
+        _opp_pool = [p for p in opponent.roster
+                     if not (not_interested_ids and p in not_interested_ids)]
+        recv_pool = list(_opp_pool)
         # FB-47 — player-level acquire targets dominate: restrict the receive
         # pool to the pinned players this opponent actually rosters. (When
         # they roster none, no cards — correct: the pin names specific
@@ -2717,7 +2856,7 @@ class TradeService:
         # Backlog #2 — targets the opponent rosters survive the need-position
         # filter, so a coveted player is offered even off-need.
         if target_ids:
-            for pid in opponent.roster:
+            for pid in _opp_pool:
                 if pid in target_ids and pid not in recv_pool:
                     recv_pool.append(pid)
         recv_pool.sort(key=seed_value, reverse=True)
