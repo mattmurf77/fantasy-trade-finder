@@ -137,6 +137,10 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 - Settings: `settings.guided-tour-toggle` (The Analyst on/off Switch — off = `dismissTour()`, on = `enableTour()` full-replay restart)
 - FeedbackFAB `aboveTabBar={false}` mounts on root-stack pushes (FreeAgents, LeagueSummary's push variant) — same `feedback.fab` id, screens over the tabs now carry the button (see root CLAUDE.md convention)
 
+**Rank-nav + calculator tranche (2026-07-25, #162/#165/#192):**
+- TabNav shared HeaderBack (Rank/Trades/League stack sub-screens): `stack.back-btn` — always-on JS back control, falls back to the stack's home route (Rank surfaces → `RankHome`, the chooser, per #162/#165)
+- InLeagueCalculator partner chips: the ranked-status flare dot is replaced by the RankedBadge text badge (`R` / `R*` derived / `NR`) — no new testID; chips assert via accessibilityLabel `@<user>, ranked|ranked in another format, values converted|not ranked`
+
 **MFL auth-link tranche (2026-07-25, #177, flag `mfl.auth_link`):**
 - PlatformLinkSheet (MFL only): `platform-link.mfl-auth-toggle` (reveals the sign-in fields) · `platform-link.mfl-username` · `platform-link.mfl-password` (secureTextEntry) · `platform-link.mfl-signin` · `platform-link.mfl-league.<league_id>` (checkbox row, pre-checked when the franchise auto-binds) · `platform-link.mfl-import` · `platform-link.mfl-open` (auth-done summary CTA); errors reuse `platform-link.error`
 

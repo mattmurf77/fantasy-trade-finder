@@ -22,9 +22,10 @@ import TradeSide from './TradeSide';
 import PlayerPickerModal from './PlayerPickerModal';
 import SuggestionCard from './SuggestionCard';
 import SendInSleeperButton from './SendInSleeperButton';
-import { Button, Card, Icon, TickLabel } from './chalkline';
+import { Badge, Button, Card, Icon, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
-import { chalk, flare, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
+import { useSession } from '../state/useSession';
+import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import type { CalcPlayer, CalcPos } from '../data/tradeCalcMock';
 import type { ScoringFormat } from '../shared/types';
 
@@ -44,6 +45,33 @@ const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: '1qb_ppr', label: '1QB PPR' },
   { key: 'sf_tep', label: 'SF TEP' },
 ];
+const FORMAT_LABEL: Record<string, string> = {
+  '1qb_ppr': '1QB PPR',
+  sf_tep: 'SF TEP',
+};
+
+// #192 — partner ranked-status, rendered as a small text badge instead of
+// the old (misleading) flare dot: R = ranked in the active calculator
+// format, R* = ranked only in the other format (board derived via #191
+// cross-format value mapping), NR = never ranked. Old servers without
+// ranked_formats degrade to the format-blind R/NR pair.
+type RankState = 'R' | 'R*' | 'NR';
+function rankStateFor(
+  m: { has_rankings: boolean; ranked_formats?: string[] },
+  format: ScoringFormat,
+): RankState {
+  if (Array.isArray(m.ranked_formats)) {
+    if (m.ranked_formats.includes(format)) return 'R';
+    if (m.ranked_formats.length > 0) return 'R*';
+    return 'NR';
+  }
+  return m.has_rankings ? 'R' : 'NR';
+}
+const RANK_STATE_A11Y: Record<RankState, string> = {
+  R: 'ranked',
+  'R*': 'ranked in another format, values converted',
+  NR: 'not ranked',
+};
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
@@ -55,7 +83,14 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export default function InLeagueCalculator({ leagueId, userId }: Props) {
-  const [format, setFormat] = useState<ScoringFormat>('1qb_ppr');
+  // #166/#167 — the format defaults to the LEAGUE's detected scoring
+  // format (useSession.activeFormat, kept league-accurate by
+  // useLeagueFormatDefault in RootNav), not a hard-coded 1QB PPR. A chip
+  // tap still overrides for this calculator session; the override is
+  // local so it never stomps the app-wide format.
+  const sessionFormat = useSession((s) => s.activeFormat);
+  const [formatChoice, setFormatChoice] = useState<ScoringFormat | null>(null);
+  const format: ScoringFormat = formatChoice ?? sessionFormat ?? '1qb_ppr';
   const [opponentId, setOpponentId] = useState<string | null>(null);
   const [giveIds, setGiveIds] = useState<string[]>([]);
   const [receiveIds, setReceiveIds] = useState<string[]>([]);
@@ -332,7 +367,7 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
               onPress={() => {
                 if (f.key !== format) {
                   haptics.selection();
-                  setFormat(f.key);
+                  setFormatChoice(f.key);
                 }
               }}
               accessibilityRole="button"
@@ -348,6 +383,8 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
       <View style={styles.chipRow}>
         {opponents.map((o) => {
           const active = o.user_id === opponentId;
+          // #192 — R / R* / NR text badge replaces the old flare dot.
+          const state = rankStateFor(o, format);
           return (
             <Pressable
               key={o.user_id}
@@ -358,21 +395,40 @@ export default function InLeagueCalculator({ leagueId, userId }: Props) {
               }}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
+              accessibilityLabel={`@${o.username}, ${RANK_STATE_A11Y[state]}`}
             >
               <Text style={[styles.chipText, active && styles.chipTextActive]}>@{o.username}</Text>
-              {!o.has_rankings ? <View style={styles.unranked} /> : null}
+              <Badge
+                label={state}
+                color={state === 'NR' ? chalk.dim : semantic.pos}
+                colorText
+              />
             </Pressable>
           );
         })}
       </View>
-      {opponent && !opponent.has_rankings ? (
-        <Text style={styles.note}>
-          @{opponent.username} hasn't ranked yet — you'll get a consensus read. Invite them to rank
-          for a two-sided verdict.
-        </Text>
-      ) : (
-        <Text style={styles.note}>Priced by your rankings and @{opponent?.username}'s.</Text>
-      )}
+      {opponent ? (() => {
+        const state = rankStateFor(opponent, format);
+        if (state === 'NR') {
+          return (
+            <Text style={styles.note}>
+              @{opponent.username} hasn't ranked yet — you'll get a consensus read. Invite them to
+              rank for a two-sided verdict.
+            </Text>
+          );
+        }
+        if (state === 'R*') {
+          // #191 — derived board: honest about the conversion.
+          const src = (opponent.ranked_formats ?? []).find((f) => f !== format);
+          return (
+            <Text style={styles.note}>
+              @{opponent.username} ranked in {FORMAT_LABEL[src ?? ''] ?? 'another format'} — values
+              converted to {FORMAT_LABEL[format]} for this read.
+            </Text>
+          );
+        }
+        return <Text style={styles.note}>Priced by your rankings and @{opponent.username}'s.</Text>;
+      })() : null}
       {!picksSupported ? (
         <Text style={styles.note}>Draft picks aren't available for ESPN leagues.</Text>
       ) : null}
@@ -518,6 +574,14 @@ function LeagueVerdict({
         {stale ? <ActivityIndicator size="small" color={ice.base} /> : null}
       </View>
       <Text style={[type.body, styles.headline]}>{headline}</Text>
+      {/* #191 — derived-board honesty line: their side of the verdict was
+          value-mapped from the other format's board, not ranked here. */}
+      {ev.basis === 'divergence' && ev.opponent_board_derived ? (
+        <Text style={[type.bodySm, styles.derivedNote]}>
+          @{oppName}'s board converted from{' '}
+          {FORMAT_LABEL[ev.opponent_board_derived_from ?? ''] ?? 'their other format'}.
+        </Text>
+      ) : null}
       {ev.basis === 'divergence' ? (
         <View style={styles.boards}>
           <View style={styles.boardRow}>
@@ -561,7 +625,6 @@ const styles = StyleSheet.create({
   chipActive: { borderColor: ice.base },
   chipText: { fontFamily: fonts.uiSemi, fontSize: 13, lineHeight: 18, color: chalk.dim },
   chipTextActive: { color: chalk.base },
-  unranked: { width: 6, height: 6, borderRadius: 3, backgroundColor: flare.base },
   note: { ...type.bodySm },
   suggestions: { gap: space.sm },
   swap: { flexDirection: 'row', alignItems: 'center', gap: space.md },
@@ -569,6 +632,7 @@ const styles = StyleSheet.create({
   actions: { gap: space.sm, alignItems: 'stretch' },
   verdictHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headline: { marginTop: space.xs },
+  derivedNote: { marginTop: space.xs, color: chalk.dim },
   boards: { gap: space.xs, marginTop: space.sm },
   boardRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
 });

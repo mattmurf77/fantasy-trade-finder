@@ -4673,8 +4673,16 @@ def get_ranking_coverage(league_id: str, exclude_user_id: str) -> dict:
     {
         "ranked": int,       # leaguemates with at least one stored ranking
         "total":  int,       # total leaguemates (excludes the current user)
-        "members": [         # per-member detail
-            {"user_id": str, "username": str, "has_rankings": bool}, ...
+        "members": [         # per-member detail — ranked_formats (#191/#192)
+                             # lists which scoring formats the member has
+                             # stored rankings in (legacy NULL rows count as
+                             # the default format), so clients can tell
+                             # "ranked in the active format" from "ranked in
+                             # the other format only" (derivable, R*) from
+                             # "never ranked" (NR). has_rankings stays the
+                             # format-blind any-format boolean.
+            {"user_id": str, "username": str, "has_rankings": bool,
+             "ranked_formats": ["sf_tep", ...]}, ...
         ]
     }
     """
@@ -4687,18 +4695,26 @@ def get_ranking_coverage(league_id: str, exclude_user_id: str) -> dict:
         ).fetchall()
 
         ranked_rows = conn.execute(
-            select(member_rankings_table.c.user_id).distinct().where(
+            select(
+                member_rankings_table.c.user_id,
+                member_rankings_table.c.scoring_format,
+            ).distinct().where(
                 (member_rankings_table.c.league_id == league_id) &
                 (member_rankings_table.c.user_id   != exclude_user_id)
             )
         ).fetchall()
 
     ranked_ids = {r.user_id for r in ranked_rows}
+    formats_by_user: dict = {}
+    for r in ranked_rows:
+        fmt = r.scoring_format or DEFAULT_SCORING
+        formats_by_user.setdefault(r.user_id, set()).add(fmt)
     member_list = [
         {
-            "user_id":      m.user_id,
-            "username":     m.username or m.display_name or m.user_id,
-            "has_rankings": m.user_id in ranked_ids,
+            "user_id":        m.user_id,
+            "username":       m.username or m.display_name or m.user_id,
+            "has_rankings":   m.user_id in ranked_ids,
+            "ranked_formats": sorted(formats_by_user.get(m.user_id, ())),
         }
         for m in member_rows
     ]

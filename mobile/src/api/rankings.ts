@@ -153,11 +153,16 @@ export async function saveTiers(
   position: Position,
   tiers: Record<string, string[]>,
   clearedPids: string[] = [],
+  demotedPids: string[] = [],
 ) {
+  // demoted_pids (#161): players the user explicitly passed over during a
+  // Quick Set tier save — the backend pins them below every tier band
+  // (unranked) instead of letting them silently keep their old tier.
   return api.post<any>('/api/tiers/save', {
     position,
     tiers,
     cleared_pids: clearedPids,
+    demoted_pids: demotedPids,
   });
 }
 

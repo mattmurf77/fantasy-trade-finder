@@ -3510,6 +3510,59 @@ def copy_tiers_from_format_route():
     })
 
 
+# ── #191 — cross-format board derivation (read-time auto-sync) ─────────────
+# When a member has rankings in format A and none in format B, reads that
+# need B derive it on the fly from A instead of pretending the member never
+# ranked. Rules (flag `rankings.cross_format_derive`):
+#   1. Explicit-over-derived: derivation fires ONLY when the member has zero
+#      member_rankings rows in the requested format — real rows always win,
+#      so a later explicit save in B simply takes over.
+#   2. Read-time, never materialized: nothing is written to member_rankings.
+#      Updating A instantly updates the derived B; there is no stale copy to
+#      clobber or clean up.
+#   3. Value-mapped, not label-copied: same #124 math as
+#      /api/tiers/copy-from-format — the member's rank ORDER per position,
+#      re-expressed on the target format's consensus seed curve (a "worth 4
+#      firsts" SF QB is NOT worth 4 firsts in 1QB).
+#   4. Labeled: responses carry additive *_derived fields so UIs can mark
+#      derived boards (#192's R* badge).
+
+_OTHER_FORMAT = {"1qb_ppr": "sf_tep", "sf_tep": "1qb_ppr"}
+
+
+def _derive_board_from_format(source_elo: dict[str, float], to_format: str) -> dict[str, float]:
+    """Derive a pid→Elo board in `to_format` from another format's snapshot.
+
+    Per position group: order the source pids by source Elo (desc), then
+    deal out the group's own `to_format` consensus seed Elos sorted desc —
+    RankingService.apply_value_map's permutation, computed statelessly so
+    no per-user service/session is touched. Pids missing from the target
+    pool are skipped (callers' seed fallback covers them); exact seed ties
+    get a hair of descending epsilon so the source order survives a sort.
+    """
+    pool_players, seed = _get_universal_pool(to_format)
+    pos_of = {p.id: p.position for p in pool_players}
+    by_pos: dict[str, list[tuple[float, str]]] = {}
+    for pid, elo in source_elo.items():
+        pos = pos_of.get(pid)
+        if pos is None:
+            continue
+        try:
+            by_pos.setdefault(pos, []).append((float(elo), pid))
+        except (TypeError, ValueError):
+            continue
+    derived: dict[str, float] = {}
+    for _pos, rows in by_pos.items():
+        rows.sort(key=lambda t: t[0], reverse=True)  # source order, best first
+        targets = sorted((seed.get(pid, 1500.0) for _, pid in rows), reverse=True)
+        for i in range(1, len(targets)):
+            if targets[i] >= targets[i - 1]:
+                targets[i] = targets[i - 1] - 0.001
+        for (_src_elo, pid), target in zip(rows, targets):
+            derived[pid] = target
+    return derived
+
+
 @app.route("/api/feedback", methods=["POST"])
 @_gate_unverified_write
 def submit_feedback_route():
@@ -3942,13 +3995,19 @@ def _record_trends_snapshot(service, user_id, league, fmt, changed_pids) -> None
 @app.route("/api/tiers/save", methods=["POST"])
 @_gate_unverified_write
 def save_tiers_route():
-    """POST /api/tiers/save {position: 'RB', tiers: {first_1: [...ids], ...}, cleared_pids: [...]}
+    """POST /api/tiers/save {position: 'RB', tiers: {first_1: [...ids], ...}, cleared_pids: [...], demoted_pids: [...]}
 
     Converts tier assignments into ELO overrides and marks the position as saved.
 
     `cleared_pids` (optional): list of pids the user explicitly removed
     from all tiers (× button → back to pool). Their override is deleted
     so they don't snap back to a previous tier on the next refresh.
+
+    `demoted_pids` (optional, #161): pids the user explicitly passed over
+    in a Quick Set tier save (visible-but-unselected players previously in
+    the saved tier or higher). Pinned below every band (unranked/pending)
+    so they don't silently keep the old higher tier. Skip never demotes —
+    the client only sends this on an explicit save with picks.
     """
     sess = _require_initialized_session()
     service   = sess["service"]
@@ -3962,15 +4021,19 @@ def save_tiers_route():
     if not isinstance(cleared_pids, list):
         cleared_pids = []
     cleared_pids = [str(x) for x in cleared_pids if x]
+    demoted_pids = body.get("demoted_pids") or []
+    if not isinstance(demoted_pids, list):
+        demoted_pids = []
+    demoted_pids = [str(x) for x in demoted_pids if x]
 
     if position not in ("QB", "RB", "WR", "TE"):
         return jsonify({"error": f"Invalid position: {position!r}"}), 400
 
-    # Must have at least one player in some tier OR something to clear.
-    # (Pure "clear-only" saves are valid — e.g. user removes their last
-    # tier-placed RB; we still need to apply the deletion server-side.)
+    # Must have at least one player in some tier OR something to clear or
+    # demote. (Pure "clear-only" saves are valid — e.g. user removes their
+    # last tier-placed RB; we still need to apply the deletion server-side.)
     total_assigned = sum(len(ids) for ids in tiers.values() if isinstance(ids, list))
-    if total_assigned == 0 and not cleared_pids:
+    if total_assigned == 0 and not cleared_pids and not demoted_pids:
         return jsonify({"error": "No players in any tier"}), 400
 
     try:
@@ -3978,12 +4041,14 @@ def save_tiers_route():
         # backend/tier_config.json) so on reload the frontend re-buckets
         # players into the same tier they were placed. Bands are
         # position+format-aware. cleared_pids lets the frontend tell us
-        # "this player is back in the pool — drop their override".
+        # "this player is back in the pool — drop their override";
+        # demoted_pids pins passed-over players below every band (#161).
         service.apply_tiers(
             position=position,
             tiers=tiers,
             scoring_format=fmt,
             cleared_pids=cleared_pids,
+            demoted_pids=demoted_pids,
         )
 
         # Persist the full tier override dict for THIS format so it survives
@@ -4847,6 +4912,37 @@ def trade_evaluate_route():
             user_elo = (boards.get(caller_user_id) or {}).get("elo_ratings") or {}
             opp_entry = boards.get(opponent_user_id) or {}
             opp_elo = opp_entry.get("elo_ratings") or {}
+
+            # #191 — cross-format auto-sync (flag rankings.cross_format_derive):
+            # a member who ranked ONLY the other format is not "unranked" —
+            # derive their board for this format at read time (value-rank
+            # mapping, see _derive_board_from_format's rules). Explicit rows
+            # in `fmt` above always win; derived boards are labeled below.
+            your_derived_from = None
+            opp_derived_from = None
+            if is_enabled("rankings.cross_format_derive") and (not opp_elo or not user_elo):
+                other_fmt = _OTHER_FORMAT.get(fmt)
+                if other_fmt:
+                    try:
+                        other_boards = load_member_rankings(
+                            league_id, exclude_user_id="", scoring_format=other_fmt)
+                    except Exception as _ob_err:
+                        log.warning("evaluate: other-format board load failed: %s", _ob_err)
+                        other_boards = {}
+                    if not opp_elo:
+                        src_entry = other_boards.get(opponent_user_id) or {}
+                        src = src_entry.get("elo_ratings") or {}
+                        if src:
+                            opp_elo = _derive_board_from_format(src, fmt)
+                            opp_derived_from = other_fmt
+                            if not opp_entry:
+                                opp_entry = src_entry  # username for the response
+                    if not user_elo:
+                        src = (other_boards.get(caller_user_id) or {}).get("elo_ratings") or {}
+                        if src:
+                            user_elo = _derive_board_from_format(src, fmt)
+                            your_derived_from = other_fmt
+
             opp_has_rankings = bool(opp_elo)
 
             def _board_value(elo_map):
@@ -4871,6 +4967,14 @@ def trade_evaluate_route():
                 "opponent_user_id":      opponent_user_id,
                 "opponent_username":     opp_entry.get("username"),
                 "opponent_has_rankings": opp_has_rankings,
+                # #191 — additive derived-board markers so UIs can label a
+                # value-mapped cross-format board (never silently pretend
+                # it's an explicit one). Absent-format members stay
+                # has_rankings: false / basis: consensus as before.
+                "opponent_board_derived":      bool(opp_derived_from),
+                "opponent_board_derived_from": opp_derived_from,
+                "your_board_derived":          bool(your_derived_from),
+                "your_board_derived_from":     your_derived_from,
                 "your_give_value":       round(gv_u, 1),
                 "your_receive_value":    round(rv_u, 1),
                 "their_give_value":      round(gv_o, 1),

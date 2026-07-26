@@ -90,6 +90,13 @@ export interface CalcEvaluationInLeague extends CalcEvaluation {
   opponent_user_id?: string;
   opponent_username?: string | null;
   opponent_has_rankings: boolean;
+  // #191 — additive derived-board markers (absent on old servers): true
+  // when that side's board was value-mapped at read time from the OTHER
+  // scoring format because this format has no explicit rankings.
+  opponent_board_derived?: boolean;
+  opponent_board_derived_from?: string | null;
+  your_board_derived?: boolean;
+  your_board_derived_from?: string | null;
   your_give_value: number;
   your_receive_value: number;
   their_give_value: number;

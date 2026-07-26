@@ -235,8 +235,8 @@ export default function QuickSetTiersScreen() {
   );
 
   const saveMutation = useMutation({
-    mutationFn: ({ ids, cleared }: { ids: string[]; cleared: string[] }) =>
-      saveTiers(position, ids.length > 0 ? { [tier]: ids } : {}, cleared),
+    mutationFn: ({ ids, cleared, demoted }: { ids: string[]; cleared: string[]; demoted: string[] }) =>
+      saveTiers(position, ids.length > 0 ? { [tier]: ids } : {}, cleared, demoted),
     onSuccess: (_data, { ids }) => {
       const nextSaved = { ...savedByTier, [tier]: ids };
       setSavedByTier(nextSaved);
@@ -261,12 +261,32 @@ export default function QuickSetTiersScreen() {
     const cleared = (savedByTier[tier] ?? []).filter((id) => !selected.has(id));
     if (ids.length === 0 && cleared.length === 0) {
       // Nothing picked and nothing to un-pick — same as Skip (a save with
-      // no assignments and no clears is a 400 on the backend).
+      // no assignments and no clears is a 400 on the backend). Skip ≠
+      // demote (#161): only an explicit save with picks demotes anyone.
       goTo(tierIdx + 1, savedByTier);
       return;
     }
-    saveMutation.mutate({ ids, cleared });
-  }, [gridPlayers, selected, savedByTier, tier, tierIdx, goTo, saveMutation]);
+    // #161 — demotion rule: an EXPLICIT save of this tier (≥1 player
+    // picked) says "these are my <tier> players". Anyone still visible in
+    // this step's grid whose CURRENT tier is this tier or higher was
+    // passed over, so they must not silently keep that tier: they're sent
+    // to unranked (below every band — pending placement), never to an
+    // arbitrarily deeper tier. Players claimed by an earlier tier this
+    // run aren't in the grid and are never demoted; lower-tier players
+    // still get their own steps later in the walk.
+    const tierRank = TIERS.indexOf(tier);
+    const demoted =
+      ids.length === 0
+        ? [] // clear-only save — restores the suggested tier, no demotion
+        : gridPlayers
+            .filter((p) => !selected.has(p.id))
+            .filter((p) => {
+              const cur = tierForElo(p.elo, position, fmt);
+              return cur != null && TIERS.indexOf(cur) <= tierRank;
+            })
+            .map((p) => p.id);
+    saveMutation.mutate({ ids, cleared, demoted });
+  }, [gridPlayers, selected, savedByTier, tier, tierIdx, goTo, saveMutation, position, fmt]);
 
   const onSkip = useCallback(() => goTo(tierIdx + 1, savedByTier), [tierIdx, savedByTier, goTo]);
   const onBack = useCallback(() => goTo(tierIdx - 1, savedByTier), [tierIdx, savedByTier, goTo]);

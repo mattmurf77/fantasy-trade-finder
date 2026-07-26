@@ -204,6 +204,7 @@ Registered under the `_comment_teardown` block in `config/features.json`; source
 | `profiles.user_toggle` | false | Per-user public-profile visibility opt-out under `profiles.public_pages` — the global flag alone never publishes a user who opted out (06/prd-04). |
 | `auth.persistent_sessions` | false | Durable sessions for account-only (Apple) users — refresh-token model with server-side revocation, replacing the 4h in-memory dict (06/prd-03; the codebase's own "P3"). |
 | `league.rookie_board_entry` | false | Mounts the fully-built-but-orphaned RookieDraftBoardSheet as a League Explore row during draft season (07/prd-04 item 2). |
+| `rankings.cross_format_derive` | false (true in `features.json`) | **FB-191** — read-time cross-format board derivation: a member with rankings only in the OTHER scoring format gets a value-mapped (#124 math) board for reads that need this format (`/api/trade/evaluate` Mode B — the in-league calculator). Explicit rankings always win; nothing materialized; responses carry additive `*_derived` markers (the calculator's R* badge, FB-192). Off ⇒ pre-#191 consensus fallback for format-unranked members. |
 
 #### Ship-by / kill-by review convention (07/prd-04)
 
