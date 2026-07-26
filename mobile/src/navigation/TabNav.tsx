@@ -67,6 +67,9 @@ export type TradesRoute = 'TradesHome' | 'TradeDeck' | 'Portfolio' | 'TradeCalcu
 function HeaderBack({ navigation, fallback }: { navigation: any; fallback: string }) {
   return (
     <Pressable
+      testID="stack.back-btn"
+      accessibilityRole="button"
+      accessibilityLabel="Back"
       onPress={() =>
         navigation.canGoBack() ? navigation.goBack() : navigation.navigate(fallback)
       }
@@ -194,16 +197,22 @@ function RankStackNav() {
         component={RankHomeScreen}
         options={subScreenOptions('Rank', initial)}
       />
+      {/* #162/#165 — every rank surface's back control falls back to
+          RankHome (the rank-method chooser), not a sibling surface. The old
+          fallbacks ('Trios' / 'Tiers') meant a surface mounted as the
+          stack's FIRST screen (launch routing via rankingMethodPref) had no
+          path back to the chooser at all: Back landed on Trios — itself
+          headerless with the flag off — and the RankMenu sheet doesn't list
+          the chooser. Testers read that as being "stuck in a loop". Trios
+          now carries the same always-on back control in both flag states
+          (unflagged fix, same class as RankHome's S1B-05 header). */}
       <RankStack.Screen
         name="Trios"
         component={RankScreen}
-        // Flag on: Trios gains a header purely to host the More-ways
-        // control (it's a stack home — no back button). Flag off: headerless
-        // as today.
         options={
           rankDest
-            ? { ...chalklineHeader('Trios'), headerRight: () => <MoreWaysButton /> }
-            : undefined
+            ? rankSubScreenOptions('Trios', 'RankHome')
+            : subScreenOptions('Trios', 'RankHome')
         }
       />
       <RankStack.Screen
@@ -211,8 +220,8 @@ function RankStackNav() {
         component={PickAnchorScreen}
         options={
           rankDest
-            ? rankSubScreenOptions('Pick Anchors', 'Trios')
-            : subScreenOptions('Pick Anchors', 'Trios')
+            ? rankSubScreenOptions('Pick Anchors', 'RankHome')
+            : subScreenOptions('Pick Anchors', 'RankHome')
         }
       />
       <RankStack.Screen
@@ -220,14 +229,16 @@ function RankStackNav() {
         component={TiersScreen}
         options={
           rankDest
-            ? rankSubScreenOptions('Tiers', 'Trios')
-            : subScreenOptions('Tiers', 'Trios')
+            ? rankSubScreenOptions('Tiers', 'RankHome')
+            : subScreenOptions('Tiers', 'RankHome')
         }
       />
       {/* 1.5.4 #104 — guided tier quick-set walk. #119 promoted it to a
           first-class method: reachable from the Tiers header, the Rank menu,
           the rank-home chooser, and launch routing (rankingMethodPref
-          'quickset'). Back fallback stays the Tiers board it writes to. */}
+          'quickset'). #162/#165: back falls back to the RankHome chooser
+          (was the Tiers board) so a launch-routed walk always has a path
+          back to "all the ranking options"; Tiers stays one menu tap away. */}
       <RankStack.Screen
         name="QuickSetTiers"
         component={QuickSetTiersScreen}
@@ -237,9 +248,9 @@ function RankStackNav() {
         // cover mode switching). Flag off: today's link to RankHome.
         options={
           rankDest
-            ? rankSubScreenOptions('Quick Set Tiers', 'Tiers')
+            ? rankSubScreenOptions('Quick Set Tiers', 'RankHome')
             : ({ navigation }) => ({
-                ...subScreenOptions('Quick Set Tiers', 'Tiers')({ navigation }),
+                ...subScreenOptions('Quick Set Tiers', 'RankHome')({ navigation }),
                 // #122: Quick Set is the no-pref default, so the demoted chooser
                 // stays one tap away ("More ways to rank", item 9's Q1 ruling) —
                 // it's the only path to RankHome from here (the Rank menu sheet
@@ -267,15 +278,15 @@ function RankStackNav() {
       />
       {/* #136 — within-tier ordering pass, the polish step after Quick set.
           Offered when the quick-set walk finishes and from the Rank menu.
-          NOT a launch-routable pref (that's #122, unselected). Back fallback
-          stays the Tiers board it writes to, same as Quick set. */}
+          NOT a launch-routable pref (that's #122, unselected). #162/#165:
+          back fallback is the RankHome chooser like every rank surface. */}
       <RankStack.Screen
         name="QuickRank"
         component={QuickRankScreen}
         options={
           rankDest
-            ? rankSubScreenOptions('Quick Rank', 'Tiers')
-            : subScreenOptions('Quick Rank', 'Tiers')
+            ? rankSubScreenOptions('Quick Rank', 'RankHome')
+            : subScreenOptions('Quick Rank', 'RankHome')
         }
       />
       <RankStack.Screen
@@ -283,8 +294,8 @@ function RankStackNav() {
         component={ManualRanksScreen}
         options={
           rankDest
-            ? rankSubScreenOptions('Overall Ranks', 'Trios')
-            : subScreenOptions('Overall Ranks', 'Trios')
+            ? rankSubScreenOptions('Overall Ranks', 'RankHome')
+            : subScreenOptions('Overall Ranks', 'RankHome')
         }
       />
       <RankStack.Screen
@@ -292,8 +303,8 @@ function RankStackNav() {
         component={TrendsScreen}
         options={
           rankDest
-            ? rankSubScreenOptions('Trends', 'Trios')
-            : subScreenOptions('Trends', 'Trios')
+            ? rankSubScreenOptions('Trends', 'RankHome')
+            : subScreenOptions('Trends', 'RankHome')
         }
       />
     </RankStack.Navigator>

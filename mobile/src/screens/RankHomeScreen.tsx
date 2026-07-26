@@ -117,7 +117,12 @@ export default function RankHomeScreen({ navigation }: any) {
     // block the user from starting to rank.
     void setPref(m.pref);
     setRankingMethod(m.pref).catch(() => {});
-    navigation.replace(m.route);
+    // #162/#165 — navigate, don't replace: replace() removed this chooser
+    // from the stack, so back (header, iOS edge-swipe, Android hardware)
+    // from the chosen surface could never return here — testers read that
+    // as being stuck in a loop. Pushing keeps the chooser underneath;
+    // launch routing is unaffected (it reads the saved pref, not the stack).
+    navigation.navigate(m.route);
   };
 
   return (
