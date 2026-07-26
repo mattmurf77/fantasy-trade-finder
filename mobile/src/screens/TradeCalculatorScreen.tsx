@@ -107,7 +107,13 @@ export default function TradeCalculatorScreen({ route }: any) {
     | { opponentUserId?: string; giveIds?: string[]; receiveIds?: string[] }
     | undefined;
   const [mode, setMode] = useState<CalcMode>(prefill ? 'league' : 'live');
-  const [format, setFormat] = useState<ScoringFormat>('1qb_ppr');
+  // #166/#167 — default to the LEAGUE's detected scoring format (same rule
+  // as InLeagueCalculator); the chips still override per-session, and the
+  // saved-draft restore below keeps precedence over this initial value.
+  const sessionFormat = useSession.getState().activeFormat;
+  const [format, setFormat] = useState<ScoringFormat>(
+    sessionFormat === 'sf_tep' || sessionFormat === '1qb_ppr' ? sessionFormat : '1qb_ppr',
+  );
   // Demo-mode trade state.
   const [partnerId, setPartnerId] = useState(CALC_PARTNERS[0].id);
   const [sendIds, setSendIds] = useState<string[]>([]);
