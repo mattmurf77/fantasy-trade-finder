@@ -281,7 +281,7 @@ Verdict math is `trade_service.classify_verdict(give_value, receive_value)` (no 
 | GET | `/api/league/coverage` | Member ranking coverage (the excluded "current user" is always the session user — a `user_id` query param is ignored, teardown W2C hygiene) |
 | GET | `/api/league/member-unlock-states` | Per-member unlock badges |
 | GET | `/api/league/members` | League member roster + invite metadata (League Summary "Leaguemates Joined") |
-| GET | `/api/leaderboard` | League + Universal leaderboards (rendered inside the League tab). `metric=streak` ranks **effective** streaks (#152 residual): a user whose `last_rank_local_date` is >1 day behind their local today (frame = their stored `last_rank_tz`, UTC fallback) decays to 0 and drops off the board — lapsed users can't squat on top spots. `self_row` applies the same rule |
+| GET | `/api/leaderboard` | League + Universal leaderboards (rendered inside the League tab). `metric=streak` ranks **effective** streaks (#152 residual): a user whose `last_rank_local_date` is >1 day behind their local today (frame = their stored `last_rank_tz`, UTC fallback) decays to 0 and drops off the board — lapsed users can't squat on top spots. `self_row` applies the same rule. `metric=ranks` counts **per player placed**, not per event (operator rule 2026-07-26): `tier_save` weights by `props.changed_count`, `ranking_reorder` by `props.moves_count`; swipes/anchor answers = 1 each; empty saves = 0; legacy prop-less rows = 1 |
 | GET | `/api/league/activity` | Activity feed |
 | GET | `/api/league/contrarian` | Contrarian rankings within league |
 | GET | `/api/league/format-stats` | Scoring format breakdown |

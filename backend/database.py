@@ -2572,26 +2572,65 @@ def _streak_self_rank(
         return None
 
 
+# Per-player action weighting (operator rule 2026-07-26): one PLAYER placed =
+# one action, regardless of surface. A trio swipe or anchor answer touches one
+# comparison/rung → weight 1 (no prop). A Quick Set tier save batches N
+# players into ONE event carrying props.changed_count; a Quick Rank / manual
+# reorder carries props.moves_count. COUNT(*) over events would score a
+# 12-player tier save the same as a single swipe, underweighting QuickSet
+# users on the Ranks leaderboard — so both leaderboard readers aggregate
+# weights in Python (props is a JSON TEXT column; cross-dialect JSON
+# extraction in SQL isn't worth it at current scale, and both readers sit
+# behind the 5-min leaderboard cache).
+_RANK_EVENT_WEIGHT_PROP = {"tier_save": "changed_count",
+                           "ranking_reorder": "moves_count"}
+
+
+def _rank_event_weight(event_type: str, props_raw) -> int:
+    prop = _RANK_EVENT_WEIGHT_PROP.get(event_type)
+    if prop is None:
+        return 1
+    try:
+        val = json.loads(props_raw or "{}").get(prop)
+        # Missing prop (old rows) → 1; explicit 0 (empty save/skip) → 0.
+        return max(0, int(val)) if val is not None else 1
+    except (TypeError, ValueError):
+        return 1
+
+
+def _rank_action_counts(
+    since_iso: str | None,
+    league_user_ids: list[str] | None,
+) -> dict[str, int]:
+    """user_id → per-player-weighted action count for rank-class events."""
+    with engine.begin() as conn:
+        stmt = select(
+            user_events_table.c.user_id,
+            user_events_table.c.event_type,
+            user_events_table.c.props,
+        ).where(user_events_table.c.event_type.in_(list(_RANK_STREAK_EVENTS)))
+        if since_iso:
+            stmt = stmt.where(user_events_table.c.occurred_at >= since_iso)
+        if league_user_ids is not None:
+            stmt = stmt.where(user_events_table.c.user_id.in_(league_user_ids))
+        totals: dict[str, int] = {}
+        for r in conn.execute(stmt):
+            totals[r.user_id] = totals.get(r.user_id, 0) \
+                + _rank_event_weight(r.event_type, r.props)
+        return totals
+
+
 def _rank_count_top(
     since_iso: str | None,
     league_user_ids: list[str] | None,
     limit: int,
 ) -> list[tuple[str, int]]:
-    """Top-N (user_id, event_count) for rank-class events since `since_iso`.
-    Indexed by ix_user_events_type_occurred."""
+    """Top-N (user_id, weighted_action_count) for rank-class events since
+    `since_iso` — one player placed = one action (see _rank_event_weight)."""
     try:
-        with engine.begin() as conn:
-            cnt = func.count().label("cnt")
-            stmt = select(user_events_table.c.user_id, cnt) \
-                .where(user_events_table.c.event_type.in_(list(_RANK_STREAK_EVENTS)))
-            if since_iso:
-                stmt = stmt.where(user_events_table.c.occurred_at >= since_iso)
-            if league_user_ids is not None:
-                stmt = stmt.where(user_events_table.c.user_id.in_(league_user_ids))
-            stmt = stmt.group_by(user_events_table.c.user_id) \
-                       .order_by(cnt.desc(), user_events_table.c.user_id.asc()) \
-                       .limit(limit)
-            return [(r.user_id, r.cnt) for r in conn.execute(stmt).fetchall()]
+        totals = _rank_action_counts(since_iso, league_user_ids)
+        ranked = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
+        return [(uid, cnt) for uid, cnt in ranked[:limit] if cnt > 0]
     except Exception as e:
         print(f"[_rank_count_top] failed: {e}")
         return []
@@ -2602,38 +2641,18 @@ def _rank_count_self_rank(
     since_iso: str | None,
     league_user_ids: list[str] | None,
 ) -> tuple[int, int] | None:
-    """Return (rank, count) for the viewer on the rank-count leaderboard.
-    Uses a CTE so the GROUP BY runs once: outer SELECT just counts rows
-    that out-rank the viewer's tuple under the same ordering."""
+    """Return (rank, count) for the viewer on the rank-count leaderboard,
+    using the same per-player weighting as _rank_count_top."""
     try:
-        with engine.begin() as conn:
-            cnt_col = func.count().label("cnt")
-            counts = select(
-                user_events_table.c.user_id.label("uid"),
-                cnt_col,
-            ).where(user_events_table.c.event_type.in_(list(_RANK_STREAK_EVENTS)))
-            if since_iso:
-                counts = counts.where(user_events_table.c.occurred_at >= since_iso)
-            if league_user_ids is not None:
-                counts = counts.where(user_events_table.c.user_id.in_(league_user_ids))
-            counts = counts.group_by(user_events_table.c.user_id).cte("counts")
-
-            my_row = conn.execute(
-                select(counts.c.cnt).where(counts.c.uid == user_id)
-            ).first()
-            if my_row is None or not my_row.cnt:
-                return None
-            my_cnt = int(my_row.cnt)
-
-            ahead = conn.execute(
-                select(func.count()).select_from(counts).where(
-                    or_(
-                        counts.c.cnt > my_cnt,
-                        and_(counts.c.cnt == my_cnt, counts.c.uid < user_id),
-                    )
-                )
-            ).scalar() or 0
-            return (ahead + 1, my_cnt)
+        totals = _rank_action_counts(since_iso, league_user_ids)
+        my_cnt = totals.get(user_id, 0)
+        if not my_cnt:
+            return None
+        ahead = sum(
+            1 for uid, cnt in totals.items()
+            if cnt > my_cnt or (cnt == my_cnt and uid < user_id)
+        )
+        return (ahead + 1, my_cnt)
     except Exception as e:
         print(f"[_rank_count_self_rank] {user_id} failed: {e}")
         return None
