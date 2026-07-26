@@ -361,7 +361,7 @@ Triggered by an external scheduler (Render cron). All POST.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/trends/risers-fallers` | Risers/fallers (uses `elo_history`) |
+| GET | `/api/trends/risers-fallers` | Risers/fallers (uses `elo_history`). Since 2026-07-25 (#164) `elo_history` is written by EVERY ranking-mutating route — `rank3`, `tiers/save` (assigned + cleared pids), `rankings/reorder`, `anchor/save` — not just trio swipes, so Quick-Set-only users populate Trends too |
 | GET | `/api/trends/contrarian` | Contrarian movers |
 | GET | `/api/trends/consensus-gap` | Gap from consensus |
 

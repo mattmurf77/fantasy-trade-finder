@@ -36,7 +36,9 @@ import {
 import { track } from '../api/events';
 import SteerSlider from '../components/SteerSlider';
 import { useSession, type RankMethodPref } from '../state/useSession';
-import { useFlag } from '../state/useFeatureFlags';
+import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
+import { useOnboardingState } from '../state/useOnboardingState';
+import { useGuide } from '../state/useGuide';
 import type { NotificationPrefs } from '../shared/types';
 
 // Settings sheet shown as a modal from the gear icon in the global TopBar.
@@ -94,6 +96,10 @@ export default function SettingsScreen({ navigation }: any) {
   // setting look broken) by resetting the mounted Rank stack.
   const rankingPref    = useSession((s) => s.rankingMethodPref);
   const setRankingPref = useSession((s) => s.setRankingMethodPref);
+  // #187 — The Analyst guided-tour opt-out, surfaced as a Settings toggle
+  // (the same permanent opt-out as the bubble's "Skip the tour" link).
+  const guidedAvatarOn = useOnboardingFeature('onboarding.guided_avatar');
+  const guideDismissed = useOnboardingState((s) => s.ob.guideDismissed);
 
   function rerouteRankStack(m: RankMethodPref) {
     // Reset the nested Rank stack to the chosen flow WITHOUT changing tab
@@ -749,6 +755,33 @@ export default function SettingsScreen({ navigation }: any) {
     </>
   );
 
+  // #187 — dismiss/disable The Analyst from Settings, both directions.
+  // Off: same path as the bubble's "Skip the tour" (dismissTour — clears any
+  // active bubble + tracks guide_tour_dismissed). On: enableTour, which
+  // RESTARTS the tour from its first step (full-replay semantics — see
+  // useGuide.enableTour for why resume-only would look broken).
+  const guideSection = guidedAvatarOn ? (
+    <>
+      <View style={styles.section}>
+        <TickLabel>Guided tour</TickLabel>
+      </View>
+      <Row
+        testID="settings.guided-tour-toggle"
+        title="The Analyst"
+        sub={
+          guideDismissed
+            ? 'Off. Turning this on restarts the guided tour from the beginning.'
+            : 'In-app guide bubbles on relevant screens. Turn off to dismiss The Analyst everywhere.'
+        }
+        value={!guideDismissed}
+        onChange={() => {
+          if (guideDismissed) useGuide.getState().enableTour();
+          else useGuide.getState().dismissTour();
+        }}
+      />
+    </>
+  ) : null;
+
   // Teardown 05-03 — denied-permission recovery banner. Rendered above the
   // toggles whenever iOS-level permission is denied (flag-gated); the
   // toggles stay editable (prefs persist for when permission returns) but
@@ -1168,6 +1201,7 @@ export default function SettingsScreen({ navigation }: any) {
             {platformLinkRows}
 
             {rankingSection}
+            {guideSection}
 
             <View style={styles.section}>
               <TickLabel>Notifications</TickLabel>
@@ -1202,6 +1236,7 @@ export default function SettingsScreen({ navigation }: any) {
             {platformLinkRows}
 
             {rankingSection}
+            {guideSection}
 
             <View style={styles.section}>
               <TickLabel>Notifications</TickLabel>
@@ -1232,8 +1267,8 @@ export default function SettingsScreen({ navigation }: any) {
 }
 
 function Row({
-  title, sub, value, onChange,
-}: { title: string; sub?: string; value: boolean; onChange: () => void }) {
+  title, sub, value, onChange, testID,
+}: { title: string; sub?: string; value: boolean; onChange: () => void; testID?: string }) {
   return (
     <View style={styles.row}>
       <View style={{ flex: 1, paddingRight: space.md }}>
@@ -1241,6 +1276,7 @@ function Row({
         {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
       </View>
       <Switch
+        testID={testID}
         value={value}
         onValueChange={onChange}
         // S8 PRD-02 — the bare Switch announced with no name; pair it

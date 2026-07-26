@@ -26,6 +26,7 @@ import {
   scrim,
 } from '../theme/chalkline';
 import { Badge, Icon, TickLabel } from '../components/chalkline';
+import FeedbackFAB from '../components/FeedbackFAB';
 import PlayerCard from '../components/PlayerCard';
 import {
   getPowerRankings,
@@ -449,6 +450,13 @@ export default function LeagueSummaryScreen() {
           </View>
         ) : null}
       </Modal>
+      {/* #188 — the root-stack push variant covers RootNav's FAB mount, so
+          it carries its own (no tab bar underneath). The tab-root variant
+          (LeagueRankings) is already covered by the RootNav mount — a second
+          FAB there would double up. */}
+      {!isTabRoot ? (
+        <FeedbackFAB activeScreen="LeagueSummary" aboveTabBar={false} />
+      ) : null}
     </SafeAreaView>
   );
 }

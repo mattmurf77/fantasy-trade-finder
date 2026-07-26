@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { onboardingEnabled } from './useFeatureFlags';
-import { getOnboardingState, patchOnboardingState } from './useOnboardingState';
+import {
+  getOnboardingState,
+  patchOnboardingState,
+  resetGuideProgress,
+} from './useOnboardingState';
 import { track } from '../api/events';
 
 // The Analyst guided tour — engine state (guided-avatar-script.md).
@@ -59,6 +63,11 @@ interface GuideStore {
   skipStep: () => void;
   /** "Skip tour" — permanent opt-out, falls back to passive surfaces. */
   dismissTour: () => void;
+  /** #187 — Settings toggle re-enable. Full-replay semantics: clears the
+   *  opt-out AND seen/completed memory so the tour restarts from its first
+   *  step (a resume-only re-enable would be a silent no-op for users who
+   *  had already seen every step — the toggle would look broken). */
+  enableTour: () => void;
   /** S8 — tour completed; guide goes reactive-only. */
   completeTour: () => void;
 }
@@ -118,6 +127,11 @@ export const useGuide = create<GuideStore>((set, get) => ({
     patchOnboardingState({ guideDismissed: true });
     track('guide_tour_dismissed', { at_step: step?.id ?? 'none' }, step?.screen);
     set({ active: null, onAccept: null, onDismissCta: null });
+  },
+
+  enableTour: () => {
+    resetGuideProgress();
+    track('guide_tour_reenabled', {});
   },
 
   completeTour: () => {

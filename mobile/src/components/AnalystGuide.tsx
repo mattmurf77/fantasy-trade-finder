@@ -180,14 +180,19 @@ export default function AnalystGuide() {
                 ))}
               </View>
             ) : null}
+            {/* #187 — permanent opt-out, present on EVERY bubble (never-trap
+                principle). Distinct from the ✕ (skips one step): this turns
+                The Analyst off for good; Settings → "Guided tour" re-enables. */}
             <Pressable
               onPress={dismissTour}
               hitSlop={8}
-              testID="guide.skip-tour"
+              testID="guide.dismiss-tour"
               style={styles.skip}
               accessibilityRole="button"
+              accessibilityLabel="Turn off the guided tour"
+              accessibilityHint="Stops The Analyst from appearing. You can turn it back on in Settings."
             >
-              <Text style={styles.skipText}>Skip the tour</Text>
+              <Text style={styles.skipText}>Skip the tour — don't show again</Text>
             </Pressable>
           </View>
         </View>
