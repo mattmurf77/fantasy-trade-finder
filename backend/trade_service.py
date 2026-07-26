@@ -1703,6 +1703,12 @@ class TradeService:
         pinned_give_players: list[str] | None = None,  # specific players user wants to trade away
         pinned_receive_players: list[str] | None = None,  # specific players user wants to acquire
                                                           # (FB-47; v2-only, legacy ignores it)
+        pinned_give_mode: str = "any",       # #174: "any" (historical, give side
+                                             # must include ≥1 pinned) or "all"
+                                             # (give side must include EVERY
+                                             # pinned player — "trade this
+                                             # package away"). v2-only, legacy
+                                             # ignores it like pinned_receive.
         opponent_user_id: str | None = None,  # #156 Specific Team: scope the
                                               # sweep to this one league-mate
         scoring_format: str = "1qb_ppr",
@@ -1756,6 +1762,7 @@ class TradeService:
                 trade_away_positions = trade_away_positions,
                 pinned_give_players  = pinned_give_players,
                 pinned_receive_players = pinned_receive_players,
+                pinned_give_mode     = pinned_give_mode,
                 opponent_user_id     = opponent_user_id,
                 scoring_format       = scoring_format,
                 is_dynasty           = is_dynasty,
@@ -1904,6 +1911,7 @@ class TradeService:
         trade_away_positions: list[str] | None,
         pinned_give_players: list[str] | None,
         pinned_receive_players: list[str] | None = None,
+        pinned_give_mode: str = "any",
         opponent_user_id: str | None = None,
         scoring_format: str = "1qb_ppr",
         is_dynasty: bool = False,
@@ -2068,6 +2076,7 @@ class TradeService:
                         trade_away_positions = trade_away_positions or [],
                         pinned_give_players  = pinned_give_players,
                         pinned_receive_players = pinned_receive_players,
+                        pinned_give_mode     = pinned_give_mode,
                         players              = self._players,
                         alpha_opp            = alpha_opp,
                         untouchable_ids      = untouchable_ids,
@@ -2090,6 +2099,7 @@ class TradeService:
                         trade_away_positions = trade_away_positions or [],
                         pinned_give_players  = pinned_give_players,
                         pinned_receive_players = pinned_receive_players,
+                        pinned_give_mode     = pinned_give_mode,
                         confidence           = confidence,
                         scoring_format       = scoring_format,
                         alpha_opp            = alpha_opp,
@@ -2114,6 +2124,7 @@ class TradeService:
                     trade_away_positions = trade_away_positions or [],
                     pinned_give_players  = pinned_give_players,
                     pinned_receive_players = pinned_receive_players,
+                    pinned_give_mode     = pinned_give_mode,
                     untouchable_ids      = untouchable_ids,
                     target_ids           = target_ids,
                     raw_user_elo         = user_elo,
@@ -2278,6 +2289,7 @@ class TradeService:
         trade_away_positions: list[str],
         pinned_give_players: list[str] | None,
         pinned_receive_players: list[str] | None = None,
+        pinned_give_mode: str = "any",
         confidence: dict[str, int] | None = None,
         scoring_format: str = "1qb_ppr",
         alpha_opp: float | None = None,
@@ -2299,6 +2311,9 @@ class TradeService:
         opp_elo    = opponent.elo_ratings
         players    = self._players
         pinned_set = set(pinned_give_players) if pinned_give_players else None
+        # #174 — "all" ⇒ the give side must include EVERY pinned player
+        # (trade-as-one-package); "any" keeps the historical ≥1 semantics.
+        pinned_all = pinned_set is not None and pinned_give_mode == "all"
         # FB-47 — pinned ACQUIRE targets: cards must receive at least one.
         pinned_recv_set = (set(pinned_receive_players)
                            if pinned_receive_players else None)
@@ -2457,8 +2472,12 @@ class TradeService:
                 heapq.heapreplace(heap, entry)
 
         def _consider(give_ids: list[str], recv_ids: list[str]) -> None:
-            if pinned_set and not (set(give_ids) & pinned_set):
-                return
+            if pinned_set:
+                if pinned_all:
+                    if not pinned_set <= set(give_ids):
+                        return
+                elif not (set(give_ids) & pinned_set):
+                    return
             if pinned_recv_set and not (set(recv_ids) & pinned_recv_set):
                 return
             if not _positions_ok(give_ids, recv_ids):
@@ -2569,6 +2588,14 @@ class TradeService:
             for pid in _known_opp:
                 if pid in target_ids and pid not in recv_candidates:
                     recv_candidates.append(pid)
+        # #174 — package mode: every pinned give player must be a candidate
+        # or no combo can contain them all. Mirrors the optimizer's
+        # always-keep rule; gated to 'all' so default-mode decks stay
+        # byte-identical to the pre-#174 prune.
+        if pinned_all:
+            for pid in _known_user:
+                if pid in pinned_set and pid not in give_candidates:
+                    give_candidates.append(pid)
         give_candidates.sort(key=lambda p: _vo(p) - user_value[p], reverse=True)
         recv_candidates.sort(key=lambda p: user_value[p] - _vo(p), reverse=True)
 
@@ -2671,6 +2698,7 @@ class TradeService:
         trade_away_positions: list[str],
         pinned_give_players: list[str] | None,
         pinned_receive_players: list[str] | None = None,
+        pinned_give_mode: str = "any",
         untouchable_ids: set | None = None,
         target_ids: set | None = None,
         raw_user_elo: dict[str, float] | None = None,
@@ -2686,6 +2714,8 @@ class TradeService:
         """
         players    = self._players
         pinned_set = set(pinned_give_players) if pinned_give_players else None
+        # #174 — "all" ⇒ every pinned give player must be in the give side.
+        pinned_all = pinned_set is not None and pinned_give_mode == "all"
 
         def _pos(pid: str) -> Optional[str]:
             p = players.get(pid)
@@ -2736,6 +2766,11 @@ class TradeService:
         seen: set[tuple] = set()
 
         def _emit(give_ids: list[str], recv_ids: list[str]) -> None:
+            # #174 package mode — the give pool is already restricted to
+            # pinned players; 'all' additionally requires the FULL set in
+            # every card (so 1-for-1 shapes drop out when 2+ are pinned).
+            if pinned_all and not pinned_set <= set(give_ids):
+                return
             key = (frozenset(give_ids), frozenset(recv_ids))
             if key in seen:
                 return

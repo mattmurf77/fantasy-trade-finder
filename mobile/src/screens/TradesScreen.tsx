@@ -44,6 +44,7 @@ import {
   shadowSheet,
   scrim,
 } from '../theme/chalkline';
+import { posColor } from '../theme/colors';
 import { TickLabel, Button, Meter, Icon, Card } from '../components/chalkline';
 import TradeCardComp from '../components/TradeCard';
 import SendInSleeperButton from '../components/SendInSleeperButton';
@@ -105,6 +106,7 @@ import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTarget
 import { S as GUIDE, nextUnrankedPosition } from '../components/analystScript';
 import { useSession } from '../state/useSession';
 import { useTradeQueue } from '../state/useTradeQueue';
+import { useFinderTargets } from '../state/useFinderTargets';
 import { useFlag, useOnboardingFeature, onboardingEnabled } from '../state/useFeatureFlags';
 import {
   useOnboardingState,
@@ -351,19 +353,29 @@ export default function TradesScreen({ navigation, route }: any) {
   const scopedOpponentName: string | undefined =
     finderMode === 'team' ? route?.params?.opponentName : undefined;
 
-  // Lateral switch handlers. Guided/Player switch in place (setParams keeps
-  // this instance mounted, so pinned targets persist across the switch);
-  // Team without a chosen opponent bounces to the hub picker; Calculator and
-  // Hub are separate destinations.
+  // Lateral switch handlers. All three deck modes switch IN PLACE
+  // (setParams keeps this instance mounted, so pinned targets persist);
+  // the Team chip opens an in-screen manager picker — both to enter team
+  // mode and to change the scoped team without bouncing back to the hub
+  // (#156 finish item 4). Calculator and Hub are separate destinations.
+  const [teamPickerOpen, setTeamPickerOpen] = useState(false);
   const switchFinderMode = useCallback(
     (m: 'guided' | 'team' | 'player') => {
-      if (m === 'team' && !scopedOpponent) {
-        navigation?.navigate?.('TradesHome');
+      if (m === 'team') {
+        setTeamPickerOpen(true);
         return;
       }
       navigation?.setParams?.({ mode: m });
     },
-    [navigation, scopedOpponent],
+    [navigation],
+  );
+  const pickScopedTeam = useCallback(
+    (opponentUserId: string, opponentName: string) => {
+      haptics.selection();
+      setTeamPickerOpen(false);
+      navigation?.setParams?.({ mode: 'team', opponentUserId, opponentName });
+    },
+    [navigation],
   );
 
   // S4 PRD-01 — "How trades are priced" sheet next to the fairness toggle.
@@ -669,8 +681,17 @@ export default function TradesScreen({ navigation, route }: any) {
   const targetingEnabled = useFlag('trade.finder_targeting');
   const [targetDirection, setTargetDirection] =
     useState<'trade_away' | 'acquire'>('trade_away');
-  const [pinnedGive, setPinnedGive] = useState<Player[]>([]);
-  const [pinnedReceive, setPinnedReceive] = useState<Player[]>([]);
+  // #156 finish — the pin lists moved to a session-only zustand store
+  // (useFinderTargets) so the hub's Specific Player card can show live
+  // counts. Semantics unchanged: session-local, cleared on league switch
+  // (store subscription + the [leagueId] effect below). `packageMode` is
+  // the #174 "Trade as one package" toggle (default ON, meaningful only
+  // with 2+ give pins).
+  const pinnedGive = useFinderTargets((s) => s.pinnedGive);
+  const pinnedReceive = useFinderTargets((s) => s.pinnedReceive);
+  const packageMode = useFinderTargets((s) => s.packageMode);
+  const setPackageMode = useFinderTargets((s) => s.setPackageMode);
+  const clearTargets = useFinderTargets((s) => s.clear);
   const [targetPickerOpen, setTargetPickerOpen] = useState(false);
 
   // ── Find-a-Trade: streaming job snapshot ─────────────────────────────
@@ -685,25 +706,38 @@ export default function TradesScreen({ navigation, route }: any) {
     // pass {} and behave exactly as before. `force` (item 7) skips the
     // server's complete-fresh job cache — used by the post-Quick-Set
     // regeneration, whose board change doesn't alter the cache key.
-    mutationFn: (vars: { auto?: boolean; force?: boolean }) =>
-      generateTrades({
+    mutationFn: (vars: { auto?: boolean; force?: boolean }) => {
+      // Pins are read from the store (not the render closure) so a
+      // pin-then-generate in the same tick (#186 keep-side) always sends
+      // the fresh lists.
+      const {
+        pinnedGive: pins,
+        pinnedReceive: wants,
+        packageMode: pkg,
+      } = useFinderTargets.getState();
+      return generateTrades({
         league_id: leagueId!,
         fairness_threshold: effectiveFairness,
         force: vars.force || undefined,
         // FB-47 — omit (not []) when unset so untargeted payloads stay
         // byte-identical to the pre-targeting shape.
         pinned_give_players:
-          targetingEnabled && pinnedGive.length > 0
-            ? pinnedGive.map((p) => p.id)
+          targetingEnabled && pins.length > 0
+            ? pins.map((p) => p.id)
             : undefined,
         pinned_receive_players:
-          targetingEnabled && pinnedReceive.length > 0
-            ? pinnedReceive.map((p) => p.id)
+          targetingEnabled && wants.length > 0
+            ? wants.map((p) => p.id)
             : undefined,
+        // #174 — "Trade as one package": with 2+ give pins and the toggle
+        // ON, every card must send ALL of them. Omitted otherwise.
+        pinned_give_mode:
+          targetingEnabled && pkg && pins.length >= 2 ? 'all' : undefined,
         // FB #156 Specific Team — scope the sweep to one league-mate. Omitted
         // (not null) when unset so untargeted payloads stay byte-identical.
         opponent_user_id: scopedOpponent || undefined,
-      }),
+      });
+    },
     onSuccess: (snapshot) => {
       setJob(snapshot);
       // For instant cache-hit responses (status === 'complete') the deck
@@ -850,8 +884,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setJob(null);
     setEdits({});
     setSwapTarget(null);
-    setPinnedGive([]);
-    setPinnedReceive([]);
+    clearTargets(); // store also self-clears via its league subscription
     setTargetPickerOpen(false);
     // Onboarding item 4 — reset the first-run auto-start lifecycle so a
     // league switch mid-first-run can auto-start against the new league.
@@ -1051,13 +1084,22 @@ export default function TradesScreen({ navigation, route }: any) {
     staleTime: 5 * 60_000,
   });
   // FB-47 — owner display names for the acquire picker's @owner badges.
-  // Only fetched while the picker is actually open.
+  // Only fetched while a picker that needs it is actually open (#156
+  // finish: the in-screen team picker shares the same cache key with the
+  // hub's manager picker).
   const leagueUsersQuery = useQuery({
     queryKey: ['league-users', leagueId],
     queryFn: () => getLeagueUsers(leagueId!),
-    enabled: !!leagueId && targetingEnabled && targetPickerOpen,
+    enabled:
+      !!leagueId &&
+      ((targetingEnabled && targetPickerOpen) || teamPickerOpen),
     staleTime: 5 * 60_000,
   });
+  // #156 finish — league-mates for the in-screen team picker.
+  const teamPickerOpponents = useMemo(
+    () => (leagueUsersQuery.data ?? []).filter((u) => u.user_id !== userId),
+    [leagueUsersQuery.data, userId],
+  );
   const valueById = useMemo(() => {
     const m = new Map<string, CalcValueRow>();
     for (const r of valuesQuery.data?.players ?? []) m.set(r.id, r);
@@ -1129,9 +1171,19 @@ export default function TradesScreen({ navigation, route }: any) {
   // deck so team-scoped or player-targeted results never mix with a prior
   // mode's cards. Gated to hub launches; the standalone Trades home never
   // runs this (finderMode is undefined there).
+  //
+  // Finish item 4: an IN-PLACE team pick (mode-bar chip → picker →
+  // setParams) also kicks generation immediately, so the deck re-fills
+  // for the new opponent without a manual "Find a Trade" tap. The FIRST
+  // run (entry from the hub) keeps the historical manual start.
+  const finderScopeSeen = useRef(false);
   useEffect(() => {
     if (!finderHubOn || !finderMode) return;
     resetDeckForNewTargets();
+    if (finderScopeSeen.current && finderMode === 'team' && scopedOpponent) {
+      generateMutation.mutate({});
+    }
+    finderScopeSeen.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finderMode, scopedOpponent]);
 
@@ -1143,17 +1195,49 @@ export default function TradesScreen({ navigation, route }: any) {
       team: p.nflTeam,
       age: p.age,
     };
-    const setter = targetDirection === 'trade_away' ? setPinnedGive : setPinnedReceive;
-    setter((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, player]));
+    const store = useFinderTargets.getState();
+    if (targetDirection === 'trade_away') store.addGive(player);
+    else store.addReceive(player);
     haptics.selection();
     resetDeckForNewTargets();
   }
 
   function handleRemoveTarget(id: string, dir: 'trade_away' | 'acquire') {
-    const setter = dir === 'trade_away' ? setPinnedGive : setPinnedReceive;
-    setter((prev) => prev.filter((p) => p.id !== id));
+    const store = useFinderTargets.getState();
+    if (dir === 'trade_away') store.removeGive(id);
+    else store.removeReceive(id);
     haptics.selection();
     resetDeckForNewTargets();
+  }
+
+  // #186 — "keep this side": pin the top card's liked side wholesale and
+  // regenerate, so the deck re-fills with other offers around it. Pure
+  // shortcut into the existing FB-47 targeting machinery: keep-give pins
+  // the send side (packageMode then holds it together per #174), keep-
+  // receive pins the get side (cards must return ≥1 of them).
+  function handleKeepSide(card: TradeCard, side: 'give' | 'receive') {
+    haptics.selection();
+    useFinderTargets
+      .getState()
+      .setSide(side, side === 'give' ? card.give_players : card.receive_players);
+    track('trade_keep_side_tapped', { side }, 'Trades');
+    resetDeckForNewTargets();
+    generateMutation.mutate({});
+  }
+
+  // #190 — hand the top card to the manual calculator, prefilled: In-league
+  // mode with this card's opponent and both sides loaded. The swap-sheet
+  // in-place edit stays; this is the "full editor" path.
+  function handleEditInCalculator(card: TradeCard) {
+    haptics.selection();
+    track('trade_edit_in_calculator_tapped', undefined, 'Trades');
+    navigation?.navigate?.('TradeCalculator', {
+      prefill: {
+        opponentUserId: card.opponent_user_id,
+        giveIds: card.give_player_ids,
+        receiveIds: card.receive_player_ids,
+      },
+    });
   }
 
   // Positions the user is trying to acquire — sharpens the card fit line's
@@ -2301,11 +2385,119 @@ export default function TradesScreen({ navigation, route }: any) {
           )}
 
           {/* FB-47 — finder targeting (flag trade.finder_targeting).
-              Direction toggle (Trade away / Acquire) + player picker.
-              Position-level targeting stays in OutlookSheet's chips; this
-              is the player-level entry point. Chip construction mirrors
-              the subnav pills. */}
-          {!firstRun && targetingEnabled && (
+              #156 finish item 1: in the hub's Specific Player mode the
+              section renders as the mockup's two-column TRADE FOR / TRADE
+              AWAY board; everywhere else the original direction-toggle
+              construction is untouched. Position-level targeting stays in
+              OutlookSheet's chips; this is the player-level entry point. */}
+          {!firstRun && targetingEnabled && finderMode === 'player' ? (
+            <View style={styles.targetSection}>
+              <View style={styles.playerBoard}>
+                <View style={[styles.boardCol, styles.boardColFor]}>
+                  <Text style={[styles.boardColH, styles.boardColHFor]}>
+                    TRADE FOR
+                  </Text>
+                  {pinnedReceive.map((p) => (
+                    <Pressable
+                      key={p.id}
+                      testID={`trades.board.for.${p.id}`}
+                      onPress={() => handleRemoveTarget(p.id, 'acquire')}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${p.name} from trade-for targets`}
+                      style={({ pressed }) => [
+                        styles.boardMini,
+                        pressed && styles.subnavPillPressed,
+                      ]}
+                    >
+                      {p.position ? (
+                        <View
+                          style={[
+                            styles.boardPosDot,
+                            { backgroundColor: posColor(p.position as any) },
+                          ]}
+                        />
+                      ) : null}
+                      <Text style={styles.boardMiniText} numberOfLines={1}>
+                        {p.name}
+                      </Text>
+                      <Icon name="x" size={12} color={chalk.faint} />
+                    </Pressable>
+                  ))}
+                  <Pressable
+                    testID="trades.board.add-for"
+                    accessibilityRole="button"
+                    accessibilityLabel="Add a player to trade for"
+                    onPress={() => {
+                      setTargetDirection('acquire');
+                      setTargetPickerOpen(true);
+                    }}
+                    style={({ pressed }) => [
+                      styles.boardAddBtn,
+                      pressed && styles.subnavPillPressed,
+                    ]}
+                  >
+                    <Text style={styles.boardAddText}>+ Add target</Text>
+                  </Pressable>
+                </View>
+                <View style={[styles.boardCol, styles.boardColAway]}>
+                  <Text style={[styles.boardColH, styles.boardColHAway]}>
+                    TRADE AWAY
+                  </Text>
+                  {pinnedGive.map((p) => (
+                    <Pressable
+                      key={p.id}
+                      testID={`trades.board.away.${p.id}`}
+                      onPress={() => handleRemoveTarget(p.id, 'trade_away')}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${p.name} from trade-away targets`}
+                      style={({ pressed }) => [
+                        styles.boardMini,
+                        pressed && styles.subnavPillPressed,
+                      ]}
+                    >
+                      {p.position ? (
+                        <View
+                          style={[
+                            styles.boardPosDot,
+                            { backgroundColor: posColor(p.position as any) },
+                          ]}
+                        />
+                      ) : null}
+                      <Text style={styles.boardMiniText} numberOfLines={1}>
+                        {p.name}
+                      </Text>
+                      <Icon name="x" size={12} color={chalk.faint} />
+                    </Pressable>
+                  ))}
+                  <Pressable
+                    testID="trades.board.add-away"
+                    accessibilityRole="button"
+                    accessibilityLabel="Add a player to trade away"
+                    onPress={() => {
+                      setTargetDirection('trade_away');
+                      setTargetPickerOpen(true);
+                    }}
+                    style={({ pressed }) => [
+                      styles.boardAddBtn,
+                      pressed && styles.subnavPillPressed,
+                    ]}
+                  >
+                    <Text style={styles.boardAddText}>+ Add asset</Text>
+                  </Pressable>
+                </View>
+              </View>
+              {pinnedGive.length >= 2 ? (
+                <PackageToggle
+                  on={packageMode}
+                  onToggle={() => {
+                    haptics.selection();
+                    setPackageMode(!packageMode);
+                    resetDeckForNewTargets();
+                  }}
+                />
+              ) : null}
+            </View>
+          ) : !firstRun && targetingEnabled ? (
             <View style={styles.targetSection}>
               <View style={styles.controlRow}>
                 <View style={{ flex: 1 }}>
@@ -2391,8 +2583,18 @@ export default function TradesScreen({ navigation, route }: any) {
                   ))}
                 </View>
               )}
+              {pinnedGive.length >= 2 ? (
+                <PackageToggle
+                  on={packageMode}
+                  onToggle={() => {
+                    haptics.selection();
+                    setPackageMode(!packageMode);
+                    resetDeckForNewTargets();
+                  }}
+                />
+              ) : null}
             </View>
-          )}
+          ) : null}
 
           {/* Find-a-Trade button. While a job is running, the button is
               disabled — the progress strip below acts as the live signal.
@@ -2656,6 +2858,14 @@ export default function TradesScreen({ navigation, route }: any) {
                 }
                 repricing={topCard.edited === true && repriceMutation.isPending}
                 fitTargetPositions={fitTargetPositions}
+                onKeepSide={
+                  // #186 — needs the FB-47 pinning machinery; hidden when
+                  // the targeting flag is off.
+                  targetingEnabled
+                    ? (side) => handleKeepSide(topCard, side)
+                    : undefined
+                }
+                onEditInCalculator={() => handleEditInCalculator(topCard)}
               />
               {/* Queue action — Pass / Interested are driven by swipe
                   gestures on the top card; Queue is a third option that
@@ -2980,6 +3190,67 @@ export default function TradesScreen({ navigation, route }: any) {
         </View>
       </Modal>
 
+      {/* #156 finish item 4 — in-screen manager picker for the Team chip.
+          Mirrors the hub's picker sheet, but lands via setParams so the
+          scope swaps IN PLACE (same screen instance; the scope effect
+          resets the deck and kicks a fresh team-scoped generation). */}
+      <Modal
+        visible={teamPickerOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setTeamPickerOpen(false)}
+      >
+        <Pressable
+          style={styles.teamPickerBackdrop}
+          onPress={() => setTeamPickerOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        />
+        <View style={styles.teamPickerSheet}>
+          <View style={styles.teamPickerGrabber} />
+          <Text style={type.heading} accessibilityRole="header">
+            Pick a manager
+          </Text>
+          <Text style={type.bodySm}>
+            We'll surface only mutual-gain deals with their roster.
+          </Text>
+          {leagueUsersQuery.isLoading ? (
+            <ActivityIndicator color={ice.base} style={{ marginTop: space.lg }} />
+          ) : (
+            <ScrollView style={styles.teamPickerScroll}>
+              {teamPickerOpponents.map((o) => {
+                const name = o.display_name || o.username || o.user_id;
+                const active = o.user_id === scopedOpponent;
+                return (
+                  <Pressable
+                    key={o.user_id}
+                    testID={`trades.team-picker.${o.user_id}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={name}
+                    onPress={() => pickScopedTeam(o.user_id, name)}
+                    style={({ pressed }) => [
+                      styles.teamPickerRow,
+                      pressed && { backgroundColor: ink.ink3 },
+                    ]}
+                  >
+                    <Text style={type.title}>{name}</Text>
+                    {active ? (
+                      <Icon name="check" size={16} color={ice.base} />
+                    ) : (
+                      <Icon name="chevron-right" size={16} color={chalk.dim} />
+                    )}
+                  </Pressable>
+                );
+              })}
+              {teamPickerOpponents.length === 0 ? (
+                <Text style={styles.fairnessHint}>No league-mates found.</Text>
+              ) : null}
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
+
       {/* Player-swap sheet (feedback #86) — replace one player on the top
           card with someone from the same roster. Suggested section = roster
           players within a tight value band of the outgoing player (#109);
@@ -3105,6 +3376,41 @@ function summarizePlayers(players: Player[]): string {
   return `${first.join(' + ')} +${players.length - 2}`;
 }
 
+// ── PackageToggle — #174 "Trade as one package" ─────────────────────
+// Chalkline binary-slider construction (same track/thumb as the fairness
+// toggle). Rendered only with 2+ pinned give players; ON sends
+// pinned_give_mode='all' so every idea carries the whole package.
+function PackageToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <Pressable
+      testID="trades.package-toggle"
+      accessibilityRole="switch"
+      accessibilityState={{ checked: on }}
+      accessibilityLabel="Trade as one package"
+      onPress={onToggle}
+      style={styles.packageToggleRow}
+    >
+      <View style={styles.fairnessSliderTap} pointerEvents="none">
+        <View style={styles.fairnessTrack} />
+        <View
+          style={[
+            styles.fairnessThumb,
+            on ? styles.fairnessThumbOn : styles.fairnessThumbOff,
+          ]}
+        />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={type.body}>Trade as one package</Text>
+        <Text style={styles.fairnessHint}>
+          {on
+            ? 'Every idea sends ALL your trade-away players together.'
+            : 'Ideas send at least one of your trade-away players.'}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
 // ── SwipableTopCard — Tinder-style gesture on the top card only ─────
 interface SwipableProps {
   card: TradeCard;
@@ -3123,6 +3429,10 @@ interface SwipableProps {
   repricing?: boolean;
   // FB-47 — pass-through to TradeCard's partner-fit line copy.
   fitTargetPositions?: string[];
+  // #186 — pass-through: pin one side + regenerate ("keep this side").
+  onKeepSide?: (side: 'give' | 'receive') => void;
+  // #190 — pass-through: open the manual calculator prefilled.
+  onEditInCalculator?: () => void;
   // Onboarding guided layer (v2.1): swipe-gesture hint. While `nudge` is
   // true the card runs a subtle translateX nudge (twice, then rests);
   // the first touch anywhere on the card calls `onFirstTouch` — the
@@ -3143,6 +3453,8 @@ function SwipableTopCard({
   onPlayerMenu,
   repricing,
   fitTargetPositions,
+  onKeepSide,
+  onEditInCalculator,
   nudge,
   onFirstTouch,
 }: SwipableProps) {
@@ -3229,6 +3541,8 @@ function SwipableTopCard({
           onPlayerMenu={onPlayerMenu}
           repricing={repricing}
           fitTargetPositions={fitTargetPositions}
+          onKeepSide={onKeepSide}
+          onEditInCalculator={onEditInCalculator}
         />
       </Animated.View>
     </GestureDetector>
@@ -3397,6 +3711,93 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 0.5,
     color: chalk.dim,
+  },
+  // #156 finish item 1 — two-column FOR/AWAY board (Specific Player mode).
+  // Mirrors mockups/trade-finding-hub variant B: ink-1 columns with a 2px
+  // semantic top rule (pos-green = incoming, flare = outgoing — both data
+  // encodings, not actions per ADR-005), mini chips, dashed add button.
+  playerBoard: {
+    flexDirection: 'row',
+    gap: space.sm,
+  },
+  boardCol: {
+    flex: 1,
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.md,
+    padding: space.md,
+    gap: space.sm,
+    minHeight: 120,
+  },
+  boardColFor: { borderTopWidth: 2, borderTopColor: semantic.pos },
+  boardColAway: { borderTopWidth: 2, borderTopColor: flare.base },
+  boardColH: {
+    ...type.label,
+  },
+  boardColHFor: { color: semantic.pos },
+  boardColHAway: { color: flare.base },
+  boardMini: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingHorizontal: space.sm,
+    borderRadius: radii.sm,
+    backgroundColor: ink.ink2,
+  },
+  boardMiniText: { ...type.bodySm, color: chalk.base, flex: 1 },
+  boardPosDot: { width: 7, height: 7, borderRadius: radii.xs },
+  boardAddBtn: {
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+  },
+  boardAddText: { ...type.bodySm, color: chalk.dim },
+  // #174 — "Trade as one package" toggle row.
+  packageToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingVertical: space.xs,
+  },
+  // #156 finish item 4 — in-screen team picker sheet (mirrors the hub's).
+  teamPickerBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: scrim },
+  teamPickerSheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    maxHeight: '80%',
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderTopLeftRadius: radii.md,
+    borderTopRightRadius: radii.md,
+    padding: space.lg,
+    gap: space.sm,
+    ...shadowSheet,
+  },
+  teamPickerGrabber: {
+    alignSelf: 'center',
+    width: 32,
+    height: 4,
+    backgroundColor: ink.lineStrong,
+    marginBottom: space.xs,
+  },
+  teamPickerScroll: { maxHeight: 360, marginTop: space.sm },
+  teamPickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: space.md,
+    paddingHorizontal: space.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
   },
   // Phase-2 inferred-outlook confirm banner — card construction (ink-1 +
   // hairline + md radius), sits between the controls card and the deck.

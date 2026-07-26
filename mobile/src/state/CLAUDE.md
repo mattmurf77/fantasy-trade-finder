@@ -9,6 +9,7 @@ Context-based state. Each file exports a hook + provider.
 - `usePushPriming.ts` — push-primer coordination; with `ux.prompt_arbiter` on, "Maybe later" declines persist and re-prime only after 3+ sessions or a want-it moment (`wantItMoment()`, fired by MatchesScreen's first mutual match)
 - `onboardingBus.ts` — session-scoped module mailbox: QuickSetTiers (onboarding mode) posts a pending deck-regen position; TradesScreen consumes it on focus (item 7 cross-stack handoff)
 - `useNotifications.ts` — in-app notification inbox state
+- `useFinderTargets.ts` — #156/#174 finder pin lists (zustand, like `useTradeQueue`): `pinnedGive`/`pinnedReceive` + the #174 `packageMode` toggle. Session-only, never persisted; self-clears on league switch via a `useSession` subscription (works with the deck screen unmounted). TradesScreen owns add/remove; the hub reads live counts
 
 No Redux/Zustand — keep it Context until pain demands more.
 - `useGuide.ts` — The Analyst guided-tour engine (flag `onboarding.guided_avatar`): one-bubble-at-a-time step store, `guidedAvatarActive()` gate (supersedes passive guided-layer surfaces), guide_* analytics

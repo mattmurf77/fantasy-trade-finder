@@ -5,7 +5,7 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | Component | Use |
 |---|---|
 | `PlayerCard` | Player tile with name, position, value |
-| `TradeCard` | Give/receive trade summary card |
+| `TradeCard` | Give/receive trade summary card. Swipe-deck extras (2026-07-25): optional `onKeepSide` (#186 per-side "Keep · more offers" — pins that side via the FB-47 machinery + regenerates) and `onEditInCalculator` (#190 → calculator prefilled); both render only in the swipe variant and only when the screen passes them |
 | `TierBadge`, `TierBin` | Tier label + drop-zone bin |
 | `PositionChip` | QB/RB/WR/TE chip with color |
 | `StrengthBar` | Horizontal value/strength meter |
@@ -13,7 +13,7 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `TradeSide` | Calculator: one side of a hand-built trade (players + add button) |
 | `VerdictPanel` | Calculator: dual-board fairness verdict + gives/gets bars (demo mode) |
 | `ConsensusVerdictCard` | Calculator: server-authoritative consensus verdict from /api/trade/evaluate (live mode) |
-| `InLeagueCalculator` | Calculator "In league" mode: real opponent + rosters, two-board mutual-gain verdict (evaluate Mode B), carries Send in Sleeper |
+| `InLeagueCalculator` | Calculator "In league" mode: real opponent + rosters, two-board mutual-gain verdict (evaluate Mode B), carries Send in Sleeper. #190: optional `initialOpponentId`/`initialGiveIds`/`initialReceiveIds` props (deck "Edit in calculator" prefill via TradeCalculatorScreen's `prefill` route param; initial values only) |
 | `SuggestionCard` | Calculator: tappable fair-package suggestion |
 | `PlayerPickerModal` | Calculator: search + position-filter player picker |
 | `OutlookSheet` | Bottom sheet for team outlook selection |
@@ -127,6 +127,13 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 **Trade-Finding Hub tranche (2026-07-20, #156, flag `trades.finder_hub`):**
 - TradeFinderHubScreen: `finder-hub.dna.edit` (opens OutlookSheet) · `finder-hub.card.<guided|team|player|calc>` (mode launcher cards) · `finder-hub.team-picker.<user_id>` (manager rows in the Specific Team sheet)
 - TradeFinderModeBar (rendered in `TradesScreen` when opened as `TradeDeck` with a `mode` param): `trades.finder-mode.<guided|team|player|calc>` (quick-switch chips) · `trades.finder-mode.hub` (back to hub). The Trades/Portfolio/Calculator subnav is hidden in these launches
+
+**Hub finish tranche (2026-07-25, #156 finish + #173/#174/#186/#190 — flag `trades.finder_hub` flipped ON):**
+- TradesScreen player-mode two-column board: `trades.board.for.<player_id>` / `trades.board.away.<player_id>` (pinned mini chips, tap removes) · `trades.board.add-for` / `trades.board.add-away` (dashed add buttons → FB-47 picker pre-directed)
+- `trades.package-toggle` (#174 "Trade as one package" switch — renders with 2+ pinned give players, both board layouts; ON ⇒ `pinned_give_mode:'all'`)
+- `trades.team-picker.<user_id>` (#156 item 4 — in-screen manager sheet from the mode bar's Team chip; lands via setParams, in-place scope change auto-regenerates)
+- TradeCard (swipe variant only): `trade-card.keep-give` / `trade-card.keep-receive` (#186 per-side "Keep · more offers" — pins that side + regenerates) · `trade-card.edit-in-calc` (#190 → `TradeCalculator` with a `prefill` route param)
+- TradeFinderHubScreen: `finder-hub.dna.untouchables` (#173 — opens the untouchables management sheet) · `finder-hub.untouchables.row.<player_id>` · `finder-hub.untouchables.remove.<player_id>`; the hub also mounts its own `feedback.fab`
 
 **League outlook-odds tranche (2026-07-23, #169, flag `outlook.odds` — DARK):**
 - LeagueSummaryScreen: `league-summary.odds.section` (the gated playoff-picture container — present only when `outlook.odds` is on AND GET /api/league/outlook returns teams) · `league-summary.odds.beta-ribbon` (the load-bearing "Projected · preseason · beta" honesty label) · `league-summary.odds.source` (strength-source caption, e.g. "Preseason roster-value projection · 10,000 sims · top 6 make the playoffs") · `league-summary.odds.row.<roster_id>` (one team's projected playoff% / title% row, payload order). Flag off ⇒ none of these render and the endpoint is never called (it 404s while the modeling backend is dark). Basis toggle + dynasty-chart IDs unchanged.

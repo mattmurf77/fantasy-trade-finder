@@ -253,3 +253,135 @@ def test_partner_fit_stamped_and_flag_off_none():
     cards_off = _gen(svc2, league, user_roster, user_elo, seed_elo, acquire=["WR"])
     assert cards_off
     assert all(c.partner_fit is None for c in cards_off)
+
+
+# ---------------------------------------------------------------------------
+# 5. #174 package constraint — pinned_give_mode="all"
+# ---------------------------------------------------------------------------
+
+def _package_fixture():
+    """Opponent covets uA (uB is a make-weight they value below their own
+    bench); the user covets oA. Under the default 'any' mode the organic
+    deck prefers uA-without-uB shapes; mode 'all' must force every card's
+    give side to carry the full {uA, uB} package."""
+    pos = {**_bodies("u"), **_bodies("o"), "uA": "WR", "uB": "WR", "oA": "WR"}
+    players = {pid: _Player(id=pid, name=pid, position=p) for pid, p in pos.items()}
+    user_roster = list(_bodies("u")) + ["uA", "uB"]
+    opp_roster = list(_bodies("o")) + ["oA"]
+
+    user_elo = {pid: 1500.0 for pid in user_roster}
+    user_elo.update({pid: 1490.0 for pid in _bodies("o")})
+    user_elo["oA"] = 1600.0
+    opp_elo = {pid: 1500.0 for pid in opp_roster}
+    opp_elo.update({pid: 1490.0 for pid in _bodies("u")})
+    opp_elo["uA"] = 1560.0
+    opp_elo["uB"] = 1470.0
+    seed_elo = {pid: 1500.0 for pid in pos}
+    seed_elo["uA"] = seed_elo["uB"] = 1520.0
+    seed_elo["oA"] = 1560.0
+    return players, user_roster, opp_roster, user_elo, opp_elo, seed_elo
+
+
+def test_pinned_give_mode_all_v2_pair_generator():
+    _set_flags("trade.finder_targeting")
+    players, user_roster, opp_roster, user_elo, opp_elo, seed_elo = _package_fixture()
+    opponent = _member("opp", opp_roster, opp_elo)
+    svc = TradeService(players=players)
+
+    def _run(mode):
+        return svc._generate_for_pair_v2(
+            user_id="user",
+            shrunk_user_elo=user_elo,
+            user_value={pid: elo_to_value(e) for pid, e in user_elo.items()},
+            user_roster=user_roster,
+            opponent=opponent,
+            league_id="L1",
+            seed_value=lambda p: elo_to_value(seed_elo.get(p, 1500.0)),
+            max_cards=5,
+            fairness_threshold=0.75,
+            acquire_positions=[],
+            trade_away_positions=[],
+            pinned_give_players=["uA", "uB"],
+            pinned_give_mode=mode,
+            confidence=None,
+            scoring_format="1qb_ppr",
+        )
+
+    any_cards = _run("any")
+    assert any_cards, "'any' mode produced no cards"
+    # Historical semantics: >=1 pinned per card, and at least one card that
+    # does NOT carry the full package (proving 'all' is genuinely stricter).
+    assert all(set(c.give_player_ids) & {"uA", "uB"} for c in any_cards)
+    assert any(not {"uA", "uB"} <= set(c.give_player_ids) for c in any_cards)
+
+    all_cards = _run("all")
+    assert all_cards, "'all' mode produced no cards"
+    for card in all_cards:
+        assert {"uA", "uB"} <= set(card.give_player_ids)
+
+
+def test_pinned_give_mode_all_v3_optimizer():
+    _set_flags("trade.finder_targeting", "trade_engine.v3")
+    players, user_roster, opp_roster, user_elo, opp_elo, seed_elo = _package_fixture()
+    opponent = _member("opp", opp_roster, opp_elo)
+
+    def _run(mode):
+        return generate_pair_trades_v3(
+            user_id="user",
+            shrunk_user_elo=user_elo,
+            user_value={pid: elo_to_value(e) for pid, e in user_elo.items()},
+            user_roster=user_roster,
+            opponent=opponent,
+            league_id="L1",
+            seed_elo=seed_elo,
+            confidence=None,
+            max_cards=5,
+            fairness_threshold=0.75,
+            scoring_format="1qb_ppr",
+            pinned_give_players=["uA", "uB"],
+            pinned_give_mode=mode,
+            players=players,
+        )
+
+    any_cards = _run("any")
+    assert any_cards, "v3 'any' mode produced no cards"
+    assert any(not {"uA", "uB"} <= set(c.give_player_ids) for c in any_cards)
+
+    all_cards = _run("all")
+    assert all_cards, "v3 'all' mode produced no cards"
+    for card in all_cards:
+        assert {"uA", "uB"} <= set(card.give_player_ids)
+
+
+def test_pinned_give_mode_all_consensus_generator():
+    """Unranked opponent (consensus fallback): mode 'all' drops the 1-for-1
+    shapes and every surviving card carries the full pinned package."""
+    _set_flags("trade.finder_targeting")
+    pos = {**_bodies("u"), **_bodies("o"), "uA": "WR", "uB": "WR", "oA": "WR"}
+    players = {pid: _Player(id=pid, name=pid, position=p) for pid, p in pos.items()}
+    user_roster = list(_bodies("u")) + ["uA", "uB"]
+    opp_roster = list(_bodies("o")) + ["oA"]
+    seed_elo = {pid: 1500.0 for pid in pos}
+    seed_elo["uA"] = seed_elo["uB"] = 1441.0   # 2x mid piece vs one stud:
+    seed_elo["oA"] = 1560.0                    # fairness ~0.55, user ahead
+    svc = TradeService(players=players)
+
+    cards = svc._generate_consensus_for_pair(
+        user_id="user",
+        opponent=_member("opp", opp_roster, {}, has_rankings=False),
+        league_id="L1",
+        seed_value=lambda p: elo_to_value(seed_elo.get(p, 1500.0)),
+        shrunk_user_elo={pid: 1500.0 for pid in user_roster},
+        user_roster=user_roster,
+        max_cards=5,
+        fairness_threshold=0.50,
+        user_profile={"position_needs": [], "position_surplus": []},
+        opp_profile={"position_needs": [], "position_surplus": []},
+        acquire_positions=[],
+        trade_away_positions=[],
+        pinned_give_players=["uA", "uB"],
+        pinned_give_mode="all",
+    )
+    assert cards, "consensus 'all' mode produced no cards"
+    for card in cards:
+        assert {"uA", "uB"} <= set(card.give_player_ids)

@@ -24,19 +24,24 @@ import {
   scrim,
 } from '../theme/chalkline';
 import { posColor } from '../theme/colors';
-import { Icon } from '../components/chalkline';
+import { Icon, Button } from '../components/chalkline';
 import LeaguePill from '../components/LeaguePill';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import OutlookSheet from '../components/OutlookSheet';
+import FeedbackFAB from '../components/FeedbackFAB';
 import { useSession } from '../state/useSession';
+import { useFinderTargets } from '../state/useFinderTargets';
+import { useFlag } from '../state/useFeatureFlags';
 import { haptics } from '../utils/haptics';
 import {
   getLeaguePreferences,
   saveLeaguePreferences,
   getAssetPrefs,
+  setAssetPref,
   type Outlook,
 } from '../api/league';
 import { getLeagueUsers } from '../api/sleeper';
+import { getTradeValues } from '../api/calc';
 
 // FB #156 — Trade-Finding Hub (Variant B, "Launcher Hub"). The Trades tab
 // home (behind flag `trades.finder_hub`): a Trade DNA summary panel + four
@@ -119,6 +124,17 @@ export default function TradeFinderHubScreen({ navigation }: any) {
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [outlookOpen, setOutlookOpen] = useState(false);
   const [teamPickerOpen, setTeamPickerOpen] = useState(false);
+  const [untouchablesOpen, setUntouchablesOpen] = useState(false);
+
+  // #156 finish item 3 — live pin counts for the Specific Player card.
+  // Pins live in the shared useFinderTargets store (session-only, cleared
+  // on league switch), so counts survive hub ⇄ deck navigation.
+  const pinnedForCount = useFinderTargets((s) => s.pinnedReceive.length);
+  const pinnedAwayCount = useFinderTargets((s) => s.pinnedGive.length);
+
+  // #173 — untouchables management (flag trade.preference_lists, same
+  // gate the deck uses for its lock toggles).
+  const untouchablesEnabled = useFlag('trade.preference_lists');
 
   const prefsQuery = useQuery({
     queryKey: ['league-prefs', leagueId],
@@ -135,7 +151,40 @@ export default function TradeFinderHubScreen({ navigation }: any) {
     enabled: !!leagueId,
     staleTime: 60_000,
   });
-  const untouchableCount = assetPrefsQuery.data?.untouchables?.length ?? 0;
+  const untouchableIds = assetPrefsQuery.data?.untouchables ?? [];
+  const untouchableCount = untouchableIds.length;
+
+  // #173 — resolve untouchable ids to names for the management sheet.
+  // The universal value pool is the same id→name source the deck's swap
+  // sheet uses; format doesn't change names, so 1QB is fine here. Only
+  // fetched while the sheet is open (shares the ['calc-values', …] cache).
+  const untouchableNamesQuery = useQuery({
+    queryKey: ['calc-values', '1qb_ppr'],
+    queryFn: ({ signal }) => getTradeValues('1qb_ppr', signal),
+    enabled: untouchablesOpen,
+    staleTime: 5 * 60_000,
+  });
+  const untouchableRows = useMemo(() => {
+    const byId = new Map(
+      (untouchableNamesQuery.data?.players ?? []).map((p) => [p.id, p]),
+    );
+    return untouchableIds.map((id) => {
+      const p = byId.get(id);
+      return {
+        id,
+        name: p?.name ?? `Player ${id}`,
+        position: p?.position ?? null,
+      };
+    });
+  }, [untouchableIds, untouchableNamesQuery.data]);
+
+  const removeUntouchable = useMutation({
+    mutationFn: (playerId: string) =>
+      setAssetPref(leagueId!, playerId, 'none'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['asset-prefs', leagueId] });
+    },
+  });
 
   // League managers for the Specific Team picker — lazily loaded when the
   // picker opens. Shares the ['league-users', leagueId] cache with TradesScreen.
@@ -253,10 +302,41 @@ export default function TradeFinderHubScreen({ navigation }: any) {
               <Text style={styles.dnaK}>Outlook </Text>
               {outlookLabel}
             </Text>
-            <Text style={styles.dnaKV}>
-              <Text style={styles.dnaK}>Untouchables </Text>
-              {untouchableCount}
-            </Text>
+            {/* #173 — the untouchables count opens the management sheet
+                (list + remove + how-to-add), so the feature is findable
+                from the hub, not only via deck-card long-press. */}
+            {untouchablesEnabled ? (
+              <Pressable
+                testID="finder-hub.dna.untouchables"
+                accessibilityRole="button"
+                accessibilityLabel={`Untouchables, ${untouchableCount}. Manage`}
+                onPress={() => {
+                  haptics.selection();
+                  setUntouchablesOpen(true);
+                }}
+                hitSlop={8}
+              >
+                {({ pressed }) => (
+                  <Text style={styles.dnaKV}>
+                    <Text style={styles.dnaK}>Untouchables </Text>
+                    {untouchableCount}
+                    <Text
+                      style={[
+                        styles.dnaEdit,
+                        pressed && { color: chalk.base },
+                      ]}
+                    >
+                      {'  Manage'}
+                    </Text>
+                  </Text>
+                )}
+              </Pressable>
+            ) : (
+              <Text style={styles.dnaKV}>
+                <Text style={styles.dnaK}>Untouchables </Text>
+                {untouchableCount}
+              </Text>
+            )}
           </View>
 
           <Text style={styles.dnaGroupLabel}>Chasing</Text>
@@ -288,36 +368,53 @@ export default function TradeFinderHubScreen({ navigation }: any) {
 
         <Text style={styles.sectionLabel}>How do you want to find trades?</Text>
 
-        {MODE_CARDS.map((m) => (
-          <Pressable
-            key={m.key}
-            testID={`finder-hub.card.${m.key}`}
-            accessibilityRole="button"
-            accessibilityLabel={
-              m.recommended ? `${m.title}, recommended` : m.title
-            }
-            accessibilityHint={m.body}
-            onPress={() => openMode(m.key)}
-            style={({ pressed }) => [
-              styles.card,
-              pressed && { backgroundColor: ink.ink2 },
-            ]}
-          >
-            <View style={styles.cardIcon}>
-              <Icon name={m.icon} size={22} color={ice.base} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <View style={styles.cardTitleRow}>
-                <Text style={styles.cardTitle}>{m.title}</Text>
-                {m.recommended ? (
-                  <Text style={styles.recTag}>recommended</Text>
-                ) : null}
+        {MODE_CARDS.map((m) => {
+          // #156 finish item 3 — the Specific Player card carries the LIVE
+          // pin counts (mockup's "1 for · 1 away" status line) instead of
+          // static copy once anything is pinned.
+          const playerPins = pinnedForCount + pinnedAwayCount;
+          const body =
+            m.key === 'player' && playerPins > 0
+              ? `${pinnedForCount} to trade for · ${pinnedAwayCount} to trade away`
+              : m.body;
+          return (
+            <Pressable
+              key={m.key}
+              testID={`finder-hub.card.${m.key}`}
+              accessibilityRole="button"
+              accessibilityLabel={
+                m.recommended ? `${m.title}, recommended` : m.title
+              }
+              accessibilityHint={body}
+              onPress={() => openMode(m.key)}
+              style={({ pressed }) => [
+                styles.card,
+                pressed && { backgroundColor: ink.ink2 },
+              ]}
+            >
+              <View style={styles.cardIcon}>
+                <Icon name={m.icon} size={22} color={ice.base} />
               </View>
-              <Text style={styles.cardBody}>{m.body}</Text>
-            </View>
-            <Icon name="chevron-right" size={18} color={chalk.faint} />
-          </Pressable>
-        ))}
+              <View style={{ flex: 1 }}>
+                <View style={styles.cardTitleRow}>
+                  <Text style={styles.cardTitle}>{m.title}</Text>
+                  {m.recommended ? (
+                    <Text style={styles.recTag}>recommended</Text>
+                  ) : null}
+                </View>
+                <Text
+                  style={[
+                    styles.cardBody,
+                    m.key === 'player' && playerPins > 0 && styles.cardBodyLive,
+                  ]}
+                >
+                  {body}
+                </Text>
+              </View>
+              <Icon name="chevron-right" size={18} color={chalk.faint} />
+            </Pressable>
+          );
+        })}
       </ScrollView>
 
       {/* Specific Team — manager picker sheet. */}
@@ -371,6 +468,73 @@ export default function TradeFinderHubScreen({ navigation }: any) {
           )}
         </View>
       </Modal>
+
+      {/* #173 — untouchables management sheet. The list + remove live
+          here; ADDING stays where it always was (hold a give-side player
+          on any trade card, or its visible lock toggle) — the how-to line
+          points there instead of duplicating a player picker. */}
+      <Modal
+        visible={untouchablesOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setUntouchablesOpen(false)}
+      >
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => setUntouchablesOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        />
+        <View style={styles.sheet}>
+          <View style={styles.grabber} />
+          <Text style={type.heading} accessibilityRole="header">
+            Untouchables
+          </Text>
+          <Text style={type.bodySm}>
+            Never offered from your roster in trade ideas. To add one, hold
+            a player you'd send on any trade card and pick "Mark
+            untouchable".
+          </Text>
+          {untouchablesOpen && untouchableNamesQuery.isLoading ? (
+            <ActivityIndicator color={ice.base} style={{ marginTop: space.lg }} />
+          ) : (
+            <ScrollView style={styles.pickerScroll}>
+              {untouchableRows.map((row) => (
+                <View
+                  key={row.id}
+                  testID={`finder-hub.untouchables.row.${row.id}`}
+                  style={styles.pickerRow}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pickerName}>{row.name}</Text>
+                    {row.position ? (
+                      <Text style={styles.dnaEmpty}>{row.position}</Text>
+                    ) : null}
+                  </View>
+                  <Button
+                    variant="ghost"
+                    compact
+                    label="Remove"
+                    testID={`finder-hub.untouchables.remove.${row.id}`}
+                    disabled={removeUntouchable.isPending}
+                    onPress={() => removeUntouchable.mutate(row.id)}
+                  />
+                </View>
+              ))}
+              {untouchableRows.length === 0 ? (
+                <Text style={styles.dnaEmpty}>
+                  None yet — hold a player you'd send on any trade card.
+                </Text>
+              ) : null}
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
+
+      {/* #188-adjacent — in-app feedback capture on the hub (every authed
+          screen carries the FAB during TestFlight; this screen is new
+          surface, so it mounts its own). */}
+      <FeedbackFAB activeScreen="TradesHome" />
     </SafeAreaView>
   );
 }
@@ -445,6 +609,8 @@ const styles = StyleSheet.create({
   cardTitle: { ...type.title },
   recTag: { ...type.label, color: flare.base },
   cardBody: { ...type.bodySm, marginTop: 1 },
+  // #156 finish item 3 — live pin-count line (mono, chalk) on the player card.
+  cardBodyLive: { color: chalk.base, fontFamily: fonts.data },
 
   // Team picker sheet
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: scrim },
