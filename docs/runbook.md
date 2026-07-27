@@ -162,7 +162,7 @@ External scheduler (Render cron) must hit:
 
 If these stop firing, queued pushes pile up in `notification_queue` and digests/re-engagement go silent.
 
-**`value-snapshot` monitoring (#57):** the daily job upserts ~1,369 rows (≈684 `1qb_ppr` + 685 `sf_tep`); the response is `{"ok": true, "snapshot_date": "...", "1qb_ppr": N, "sf_tep": N}`. A day with no row written is value-history permanently lost (the universal pool is rebuilt from the live DP CSV each boot, so there is no backfill). If the job misses a day, that gap stays a gap — accept it; do **not** fabricate history. Verify it's firing by checking `player_value_history` has rows for today's UTC date. Idempotent, so re-running same-day is safe.
+**`value-snapshot` monitoring (#57):** the daily job upserts ~1,369 rows (≈684 `1qb_ppr` + 685 `sf_tep`); the response is `{"ok": true, "snapshot_date": "...", "1qb_ppr": N, "sf_tep": N}`. A day with no row written is value-history permanently lost (the universal pool is rebuilt from the live DP CSV each boot, so there is no backfill). If the job misses a day, that gap stays a gap — accept it; do **not** fabricate history. Verify it's firing by checking `player_value_history` has rows for today's UTC date. Idempotent, so re-running same-day is safe. **2026-07-26 (market-data readiness):** the endpoint was never provisioned in `render.yaml` — it now is (`value-snapshot-daily`, 06:00 UTC), and `hourly-tick` carries an idempotent fallback guard that writes today's snapshot when missing (response gains a `value_snapshot` key when the fallback ran). A full missed day now requires BOTH crons to be down for 24h; if you see `value_snapshot` in hourly-tick responses regularly, the dedicated cron isn't firing — check the Render cron service.
 
 ---
 

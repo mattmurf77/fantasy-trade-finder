@@ -311,6 +311,31 @@ trade_block_table = Table("trade_block", metadata,
     UniqueConstraint("league_id", "player_id", name="uq_trade_block"),
 )
 
+# Market-data readiness (PRD #43 Phase-1 data foundation, backlog #26) —
+# executed Sleeper league trades, captured RAW during session_init's
+# background daemon (backend/sleeper_trades_service.py, flag
+# `market.trade_capture`). Capture only: no scoring, no aggregation, no UI.
+# `raw` retains the full Sleeper transaction payload so a future
+# observed-market model can re-derive anything the normalized columns
+# don't carry. Idempotent on transaction_id (append-only; a trade never
+# mutates after completion).
+sleeper_trades_table = Table("sleeper_trades", metadata,
+    Column("id",             Integer, primary_key=True, autoincrement=True),
+    Column("transaction_id", String,  nullable=False),  # Sleeper transaction id
+    Column("league_id",      String,  nullable=False),
+    Column("week",           Integer),                  # Sleeper `leg`
+    Column("traded_at",      String),                   # ISO UTC from status_updated (ms)
+    Column("synced_at",      String,  nullable=False),  # ISO UTC capture time
+    Column("roster_ids",     Text),                     # JSON: participating roster_ids
+    Column("adds",           Text),                     # JSON: {player_id: receiving roster_id}
+    Column("drops",          Text),                     # JSON: {player_id: sending roster_id}
+    Column("draft_picks",    Text),                     # JSON: traded pick objects (season/round/owners)
+    Column("waiver_budget",  Text),                     # JSON: FAAB transfers in the trade
+    Column("raw",            Text,    nullable=False),  # JSON: full Sleeper transaction payload
+    UniqueConstraint("transaction_id", name="uq_sleeper_trade_txid"),
+)
+Index("ix_sleeper_trades_league", sleeper_trades_table.c.league_id)
+
 # Latest ELO snapshot for each player as ranked by each user in each league.
 # Replaced atomically (delete + insert) every time a user submits their rankings.
 # This is what lets leaguemates see each other's actual valuations.
@@ -4667,6 +4692,45 @@ def load_trade_block(league_id: str) -> list[dict]:
     return [dict(r._mapping) for r in rows]
 
 
+def record_sleeper_trades(rows: list[dict]) -> int:
+    """Market-data readiness — append captured Sleeper trade transactions.
+
+    Idempotent on transaction_id: rows whose transaction_id is already
+    stored are skipped (a completed trade never mutates, so skip — not
+    upsert — is correct and keeps the first-captured raw payload).
+
+    Returns the number of NEW rows inserted.
+    """
+    if not rows:
+        return 0
+    txids = [r["transaction_id"] for r in rows]
+    with engine.begin() as conn:
+        existing = {
+            r.transaction_id
+            for r in conn.execute(
+                select(sleeper_trades_table.c.transaction_id)
+                .where(sleeper_trades_table.c.transaction_id.in_(txids))
+            ).fetchall()
+        }
+        new_rows = [r for r in rows if r["transaction_id"] not in existing]
+        if new_rows:
+            conn.execute(sleeper_trades_table.insert(), new_rows)
+    return len(new_rows)
+
+
+def load_sleeper_trades(league_id: str, limit: int = 200) -> list[dict]:
+    """Return a league's captured trades, newest first (future read seam
+    for League Trade History / observed-market derivation — PRD #43)."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(sleeper_trades_table)
+            .where(sleeper_trades_table.c.league_id == league_id)
+            .order_by(sleeper_trades_table.c.traded_at.desc())
+            .limit(limit)
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
 def set_league_scoring(league_id: str, scoring_format: str) -> None:
     """Save the league's default scoring format (shown on the league summary)."""
     if scoring_format not in SCORING_FORMATS:
@@ -7387,6 +7451,19 @@ def load_value_extremes(
         "low":            {"value": lo.consensus_value, "date": lo.snapshot_date},
         "tracking_since": rows[0].snapshot_date,
     }
+
+
+def value_snapshot_formats_for(snapshot_date: str) -> set[str]:
+    """Scoring formats that already have consensus snapshot rows for the
+    given UTC date. Used by the hourly-tick fallback guard to decide
+    whether today's daily value snapshot still needs writing."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(player_value_history_table.c.scoring_format)
+            .where(player_value_history_table.c.snapshot_date == snapshot_date)
+            .distinct()
+        ).fetchall()
+    return {r.scoring_format for r in rows}
 
 
 # In-process cache for load_community_elo_for_league.

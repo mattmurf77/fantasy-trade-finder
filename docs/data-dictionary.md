@@ -150,6 +150,29 @@ Constraint: `uq_trade_block` on `(league_id, player_id)`. Written via `replace_t
 
 ---
 
+## `sleeper_trades`
+
+Market-data readiness (operator directive 2026-07-26; PRD #43 Phase-1 data foundation / backlog #26) — **executed Sleeper league trades, captured raw**. Source: the documented public v1 endpoint `GET /league/<id>/transactions/<week>`, swept over legs 1–18 by `backend/sleeper_trades_service.sync_league_trades` during `session_init`'s background daemon (flag `market.trade_capture`, Sleeper numeric league ids only, best-effort). Only `type="trade"` + `status="complete"` rows are stored. Capture ONLY — no scoring, no aggregation, no UI; this table exists so a future observed-market model (PRD #43 Phases 2–3) and league-specific market signals have raw material accumulating from today.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `transaction_id` | str | Sleeper transaction id — idempotency key |
+| `league_id` | str | indexed (`ix_sleeper_trades_league`) |
+| `week` | int, nullable | Sleeper `leg` |
+| `traded_at` | str, nullable | ISO UTC from `status_updated` (epoch ms) |
+| `synced_at` | str | ISO UTC capture time |
+| `roster_ids` | text | JSON: participating roster_ids |
+| `adds` | text | JSON: `{player_id: receiving roster_id}` |
+| `drops` | text | JSON: `{player_id: sending roster_id}` |
+| `draft_picks` | text | JSON: traded pick objects (season/round/owners) |
+| `waiver_budget` | text | JSON: FAAB transfers inside the trade |
+| `raw` | text | JSON: **full Sleeper transaction payload** — source of truth; normalized columns are a convenience projection |
+
+Constraint: `uq_sleeper_trade_txid` on `transaction_id`. Append-only: `record_sleeper_trades` skips already-stored ids (a completed trade never mutates; the first-captured raw payload is kept), so re-sweeps are free. Read via `load_sleeper_trades(league_id)` — the future read seam for League Trade History / observed-market derivation. Retention: keep forever (trades are the dataset).
+
+---
+
 ## `member_rankings`
 
 Latest Elo per (user, league, player). Replaced atomically (delete + insert) on submit.
@@ -450,7 +473,7 @@ Constraint: `uq_asset_pref` on `(user_id, league_id, player_id)` — a player ho
 
 ## `player_value_history`
 
-Daily **consensus** value snapshots (backlog #57 / player profiles #17). `elo_history` logs each user's *personal* Elo; this table logs the market side — one row per universal-pool player per scoring format per day, written by `POST /api/cron/value-snapshot`. The DynastyProcess-seeded universal pool is rebuilt from the live CSV on every boot, so yesterday's consensus numbers are otherwise unrecoverable; this is pure retention so value-history charts, the movers digest (#33), and Wrapped (#46) have history to draw on.
+Daily **consensus** value snapshots (backlog #57 / player profiles #17). `elo_history` logs each user's *personal* Elo; this table logs the market side — one row per universal-pool player per scoring format per day, written by `POST /api/cron/value-snapshot` **plus a fallback guard on `POST /api/cron/hourly-tick`** (market-data readiness 2026-07-26: if today's UTC date is missing rows for any scoring format, the hourly tick writes the snapshot via the shared `server._write_daily_value_snapshots`; `database.value_snapshot_formats_for` is the cheap presence check). Both writers share the `uq_value_snapshot` upsert, so they can never duplicate. The DynastyProcess-seeded universal pool is rebuilt from the live CSV on every boot, so yesterday's consensus numbers are otherwise unrecoverable; this is pure retention so value-history charts, the movers digest (#33), and Wrapped (#46) have history to draw on.
 
 | Column | Type | Notes |
 |---|---|---|

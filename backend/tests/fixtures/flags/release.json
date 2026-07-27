@@ -46,6 +46,7 @@
   "sleeper.trade_block": true,
   "trade.block_boost": true,
   "picks.owned_sync": true,
+  "market.trade_capture": true,
   "trade.picks_in_pool": true,
   "trade.outlook_direction": true,
   "outlook.odds": false,
