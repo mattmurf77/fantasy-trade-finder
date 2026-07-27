@@ -808,7 +808,9 @@ function groupRows(
     if (arr) arr.push(r);
     else buckets.set(key, [r]);
   }
-  const selected = [...filter].filter((k): k is CorePos => k !== 'PICKS');
+  // #195 — filtered sections keep the canonical QB→RB→WR→TE order (the Set's
+  // insertion order is toggle order), matching the pills and the bar stack.
+  const selected = CORE_POSITIONS.filter((k) => filter.has(k));
   const order: string[] =
     filter.size > 0 ? selected : [...CORE_POSITIONS, 'Other'];
   return order
@@ -904,10 +906,13 @@ function PosFilterPills({ idPrefix, filter, onToggle, style, showPicks }: {
 }
 
 // One team as a VERTICAL stacked column (2026-07-26): position segments
-// bottom-up QB→RB→WR→TE (+ neutral Picks cap in the All view), height scaled
-// to the league max, slightly rounded top (≤8px per Chalkline), rank numeral
-// underneath (the caller's numeral in an ice pill). In drill-in focus every
-// non-selected column renders muted-gray segments.
+// TOP-DOWN QB→RB→WR→TE — the same order as the filter pills (#195) — with
+// the neutral Picks segment at the BASE in the All view (picks stay last in
+// the QB→RB→WR→TE→Picks reading order, so the former top "cap" becomes the
+// base under the top-down flip). Height scaled to the league max, slightly
+// rounded top (≤8px per Chalkline), rank numeral underneath (the caller's
+// numeral in an ice pill). In drill-in focus every non-selected column
+// renders muted-gray segments.
 function BarColumn({ tc, rank, active, maxActive, subset, filter, focused, grayed, onPress }: {
   tc: TeamComputed;
   rank: number;
@@ -926,7 +931,8 @@ function BarColumn({ tc, rank, active, maxActive, subset, filter, focused, graye
       : subset === 'all'
         ? [...CORE_POSITIONS, 'PICKS']
         : [...CORE_POSITIONS];
-  // Stable stacking order regardless of Set insertion order.
+  // Stable stacking order regardless of Set insertion order: QB→RB→WR→TE
+  // top-down (#195, filter-pill order), Picks last (= the base).
   const orderOf = (p: FilterKey) =>
     p === 'PICKS' ? CORE_POSITIONS.length : CORE_POSITIONS.indexOf(p as CorePos);
   const shown = shownBase.sort((a, b) => orderOf(a) - orderOf(b));
@@ -938,8 +944,9 @@ function BarColumn({ tc, rank, active, maxActive, subset, filter, focused, graye
     grayed ? GRAY_SEGMENT[p] : p === 'PICKS' ? PICKS_COLOR : posColor(p);
   const segSum = shown.reduce((s, p) => s + segValue(p), 0);
   const heightPct = active > 0 ? Math.max((active / maxActive) * 100, 3) : 0;
-  // Render top→bottom = reverse of the bottom-up stack.
-  const stack = [...shown].reverse();
+  // #195 — render top→bottom in `shown` order directly (QB at the top,
+  // Picks at the base), matching the filter-pill order.
+  const stack = shown;
   const name = team.display_name || team.username || team.user_id;
 
   return (

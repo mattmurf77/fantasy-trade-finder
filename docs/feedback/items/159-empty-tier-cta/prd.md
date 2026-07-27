@@ -2,7 +2,7 @@
 
 - **Screen:** QuickSetTiers (guided tier walk) · also QuickRank if it shares the CTA
 - **Type:** polish · **Reporter:** jonbonjourvi (filed v1.7.1)
-- **Status:** requirement written 2026-07-18 (operator-dictated)
+- **Status:** implemented 2026-07-27 (branch `teardown-remediation` — see status.md)
 
 ## Problem
 During the Quick Set guided walk, when the user has selected **no** players for
