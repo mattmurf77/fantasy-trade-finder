@@ -203,6 +203,35 @@ export function evaluateTradesInLeague(
   );
 }
 
+// Deck swap-suggestions (2026-07-27 player-changer): evaluate a card's trade
+// MINUS one asset to get replacement candidates (`eveners`) for it. Same Mode
+// B call as evaluateTradeInLeague plus `one_sided_eveners: true` — when the
+// removal empties a side (a 1-for-1 card) the server builds eveners for the
+// emptied side anyway, sized against the other side's package value. Old
+// servers ignore the extra key and simply return no eveners on one-sided
+// reads (the client degrades to its honest empty state).
+export async function evaluateForSwapSuggestions(
+  givePlayerIds: string[],
+  receivePlayerIds: string[],
+  format: ScoringFormat,
+  leagueId: string,
+  opponentUserId: string,
+  signal?: AbortSignal,
+): Promise<CalcEvaluationInLeague> {
+  return apiRequest('/api/trade/evaluate', {
+    method: 'POST',
+    signal,
+    body: {
+      give_player_ids: givePlayerIds,
+      receive_player_ids: receivePlayerIds,
+      scoring_format: format,
+      league_id: leagueId,
+      opponent_user_id: opponentUserId,
+      one_sided_eveners: true,
+    },
+  });
+}
+
 export async function evaluateTradeInLeague(
   givePlayerIds: string[],
   receivePlayerIds: string[],

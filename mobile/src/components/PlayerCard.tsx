@@ -118,7 +118,10 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     player.years_experience != null
       ? `${player.years_experience} yr${player.years_experience === 1 ? '' : 's'}`
       : null;
-  const isRookie = player.years_experience === 0;
+  // #194 — PICK pseudo-assets ride the Player shape with years_experience 0,
+  // which is "no experience", not "rookie season": never badge a pick RK.
+  const isRookie =
+    player.years_experience === 0 && String(player.position) !== 'PICK';
 
   // Position rail + badge — position hexes are cross-client invariants,
   // rendered only via the chalkline re-export.

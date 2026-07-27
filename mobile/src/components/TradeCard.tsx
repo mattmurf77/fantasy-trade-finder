@@ -60,6 +60,11 @@ interface Props {
   // #190 — "Edit in calculator": opens the manual calculator prefilled
   // with this card's opponent + both sides (swipe deck only).
   onEditInCalculator?: () => void;
+  // #194 — per-asset remove (swipe deck only): drop this asset from the
+  // suggested trade and re-price the rest. The card renders the ✕ dimmed
+  // when the asset is the last one on its side (a trade needs ≥1 per
+  // side); the handler owns the honest hint + pinned-package confirm.
+  onRemoveAsset?: (player: Player, side: 'give' | 'receive') => void;
 }
 
 // FB-47 — partner-fit line copy. `partner_fit` is a 0–1 scalar; the exact
@@ -101,6 +106,7 @@ function TradeCardComp({
   fitTargetPositions,
   onKeepSide,
   onEditInCalculator,
+  onRemoveAsset,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
   // The pick-denominated TradeValueBar (feedback #157) is the universal
@@ -211,6 +217,37 @@ function TradeCardComp({
       })()
     ) : null;
 
+  // #194 — per-asset remove (swipe deck only): 28px ✕ beside the swap
+  // affordance. The last asset on a side renders dimmed (a trade needs at
+  // least one per side) but stays tappable — the screen's handler answers
+  // with the honest hint instead of silently ignoring the tap.
+  const removeSlot = (p: Player, side: 'give' | 'receive') => {
+    if (variant !== 'swipe' || !onRemoveAsset) return null;
+    const sideCount = side === 'give' ? givePlayers.length : receivePlayers.length;
+    const canRemove = sideCount > 1;
+    return (
+      <Pressable
+        testID={`trade-card.remove-asset.${p.id}`}
+        hitSlop={8}
+        onPress={() => onRemoveAsset(p, side)}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !canRemove }}
+        accessibilityLabel={
+          canRemove
+            ? `Remove ${p.name} from this trade`
+            : `Cannot remove ${p.name} — a trade needs at least one asset on each side`
+        }
+        style={({ pressed }) => [
+          styles.swapBtn,
+          !canRemove && styles.removeBtnDisabled,
+          pressed && styles.swapBtnPressed,
+        ]}
+      >
+        <Icon name="x" size={14} color={chalk.dim} />
+      </Pressable>
+    );
+  };
+
   // #186 — per-side keep affordance (swipe deck only): pins that side's
   // players and regenerates, so the OTHER side gets re-shopped. Compact
   // bordered-chalk construction (ice stays on the deck's primary actions).
@@ -255,6 +292,9 @@ function TradeCardComp({
       });
     }
     if (onSwapPlayer) actions.push({ name: 'swap', label: 'Swap for another player' });
+    if (variant === 'swipe' && onRemoveAsset) {
+      actions.push({ name: 'remove', label: 'Remove from this trade' });
+    }
     return {
       accessibilityLabel: [
         p.name,
@@ -272,6 +312,7 @@ function TradeCardComp({
             if (nativeEvent.actionName === 'menu') onPlayerMenu?.(p, side);
             else if (nativeEvent.actionName === 'untouchable') onToggleUntouchable?.(p);
             else if (nativeEvent.actionName === 'swap') onSwapPlayer?.(p, side);
+            else if (nativeEvent.actionName === 'remove') onRemoveAsset?.(p, side);
           }
         : undefined,
     };
@@ -386,6 +427,7 @@ function TradeCardComp({
                   p.on_block ||
                   untouchableIds?.has(p.id) ||
                   onSwapPlayer ||
+                  onRemoveAsset ||
                   (onPlayerMenu && onToggleUntouchable) ? (
                     <View style={styles.rightSlotRow}>
                       {blockBadge(p)}
@@ -394,6 +436,7 @@ function TradeCardComp({
                       ) : null}
                       {lockSlot(p)}
                       {swapSlot(p, 'give')}
+                      {removeSlot(p, 'give')}
                     </View>
                   ) : undefined
                 }
@@ -419,10 +462,11 @@ function TradeCardComp({
                 {...rowA11y(p, 'receive')}
                 onLongPress={longPressFor(p, 'receive')}
                 rightSlot={
-                  p.on_block || onSwapPlayer ? (
+                  p.on_block || onSwapPlayer || onRemoveAsset ? (
                     <View style={styles.rightSlotRow}>
                       {blockBadge(p)}
                       {swapSlot(p, 'receive')}
+                      {removeSlot(p, 'receive')}
                     </View>
                   ) : undefined
                 }
@@ -681,6 +725,11 @@ const styles = StyleSheet.create({
   },
   swapBtnPressed: {
     backgroundColor: ink.ink3,
+  },
+  // #194 — remove ✕ on the last asset of a side: visibly inert (the tap
+  // still lands so the screen can voice the min-one-per-side hint).
+  removeBtnDisabled: {
+    opacity: 0.35,
   },
   // Untouchable lock twin — marked state borrows the active treatment
   // (ice border) from the queue button's queued state.

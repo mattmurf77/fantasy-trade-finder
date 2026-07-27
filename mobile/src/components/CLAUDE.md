@@ -5,7 +5,7 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | Component | Use |
 |---|---|
 | `PlayerCard` | Player tile with name, position, value |
-| `TradeCard` | Give/receive trade summary card. Swipe-deck extras (2026-07-25): optional `onKeepSide` (#186 per-side "Keep · more offers" — pins that side via the FB-47 machinery + regenerates) and `onEditInCalculator` (#190 → calculator prefilled); both render only in the swipe variant and only when the screen passes them |
+| `TradeCard` | Give/receive trade summary card. Swipe-deck extras (2026-07-25): optional `onKeepSide` (#186 per-side "Keep · more offers" — pins that side via the FB-47 machinery + regenerates) and `onEditInCalculator` (#190 → calculator prefilled); 2026-07-27 `onRemoveAsset` (#194 — per-row ✕ drops the asset and re-prices; the last asset on a side renders dimmed, the tap voices the min-one-per-side hint). All render only in the swipe variant and only when the screen passes them |
 | `TierBadge`, `TierBin` | Tier label + drop-zone bin |
 | `PositionChip` | QB/RB/WR/TE chip with color |
 | `StrengthBar` | Horizontal value/strength meter |
@@ -32,8 +32,9 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `QuickSetPromptCard` | Onboarding item 7 (flag `onboarding.quickset_prompt`): inline deck-slot prompt card ("These trades use consensus values.") — accept deep-links to onboarding-mode QuickSetTiers, dismiss = snooze (caller owns bookkeeping); explicit buttons, not swipeable (documented deviation) |
 | `AppleSaveMomentSheet` | Onboarding item 8 (flag `onboarding.apple_save_moment`, ADR-006): save-moment Apple ask modal — honest cross-device framing only, official Apple button, "Not now" decline; bind flow mirrors Settings' handleLinkApple (conflict/linked/no-session outcomes) |
 | `Toast` | Transient notification. Teardown S4 PRD-03: unflagged VoiceOver announce on show + Reduce Motion fade fallback; flag `ux.toast_v2` = warn/error hold ≥5s (holdMs 0 = sticky); optional `action` slot (label+callback, e.g. Undo — callers pass it only under `ux.swipe_undo`) |
-| `PlayerContextMenu` | Teardown S3 PRD-02 (flag `ux.player_context_menu`): shared player long-press bottom sheet — header = player info, rows = per-surface commands (untouchable / swap) passed by the caller; also exports `LockGlyph` (untouchable visible-twin icon, local Svg pending Icon.tsx fold-in) |
+| `PlayerContextMenu` | Teardown S3 PRD-02 (flag `ux.player_context_menu`): shared player long-press bottom sheet — header = player info, rows = per-surface commands (untouchable / swap / swap suggestions / remove) passed by the caller; rows accept an optional `testID` override (2026-07-27 — defaults to `player-menu.<key>`); also exports `LockGlyph` (untouchable visible-twin icon, local Svg pending Icon.tsx fold-in) |
 | `HelpSheet` | Teardown S4 PRD-01 (flag `ux.help_surface`): lightweight help bottom sheet (2–3 sentences + "Read more" web link); exports `InfoButton` (ⓘ, 44pt effective target) |
+| `SwapSuggestSheet` | Deck swap-suggestions sheet (2026-07-27 player-changer — operator follow-up to the calc eveners): one-tap replacement candidates for ONE asset of the top deck card, from `/api/trade/evaluate` on the trade MINUS that asset (`one_sided_eveners` covers 1-for-1 cards). Honest loading/error/empty states; "Browse full roster" hands off to the classic #86 SwapPlayerSheet. Host (TradesScreen) owns the query + pick-to-reprice wiring |
 | `TradeFinderModeBar` | Trade-Finding Hub (#156, flag `trades.finder_hub`): lateral quick-switch chip row (Guided · Team · Player · Calc) + "‹ Hub" back + mode title/hint, carried atop each focused trade-finder mode in `TradesScreen`. Presentational; host owns nav (guided/team/player switch in place via setParams, calc/hub navigate) |
 | `TopBar` | Screen header |
 
@@ -176,5 +177,10 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 - `league-summary.avg-line` — dashed league-average line across the chart at the mean of the currently shown bar values (filters × subset × basis; "Avg <value>" label; a11y "League average N in this view"; hidden when the view sums to zero)
 - UNCHANGED but re-homed: `league-summary.team.<user_id>` now lives on the ranked LIST rows below the chart; `league-summary.roster-close` is the chart-card X that exits team focus (the drill-in roster renders INLINE below the chart now, not in a Modal); `league-summary.posfilter.*` / `league-summary.roster-posfilter.*` / `league-summary.updated-at` / basis chips / `league-summary.roster-picks` all keep their ids. Drill-in group headers add tercile-colored "(rank/M)" chips (a11y "POS ranked N of M"); player rows show league-wide positional value ranks via PlayerCard `posRank` ("RB2", "NR")
 
+
+**Deck player-changer + remove-asset tranche (2026-07-27, operator follow-up + #194):**
+- TradeCard (swipe variant, top card only): `trade-card.remove-asset.<player_id>` (per-row ✕ — drops the asset + re-prices; dimmed with `accessibilityState.disabled` when it's the side's last asset, tap then voices the hint toast)
+- PlayerContextMenu on the top deck card: `trade-card.swap-suggest.<player_id>` (the "Swap suggestions" row — registry-specced override of the default `player-menu.<key>` id) · `player-menu.remove-asset` ("Remove from trade" row)
+- SwapSuggestSheet: `trade-card.swap-suggest-sheet` (sheet container) · `trade-card.swap-option.<id>` (one-tap replacement row; `<id>` = player_id, pick_id, or `<a>+<b>` for the 2-piece package) · `trade-card.swap-suggest-empty` (honest no-candidates state)
 
 **League rankings (#14 completion, 2026-07-20):** `RankChipBadge` — "#3 of 12" consensus power-rank chip from the open `GET /api/league/rank-chip` read (60s server cache); silent-fail enrichment (error/old-server/demo → renders nothing); ice text when top-3. Mounted on LeaguePicker rows + the League tab hero chips. testID `league.rank-chip.<league_id>`
