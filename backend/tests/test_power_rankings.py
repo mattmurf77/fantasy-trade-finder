@@ -19,7 +19,7 @@ import pytest
 
 import backend.server as server
 from backend.pick_values import pick_pool_value
-from backend.power_rankings import compute_power_rankings
+from backend.power_rankings import compute_power_rankings, optimal_starters
 from backend.trade_service import elo_to_value
 
 
@@ -230,6 +230,119 @@ def test_personal_basis_zero_board_equals_consensus_exactly():
 
 
 # ---------------------------------------------------------------------------
+# League Analyzer replication (2026-07-26) — DERIVED value-optimal starters
+# (optimal_starters + the per-team `starters` field). Starters/bench are a
+# function of dynasty value + the league's slot template only — no per-week
+# lineup data.
+# ---------------------------------------------------------------------------
+
+def _row(pid, pos, value):
+    return {"player_id": pid, "position": pos, "value": value}
+
+
+def test_optimal_starters_fills_dedicated_slots_by_value():
+    roster = [_row("qb_hi", "QB", 900), _row("qb_lo", "QB", 300),
+              _row("rb_hi", "RB", 800), _row("rb_mid", "RB", 500),
+              _row("rb_lo", "RB", 100), _row("wr_hi", "WR", 700)]
+    starters = optimal_starters(roster, ["QB", "RB", "RB", "WR"])
+    assert starters == ["qb_hi", "rb_hi", "rb_mid", "wr_hi"]
+
+
+def test_optimal_starters_superflex_takes_second_qb():
+    # SUPER_FLEX prefers the QB when he outvalues every remaining RB/WR/TE.
+    roster = [_row("qb1", "QB", 900), _row("qb2", "QB", 850),
+              _row("rb1", "RB", 800), _row("rb2", "RB", 400),
+              _row("wr1", "WR", 700), _row("te1", "TE", 200)]
+    starters = optimal_starters(
+        roster, ["QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX"])
+    # Dedicated: qb1, rb1, wr1, te1. FLEX (RB/WR/TE) → rb2. SUPER_FLEX → qb2.
+    assert set(starters) == {"qb1", "rb1", "wr1", "te1", "rb2", "qb2"}
+
+
+def test_optimal_starters_flex_narrowest_first():
+    # One elite WR left for two flex slots: the narrower REC_FLEX must not be
+    # starved by SUPER_FLEX taking the WR first.
+    roster = [_row("qb1", "QB", 900), _row("qb2", "QB", 850),
+              _row("wr1", "WR", 800), _row("te1", "TE", 100)]
+    starters = optimal_starters(roster, ["QB", "SUPER_FLEX", "REC_FLEX"])
+    # QB→qb1; REC_FLEX (narrower, filled first) → wr1; SUPER_FLEX → qb2.
+    assert set(starters) == {"qb1", "wr1", "qb2"}
+
+
+def test_optimal_starters_unfillable_slots_left_empty():
+    roster = [_row("rb1", "RB", 500)]
+    starters = optimal_starters(roster, ["QB", "RB", "RB", "TE", "FLEX"])
+    # Only one RB exists — every other slot stays empty, never padded.
+    assert starters == ["rb1"]
+
+
+def test_optimal_starters_ignores_out_of_pool_positions():
+    roster = [_row("rb1", "RB", 500), _row("k1", "K", 0)]
+    # K/DEF/IDP slots aren't in the eligibility map → contribute nothing.
+    starters = optimal_starters(roster, ["RB", "FLEX"])
+    assert starters == ["rb1"]
+
+
+def test_compute_derives_starters_from_lineup_slots():
+    slots = ["QB", "RB", "FLEX"]
+    teams = compute_power_rankings(MEMBERS, SEED, PLAYERS, lineup_slots=slots)
+    a = _team(teams, "u_a")
+    b = _team(teams, "u_b")
+    assert a["starters"] == ["qb1", "rb1"]            # no third pool player
+    assert set(b["starters"]) == {"qb2", "rb2", "wr1"}  # FLEX → wr1 over te1
+
+
+def test_compute_without_lineup_slots_keeps_starters_none():
+    teams = compute_power_rankings(MEMBERS, SEED, PLAYERS)
+    assert all(t["starters"] is None for t in teams)
+
+
+def test_derived_starters_follow_personal_basis_values():
+    # On the caller's board rb2 outvalues rb1 — the optimal lineup must flip
+    # with the basis, because starters are a function of the ranked values.
+    members = [{"user_id": "u_a", "username": "alice",
+                "player_ids": ["rb1", "rb2"]}]
+    slots = ["RB"]
+    consensus = compute_power_rankings(members, SEED, PLAYERS,
+                                       lineup_slots=slots)
+    personal = compute_power_rankings(members, SEED, PLAYERS,
+                                      board_elo={"rb2": 1900.0},
+                                      lineup_slots=slots)
+    assert consensus[0]["starters"] == ["rb1"]
+    assert personal[0]["starters"] == ["rb2"]
+
+
+def test_bench_reranking_flips_league_order():
+    # The client's Bench view re-ranks the league from (roster − starters)
+    # values. Alice: one stud starter, empty bench. Bob: weaker starter but a
+    # deep bench. All-ranking says Alice; bench-ranking must say Bob. This
+    # pins the payload contract the client math depends on (per-player roster
+    # values + the starters split).
+    members = [
+        {"user_id": "u_a", "username": "alice", "player_ids": ["qb1"]},
+        {"user_id": "u_b", "username": "bob",
+         "player_ids": ["qb2", "rb1", "rb2", "wr1", "te1"]},
+    ]
+    teams = compute_power_rankings(members, SEED, PLAYERS,
+                                   lineup_slots=["QB"])
+
+    def subset_total(t, bench):
+        s = set(t["starters"])
+        return sum(r["value"] for r in t["roster"]
+                   if (r["player_id"] not in s) == bench)
+
+    a, b = _team(teams, "u_a"), _team(teams, "u_b")
+    assert a["starters"] == ["qb1"] and b["starters"] == ["qb2"]
+    # Starters view: Alice's qb1 beats Bob's qb2.
+    assert subset_total(a, bench=False) > subset_total(b, bench=False)
+    # Bench view: Alice has nothing, Bob's bench dominates → order flips.
+    assert subset_total(a, bench=True) == 0.0
+    assert subset_total(b, bench=True) > subset_total(a, bench=True)
+    bench_order = sorted(teams, key=lambda t: -subset_total(t, bench=True))
+    assert [t["user_id"] for t in bench_order] == ["u_b", "u_a"]
+
+
+# ---------------------------------------------------------------------------
 # Route-level acceptance tests (#14) — /api/league/power-rankings +
 # /api/league/rank-chip
 # ---------------------------------------------------------------------------
@@ -419,6 +532,52 @@ def test_route_updated_at_present_and_parseable(client):
     ts = datetime.fromisoformat(body["updated_at"])
     assert ts.tzinfo is not None
     assert abs((datetime.now(timezone.utc) - ts).total_seconds()) < 60
+
+
+# (g) derived starters in the route payload (2026-07-26) --------------------
+
+def test_route_starters_unavailable_without_slot_template(client):
+    # LEAGUE is a non-Sleeper id → _sleeper_lineup_slots yields None → every
+    # team's starters is None and the control-gating flag is false.
+    _install_sess(_mk_sess())
+    code, body = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
+    assert code == 200
+    assert body["starters_available"] is False
+    assert all(t["starters"] is None for t in body["teams"])
+
+
+def test_route_starters_available_with_slot_template(client):
+    _install_sess(_mk_sess())
+    with patch.object(server, "_sleeper_lineup_slots",
+                      lambda lid: ["QB", "RB", "FLEX"]):
+        code, body = _get(client,
+                          f"/api/league/power-rankings?league_id={LEAGUE}")
+    assert code == 200
+    assert body["starters_available"] is True
+    a = next(t for t in body["teams"] if t["user_id"] == "u_a")
+    b = next(t for t in body["teams"] if t["user_id"] == "u_b")
+    assert a["starters"] == ["qb1", "rb1"]
+    assert set(b["starters"]) == {"qb2", "rb2", "wr1"}
+    # Starters are always a subset of the serialized roster.
+    for t in body["teams"]:
+        roster_ids = {r["player_id"] for r in t["roster"]}
+        assert set(t["starters"]) <= roster_ids
+
+
+def test_sleeper_lineup_slots_filters_to_relevant_slots():
+    meta = {"roster_positions": ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX",
+                                 "SUPER_FLEX", "K", "DEF", "IDP_FLEX",
+                                 "BN", "BN", "IR", "TAXI"]}
+    server._FA_LEAGUE_META_CACHE.pop("123456789", None)
+    with patch.object(server, "_fetch_sleeper_league_meta", lambda lid: meta):
+        try:
+            slots = server._sleeper_lineup_slots("123456789")
+        finally:
+            server._FA_LEAGUE_META_CACHE.pop("123456789", None)
+    assert slots == ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "SUPER_FLEX"]
+    # Non-Sleeper ids never fetch and never yield a template.
+    assert server._sleeper_lineup_slots("espn:12345") is None
+    assert server._sleeper_lineup_slots("league_demo") is None
 
 
 # (f) rank-chip route --------------------------------------------------------

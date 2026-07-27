@@ -14071,6 +14071,30 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
     return out
 
 
+def _sleeper_lineup_slots(league_id: str) -> list[str] | None:
+    """The league's starting-slot template for the derived starters/bench
+    split (League Analyzer replication, 2026-07-26): Sleeper roster_positions
+    filtered to the slots the value pool can fill (QB/RB/WR/TE + flex types —
+    power_rankings.LINEUP_SLOT_ELIGIBILITY). None for non-Sleeper league ids
+    (ESPN/MFL/Fleaflicker imports, demo) or when the meta can't be fetched —
+    callers degrade by omitting the split (never fabricate). Reuses the #179
+    15-min league-meta cache, so steady-state this costs no network call.
+    """
+    from .power_rankings import LINEUP_SLOT_ELIGIBILITY
+    if not league_id or not str(league_id).isdigit():
+        return None
+    now = time.time()
+    hit = _FA_LEAGUE_META_CACHE.get(league_id)
+    if hit is not None and (now - hit[0]) < _FA_LEAGUE_META_TTL:
+        meta = hit[1]
+    else:
+        meta = _fetch_sleeper_league_meta(league_id) or {}
+        _FA_LEAGUE_META_CACHE[league_id] = (now, meta)
+    slots = [s for s in (meta.get("roster_positions") or [])
+             if s in LINEUP_SLOT_ELIGIBILITY]
+    return slots or None
+
+
 @app.route("/api/league/power-rankings")
 def league_power_rankings_route():
     """GET /api/league/power-rankings?league_id=...&basis=consensus|personal|redraft
@@ -14136,15 +14160,29 @@ def league_power_rankings_route():
 
         teams = compute_power_rankings(
             members, seed, players_meta, board_elo=board_elo,
-            picks_by_owner=_power_picks_by_owner(league_id, fmt))
+            picks_by_owner=_power_picks_by_owner(league_id, fmt),
+            lineup_slots=_sleeper_lineup_slots(league_id))
         for t in teams:
             t["is_you"] = (t["user_id"] == g_user_id)
+        # League Analyzer replication (2026-07-26): per-team `starters` is
+        # the DERIVED value-optimal lineup (optimal_starters over the
+        # league's slot template — no per-week lineup data). The client's
+        # All/Starters/Bench filter is offered only when every team carries
+        # the split and at least one is non-empty — a missing slot template
+        # (non-Sleeper platform, meta flake) hides the control (honest
+        # degradation, never fabricated).
+        starters_available = (
+            bool(teams)
+            and all(isinstance(t.get("starters"), list) for t in teams)
+            and any(t["starters"] for t in teams)
+        )
         return jsonify({
-            "league_id":      league_id,
-            "basis":          basis,
-            "scoring_format": fmt,
-            "updated_at":     datetime.now(timezone.utc).isoformat(),
-            "teams":          teams,
+            "league_id":          league_id,
+            "basis":              basis,
+            "scoring_format":     fmt,
+            "updated_at":         datetime.now(timezone.utc).isoformat(),
+            "starters_available": starters_available,
+            "teams":              teams,
         })
     except Exception as e:
         log.error("league/power-rankings error: %s", e)
