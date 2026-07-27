@@ -134,6 +134,6 @@
   "deck.taste_vectors": true,
   "deck.exploration": true,
   "deck.value_model": false,
-  "deck.first_session": false,
+  "deck.first_session": true,
   "deck.replenishment": true
 }

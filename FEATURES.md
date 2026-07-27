@@ -99,6 +99,33 @@ Monetization PRDs (trial timeline, `trial_ending` push, billing grace, Founder $
 
 ---
 
+## 10 · TikTok-Discovery Deck Engine (2026-07-26)
+
+The Find-a-Trade deck rebuilt as a learning discovery engine (research → gap analysis → PRDs in
+`docs/plans/tiktok-discovery/`; build reports in gitignored `feedback-workspace/tiktok-discovery/build/`).
+Shipped wave-by-wave to prod + TestFlight (builds 58–62). QA: `qa/tiktok-discovery-qa.md`.
+North star: trades proposed/accepted per weekly-active — session minutes are a cost metric.
+
+| Feature | Flag | State | PRD | Key files |
+|---|---|---|---|---|
+| Signal spine — deck_impressions/deck_outcomes joined by impression_id; propensity, position, dwell, board-state frozen at serve | `deck.signal_v2` | **ON** | F1 | backend/{database,server}.py, TradesScreen |
+| Weekly replenishment ritual — completion card, Wed pre-gen in daily-tick, opt-in 1/week push | `deck.replenishment` | **ON** | F10 | server.py daily-tick, TradesScreen, deepLinks |
+| Thompson v2 — pessimistic base-rate priors, γ-decay, viewed-only counts, lane×shape arms | `deck.thompson_v2` | **ON** | F2 | server.py `_order_deck`, database.py loaders |
+| Fatigue & durable suppression — per-user impression discounting, 30d decline suppression + one retest, undo note, refresh seam | `deck.fatigue` | **ON** | F3 | server.py, deck_suppressions table, TradesScreen |
+| Session re-rank — remaining deck re-sorts after each verdict (client-side; peeked/pinned cards locked) | `deck.session_rerank` | **ON** | F4 | utils/sessionRerank.ts, TradesScreen |
+| Taste vectors — dual-τ (21d/180d) attribute weights + board-derived prior; bounded multiplicative re-rank | `deck.taste_vectors` | **ON** | F5 | backend/taste_service.py, user_taste table |
+| Exploration — one labeled Wildcard/deck (slot 5), archetype audition pools, honest exploration propensity | `deck.exploration` | **ON** | F7 | server.py, archetype_auditions table, TradeCard |
+| Offline eval harness — replay IPS/SNIPS + calibration CLI, nightly grading in daily-tick | *unflagged (operator tooling)* | active | F8 | backend/eval/ |
+| First-session win — confidence-weighted first-5, 10-card first deck, "Built from your updated board" header, honest adaptation moment | `deck.first_session` | **ON** | F9 | server.py, utils/firstSessionMoment.ts, TradesScreen |
+| Learned value model — calibrated P(like)/P(propose|like) × V-vector as base ordering | `deck.value_model` | **DARK — do not flip** | F6 | backend/value_model.py |
+
+**`deck.value_model` graduation gate (the reason it's dark):** F8 replay win on like-rate AND
+propose-rate with ESS ≥ 100 → calibration deciles within ±20% → interleave/experiment win → flip.
+The nightly job grades it automatically once `python3 -m backend.value_model --refit` has trained on
+real accumulated F1 data. Checklist: `feedback-workspace/tiktok-discovery/build/W5-F6.md`.
+
+---
+
 ## Rollback quick-reference
 
 - **Any flagged feature:** set its flag → false in `config/features.json`, reload/rebuild. No code revert needed.
