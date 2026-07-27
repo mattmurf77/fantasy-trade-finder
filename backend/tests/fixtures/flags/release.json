@@ -130,7 +130,7 @@
   "deck.fatigue": true,
   "deck.session_rerank": true,
   "deck.taste_vectors": true,
-  "deck.exploration": false,
+  "deck.exploration": true,
   "deck.value_model": false,
   "deck.first_session": false,
   "deck.replenishment": true
