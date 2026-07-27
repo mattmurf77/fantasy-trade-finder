@@ -140,6 +140,16 @@ export interface TradeCard {
   // on at generation time; echoed back (with dwell/engagement fields) on
   // dispositions + events so the backend can append deck_outcomes rows.
   impression_id?: string;
+  // F3 (flag deck.fatigue): true when this card is the ONE low-exposure
+  // retest of an expired decline-suppression window (server.py
+  // trade_card_to_dict serializes `retest` only when true). Read by F4's
+  // session re-rank (utils/sessionRerank.isPositionLocked) so the retest's
+  // deliberate serve position is never moved. No UI reads it.
+  retest?: boolean;
+  // F7 (future wildcard/exploration slot): reserved marker — when F7 lands,
+  // its cards are position-locked by the same F4 guard with zero changes
+  // here. Never serialized by today's backend.
+  wildcard?: boolean;
   // Low-value player added by the engine to balance an otherwise-unfair
   // trade. The player is ALREADY in give_players/receive_players — this
   // just identifies which one, so the UI can call it out.

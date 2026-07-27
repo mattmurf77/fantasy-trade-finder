@@ -179,6 +179,10 @@ function normalizeTradeCard(raw: any): TradeCard {
     // F1 signal spine (flag deck.signal_v2): server sends impression_id per
     // card only when the flag is on; absent → undefined and nothing changes.
     impression_id:      typeof raw?.impression_id === 'string' ? raw.impression_id : undefined,
+    // F3 retest marker (serialized only when true) + F7's reserved wildcard
+    // marker — both read solely by F4's session re-rank position lock.
+    retest:             raw?.retest === true ? true : undefined,
+    wildcard:           raw?.wildcard === true ? true : undefined,
     sweetener,
     partner_fit:        partnerFit,
     match_context:      matchContext,

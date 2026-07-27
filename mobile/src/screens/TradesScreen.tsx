@@ -123,6 +123,20 @@ import {
 } from '../api/tradePregen';
 import { navigationRef } from '../navigation/RootNav';
 import NewPartnersBanner from '../components/NewPartnersBanner';
+// F4 session re-rank (flag deck.session_rerank): pure math lives in
+// utils/sessionRerank — this screen only owns the session state (refs) and
+// the wiring into advance()/undo/reset.
+import {
+  buildBoostVector,
+  dispositionWeight,
+  extractCardAttributes,
+  isZeroVector,
+  rerankRemaining,
+  SESSION_RERANK_LAST_K,
+  type RerankDisposition,
+  type RerankEvent,
+  type RerankMove,
+} from '../utils/sessionRerank';
 import type { Player, TradeCard, TradeJobSnapshot, ScoringFormat } from '../shared/types';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -346,6 +360,11 @@ export default function TradesScreen({ navigation, route }: any) {
   // was hidden). Dismissal is per-job (a fresh generation may re-show it);
   // "Undo" lifts the newest decline suppression server-side and regenerates.
   const fatigueOn = useFlag('deck.fatigue');
+  // F4 (flag deck.session_rerank, PRD F4): after each disposition the
+  // REMAINING cards (position ≥ dispositioned+2) re-sort against a
+  // session-local boost vector. Off ⇒ no events recorded, no reorder ever
+  // runs — deck order stays exactly the served order (byte-identical).
+  const rerankOn = useFlag('deck.session_rerank');
   const [suppressionNoteDismissedJob, setSuppressionNoteDismissedJob] =
     useState<string | null>(null);
   const [suppressionUndoPending, setSuppressionUndoPending] = useState(false);
@@ -1087,9 +1106,12 @@ export default function TradesScreen({ navigation, route }: any) {
   }
 
   // Pause/resume the dwell timer on app background (PRD F1: backgrounding
-  // must not inflate dwell). Flag off ⇒ no listener at all.
+  // must not inflate dwell). Flags off ⇒ no listener at all. F4 also rides
+  // the dwell timer (pass classification), so deck.session_rerank keeps it
+  // running even when deck.signal_v2 is off — no telemetry is sent in that
+  // combination (signalForCard still gates on signalV2On).
   useEffect(() => {
-    if (!signalV2On) return;
+    if (!signalV2On && !rerankOn) return;
     const sub = AppState.addEventListener('change', (st) => {
       const d = dwellRef.current;
       if (st === 'active') {
@@ -1102,7 +1124,127 @@ export default function TradesScreen({ navigation, route }: any) {
       }
     });
     return () => sub.remove();
-  }, [signalV2On]);
+  }, [signalV2On, rerankOn]);
+
+  // ── F4 session re-rank (flag deck.session_rerank) ────────────────────
+  // Session state is ref-only and dies with the deck: reset on new job /
+  // regenerate / league switch (effect below), on deck completion (the
+  // deckExhausted effect), and trivially on unmount/relaunch (nothing is
+  // ever persisted). Pure math lives in utils/sessionRerank.ts.
+  //
+  //   rerankEventsRef  — last-k dispositions (attrs + reward), newest last.
+  //   servedIndexRef   — trade_id → order the server streamed the card in
+  //                      (assigned at first sight, never reassigned; the
+  //                      re-rank's base score is 1/(servedIndex+1)).
+  //   pendingRerankMovesRef — moves computed inside the setDeck updater,
+  //                      flushed to analytics by the [deck] effect below
+  //                      (side effects don't belong in state updaters).
+  //   lastRerankedRef  — max-ONE-reorder-per-disposition guard on the raw
+  //                      trade_id (advance()'s own double-fire guard only
+  //                      exists when ux.swipe_undo is on).
+  const rerankEventsRef = useRef<RerankEvent[]>([]);
+  const servedIndexRef = useRef<Map<string, number>>(new Map());
+  const pendingRerankMovesRef = useRef<RerankMove[] | null>(null);
+  const lastRerankedRef = useRef<string | null>(null);
+  // Set by handleFlagBadTrade just before its advance('pass') so the
+  // disposition records as `not_interested` (−2) instead of a pass.
+  const nextDispositionNotInterestedRef = useRef(false);
+
+  // Hard reset: a fresh job (generate/regenerate mints a new job_id) or a
+  // league switch starts a clean session vector. Mirrors the F10 tally
+  // effect's keying — every deck-reset site funnels through job/league.
+  useEffect(() => {
+    rerankEventsRef.current = [];
+    servedIndexRef.current = new Map();
+    pendingRerankMovesRef.current = null;
+    lastRerankedRef.current = null;
+  }, [rerankOn, job?.job_id, leagueId]);
+
+  // Served-order bookkeeping: cards enter `deck` in served order (the
+  // append effect above dedups + appends), so first-sight index == served
+  // index. Later reorders never touch existing entries.
+  useEffect(() => {
+    if (!rerankOn) return;
+    const map = servedIndexRef.current;
+    for (const c of deck) {
+      if (!map.has(c.trade_id)) map.set(c.trade_id, map.size);
+    }
+  }, [rerankOn, deck]);
+
+  // Telemetry flush (PRD F4 §5): when deck.signal_v2 is ALSO on, each
+  // applied reorder logs through the existing F1 client event side-channel
+  // (api/events track → /api/events). Set inside the setDeck updater,
+  // flushed here after the commit. No backend endpoint is added.
+  useEffect(() => {
+    const moves = pendingRerankMovesRef.current;
+    if (!moves || moves.length === 0) return;
+    pendingRerankMovesRef.current = null;
+    if (!signalV2On) return;
+    const byId = new Map(deck.map((c) => [c.trade_id, c]));
+    track(
+      'deck_reranked',
+      {
+        moved: moves.length,
+        // Cap the per-event payload; from/to are DECK positions (the F1
+        // impression rows carry position_in_deck for the join).
+        moves: moves.slice(0, 10).map((m) => ({
+          trade_id: m.trade_id,
+          ...(byId.get(m.trade_id)?.impression_id
+            ? { impression_id: byId.get(m.trade_id)!.impression_id }
+            : {}),
+          from: m.from,
+          to: m.to,
+        })),
+      },
+      'Trades',
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deck]);
+
+  /** Record one disposition into the session vector and apply AT MOST one
+   *  reorder of the remaining cards. Called from advance() only. */
+  function applySessionRerank(
+    card: TradeCard,
+    rawId: string,
+    disposition: RerankDisposition,
+    dwellMs: number,
+  ) {
+    if (lastRerankedRef.current === rawId) return; // one reorder/disposition
+    lastRerankedRef.current = rawId;
+    const events = rerankEventsRef.current;
+    events.push({
+      tradeId: rawId,
+      attrs: extractCardAttributes(card),
+      weight: dispositionWeight(disposition, dwellMs),
+    });
+    if (events.length > SESSION_RERANK_LAST_K) {
+      events.splice(0, events.length - SESSION_RERANK_LAST_K);
+    }
+    // Reorder only while the DISPLAY order is the deck order — with the
+    // fairness toggle off or a lane filter active, sortedDeck is a
+    // different projection and deck indices aren't screen positions, so
+    // moving deck entries could violate the next-card guard. The vector
+    // keeps accumulating either way.
+    if (!fairnessOn || laneFilter) return;
+    const boost = buildBoostVector(events);
+    if (isZeroVector(boost)) return;
+    setDeck((prev) => {
+      const curIdx = prev.findIndex((c) => c.trade_id === rawId);
+      if (curIdx < 0) return prev;
+      // Positions ≤ curIdx+1 are untouchable: curIdx+1 was the peeked next
+      // card and fronts in this same commit (setDeckIdx is batched with
+      // this update) — it must never swap under the user's thumb.
+      const { order, moves } = rerankRemaining(
+        prev,
+        curIdx + 2,
+        boost,
+        servedIndexRef.current,
+      );
+      if (moves.length === 0) return prev;
+      pendingRerankMovesRef.current = moves; // idempotent under re-invoke
+      return order;
+    });
+  }
 
   function flushPendingPass() {
     const p = pendingPassRef.current;
@@ -1122,6 +1264,19 @@ export default function TradesScreen({ navigation, route }: any) {
     pendingPassRef.current = null;
     clearTimeout(p.timer);
     lastDispositionedRef.current = null;
+    // F4 (deck.session_rerank): the undone pass never became a real
+    // disposition — pop its event so the vector forgets it, and re-arm the
+    // one-reorder guard so a re-swipe of this card records fresh. An
+    // already-applied reorder stays (it only touched positions the user
+    // hadn't seen); the next disposition recomputes from the corrected
+    // vector.
+    if (rerankOn) {
+      const evts = rerankEventsRef.current;
+      if (evts.length > 0 && evts[evts.length - 1].tradeId === p.rawId) {
+        evts.pop();
+      }
+      if (lastRerankedRef.current === p.rawId) lastRerankedRef.current = null;
+    }
     // F10 (deck.replenishment): an undone pass leaves the tally episode.
     if (replenishmentOn) {
       setSessionTally((t) => ({ ...t, passed: Math.max(0, t.passed - 1) }));
@@ -1564,7 +1719,10 @@ export default function TradesScreen({ navigation, route }: any) {
   // per fronted trade_id, not per index change.
   const topImpressionId = signalV2On ? rawTopCard?.impression_id : undefined;
   useEffect(() => {
-    if (!signalV2On) return;
+    // F4 (deck.session_rerank) also needs the per-card dwell reset (pass
+    // classification); with signal_v2 off, topImpressionId is undefined so
+    // the deck_card_viewed timer below never arms — F1 telemetry unchanged.
+    if (!signalV2On && !rerankOn) return;
     dwellRef.current = { startedAt: Date.now(), pausedAt: null, pausedTotal: 0 };
     engagementRef.current = { detailExpanded: false, calcOpened: false };
     if (viewedTimerRef.current) {
@@ -1591,7 +1749,7 @@ export default function TradesScreen({ navigation, route }: any) {
     };
     // deckIdx intentionally omitted (see the effect above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signalV2On, topTradeId, topImpressionId]);
+  }, [signalV2On, rerankOn, topTradeId, topImpressionId]);
 
   // ── Onboarding guided layer (onboarding.guided_layer AND .trades_first,
   // v2.1): coach marks 1–2. Each shows once ever (persisted at show time),
@@ -1873,6 +2031,11 @@ export default function TradesScreen({ navigation, route }: any) {
     }
     if (exhaustedTrackedRef.current) return;
     exhaustedTrackedRef.current = true;
+    // F4 (deck.session_rerank): the session vector dies with the completed
+    // deck (PRD §4) — completion is the one reset site the job/league
+    // effect can't see (job_id doesn't change when the deck runs out).
+    rerankEventsRef.current = [];
+    lastRerankedRef.current = null;
     track('deck_exhausted_viewed', { deck_size: deck.length }, 'Trades');
     maybeShowQuicksetPrompt('like'); // swipes ≥3 path; pass-trigger n/a here
     // Guided tour S7 — the trio ramp, pointed at the real CTA below (once
@@ -2152,6 +2315,19 @@ export default function TradesScreen({ navigation, route }: any) {
     // F1 (deck.signal_v2): freeze dwell/engagement at disposition time —
     // undefined when the flag is off or the card has no impression_id.
     const dispatchSignal = signalForCard(rawTopCard);
+    // F4 (deck.session_rerank): fold this disposition into the session
+    // vector and re-rank the remaining cards (positions ≥ current+2 only).
+    // Attributes come from the card the user actually acted on (topCard —
+    // the edited variant after a swap); identity is the raw deck id. Dwell
+    // is read here, before the top-card-change effect resets the timer. A
+    // bad-trade flag (#85) routes through advance('pass') with the ref set
+    // and earns the strong `not_interested` reward instead.
+    if (rerankOn) {
+      const rerankDisposition: RerankDisposition =
+        nextDispositionNotInterestedRef.current ? 'not_interested' : decision;
+      nextDispositionNotInterestedRef.current = false;
+      applySessionRerank(topCard, dispatchRawId, rerankDisposition, currentDwellMs());
+    }
     if (swipeUndoOn && decision === 'pass') {
       // Hold the POST for the undo window (design note at pendingPassRef).
       const card = topCard;
@@ -2237,7 +2413,13 @@ export default function TradesScreen({ navigation, route }: any) {
       card: topCard,
       impressionId: signalV2On ? rawTopCard?.impression_id : undefined,
     });
+    // F4 (deck.session_rerank): a bad-trade flag is the explicit "not
+    // interested" — advance('pass') reads this ref for the −2 reward. The
+    // trailing clear covers advance() no-oping on its double-fire guard,
+    // so the marker can never leak onto a later card's disposition.
+    if (rerankOn) nextDispositionNotInterestedRef.current = true;
     advance('pass');
+    nextDispositionNotInterestedRef.current = false;
     // Flagging is deliberate — commit the pass immediately (no undo window;
     // the flag toast below replaces the pass-undo toast anyway).
     if (swipeUndoOn) flushPendingPass();

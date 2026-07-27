@@ -9,7 +9,8 @@
     "web": "expo start --web",
     "postinstall": "patch-package",
     "test:contrast": "node scripts/check-contrast.js",
-    "test:feedback-badge": "node tests/check-feedback-badge.js"
+    "test:feedback-badge": "node tests/check-feedback-badge.js",
+    "test:session-rerank": "node tests/check-session-rerank.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
