@@ -118,3 +118,24 @@ with Back buttons. Copy voice: "Trade with your head, not heart."
 10. **FAAB-aware FA add sheet** (bid input + budget + drop suggestions) —
     extends #179's honest add flow if/when a write path exists; the drop-
     candidate suggestion works even for the deep-link flow today.
+
+---
+
+## Operator decisions (2026-07-26)
+
+- **Risers/fallers + market-driven rankings** (app-wide AND league-specific):
+  not now — but ensure the DATA ARCHITECTURE exists to build later →
+  market-data readiness audit/plumbing tasked (see docs/plans/market-data-readiness.md when it lands).
+- **Waiver claim / FAAB / budget remaining / value-sorted (ascending) drop
+  candidates:** TOP PRIORITY → in build (claim-preparation sheet; Sleeper
+  executes, FTF prepares).
+- **Visible trade adjustments breakdown:** approved (assuming simple) → in build.
+- **3-way trades:** fun, not important → BACKLOG.
+- **Counter suggestions:** loved; shipped as calculator eveners (incl. 2-piece
+  packages); ALSO to serve as the "player changer" on find-a-trade deck cards →
+  follow-up after the asset-ideas build lands.
+- **Upgrade/Downgrade/Lateral grouping on single-asset targeting:** "literally
+  exactly what I expect" (the #189 complaint's real fix) → in build
+  (trade.asset_ideas).
+- **Pick stack segment + filter-aware league-average line on League Summary:**
+  approved → amended into the in-flight League Analyzer replication build.
