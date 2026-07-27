@@ -14204,18 +14204,25 @@ _FA_LEAGUE_META_CACHE: dict[str, tuple[float, dict]] = {}
 _FA_LEAGUE_META_TTL = 900.0  # 15 min
 
 
+def _fa_league_meta(league_id: str) -> dict:
+    """Cached Sleeper league meta for the FA route (roster limit + waiver
+    settings share one fetch — the claim-sheet upgrade added no extra
+    Sleeper call). Empty dict when the meta can't be fetched."""
+    now = time.time()
+    hit = _FA_LEAGUE_META_CACHE.get(league_id)
+    if hit is not None and (now - hit[0]) < _FA_LEAGUE_META_TTL:
+        return hit[1]
+    meta = _fetch_sleeper_league_meta(league_id) or {}
+    _FA_LEAGUE_META_CACHE[league_id] = (now, meta)
+    return meta
+
+
 def _sleeper_roster_limit(league_id: str) -> int | None:
     """Total roster capacity for a Sleeper league: lineup+bench slots
     (roster_positions) plus IR (reserve_slots) and taxi (taxi_slots) —
     the same headcount Sleeper's `players` list can grow to. None when the
     meta can't be fetched or has no roster_positions."""
-    now = time.time()
-    hit = _FA_LEAGUE_META_CACHE.get(league_id)
-    if hit is not None and (now - hit[0]) < _FA_LEAGUE_META_TTL:
-        meta = hit[1]
-    else:
-        meta = _fetch_sleeper_league_meta(league_id) or {}
-        _FA_LEAGUE_META_CACHE[league_id] = (now, meta)
+    meta = _fa_league_meta(league_id)
     slots = len(meta.get("roster_positions") or [])
     if not slots:
         return None
@@ -14225,6 +14232,37 @@ def _sleeper_roster_limit(league_id: str) -> int | None:
                       + int(settings.get("taxi_slots") or 0))
     except (TypeError, ValueError):
         return slots
+
+
+# Sleeper settings.waiver_type → wire enum (docs/api-reference.md):
+# 0 = rolling waiver priority, 1 = reverse-standings priority, 2 = FAAB.
+_SLEEPER_WAIVER_TYPES = {0: "rolling", 1: "reverse_standings", 2: "faab"}
+
+
+def _sleeper_waivers(league_id: str, my_budget_used) -> dict:
+    """#179 claim sheet — the league's waiver context. `type` is the wire
+    enum above (None when the meta is missing/unrecognized). `faab` is the
+    caller's budget line for FAAB leagues (budget from league settings,
+    used from their live roster's settings.waiver_budget_used — passed in
+    by the route, which already reads the rosters); None for priority-
+    waiver leagues, so the client can say "waiver priority league" instead
+    of showing a bid input. All faab fields nullable/best-effort."""
+    settings = _fa_league_meta(league_id).get("settings") or {}
+    wtype = _SLEEPER_WAIVER_TYPES.get(settings.get("waiver_type"))
+    faab = None
+    if wtype == "faab":
+        try:
+            budget = int(settings.get("waiver_budget"))
+        except (TypeError, ValueError):
+            budget = None
+        try:
+            used = int(my_budget_used) if my_budget_used is not None else None
+        except (TypeError, ValueError):
+            used = None
+        remaining = (budget - used
+                     if budget is not None and used is not None else None)
+        faab = {"budget": budget, "used": used, "remaining": remaining}
+    return {"type": wtype, "faab": faab}
 
 
 @app.route("/api/league/free-agents")
@@ -14262,9 +14300,22 @@ def league_free_agents_route():
            "drop_suggestion": {"player_id", "name", "position",
                                "value", "delta"} | null}, ...
         ],  # top 50 after the position filter
-        "roster_capacity": {"my_count": int|null, "limit": int|null} | null
-          # #179 — Sleeper leagues only; feeds the client's add pre-check
-          # (limit = lineup+bench+IR+taxi slots from league meta).
+        "roster_capacity": {"my_count": int|null, "limit": int|null,
+                            "open_slots": int|null} | null
+          # #179 — Sleeper leagues only; feeds the client's claim sheet
+          # (limit = lineup+bench+IR+taxi slots from league meta;
+          #  open_slots = max(limit - my_count, 0), null when either is).
+        "waivers": {"type": "faab"|"rolling"|"reverse_standings"|null,
+                    "faab": {"budget", "used", "remaining"} | null} | null
+          # #179 claim sheet — Sleeper leagues only. faab is the CALLER'S
+          # budget line (league waiver_budget / their roster's
+          # waiver_budget_used) and is null for non-FAAB waiver types.
+        "drop_candidates": {"players": [{"id","name","position","value"},...],
+                            "untouchables_excluded": int} | null
+          # #179 claim sheet — Sleeper leagues only. The caller's roster
+          # priced on their board, value-ASCENDING (least valuable first),
+          # capped at 8; untouchables (asset_prefs) never appear, and the
+          # count tells the sheet they were withheld.
       }
 
     Errors: 503 rosters_unavailable when NO roster source yielded a single
@@ -14274,7 +14325,8 @@ def league_free_agents_route():
     board, so it's board-derived content like /api/rankings.
     """
     from .free_agent_service import (
-        FA_POSITIONS, board_is_personalized, compute_free_agents,
+        FA_POSITIONS, board_is_personalized, compute_drop_candidates,
+        compute_free_agents,
     )
     sess = _require_initialized_session()
     sess["last_active"] = time.time()
@@ -14326,12 +14378,19 @@ def league_free_agents_route():
         rostered = {str(pid) for roster in member_rosters for pid in roster}
 
         my_roster_count: int | None = None
+        # #179 claim sheet — the caller's own roster ids, best source wins:
+        # live Sleeper read > snapshot row > session roster (same precedence
+        # my_roster_count already follows). Feeds drop_candidates.
+        my_roster_ids: list[str] | None = None
+        # The caller's FAAB spend, from their live Sleeper roster's settings.
+        my_waiver_used = None
         try:
             for r in load_league_members(league_id):
                 ids = [str(pid) for pid in (r.get("player_ids") or [])]
                 rostered.update(ids)
                 if r.get("user_id") == g_user_id and ids:
                     my_roster_count = len(ids)
+                    my_roster_ids   = ids
         except Exception as e:
             log.warning("free-agents: league_members snapshot read failed "
                         "for %s (continuing on session rosters): %s",
@@ -14355,6 +14414,9 @@ def league_free_agents_route():
                     rostered.update(ids)
                     if str(r.get("owner_id") or "") == str(g_user_id):
                         my_roster_count = len(ids)
+                        my_roster_ids   = ids
+                        my_waiver_used  = (r.get("settings") or {}).get(
+                            "waiver_budget_used")
             except Exception as e:
                 log.warning("free-agents: live Sleeper rosters read failed "
                             "for %s (serving snapshot-derived exclusion): %s",
@@ -14377,15 +14439,44 @@ def league_free_agents_route():
                             "try again shortly."),
             }), 503
 
-        # #179 — roster-capacity context for the client's add pre-check
-        # (Sleeper leagues only; both fields best-effort/nullable).
+        # #179 — claim-sheet context (Sleeper leagues only; every field
+        # best-effort/nullable): roster capacity + open slots, waiver
+        # type/FAAB budget, and the value-ascending drop-candidate list.
         roster_capacity = None
+        waivers         = None
+        drop_candidates = None
         if is_sleeper_league:
             if my_roster_count is None and user_roster:
                 my_roster_count = len(user_roster)
+            limit = _sleeper_roster_limit(league_id)
             roster_capacity = {
-                "my_count": my_roster_count,
-                "limit":    _sleeper_roster_limit(league_id),
+                "my_count":   my_roster_count,
+                "limit":      limit,
+                "open_slots": (max(limit - my_roster_count, 0)
+                               if limit is not None
+                               and my_roster_count is not None else None),
+            }
+            waivers = _sleeper_waivers(league_id, my_waiver_used)
+            untouchable_ids: set = set()
+            try:
+                ap = load_asset_preferences(user_id=g_user_id,
+                                            league_id=league_id)
+                untouchable_ids = {str(x) for x in ap.get("untouchables", [])}
+            except Exception as ap_err:
+                log.warning("free-agents: asset-prefs read failed for %s "
+                            "(drop candidates unfiltered): %s",
+                            league_id, ap_err)
+            cand_rows, cand_excluded = compute_drop_candidates(
+                pool_players = pool_players,
+                seed_elo     = seed,
+                user_elo     = user_elo,
+                user_roster  = (my_roster_ids if my_roster_ids is not None
+                                else user_roster),
+                exclude_ids  = untouchable_ids,
+            )
+            drop_candidates = {
+                "players":                cand_rows,
+                "untouchables_excluded":  cand_excluded,
             }
 
         free_agents = compute_free_agents(
@@ -14402,9 +14493,12 @@ def league_free_agents_route():
             "position":          position or "ALL",
             "user_has_rankings": board_is_personalized(user_elo, seed),
             "free_agents":       free_agents,
-            # #179 — {my_count, limit} for Sleeper leagues (fields nullable
-            # when unknown); null for platform/demo leagues.
+            # #179 — claim-sheet context, Sleeper leagues only (fields
+            # nullable when unknown); all three null for platform/demo
+            # leagues. See docstring for shapes.
             "roster_capacity":   roster_capacity,
+            "waivers":           waivers,
+            "drop_candidates":   drop_candidates,
         })
     except Exception as e:
         log.error("league/free-agents error: %s", e)

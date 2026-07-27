@@ -36,6 +36,9 @@ FA_POSITIONS = ("QB", "RB", "WR", "TE")
 # position-filtered call gets a full page of that position).
 DEFAULT_LIMIT = 50
 
+# #179 claim sheet — cap on the drop-candidate list (least valuable first).
+DROP_CANDIDATE_LIMIT = 8
+
 
 def board_value(player_id: str,
                 user_elo: dict[str, float],
@@ -143,3 +146,44 @@ def compute_free_agents(pool_players: list,
             "drop_suggestion": drop,
         })
     return rows
+
+
+def compute_drop_candidates(pool_players: list,
+                            seed_elo: dict[str, float],
+                            user_elo: dict[str, float],
+                            user_roster: Iterable[str],
+                            exclude_ids: Iterable[str] = (),
+                            limit: int = DROP_CANDIDATE_LIMIT,
+                            ) -> tuple[list[dict], int]:
+    """Claim-sheet drop list (#179 upgrade): the caller's rostered players
+    priced on their board, sorted value-ASCENDING (least valuable first —
+    the operator's exact ask), capped at `limit`.
+
+    exclude_ids: player ids never suggested as drops — the caller's
+    untouchables (asset_prefs). Returns (rows, excluded_count) where
+    excluded_count is how many rostered, priceable players were withheld
+    because of the exclusion, so the sheet can say untouchables were
+    skipped. Roster entries outside the universal pool (unpriceable) are
+    silently skipped, same as compute_free_agents' drop rule.
+
+    Rows: {id, name, position, value}.
+    """
+    players_by_id = {p.id: p for p in pool_players}
+    exclude = {str(x) for x in exclude_ids}
+    excluded_count = 0
+    rows: list[dict] = []
+    for pid in dict.fromkeys(str(x) for x in user_roster):
+        p = players_by_id.get(pid)
+        if p is None or p.position not in FA_POSITIONS:
+            continue
+        if pid in exclude:
+            excluded_count += 1
+            continue
+        rows.append({
+            "id":       pid,
+            "name":     p.name,
+            "position": p.position,
+            "value":    board_value(pid, user_elo, seed_elo),
+        })
+    rows.sort(key=lambda r: r["value"])
+    return rows[:limit], excluded_count
