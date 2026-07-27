@@ -23,6 +23,7 @@ import TradeSide from './TradeSide';
 import PlayerPickerModal from './PlayerPickerModal';
 import SuggestionCard from './SuggestionCard';
 import EvenerRows from './EvenerRows';
+import AdjustmentsDisclosure from './AdjustmentsDisclosure';
 import SendInSleeperButton from './SendInSleeperButton';
 import { Badge, Button, Card, Icon, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
@@ -650,6 +651,18 @@ function LeagueVerdict({
           {Math.round(ev.give_value).toLocaleString()} vs {Math.round(ev.receive_value).toLocaleString()}
         </Text>
       </View>
+      {/* Why the consensus totals differ from the naive sum of parts —
+          collapsed by default, only when the server itemized adjustments. */}
+      {ev.adjustments ? (
+        <View style={styles.adjustments}>
+          <AdjustmentsDisclosure
+            adjustments={ev.adjustments}
+            naiveTotals={ev.naive_totals}
+            giveTotal={ev.give_value}
+            receiveTotal={ev.receive_value}
+          />
+        </View>
+      ) : null}
     </Card>
   );
 }
@@ -681,4 +694,5 @@ const styles = StyleSheet.create({
   derivedNote: { marginTop: space.xs, color: chalk.dim },
   boards: { gap: space.xs, marginTop: space.sm },
   boardRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  adjustments: { marginTop: space.sm },
 });

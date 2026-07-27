@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Card, Meter } from './chalkline';
 import TradeValueBar from './TradeValueBar';
 import EvenerRows from './EvenerRows';
+import AdjustmentsDisclosure from './AdjustmentsDisclosure';
 import type { CalcEvaluation, CalcEvener } from '../api/calc';
 import { semantic, space, type } from '../theme/chalkline';
 
@@ -66,6 +67,15 @@ export default function ConsensusVerdictCard({
             {Math.round(evaluation.receive_value).toLocaleString()}
           </Text>
         </View>
+
+        {/* Why the totals differ from the naive sum of parts — collapsed by
+            default, renders only when the server itemized adjustments. */}
+        <AdjustmentsDisclosure
+          adjustments={evaluation.adjustments}
+          naiveTotals={evaluation.naive_totals}
+          giveTotal={evaluation.give_value}
+          receiveTotal={evaluation.receive_value}
+        />
 
         {onAddEvener && evaluation.eveners && evaluation.eveners.length > 0 && evaluation.gap?.add_to ? (
           <EvenerRows

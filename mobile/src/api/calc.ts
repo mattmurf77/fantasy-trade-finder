@@ -54,6 +54,21 @@ export interface CalcEvener {
   ids?: string[];
 }
 
+// Itemized value adjustments (DynastyDealer teardown 2026-07-26): why a
+// side's displayed package value differs from the naive sum of its asset
+// values. Only adjustments the evaluate path actually applies appear —
+// package_depth (lesser assets count below face value) and consolidation
+// (crown premium for the outnumbered side). Consensus-based in both modes;
+// naive_totals[side] + Σ amounts == the displayed side value.
+export interface CalcAdjustment {
+  key: string; // 'package_depth' | 'consolidation'
+  label: string;
+  /** Signed value effect vs the side's naive sum (same units as totals). */
+  amount: number;
+  /** One plain-language sentence of rationale. */
+  why: string;
+}
+
 export interface CalcEvaluation {
   scoring_format: ScoringFormat;
   give_value: number;
@@ -70,6 +85,11 @@ export interface CalcEvaluation {
   dropped_player_ids: string[];
   /** Present only on an uneven two-sided read; see CalcEvener. */
   eveners?: CalcEvener[];
+  /** Present only when at least one adjustment moved a side's value
+   *  (absent on old servers); see CalcAdjustment. */
+  adjustments?: { give: CalcAdjustment[]; receive: CalcAdjustment[] };
+  /** Naive per-side sums ("sum of parts") — rides along with adjustments. */
+  naive_totals?: { give: number; receive: number };
 }
 
 export async function getTradeValues(
