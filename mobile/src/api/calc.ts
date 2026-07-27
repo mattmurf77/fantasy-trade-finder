@@ -36,6 +36,24 @@ export interface CalcGap {
   pick_equivalent: CalcGapPick | null;
 }
 
+// One-tap evener assets (DynastyGM teardown 2026-07-26): concrete assets the
+// WINNING side can add to what they give to balance an uneven trade. Mode B
+// draws them from that side's real roster + owned picks (window around the
+// gap, closest first, ≤3 singles + at most one 2-piece package); Mode A falls
+// back to the single generic pick nearest the gap. Absent when the trade is
+// even/one-sided (and on old servers).
+export interface CalcEvener {
+  id: string;
+  name: string; // pick assets carry their pick label ("2027 1st")
+  position: string; // 'PICK' for picks, 'PKG' for a 2-piece package
+  team: string | null;
+  value: number;
+  is_pick: boolean;
+  /** 2-piece combo row — `ids` are the pieces; the + button adds both. */
+  is_package?: boolean;
+  ids?: string[];
+}
+
 export interface CalcEvaluation {
   scoring_format: ScoringFormat;
   give_value: number;
@@ -50,6 +68,8 @@ export interface CalcEvaluation {
   gap: CalcGap | null;
   per_player: { player_id: string; side: 'give' | 'receive'; value: number }[];
   dropped_player_ids: string[];
+  /** Present only on an uneven two-sided read; see CalcEvener. */
+  eveners?: CalcEvener[];
 }
 
 export async function getTradeValues(

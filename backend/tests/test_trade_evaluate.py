@@ -201,6 +201,175 @@ def test_mode_b_requires_session():
     assert r.status_code == 401
 
 
+# ── Eveners (`eveners`) — DynastyGM teardown 2026-07-26 ──────────────────
+# One-tap balance assets for the WINNING side. Mode B draws from that side's
+# real roster + owned picks in a 0.4×–1.5× window around gap.value (closest
+# first, cap 3, + at most one 2-piece combo); Mode A falls back to the single
+# generic pick the gap already names. Untouchables are never recommended.
+
+
+def _evener_pool(gap, e2v_inv):
+    """Extra pool players at controlled values relative to the gap."""
+    mk = lambda pid, mult: (_P(pid, pid.upper(), "WR", "KC", 25), e2v_inv(gap * mult))
+    return [
+        mk("ev_close",   1.0),    # |Δ| = 0        → rank 1
+        mk("ev_second",  0.95),   # |Δ| = 0.05·gap → rank 2
+        mk("ev_third",   0.8),    # |Δ| = 0.20·gap → rank 3 (unless pick beats it)
+        mk("ev_fourth",  0.5),    # in window but beyond the cap
+        mk("ev_low",     0.3),    # below window — excluded
+        mk("ev_high",    1.6),    # above window — excluded
+        mk("ev_untouch", 0.99),   # would rank 2nd but is untouchable
+    ]
+
+
+def _install_evener_world(monkeypatch, roster_owner, gap, *, picks=None,
+                          untouchables=()):
+    """Extend the pool with evener candidates owned by `roster_owner` and
+    mock the Mode B roster/pick/pref loaders."""
+    v2e = srv._trade_service_mod.value_to_elo
+    extra = _evener_pool(gap, v2e)
+    players = _POOL_PLAYERS + [p for p, _ in extra]
+    seed = dict(_SEED)
+    seed.update({p.id: elo for p, elo in extra})
+    monkeypatch.setitem(
+        srv.g_universal_by_format, "1qb_ppr", {"players": players, "seed": seed})
+    monkeypatch.setattr(srv, "load_league_members", lambda league_id: [
+        {"user_id": roster_owner, "player_ids": [p.id for p, _ in extra]},
+    ])
+    monkeypatch.setattr(
+        srv, "load_draft_picks",
+        lambda league_id=None, owner_user_id=None, **k: [
+            p for p in (picks or [])
+            if owner_user_id is None or p["owner_user_id"] == owner_user_id],
+    )
+    monkeypatch.setattr(
+        srv, "load_asset_preferences",
+        lambda user_id=None, league_id=None: {"untouchables": list(untouchables),
+                                              "targets": [], "not_interested": []},
+    )
+
+
+def _consensus_gap(give_ids, recv_ids):
+    """The gap the route will compute for this trade (Mode A read)."""
+    d = _post({"give_player_ids": give_ids, "receive_player_ids": recv_ids}).get_json()
+    return d["gap"]["value"]
+
+
+_BOARDS = {
+    CALLER: {"username": "me",  "elo_ratings": {}},
+    OPP:    {"username": "opp", "elo_ratings": {}},
+}
+
+
+def test_mode_b_eveners_from_callers_roster_when_caller_wins(monkeypatch):
+    # give=mid < receive=good → the CALLER receives more (wins) → add_to='give'
+    # → eveners come from the CALLER's roster; their untouchables are skipped.
+    gap = _consensus_gap(["mid"], ["good"])
+    _install_evener_world(monkeypatch, CALLER, gap, untouchables=["ev_untouch"])
+    d = _post_authed({
+        "give_player_ids": ["mid"], "receive_player_ids": ["good"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    assert d["gap"]["add_to"] == "give"
+    evs = d["eveners"]
+    singles = [e for e in evs if not e.get("is_package")]
+    # Window + cap + closest-first: ev_close, ev_second, ev_third; ev_fourth
+    # capped out, ev_low/ev_high outside the window, ev_untouch excluded.
+    assert [e["id"] for e in singles] == ["ev_close", "ev_second", "ev_third"]
+    assert all(gap * 0.4 <= e["value"] <= gap * 1.5 for e in singles)
+    assert singles[0]["position"] == "WR" and singles[0]["is_pick"] is False
+    # Stretch: one 2-piece combo from sub-gap assets — pieces too small to
+    # matter alone can pair up. Best in-window pair by closeness is
+    # ev_third+ev_low (1.1×gap); the 0.95+0.8-style sums overflow the window.
+    pkgs = [e for e in evs if e.get("is_package")]
+    assert len(pkgs) == 1
+    assert sorted(pkgs[0]["ids"]) == ["ev_low", "ev_third"]
+    assert pkgs[0]["value"] == pytest.approx(gap * 1.1, rel=0.01)
+    assert pkgs[0]["position"] == "PKG"
+
+
+def test_mode_b_eveners_include_owned_picks(monkeypatch):
+    gap = _consensus_gap(["mid"], ["good"])
+    pick = {"pick_id": "L1_2027_1_3", "owner_user_id": CALLER, "season": 2027,
+            "round": 1, "pool_value": round(gap * 0.9, 1), "is_traded": 0,
+            "original_username": None}
+    _install_evener_world(monkeypatch, CALLER, gap, picks=[pick],
+                          untouchables=["ev_untouch"])
+    d = _post_authed({
+        "give_player_ids": ["mid"], "receive_player_ids": ["good"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    singles = [e for e in d["eveners"] if not e.get("is_package")]
+    # |Δ|: ev_close 0 < ev_second 0.05 < pick 0.10 < ev_third 0.20 (capped).
+    assert [e["id"] for e in singles] == ["ev_close", "ev_second", "L1_2027_1_3"]
+    pick_row = singles[2]
+    assert pick_row["is_pick"] is True
+    assert pick_row["position"] == "PICK"
+    assert pick_row["name"] == "2027 1st"
+    assert pick_row["value"] == pytest.approx(gap * 0.9, rel=0.01)
+
+
+def test_mode_b_eveners_from_opponents_roster_when_opponent_wins(monkeypatch):
+    # give=good > receive=mid → the OPPONENT receives more → add_to='receive'
+    # → eveners come from the OPPONENT's roster (their untouchables skipped).
+    gap = _consensus_gap(["good"], ["mid"])
+    _install_evener_world(monkeypatch, OPP, gap, untouchables=["ev_untouch"])
+    d = _post_authed({
+        "give_player_ids": ["good"], "receive_player_ids": ["mid"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    assert d["gap"]["add_to"] == "receive"
+    singles = [e for e in d["eveners"] if not e.get("is_package")]
+    assert [e["id"] for e in singles] == ["ev_close", "ev_second", "ev_third"]
+
+
+def test_mode_b_eveners_absent_on_even_trade(monkeypatch):
+    _install_evener_world(monkeypatch, CALLER, 1000.0)
+    d = _post_authed({
+        "give_player_ids": ["stud"], "receive_player_ids": ["stud"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    assert d["favors"] == "even"
+    assert "eveners" not in d
+
+
+def test_mode_b_eveners_exclude_players_already_in_trade(monkeypatch):
+    gap = _consensus_gap(["mid"], ["good"])
+    _install_evener_world(monkeypatch, CALLER, gap)
+    d = _post_authed({
+        # ev_close rides along in the give side → it can't be recommended.
+        "give_player_ids": ["mid", "ev_close"], "receive_player_ids": ["good"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    if d.get("gap") and d["gap"]["add_to"]:
+        assert all(e["id"] != "ev_close" for e in d.get("eveners", []))
+
+
+def test_mode_a_evener_is_the_gap_generic_pick():
+    # stud vs good — the gap names Early 1st (see the gap tests above); the
+    # rosterless calculator recommends exactly that pick, calculator-addable.
+    d = _post({"give_player_ids": ["stud"], "receive_player_ids": ["good"]}).get_json()
+    pe = d["gap"]["pick_equivalent"]
+    assert d["eveners"] == [{
+        "id": pe["pick_id"], "name": pe["label"], "position": "PICK",
+        "team": None, "value": pe["value"], "is_pick": True,
+    }]
+    assert d["eveners"][0]["id"] == "generic_pick_1_early"
+
+
+def test_mode_a_eveners_empty_when_gap_beyond_pick_ladder():
+    d = _post({"give_player_ids": ["stud"], "receive_player_ids": ["bench"]}).get_json()
+    assert d["gap"]["pick_equivalent"] is None
+    assert d["eveners"] == []          # present but honestly empty
+
+
+def test_mode_a_eveners_absent_when_even_or_one_sided():
+    even = _post({"give_player_ids": ["stud"], "receive_player_ids": ["stud"]}).get_json()
+    assert "eveners" not in even
+    one = _post({"give_player_ids": ["stud"], "receive_player_ids": []}).get_json()
+    assert "eveners" not in one
+
+
 def test_values_endpoint_shape_and_etag():
     with srv.app.test_client() as c:
         r = c.get("/api/trade/values?scoring_format=1qb_ppr")
