@@ -170,17 +170,25 @@ def _sleeper_session(league_members, user_roster=("wr1",),
 
 
 def _get_live(c, raw_rows, live_rosters, *, linked_platform=False,
-              league_meta=None, **params):
-    """GET the route with pool, snapshot, platform lookup and the live
-    Sleeper reads all patched. `live_rosters` may be an Exception instance
-    (the live read fails) or a list of Sleeper roster dicts."""
+              league_meta=None, asset_prefs=None, pool=None, seed=None,
+              **params):
+    """GET the route with pool, snapshot, platform lookup, asset prefs and
+    the live Sleeper reads all patched. `live_rosters` may be an Exception
+    instance (the live read fails) or a list of Sleeper roster dicts.
+    `pool`/`seed` override the default SF_POOL/SF_SEED (claim-sheet drop-
+    candidate tests need distinct values); `asset_prefs` overrides the
+    default empty untouchables/targets/not-interested lists."""
     q = "&".join(f"{k}={v}" for k, v in params.items())
     sleeper_get = (MagicMock(side_effect=live_rosters)
                    if isinstance(live_rosters, Exception)
                    else MagicMock(return_value=live_rosters))
+    the_pool = SF_POOL if pool is None else pool
+    the_seed = dict(SF_SEED if seed is None else seed)
+    prefs = asset_prefs or {"untouchables": [], "targets": [],
+                            "not_interested": []}
     server._FA_LEAGUE_META_CACHE.clear()
     with patch.object(server, "_get_universal_pool",
-                      lambda fmt: (SF_POOL, dict(SF_SEED))), \
+                      lambda fmt: (the_pool, dict(the_seed))), \
          patch.object(server, "load_league_members",
                       MagicMock(return_value=raw_rows)), \
          patch.object(server, "is_linked_platform_league",
@@ -188,6 +196,8 @@ def _get_live(c, raw_rows, live_rosters, *, linked_platform=False,
          patch.object(server, "_sleeper_get", sleeper_get), \
          patch.object(server, "_fetch_sleeper_league_meta",
                       MagicMock(return_value=league_meta)), \
+         patch.object(server, "load_asset_preferences",
+                      MagicMock(return_value=prefs)), \
          patch.object(server, "_verified_read_denial", lambda s: None), \
          patch.object(server, "touch_user_activity", MagicMock()):
         resp = c.get(f"/api/league/free-agents{('?' + q) if q else ''}",
@@ -326,11 +336,93 @@ def test_roster_capacity_for_sleeper_league(sleeper_client):
                      league_meta=meta)
     assert r.status_code == 200, r.get_json()
     cap = r.get_json()["roster_capacity"]
-    assert cap == {"my_count": 1, "limit": 11}   # 6 slots + 2 IR + 3 taxi
+    # 6 slots + 2 IR + 3 taxi; claim sheet adds open_slots = limit - count.
+    assert cap == {"my_count": 1, "limit": 11, "open_slots": 10}
 
 
 def test_roster_capacity_null_for_non_sleeper_league(client):
-    """Non-numeric (demo/local) league ids get no capacity block."""
+    """Non-numeric (demo/local) league ids get no capacity block — and no
+    claim-sheet waiver/drop-candidate context either."""
     r = _get(client, RAW_ROWS)
     assert r.status_code == 200, r.get_json()
-    assert r.get_json()["roster_capacity"] is None
+    body = r.get_json()
+    assert body["roster_capacity"] is None
+    assert body["waivers"] is None
+    assert body["drop_candidates"] is None
+
+
+# ── #179 claim sheet — waivers (FAAB) + open_slots + drop candidates ──────
+
+def _meta(waiver_settings=None, n_slots=6):
+    s = {"reserve_slots": 0, "taxi_slots": 0}
+    s.update(waiver_settings or {})
+    return {"roster_positions": ["QB", "RB", "WR", "TE", "BN", "BN"][:n_slots],
+            "settings": s}
+
+
+def test_faab_block_for_faab_league(sleeper_client):
+    """FAAB league (waiver_type 2): budget from league settings, used from
+    the caller's live roster, remaining = budget - used."""
+    live = [
+        {"roster_id": 1, "owner_id": UID, "players": ["wr1"],
+         "settings": {"waiver_budget_used": 37}},
+        {"roster_id": 2, "owner_id": "opp1", "players": ["rb1"]},
+    ]
+    r, _ = _get_live(sleeper_client, SNAPSHOT_ROWS, live,
+                     league_meta=_meta({"waiver_type": 2,
+                                        "waiver_budget": 100}))
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["waivers"] == {
+        "type": "faab",
+        "faab": {"budget": 100, "used": 37, "remaining": 63},
+    }
+
+
+def test_faab_null_for_priority_waiver_league(sleeper_client):
+    """Rolling-priority league (waiver_type 0): the type is served so the
+    client can say 'waiver priority league', but there is no faab block."""
+    r, _ = _get_live(sleeper_client, SNAPSHOT_ROWS, LIVE_ROSTERS,
+                     league_meta=_meta({"waiver_type": 0,
+                                        "waiver_budget": 100}))
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["waivers"] == {"type": "rolling", "faab": None}
+
+
+def test_open_slots_zero_when_roster_full(sleeper_client):
+    """my_count == limit ⇒ open_slots 0 (the sheet demands a drop)."""
+    live = [{"roster_id": 1, "owner_id": UID,
+             "players": ["wr1", "x1", "x2", "x3", "x4", "x5"]}]
+    r, _ = _get_live(sleeper_client, SNAPSHOT_ROWS, live,
+                     league_meta=_meta())
+    assert r.status_code == 200, r.get_json()
+    cap = r.get_json()["roster_capacity"]
+    assert cap == {"my_count": 6, "limit": 6, "open_slots": 0}
+
+
+# Drop-candidate fixture: the caller rosters d1..d10 with strictly
+# increasing seed Elo (d1 cheapest), d3 flagged untouchable.
+DROP_POOL = SF_POOL + [_p(f"d{i}", "RB") for i in range(1, 11)]
+DROP_SEED = {**SF_SEED,
+             **{f"d{i}": 1200.0 + 40.0 * i for i in range(1, 11)}}
+
+
+def test_drop_candidates_ascending_untouchables_excluded_capped(sleeper_client):
+    live = [
+        {"roster_id": 1, "owner_id": UID,
+         "players": [f"d{i}" for i in range(1, 11)]},
+        {"roster_id": 2, "owner_id": "opp1", "players": ["rb1"]},
+    ]
+    r, _ = _get_live(sleeper_client, SNAPSHOT_ROWS, live,
+                     league_meta=_meta(),
+                     asset_prefs={"untouchables": ["d3"], "targets": [],
+                                  "not_interested": []},
+                     pool=DROP_POOL, seed=DROP_SEED)
+    assert r.status_code == 200, r.get_json()
+    dc = r.get_json()["drop_candidates"]
+    ids = [row["id"] for row in dc["players"]]
+    # Least valuable first, untouchable d3 withheld, capped at 8 of the 9
+    # eligible (the most valuable, d10, falls off the cap).
+    assert ids == ["d1", "d2", "d4", "d5", "d6", "d7", "d8", "d9"]
+    values = [row["value"] for row in dc["players"]]
+    assert values == sorted(values)
+    assert dc["untouchables_excluded"] == 1

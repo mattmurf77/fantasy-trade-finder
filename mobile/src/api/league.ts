@@ -699,13 +699,42 @@ export interface FreeAgentRow {
   pos_rank: number;
   drop_suggestion: FreeAgentDropSuggestion | null;
 }
-// #179 — roster-capacity context for the Add pre-check. Sleeper leagues
-// only (null for platform/demo leagues); both fields best-effort — null
+// #179 — roster-capacity context for the claim sheet. Sleeper leagues
+// only (null for platform/demo leagues); all fields best-effort — null
 // when the backend couldn't resolve them. `limit` counts lineup+bench+IR+
-// taxi slots; `my_count` is the caller's current Sleeper roster headcount.
+// taxi slots; `my_count` is the caller's current Sleeper roster headcount;
+// `open_slots` = max(limit - my_count, 0), null when either side is
+// unknown (absent on pre-claim-sheet servers).
 export interface FreeAgentRosterCapacity {
   my_count: number | null;
   limit: number | null;
+  open_slots?: number | null;
+}
+// #179 claim sheet — the league's waiver context (Sleeper only, null
+// otherwise). `faab` is the CALLER'S budget line and is null for
+// priority-waiver leagues (type says which kind, so the sheet can say
+// "waiver priority league" instead of showing a bid input).
+export interface FreeAgentWaivers {
+  type: 'faab' | 'rolling' | 'reverse_standings' | null;
+  faab: {
+    budget: number | null;
+    used: number | null;
+    remaining: number | null;
+  } | null;
+}
+// #179 claim sheet — the caller's roster priced on their board, sorted
+// value-ASCENDING (least valuable first), capped at 8. Untouchables
+// (asset_prefs) never appear; `untouchables_excluded` counts how many were
+// withheld so the sheet can say so.
+export interface FreeAgentDropCandidate {
+  id: string;
+  name: string;
+  position: string;
+  value: number;
+}
+export interface FreeAgentDropCandidates {
+  players: FreeAgentDropCandidate[];
+  untouchables_excluded: number;
 }
 export interface FreeAgentsResponse {
   league_id: string;
@@ -715,6 +744,10 @@ export interface FreeAgentsResponse {
   free_agents: FreeAgentRow[];
   /** Absent on pre-#179 servers. */
   roster_capacity?: FreeAgentRosterCapacity | null;
+  /** Absent on pre-claim-sheet servers. Sleeper leagues only. */
+  waivers?: FreeAgentWaivers | null;
+  /** Absent on pre-claim-sheet servers. Sleeper leagues only. */
+  drop_candidates?: FreeAgentDropCandidates | null;
 }
 export async function getFreeAgents(
   leagueId: string,

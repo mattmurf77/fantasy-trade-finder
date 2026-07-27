@@ -80,3 +80,97 @@ optional.
 - MFL execute-add once authed MFL linking (#177) lands.
 - A `add_player_id` query param on the Sleeper deep-link if Sleeper ever
   documents one (today only the players-surface path is known-good).
+
+---
+
+## v2 — claim-preparation sheet (2026-07-26, teardown-remediation worktree)
+
+**Driver:** DynastyDealer teardown (League Hub → Waivers,
+`docs/business/product/2026-07-26-dynastydealer-dtf-teardowns.md`) +
+operator priority: "Waiver claim, FAAB support, budget remaining, and
+value sorted drop candidates is a big one… value sorted drop candidates
+by least valuable is perfect."
+
+The Sleeper Add flow upgraded from alert → **claim sheet** (testID
+`fa-claim.sheet`). Still zero fabricated write paths: FTF PREPARES the
+claim, the user executes it in Sleeper — the sheet's footer says so
+verbatim ("Sleeper doesn't allow apps to submit claims — finish in
+Sleeper") and the CTA (`fa-claim.open-sleeper`) deep-links to the same
+league players page as v1.
+
+**Backend (additive on `GET /api/league/free-agents` — no companion
+endpoint; the route already held every input, so one payload keeps the
+sheet a single fetch):** Sleeper leagues now also get
+
+- `waivers: {type, faab}` — `type` maps Sleeper `settings.waiver_type`
+  (2→`faab`, 0→`rolling`, 1→`reverse_standings`, unknown→null); `faab` =
+  the caller's `{budget, used, remaining}` (league `settings.waiver_budget`
+  / their live roster's `settings.waiver_budget_used`), null for
+  priority-waiver leagues. No new Sleeper calls: settings ride the cached
+  league-meta fetch (`_fa_league_meta`, split out of
+  `_sleeper_roster_limit`), spend rides the existing rosters read.
+- `drop_candidates: {players, untouchables_excluded}` — caller's roster
+  priced on their board (consensus fallback, same valuation as the FA
+  list), value-**ascending**, capped at 8
+  (`compute_drop_candidates` in `free_agent_service.py`); untouchables
+  (asset_prefs) never suggested, count reported so the sheet can say so.
+- `roster_capacity.open_slots` — max(limit − my_count, 0), null when
+  either side is unknown.
+
+All three keys null for platform/demo leagues; old clients ignore them.
+
+**Client sheet per league type (Sleeper only — platform-linked/local keep
+the v1 dimmed/explainer alerts):**
+
+- FAAB league: numeric bid input (`fa-claim.bid`, number-pad) with
+  "Budget: $N remaining"; bid > remaining shows an inline error and
+  disables the CTA until lowered.
+- Priority-waiver league: "This is a waiver priority league — no FAAB bid
+  needed." — no bid input.
+- Open slots: "You have N open roster slots — no drop needed." Full (or
+  capacity unknown): "Select a player to drop", radio-select rows
+  (`fa-claim.drop.<id>`) least-valuable-first, plus a note when
+  untouchables were withheld.
+
+**MFL execute-add feasibility (follow-up, NOT built):** unlike Sleeper,
+MFL's authed API has a real write endpoint — `import.cgi` with
+`TYPE=fcfsWaiver` / `TYPE=waiver` (`ADD=`/`DROP=` player ids, FAAB `BID=`)
+against the league host, authenticated by the same `MFL_USER_ID` cookie
+`mfl_auth_link` (#177) already captures. Feasible now that authed linking
+exists, with three cautions: (1) cookie freshness — the stored cookie can
+expire or be invalidated by a password change, so an execute path needs a
+re-auth prompt on 401-shaped responses; (2) league-host routing — writes
+must hit the league's assigned host (`wwwNN.myfantasyleague.com`), not the
+apex; (3) blast radius — this would be FTF's FIRST real roster write
+anywhere, so it wants an explicit confirm step, a feature flag, and
+transaction-result surfacing (MFL returns XML errors like "roster full")
+before any rollout. Sized as its own item, not part of this change.
+
+## Files changed (v2)
+
+- `backend/server.py` — `_fa_league_meta` + `_sleeper_waivers`
+  (`_SLEEPER_WAIVER_TYPES`), route additions above.
+- `backend/free_agent_service.py` — `compute_drop_candidates`
+  (+ `DROP_CANDIDATE_LIMIT = 8`).
+- `backend/tests/test_free_agents_route.py` — claim-sheet coverage (see
+  Tests v2).
+- `mobile/src/api/league.ts` — `FreeAgentWaivers`,
+  `FreeAgentDropCandidate(s)`, `open_slots`, response keys.
+- `mobile/src/screens/FreeAgentsScreen.tsx` — `ClaimSheet` (replaces the
+  Sleeper alert step), `explainNoAdd` for the rest.
+- `mobile/src/components/CLAUDE.md` — testID registry tranche.
+- `docs/api-reference.md` — FA route contract.
+
+## Tests (v2)
+
+- `test_faab_block_for_faab_league` — budget/used/remaining wiring.
+- `test_faab_null_for_priority_waiver_league` — type served, faab null.
+- `test_open_slots_zero_when_roster_full` + updated
+  `test_roster_capacity_for_sleeper_league` — open-slot math.
+- `test_drop_candidates_ascending_untouchables_excluded_capped` —
+  least-valuable-first order, untouchable withheld + counted, cap 8.
+- `test_roster_capacity_null_for_non_sleeper_league` extended — waivers +
+  drop_candidates null off-Sleeper.
+- Mobile: `npx tsc --noEmit` clean; Maestro targets `fa-claim.sheet` /
+  `fa-claim.bid` / `fa-claim.drop.<id>` / `fa-claim.open-sleeper`
+  (registered in the testID registry).

@@ -80,7 +80,10 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 - FreeAgentsScreen: `free-agents.pos-tab.<all|qb|rb|wr|te>` (filter pills) · `free-agents.list` (FlatList) · `free-agents.row.<player_id>` (dense PlayerCard) · `free-agents.empty-text` (no-league AND empty-list states) · `free-agents.back-btn` (#151 explicit header back — native back dead on iOS 26, RNS#3294)
 
 **Free-agent add + Trades entry tranche (2026-07-25, #179/#182):**
-- FreeAgentsScreen: `free-agents.add.<player_id>` (per-row Add — Sleeper: explainer alert → deep-link to the league's Sleeper players page, with a roster-full warn when `roster_capacity` says so; ESPN/MFL/Fleaflicker/local: ghost/dim, tap explains the missing write path)
+- FreeAgentsScreen: `free-agents.add.<player_id>` (per-row Add — Sleeper: opens the claim sheet since the 2026-07-26 v2; ESPN/MFL/Fleaflicker/local: ghost/dim, tap explains the missing write path)
+
+**FA claim-sheet tranche (2026-07-26, #179 v2):**
+- FreeAgentsScreen ClaimSheet (Sleeper leagues only — replaces the v1 explainer alert): `fa-claim.sheet` (sheet container) · `fa-claim.bid` (FAAB bid TextInput, number-pad — renders only when `waivers.type === 'faab'`; bid > remaining disables the CTA) · `fa-claim.drop.<player_id>` (radio-select drop-candidate rows, least valuable first — render when `open_slots` is 0/unknown) · `fa-claim.open-sleeper` (primary CTA → the league's Sleeper players page deep-link)
 - TradesScreen: `trades.explore.free-agents` (Explore row on the standalone Trades home → root-stack `FreeAgents`; hidden first-run and in hub-launched deck modes)
 
 **Header-back rollout tranche (2026-07-25, #151 pattern):**
