@@ -1,0 +1,373 @@
+"""#172/#189 follow-up — asset-centric Upgrade / Lateral / Downgrade ideas
+(flag trade.asset_ideas).
+
+TradeService.generate_asset_ideas: for ONE pinned asset, sweep counterparty
+rosters and group candidate deals around the pin's CONSENSUS value:
+
+  upgrade   — counterpart above the ±asset_ideas_lateral_band band; straight
+              1-for-1 when it passes the gates, else pin + own-roster
+              sweetener (give dir) / package of lesser own assets (receive dir)
+  lateral   — 1-for-1 within the band
+  downgrade — 2-3 lesser pieces packaged back (give dir) / pin + owner
+              sweetener(s) for a single better own asset (receive dir)
+
+Gates are the consensus-basis reuse set (package_value_v2, fairness ratio,
+#108 user-gain, #141 filler, consolidation raw-loss). A group that would be
+EMPTY refills from the widened #189 band, labeled relaxed=True +
+relaxed_reason="fairness_band". Groups are capped (asset_ideas_group_cap)
+and ordered by |difference|; output is deterministic.
+
+Route: POST /api/trades/asset-ideas — 404 when the flag is off.
+
+Elo→value refresher (defaults): value = 1000 * exp(0.005 * (elo - 1500)).
+"""
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+
+import backend.feature_flags as ff
+import backend.trade_service as ts
+from backend.trade_service import League, LeagueMember, TradeService
+
+
+@pytest.fixture(autouse=True)
+def _isolate():
+    old_flags = ff._flags_cache
+    old_cfg = dict(ts._cfg)
+    ff._flags_cache = dict(ff.DEFAULT_FLAGS)   # all off — crown premium too
+    ts._cfg.clear()
+    ts._cfg.update(ts._DEFAULT_CFG)
+    try:
+        yield
+    finally:
+        ff._flags_cache = old_flags
+        ts._cfg.clear()
+        ts._cfg.update(old_cfg)
+
+
+class _Player:
+    def __init__(self, pid, position="RB", age=25, search_rank=50):
+        self.id = pid
+        self.name = f"Player {pid}"
+        self.position = position
+        self.team = "TST"
+        self.age = age
+        self.years_experience = 3
+        self.search_rank = search_rank
+        self.pick_value = None
+
+
+# ── Give-direction fixture ────────────────────────────────────────────────
+# Pin P (elo 1560, v≈1349.9; band ±10% → [1214.9, 1484.8]).
+# Opponent assets: U 1700 (v≈2718, upgrade), L 1570 (v≈1419, lateral),
+#   L2 1550 (v≈1284 — in band but BELOW the pin → #108 excludes it),
+#   D1 1520 (v≈1105) + D2 1500 (v=1000) — downgrade pieces.
+# User roster: P + sweetener S1 1610 (v≈1732 — makes the 2-for-1 upgrade
+# pass fairness AND the consolidation raw-loss cap).
+GIVE_ELO = {"P": 1560.0, "S1": 1610.0, "U": 1700.0, "L": 1570.0,
+            "L2": 1550.0, "D1": 1520.0, "D2": 1500.0}
+
+
+def _give_service():
+    players = {pid: _Player(pid) for pid in GIVE_ELO}
+    opp = LeagueMember(user_id="opp", username="OppTeam",
+                       roster=["U", "L", "L2", "D1", "D2"], elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[opp]))
+    return svc
+
+
+def _give_ideas(svc=None, **kw):
+    svc = svc or _give_service()
+    kw.setdefault("fairness_threshold", 0.50)
+    return svc.generate_asset_ideas(
+        user_id="user",
+        user_roster=["P", "S1"],
+        league_id="L1",
+        seed_elo=dict(GIVE_ELO),
+        asset_id="P",
+        direction="give",
+        raw_user_elo=dict(GIVE_ELO),
+        **kw,
+    )
+
+
+def test_give_direction_grouping_bands():
+    groups = _give_ideas()
+    # Upgrade: U comes back; the straight 1-for-1 can't pass fairness, so
+    # the sweetened 2-for-1 (P + S1) is the emitted variant.
+    assert len(groups["upgrade"]) == 1
+    up = groups["upgrade"][0]
+    assert up["receive_player_ids"] == ["U"]
+    assert sorted(up["give_player_ids"]) == ["P", "S1"]
+    assert up["counterparty_user_id"] == "opp"
+    assert up["difference"] == round(up["receive_value"] - up["give_value"], 1)
+    # Lateral: exactly the in-band 1-for-1 that clears #108 (L, not L2).
+    assert [i["receive_player_ids"] for i in groups["lateral"]] == [["L"]]
+    assert groups["lateral"][0]["give_player_ids"] == ["P"]
+    assert groups["lateral"][0]["difference"] > 0
+    # Downgrade: P out, 2-piece package back.
+    assert len(groups["downgrade"]) == 1
+    down = groups["downgrade"][0]
+    assert down["give_player_ids"] == ["P"]
+    assert sorted(down["receive_player_ids"]) == ["D1", "D2"]
+    # No idea is labeled relaxed at the 0.50 wide net.
+    for g in groups.values():
+        for idea in g:
+            assert "relaxed" not in idea
+
+
+def test_user_gain_gate_excludes_below_pin_lateral():
+    """L2 sits inside the band but below the pin's value — the #108
+    consensus-delta gate (receive − give ≥ ε) keeps it out everywhere."""
+    groups = _give_ideas()
+    for g in groups.values():
+        for idea in g:
+            assert "L2" not in idea["receive_player_ids"]
+
+
+def test_exclusions_respected():
+    # not-interested: U never enters the receive pool → no upgrade ideas
+    # (the 1-for-1 is hard-gated by fairness, nothing to relax into).
+    groups = _give_ideas(not_interested_ids={"U"})
+    assert groups["upgrade"] == []
+    assert groups["lateral"]            # unrelated groups unaffected
+    # untouchable sweetener: never leaves the roster → upgrade dries up.
+    groups = _give_ideas(untouchable_ids={"S1"})
+    assert groups["upgrade"] == []
+    for g in groups.values():
+        for idea in g:
+            assert "S1" not in idea["give_player_ids"]
+    # untouchable PIN in give direction: nothing is ever offered.
+    groups = _give_ideas(untouchable_ids={"P"})
+    assert groups == {"upgrade": [], "lateral": [], "downgrade": []}
+
+
+def test_relaxed_refill_labels_only_empty_groups():
+    """At a strict 0.75 threshold the sweetened upgrade (fairness ≈0.59)
+    falls out of the strict band; the group refills from the widened #189
+    band (relaxed_fairness_threshold 0.55) with honest labels. Groups that
+    still pass strictly (lateral ≈0.89, downgrade ≈0.87) stay unlabeled."""
+    groups = _give_ideas(fairness_threshold=0.75)
+    assert len(groups["upgrade"]) == 1
+    up = groups["upgrade"][0]
+    assert up["relaxed"] is True
+    assert up["relaxed_reason"] == "fairness_band"
+    assert up["fairness"] < 0.75
+    for group in ("lateral", "downgrade"):
+        assert groups[group], f"{group} should still pass strictly"
+        for idea in groups[group]:
+            assert "relaxed" not in idea
+
+
+def test_group_cap_and_ordering():
+    """11 lateral candidates → capped at asset_ideas_group_cap (6), ordered
+    by |difference| ascending (closest deals first)."""
+    elos = {"P": 1560.0}
+    lat_ids = []
+    for i in range(11):
+        pid = f"LAT{i}"
+        lat_ids.append(pid)
+        elos[pid] = 1562.0 + 2.0 * i          # all in band, all above the pin
+    players = {pid: _Player(pid) for pid in elos}
+    opp = LeagueMember(user_id="opp", username="OppTeam",
+                       roster=lat_ids, elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[opp]))
+    kw = dict(user_id="user", user_roster=["P"], league_id="L1",
+              seed_elo=dict(elos), asset_id="P", direction="give",
+              fairness_threshold=0.50, raw_user_elo=dict(elos))
+    groups = svc.generate_asset_ideas(**kw)
+    assert len(groups["lateral"]) == int(ts._DEFAULT_CFG["asset_ideas_group_cap"])
+    diffs = [abs(i["difference"]) for i in groups["lateral"]]
+    assert diffs == sorted(diffs)
+    # Closest candidate leads the group.
+    assert groups["lateral"][0]["receive_player_ids"] == ["LAT0"]
+    # Determinism: an identical second run returns an identical structure.
+    assert svc.generate_asset_ideas(**kw) == groups
+
+
+def test_give_ideas_deterministic():
+    assert _give_ideas() == _give_ideas()
+
+
+# ── Receive-direction fixture ─────────────────────────────────────────────
+# Pin T (elo 1700, v≈2718; band → [2446, 2990]) on opp2's roster (which also
+# holds extra E 1650, v≈2117). User roster: G_up 1650 (v≈2117, below band —
+# upgrade headliner), G2 1500 (v=1000, pairs with G_up), G_lat 1690 (v≈2586,
+# in band), G_down 1720 (v≈3004, above band — downgrade give).
+RECV_ELO = {"T": 1700.0, "E": 1650.0, "G_up": 1650.0, "G2": 1500.0,
+            "G_lat": 1690.0, "G_down": 1720.0}
+
+
+def _recv_service():
+    players = {pid: _Player(pid) for pid in RECV_ELO}
+    owner = LeagueMember(user_id="opp2", username="Owner",
+                         roster=["T", "E"], elo_ratings={})
+    other = LeagueMember(user_id="opp3", username="Other",
+                         roster=[], elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[owner, other]))
+    return svc
+
+
+def _recv_ideas(svc=None, **kw):
+    svc = svc or _recv_service()
+    kw.setdefault("fairness_threshold", 0.50)
+    return svc.generate_asset_ideas(
+        user_id="user",
+        user_roster=["G_up", "G2", "G_lat", "G_down"],
+        league_id="L1",
+        seed_elo=dict(RECV_ELO),
+        asset_id="T",
+        direction="receive",
+        raw_user_elo=dict(RECV_ELO),
+        **kw,
+    )
+
+
+def test_receive_direction_mirrors_grouping():
+    groups = _recv_ideas()
+    # Every idea's counterparty is the pin's OWNER, and the pin is always
+    # on the receive side (ideas are what the user GIVES).
+    for g in groups.values():
+        for idea in g:
+            assert idea["counterparty_user_id"] == "opp2"
+            assert "T" in idea["receive_player_ids"]
+    # Upgrade: tier up INTO the pin — a package of lesser own assets
+    # (the G_up + G2 pair lands closer than the bare 1-for-1).
+    assert len(groups["upgrade"]) == 1
+    up = groups["upgrade"][0]
+    assert up["receive_player_ids"] == ["T"]
+    assert sorted(up["give_player_ids"]) == ["G2", "G_up"]
+    assert up["difference"] > 0
+    # Lateral: the in-band own asset swaps straight across.
+    assert [i["give_player_ids"] for i in groups["lateral"]] == [["G_lat"]]
+    # Downgrade: single better own asset out, pin + owner sweetener back.
+    assert len(groups["downgrade"]) == 1
+    down = groups["downgrade"][0]
+    assert down["give_player_ids"] == ["G_down"]
+    assert sorted(down["receive_player_ids"]) == ["E", "T"]
+
+
+def test_receive_direction_exclusions():
+    # A not-interested PIN is never proposed at all.
+    groups = _recv_ideas(not_interested_ids={"T"})
+    assert groups == {"upgrade": [], "lateral": [], "downgrade": []}
+    # A not-interested owner sweetener never pads the downgrade return.
+    groups = _recv_ideas(not_interested_ids={"E"})
+    assert groups["downgrade"] == []
+    # Untouchable own assets never appear on the give side.
+    groups = _recv_ideas(untouchable_ids={"G_lat"})
+    assert groups["lateral"] == []
+    for g in groups.values():
+        for idea in g:
+            assert "G_lat" not in idea["give_player_ids"]
+
+
+def test_receive_ideas_deterministic():
+    assert _recv_ideas() == _recv_ideas()
+
+
+def test_unknown_asset_or_direction_returns_empty():
+    svc = _give_service()
+    empty = {"upgrade": [], "lateral": [], "downgrade": []}
+    assert svc.generate_asset_ideas(
+        user_id="user", user_roster=["P", "S1"], league_id="L1",
+        seed_elo=dict(GIVE_ELO), asset_id="nope", direction="give") == empty
+    assert svc.generate_asset_ideas(
+        user_id="user", user_roster=["P", "S1"], league_id="L1",
+        seed_elo=dict(GIVE_ELO), asset_id="P", direction="sideways") == empty
+    # Give-direction pin must actually be on the user's roster.
+    assert svc.generate_asset_ideas(
+        user_id="user", user_roster=["S1"], league_id="L1",
+        seed_elo=dict(GIVE_ELO), asset_id="P", direction="give") == empty
+
+
+# ── Route: POST /api/trades/asset-ideas ──────────────────────────────────
+
+TOKEN = "sess-asset-ideas-tok"
+
+
+class _FakeRankSet(SimpleNamespace):
+    pass
+
+
+class _FakeService:
+    def __init__(self, elo_map):
+        self._seed = dict(elo_map)
+        self._rank_rows = [
+            SimpleNamespace(player=SimpleNamespace(id=pid), elo=e)
+            for pid, e in elo_map.items()
+        ]
+
+    def get_rankings(self, position=None):
+        return _FakeRankSet(rankings=self._rank_rows)
+
+
+@pytest.fixture()
+def route_client():
+    import backend.server as server
+    svc = _give_service()
+    players = list(svc._players.values())
+    sess = {
+        "user_id":       "user",
+        "league":        svc._leagues["L1"],
+        "players":       players,
+        "user_roster":   ["P", "S1"],
+        "service":       _FakeService(GIVE_ELO),
+        "trade_svc":     svc,
+        "active_format": "1qb_ppr",
+        "last_active":   0.0,
+    }
+    server.app.config["TESTING"] = True
+    c = server.app.test_client()
+    with server._sessions_lock:
+        server._sessions[TOKEN] = sess
+    try:
+        with patch.object(server, "_verified_write_denial", lambda s: None):
+            yield c
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(TOKEN, None)
+
+
+def _post(c, body):
+    return c.post("/api/trades/asset-ideas", json=body,
+                  headers={"X-Session-Token": TOKEN})
+
+
+def test_route_404_when_flag_off(route_client):
+    ff._flags_cache = dict(ff.DEFAULT_FLAGS)          # trade.asset_ideas off
+    r = _post(route_client, {"asset_id": "P"})
+    assert r.status_code == 404
+
+
+def test_route_groups_shape(route_client):
+    ff._flags_cache = {**ff.DEFAULT_FLAGS, "trade.asset_ideas": True}
+    r = _post(route_client, {"asset_id": "P", "direction": "give"})
+    assert r.status_code == 200, r.get_json()
+    data = r.get_json()
+    assert data["direction"] == "give"
+    assert data["basis"] == "consensus"
+    assert data["asset"]["id"] == "P"
+    groups = data["groups"]
+    assert set(groups) == {"upgrade", "lateral", "downgrade"}
+    up = groups["upgrade"][0]
+    # Serialized rows carry hydrated player dicts alongside the id lists.
+    assert [p["id"] for p in up["receive"]] == up["receive_player_ids"] == ["U"]
+    assert {p["id"] for p in up["give"]} == set(up["give_player_ids"]) == {"P", "S1"}
+    assert up["counterparty_username"] == "OppTeam"
+    assert isinstance(up["difference"], float)
+
+
+def test_route_validation(route_client):
+    ff._flags_cache = {**ff.DEFAULT_FLAGS, "trade.asset_ideas": True}
+    assert _post(route_client, {}).status_code == 400
+    assert _post(route_client,
+                 {"asset_id": "P", "direction": "sideways"}).status_code == 400
+    assert _post(route_client, {"asset_id": "zzz"}).status_code == 404

@@ -144,6 +144,17 @@ _DEFAULT_CFG: dict[str, float] = {
     # ------------------------------------------------------------------
     "relaxed_fairness_threshold": 0.55,
     "relaxed_surplus_floor":       0.0,
+    # ------------------------------------------------------------------
+    # #172/#189 follow-up — asset-centric Upgrade / Lateral / Downgrade
+    # ideas (flag: trade.asset_ideas; TradeService.generate_asset_ideas).
+    # A counterpart asset within ±asset_ideas_lateral_band of the pinned
+    # asset's consensus value classifies as a Lateral 1-for-1; above the
+    # band it's an Upgrade target, below it a Downgrade piece. Each of
+    # the three groups is capped at asset_ideas_group_cap ideas, ordered
+    # by |difference| (closest deals first).
+    # ------------------------------------------------------------------
+    "asset_ideas_lateral_band":   0.10,
+    "asset_ideas_group_cap":      6.0,
     # Waiver/roster-slot cost (amendment A3, FantasyCalc-derived ≈ rank-300 value)
     "waiver_slot_cost":    425.0,     # value cost per extra player received
     # Confidence shrinkage + range-overlap fairness (Change 4 + amendment A4)
@@ -2064,6 +2075,284 @@ class TradeService:
                     c.relaxed_reason = reason
                 return cards
         return []
+
+    # ------------------------------------------------------------------
+    # #172/#189 follow-up — asset-centric Upgrade / Lateral / Downgrade
+    # ideas (flag: trade.asset_ideas; route POST /api/trades/asset-ideas)
+    # ------------------------------------------------------------------
+
+    def generate_asset_ideas(
+        self,
+        *,
+        user_id: str,
+        user_roster: list[str],
+        league_id: str,
+        seed_elo: dict[str, float],
+        asset_id: str,
+        direction: str = "give",             # "give" (trade away) | "receive" (acquire)
+        fairness_threshold: float = 0.50,
+        raw_user_elo: dict[str, float] | None = None,
+        untouchable_ids: set | None = None,
+        not_interested_ids: set | None = None,
+    ) -> dict[str, list[dict]]:
+        """Grouped trade ideas for ONE pinned asset (player or pick), the
+        Dynasty-Trade-Factory "Smart Trade Finder" presentation: sweep every
+        league-mate's roster (owned picks included when the caller injected
+        them) and return candidate deals grouped Upgrade / Lateral /
+        Downgrade around the pinned asset's CONSENSUS value.
+
+        direction="give" (pinned asset leaves the user's roster — "what can
+        I get for X?"): ideas enumerate the RETURN. A counterpart asset
+        above the ±asset_ideas_lateral_band band is an Upgrade target (the
+        user adds a sweetener from their own roster when a straight 1-for-1
+        can't close the gap); inside the band it's a Lateral 1-for-1; below
+        it, 2-3 lesser pieces are packaged back as a Downgrade.
+
+        direction="receive" (pinned asset is acquired from its owner —
+        "what would X cost me?"): the mirror. Ideas enumerate what the USER
+        GIVES — a package of lesser own assets tiers UP into the pin
+        (Upgrade), a band-value own asset swaps straight across (Lateral),
+        and a single better own asset comes back as the pin plus owner
+        sweetener(s) (Downgrade).
+
+        Valuation and gates are the consensus-basis reuse set from
+        _generate_consensus_for_pair — package_value_v2 (crown premium via
+        n_other), the min/max fairness ratio, the #108 user-gain gates
+        (user_gain_epsilon on the consensus package delta +
+        user_gain_ok_1for1 on the raw board), #141 filler_ok and the
+        consolidation raw-loss cap. No new valuation math.
+
+        Coverage relaxation (#189 convention): candidates are evaluated
+        against min(fairness_threshold, relaxed_fairness_threshold); a
+        group that would otherwise be EMPTY refills from candidates that
+        passed only the widened band, labeled relaxed=True +
+        relaxed_reason="fairness_band". The #108 gates, untouchables and
+        not-interested exclusions are NEVER relaxed.
+
+        Each idea dict: counterparty ids, give/receive player-id lists,
+        adjusted package values (give_value / receive_value — same value
+        space as the calculator), signed difference (receive − give; + =
+        user ahead on consensus), fairness. Groups are capped at
+        asset_ideas_group_cap, ordered by |difference| ascending.
+        Deterministic for a fixed league snapshot.
+        """
+        empty: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
+        league = self._leagues.get(league_id)
+        players = self._players
+        if not league or asset_id not in players:
+            return empty
+        if direction not in ("give", "receive"):
+            return empty
+
+        _vs_cache: dict[str, float] = {}
+
+        def _v(pid: str) -> float:
+            val = _vs_cache.get(pid)
+            if val is None:
+                val = elo_to_value(seed_elo.get(pid, 1500.0))
+                _vs_cache[pid] = val
+            return val
+
+        def _uval_raw(pid: str) -> float:
+            # #141 max-of-boards arm: user raw board where known, else
+            # consensus (mirrors the consensus generator).
+            e = raw_user_elo.get(pid) if raw_user_elo else None
+            return elo_to_value(e) if e is not None else _v(pid)
+
+        v_pin = _v(asset_id)
+        band = _c("asset_ideas_lateral_band")
+        lo, hi = v_pin * (1.0 - band), v_pin * (1.0 + band)
+        cap = max(1, int(_c("asset_ideas_group_cap")))
+        relaxed_thr = min(fairness_threshold, _c("relaxed_fairness_threshold"))
+
+        def _eval(give_ids: list[str], recv_ids: list[str]):
+            """All non-fairness gates + the WIDENED fairness band. Returns
+            (fairness, gv, rv) or None when hard-gated."""
+            gvals = [_v(p) for p in give_ids]
+            rvals = [_v(p) for p in recv_ids]
+            v_max = max(gvals + rvals)
+            gv = package_value_v2(gvals, v_max, n_other=len(recv_ids))
+            rv = package_value_v2(rvals, v_max, n_other=len(give_ids))
+            if gv <= 0 or rv <= 0:
+                return None
+            # #108 — consensus IS the user's board here (never relaxed).
+            if rv - gv < _c("user_gain_epsilon"):
+                return None
+            frac = _c("consolidation_raw_loss_frac")
+            if frac > 0 and len(give_ids) > len(recv_ids):
+                raw_give = sum(gvals)
+                if raw_give - sum(rvals) > frac * raw_give:
+                    return None
+            if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
+                return None
+            if not filler_ok(give_ids, recv_ids, _uval_raw, _v):
+                return None
+            fairness = min(gv, rv) / max(gv, rv)
+            if fairness < relaxed_thr:
+                return None
+            return fairness, gv, rv
+
+        strict: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
+        relaxed: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
+        seen: set[tuple] = set()
+
+        def _emit(member, give_ids, recv_ids, res, group) -> None:
+            key = (frozenset(give_ids), frozenset(recv_ids), member.user_id)
+            if key in seen:
+                return
+            seen.add(key)
+            fairness, gv, rv = res
+            idea = {
+                "counterparty_user_id":  member.user_id,
+                "counterparty_username": member.username,
+                "give_player_ids":       list(give_ids),
+                "receive_player_ids":    list(recv_ids),
+                "give_value":            round(gv, 1),
+                "receive_value":         round(rv, 1),
+                "difference":            round(rv - gv, 1),
+                "fairness":              round(fairness, 3),
+            }
+            if fairness >= fairness_threshold:
+                strict[group].append(idea)
+            else:
+                idea["relaxed"] = True
+                idea["relaxed_reason"] = "fairness_band"
+                relaxed[group].append(idea)
+
+        def _emit_best(member, variants, group) -> None:
+            """variants: [(give_ids, recv_ids, res)]. Emit the closest deal
+            (min |difference|), preferring strict-band passes over relaxed."""
+            if not variants:
+                return
+            def _rank(v):
+                fairness, gv, rv = v[2]
+                return (fairness < fairness_threshold, abs(rv - gv),
+                        tuple(v[0]), tuple(v[1]))
+            _emit(member, *min(variants, key=_rank), group)
+
+        # Bound the piece pool for 2/3-asset package enumeration.
+        _POOL = 12
+
+        def _asset_sort(ids) -> list[str]:
+            return sorted(ids, key=lambda p: (-_v(p), p))
+
+        if direction == "give":
+            if asset_id not in user_roster:
+                return empty
+            if untouchable_ids and asset_id in untouchable_ids:
+                return empty     # untouchables are never given away (never relaxed)
+            sweeteners = _asset_sort(
+                p for p in set(user_roster)
+                if p != asset_id and p in players
+                and not (untouchable_ids and p in untouchable_ids))
+            opponents = sorted(
+                (m for m in league.members if m.user_id != user_id and m.roster),
+                key=lambda m: m.user_id)
+            for member in opponents:
+                pool = _asset_sort(
+                    p for p in set(member.roster)
+                    if p in players and p != asset_id
+                    and not (not_interested_ids and p in not_interested_ids))
+                for c in pool:
+                    vc = _v(c)
+                    if lo <= vc <= hi:
+                        res = _eval([asset_id], [c])
+                        if res:
+                            _emit(member, [asset_id], [c], res, "lateral")
+                    elif vc > hi:
+                        variants = []
+                        res = _eval([asset_id], [c])
+                        if res:
+                            variants.append(([asset_id], [c], res))
+                        for s in sweeteners:
+                            res = _eval([asset_id, s], [c])
+                            if res:
+                                variants.append(([asset_id, s], [c], res))
+                        _emit_best(member, variants, "upgrade")
+                # Downgrade: 2-3 lesser pieces back for the pin. Best 2
+                # combos per opponent with DISTINCT headliners (recombining
+                # the same top piece is a near-duplicate, not variety).
+                down = [p for p in pool if _v(p) < lo][:_POOL]
+                combos = []
+                for r in (2, 3):
+                    for combo in combinations(down, r):
+                        res = _eval([asset_id], list(combo))
+                        if res:
+                            combos.append((list(combo), res))
+                combos.sort(key=lambda cr: (cr[1][0] < fairness_threshold,
+                                            abs(cr[1][2] - cr[1][1]),
+                                            tuple(cr[0])))
+                kept_headliners: set[str] = set()
+                for combo, res in combos:
+                    if len(kept_headliners) >= 2:
+                        break
+                    head = combo[0]          # pools are value-sorted desc
+                    if head in kept_headliners:
+                        continue
+                    kept_headliners.add(head)
+                    _emit(member, [asset_id], combo, res, "downgrade")
+        else:   # direction == "receive"
+            if not_interested_ids and asset_id in not_interested_ids:
+                return empty     # user said never offer this to them
+            owner = next(
+                (m for m in sorted(league.members, key=lambda m: m.user_id)
+                 if m.user_id != user_id and asset_id in (m.roster or [])),
+                None)
+            if owner is None:
+                return empty
+            give_pool = _asset_sort(
+                p for p in set(user_roster)
+                if p != asset_id and p in players
+                and not (untouchable_ids and p in untouchable_ids))
+            extras = _asset_sort(
+                p for p in set(owner.roster)
+                if p in players and p != asset_id
+                and not (not_interested_ids and p in not_interested_ids))[:_POOL]
+            for g in give_pool:
+                vg = _v(g)
+                if lo <= vg <= hi:
+                    res = _eval([g], [asset_id])
+                    if res:
+                        _emit(owner, [g], [asset_id], res, "lateral")
+                elif vg < lo:
+                    # Tier UP into the pin: this asset headlines, optionally
+                    # plus one more own piece to close the gap.
+                    variants = []
+                    res = _eval([g], [asset_id])
+                    if res:
+                        variants.append(([g], [asset_id], res))
+                    for s in give_pool:
+                        if s == g:
+                            continue
+                        res = _eval([g, s], [asset_id])
+                        if res:
+                            variants.append(([g, s], [asset_id], res))
+                    _emit_best(owner, variants, "upgrade")
+                else:
+                    # Tier DOWN: give the better own asset, receive the pin
+                    # plus 1-2 owner sweeteners (a bare 1-for-1 down always
+                    # fails the #108 epsilon, so extras are required).
+                    variants = []
+                    for e in extras:
+                        res = _eval([g], [asset_id, e])
+                        if res:
+                            variants.append(([g], [asset_id, e], res))
+                    for e1, e2 in combinations(extras, 2):
+                        res = _eval([g], [asset_id, e1, e2])
+                        if res:
+                            variants.append(([g], [asset_id, e1, e2], res))
+                    _emit_best(owner, variants, "downgrade")
+
+        out: dict[str, list[dict]] = {}
+        order_key = lambda i: (abs(i["difference"]), i["counterparty_user_id"],
+                               tuple(i["give_player_ids"]),
+                               tuple(i["receive_player_ids"]))
+        for group in ("upgrade", "lateral", "downgrade"):
+            # #189 convention: relaxed-band ideas surface ONLY when the
+            # group would otherwise be empty, and stay labeled.
+            chosen = strict[group] or relaxed[group]
+            out[group] = sorted(chosen, key=order_key)[:cap]
+        return out
 
     # ------------------------------------------------------------------
     # Trade engine v2 (flag: trade_engine.v2)

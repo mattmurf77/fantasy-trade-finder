@@ -282,6 +282,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # can send/receive a pick (#170/#171). DATA inclusion only — scoring
     # unchanged. Off ⇒ no pick ever appears in a suggestion.
     "trade.picks_in_pool",
+    # ── #172/#189 follow-up — asset-centric trade ideas ──────────────────
+    # POST /api/trades/asset-ideas: when the user pins exactly ONE asset in
+    # the finder targeting flow, return Upgrade / Lateral / Downgrade idea
+    # groups swept from every league-mate's roster + owned picks (consensus
+    # basis, TradeService.generate_asset_ideas). Off ⇒ the route 404s and
+    # the mobile grouped-ideas panel never renders. Default ON in
+    # config/features.json (operator ask); this flag is the kill switch.
+    "trade.asset_ideas",
     # ── Feedback #175 — directional outlook weighting ────────────────────
     # When the user's resolved outlook is rebuild-side (rebuilder/jets),
     # cards acquiring win-now/older production are strongly penalized and
