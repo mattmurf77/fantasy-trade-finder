@@ -50,6 +50,12 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # Trades
     "find_trades_tapped", "trade_card_viewed", "trade_flagged",
     "match_opened",
+    # TikTok-discovery deck engine (docs/plans/tiktok-discovery/). The F1
+    # /api/events outcome scan reads deck_card_viewed / swipe_undone BEFORE
+    # taxonomy filtering (server-side deck_outcomes are independent of this
+    # allowlist); registering them here additionally lands the analytics
+    # rows F8's offline-eval harness reads. deck_reranked is F4 telemetry.
+    "deck_card_viewed", "swipe_undone", "deck_reranked",
     # Engagement
     "push_opened",
     # Onboarding & conversion plan (docs/plans/onboarding-conversion/plan.md)
@@ -138,6 +144,10 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                        "cold_start"}),
     "trade_flagged":        frozenset({"reason", "trade_id"}),
     "match_opened":         frozenset({"match_id"}),
+    # TikTok-discovery deck engine (F1 viewed/undo joins + F4 rerank moves)
+    "deck_card_viewed":     frozenset({"impression_id", "trade_id", "card_index"}),
+    "swipe_undone":         frozenset({"trade_id", "impression_id"}),
+    "deck_reranked":        frozenset({"moved", "moves"}),
     # Engagement
     "push_opened":          frozenset({"kind", "dedup_key"}),
     # Onboarding & conversion plan (docs/plans/onboarding-conversion/plan.md)

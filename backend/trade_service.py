@@ -270,6 +270,28 @@ _DEFAULT_CFG: dict[str, float] = {
     "fatigue_decline_value_band": 0.10,  # near-duplicate ⇔ package value within ±this fraction
     "fatigue_retest_mult":        0.5,   # low-exposure multiplier for the ONE post-window retest card
     # ------------------------------------------------------------------
+    # F5 — trade-taste vectors (flag: deck.taste_vectors — consumed by
+    # backend/taste_service.py + server's taste layer around _order_deck).
+    #   final = base × clamp((1 + η_l·prefMatch_long)·(1 + η_s·prefMatch_short),
+    #                        taste_clamp_lo, taste_clamp_hi)
+    # prefMatch = normalized cosine of the decayed taste vector against the
+    # card's attribute set — 0 for a zero-history user, so the multiplier
+    # is exactly 1.0 (flag-off-identical ordering). Applied AFTER all
+    # generation gates: reorders acceptable trades, never rescues gated ones.
+    # ------------------------------------------------------------------
+    "taste_eta_long":             0.2,   # long-τ prefMatch weight (η_l)
+    "taste_eta_short":            0.3,   # short-τ prefMatch weight (η_s)
+    "taste_clamp_lo":             0.7,   # final taste multiplier floor
+    "taste_clamp_hi":             1.4,   # final taste multiplier ceiling
+    "taste_tau_short_days":      21.0,   # short-interest decay τ
+    "taste_tau_long_days":      180.0,   # long-interest decay τ
+    "taste_dwell_ms":          8000.0,   # dwell_ms ≥ this ⇒ long-dwell bonus applies
+    "taste_dwell_bonus":          0.3,   # reward added on a long dwell
+    "taste_epsilon":             0.05,   # GC floor — rows with both |w| below vanish on read/update
+    "taste_prior_scale":         10.0,   # board-prior ceiling ≈ this many likes of weight
+    "taste_prior_shrink":        20.0,   # per-attr ranked-count shrinkage n/(n+this)
+    "taste_prior_ref_delta":     0.25,   # |board-vs-consensus| rel delta treated as "strong"
+    # ------------------------------------------------------------------
     # F10 — weekly deck replenishment (flag: deck.replenishment —
     # consumed by server._run_weekly_replenishment inside daily-tick)
     # ------------------------------------------------------------------

@@ -218,7 +218,7 @@ flags flipped ON at its TestFlight ship. F8 (offline eval harness) is unflagged 
 | `deck.thompson_v2` | false | F2 bandit hygiene: pessimistic base-rate priors, posterior decay γ=0.995/day, viewed-only (cascade) updates, archetype×shape arms with parent warm-start. |
 | `deck.fatigue` | false | F3 per-user impression discounting, decline ⇒ 30-day near-duplicate suppression (+1 retest), suppression note + undo, deck refresh (soft-layer reset). |
 | `deck.session_rerank` | false | F4 client-side re-rank of remaining deck after each disposition (last-k session boost vector; peeked card/pins/wildcard never move). |
-| `deck.taste_vectors` | false | F5 per-user decayed attribute-preference vectors (short τ=21d / long τ=180d) applied as bounded multiplicative re-rank at generation. |
+| `deck.taste_vectors` | false | F5 per-user decayed attribute-preference vectors (short τ=21d / long τ=180d) + board-derived prior, applied as a bounded multiplicative re-rank at generation (`user_taste` table, `backend/taste_service.py`; keys in the F5 model_config section below). |
 | `deck.exploration` | false | F7 one labeled Wildcard slot per deck (positions 4–6), archetype audition pools, exploration propensity logging. |
 | `deck.value_model` | false | F6 learned P(like)/P(propose) heads × hand-set V-vector as base ordering. **Stays dark until an F8 replay win with adequate ESS (PRD gate).** |
 | `deck.first_session` | false | F9 confidence-weighted first-5 cards on a user's first deck + honest visible-adaptation moment. |
@@ -349,6 +349,25 @@ All read via `server._deck_cfg`, consumed by the fatigue/suppression layer aroun
 | `fatigue_decline_suppress_days` | 30.0 | Hard near-duplicate suppression window after a decline / proposal-kill |
 | `fatigue_decline_value_band` | 0.10 | Near-duplicate ⇔ same centerpiece + shape AND package value within ±this fraction of the declined package |
 | `fatigue_retest_mult` | 0.5 | Low-exposure multiplier for the ONE post-window retest card |
+
+### F5 — trade-taste vectors (flag `deck.taste_vectors`)
+
+All read via `taste_service._cfg` (same live-dict pattern as `server._deck_cfg`), consumed by `backend/taste_service.py` + the taste layer around `_order_deck`. Serving math: `final = base × clamp((1 + taste_eta_long·prefMatch_long)·(1 + taste_eta_short·prefMatch_short), taste_clamp_lo, taste_clamp_hi)` with prefMatch = normalized cosine of the decayed vector against the card's attribute set (`shape:`, `arch:`, `window:`, `cpos:`, `givepos:`/`recvpos:`, `giveband:`/`recvband:`, `giveage:`/`recvage:`, `pick:`, `partner:` keys). Zero-history user ⇒ prefMatch 0 ⇒ multiplier exactly 1.0 (flag-off-identical ordering). Applied after every generation gate — reorders acceptable trades, never rescues gated ones — and composes multiplicatively with the F3 fatigue discount.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `taste_eta_long` | 0.2 | Long-τ prefMatch weight (η_l) |
+| `taste_eta_short` | 0.3 | Short-τ prefMatch weight (η_s) |
+| `taste_clamp_lo` | 0.7 | Final taste multiplier floor |
+| `taste_clamp_hi` | 1.4 | Final taste multiplier ceiling |
+| `taste_tau_short_days` | 21.0 | Short-interest decay τ (`w ← w·exp(−Δt/τ) + r`, lazy at read/update) |
+| `taste_tau_long_days` | 180.0 | Long-interest decay τ |
+| `taste_dwell_ms` | 8000.0 | `dwell_ms` ≥ this on an outcome ⇒ the long-dwell bonus applies (hesitation is interest, whatever the verdict) |
+| `taste_dwell_bonus` | 0.3 | Reward added on a long dwell (base rewards: like +1, propose +6, accept +4, pass −0.5, decline −2, not_interested −4) |
+| `taste_epsilon` | 0.05 | GC floor — `user_taste` rows whose decayed weights are BOTH below this are deleted on read/update; sub-ε prior attrs are never stored |
+| `taste_prior_scale` | 10.0 | Board-prior ceiling ≈ the weight of this many likes (a warm start swipe volume overtakes, not a ceiling) |
+| `taste_prior_shrink` | 20.0 | Per-attribute ranked-count shrinkage `n/(n+this)` on the board prior |
+| `taste_prior_ref_delta` | 0.25 | Board-vs-consensus relative delta treated as "strong" (prior scales on `mean_delta/this`, clamped ±1) |
 
 ### Tier 3 (flag-gated, landing imminently)
 

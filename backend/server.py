@@ -171,6 +171,7 @@ from .database import (
     create_shared_package, load_shared_package, count_recent_shared_packages,
 )
 from . import sleeper_write as _sleeper_write
+from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
 from . import trends_service as _trends_service_mod
@@ -2058,6 +2059,15 @@ def _deck_fatigue_enabled() -> bool:
     return getattr(FLAGS, "deck_fatigue", False)
 
 
+def _deck_taste_enabled() -> bool:
+    """F5 — trade-taste vectors (docs/plans/tiktok-discovery/prds/
+    F5-taste-vectors.md). Every taste code path checks this — the outcome-
+    write update hook, the features_json taste_attrs stamp, the board-prior
+    refresh, and the serving multiplier; off ⇒ byte-identical scoring,
+    payloads, and DB writes."""
+    return getattr(FLAGS, "deck_taste_vectors", False)
+
+
 def _deck_cfg(key: str, default: float) -> float:
     """model_config key via trade_service's live config dict (same pattern
     as _fuzzy_match_tau). Defaults inline so a missing key never breaks
@@ -2331,6 +2341,7 @@ def _order_deck(
     seed_map: dict,
     capture: dict | None = None,
     fatigue_mult: dict | None = None,
+    taste_mult: dict | None = None,
 ) -> list:
     """Apply A5 (Thompson ordering — v1, or the F2 v2 sampler when
     deck.thompson_v2 is on) and A6 (diversification) to a generated deck.
@@ -2347,11 +2358,19 @@ def _order_deck(
     `fatigue_mult` (F3, deck.fatigue): {id(card): m ≤ 1.0} discounts folded
     into the ordering key AFTER the Thompson draw — fatigue reorders, never
     boosts, and the F1 final_key capture records it. None (the flag-off
-    caller value) ⇒ byte-identical pre-F3 behavior."""
+    caller value) ⇒ byte-identical pre-F3 behavior.
+
+    `taste_mult` (F5, deck.taste_vectors): {id(card): m} bounded taste
+    multipliers (clamped [taste_clamp_lo, taste_clamp_hi] upstream —
+    unlike fatigue they may boost within the clamp). Folded into the same
+    ordering key, composing multiplicatively with the Thompson draw, the
+    F3 discount and the diversity penalty (order immaterial). None (the
+    flag-off / zero-history caller value) ⇒ byte-identical pre-F5
+    behavior."""
     thompson_v2 = _deck_thompson_v2_enabled()   # F2 — supersedes the v1 draw
     thompson  = _thompson_deck_enabled() or thompson_v2
     diversity = _deck_diversity_enabled()
-    if not cards or not (thompson or diversity or fatigue_mult):
+    if not cards or not (thompson or diversity or fatigue_mult or taste_mult):
         return cards
 
     key = {id(c): float(getattr(c, "composite_score", 0.0) or 0.0) for c in cards}
@@ -2399,6 +2418,14 @@ def _order_deck(
     if fatigue_mult:
         for c in cards:
             key[id(c)] *= min(1.0, float(fatigue_mult.get(id(c), 1.0)))
+
+    # F5 (deck.taste_vectors) — bounded taste multiplier on the ordering
+    # key. Already clamped by taste_service; a card missing from the map
+    # rides 1.0. Reorders gate-passing candidates only — membership of
+    # `cards` was settled upstream and is never changed here.
+    if taste_mult:
+        for c in cards:
+            key[id(c)] *= float(taste_mult.get(id(c), 1.0))
 
     if diversity:
         user_cap = int(_deck_cfg("diversity_user_cap", 3))
@@ -2539,6 +2566,14 @@ def _log_deck_signal_impressions(
         # decks' features_json stays byte-identical to pre-F10.
         if source:
             features["deck_source"] = source
+        # F5 (deck.taste_vectors) — freeze the card's taste-attribute keys
+        # at serve time so the outcome-write update reads them from the
+        # impression instead of re-deriving (no training/serving skew).
+        # Key added only while the flag is on, so flag-off features_json
+        # stays byte-identical to pre-F5.
+        if _deck_taste_enabled():
+            features["taste_attrs"] = _taste_service.card_taste_attrs(
+                card, players_dict, seed_map or {})
         base = float(getattr(card, "composite_score", 0.0) or 0.0)
         impression_id = uuid.uuid4().hex
         imp_by_card[id(card)] = impression_id
@@ -2590,6 +2625,15 @@ def _save_deck_outcome_safe(
             detail_expanded = bool(detail_expanded) if detail_expanded is not None else None,
             calc_opened     = bool(calc_opened) if calc_opened is not None else None,
         )
+        # F5 (deck.taste_vectors) — synchronous taste-vector update riding
+        # the outcome write (PRD: minute-level sync at FTF QPS = a SQL
+        # write). Flag-gated here AND never-throwing inside, so this
+        # helper's contract is unweakened; flag off ⇒ zero taste reads or
+        # writes. Skipped when the outcome insert itself failed (the
+        # exception path above) — no label, no learning.
+        if _deck_taste_enabled():
+            _taste_service.update_taste_from_outcome(
+                impression_id[:64], action, dwell_ms=dw)
     except Exception as out_err:
         log.warning("deck signal outcome write failed (non-fatal): %s", out_err)
 
@@ -2915,6 +2959,38 @@ def _save_decline_suppression(
     )
 
 
+# ── F5 (flag deck.taste_vectors) — board-derived prior refresh ──────────────
+
+def _refresh_taste_board_prior(user_id: str, service) -> None:
+    """F5 (PRD amendment 2026-07-26) — refresh the board-derived taste
+    prior. Called from every board-save path that republishes
+    member_rankings and invalidates cached decks (rank3 swipes, tiers/save,
+    tiers/copy-from-format, anchor/save, rankings/reorder): the user's
+    board is taste signal available before a single swipe.
+
+    "Ranked" = priced away from the consensus seed: trio swipes, tier
+    bands, reorders and anchors all move Elo off seed, while an untouched
+    player sits exactly at seed and carries no signal (delta 0 would only
+    dilute the shrinkage). Values come from the session RankingService the
+    route already holds (its Elo snapshot + `_seed` consensus map) —
+    nothing is re-derived. Flag-gated and never-throwing: a board save
+    must never fail on the taste layer. A zero-divergence board (or a
+    brand-new user) clears the prior block — the zero-history contract."""
+    if not _deck_taste_enabled() or service is None:
+        return
+    try:
+        seed = getattr(service, "_seed", {}) or {}
+        rank_set = service.get_rankings(position=None)
+        entries = []
+        for rp in rank_set.rankings:
+            seed_elo = float(seed.get(rp.player.id, 1500.0))
+            if abs(float(rp.elo) - seed_elo) > 1e-6:
+                entries.append((rp.player, float(rp.elo), seed_elo))
+        _taste_service.refresh_board_prior(user_id, entries)
+    except Exception as e:
+        log.warning("taste board-prior refresh failed (non-fatal): %s", e)
+
+
 def _user_pick_share(user_id: str, league_id: str) -> float:
     """The user's share of total draft-pick value in a league (0.0 when no
     picks synced). Feeds the #8 outlook seed and #1's classifier."""
@@ -3227,6 +3303,28 @@ def _run_trade_job(
                 log.warning("deck fatigue layer failed (non-fatal): %s", fat_err)
                 suppression_note, fatigue_mults = None, None
 
+        # F5 (flag deck.taste_vectors) — per-user taste multipliers,
+        # computed AFTER the F3 suppression pass (gate-passing survivors
+        # only — taste reorders acceptable trades, never rescues gated or
+        # suppressed ones) and folded into the ordering key by _order_deck
+        # below, composing multiplicatively with the F3 fatigue discounts
+        # (order immaterial, both bounded). Zero-history users (no board
+        # prior, no swipe-learned rows) yield None, so every downstream
+        # path is byte-identical to flag-off — the cold-start contract.
+        # Non-fatal: any failure serves the deck exactly as generated.
+        taste_mults: dict | None = None
+        if _deck_taste_enabled() and league_id != "league_demo":
+            try:
+                taste_mults = _taste_service.taste_multipliers(
+                    final_cards,
+                    user_id      = g_user_id,
+                    players_dict = players_dict,
+                    seed_map     = seed_map,
+                )
+            except Exception as taste_err:
+                log.warning("deck taste layer failed (non-fatal): %s", taste_err)
+                taste_mults = None
+
         # Tier 2 amendments A5 + A6 — Thompson-sampled ordering + league-wide
         # diversification. Runs AFTER likes-you injection (so pinning sees
         # the final likes_you flags) and BEFORE impression logging (so
@@ -3237,7 +3335,7 @@ def _run_trade_job(
         signal_capture: dict | None = None
         if league_id != "league_demo" and (
                 _thompson_deck_enabled() or _deck_thompson_v2_enabled()
-                or _deck_diversity_enabled() or fatigue_mults):
+                or _deck_diversity_enabled() or fatigue_mults or taste_mults):
             try:
                 # F1: capture the drawn Thompson multipliers + final ordering
                 # keys for deck_impressions. None when the flag is off — the
@@ -3252,6 +3350,7 @@ def _run_trade_job(
                     seed_map  = seed_map,
                     capture   = signal_capture,
                     fatigue_mult = fatigue_mults,
+                    taste_mult   = taste_mults,   # F5 — None when off/zero-history
                 )
                 if [id(c) for c in ordered] != [id(c) for c in final_cards]:
                     final_cards = ordered
@@ -3807,6 +3906,10 @@ def post_rank3():
                 )
         except Exception as db_err:
             log.warning("member_rankings auto-publish failed (continuing): %s", db_err)
+
+        # F5 (deck.taste_vectors) — board saves refresh the board-derived
+        # taste prior (flag-gated + never-throwing inside the helper).
+        _refresh_taste_board_prior(g_user_id, service)
 
         # ── Trends: record ELO snapshot for any player involved in this
         # ranking.  We only write the players that actually changed in this
@@ -4398,6 +4501,10 @@ def copy_tiers_from_format_route():
             )
         except Exception as db_err:
             log.warning("copy-from-format: member_rankings publish failed: %s", db_err)
+
+    # F5 (deck.taste_vectors) — board saves refresh the board-derived
+    # taste prior (flag-gated + never-throwing inside the helper).
+    _refresh_taste_board_prior(g_user_id, to_svc)
 
     # Invalidate any cached trade-generation jobs since rankings just changed.
     try:
@@ -5012,6 +5119,10 @@ def save_tiers_route():
         except Exception as db_err:
             log.warning("member_rankings publish after tiers save failed: %s", db_err)
 
+        # F5 (deck.taste_vectors) — board saves refresh the board-derived
+        # taste prior (flag-gated + never-throwing inside the helper).
+        _refresh_taste_board_prior(g_user_id, service)
+
         # #164 — feed the Trends tab: tier placements (and clears, whose ELO
         # reverted) are ranking changes and must land in elo_history.
         assigned_pids = [
@@ -5148,6 +5259,10 @@ def save_anchor_route():
                 )
         except Exception as db_err:
             log.warning("member_rankings publish after anchor failed: %s", db_err)
+
+        # F5 (deck.taste_vectors) — board saves refresh the board-derived
+        # taste prior (flag-gated + never-throwing inside the helper).
+        _refresh_taste_board_prior(g_user_id, service)
 
         # #164 — feed the Trends tab (see _record_trends_snapshot).
         _record_trends_snapshot(service, g_user_id, g_league, fmt, [player_id])
@@ -5518,6 +5633,10 @@ def reorder_rankings():
                 )
         except Exception as db_err:
             log.warning("member_rankings publish after reorder failed: %s", db_err)
+
+        # F5 (deck.taste_vectors) — board saves refresh the board-derived
+        # taste prior (flag-gated + never-throwing inside the helper).
+        _refresh_taste_board_prior(g_user_id, service)
 
         # #164 — feed the Trends tab (see _record_trends_snapshot).
         _record_trends_snapshot(service, g_user_id, g_league, fmt, ordered_ids)

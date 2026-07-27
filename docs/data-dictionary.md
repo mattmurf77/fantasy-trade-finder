@@ -224,7 +224,7 @@ TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-
 | `deck_job_id` | str | generation job id (`_trade_jobs`) |
 | `card_index` | int | 0 = top card, final served order |
 | `trade_hash` | str | sha256[:16] of sorted give ids \| sorted receive ids \| partner |
-| `features_json` | JSON text | **frozen at serve time** — shape, basis, likes_you, lane, give/receive positions, values + 500-wide value bands, `involves_pick`, `partner_user_id`, surplus margin (mismatch), fairness, need/partner fit, fit_premium, aggression_variant, relaxed, plus board-state-at-serve: `ranked_player_count`, `last_board_update_at`, `user_value_basis` (`personal`/`consensus`) |
+| `features_json` | JSON text | **frozen at serve time** — shape, basis, likes_you, lane, give/receive positions, values + 500-wide value bands, `involves_pick`, `partner_user_id`, surplus margin (mismatch), fairness, need/partner fit, fit_premium, aggression_variant, relaxed, plus board-state-at-serve: `ranked_player_count`, `last_board_update_at`, `user_value_basis` (`personal`/`consensus`); `deck_source` only on F10 cron-pre-generated decks; `taste_attrs` (F5, only while `deck.taste_vectors` is on) — the card's frozen taste-attribute keys consumed by `user_taste` updates |
 | `propensity` | float NOT NULL | the Thompson multiplier **actually applied** to this card's sort key (`0.5 + beta draw`, in (0.5, 1.5)); `1.0` when ordering was off (deterministic serve) |
 | `base_score` | float | `composite_score` before presentation multipliers |
 | `final_score` | float | ordering key after Thompson/diversity multipliers (= base when ordering off) |
@@ -305,6 +305,20 @@ TikTok-discovery **F10 deck replenishment** (flag `deck.replenishment`, `docs/pl
 | `created_at` | str | ISO UTC |
 
 Unique: `uq_deck_replenish_week` on `(user_id, league_id, iso_week)`.
+
+---
+
+## `user_taste`
+
+TikTok-discovery **F5 trade-taste vectors** (flag `deck.taste_vectors`, `docs/plans/tiktok-discovery/prds/F5-taste-vectors.md`). Per-user decayed attribute-preference weights — the Monolith long/short interest split without embeddings. One lazily-created row per (user, attribute key), updated synchronously on every F1 `deck_outcomes` write (`w[a] ← w[a]·exp(−Δt/τ) + r(action)`, attrs read from the impression's frozen `features_json.taste_attrs`) and GC'd on read/update when **both** decayed weights fall below `taste_epsilon` — so the table stays bounded per user by the attribute-space cardinality (~50 fixed keys + one per league-mate + priors). Rows whose `attr` carries the `prior:` prefix hold the **board-derived prior** (2026-07-26 PRD amendment): rewritten wholesale by `replace_user_taste_prior` on every board save (rank3, tiers/save, copy-from-format, anchor/save, rankings/reorder), never touched by outcome updates, folded into the effective long vector at read time. User-scoped by design (no `league_id`): taste follows the manager; partner attrs are global user ids. All math lives in `backend/taste_service.py`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `user_id` | str PK (composite) | |
+| `attr` | str PK (composite) | attribute key, e.g. `recvpos:RB`, `pick:premium`, `partner:<user_id>`, `prior:cpos:PICK` |
+| `w_short` | float | short-interest weight (τ = `taste_tau_short_days`, 21d); always 0 on `prior:` rows |
+| `w_long` | float | long-interest weight (τ = `taste_tau_long_days`, 180d); carries the prior mass on `prior:` rows |
+| `updated_at` | str | ISO UTC of the last decay+reward write — the lazy-decay anchor |
 
 ---
 

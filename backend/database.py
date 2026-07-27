@@ -529,6 +529,29 @@ deck_replenish_log_table = Table("deck_replenish_log", metadata,
                      name="uq_deck_replenish_week"),
 )
 
+# ── TikTok-discovery F5 (flag deck.taste_vectors) — taste vectors ───────────
+# docs/plans/tiktok-discovery/prds/F5-taste-vectors.md. Per-user decayed
+# attribute-preference weights (the Monolith long/short interest split
+# without embeddings): one lazily-created row per (user, attribute key),
+# updated synchronously on every F1 deck_outcomes write and GC'd on
+# read/update when both decayed weights fall below the taste_epsilon floor
+# (Monolith admission/expiry in SQL). Rows whose attr carries the "prior:"
+# prefix hold the BOARD-DERIVED long-τ prior (PRD amendment 2026-07-26):
+# they are rewritten wholesale on board saves by replace_user_taste_prior,
+# never touched by outcome updates, and folded into the effective long
+# vector at read time — so swipe-learned weights accumulate on top and
+# dominate with volume. Math (decay, rewards, cosine, prior aggregation)
+# lives in backend/taste_service.py; this table + the thin helpers below
+# are the only storage. User-scoped by design (PRD schema): taste follows
+# the manager across leagues; partner attrs are global user ids.
+user_taste_table = Table("user_taste", metadata,
+    Column("user_id",    String, primary_key=True),
+    Column("attr",       String, primary_key=True),    # e.g. "recvpos:RB", "prior:pick:premium"
+    Column("w_short",    Float,  nullable=False),      # τ_short decayed weight (21d default)
+    Column("w_long",     Float,  nullable=False),      # τ_long decayed weight (180d default)
+    Column("updated_at", String, nullable=False),      # ISO UTC of last decay+reward write
+)
+
 
 # ---------------------------------------------------------------------------
 # Canonical player reference table — synced from Sleeper bulk payload.
@@ -4225,6 +4248,92 @@ def load_deck_fatigue_reset(user_id: str, league_id: str) -> str | None:
                 deck_fatigue_resets_table.c.league_id == league_id,
             ))
         ).scalar()
+
+
+# ---------------------------------------------------------------------------
+# F5 (flag deck.taste_vectors) — taste-vector storage (thin reads/writes;
+# all math lives in backend/taste_service.py)
+# ---------------------------------------------------------------------------
+
+def load_deck_impression(impression_id: str) -> dict | None:
+    """F5 — one impression row's owner + frozen features, for the
+    synchronous taste update riding an outcome write. Read-only; None for
+    an unknown id (late/junk labels update nothing)."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(
+                deck_impressions_table.c.user_id,
+                deck_impressions_table.c.league_id,
+                deck_impressions_table.c.features_json,
+            ).where(deck_impressions_table.c.impression_id == impression_id)
+        ).first()
+    if row is None:
+        return None
+    return {"user_id": row.user_id, "league_id": row.league_id,
+            "features_json": row.features_json}
+
+
+def load_user_taste(user_id: str) -> list[dict]:
+    """F5 — every stored taste row for one user (prior rows included).
+    Decay/GC decisions are the caller's job (derive-on-read pattern)."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                user_taste_table.c.attr,
+                user_taste_table.c.w_short,
+                user_taste_table.c.w_long,
+                user_taste_table.c.updated_at,
+            ).where(user_taste_table.c.user_id == user_id)
+        ).fetchall()
+    return [{"attr": r.attr, "w_short": float(r.w_short),
+             "w_long": float(r.w_long), "updated_at": r.updated_at}
+            for r in rows]
+
+
+def replace_user_taste_rows(
+    user_id: str,
+    upserts: dict,
+    deletes: list | tuple = (),
+) -> None:
+    """F5 — one-transaction upsert+GC for a set of attrs.
+
+    upserts: {attr: (w_short, w_long, updated_at_iso)} — row replaced.
+    deletes: attrs whose decayed weights fell below ε — row removed.
+    Delete+insert (one txn) keeps the upsert portable across dialects
+    (same idiom as set_deck_fatigue_reset)."""
+    attrs = list(upserts.keys()) + [a for a in deletes if a not in upserts]
+    if not attrs:
+        return
+    with engine.begin() as conn:
+        conn.execute(delete(user_taste_table).where(and_(
+            user_taste_table.c.user_id == user_id,
+            user_taste_table.c.attr.in_(attrs),
+        )))
+        if upserts:
+            conn.execute(insert(user_taste_table), [
+                {"user_id": user_id, "attr": a, "w_short": float(ws),
+                 "w_long": float(wl), "updated_at": ts}
+                for a, (ws, wl, ts) in upserts.items()
+            ])
+
+
+def replace_user_taste_prior(user_id: str, prior: dict, now_iso: str) -> None:
+    """F5 — rewrite the user's board-derived prior wholesale (PRD amendment):
+    every existing "prior:"-prefixed row is dropped, then one row per prior
+    attr is inserted with the prior mass in w_long (w_short stays 0 — the
+    prior is a long-interest warm start, not a session signal). An empty
+    prior clears the block (a board that stopped diverging stops priming)."""
+    with engine.begin() as conn:
+        conn.execute(delete(user_taste_table).where(and_(
+            user_taste_table.c.user_id == user_id,
+            user_taste_table.c.attr.like("prior:%"),
+        )))
+        if prior:
+            conn.execute(insert(user_taste_table), [
+                {"user_id": user_id, "attr": f"prior:{a}", "w_short": 0.0,
+                 "w_long": float(v), "updated_at": now_iso}
+                for a, v in prior.items()
+            ])
 
 
 def load_recent_impression_target_user_counts(
