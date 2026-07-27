@@ -132,6 +132,23 @@ position label only). Player rows show league-wide positional value ranks
 computed client-side from the payload's per-player roster values under the
 active subset.
 
+### 4. Second operator amendment (2026-07-26, folded in)
+
+- **Picks as a stack segment:** each team's draft-pick value renders as its
+  own neutral chalk-faint segment (the established picks treatment — never a
+  position hex) capping the All-subset stack. Rule: picks participate in the
+  All view only — starters lineups hold players, so Starters/Bench bars are
+  player-only by definition (pill/legend/segment/drill-section all disappear
+  off All; a stale PICKS filter selection is stripped on subset switch).
+- **League-average line** (`league-summary.avg-line`): dashed chalk-dim
+  hairline across the bar region at the mean of EXACTLY the values the bars
+  show — position pills × All/Starters/Bench × basis all applied (no filter
+  = full-roster average including picks). Small "Avg <value>" label
+  (right-aligned, clamped inside the chart), a11y "League average N in this
+  view", pointerEvents none (bar taps pass through), recomputes with every
+  filter change, hidden when the view sums to zero. Client-side only — no
+  endpoint change.
+
 ## Payload shape chosen
 
 Per-team `starters: [player_id] | null` + top-level `starters_available`

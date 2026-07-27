@@ -314,6 +314,18 @@ export default function LeagueSummaryScreen() {
     [ranked],
   );
 
+  // League-average line (2026-07-26 amendment): the mean of EXACTLY the
+  // values the bars are showing — position pills × subset × basis all
+  // applied (no filter = full-roster average including picks). Recomputes
+  // with every filter change because `ranked` does.
+  const avgActive = useMemo(
+    () =>
+      ranked.length > 0
+        ? ranked.reduce((s, r) => s + r.active, 0) / ranked.length
+        : 0,
+    [ranked],
+  );
+
   // In-league positional rank per team (drill-in group headers, 2026-07-26):
   // rank of this team's position-group value among all teams', under the
   // active subset. 1 + count of strictly greater values (ties share a rank).
@@ -590,24 +602,53 @@ export default function LeagueSummaryScreen() {
             </View>
           ) : (
             <>
-              <View style={styles.chartRow}>
-                {ranked.map((r, idx) => (
-                  <BarColumn
-                    key={r.tc.team.user_id}
-                    tc={r.tc}
-                    rank={idx + 1}
-                    active={r.active}
-                    maxActive={maxActive}
-                    subset={subset}
-                    filter={posFilter}
-                    focused={selectedId === r.tc.team.user_id}
-                    grayed={!!selectedId && selectedId !== r.tc.team.user_id}
-                    onPress={() => {
-                      setDrillPos(new Set());
-                      setSelectedId(r.tc.team.user_id);
-                    }}
-                  />
-                ))}
+              <View style={styles.chartWrap}>
+                <View style={styles.chartRow}>
+                  {ranked.map((r, idx) => (
+                    <BarColumn
+                      key={r.tc.team.user_id}
+                      tc={r.tc}
+                      rank={idx + 1}
+                      active={r.active}
+                      maxActive={maxActive}
+                      subset={subset}
+                      filter={posFilter}
+                      focused={selectedId === r.tc.team.user_id}
+                      grayed={!!selectedId && selectedId !== r.tc.team.user_id}
+                      onPress={() => {
+                        setDrillPos(new Set());
+                        setSelectedId(r.tc.team.user_id);
+                      }}
+                    />
+                  ))}
+                </View>
+                {/* League-average line — dashed chalk-dim hairline at the
+                    mean of the currently shown bar values (filters + subset
+                    + basis applied). pointerEvents none so bar taps pass
+                    through; label clamped inside the chart area. Hidden
+                    when the view sums to zero. */}
+                {avgActive > 0
+                  ? (() => {
+                      const topPx = Math.min(
+                        Math.max(CHART_HEIGHT * (1 - avgActive / maxActive), 15),
+                        CHART_HEIGHT - 2,
+                      );
+                      return (
+                        <View
+                          testID="league-summary.avg-line"
+                          pointerEvents="none"
+                          accessible
+                          accessibilityLabel={`League average ${Math.round(avgActive).toLocaleString('en-US')} in this view`}
+                          style={styles.avgOverlay}
+                        >
+                          <View style={[styles.avgLine, { top: topPx }]} />
+                          <Text style={[styles.avgLabel, { top: topPx - 15 }]}>
+                            {`Avg ${fmtK(avgActive)}`}
+                          </Text>
+                        </View>
+                      );
+                    })()
+                  : null}
               </View>
               {/* Position legend — the stack encoding. */}
               <View style={styles.legend}>
@@ -1194,10 +1235,36 @@ const styles = StyleSheet.create({
   hint: { marginTop: space.sm, marginBottom: space.md, color: chalk.dim },
 
   // Vertical stacked columns — x-axis = rank 1..N.
+  chartWrap: { position: 'relative' },
   chartRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 3,
+  },
+  // League-average overlay — spans the bar region only (CHART_HEIGHT), so
+  // the line lands on the same scale the bars use.
+  avgOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: CHART_HEIGHT,
+  },
+  avgLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 0,
+    borderTopWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: chalk.dim,
+  },
+  avgLabel: {
+    position: 'absolute',
+    right: 0,
+    ...type.label,
+    fontSize: 11,
+    color: chalk.dim,
   },
   col: { flex: 1, alignItems: 'stretch' },
   colWell: {
