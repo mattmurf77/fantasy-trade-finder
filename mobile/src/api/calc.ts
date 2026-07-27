@@ -144,6 +144,13 @@ export interface CalcEvaluationInLeague extends CalcEvaluation {
   your_value_delta: number; // by YOUR board (positive = you gain)
   their_value_delta: number; // by THEIR board (positive = they gain)
   mutual_gain: boolean;
+  /** Starter impact (DTF teardown 2026-07-27, Mode B only — absent on old
+   *  servers and when the league's lineup-slot template is unknown):
+   *  optimal-lineup value delta before vs after the trade, per side
+   *  (positive = that side's STARTING lineup gets stronger; consensus
+   *  values, derived value-optimal lineup — no per-week lineup data),
+   *  plus one plain-language caller-centric sentence. */
+  starter_impact?: { your_delta: number; their_delta: number; note: string };
 }
 
 // ── Suggestion confirmation (#78) ────────────────────────────────────────

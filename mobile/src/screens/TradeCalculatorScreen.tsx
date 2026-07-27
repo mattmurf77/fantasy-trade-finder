@@ -41,6 +41,7 @@ import {
 import TradeSide from '../components/TradeSide';
 import VerdictPanel from '../components/VerdictPanel';
 import ConsensusVerdictCard from '../components/ConsensusVerdictCard';
+import ShareTradeImage, { type ShareAsset } from '../components/ShareTradeImage';
 import SuggestionCard from '../components/SuggestionCard';
 import PlayerPickerModal from '../components/PlayerPickerModal';
 import Toast from '../components/Toast';
@@ -513,6 +514,23 @@ export default function TradeCalculatorScreen({ route }: any) {
 
   const liveReady = !!valuesQuery.data;
 
+  // Share-as-image (DynastyDealer teardown 2026-07-26) — live mode only:
+  // the share card needs a server verdict and the pool's names/positions.
+  const liveShareAssets = (ids: string[]): ShareAsset[] =>
+    ids
+      .map((id) => livePlayerById[id])
+      .filter(Boolean)
+      .map((p) => ({ id: p.id, name: p.name, position: p.pos, value: liveBoard[p.id] ?? 0 }));
+  const liveVerdictLine = (d: { verdict: string | null; favors: string | null }) =>
+    d.verdict
+      ? `Verdict: ${d.verdict}` +
+        (d.favors === 'give'
+          ? ' · Side A sends more'
+          : d.favors === 'receive'
+          ? ' · Side B sends more'
+          : '')
+      : 'Package value';
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       {/* S3 PRD-03 — Clear-trade Undo toast (only ever set flag-on). */}
@@ -783,6 +801,27 @@ export default function TradeCalculatorScreen({ route }: any) {
           <View style={styles.actions}>
             {bothSides && (!isLive || evalQuery.data) ? (
               <Button label="Share trade" variant="secondary" onPress={shareTrade} />
+            ) : null}
+            {/* Share-as-image (DynastyDealer teardown 2026-07-26): PNG of
+                the verdict card via the native sheet; text fallback. */}
+            {isLive && bothSides && evalQuery.data ? (
+              <ShareTradeImage
+                caption={`Trade idea · ${FORMATS.find((f) => f.key === format)?.label ?? ''}`}
+                sendTitle="Side A sends"
+                receiveTitle="Side B sends"
+                sendAssets={liveShareAssets(liveSendIds)}
+                receiveAssets={liveShareAssets(liveReceiveIds)}
+                sendTotal={evalQuery.data.give_value}
+                receiveTotal={evalQuery.data.receive_value}
+                verdictLine={liveVerdictLine(evalQuery.data)}
+                fallbackText={[
+                  `Trade idea (DTF Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
+                  `Side A: ${liveSendIds.map((id) => livePlayerById[id]?.name ?? id).join(', ')}`,
+                  `Side B: ${liveReceiveIds.map((id) => livePlayerById[id]?.name ?? id).join(', ')}`,
+                  `Consensus: ${Math.round(evalQuery.data.give_value).toLocaleString()} vs ${Math.round(evalQuery.data.receive_value).toLocaleString()}`,
+                  liveVerdictLine(evalQuery.data),
+                ].join('\n')}
+              />
             ) : null}
             <Button
               label="Clear trade"
