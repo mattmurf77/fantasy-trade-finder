@@ -35,6 +35,10 @@ export interface PlayerMenuAction {
   label: string;
   /** Muted single-line hint under the label (optional). */
   hint?: string;
+  /** Explicit row testID; defaults to `player-menu.<key>`. Used when a row
+   *  must carry a registry-specced id (e.g. the deck's
+   *  `trade-card.swap-suggest.<asset_id>` row, 2026-07-27). */
+  testID?: string;
   onPress: () => void;
 }
 
@@ -83,7 +87,7 @@ export default function PlayerContextMenu({ visible, player, actions, onClose }:
           {actions.map((a) => (
             <Pressable
               key={a.key}
-              testID={`player-menu.${a.key}`}
+              testID={a.testID ?? `player-menu.${a.key}`}
               accessibilityRole="button"
               accessibilityLabel={a.label}
               onPress={a.onPress}

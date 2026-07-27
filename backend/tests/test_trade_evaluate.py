@@ -345,6 +345,77 @@ def test_mode_b_eveners_exclude_players_already_in_trade(monkeypatch):
         assert all(e["id"] != "ev_close" for e in d.get("eveners", []))
 
 
+def test_mode_b_one_sided_eveners_opt_in_for_emptied_give_side(monkeypatch):
+    # Deck swap-suggestions (2026-07-27): a 1-for-1 card minus its give asset
+    # is a one-sided read. With one_sided_eveners the EMPTY give side gets
+    # replacement candidates from the CALLER's roster, sized against the
+    # receive side's full package value.
+    d0 = _post({"give_player_ids": [], "receive_player_ids": ["good"]}).get_json()
+    gap = d0["receive_value"]
+    _install_evener_world(monkeypatch, CALLER, gap, untouchables=["ev_untouch"])
+    d = _post_authed({
+        "give_player_ids": [], "receive_player_ids": ["good"],
+        "league_id": "L1", "opponent_user_id": OPP,
+        "one_sided_eveners": True,
+    }, _BOARDS, monkeypatch).get_json()
+    assert d["gap"] is None                      # still a one-sided read
+    singles = [e for e in d["eveners"] if not e.get("is_package")]
+    # Same window/cap/order semantics as the two-sided eveners, gap = the
+    # non-empty side's value; the caller's untouchables stay excluded.
+    assert [e["id"] for e in singles] == ["ev_close", "ev_second", "ev_third"]
+    assert all(gap * 0.4 <= e["value"] <= gap * 1.5 for e in singles)
+
+
+def test_mode_b_one_sided_eveners_from_opponent_for_emptied_receive_side(monkeypatch):
+    d0 = _post({"give_player_ids": ["good"], "receive_player_ids": []}).get_json()
+    gap = d0["give_value"]
+    # Candidates live on the OPPONENT's roster (the receive side's owner).
+    _install_evener_world(monkeypatch, OPP, gap, untouchables=["ev_untouch"])
+    d = _post_authed({
+        "give_player_ids": ["good"], "receive_player_ids": [],
+        "league_id": "L1", "opponent_user_id": OPP,
+        "one_sided_eveners": True,
+    }, _BOARDS, monkeypatch).get_json()
+    singles = [e for e in d["eveners"] if not e.get("is_package")]
+    assert [e["id"] for e in singles] == ["ev_close", "ev_second", "ev_third"]
+
+
+def test_mode_b_one_sided_eveners_absent_without_param(monkeypatch):
+    # Default behavior unchanged: one-sided Mode B reads carry no eveners.
+    gap = _post({"give_player_ids": [],
+                 "receive_player_ids": ["good"]}).get_json()["receive_value"]
+    _install_evener_world(monkeypatch, CALLER, gap)
+    d = _post_authed({
+        "give_player_ids": [], "receive_player_ids": ["good"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    assert "eveners" not in d
+
+
+def test_mode_b_one_sided_eveners_param_ignored_on_two_sided_read(monkeypatch):
+    # With both sides present the normal gap machinery owns eveners — the
+    # param must not change a two-sided response.
+    gap = _consensus_gap(["mid"], ["good"])
+    _install_evener_world(monkeypatch, CALLER, gap)
+    base = _post_authed({
+        "give_player_ids": ["mid"], "receive_player_ids": ["good"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    with_param = _post_authed({
+        "give_player_ids": ["mid"], "receive_player_ids": ["good"],
+        "league_id": "L1", "opponent_user_id": OPP,
+        "one_sided_eveners": True,
+    }, _BOARDS, monkeypatch).get_json()
+    assert with_param["eveners"] == base["eveners"]
+
+
+def test_mode_a_one_sided_eveners_param_is_mode_b_only():
+    # Rosterless Mode A has no rosters to draw from — the param is inert.
+    d = _post({"give_player_ids": ["stud"], "receive_player_ids": [],
+               "one_sided_eveners": True}).get_json()
+    assert "eveners" not in d
+
+
 def test_mode_a_evener_is_the_gap_generic_pick():
     # stud vs good — the gap names Early 1st (see the gap tests above); the
     # rosterless calculator recommends exactly that pick, calculator-addable.

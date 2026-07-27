@@ -6841,7 +6841,14 @@ def trade_evaluate_route():
     POST /api/trade/evaluate
     Body: {give_player_ids: [...], receive_player_ids: [...],
            scoring_format?: '1qb_ppr'|'sf_tep', fairness_threshold?: float,
-           league_id?: str, opponent_user_id?: str}
+           league_id?: str, opponent_user_id?: str,
+           one_sided_eveners?: bool}
+
+    one_sided_eveners (Mode B only, 2026-07-27 deck player-changer): when true
+    and exactly one side is empty, `eveners` are built for the EMPTY side
+    (candidates sized against the other side's full package value) — the
+    replacement-candidate read for "this trade minus its only give/receive
+    asset". Default absent → one-sided reads carry no eveners, as before.
 
     Mode A (default — no auth, no league): consensus values + fairness verdict
     for a hand-built trade. Reuses trade_optimizer._consensus_packages/
@@ -7080,6 +7087,28 @@ def trade_evaluate_route():
                                "value": pe["value"], "is_pick": True}])
             except Exception as evn_err:
                 log.warning("evaluate: evener build failed (omitted): %s", evn_err)
+        elif (mode_b and bool(body.get("one_sided_eveners"))
+              and bool(give) != bool(recv)):
+            # Deck swap-suggestions (2026-07-27 player-changer): the client
+            # evaluates a card's trade MINUS one asset to get replacement
+            # candidates. On a 1-for-1 that empties a side, so there is no
+            # favors/gap to hang eveners on — this explicit opt-in builds
+            # them for the EMPTY side (its owner's roster + picks), sized
+            # against the full package value of the non-empty side. Additive:
+            # absent param → byte-identical responses.
+            try:
+                _os_add_to = "give" if not give else "receive"
+                _os_gap = receive_value if not give else give_value
+                if _os_gap > 0:
+                    _os_owner = (caller_user_id if _os_add_to == "give"
+                                 else opponent_user_id)
+                    result["eveners"] = _roster_eveners(
+                        league_id, _os_owner, _os_gap,
+                        set(give_raw) | set(recv_raw),
+                        _pool_players, seed_value)
+            except Exception as evn_err:
+                log.warning("evaluate: one-sided evener build failed (omitted): %s",
+                            evn_err)
 
         # FR-20 (analytics P0, LLD §6.4b): calc_trade_evaluated — load-bearing
         # for the WAT north star (PRD FR-20). Mode A is a public route, so

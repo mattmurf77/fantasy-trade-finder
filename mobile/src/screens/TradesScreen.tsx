@@ -87,8 +87,11 @@ import { getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import {
   getTradeValues,
   evaluateTradeInLeague,
+  evaluateForSwapSuggestions,
   type CalcValueRow,
+  type CalcEvener,
 } from '../api/calc';
+import SwapSuggestSheet from '../components/SwapSuggestSheet';
 import { getProgress } from '../api/rankings';
 import { track, msSinceOpen } from '../api/events';
 import { getBaseUrl } from '../api/client';
@@ -539,6 +542,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setJob(null);
     setEdits({});
     setSwapTarget(null);
+    setSuggestTarget(null);
   }
 
   // Preferences — open outlook sheet the first time the user lands here
@@ -1012,6 +1016,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setJob(null);
     setEdits({});
     setSwapTarget(null);
+    setSuggestTarget(null);
     clearTargets(); // store also self-clears via its league subscription
     setTargetPickerOpen(false);
     // Onboarding item 4 — reset the first-run auto-start lifecycle so a
@@ -1757,6 +1762,75 @@ export default function TradesScreen({ navigation, route }: any) {
   const topCard = rawTopCard ? edits[rawTopCard.trade_id] ?? rawTopCard : undefined;
   const nextCard = sortedDeck[deckIdx + 1];
 
+  // ── Swap suggestions (2026-07-27 player-changer) ─────────────────────
+  // Operator follow-up to the calculator eveners: counter-suggestions
+  // "served as the player changer" on find-a-trade cards. The top card's
+  // context menu gets a "Swap suggestions" row per asset; opening it fires
+  // ONE Mode B /api/trade/evaluate of the card's trade MINUS that asset —
+  // the returned `eveners` (players + owned picks + the 2-piece package)
+  // are one-tap replacements for it. `one_sided_eveners` covers the
+  // 1-for-1 card whose minus-trade empties a side. Picking a candidate
+  // swaps it in through the same edit/re-price machinery as the classic
+  // swap sheet (#86).
+  const [suggestTarget, setSuggestTarget] = useState<{
+    player: Player;
+    side: 'give' | 'receive';
+  } | null>(null);
+  const suggestQuery = useQuery({
+    queryKey: [
+      'swap-suggest',
+      rawTopCard?.trade_id,
+      suggestTarget?.player.id,
+      suggestTarget?.side,
+    ],
+    enabled:
+      !!suggestTarget &&
+      !!topCard?.opponent_user_id &&
+      !!(topCard?.league_id || leagueId),
+    staleTime: 60_000,
+    queryFn: ({ signal }) => {
+      const { player, side } = suggestTarget!;
+      const give = topCard!.give_player_ids.filter(
+        (id) => !(side === 'give' && id === player.id),
+      );
+      const receive = topCard!.receive_player_ids.filter(
+        (id) => !(side === 'receive' && id === player.id),
+      );
+      return evaluateForSwapSuggestions(
+        give,
+        receive,
+        calcFormat,
+        topCard!.league_id || leagueId!,
+        topCard!.opponent_user_id,
+        signal,
+      );
+    },
+  });
+  // Candidates: the minus-trade's eveners, but only when the shortfall is
+  // on the REMOVED asset's side — otherwise they'd be additions from the
+  // OTHER roster, not replacements (honest empty instead). The removed
+  // asset itself is filtered out: it's no longer "in the trade" in the
+  // request, so the server would happily return it as its own best
+  // replacement.
+  const swapSuggestions = useMemo<CalcEvener[]>(() => {
+    const data = suggestQuery.data;
+    if (!data || !suggestTarget || !topCard) return [];
+    const { player, side } = suggestTarget;
+    if (data.gap) {
+      if (data.gap.add_to !== side) return [];
+    } else {
+      // One-sided read (gap null): the server built eveners for the EMPTY
+      // side — trust them only when that side is the removed asset's (i.e.
+      // the removed asset was its side's only one).
+      const sideIds =
+        side === 'give' ? topCard.give_player_ids : topCard.receive_player_ids;
+      if (sideIds.length > 1) return [];
+    }
+    return (data.eveners ?? []).filter(
+      (e) => e.id !== player.id && !(e.ids ?? []).includes(player.id),
+    );
+  }, [suggestQuery.data, suggestTarget, topCard]);
+
   // ── S4 PRD-04 (ux.prompt_arbiter): one-surface arbiter ───────────────
   // At most ONE instructional/promotional surface at a time on this screen.
   // Slots are claimed in priority order (hook call order IS the tiebreak):
@@ -2352,22 +2426,13 @@ export default function TradesScreen({ navigation, route }: any) {
       .filter((r): r is CalcValueRow => !!r);
   }, [swapTarget, topCard, rosterByOwner, valueById, userId]);
 
-  function handleSwapPick(replacement: CalcValueRow) {
-    if (!swapTarget || !rawTopCard || !topCard) return;
+  // Shared tail for every top-card package edit — swap (#86), swap-
+  // suggestion pick (2026-07-27), asset removal (#194): overlay the edited
+  // card (engine numbers cleared) keyed by the ORIGINAL trade id, then
+  // re-price via Mode B.
+  function applyPackageEdit(give: Player[], receive: Player[]) {
+    if (!rawTopCard || !topCard) return;
     const rawId = rawTopCard.trade_id;
-    const { player: outgoing, side } = swapTarget;
-    const incoming: Player = {
-      id: replacement.id,
-      name: replacement.name,
-      position: replacement.position,
-      team: replacement.team,
-      age: replacement.age,
-    };
-    const swapIn = (arr: Player[]) =>
-      arr.map((p) => (p.id === outgoing.id ? incoming : p));
-    const give = side === 'give' ? swapIn(topCard.give_players) : topCard.give_players;
-    const receive =
-      side === 'receive' ? swapIn(topCard.receive_players) : topCard.receive_players;
     const editedCard: TradeCard = {
       ...topCard,
       trade_id: `${rawId}${EDITED_SUFFIX}`,
@@ -2391,13 +2456,133 @@ export default function TradesScreen({ navigation, route }: any) {
       likesYou: false,
     };
     setEdits((prev) => ({ ...prev, [rawId]: editedCard }));
-    setSwapTarget(null);
     haptics.selection();
     // Mode B needs a real counterparty id; without one the card just shows
     // EDITED with no fairness read (shouldn't happen on generated cards).
     if (editedCard.opponent_user_id) {
       repriceMutation.mutate({ rawId, card: editedCard });
     }
+  }
+
+  function handleSwapPick(replacement: CalcValueRow) {
+    if (!swapTarget || !rawTopCard || !topCard) return;
+    const { player: outgoing, side } = swapTarget;
+    const incoming: Player = {
+      id: replacement.id,
+      name: replacement.name,
+      position: replacement.position,
+      team: replacement.team,
+      age: replacement.age,
+    };
+    const swapIn = (arr: Player[]) =>
+      arr.map((p) => (p.id === outgoing.id ? incoming : p));
+    setSwapTarget(null);
+    applyPackageEdit(
+      side === 'give' ? swapIn(topCard.give_players) : topCard.give_players,
+      side === 'receive' ? swapIn(topCard.receive_players) : topCard.receive_players,
+    );
+  }
+
+  // Swap-suggestion pick (2026-07-27 player-changer): replace the target
+  // asset with the chosen evener — both pieces for a 2-piece package.
+  // Player pieces resolve names/positions from the consensus values pool;
+  // a piece the pool doesn't price is an owned pick — name from the row
+  // (package rows carry "A + B" in ids order), shape mirroring the
+  // backend's pick pseudo-players (position/team 'PICK'). The re-price
+  // resolves owned pick ids via the card's league_id (#158).
+  function handleSuggestPick(evener: CalcEvener) {
+    if (!suggestTarget || !topCard) return;
+    const { player: outgoing, side } = suggestTarget;
+    const pieceIds = evener.is_package && evener.ids ? evener.ids : [evener.id];
+    const pieceNames = evener.is_package ? evener.name.split(' + ') : [evener.name];
+    const incoming: Player[] = pieceIds.map((id, i) => {
+      const row = valueById.get(id);
+      if (row) {
+        return {
+          id,
+          name: row.name,
+          position: row.position,
+          team: row.team,
+          age: row.age,
+        };
+      }
+      const pos = evener.is_package ? 'PICK' : evener.position;
+      return {
+        id,
+        name: pieceNames[i] ?? evener.name,
+        position: pos,
+        team: pos === 'PICK' ? 'PICK' : null,
+      };
+    });
+    const replaceIn = (arr: Player[]) =>
+      arr.flatMap((p) => (p.id === outgoing.id ? incoming : [p]));
+    track(
+      'trade_swap_suggestion_picked',
+      {
+        side,
+        asset_kind: evener.is_package ? 'package' : evener.is_pick ? 'pick' : 'player',
+      },
+      'Trades',
+    );
+    setSuggestTarget(null);
+    applyPackageEdit(
+      side === 'give' ? replaceIn(topCard.give_players) : topCard.give_players,
+      side === 'receive' ? replaceIn(topCard.receive_players) : topCard.receive_players,
+    );
+  }
+
+  function openSwapSuggestions(player: Player, side: 'give' | 'receive') {
+    // F1 (deck.signal_v2): suggestion sheet = detail engagement.
+    if (signalV2On) engagementRef.current.detailExpanded = true;
+    track('trade_swap_suggest_opened', { side }, 'Trades');
+    setSuggestTarget({ player, side });
+  }
+
+  // #194 — remove an asset from the top card (either side). At least one
+  // asset must remain per side (honest hint instead of a silent no-op);
+  // removing a PINNED give asset while "Trade as one package" (#174) is on
+  // gets a small confirm — it breaks the whole-package request for this
+  // card (the pins themselves stay set for future decks).
+  function handleRemoveAsset(player: Player, side: 'give' | 'receive') {
+    if (!rawTopCard || !topCard) return;
+    const sidePlayers =
+      side === 'give' ? topCard.give_players : topCard.receive_players;
+    if (sidePlayers.length <= 1) {
+      setToast({
+        msg: 'A trade needs at least one asset on each side.',
+        tone: 'warn',
+      });
+      return;
+    }
+    const doRemove = () => {
+      track('trade_asset_removed', { side }, 'Trades');
+      applyPackageEdit(
+        side === 'give'
+          ? topCard.give_players.filter((p) => p.id !== player.id)
+          : topCard.give_players,
+        side === 'receive'
+          ? topCard.receive_players.filter((p) => p.id !== player.id)
+          : topCard.receive_players,
+      );
+    };
+    if (
+      side === 'give' &&
+      packageMode &&
+      pinnedGive.some((p) => p.id === player.id)
+    ) {
+      Alert.alert(
+        'Break up the package?',
+        `You asked for ideas that send all your pinned players together. ` +
+          `Removing ${player.name} breaks that package on this card — your ` +
+          `pins stay set for the next deck.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Remove', style: 'destructive', onPress: doRemove },
+        ],
+      );
+      return;
+    }
+    doRemove();
   }
 
   function advance(decision: 'like' | 'pass') {
@@ -2693,6 +2878,22 @@ export default function TradesScreen({ navigation, route }: any) {
         },
       });
     }
+    // 2026-07-27 player-changer: server-priced replacement candidates for
+    // this asset (the calculator's counter-suggestion eveners, served per
+    // deck-card asset). Needs a real counterparty for the Mode B read —
+    // generated cards always carry one.
+    if (topCard?.opponent_user_id) {
+      actions.push({
+        key: 'swap-suggest',
+        testID: `trade-card.swap-suggest.${player.id}`,
+        label: 'Swap suggestions',
+        hint: 'Replacements priced to keep this trade balanced',
+        onPress: () => {
+          setMenuTarget(null);
+          openSwapSuggestions(player, side);
+        },
+      });
+    }
     actions.push({
       key: 'swap',
       label: 'Swap player',
@@ -2703,6 +2904,17 @@ export default function TradesScreen({ navigation, route }: any) {
       onPress: () => {
         setMenuTarget(null);
         setSwapTarget({ player, side });
+      },
+    });
+    // #194 — the on-card ✕ is the primary affordance; this row keeps the
+    // command in the shared long-press vocabulary alongside swap.
+    actions.push({
+      key: 'remove-asset',
+      label: 'Remove from trade',
+      hint: 'Drop this asset and re-price the rest',
+      onPress: () => {
+        setMenuTarget(null);
+        handleRemoveAsset(player, side);
       },
     });
     return actions;
@@ -3590,6 +3802,7 @@ export default function TradesScreen({ navigation, route }: any) {
                     : undefined
                 }
                 onEditInCalculator={() => handleEditInCalculator(topCard)}
+                onRemoveAsset={handleRemoveAsset}
               />
               {/* Queue action — Pass / Interested are driven by swipe
                   gestures on the top card; Queue is a third option that
@@ -4041,6 +4254,26 @@ export default function TradesScreen({ navigation, route }: any) {
         onClose={() => setSwapTarget(null)}
       />
 
+      {/* Swap-suggestions sheet (2026-07-27 player-changer) — the
+          calculator's counter-suggestion eveners served per deck-card
+          asset. "Browse full roster" hands the same asset off to the
+          classic #86 swap sheet above. */}
+      <SwapSuggestSheet
+        visible={!!suggestTarget}
+        replacing={suggestTarget?.player ?? null}
+        suggestions={swapSuggestions}
+        loading={suggestQuery.isLoading}
+        error={suggestQuery.isError}
+        onPick={handleSuggestPick}
+        onBrowseRoster={() => {
+          if (suggestTarget) {
+            setSwapTarget(suggestTarget);
+            setSuggestTarget(null);
+          }
+        }}
+        onClose={() => setSuggestTarget(null)}
+      />
+
       {/* FB-47 — target picker. Trade away = the user's roster; Acquire =
           every leaguemate's roster (@owner badge per row). Reuses the
           calculator's search + position-filter picker; picking keeps the
@@ -4196,6 +4429,8 @@ interface SwipableProps {
   onKeepSide?: (side: 'give' | 'receive') => void;
   // #190 — pass-through: open the manual calculator prefilled.
   onEditInCalculator?: () => void;
+  // #194 — pass-through: remove one asset from the card and re-price.
+  onRemoveAsset?: (player: Player, side: 'give' | 'receive') => void;
   // Onboarding guided layer (v2.1): swipe-gesture hint. While `nudge` is
   // true the card runs a subtle translateX nudge (twice, then rests);
   // the first touch anywhere on the card calls `onFirstTouch` — the
@@ -4218,6 +4453,7 @@ function SwipableTopCard({
   fitTargetPositions,
   onKeepSide,
   onEditInCalculator,
+  onRemoveAsset,
   nudge,
   onFirstTouch,
 }: SwipableProps) {
@@ -4306,6 +4542,7 @@ function SwipableTopCard({
           fitTargetPositions={fitTargetPositions}
           onKeepSide={onKeepSide}
           onEditInCalculator={onEditInCalculator}
+          onRemoveAsset={onRemoveAsset}
         />
       </Animated.View>
     </GestureDetector>
