@@ -535,6 +535,14 @@ export interface PowerRankedTeam {
    *  positions_value is the positions-only sum. Absent on old servers. */
   picks?: { count: number; value: number; items: Array<{ label: string; value: number }> };
   positions_value?: number;
+  /** League Analyzer replication (2026-07-26) — the team's DERIVED
+   *  value-optimal starting lineup: the league's starting-slot template
+   *  (Sleeper roster_positions) filled with the team's highest-value
+   *  eligible players on the SAME basis as this payload's values (so a
+   *  personal board reshapes the split). No per-week lineup data is read.
+   *  null (or absent on old servers) = template unknown → the client hides
+   *  the All/Starters/Bench filter (never fabricates). */
+  starters?: string[] | null;
 }
 
 export interface PowerRankingsResponse {
@@ -544,6 +552,10 @@ export interface PowerRankingsResponse {
   teams: PowerRankedTeam[];
   /** #14 FR6 — server compute time (ISO). Absent on old servers. */
   updated_at?: string;
+  /** 2026-07-26 — true only when EVERY team carries a derived `starters`
+   *  list and at least one is non-empty. Gates the All/Starters/Bench
+   *  segmented control; absent on old servers (treat as false). */
+  starters_available?: boolean;
 }
 
 /** #14 — rank chip for league cards. Consensus basis; deliberately open

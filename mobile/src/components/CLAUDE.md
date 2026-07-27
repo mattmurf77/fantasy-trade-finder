@@ -151,4 +151,11 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 **MFL auth-link tranche (2026-07-25, #177, flag `mfl.auth_link`):**
 - PlatformLinkSheet (MFL only): `platform-link.mfl-auth-toggle` (reveals the sign-in fields) · `platform-link.mfl-username` · `platform-link.mfl-password` (secureTextEntry) · `platform-link.mfl-signin` · `platform-link.mfl-league.<league_id>` (checkbox row, pre-checked when the franchise auto-binds) · `platform-link.mfl-import` · `platform-link.mfl-open` (auth-done summary CTA); errors reuse `platform-link.error`
 
+**League Analyzer replication tranche (2026-07-26, DynastyGM teardown — LeagueSummaryScreen):**
+- `league-summary.bar.<user_id>` — one VERTICAL stacked column in the rank-axis chart (a11y label "Rank N, TeamName, X total"); tapping focuses the team (its bar keeps position colors, every other bar goes muted-gray)
+- `league-summary.subset.<all|starters|bench>` — the league-wide roster-subset segmented control. Rendered ONLY when the payload says `starters_available` (derived value-optimal lineup — never per-week lineup data); Starters/Bench recompute + re-rank the whole chart AND the drill-in
+- `league-summary.refresh` — chart-card refresh affordance (pull-to-refresh also stays)
+- `league-summary.focus-caption` — drill-in caption ("League rank: N/M") in the chart-card header while a team is focused
+- UNCHANGED but re-homed: `league-summary.team.<user_id>` now lives on the ranked LIST rows below the chart; `league-summary.roster-close` is the chart-card X that exits team focus (the drill-in roster renders INLINE below the chart now, not in a Modal); `league-summary.posfilter.*` / `league-summary.roster-posfilter.*` / `league-summary.updated-at` / basis chips / `league-summary.roster-picks` all keep their ids. Drill-in group headers add tercile-colored "(rank/M)" chips (a11y "POS ranked N of M"); player rows show league-wide positional value ranks via PlayerCard `posRank` ("RB2", "NR")
+
 **League rankings (#14 completion, 2026-07-20):** `RankChipBadge` — "#3 of 12" consensus power-rank chip from the open `GET /api/league/rank-chip` read (60s server cache); silent-fail enrichment (error/old-server/demo → renders nothing); ice text when top-3. Mounted on LeaguePicker rows + the League tab hero chips. testID `league.rank-chip.<league_id>`
