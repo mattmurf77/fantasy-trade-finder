@@ -89,6 +89,8 @@ from .database import (
     # F7 (deck.exploration) — archetype audition state + engagement counts
     load_archetype_auditions, upsert_archetype_audition,
     count_archetype_engagement,
+    # F9 (deck.first_session) — first-deck detection + previous-deck serve time
+    load_deck_serve_history,
     # F10 (deck.replenishment) — weekly deck pre-generation
     load_active_deck_user_leagues, load_latest_trade_impression_batch,
     replenish_week_done, log_deck_replenish,
@@ -1961,6 +1963,17 @@ def _trade_job_public_view(job: dict) -> dict:
     note = job.get("suppression_note")
     if note:
         out["suppression_note"] = note
+    # F9 (deck.first_session) — additive fields, set by the worker only
+    # while the flag is on. `first_deck` marks the user's first deck for
+    # this league (gates the mobile adaptation moment + activation
+    # events); `board_refresh` is the board-sourced header payload
+    # (amendment 2026-07-26 — every board-refreshed deck). Absent
+    # otherwise, so flag-off payloads stay byte-identical.
+    if job.get("first_deck"):
+        out["first_deck"] = True
+    board_refresh = job.get("board_refresh")
+    if board_refresh:
+        out["board_refresh"] = board_refresh
     return out
 
 
@@ -2236,6 +2249,16 @@ def _deck_exploration_enabled() -> bool:
     path checks this; off ⇒ byte-identical decks, payloads, and DB writes
     (no over-generation, no wildcard, no audition reads)."""
     return getattr(FLAGS, "deck_exploration", False)
+
+
+def _deck_first_session_enabled() -> bool:
+    """F9 — first-session win engineering (docs/plans/tiktok-discovery/
+    prds/F9-first-session-win.md). Every F9 code path checks this —
+    first-deck detection, the confidence-weighted top-region partition,
+    the first-deck size clamp, the additive job fields (first_deck /
+    board_refresh) and the features_json first_deck stamp; off ⇒
+    byte-identical payloads, ordering, and DB writes."""
+    return getattr(FLAGS, "deck_first_session", False)
 
 
 def _deck_value_model_enabled() -> bool:
@@ -2728,6 +2751,7 @@ def _log_deck_signal_impressions(
     scoring_format: str,
     source: str | None = None,
     seed_map: dict | None = None,   # F3 — centerpiece derivation (flag-gated)
+    first_deck: bool = False,       # F9 — first-deck features stamp (flag-gated)
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -2801,6 +2825,15 @@ def _log_deck_signal_impressions(
         # decks' features_json stays byte-identical to pre-F10.
         if source:
             features["deck_source"] = source
+        # F9 (deck.first_session) — frozen first-deck marker. The caller
+        # only passes True while the flag is on AND this is the user's
+        # first deck for the league, so flag-off (and every non-first)
+        # features_json stays byte-identical. Serves the activation
+        # metrics: first_session_like_position = MIN(card_index) over
+        # like outcomes joined to first_deck impressions (F1 seam, no new
+        # tables).
+        if first_deck:
+            features["first_deck"] = True
         # F5 (deck.taste_vectors) — freeze the card's taste-attribute keys
         # at serve time so the outcome-write update reads them from the
         # impression instead of re-deriving (no training/serving skew).
@@ -3641,6 +3674,167 @@ def _apply_exploration_slot(
     return deck, wildcard, info
 
 
+# ── F9 (flag deck.first_session) — first-session win engineering ────────────
+# docs/plans/tiktok-discovery/prds/F9-first-session-win.md (incl. the
+# 2026-07-26 board-sourced amendment). Three server pieces:
+#
+#   1. Confidence-weighted top region — on the user's FIRST deck for a
+#      league (no deck_impressions AND no legacy trade_impressions rows —
+#      load_deck_serve_history), a post-ordering STABLE PARTITION floats
+#      gate-passing high-confidence cards (simple shape + consensus-seeded
+#      assets + strong margin, _first_session_confidence_ok) into the first
+#      first_session_top_k UNLOCKED slots. No new scorer: membership was
+#      settled by the quality gates upstream; the partition only reorders
+#      admitted candidates (and never rescues gated ones). Locked slots —
+#      the F7 wildcard (fixed served position; slot 5 on decks ≥8), pinned
+#      likes-you cards (counterparty intent is the strongest first-session
+#      win there is — treated as confidence-passing by definition, and the
+#      pinning invariant holds through every layer incl. the client's F4
+#      locks), and F3 retest cards (impossible on a true first deck, locked
+#      defensively) — keep their exact index; with the wildcard at slot 5
+#      the confidence region becomes positions 1–4 + 6.
+#   2. First-deck size clamp — first decks truncate to
+#      first_session_deck_max cards (only when the generator produced
+#      more; never padded) so session-one completion — F10's moment — is
+#      reachable. Runs BEFORE the partition, AFTER the F7 wildcard insert
+#      (slot ≤ 6 < the clamp, so the wildcard always survives).
+#   3. Board-refreshed header (amendment) — EVERY deck (not just first
+#      ones) whose user's board changed since their previous deck carries
+#      an additive job field `board_refresh` (built here, passed through
+#      by _trade_job_public_view). Needs the F1 spine for the previous
+#      deck's serve time; when deck.signal_v2 is off the field is omitted
+#      (the PRD fallback).
+
+def _first_session_confidence_ok(card, seed_map: dict) -> bool:
+    """The F9 confidence bar (config first_session_*):
+      - simple shape: per side ≤ first_session_max_side_assets AND total
+        ≤ first_session_max_total_assets (defaults ⇒ 1x1 / 2x1 / 1x2 —
+        parseable in ~2s per the presentment 3-second-hook finding);
+      - high-data assets: every asset consensus-seeded at ≥
+        first_session_min_seed_elo (the seed map is the consensus-data
+        signal the generation path already computes — shrinkage targets +
+        fairness ranges; user comparison counts are ~0 on a first deck by
+        definition, so they can't differentiate). #185 primes injected
+        picks into the seed map, so priced picks pass naturally;
+      - strong margin: divergence cards need mismatch_score ≥
+        first_session_min_margin; consensus-basis cards (mismatch 0 by
+        construction) need fairness_score ≥ first_session_min_fairness.
+    Reorder criterion ONLY — nothing here admits or gates a card."""
+    give = list(getattr(card, "give_player_ids", None) or [])
+    recv = list(getattr(card, "receive_player_ids", None) or [])
+    if not give or not recv:
+        return False
+    max_side  = int(_deck_cfg("first_session_max_side_assets", 2))
+    max_total = int(_deck_cfg("first_session_max_total_assets", 3))
+    if len(give) > max_side or len(recv) > max_side:
+        return False
+    if len(give) + len(recv) > max_total:
+        return False
+    min_seed = _deck_cfg("first_session_min_seed_elo", 1250.0)
+    for pid in (*give, *recv):
+        seed = seed_map.get(pid)
+        if seed is None or float(seed) < min_seed:
+            return False
+    if getattr(card, "basis", "divergence") == "consensus":
+        fairness = float(getattr(card, "fairness_score", 0.0) or 0.0)
+        return fairness >= _deck_cfg("first_session_min_fairness", 0.85)
+    margin = float(getattr(card, "mismatch_score", 0.0) or 0.0)
+    return margin >= _deck_cfg("first_session_min_margin", 40.0)
+
+
+def _apply_first_session_shaping(cards: list, *, seed_map: dict) -> list:
+    """First-deck layer: size clamp + confidence partition (docstring at
+    the section header above). Pure — returns a new list, input untouched.
+    Best-effort: with fewer passing cards than region slots, the passing
+    ones lead and the rest keep served order (stable partition; a deck
+    with nothing passing returns unchanged)."""
+    if not cards:
+        return cards
+
+    # 2. Size clamp — truncate only (best-first order is already settled;
+    # pinned likes-you cards sit at the top and the F7 wildcard's slot is
+    # clamped ≤ 6, so neither can be cut at the default max of 10).
+    max_cards = int(_deck_cfg("first_session_deck_max", 10))
+    if max_cards > 0 and len(cards) > max_cards:
+        cards = cards[:max_cards]
+    else:
+        cards = list(cards)
+
+    # 1. Confidence partition of the top region.
+    k = int(_deck_cfg("first_session_top_k", 5))
+    if k <= 0 or len(cards) <= 1:
+        return cards
+    locked = {
+        i for i, c in enumerate(cards)
+        if getattr(c, "wildcard", False)
+        or getattr(c, "likes_you", False)
+        or getattr(c, "retest", False)
+    }
+    # The confidence region = the first k UNLOCKED slot indices (with the
+    # F7 wildcard at served slot 5, that is positions 1–4 + 6).
+    region_size = 0
+    for i in range(len(cards)):
+        if i in locked:
+            continue
+        region_size += 1
+        if region_size >= k:
+            break
+    movable = [c for i, c in enumerate(cards) if i not in locked]
+    chosen: list = []
+    rest:   list = []
+    for c in movable:
+        if len(chosen) < region_size and _first_session_confidence_ok(c, seed_map):
+            chosen.append(c)
+        else:
+            rest.append(c)
+    if not chosen:
+        return cards
+    reordered = iter(chosen + rest)
+    return [cards[i] if i in locked else next(reordered) for i in range(len(cards))]
+
+
+def _parse_iso_utc(ts) -> datetime | None:
+    """ISO timestamp → aware UTC datetime; None when unparseable. Naive
+    timestamps are treated as UTC (same convention as _iso_age_days)."""
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(ts))
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def _first_session_board_refresh(
+    user_id: str,
+    league_id: str,
+    scoring_format: str,
+    last_deck_served_at: str | None,
+) -> dict | None:
+    """F9 amendment (2026-07-26) — the additive job payload
+    {"updated_since_last_deck": True, "ranked_player_count", "basis"} when
+    the user's board changed since their previous deck, else None (the
+    field is only ever present when literally true — the anti-control-
+    theater rule applied to ranking). Applies to EVERY board-refreshed
+    deck, not just session one; still gated on deck.first_session by the
+    caller. Requires the F1 spine for the previous-deck timestamp: when
+    deck.signal_v2 is off (or this is the user's first spine deck) the
+    field is omitted."""
+    if not _deck_signal_v2_enabled() or not last_deck_served_at:
+        return None
+    ranked_count, last_board_update = load_board_state(
+        user_id, league_id, scoring_format)
+    prev = _parse_iso_utc(last_deck_served_at)
+    upd  = _parse_iso_utc(last_board_update)
+    if prev is None or upd is None or upd <= prev:
+        return None
+    return {
+        "updated_since_last_deck": True,
+        "ranked_player_count": int(ranked_count or 0),
+        "basis": "personal" if (ranked_count or 0) > 0 else "consensus",
+    }
+
+
 def _user_pick_share(user_id: str, league_id: str) -> float:
     """The user's share of total draft-pick value in a league (0.0 when no
     picks synced). Feeds the #8 outlook seed and #1's classifier."""
@@ -4119,6 +4313,64 @@ def _run_trade_job(
             except Exception as ex_err:
                 log.warning("deck exploration layer failed (non-fatal): %s", ex_err)
 
+        # F9 (flag deck.first_session) — first-session win engineering,
+        # applied AFTER the F7 wildcard insert (the wildcard's slot is a
+        # fixed served position and takes precedence — the confidence
+        # region skips locked slots) and BEFORE impression logging (both
+        # impression streams must record the true served order). Two
+        # parts: (a) FIRST decks only (no prior deck_impressions or legacy
+        # trade_impressions for this user+league) get the size clamp +
+        # confidence-weighted top region and the additive `first_deck` job
+        # field; (b) EVERY deck built from a board updated since the
+        # user's previous deck gets the additive `board_refresh` job field
+        # (2026-07-26 amendment; omitted when deck.signal_v2 is off — no
+        # previous-deck timestamp exists without the F1 spine). Non-fatal
+        # throughout; flag off ⇒ zero reads, byte-identical payloads.
+        fs_first_deck = False
+        if _deck_first_session_enabled() and league_id != "league_demo":
+            fs_last_served_at = None
+            try:
+                _has_prior, fs_last_served_at = load_deck_serve_history(
+                    g_user_id, league_id)
+                fs_first_deck = not _has_prior
+            except Exception as fs_err:
+                log.warning("first-session history read failed (non-fatal): %s",
+                            fs_err)
+            if fs_first_deck:
+                try:
+                    shaped = _apply_first_session_shaping(
+                        final_cards, seed_map=seed_map)
+                    if ([id(c) for c in shaped] != [id(c) for c in final_cards]
+                            or len(shaped) != len(final_cards)):
+                        final_cards = shaped
+                        snapshot = []
+                        for c in final_cards:
+                            d = trade_card_to_dict(c, players_dict)
+                            d["real_opponent"] = c.target_user_id in real_user_ids
+                            d["outlook"]       = outlook_value
+                            snapshot.append(d)
+                        with _trade_jobs_lock:
+                            j = _trade_jobs.get(job_id)
+                            if j is not None and j["status"] == "running":
+                                j["cards"] = snapshot
+                except Exception as fs_err:
+                    log.warning("first-session shaping failed (non-fatal): %s",
+                                fs_err)
+                with _trade_jobs_lock:
+                    j = _trade_jobs.get(job_id)
+                    if j is not None:
+                        j["first_deck"] = True
+            try:
+                _board_refresh = _first_session_board_refresh(
+                    g_user_id, league_id, active_format, fs_last_served_at)
+                if _board_refresh:
+                    with _trade_jobs_lock:
+                        j = _trade_jobs.get(job_id)
+                        if j is not None:
+                            j["board_refresh"] = _board_refresh
+            except Exception as br_err:
+                log.warning("board-refresh header failed (non-fatal): %s", br_err)
+
         # Tier 2 (2.4) — impression logging: one row per card in final deck
         # order, once per completed job (NOT per /status poll — polls only
         # read the stored snapshot). This is the training-data pipeline for
@@ -4153,6 +4405,7 @@ def _run_trade_job(
                     scoring_format = active_format,
                     source         = job_source,
                     seed_map       = seed_map,   # F3 — centerpiece stamping
+                    first_deck     = fs_first_deck,   # F9 — frozen features stamp
                 )
                 if imp_by_card:
                     snapshot = []

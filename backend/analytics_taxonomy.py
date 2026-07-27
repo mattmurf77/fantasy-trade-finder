@@ -56,6 +56,14 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # allowlist); registering them here additionally lands the analytics
     # rows F8's offline-eval harness reads. deck_reranked is F4 telemetry.
     "deck_card_viewed", "swipe_undone", "deck_reranked",
+    # F9 (deck.first_session) — activation instrumentation. Client-fired
+    # only on the user's first deck for a league (server-marked
+    # `first_deck` job field) while the flag is on: first_session_like =
+    # position of the session's FIRST like; first_session_deck_completed =
+    # session-one deck completion; first_session_adaptation_shown = the
+    # honest mid-deck adaptation moment rendered.
+    "first_session_like", "first_session_deck_completed",
+    "first_session_adaptation_shown",
     # Engagement
     "push_opened",
     # Onboarding & conversion plan (docs/plans/onboarding-conversion/plan.md)
@@ -148,6 +156,17 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "deck_card_viewed":     frozenset({"impression_id", "trade_id", "card_index"}),
     "swipe_undone":         frozenset({"trade_id", "impression_id"}),
     "deck_reranked":        frozenset({"moved", "moves"}),
+    # F9 — `position` is the 1-based disposition ordinal within the first
+    # session (the swipe at which the first like landed); `variant` is
+    # 'rerank' (deck.session_rerank on — the deck literally re-ranks) or
+    # 'descriptive' (the honest fallback); `attribute` is the dominant
+    # liked attribute key (client-local sessionRerank key space).
+    "first_session_like":            frozenset({"position", "trade_id",
+                                                "impression_id"}),
+    "first_session_deck_completed":  frozenset({"deck_size", "dispositions",
+                                                "liked"}),
+    "first_session_adaptation_shown": frozenset({"variant", "attribute",
+                                                 "likes"}),
     # Engagement
     "push_opened":          frozenset({"kind", "dedup_key"}),
     # Onboarding & conversion plan (docs/plans/onboarding-conversion/plan.md)

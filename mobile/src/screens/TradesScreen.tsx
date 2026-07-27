@@ -140,6 +140,16 @@ import {
   type RerankEvent,
   type RerankMove,
 } from '../utils/sessionRerank';
+// F9 first-session win (flag deck.first_session): pure trigger math for the
+// adaptation moment lives in utils/firstSessionMoment — this screen owns the
+// session refs, the inline card, and the activation events.
+import {
+  cardMatchesAttribute,
+  findDominantLikedAttribute,
+  FIRST_SESSION_MIN_DISPOSITIONS,
+  FIRST_SESSION_MIN_SHARED_LIKES,
+  type FirstSessionLike,
+} from '../utils/firstSessionMoment';
 import type { Player, TradeCard, TradeJobSnapshot, ScoringFormat } from '../shared/types';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -197,6 +207,11 @@ let guideS7ShownThisSession = false;
 // Onboarding item 8 (F4): at most one Apple save-moment ask per app session
 // across all trigger classes — asks never stack and never nag.
 let appleAskShownThisSession = false;
+
+// F9 (deck.first_session): the adaptation moment renders at most once per
+// app session (module-level so a tab remount / regenerate can't re-fire it
+// — "at most once per first session" with margin).
+let adaptationMomentShownThisSession = false;
 
 export default function TradesScreen({ navigation, route }: any) {
   const queryClient = useQueryClient();
@@ -368,6 +383,19 @@ export default function TradesScreen({ navigation, route }: any) {
   // session-local boost vector. Off ⇒ no events recorded, no reorder ever
   // runs — deck order stays exactly the served order (byte-identical).
   const rerankOn = useFlag('deck.session_rerank');
+  // F9 (flag deck.first_session, PRD F9): first-deck activation layer.
+  // Everything gates on firstSessionOn AND the server-marked job.first_deck
+  // (the server checked deck history — existing users never carry it), so
+  // flag off ⇒ no refs update, no events fire, no card renders. The board-
+  // sourced header (amendment) reads job.board_refresh, which the server
+  // emits for ANY board-refreshed deck while the flag is on.
+  const firstSessionOn = useFlag('deck.first_session');
+  const [adaptationMoment, setAdaptationMoment] = useState<{
+    phrase: string;
+    attribute: string;
+    likes: number;
+    variant: 'rerank' | 'descriptive';
+  } | null>(null);
   const [suppressionNoteDismissedJob, setSuppressionNoteDismissedJob] =
     useState<string | null>(null);
   const [suppressionUndoPending, setSuppressionUndoPending] = useState(false);
@@ -1212,6 +1240,27 @@ export default function TradesScreen({ navigation, route }: any) {
     lastRerankedRef.current = null;
   }, [rerankOn, job?.job_id, leagueId]);
 
+  // ── F9 first-session win (flag deck.first_session) ───────────────────
+  // Session tallies for the first-deck activation layer. Ref-only, reset
+  // per job/league like the F4 vector; the once-per-app-session guard on
+  // the adaptation moment is module-level (adaptationMomentShownThisSession).
+  //   fsDispositionsRef — dispositions this deck session (1-based ordinal
+  //                       feeds first_session_like.position).
+  //   fsLikesRef        — attrs (+ counterparty) of each liked card, for
+  //                       the dominant-attribute trigger.
+  //   fsFirstLikeTrackedRef / fsCompletionTrackedRef — one-shot event guards.
+  const fsDispositionsRef = useRef(0);
+  const fsLikesRef = useRef<FirstSessionLike[]>([]);
+  const fsFirstLikeTrackedRef = useRef(false);
+  const fsCompletionTrackedRef = useRef(false);
+  useEffect(() => {
+    fsDispositionsRef.current = 0;
+    fsLikesRef.current = [];
+    fsFirstLikeTrackedRef.current = false;
+    fsCompletionTrackedRef.current = false;
+    setAdaptationMoment(null);
+  }, [firstSessionOn, job?.job_id, leagueId]);
+
   // Served-order bookkeeping: cards enter `deck` in served order (the
   // append effect above dedups + appends), so first-sight index == served
   // index. Later reorders never touch existing entries.
@@ -1332,6 +1381,13 @@ export default function TradesScreen({ navigation, route }: any) {
     // F10 (deck.replenishment): an undone pass leaves the tally episode.
     if (replenishmentOn) {
       setSessionTally((t) => ({ ...t, passed: Math.max(0, t.passed - 1) }));
+    }
+    // F9 (deck.first_session): the undone pass never became a real
+    // disposition — back it out of the session tally so the first-like
+    // position ordinal stays honest (likes commit immediately, so
+    // fsLikesRef needs no correction).
+    if (firstSessionOn && job?.first_deck) {
+      fsDispositionsRef.current = Math.max(0, fsDispositionsRef.current - 1);
     }
     setDeckIdx((cur) => {
       const idx = sortedDeckRef.current.findIndex((c) => c.trade_id === p.rawId);
@@ -2088,6 +2144,26 @@ export default function TradesScreen({ navigation, route }: any) {
     // effect can't see (job_id doesn't change when the deck runs out).
     rerankEventsRef.current = [];
     lastRerankedRef.current = null;
+    // F9 (deck.first_session): session-one completion — the user finished
+    // their FIRST deck with ≥1 disposition this session (the PRD's
+    // activation event, alongside ≥1 like). One-shot per deck session.
+    if (
+      firstSessionOn &&
+      job?.first_deck &&
+      !fsCompletionTrackedRef.current &&
+      fsDispositionsRef.current > 0
+    ) {
+      fsCompletionTrackedRef.current = true;
+      track(
+        'first_session_deck_completed',
+        {
+          deck_size: deck.length,
+          dispositions: fsDispositionsRef.current,
+          liked: fsLikesRef.current.length,
+        },
+        'Trades',
+      );
+    }
     track('deck_exhausted_viewed', { deck_size: deck.length }, 'Trades');
     maybeShowQuicksetPrompt('like'); // swipes ≥3 path; pass-trigger n/a here
     // Guided tour S7 — the trio ramp, pointed at the real CTA below (once
@@ -2379,6 +2455,72 @@ export default function TradesScreen({ navigation, route }: any) {
         nextDispositionNotInterestedRef.current ? 'not_interested' : decision;
       nextDispositionNotInterestedRef.current = false;
       applySessionRerank(topCard, dispatchRawId, rerankDisposition, currentDwellMs());
+    }
+    // F9 (deck.first_session): first-deck activation tallies + the
+    // adaptation moment. Only on the server-marked FIRST deck for this
+    // league; flag off or any prior deck ⇒ this block never runs.
+    if (firstSessionOn && job?.first_deck) {
+      fsDispositionsRef.current += 1;
+      if (decision === 'like') {
+        fsLikesRef.current.push({
+          attrs: extractCardAttributes(topCard),
+          opponentUsername: topCard.opponent_username,
+          opponentUserId: topCard.opponent_user_id,
+        });
+        if (!fsFirstLikeTrackedRef.current) {
+          fsFirstLikeTrackedRef.current = true;
+          // position = 1-based disposition ordinal of the session's first
+          // like (the PRD's first_session_like_position metric).
+          track(
+            'first_session_like',
+            {
+              position: fsDispositionsRef.current,
+              trade_id: dispatchRawId,
+              ...(dispatchSignal?.impression_id
+                ? { impression_id: dispatchSignal.impression_id }
+                : {}),
+            },
+            'Trades',
+          );
+        }
+      }
+      // Adaptation moment — trigger conditions ARE the card's claims (PRD:
+      // never claim adaptation that didn't happen): ≥5 dispositions, ≥3
+      // likes sharing a phraseable dominant attribute, AND ≥1 unseen card
+      // ahead carrying it. Variant: 'rerank' only when deck.session_rerank
+      // is also on (the deck literally re-ranks toward the liked
+      // attribute); otherwise the honest descriptive copy.
+      if (
+        !adaptationMomentShownThisSession &&
+        fsDispositionsRef.current >= FIRST_SESSION_MIN_DISPOSITIONS &&
+        fsLikesRef.current.length >= FIRST_SESSION_MIN_SHARED_LIKES
+      ) {
+        const signal = findDominantLikedAttribute(fsLikesRef.current);
+        if (signal) {
+          const ahead = sortedDeckRef.current
+            .slice(deckIdx + 1)
+            .some((c) => cardMatchesAttribute(c, signal.attribute));
+          if (ahead) {
+            adaptationMomentShownThisSession = true;
+            // 'rerank' only when the F4 re-rank is actually operating on
+            // this display order (flag on AND deck order is the display
+            // order — applySessionRerank skips reorders under a lane
+            // filter or the fairness-off client sort). Otherwise the
+            // descriptive variant, whose only claim is the remaining
+            // cards (verified above).
+            const variant =
+              rerankOn && fairnessOn && !laneFilter
+                ? ('rerank' as const)
+                : ('descriptive' as const);
+            setAdaptationMoment({ ...signal, variant });
+            track(
+              'first_session_adaptation_shown',
+              { variant, attribute: signal.attribute, likes: signal.likes },
+              'Trades',
+            );
+          }
+        }
+      }
     }
     if (swipeUndoOn && decision === 'pass') {
       // Hold the POST for the undo window (design note at pendingPassRef).
@@ -3274,6 +3416,26 @@ export default function TradesScreen({ navigation, route }: any) {
           />
         ) : null}
 
+        {/* F9 (deck.first_session) — board-sourced header (2026-07-26
+            amendment): the deck was generated from a board updated since
+            the user's previous deck — say so (ranks are the loudest
+            explicit input; the anti-control-theater rule applied to
+            ranking). Server-truthed: board_refresh is only ever present
+            when literally true. Mirrors the F3 note's quiet ink-2 bar;
+            when both render they STACK, board header FIRST — deck
+            provenance before removals (documented choice). */}
+        {firstSessionOn && job?.board_refresh?.updated_since_last_deck ? (
+          <View testID="trades.board-refresh-note" style={styles.boardRefreshNote}>
+            <Text style={styles.boardRefreshText} numberOfLines={2}>
+              Built from your updated board
+              {job.board_refresh.basis === 'personal' &&
+              (job.board_refresh.ranked_player_count ?? 0) > 0
+                ? ` — ${job.board_refresh.ranked_player_count} players ranked`
+                : ''}
+            </Text>
+          </View>
+        ) : null}
+
         {/* F3 (deck.fatigue) — honoring note: the deck was shaped by a
             decline-window suppression, say so visibly (the anti-control-
             theater rule). One line, dismissible per job; Undo lifts the
@@ -3334,6 +3496,36 @@ export default function TradesScreen({ navigation, route }: any) {
               onAccept={() => acceptQuicksetPrompt('prompt')}
               onDismiss={snoozeQuicksetPrompt}
             />
+          ) : adaptationMoment && topCard ? (
+            // F9 (deck.first_session) — the adaptation moment: ONE inline
+            // card between deck cards (QuickSetPromptCard precedent — it
+            // holds the top-of-deck slot until dismissed; the deck resumes
+            // underneath). Copy variants are literal truths enforced at
+            // trigger time (advance()): 'rerank' only when
+            // deck.session_rerank is on AND ≥1 matching card remains;
+            // 'descriptive' claims only the remaining cards. Once per app
+            // session, dismissible.
+            <Card>
+              <View style={styles.emptyInner} testID="trades.adaptation-moment">
+                <Text style={styles.adaptationTitle}>
+                  Noticed you're liking {adaptationMoment.phrase}
+                </Text>
+                <Text style={styles.emptyBody}>
+                  {adaptationMoment.variant === 'rerank'
+                    ? 'More of those ahead.'
+                    : 'There are more of those in this deck.'}
+                </Text>
+                <Button
+                  testID="trades.adaptation-moment.dismiss"
+                  label="Keep swiping"
+                  compact
+                  onPress={() => {
+                    haptics.selection();
+                    setAdaptationMoment(null);
+                  }}
+                />
+              </View>
+            </Card>
           ) : topCard ? (
             <>
               {/* Peek of the next card behind the top one. Clipped to the
@@ -4530,6 +4722,30 @@ const styles = StyleSheet.create({
     ...type.bodySm,
     color: chalk.dim,
     fontFamily: fonts.uiSemi,
+  },
+  // F9 (deck.first_session) — board-sourced deck header. Same quiet ink-2
+  // bar family as the F3 suppression note above (mirrored styling per the
+  // PRD); flare border = informational highlight, matching the quickset
+  // diff banner's "your board changed" precedent. Stacks ABOVE the F3
+  // note when both render.
+  boardRefreshNote: {
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: flare.base,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    marginBottom: space.md,
+  },
+  boardRefreshText: {
+    ...type.bodySm,
+    color: chalk.base,
+    fontFamily: fonts.uiSemi,
+  },
+  // F9 — adaptation-moment inline card title (body copy reuses emptyBody).
+  adaptationTitle: {
+    ...type.title,
+    textAlign: 'center',
   },
   // Item 10 — demo→real bridge bar + redraft honesty label.
   demoBridge: {

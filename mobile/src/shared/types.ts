@@ -262,6 +262,22 @@ export interface TradeJobSnapshot {
     count: number;
     latest_declined_at?: string | null;
   };
+  // F9 (flag deck.first_session): true when this is the user's FIRST deck
+  // for this league (server checks deck_impressions + legacy
+  // trade_impressions history). Gates the client's adaptation moment and
+  // the first_session_* activation events. Absent otherwise.
+  first_deck?: boolean;
+  // F9 amendment (2026-07-26): present only when the deck was generated
+  // from a board updated since the user's PREVIOUS deck (needs the F1
+  // spine — omitted when deck.signal_v2 is off). Drives the deck header's
+  // "Built from your updated board" line; ranked_player_count is shown
+  // when basis is 'personal'. The server only emits it when the claim is
+  // literally true (anti-control-theater rule).
+  board_refresh?: {
+    updated_since_last_deck: boolean;
+    ranked_player_count?: number;
+    basis?: 'personal' | 'consensus';
+  };
 }
 
 export interface NotificationItem {

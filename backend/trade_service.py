@@ -320,6 +320,28 @@ _DEFAULT_CFG: dict[str, float] = {
     "audition_like_rate_frac":    0.5,   # graduate at like-rate ≥ this × global base rate
     "audition_retire_days":      30.0,   # retirement window before a failed archetype re-auditions
     # ------------------------------------------------------------------
+    # F9 — first-session win engineering (flag: deck.first_session —
+    # consumed by server's first-deck layer after the F7 wildcard slot).
+    # Confidence bar (per card, _first_session_confidence_ok): simple
+    # shape (per side ≤ first_session_max_side_assets AND total assets ≤
+    # first_session_max_total_assets ⇒ 1x1 / 2x1 / 1x2 at defaults), every
+    # asset consensus-seeded at ≥ first_session_min_seed_elo (the high-data
+    # check — the seed map is the consensus signal the generation path
+    # already computes; a user's own comparison counts are ~0 on a first
+    # deck by definition), and strong margin: divergence cards need
+    # mismatch_score ≥ first_session_min_margin; consensus-basis cards
+    # (mismatch 0 by construction) need fairness_score ≥
+    # first_session_min_fairness instead.
+    # ------------------------------------------------------------------
+    "first_session_top_k":            5.0,   # confidence-weighted top region (unlocked slots)
+    "first_session_min_margin":      40.0,   # divergence-card mismatch_score bar
+    "first_session_min_fairness":     0.85,  # consensus-card fairness_score bar
+    "first_session_min_seed_elo":  1250.0,   # every asset must be consensus-seeded ≥ this
+    "first_session_max_side_assets":  2.0,   # per-side asset cap for "simple shape"
+    "first_session_max_total_assets": 3.0,   # total asset cap for "simple shape"
+    "first_session_deck_max":        10.0,   # first decks clamp to ≤ this many cards
+    "first_session_deck_min":         8.0,   # documented target floor (no padding — max clamps only)
+    # ------------------------------------------------------------------
     # F10 — weekly deck replenishment (flag: deck.replenishment —
     # consumed by server._run_weekly_replenishment inside daily-tick)
     # ------------------------------------------------------------------

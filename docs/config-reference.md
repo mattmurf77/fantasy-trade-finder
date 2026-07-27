@@ -223,7 +223,7 @@ flags flipped ON at its TestFlight ship. F8 (offline eval harness) is unflagged 
 | `deck.taste_vectors` | false | F5 per-user decayed attribute-preference vectors (short τ=21d / long τ=180d) + board-derived prior, applied as a bounded multiplicative re-rank at generation (`user_taste` table, `backend/taste_service.py`; keys in the F5 model_config section below). |
 | `deck.exploration` | false | F7 one labeled Wildcard slot per deck (positions 4–6), archetype audition pools, exploration propensity logging. |
 | `deck.value_model` | false | F6 learned P(like)/P(propose) heads × hand-set V-vector as base ordering (`backend/value_model.py`; §F6 keys below). Gates BOTH serving and the automatic nightly refit — dark = truly inert. **Stays dark until an F8 replay win with adequate ESS (PRD gate).** |
-| `deck.first_session` | false | F9 confidence-weighted first-5 cards on a user's first deck + honest visible-adaptation moment. |
+| `deck.first_session` | false | F9 first-session win: confidence-weighted top-5 + 8–10-card clamp on a user's FIRST deck per league, the honest mid-deck adaptation moment (client), the "Built from your updated board" header on every board-refreshed deck (2026-07-26 amendment; needs `deck.signal_v2` for the previous-deck timestamp), and the `first_session_*` activation events. Off ⇒ byte-identical payloads/ordering/UI. |
 | `deck.replenishment` | false | F10 deck-completion summary card + weekly post-waivers pre-generation (daily-tick hook) + 1/week preference-gated fresh-deck push. |
 
 #### Ship-by / kill-by review convention (07/prd-04)
@@ -386,6 +386,21 @@ Read via `server._deck_cfg`, consumed by the exploration layer that runs AFTER `
 | `audition_min_views` | 30 | Viewed impressions (global, viewed-gated) before an auditioning archetype gets a graduate/retire verdict; also the all-time bar below which a first-seen archetype enters `test` |
 | `audition_like_rate_frac` | 0.5 | Graduate when window like-rate ≥ this × the global base rate (F2's cached trailing-30d p̂) |
 | `audition_retire_days` | 30 | Retirement window for a failed archetype before it re-enters `test` with a fresh counting window |
+
+### F9 — first-session win engineering (flag `deck.first_session`)
+
+Read via `server._deck_cfg`, consumed by the first-deck layer that runs AFTER the F7 wildcard insert and BEFORE impression logging in `_run_trade_job` (`_apply_first_session_shaping` + `_first_session_confidence_ok`). First decks only (no `deck_impressions` AND no legacy `trade_impressions` rows for the user+league): the deck clamps to `first_session_deck_max` cards (truncate only, never padded), then a stable partition floats confidence-passing cards into the first `first_session_top_k` UNLOCKED slots — the F7 wildcard's fixed slot, likes-you pins, and F3 retest cards never move (with the wildcard at slot 5 the region is positions 1–4 + 6). Reorder/truncate only — quality gates untouched, no card is ever rescued.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `first_session_top_k` | 5 | Confidence-weighted top region — the first this-many unlocked served slots |
+| `first_session_min_margin` | 40.0 | Divergence-card bar: `mismatch_score` ≥ this |
+| `first_session_min_fairness` | 0.85 | Consensus-card bar (their mismatch is 0 by construction): `fairness_score` ≥ this |
+| `first_session_min_seed_elo` | 1250.0 | High-data check: EVERY asset must be consensus-seeded ≥ this (the seed map is the consensus-n signal the engine already computes; user comparison counts are ~0 on a first deck). #185-primed picks pass naturally |
+| `first_session_max_side_assets` | 2 | Per-side asset cap for "simple shape" |
+| `first_session_max_total_assets` | 3 | Total asset cap — defaults ⇒ 1x1 / 2x1 / 1x2 pass, 2x2/3x1+ serve later |
+| `first_session_deck_max` | 10 | First decks truncate to ≤ this many cards (session-one completion — F10's moment — must be reachable) |
+| `first_session_deck_min` | 8 | Documented target floor only — no padding, only the max clamps |
 
 ### F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)
 

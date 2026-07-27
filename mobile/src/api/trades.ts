@@ -216,6 +216,24 @@ function normalizeJobSnapshot(raw: any): TradeJobSnapshot {
               : null,
         }
       : undefined;
+  // F9 (flag deck.first_session) — additive first-deck marker + board-
+  // refreshed header payload; both validated defensively so a malformed
+  // payload degrades to "absent" (nothing renders / no events fire).
+  const rawBr = raw?.board_refresh;
+  const boardRefresh =
+    rawBr && rawBr.updated_since_last_deck === true
+      ? {
+          updated_since_last_deck: true as const,
+          ranked_player_count:
+            typeof rawBr.ranked_player_count === 'number'
+              ? rawBr.ranked_player_count
+              : undefined,
+          basis:
+            rawBr.basis === 'personal' || rawBr.basis === 'consensus'
+              ? (rawBr.basis as 'personal' | 'consensus')
+              : undefined,
+        }
+      : undefined;
   return {
     job_id:          String(raw?.job_id ?? ''),
     status:          raw?.status === 'complete' ? 'complete'
@@ -226,6 +244,8 @@ function normalizeJobSnapshot(raw: any): TradeJobSnapshot {
     opponents_total: Number(raw?.opponents_total ?? 0) || 0,
     error:           raw?.error ?? null,
     ...(suppressionNote ? { suppression_note: suppressionNote } : {}),
+    ...(raw?.first_deck === true ? { first_deck: true } : {}),
+    ...(boardRefresh ? { board_refresh: boardRefresh } : {}),
   };
 }
 

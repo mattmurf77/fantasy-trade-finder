@@ -3903,6 +3903,47 @@ def load_board_state(
     return (int(row[0] or 0), row[1]) if row else (0, None)
 
 
+def load_deck_serve_history(
+    user_id: str,
+    league_id: str,
+) -> tuple[bool, str | None]:
+    """F9 (deck.first_session) — has this user+league ever been served a
+    deck, and when was the newest F1-spine deck served?
+
+    Returns (has_prior_deck, last_deck_served_at):
+      has_prior_deck      — True when ANY deck_impressions row (F1 spine) OR
+                            any legacy trade_impressions row exists. The
+                            legacy check protects pre-F1 users: their decks
+                            predate the spine, and F9's first-deck shaping
+                            must never fire for them (existing-user no-op
+                            contract).
+      last_deck_served_at — MAX(deck_impressions.served_at); None when the
+                            F1 spine has no rows for this user+league (the
+                            board_refresh header is then omitted — there is
+                            no "previous deck" timestamp to compare against).
+
+    Two cheap indexed lookups (ix_deck_impressions_user_league /
+    ix_trade_impressions_user_league); the legacy EXISTS only runs when the
+    spine is empty.
+    """
+    with engine.connect() as conn:
+        last = conn.execute(
+            select(func.max(deck_impressions_table.c.served_at)).where(and_(
+                deck_impressions_table.c.user_id   == user_id,
+                deck_impressions_table.c.league_id == league_id,
+            ))
+        ).scalar()
+        if last is not None:
+            return True, last
+        legacy = conn.execute(
+            select(trade_impressions_table.c.id).where(and_(
+                trade_impressions_table.c.user_id   == user_id,
+                trade_impressions_table.c.league_id == league_id,
+            )).limit(1)
+        ).first()
+        return legacy is not None, None
+
+
 def load_trade_decision_shape_counts(
     user_id: str,
     league_id: str,

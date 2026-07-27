@@ -326,7 +326,7 @@ FLAG_KEYS: tuple[str, ...] = (
     "deck.taste_vectors",   # F5 — taste vectors: per-user decayed attr prefs (short/long τ) + board prior, bounded re-rank
     "deck.exploration",     # F7 — wildcard slot (1/deck ≥8, positions 4–6, honest label) + archetype audition pools + exploration propensity logging
     "deck.value_model",     # F6 — learned P(like)/P(propose) heads × V-vector base ordering + nightly refit; DARK until an F8 replay win
-    "deck.first_session",   # reserved (no consumer yet)
+    "deck.first_session",   # F9 — first-session win: confidence-weighted first-5 + size clamp on FIRST decks, board-refreshed deck header, adaptation moment
     "deck.replenishment",   # reserved (no consumer yet)
     # ── #169 — League "outlook odds" (playoff/championship-odds pipeline) ──
     # Gates GET /api/league/outlook (backend/outlook/). Off (default) ⇒ the
