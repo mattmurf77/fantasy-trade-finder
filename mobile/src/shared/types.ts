@@ -242,6 +242,13 @@ export interface TradeJobSnapshot {
   opponents_done: number;
   opponents_total: number;
   error?: string | null;
+  // F3 (flag deck.fatigue): present only when ≥1 candidate was hidden by a
+  // decline-window suppression — drives the deck header's honoring note
+  // ("Hiding trades like ones you declined — Undo"). Absent otherwise.
+  suppression_note?: {
+    count: number;
+    latest_declined_at?: string | null;
+  };
 }
 
 export interface NotificationItem {

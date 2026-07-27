@@ -197,6 +197,19 @@ function normalizeTradeCard(raw: any): TradeCard {
 // downstream code keeps using the unified TradeCard shape.
 function normalizeJobSnapshot(raw: any): TradeJobSnapshot {
   const cards = Array.isArray(raw?.cards) ? raw.cards.map(normalizeTradeCard) : [];
+  // F3 (flag deck.fatigue) — additive honoring note; validated defensively so
+  // a malformed payload degrades to "no note" (banner hidden).
+  const rawNote = raw?.suppression_note;
+  const suppressionNote =
+    rawNote && typeof rawNote.count === 'number' && rawNote.count > 0
+      ? {
+          count: rawNote.count,
+          latest_declined_at:
+            typeof rawNote.latest_declined_at === 'string'
+              ? rawNote.latest_declined_at
+              : null,
+        }
+      : undefined;
   return {
     job_id:          String(raw?.job_id ?? ''),
     status:          raw?.status === 'complete' ? 'complete'
@@ -206,6 +219,7 @@ function normalizeJobSnapshot(raw: any): TradeJobSnapshot {
     opponents_done:  Number(raw?.opponents_done ?? 0)  || 0,
     opponents_total: Number(raw?.opponents_total ?? 0) || 0,
     error:           raw?.error ?? null,
+    ...(suppressionNote ? { suppression_note: suppressionNote } : {}),
   };
 }
 
@@ -363,6 +377,14 @@ export async function setMatchDisposition(
   return api.post<any>(`/api/trades/matches/${matchId}/disposition`, {
     decision,
   });
+}
+
+// POST /api/trades/suppressions/undo — F3 (flag deck.fatigue). Lifts the
+// NEWEST decline suppression for this league (the deck note's "Undo"); the
+// caller then regenerates so the previously-hidden trades can return. 404s
+// when the flag is off — callers only reach this behind useFlag('deck.fatigue').
+export async function undoDeckSuppression(leagueId: string) {
+  return api.post<any>('/api/trades/suppressions/undo', { league_id: leagueId });
 }
 
 // POST /api/trades/matches/:id/dismiss

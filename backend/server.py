@@ -81,6 +81,11 @@ from .database import (
     # F2 (deck.thompson_v2) — bandit hygiene (viewed-gated arm events,
     # frozen legacy seam, global prior base rate)
     load_deck_arm_events, load_legacy_shape_counts, load_global_like_rate,
+    # F3 (deck.fatigue) — fatigue events + decline-suppression state
+    load_deck_fatigue_events, save_deck_suppression, load_deck_suppressions,
+    mark_deck_suppression_retested, resuppress_deck_suppression,
+    lift_latest_deck_suppression, load_deck_pass_after,
+    set_deck_fatigue_reset, load_deck_fatigue_reset,
     # F10 (deck.replenishment) — weekly deck pre-generation
     load_active_deck_user_leagues, load_latest_trade_impression_batch,
     replenish_week_done, log_deck_replenish,
@@ -1778,7 +1783,7 @@ def _trade_job_key(user_id: str, league_id: str, scoring_format: str) -> tuple:
 def _trade_job_public_view(job: dict) -> dict:
     """Shape returned to the mobile app by /api/trades/generate + /status.
     Hides internal-only fields like the cache key."""
-    return {
+    out = {
         "job_id":          job["job_id"],
         "status":          job["status"],
         "opponents_done":  job["opponents_done"],
@@ -1786,6 +1791,14 @@ def _trade_job_public_view(job: dict) -> dict:
         "cards":           job.get("cards") or [],
         "error":           job.get("error"),
     }
+    # F3 (deck.fatigue) — additive honoring note, set by the worker only
+    # when the flag is on AND ≥1 candidate was decline-suppressed:
+    # {count, latest_declined_at}. Absent otherwise, so flag-off payloads
+    # stay byte-identical.
+    note = job.get("suppression_note")
+    if note:
+        out["suppression_note"] = note
+    return out
 
 
 def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value) -> bool:
@@ -2036,6 +2049,13 @@ def _deck_thompson_v2_enabled() -> bool:
     runs byte-identically. Self-sufficient: v2 on with trade.thompson_deck
     off still orders the deck."""
     return getattr(FLAGS, "deck_thompson_v2", False)
+
+
+def _deck_fatigue_enabled() -> bool:
+    """F3 — fatigue & durable suppression (docs/plans/tiktok-discovery/prds/
+    F3-fatigue-suppression.md). Every fatigue/suppression code path checks
+    this; off ⇒ byte-identical scoring, payloads, and DB writes."""
+    return getattr(FLAGS, "deck_fatigue", False)
 
 
 def _deck_cfg(key: str, default: float) -> float:
@@ -2310,6 +2330,7 @@ def _order_deck(
     job_id: str,
     seed_map: dict,
     capture: dict | None = None,
+    fatigue_mult: dict | None = None,
 ) -> list:
     """Apply A5 (Thompson ordering — v1, or the F2 v2 sampler when
     deck.thompson_v2 is on) and A6 (diversification) to a generated deck.
@@ -2321,11 +2342,16 @@ def _order_deck(
     {"propensity": {id(card): multiplier}, "final_key": {id(card): key}} —
     the Thompson multiplier ACTUALLY applied per card and the post-multiplier
     ordering key, for deck_impressions logging. Pure out-param: ordering math
-    is untouched and callers that pass None see identical behavior."""
+    is untouched and callers that pass None see identical behavior.
+
+    `fatigue_mult` (F3, deck.fatigue): {id(card): m ≤ 1.0} discounts folded
+    into the ordering key AFTER the Thompson draw — fatigue reorders, never
+    boosts, and the F1 final_key capture records it. None (the flag-off
+    caller value) ⇒ byte-identical pre-F3 behavior."""
     thompson_v2 = _deck_thompson_v2_enabled()   # F2 — supersedes the v1 draw
     thompson  = _thompson_deck_enabled() or thompson_v2
     diversity = _deck_diversity_enabled()
-    if not cards or not (thompson or diversity):
+    if not cards or not (thompson or diversity or fatigue_mult):
         return cards
 
     key = {id(c): float(getattr(c, "composite_score", 0.0) or 0.0) for c in cards}
@@ -2365,6 +2391,14 @@ def _order_deck(
                 capture["propensity"] = {
                     id(c): 0.5 + sample_by_shape[_card_shape(c)] for c in cards
                 }
+
+    # F3 (deck.fatigue) — multiplicative discount on the ordering key.
+    # Applied after the Thompson draw and before the diversity penalty
+    # (order is immaterial — all three are multiplicative) so the captured
+    # final_key records the key ACTUALLY sorted on.
+    if fatigue_mult:
+        for c in cards:
+            key[id(c)] *= min(1.0, float(fatigue_mult.get(id(c), 1.0)))
 
     if diversity:
         user_cap = int(_deck_cfg("diversity_user_cap", 3))
@@ -2412,6 +2446,15 @@ def _signal_value_band(value) -> str | None:
     return f"{lo}-{lo + 500}"
 
 
+def _deck_trade_hash(give: list, recv: list, target) -> str:
+    """The F1 stable card identity: sha256 of sorted give | sorted receive |
+    partner, truncated to 16 hex chars. Single definition so the impression
+    writer and the F3 fatigue layer can never drift."""
+    return hashlib.sha256(
+        f"{','.join(sorted(give))}|{','.join(sorted(recv))}|{target or ''}"
+        .encode()).hexdigest()[:16]
+
+
 def _log_deck_signal_impressions(
     *,
     user_id: str,
@@ -2422,6 +2465,7 @@ def _log_deck_signal_impressions(
     capture: dict | None,
     scoring_format: str,
     source: str | None = None,
+    seed_map: dict | None = None,   # F3 — centerpiece derivation (flag-gated)
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -2498,15 +2542,13 @@ def _log_deck_signal_impressions(
         base = float(getattr(card, "composite_score", 0.0) or 0.0)
         impression_id = uuid.uuid4().hex
         imp_by_card[id(card)] = impression_id
-        rows.append({
+        row = {
             "impression_id": impression_id,
             "user_id":       user_id,
             "league_id":     league_id,
             "deck_job_id":   job_id,
             "card_index":    pos,
-            "trade_hash":    hashlib.sha256(
-                f"{','.join(sorted(give))}|{','.join(sorted(recv))}|{target or ''}"
-                .encode()).hexdigest()[:16],
+            "trade_hash":    _deck_trade_hash(give, recv, target),
             "features_json": json.dumps(features),
             "propensity":    float(prop_by_card.get(id(card), 1.0)),
             "base_score":    base,
@@ -2514,7 +2556,12 @@ def _log_deck_signal_impressions(
             "archetype":     lane,   # lane is today's closest archetype label
             "shape_bucket":  _card_shape(card),
             "served_at":     served_at,
-        })
+        }
+        # F3 (deck.fatigue) — per-item fatigue key, stamped only while the
+        # flag is on so flag-off insert rows stay byte-identical to F1's.
+        if _deck_fatigue_enabled():
+            row["centerpiece_id"] = _fatigue_centerpiece(give, recv, seed_map or {})
+        rows.append(row)
     save_deck_impressions(rows)
     return imp_by_card
 
@@ -2545,6 +2592,327 @@ def _save_deck_outcome_safe(
         )
     except Exception as out_err:
         log.warning("deck signal outcome write failed (non-fatal): %s", out_err)
+
+
+# ── F3 (flag deck.fatigue) — fatigue & durable suppression ──────────────────
+# docs/plans/tiktok-discovery/prds/F3-fatigue-suppression.md. Two layers,
+# both strictly per-user and layered ON TOP of the league-level saturation
+# caps in _order_deck/_cap_per_target (which are untouched):
+#
+#   1. SOFT fatigue — a multiplicative discount on the ordering key, derived
+#      on read from viewed deck_impressions (F1 join, viewed rows only) keyed
+#      by trade_hash AND centerpiece player, plus a weaker archetype-level
+#      accrual and a strong session demotion for centerpieces passed 2+
+#      times in one deck job. Discount only: multipliers are ≤ 1.0, applied
+#      AFTER all generation gates — a fatigued card can sink, never rise,
+#      and no gated card is ever rescued.
+#   2. HARD (semi-durable) suppression — a decline/proposal-kill removes
+#      near-duplicates (same centerpiece + shape bucket + package value
+#      within ±fatigue_decline_value_band) for fatigue_decline_suppress_days,
+#      then grants exactly ONE low-exposure retest card, re-arming if the
+#      retest is passed (checked lazily at the next generation).
+#
+# Floor: suppression never shrinks the candidate pool below _DECK_MIN_CARDS —
+# when the floor engages the best suppressed cards are restored and a warning
+# is logged (no silent starvation). Not-interested/untouchables (#163) remain
+# the authoritative hard filters upstream and are never touched here.
+
+_FATIGUE_SESSION_PASS_MIN = 2   # passes on one centerpiece in one job ⇒ strong demotion
+
+
+def _fatigue_centerpiece(give: list, recv: list, seed_map: dict) -> str | None:
+    """The package's highest-consensus asset — the per-item fatigue key.
+    Deterministic tie-break by player id so serve-time and decline-time
+    derivations agree even on a cold seed map."""
+    pids = [str(p) for p in list(give or []) + list(recv or [])]
+    if not pids:
+        return None
+    return max(pids, key=lambda p: (float(seed_map.get(p, 1500.0)), p))
+
+
+def _fatigue_package_value(give: list, recv: list, seed_map: dict) -> float | None:
+    """Total consensus value of both sides on the v2 value scale (per-player
+    elo_to_value over seed Elos, no depth discount) — the same computation at
+    serve time and decline time, so the ±band comparison is apples-to-apples.
+    None on an empty seed map (band test is then skipped)."""
+    if not seed_map:
+        return None
+    try:
+        from .trade_service import elo_to_value
+        pids = [str(p) for p in list(give or []) + list(recv or [])]
+        return round(sum(elo_to_value(float(seed_map.get(p, 1500.0))) for p in pids), 1)
+    except Exception:
+        return None
+
+
+def _deck_fatigue_state(user_id: str, league_id: str) -> dict:
+    """Aggregate the F1 event stream into the fatigue inputs, derived at
+    read time (no stored soft state):
+
+      hash / center / arch : {key: (viewed_count, days_since_last_seen)}
+                             from `viewed` outcomes inside the lookback
+                             window AND after any "Refresh my deck" marker.
+      session_demoted      : {centerpiece, …} passed ≥_FATIGUE_SESSION_PASS_MIN
+                             times within ONE deck job whose passes fall
+                             inside the fatigue_session_hours window.
+    """
+    now      = datetime.now(timezone.utc)
+    lookback = max(1, int(_deck_cfg("fatigue_lookback_days", 30)))
+    cutoff   = (now - timedelta(days=lookback)).isoformat()
+    since    = cutoff
+    reset_at = load_deck_fatigue_reset(user_id, league_id)
+    if reset_at and reset_at > since:
+        since = reset_at
+
+    hash_acc:   dict[str, list] = {}   # key -> [count, min_age_days]
+    center_acc: dict[str, list] = {}
+    arch_acc:   dict[str, list] = {}
+    job_passes: dict[tuple, int] = {}  # (job_id, centerpiece) -> pass count
+    session_h  = max(0.0, _deck_cfg("fatigue_session_hours", 8.0))
+    session_cut = (now - timedelta(hours=session_h)).isoformat()
+
+    for thash, center, arch, _shape, job_id, action, acted_at in \
+            load_deck_fatigue_events(user_id, league_id, since):
+        if action == "viewed":
+            age = _iso_age_days(acted_at, now)
+            if age is None:
+                continue
+            for key, acc in ((thash, hash_acc), (center, center_acc), (arch, arch_acc)):
+                if not key:
+                    continue
+                a = acc.setdefault(key, [0, float("inf")])
+                a[0] += 1
+                a[1] = min(a[1], age)
+        elif action == "pass" and center and acted_at and acted_at >= session_cut:
+            k = (job_id, center)
+            job_passes[k] = job_passes.get(k, 0) + 1
+
+    session_demoted = {c for (_j, c), n in job_passes.items()
+                       if n >= _FATIGUE_SESSION_PASS_MIN}
+    return {
+        "hash":   {k: (v[0], v[1]) for k, v in hash_acc.items()},
+        "center": {k: (v[0], v[1]) for k, v in center_acc.items()},
+        "arch":   {k: (v[0], v[1]) for k, v in arch_acc.items()},
+        "session_demoted": session_demoted,
+    }
+
+
+def _deck_fatigue_multipliers(
+    cards: list,
+    *,
+    user_id: str,
+    league_id: str,
+    seed_map: dict,
+    retest_ids: set | None = None,
+) -> dict[int, float]:
+    """Per-card fatigue multiplier in [fatigue_floor·session_demotion, 1.0].
+
+    Item level (trade_hash and centerpiece, coefficient fatigue_a) and
+    archetype level (weaker fatigue_arch_a) each produce the PRD's LinkedIn
+    form  w1·exp(−a·impCount) + w2·exp(−b·daysSinceLastSeen); the card takes
+    the MIN of its keys (never a product — one impression must not be
+    triple-counted through its own hash/centerpiece/archetype). Cards with
+    no viewed history inside the window multiply by exactly 1.0. Any read
+    failure degrades to all-1.0 — generation never breaks."""
+    try:
+        state = _deck_fatigue_state(user_id, league_id)
+    except Exception as e:
+        log.warning("deck fatigue: state read failed (soft-off): %s", e)
+        state = {"hash": {}, "center": {}, "arch": {}, "session_demoted": set()}
+
+    w1    = _deck_cfg("fatigue_w1", 0.85)
+    w2    = _deck_cfg("fatigue_w2", 0.15)
+    a     = _deck_cfg("fatigue_a", 0.18)
+    a_arc = _deck_cfg("fatigue_arch_a", 0.05)
+    b     = _deck_cfg("fatigue_b", 0.10)
+    floor = min(1.0, max(0.0, _deck_cfg("fatigue_floor", 0.25)))
+    demote = min(1.0, max(0.0, _deck_cfg("fatigue_session_demotion", 0.2)))
+    retest_mult = min(1.0, max(0.0, _deck_cfg("fatigue_retest_mult", 0.5)))
+
+    def _m(stats, coeff):
+        if not stats:
+            return 1.0
+        count, age = stats
+        if count <= 0:
+            return 1.0
+        val = w1 * math.exp(-coeff * count) + w2 * math.exp(-b * max(0.0, age))
+        return min(1.0, max(floor, val))
+
+    out: dict[int, float] = {}
+    for c in cards:
+        give   = list(getattr(c, "give_player_ids", None) or [])
+        recv   = list(getattr(c, "receive_player_ids", None) or [])
+        thash  = _deck_trade_hash(give, recv, getattr(c, "target_user_id", None))
+        center = _fatigue_centerpiece(give, recv, seed_map)
+        arch   = _card_archetype(c)
+        m = min(
+            _m(state["hash"].get(thash), a),
+            _m(state["center"].get(center), a) if center else 1.0,
+            _m(state["arch"].get(arch), a_arc) if arch else 1.0,
+        )
+        if center and center in state["session_demoted"]:
+            m = min(m, demote)
+        if retest_ids and id(c) in retest_ids:
+            # The ONE decline-window retest card is served low-exposure.
+            m = min(m, retest_mult)
+        out[id(c)] = m
+    return out
+
+
+def _apply_deck_suppression(
+    cards: list,
+    *,
+    user_id: str,
+    league_id: str,
+    seed_map: dict,
+) -> tuple[list, dict | None, set]:
+    """Remove decline-window near-duplicates from a generated deck.
+
+    Returns (kept_cards, suppression_note, retest_card_ids):
+      suppression_note — {"count", "latest_declined_at"} when ≥1 card was
+                         suppressed (feeds the client's honoring note),
+                         else None.
+      retest_card_ids  — id(card) set for cards granted as the ONE
+                         low-exposure retest of an expired window.
+
+    Lazy retest resolution: an expired row that was retested and whose
+    retest hash has a later `pass` outcome is re-armed HERE (next
+    generation), so the swipe path stays write-free. Floor: never returns
+    fewer than _DECK_MIN_CARDS when the input had that many — restored
+    cards are logged, not silently dropped. likes_you cards are never
+    suppressed (mirror interest outranks a stale decline)."""
+    rows = load_deck_suppressions(user_id, league_id)
+    if not rows or not cards:
+        return cards, None, set()
+
+    now      = datetime.now(timezone.utc)
+    now_iso  = now.isoformat()
+    band     = max(0.0, _deck_cfg("fatigue_decline_value_band", 0.10))
+    window_d = max(1, int(_deck_cfg("fatigue_decline_suppress_days", 30)))
+
+    # Lazy re-suppress: retested + expired + passed-after-retest ⇒ new window.
+    for r in rows:
+        if (r.get("expires_at") and r["expires_at"] <= now_iso
+                and r.get("retested_at") and r.get("retest_trade_hash")):
+            try:
+                passed_at = load_deck_pass_after(
+                    user_id, league_id, r["retest_trade_hash"], r["retested_at"])
+            except Exception as e:
+                log.warning("deck fatigue: retest pass check failed: %s", e)
+                passed_at = None
+            if passed_at:
+                new_exp = (datetime.fromisoformat(passed_at).replace(
+                    tzinfo=timezone.utc) if datetime.fromisoformat(passed_at).tzinfo is None
+                    else datetime.fromisoformat(passed_at)) + timedelta(days=window_d)
+                try:
+                    resuppress_deck_suppression(r["id"], passed_at, new_exp.isoformat())
+                except Exception as e:
+                    log.warning("deck fatigue: re-suppress write failed: %s", e)
+                r["declined_at"] = passed_at
+                r["expires_at"]  = new_exp.isoformat()
+                r["retested_at"] = None
+                r["retest_trade_hash"] = None
+
+    def _row_matches(r, center, shape, value):
+        if r["centerpiece_id"] != center or r["shape_bucket"] != shape:
+            return False
+        rv = r.get("package_value")
+        if rv is None or value is None or rv <= 0:
+            return True   # no value basis ⇒ centerpiece+shape decide
+        return abs(value - rv) <= band * rv
+
+    active  = [r for r in rows if r["expires_at"] > now_iso]
+    pending = [r for r in rows if r["expires_at"] <= now_iso and not r.get("retested_at")]
+
+    kept: list = []
+    suppressed: list = []            # [(card, declined_at), …]
+    retest_ids: set = set()
+    granted_rows: set = set()
+
+    for c in cards:
+        give   = list(getattr(c, "give_player_ids", None) or [])
+        recv   = list(getattr(c, "receive_player_ids", None) or [])
+        center = _fatigue_centerpiece(give, recv, seed_map)
+        shape  = _card_shape(c)
+        value  = _fatigue_package_value(give, recv, seed_map)
+
+        if getattr(c, "likes_you", False) or center is None:
+            kept.append(c)
+            continue
+
+        hit = next((r for r in active if _row_matches(r, center, shape, value)), None)
+        if hit is not None:
+            suppressed.append((c, hit["declined_at"]))
+            continue
+
+        # Expired window, no retest yet ⇒ this card is the ONE retest; any
+        # further match of the same row in this deck stays suppressed.
+        retest_row = next(
+            (r for r in pending if _row_matches(r, center, shape, value)), None)
+        if retest_row is not None:
+            if retest_row["id"] in granted_rows:
+                suppressed.append((c, retest_row["declined_at"]))
+                continue
+            granted_rows.add(retest_row["id"])
+            thash = _deck_trade_hash(give, recv, getattr(c, "target_user_id", None))
+            try:
+                mark_deck_suppression_retested(retest_row["id"], thash, now_iso)
+            except Exception as e:
+                log.warning("deck fatigue: retest mark failed: %s", e)
+            try:
+                setattr(c, "fatigue_retest", True)
+            except Exception:
+                pass
+            retest_ids.add(id(c))
+        kept.append(c)
+
+    # Suppression floor — never starve the deck, and never silently.
+    if suppressed and len(kept) < _DECK_MIN_CARDS:
+        suppressed.sort(
+            key=lambda cd: float(getattr(cd[0], "composite_score", 0.0) or 0.0),
+            reverse=True)
+        restored = 0
+        while len(kept) < _DECK_MIN_CARDS and suppressed:
+            kept.append(suppressed.pop(0)[0])
+            restored += 1
+        log.warning(
+            "deck fatigue: suppression floor engaged — restored %d suppressed "
+            "card(s) to keep the deck at %d (user=%s league=%s)",
+            restored, _DECK_MIN_CARDS, user_id, league_id)
+
+    note = None
+    if suppressed:
+        declines = [d for _c, d in suppressed if d]
+        note = {
+            "count": len(suppressed),
+            "latest_declined_at": max(declines) if declines else None,
+        }
+    return kept, note, retest_ids
+
+
+def _save_decline_suppression(
+    user_id: str,
+    league_id: str,
+    give: list,
+    recv: list,
+    seed_map: dict,
+) -> None:
+    """Persist one decline/proposal-kill suppression window (flag-gated by
+    the caller). give/recv are from the SUPPRESSED user's perspective."""
+    center = _fatigue_centerpiece(give, recv, seed_map)
+    if not center:
+        return
+    days = max(1, int(_deck_cfg("fatigue_decline_suppress_days", 30)))
+    now  = datetime.now(timezone.utc)
+    save_deck_suppression(
+        user_id        = user_id,
+        league_id      = league_id,
+        centerpiece_id = center,
+        shape_bucket   = f"{len(give)}x{len(recv)}",
+        package_value  = _fatigue_package_value(give, recv, seed_map),
+        declined_at    = now.isoformat(),
+        expires_at     = (now + timedelta(days=days)).isoformat(),
+    )
 
 
 def _user_pick_share(user_id: str, league_id: str) -> float:
@@ -2812,16 +3180,64 @@ def _run_trade_job(
             except Exception as ly_err:
                 log.warning("likes-you injection failed (non-fatal): %s", ly_err)
 
+        # F3 (flag deck.fatigue) — per-user layer, applied AFTER likes-you
+        # injection and BEFORE ordering/impressions: (1) decline-window
+        # near-duplicate suppression (with the ONE-retest grant and the
+        # ≥_DECK_MIN_CARDS floor), (2) soft fatigue multipliers folded into
+        # the ordering key by _order_deck below. League-level saturation
+        # caps in _order_deck are untouched — this stacks on top. Non-fatal:
+        # any failure serves the deck exactly as generated. Flag off ⇒
+        # both stay None and every downstream path is byte-identical.
+        suppression_note: dict | None = None
+        fatigue_mults: dict | None = None
+        if _deck_fatigue_enabled() and league_id != "league_demo":
+            try:
+                n_before = len(final_cards)
+                final_cards, suppression_note, _retest_ids = _apply_deck_suppression(
+                    final_cards,
+                    user_id   = g_user_id,
+                    league_id = league_id,
+                    seed_map  = seed_map,
+                )
+                fatigue_mults = _deck_fatigue_multipliers(
+                    final_cards,
+                    user_id    = g_user_id,
+                    league_id  = league_id,
+                    seed_map   = seed_map,
+                    retest_ids = _retest_ids,
+                )
+                with _trade_jobs_lock:
+                    j = _trade_jobs.get(job_id)
+                    if j is not None and suppression_note:
+                        j["suppression_note"] = suppression_note
+                if len(final_cards) != n_before or _retest_ids:
+                    # Suppressed cards must vanish from (and retest labels
+                    # appear in) the already-published snapshot.
+                    snapshot = []
+                    for c in final_cards:
+                        d = trade_card_to_dict(c, players_dict)
+                        d["real_opponent"] = c.target_user_id in real_user_ids
+                        d["outlook"]       = outlook_value
+                        snapshot.append(d)
+                    with _trade_jobs_lock:
+                        j = _trade_jobs.get(job_id)
+                        if j is not None and j["status"] == "running":
+                            j["cards"] = snapshot
+            except Exception as fat_err:
+                log.warning("deck fatigue layer failed (non-fatal): %s", fat_err)
+                suppression_note, fatigue_mults = None, None
+
         # Tier 2 amendments A5 + A6 — Thompson-sampled ordering + league-wide
         # diversification. Runs AFTER likes-you injection (so pinning sees
         # the final likes_you flags) and BEFORE impression logging (so
         # trade_impressions records true served positions). Deterministically
         # seeded per job, so /status re-polls see a stable order. Non-fatal:
-        # any failure serves the deck exactly as generated.
+        # any failure serves the deck exactly as generated. F3: fatigue
+        # multipliers ride the same call (None when the flag is off).
         signal_capture: dict | None = None
         if league_id != "league_demo" and (
                 _thompson_deck_enabled() or _deck_thompson_v2_enabled()
-                or _deck_diversity_enabled()):
+                or _deck_diversity_enabled() or fatigue_mults):
             try:
                 # F1: capture the drawn Thompson multipliers + final ordering
                 # keys for deck_impressions. None when the flag is off — the
@@ -2835,6 +3251,7 @@ def _run_trade_job(
                     job_id    = job_id,
                     seed_map  = seed_map,
                     capture   = signal_capture,
+                    fatigue_mult = fatigue_mults,
                 )
                 if [id(c) for c in ordered] != [id(c) for c in final_cards]:
                     final_cards = ordered
@@ -2884,6 +3301,7 @@ def _run_trade_job(
                     capture        = signal_capture,
                     scoring_format = active_format,
                     source         = job_source,
+                    seed_map       = seed_map,   # F3 — centerpiece stamping
                 )
                 if imp_by_card:
                     snapshot = []
@@ -6059,6 +6477,11 @@ def trade_card_to_dict(card, players: dict) -> dict:
     sweetener = getattr(card, "sweetener", None)
     if sweetener:
         out["sweetener"] = sweetener
+    # F3 (deck.fatigue) — the ONE post-decline-window retest card, labeled
+    # honestly. The attribute is only ever set while the flag is on, so
+    # flag-off payloads stay byte-identical.
+    if getattr(card, "fatigue_retest", False):
+        out["retest"] = True
     # #189 — relaxed-fallback annotation, only when the relaxed pass emitted
     # this card (targeted job, zero cards under normal gates). Additive:
     # ordinary cards' payloads stay byte-identical. Clients label these
@@ -6182,6 +6605,18 @@ def generate_trades():
     # concurrent workers for one key), and pinned jobs already bypass.
     force_fresh        = bool(body.get("force"))
 
+    # F3 (deck.fatigue) — "Refresh my deck": clear the user's SOFT fatigue
+    # state (pass-derived multipliers + session demotions) and regenerate.
+    # Decline suppressions, not-interested and untouchables are untouched —
+    # refresh resets staleness insurance, not the user's expressed negatives.
+    # Ignored (byte-identical) when the flag is off.
+    if body.get("refresh_fatigue") and _deck_fatigue_enabled():
+        try:
+            set_deck_fatigue_reset(g_user_id, league_id)
+        except Exception as reset_err:
+            log.warning("deck fatigue reset failed (non-fatal): %s", reset_err)
+        force_fresh = True   # the cached deck predates the reset by definition
+
     # Read current outlook for cache-freshness comparison. The actual job
     # worker reads it again; this is just for the cache hit decision. Must
     # resolve declared-else-seeded identically to the worker (#8) or every
@@ -6243,6 +6678,49 @@ def generate_trades():
     with _trade_jobs_lock:
         snapshot = _trade_job_public_view(_trade_jobs[job_id])
     return jsonify(snapshot)
+
+
+@app.route("/api/trades/suppressions/undo", methods=["POST"])
+@_gate_unverified_write
+def undo_deck_suppression():
+    """POST /api/trades/suppressions/undo   (F3, flag deck.fatigue)
+    Body: { "league_id"?: str }  — defaults to the active session league.
+
+    Lifts the NEWEST decline suppression for this user+league (the deck
+    header note's "Undo"). Newest-only by design: the note surfaces the
+    latest decline, so undo reverses exactly what the note describes; older
+    windows each need their own undo. Lifting invalidates the cached deck so
+    the client's follow-up regenerate reflects it. 404 when the flag is off
+    (route doesn't exist for old clients)."""
+    if not _deck_fatigue_enabled():
+        return jsonify({"error": "not found"}), 404
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess.get("user_id")
+    g_league  = sess.get("league")
+    if not g_user_id:
+        return jsonify({"error": "session not initialised"}), 400
+    body      = request.get_json(silent=True) or {}
+    league_id = body.get("league_id") or (g_league.league_id if g_league else None)
+    if not league_id:
+        return jsonify({"error": "league_id required"}), 400
+    try:
+        lifted = lift_latest_deck_suppression(g_user_id, league_id)
+    except Exception as e:
+        log.warning("suppression undo failed: %s", e)
+        return jsonify({"error": "undo_failed"}), 500
+    if lifted:
+        _invalidate_trade_jobs(user_id=g_user_id, league_id=league_id)
+    try:
+        record_event(
+            g_user_id, "suppression_undone",
+            league_id=league_id, source="api",
+            props={"lifted": lifted},
+            **(getattr(g, "device_info", {}) or {}),
+        )
+    except Exception as ev_err:
+        log.warning("record_event(suppression_undone) failed: %s", ev_err)
+    return jsonify({"ok": True, "lifted": lifted})
 
 
 @app.route("/api/trades/status")
@@ -7438,6 +7916,37 @@ def disposition_trade_match(match_id):
             _match_league_id and _active_league_id
             and _match_league_id != _active_league_id
         )
+
+        # F3 (flag deck.fatigue) — a decline is the strongest negative: open
+        # a 30-day near-duplicate suppression window for the decliner, and —
+        # when this decline kills a proposal the partner had ACCEPTED — for
+        # the partner too (their proposal was killed; PRD "proposal-killed").
+        # Cached decks are invalidated so the next generate honors it.
+        # Never allowed to fail the tap.
+        if decision == "decline" and _deck_fatigue_enabled():
+            try:
+                _sup_league = _match_league_id or _active_league_id
+                _seed = (getattr(service, "_seed", None) or {}) if service else {}
+                if _sup_league:
+                    _save_decline_suppression(
+                        g_user_id, _sup_league,
+                        result.get("user_give") or [],
+                        result.get("user_receive") or [],
+                        _seed,
+                    )
+                    if (result.get("both_decided")
+                            and result.get("outcome") == "declined"
+                            and result.get("partner_decision") == "accept"
+                            and result.get("partner_user_id")):
+                        _save_decline_suppression(
+                            result["partner_user_id"], _sup_league,
+                            result.get("user_receive") or [],   # mirror perspective
+                            result.get("user_give") or [],
+                            _seed,
+                        )
+                    _invalidate_trade_jobs(user_id=g_user_id, league_id=_sup_league)
+            except Exception as sup_err:
+                log.warning("decline suppression hook failed (non-fatal): %s", sup_err)
 
         try:
             record_event(

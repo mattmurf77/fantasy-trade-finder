@@ -231,6 +231,7 @@ TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-
 | `archetype` | str | lane label when stamped (`window`/`value`), else null |
 | `shape_bucket` | str | `"1x1"`, `"2x1"`, … (the Thompson arm) |
 | `served_at` | str | ISO UTC |
+| `centerpiece_id` | str | **F3** (flag `deck.fatigue`) — highest-consensus asset in the package (deterministic tie-break by id), the per-item fatigue key. Stamped only while `deck.fatigue` is on; NULL on pre-F3 / flag-off rows |
 
 Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`.
 
@@ -251,6 +252,41 @@ F1 labels, **append-only**, joined to `deck_impressions` by `impression_id` (sof
 | `acted_at` | str | ISO UTC (server clock) |
 
 Indexes: `ix_deck_outcomes_impression` on `impression_id`.
+
+---
+
+## `deck_suppressions`
+
+TikTok-discovery **F3 fatigue & durable suppression** (flag `deck.fatigue`, `docs/plans/tiktok-discovery/prds/F3-fatigue-suppression.md`). One row per decline / proposal-kill: near-duplicates (same centerpiece + same shape bucket + package value within ±`fatigue_decline_value_band`) are removed from that user's decks until `expires_at`, after which the row grants exactly **one** low-exposure retest card; a `pass` on the retest re-arms the row (resolved lazily at the next generation — the swipe path stays write-free). Written by `save_deck_suppression` from the disposition route's decline hook (re-declaring a live concept refreshes its window instead of inserting a duplicate). Soft pass-fatigue is **not** stored here — it is derived on read from `deck_impressions ⨝ deck_outcomes`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `user_id` | str | the suppressed user's deck |
+| `league_id` | str | |
+| `centerpiece_id` | str | highest-consensus asset in the declined package |
+| `shape_bucket` | str | `"1x1"`, `"2x1"`, … |
+| `package_value` | float | consensus give+receive value at decline time (per-player `elo_to_value` over seed Elos); NULL ⇒ the ±band test is skipped (centerpiece+shape decide) |
+| `declined_at` | str | ISO UTC |
+| `expires_at` | str | `declined_at` + `fatigue_decline_suppress_days` |
+| `retested_at` | str | when the ONE post-window retest card was served (NULL until then) |
+| `retest_trade_hash` | str | F1 `trade_hash` of the served retest card |
+| `lifted_at` | str | the user's "Undo" (`POST /api/trades/suppressions/undo`); a lifted row is permanently inert |
+| `created_at` | str | ISO UTC |
+
+Indexes: `ix_deck_suppressions_user_league` on `(user_id, league_id)`.
+
+---
+
+## `deck_fatigue_resets`
+
+F3 "Refresh my deck" marker — one row per (user, league). Soft-fatigue reads (`load_deck_fatigue_events`) ignore viewed/pass events before `reset_at`; decline suppressions, not-interested and untouchables are unaffected. Written by `set_deck_fatigue_reset` from `POST /api/trades/generate` with `refresh_fatigue: true` (flag-gated).
+
+| Column | Type | Notes |
+|---|---|---|
+| `user_id` | str PK (composite) | |
+| `league_id` | str PK (composite) | |
+| `reset_at` | str | ISO UTC of the latest refresh |
 
 ---
 

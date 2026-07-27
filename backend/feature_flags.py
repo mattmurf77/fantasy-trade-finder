@@ -306,7 +306,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # rows, byte-identical payloads, old-client behavior everywhere.
     "deck.signal_v2",
     "deck.thompson_v2",     # F2 — v2 deck sampler: pessimistic priors, decay, viewed-gated counts, lane×shape arms
-    "deck.fatigue",         # F3 — reserved (no consumer yet)
+    "deck.fatigue",         # F3 — per-user fatigue multipliers, 30d decline suppression + retest, deck refresh/undo
     "deck.session_rerank",  # F4 — reserved (no consumer yet)
     "deck.taste_vectors",   # F5 — reserved (no consumer yet)
     "deck.exploration",     # F7 — reserved (no consumer yet)

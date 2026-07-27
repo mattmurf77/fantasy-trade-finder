@@ -67,6 +67,7 @@ import {
   swipeTrade,
   flagBadTrade,
   getLikedTrades,
+  undoDeckSuppression,
   type SwipeSignal,
 } from '../api/trades';
 import {
@@ -340,6 +341,14 @@ export default function TradesScreen({ navigation, route }: any) {
   const replenishmentOn = useFlag('deck.replenishment');
   const [sessionTally, setSessionTally] = useState({ passed: 0, liked: 0, proposed: 0 });
   const [summaryDismissed, setSummaryDismissed] = useState(false);
+  // F3 (flag deck.fatigue): deck header honoring note — shown when the job
+  // snapshot carries suppression_note (≥1 near-duplicate of a declined trade
+  // was hidden). Dismissal is per-job (a fresh generation may re-show it);
+  // "Undo" lifts the newest decline suppression server-side and regenerates.
+  const fatigueOn = useFlag('deck.fatigue');
+  const [suppressionNoteDismissedJob, setSuppressionNoteDismissedJob] =
+    useState<string | null>(null);
+  const [suppressionUndoPending, setSuppressionUndoPending] = useState(false);
   // S1 PRD-05 (flag ux.retap_active_tab) — when the Trades stack is already
   // at TradesHome, a focused re-tap scrolls the main list to top. (TabNav
   // pops any pushed Portfolio/Calculator screen first.)
@@ -1331,6 +1340,26 @@ export default function TradesScreen({ navigation, route }: any) {
     track('trade_keep_side_tapped', { side }, 'Trades');
     resetDeckForNewTargets();
     generateMutation.mutate({});
+  }
+
+  // F3 (deck.fatigue) — deck-note "Undo": lift the newest decline
+  // suppression server-side, then regenerate so the hidden trades can
+  // come back. force:true — the server invalidated its cache on the lift,
+  // but a stale in-flight snapshot must not short-circuit the re-run.
+  async function handleSuppressionUndo() {
+    if (!leagueId || suppressionUndoPending) return;
+    haptics.selection();
+    setSuppressionUndoPending(true);
+    track('suppression_undo_tapped', undefined, 'Trades');
+    try {
+      await undoDeckSuppression(leagueId);
+      resetDeckForNewTargets();
+      generateMutation.mutate({ force: true });
+    } catch {
+      setToast({ msg: 'Could not undo — try again', tone: 'warn' });
+    } finally {
+      setSuppressionUndoPending(false);
+    }
   }
 
   // #190 — hand the top card to the manual calculator, prefilled: In-league
@@ -2997,6 +3026,58 @@ export default function TradesScreen({ navigation, route }: any) {
           />
         ) : null}
 
+        {/* F3 (deck.fatigue) — honoring note: the deck was shaped by a
+            decline-window suppression, say so visibly (the anti-control-
+            theater rule). One line, dismissible per job; Undo lifts the
+            newest suppression and regenerates. */}
+        {fatigueOn &&
+        job?.suppression_note &&
+        job.suppression_note.count > 0 &&
+        suppressionNoteDismissedJob !== job.job_id ? (
+          <View testID="trades.suppression-note" style={styles.suppressionNote}>
+            <Text style={styles.suppressionNoteText} numberOfLines={2}>
+              Hiding trades like ones you declined
+            </Text>
+            <Pressable
+              testID="trades.suppression-note.undo"
+              onPress={handleSuppressionUndo}
+              disabled={suppressionUndoPending}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Undo — show these trades again"
+            >
+              {({ pressed }) => (
+                <Text
+                  style={[
+                    styles.suppressionNoteUndo,
+                    (pressed || suppressionUndoPending) && { color: chalk.dim },
+                  ]}
+                >
+                  Undo
+                </Text>
+              )}
+            </Pressable>
+            <Pressable
+              testID="trades.suppression-note.dismiss"
+              onPress={() => setSuppressionNoteDismissedJob(job.job_id)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss"
+            >
+              {({ pressed }) => (
+                <Text
+                  style={[
+                    styles.suppressionNoteDismiss,
+                    pressed && { color: chalk.base },
+                  ]}
+                >
+                  Dismiss
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
+
         <View style={styles.deckWrap} ref={deckWrapRef} collapsable={false}>
           {quicksetPromptShown ? (
             // Item 7 — inline prompt card holds the top-of-deck slot until
@@ -4167,6 +4248,37 @@ const styles = StyleSheet.create({
     fontFamily: fonts.uiSemi,
   },
   appleBannerDismiss: {
+    ...type.bodySm,
+    color: chalk.dim,
+    fontFamily: fonts.uiSemi,
+  },
+  // F3 (deck.fatigue) — deck header honoring note. Same quiet ink-2 bar
+  // family as the banners above; text-only actions, no icons.
+  suppressionNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    marginBottom: space.md,
+  },
+  suppressionNoteText: {
+    ...type.bodySm,
+    color: chalk.base,
+    fontFamily: fonts.uiSemi,
+    flex: 1,
+    minWidth: 0,
+  },
+  suppressionNoteUndo: {
+    ...type.bodySm,
+    color: ice.base,
+    fontFamily: fonts.uiSemi,
+  },
+  suppressionNoteDismiss: {
     ...type.bodySm,
     color: chalk.dim,
     fontFamily: fonts.uiSemi,

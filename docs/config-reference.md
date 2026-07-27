@@ -331,6 +331,25 @@ The per-position age NOW/FUTURE curves are deliberately a code constant table (`
 | `thompson_decay_gamma` | 0.995 | **F2** (flag `deck.thompson_v2`) — per-day posterior decay γ: effective like/pass mass = γ^age_days, computed lazily at read time in `server._thompson_v2_arm_stats` (no cron mutates state). Clamped to [0.5, 0.99999]. Start conservative; tunable without deploy |
 | `replenish_weekday` | 2.0 | **F10** (flag `deck.replenishment`) — Python `weekday()` on which the weekly replenishment pass inside `/api/cron/daily-tick` unlocks (2 = Wednesday, post-waivers). The gate is `>=`, so later days of the same ISO week self-heal a missed cron run; the `deck_replenish_log` marker keeps everything 1/week. Read via `server._deck_cfg` |
 
+### F3 — fatigue & durable suppression (flag `deck.fatigue`)
+
+All read via `server._deck_cfg`, consumed by the fatigue/suppression layer around `_order_deck`. The soft multiplier is the PRD's LinkedIn impression-discounting form `w1·exp(−a·impCount) + w2·exp(−b·daysSinceLastSeen)`, computed from **viewed** impressions only, clamped to `[fatigue_floor, 1.0]`, applied only to items with ≥1 viewed impression inside `fatigue_lookback_days` — recovery comes from impressions aging out of the window. A card takes the **min** across its keys (trade_hash, centerpiece, archetype), never a product. Discount-only: multipliers never exceed 1.0 and are applied after all generation gates.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `fatigue_w1` | 0.85 | Weight of the impression-count term |
+| `fatigue_w2` | 0.15 | Weight of the recency-credit term |
+| `fatigue_a` | 0.18 | Per-impression decay at item level (trade_hash / centerpiece keys) |
+| `fatigue_b` | 0.10 | Per-day decay of the recency credit |
+| `fatigue_arch_a` | 0.05 | Weaker per-impression decay for the archetype-level accrual |
+| `fatigue_floor` | 0.25 | Soft multiplier never drops below this |
+| `fatigue_lookback_days` | 30.0 | Viewed impressions older than this stop counting (the recovery window) |
+| `fatigue_session_hours` | 8.0 | Deck-session window for the 2+-pass demotion |
+| `fatigue_session_demotion` | 0.2 | Multiplier for a centerpiece passed ≥2× within one deck job in the session window |
+| `fatigue_decline_suppress_days` | 30.0 | Hard near-duplicate suppression window after a decline / proposal-kill |
+| `fatigue_decline_value_band` | 0.10 | Near-duplicate ⇔ same centerpiece + shape AND package value within ±this fraction of the declined package |
+| `fatigue_retest_mult` | 0.5 | Low-exposure multiplier for the ONE post-window retest card |
+
 ### Tier 3 (flag-gated, landing imminently)
 
 | Key | Default | Meaning |

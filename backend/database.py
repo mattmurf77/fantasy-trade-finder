@@ -430,6 +430,10 @@ deck_impressions_table = Table("deck_impressions", metadata,
     Column("archetype",     String),                     # lane/basis-derived label when available
     Column("shape_bucket",  String),                     # "1x1", "2x1", … (Thompson arm)
     Column("served_at",     String,  nullable=False),    # ISO UTC
+    # F3 (deck.fatigue) — highest-consensus asset in the package, the
+    # per-item fatigue key. Populated only while deck.fatigue is on
+    # (NULL otherwise / on pre-F3 rows); additive via _migrate_db.
+    Column("centerpiece_id", String),
 )
 
 Index(
@@ -462,6 +466,48 @@ deck_outcomes_table = Table("deck_outcomes", metadata,
 Index(
     "ix_deck_outcomes_impression",
     deck_outcomes_table.c.impression_id,
+)
+
+# ── TikTok-discovery F3 (flag deck.fatigue) — durable decline suppression ───
+# docs/plans/tiktok-discovery/prds/F3-fatigue-suppression.md. One row per
+# decline/proposal-kill: near-duplicates (same centerpiece + same shape
+# bucket + package value within ±fatigue_decline_value_band) are removed
+# from that user's decks until expires_at. After expiry the row grants
+# exactly ONE low-exposure retest card (retested_at/retest_trade_hash record
+# it); a pass on the retest re-arms the row for another window — resolved
+# lazily at the next generation, no write hooks in the swipe path. `lifted_at`
+# is the user's "Undo": a lifted row is permanently inert. Soft pass-fatigue
+# is NOT stored here — it is derived on read from deck_impressions ⨝
+# deck_outcomes (F2 pattern); the only stored soft-fatigue state is the
+# per-user reset marker below.
+deck_suppressions_table = Table("deck_suppressions", metadata,
+    Column("id",                Integer, primary_key=True, autoincrement=True),
+    Column("user_id",           String,  nullable=False),
+    Column("league_id",         String,  nullable=False),
+    Column("centerpiece_id",    String,  nullable=False),  # highest-consensus asset in the declined package
+    Column("shape_bucket",      String,  nullable=False),  # "1x1", "2x1", …
+    Column("package_value",     Float),                    # consensus give+receive value at decline; NULL ⇒ band test skipped
+    Column("declined_at",       String,  nullable=False),  # ISO UTC
+    Column("expires_at",        String,  nullable=False),  # declined_at + fatigue_decline_suppress_days
+    Column("retested_at",       String),                   # ISO — when the ONE post-window retest card was served
+    Column("retest_trade_hash", String),                   # F1 trade_hash of the served retest card
+    Column("lifted_at",         String),                   # user undo — row inert once set
+    Column("created_at",        String,  nullable=False),
+)
+
+Index(
+    "ix_deck_suppressions_user_league",
+    deck_suppressions_table.c.user_id,
+    deck_suppressions_table.c.league_id,
+)
+
+# F3 — per-user-league soft-fatigue reset marker ("Refresh my deck").
+# Fatigue reads ignore viewed/pass events before reset_at; decline
+# suppressions (table above) and not-interested/untouchables are unaffected.
+deck_fatigue_resets_table = Table("deck_fatigue_resets", metadata,
+    Column("user_id",   String, primary_key=True),
+    Column("league_id", String, primary_key=True),
+    Column("reset_at",  String, nullable=False),   # ISO UTC
 )
 
 # ── TikTok-discovery F10 (flag deck.replenishment) — weekly marker ──────────
@@ -1665,6 +1711,8 @@ def _migrate_db() -> None:
         ("user_events",        "client_ts",             "VARCHAR"),
         ("user_events",        "experiments",           "TEXT"),
         ("user_events",        "country",               "VARCHAR"),
+        # F3 (deck.fatigue) — per-item fatigue key on the impression spine.
+        ("deck_impressions",   "centerpiece_id",        "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -3962,6 +4010,223 @@ def load_global_like_rate(days: int = 30) -> tuple[int, int]:
     return likes, likes + by_decision.get("pass", 0)
 
 
+# ---------------------------------------------------------------------------
+# F3 (flag deck.fatigue) — fatigue event reads + decline-suppression state
+# ---------------------------------------------------------------------------
+
+def load_deck_fatigue_events(
+    user_id: str,
+    league_id: str,
+    since_iso: str,
+) -> list[tuple]:
+    """F3 (deck.fatigue) — raw viewed/pass events for the fatigue multiplier.
+
+    Read-only. Returns [(trade_hash, centerpiece_id, archetype, shape_bucket,
+    deck_job_id, action, acted_at), …] for every `viewed` or `pass`
+    deck_outcomes row on this user+league's impressions with
+    acted_at >= since_iso (the caller passes max(lookback cutoff, fatigue
+    reset marker)). Aggregation (imp counts, last-seen ages, per-job session
+    pass counts) is the caller's job — dumb event read, same derive-on-read
+    pattern as load_deck_arm_events.
+    """
+    q = (
+        select(
+            deck_impressions_table.c.trade_hash,
+            deck_impressions_table.c.centerpiece_id,
+            deck_impressions_table.c.archetype,
+            deck_impressions_table.c.shape_bucket,
+            deck_impressions_table.c.deck_job_id,
+            deck_outcomes_table.c.action,
+            deck_outcomes_table.c.acted_at,
+        )
+        .select_from(deck_outcomes_table.join(
+            deck_impressions_table,
+            deck_impressions_table.c.impression_id
+            == deck_outcomes_table.c.impression_id,
+        ))
+        .where(and_(
+            deck_impressions_table.c.user_id   == user_id,
+            deck_impressions_table.c.league_id == league_id,
+            deck_outcomes_table.c.action.in_(("viewed", "pass")),
+            deck_outcomes_table.c.acted_at >= since_iso,
+        ))
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(q).fetchall()
+    return [(r.trade_hash, r.centerpiece_id, r.archetype, r.shape_bucket,
+             r.deck_job_id, r.action, r.acted_at) for r in rows]
+
+
+def save_deck_suppression(
+    user_id: str,
+    league_id: str,
+    centerpiece_id: str,
+    shape_bucket: str,
+    package_value: float | None,
+    declined_at: str,
+    expires_at: str,
+) -> None:
+    """F3 — record a decline/proposal-kill suppression window.
+
+    Re-declaring a concept that already has a LIVE (unlifted, unexpired) row
+    for the same (centerpiece, shape) refreshes that row's window and clears
+    any retest state instead of inserting a duplicate — one row per live
+    concept, so the one-retest-per-window rule can't be multiplied.
+    """
+    with engine.begin() as conn:
+        existing = conn.execute(
+            select(deck_suppressions_table.c.id).where(and_(
+                deck_suppressions_table.c.user_id        == user_id,
+                deck_suppressions_table.c.league_id      == league_id,
+                deck_suppressions_table.c.centerpiece_id == centerpiece_id,
+                deck_suppressions_table.c.shape_bucket   == shape_bucket,
+                deck_suppressions_table.c.lifted_at.is_(None),
+                deck_suppressions_table.c.expires_at > declined_at,
+            )).limit(1)
+        ).scalar()
+        if existing is not None:
+            conn.execute(
+                update(deck_suppressions_table)
+                .where(deck_suppressions_table.c.id == existing)
+                .values(declined_at=declined_at, expires_at=expires_at,
+                        package_value=package_value,
+                        retested_at=None, retest_trade_hash=None)
+            )
+            return
+        conn.execute(insert(deck_suppressions_table).values(
+            user_id        = user_id,
+            league_id      = league_id,
+            centerpiece_id = centerpiece_id,
+            shape_bucket   = shape_bucket,
+            package_value  = package_value,
+            declined_at    = declined_at,
+            expires_at     = expires_at,
+            created_at     = _now(),
+        ))
+
+
+def load_deck_suppressions(user_id: str, league_id: str, limit: int = 200) -> list[dict]:
+    """F3 — every non-lifted suppression row for one user+league (newest
+    declines first, bounded). Expired rows are included: an expired row that
+    was never retested still owes its ONE retest card, and a retested row may
+    need the lazy re-suppress check."""
+    q = (
+        select(deck_suppressions_table)
+        .where(and_(
+            deck_suppressions_table.c.user_id   == user_id,
+            deck_suppressions_table.c.league_id == league_id,
+            deck_suppressions_table.c.lifted_at.is_(None),
+        ))
+        .order_by(deck_suppressions_table.c.declined_at.desc())
+        .limit(limit)
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(q).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+def mark_deck_suppression_retested(row_id: int, trade_hash: str, at_iso: str) -> None:
+    """F3 — stamp the ONE post-window retest card onto its suppression row."""
+    with engine.begin() as conn:
+        conn.execute(
+            update(deck_suppressions_table)
+            .where(deck_suppressions_table.c.id == row_id)
+            .values(retested_at=at_iso, retest_trade_hash=trade_hash)
+        )
+
+
+def resuppress_deck_suppression(row_id: int, declined_at: str, expires_at: str) -> None:
+    """F3 — the retest card was passed: re-arm the row for a fresh window
+    (clearing retest state so the NEXT window grants exactly one retest again)."""
+    with engine.begin() as conn:
+        conn.execute(
+            update(deck_suppressions_table)
+            .where(deck_suppressions_table.c.id == row_id)
+            .values(declined_at=declined_at, expires_at=expires_at,
+                    retested_at=None, retest_trade_hash=None)
+        )
+
+
+def lift_latest_deck_suppression(user_id: str, league_id: str) -> int:
+    """F3 — the deck-note "Undo": permanently lift the NEWEST non-lifted
+    suppression (by declined_at). Returns rows lifted (0 or 1)."""
+    now = datetime.now(timezone.utc).isoformat()
+    with engine.begin() as conn:
+        row_id = conn.execute(
+            select(deck_suppressions_table.c.id)
+            .where(and_(
+                deck_suppressions_table.c.user_id   == user_id,
+                deck_suppressions_table.c.league_id == league_id,
+                deck_suppressions_table.c.lifted_at.is_(None),
+            ))
+            .order_by(deck_suppressions_table.c.declined_at.desc())
+            .limit(1)
+        ).scalar()
+        if row_id is None:
+            return 0
+        conn.execute(
+            update(deck_suppressions_table)
+            .where(deck_suppressions_table.c.id == row_id)
+            .values(lifted_at=now)
+        )
+        return 1
+
+
+def load_deck_pass_after(
+    user_id: str,
+    league_id: str,
+    trade_hash: str,
+    after_iso: str,
+) -> str | None:
+    """F3 — earliest `pass` outcome on any of this user+league's impressions
+    of `trade_hash` acted after `after_iso` (the lazy retest-failed check).
+    Returns the acted_at ISO string, or None when the retest wasn't passed."""
+    q = (
+        select(func.min(deck_outcomes_table.c.acted_at))
+        .select_from(deck_outcomes_table.join(
+            deck_impressions_table,
+            deck_impressions_table.c.impression_id
+            == deck_outcomes_table.c.impression_id,
+        ))
+        .where(and_(
+            deck_impressions_table.c.user_id    == user_id,
+            deck_impressions_table.c.league_id  == league_id,
+            deck_impressions_table.c.trade_hash == trade_hash,
+            deck_outcomes_table.c.action == "pass",
+            deck_outcomes_table.c.acted_at > after_iso,
+        ))
+    )
+    with engine.connect() as conn:
+        return conn.execute(q).scalar()
+
+
+def set_deck_fatigue_reset(user_id: str, league_id: str) -> str:
+    """F3 — "Refresh my deck": stamp the soft-fatigue reset marker to now.
+    Fatigue reads ignore events before it; decline suppressions unaffected.
+    Delete+insert (one txn) keeps the upsert portable across dialects."""
+    now = datetime.now(timezone.utc).isoformat()
+    with engine.begin() as conn:
+        conn.execute(delete(deck_fatigue_resets_table).where(and_(
+            deck_fatigue_resets_table.c.user_id   == user_id,
+            deck_fatigue_resets_table.c.league_id == league_id,
+        )))
+        conn.execute(insert(deck_fatigue_resets_table).values(
+            user_id=user_id, league_id=league_id, reset_at=now,
+        ))
+    return now
+
+
+def load_deck_fatigue_reset(user_id: str, league_id: str) -> str | None:
+    """F3 — the user's soft-fatigue reset marker (ISO), or None."""
+    with engine.connect() as conn:
+        return conn.execute(
+            select(deck_fatigue_resets_table.c.reset_at).where(and_(
+                deck_fatigue_resets_table.c.user_id   == user_id,
+                deck_fatigue_resets_table.c.league_id == league_id,
+            ))
+        ).scalar()
+
+
 def load_recent_impression_target_user_counts(
     league_id: str,
     exclude_user_id: str,
@@ -5806,14 +6071,26 @@ def record_match_disposition(
                     "decision_type": "disposition",
                 })
 
+    # F3 (deck.fatigue) — additive context for the decline-suppression hook:
+    # the package from the CALLER's perspective plus the partner's current
+    # decision. Decoded defensively; failures degrade to empty lists.
+    try:
+        _a_give    = json.loads(row.user_a_give)
+        _a_receive = json.loads(row.user_a_receive)
+    except (json.JSONDecodeError, TypeError):
+        _a_give, _a_receive = [], []
+
     return {
-        "status":          "ok",
-        "match_id":        match_id,
-        "league_id":       row.league_id,
-        "both_decided":    both_decided,
-        "outcome":         outcome,
-        "partner_user_id": (row.user_b_id if is_a else row.user_a_id),
-        "elo_signals":     elo_signals,
+        "status":           "ok",
+        "match_id":         match_id,
+        "league_id":        row.league_id,
+        "both_decided":     both_decided,
+        "outcome":          outcome,
+        "partner_user_id":  (row.user_b_id if is_a else row.user_a_id),
+        "partner_decision": (b_dec if is_a else a_dec),
+        "user_give":        (_a_give if is_a else _a_receive),
+        "user_receive":     (_a_receive if is_a else _a_give),
+        "elo_signals":      elo_signals,
     }
 
 

@@ -246,6 +246,30 @@ _DEFAULT_CFG: dict[str, float] = {
     "thompson_prior_base_rate":   0.59,  # p̂ fallback when the trailing-30d global like rate is too thin (all-time global rate 13/22 as of 2026-07-26)
     "thompson_decay_gamma":       0.995, # per-day posterior decay γ, applied lazily at read time
     # ------------------------------------------------------------------
+    # F3 — fatigue & durable suppression (flag: deck.fatigue — consumed
+    # by server's fatigue/suppression layer around _order_deck).
+    # Multiplier (LinkedIn impression-discounting form, viewed rows only):
+    #   fatigue = w1·exp(−a·impCount) + w2·exp(−b·daysSinceLastSeen)
+    # clamped to [fatigue_floor, 1.0] and applied only to items with ≥1
+    # viewed impression inside fatigue_lookback_days — full recovery comes
+    # from impressions aging out of the window; the w2 term is a small
+    # recency credit (a just-seen item keeps continuity; the impression
+    # count is the fatigue driver). Archetype accrual reuses the same form
+    # with the weaker fatigue_arch_a. Never boosts (≤ 1.0 by construction).
+    # ------------------------------------------------------------------
+    "fatigue_w1":                 0.85,
+    "fatigue_w2":                 0.15,
+    "fatigue_a":                  0.18,  # per-impression decay, item level (trade_hash / centerpiece)
+    "fatigue_b":                  0.10,  # per-day decay of the recency credit
+    "fatigue_arch_a":             0.05,  # weaker per-impression decay at archetype level
+    "fatigue_floor":              0.25,  # multiplier never drops below this
+    "fatigue_lookback_days":     30.0,   # viewed impressions older than this stop counting
+    "fatigue_session_hours":      8.0,   # deck-session window for the 2+-pass demotion
+    "fatigue_session_demotion":   0.2,   # multiplier for 2+ passes on one centerpiece in a session
+    "fatigue_decline_suppress_days": 30.0,  # hard near-duplicate window after a decline
+    "fatigue_decline_value_band": 0.10,  # near-duplicate ⇔ package value within ±this fraction
+    "fatigue_retest_mult":        0.5,   # low-exposure multiplier for the ONE post-window retest card
+    # ------------------------------------------------------------------
     # F10 — weekly deck replenishment (flag: deck.replenishment —
     # consumed by server._run_weekly_replenishment inside daily-tick)
     # ------------------------------------------------------------------
