@@ -1,6 +1,9 @@
 databases:
   - name: fantasy-trade-finder-db
-    plan: free
+    # The live DB was upgraded to Basic-256mb in the Render dashboard;
+    # the blueprint must match or sync fails with "cannot downgrade
+    # database from Basic-256mb to Free" (2026-07-26).
+    plan: basic-256mb
     databaseName: trade_finder
     user: trade_finder_user
 
