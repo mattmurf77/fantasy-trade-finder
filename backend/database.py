@@ -552,6 +552,31 @@ user_taste_table = Table("user_taste", metadata,
     Column("updated_at", String, nullable=False),      # ISO UTC of last decay+reward write
 )
 
+# ── TikTok-discovery F7 (flag deck.exploration) — archetype audition ─────────
+# docs/plans/tiktok-discovery/prds/F7-exploration-slots.md §3. One GLOBAL row
+# per archetype label (archetype = deck_impressions.archetype — lane today):
+# the follower-blind staged pool. status ∈ test | general | retired:
+#   test    — new/low-data archetype; served ONLY via wildcard slots until it
+#             accrues audition_min_views viewed impressions across all users.
+#   general — graduated (like-rate ≥ audition_like_rate_frac × the global
+#             base rate at n ≥ audition_min_views) or grandfathered in with
+#             enough all-time views; serves normally.
+#   retired — failed its audition; excluded from decks AND wildcard draws
+#             until retired_at + audition_retire_days, then re-enters test.
+# viewed_impressions / likes are the counts of the CURRENT audition window
+# (since entered_at), refreshed lazily at wildcard-draw time from
+# deck_impressions ⨝ deck_outcomes (no cron; state machine lives in
+# server._audition_statuses). entered_at/retired_at timestamps double as the
+# transition log.
+archetype_auditions_table = Table("archetype_auditions", metadata,
+    Column("archetype",          String,  primary_key=True),
+    Column("status",             String,  nullable=False),   # test | general | retired
+    Column("viewed_impressions", Integer, nullable=False),   # viewed count since entered_at
+    Column("likes",              Integer, nullable=False),   # liked-and-viewed count since entered_at
+    Column("entered_at",         String,  nullable=False),   # ISO UTC — current window start
+    Column("retired_at",         String),                    # ISO UTC — set while status='retired'
+)
+
 
 # ---------------------------------------------------------------------------
 # Canonical player reference table — synced from Sleeper bulk payload.
@@ -4334,6 +4359,100 @@ def replace_user_taste_prior(user_id: str, prior: dict, now_iso: str) -> None:
                  "w_long": float(v), "updated_at": now_iso}
                 for a, v in prior.items()
             ])
+
+
+# ---------------------------------------------------------------------------
+# F7 (flag deck.exploration) — archetype-audition storage + engagement counts
+# (state machine lives in server._audition_statuses; these stay thin)
+# ---------------------------------------------------------------------------
+
+def load_archetype_auditions() -> dict[str, dict]:
+    """F7 — every audition row, keyed by archetype. Read-only; the lazy
+    draw-time evaluation in server decides transitions."""
+    with engine.connect() as conn:
+        rows = conn.execute(select(
+            archetype_auditions_table.c.archetype,
+            archetype_auditions_table.c.status,
+            archetype_auditions_table.c.viewed_impressions,
+            archetype_auditions_table.c.likes,
+            archetype_auditions_table.c.entered_at,
+            archetype_auditions_table.c.retired_at,
+        )).fetchall()
+    return {r.archetype: {
+        "archetype":          r.archetype,
+        "status":             r.status,
+        "viewed_impressions": int(r.viewed_impressions or 0),
+        "likes":              int(r.likes or 0),
+        "entered_at":         r.entered_at,
+        "retired_at":         r.retired_at,
+    } for r in rows}
+
+
+def upsert_archetype_audition(
+    archetype: str,
+    *,
+    status: str,
+    viewed_impressions: int,
+    likes: int,
+    entered_at: str,
+    retired_at: str | None,
+) -> None:
+    """F7 — replace one archetype's audition row wholesale. Delete+insert in
+    one txn keeps the upsert portable across dialects (same idiom as
+    set_deck_fatigue_reset / replace_user_taste_rows)."""
+    with engine.begin() as conn:
+        conn.execute(delete(archetype_auditions_table).where(
+            archetype_auditions_table.c.archetype == archetype))
+        conn.execute(insert(archetype_auditions_table).values(
+            archetype          = archetype,
+            status             = status,
+            viewed_impressions = int(viewed_impressions),
+            likes              = int(likes),
+            entered_at         = entered_at,
+            retired_at         = retired_at,
+        ))
+
+
+def count_archetype_engagement(
+    archetype: str,
+    since_iso: str | None = None,
+) -> tuple[int, int]:
+    """F7 — (viewed, likes) for one archetype across ALL users/leagues (the
+    audition pool is follower-blind and global by design).
+
+    viewed = distinct deck_impressions rows carrying this archetype label
+    with a `viewed` outcome (served ≠ viewed — F1's cascade rule); likes =
+    the subset of those that ALSO have a `like` outcome, so the like-rate
+    numerator and denominator share the same viewed-gated base. since_iso
+    scopes both to impressions served in the current audition window."""
+    viewed_alias = deck_outcomes_table.alias("f7_viewed")
+    like_alias   = deck_outcomes_table.alias("f7_like")
+    has_viewed = (
+        select(viewed_alias.c.id)
+        .where(and_(
+            viewed_alias.c.impression_id == deck_impressions_table.c.impression_id,
+            viewed_alias.c.action == "viewed",
+        )).exists()
+    )
+    has_like = (
+        select(like_alias.c.id)
+        .where(and_(
+            like_alias.c.impression_id == deck_impressions_table.c.impression_id,
+            like_alias.c.action == "like",
+        )).exists()
+    )
+    conds = [deck_impressions_table.c.archetype == archetype, has_viewed]
+    if since_iso:
+        conds.append(deck_impressions_table.c.served_at >= since_iso)
+    q_viewed = (select(func.count())
+                .select_from(deck_impressions_table).where(and_(*conds)))
+    q_likes = (select(func.count())
+               .select_from(deck_impressions_table)
+               .where(and_(*conds, has_like)))
+    with engine.connect() as conn:
+        viewed = int(conn.execute(q_viewed).scalar() or 0)
+        likes  = int(conn.execute(q_likes).scalar() or 0)
+    return viewed, likes
 
 
 def load_recent_impression_target_user_counts(

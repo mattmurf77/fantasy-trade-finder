@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
   type AccessibilityActionEvent,
 } from 'react-native';
-import { ink, chalk, flare, ice, semantic, space, radii, type } from '../theme/chalkline';
+import { ink, chalk, flare, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { TickLabel, Button, Icon, Badge } from './chalkline';
 import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
@@ -290,6 +290,25 @@ function TradeCardComp({
         </View>
       )}
 
+      {/* F7 exploration wildcard (server flag deck.exploration) — honest
+          labeling: this card was deliberately drawn from OUTSIDE the user's
+          learned taste (gate-passing quality, off-taste pick). Provenance-
+          chip construction (ProvenanceChip.tsx: hairline chip + tick +
+          mono micro-label); flare = informational highlight (ADR-005).
+          Backend serializes `wildcard` only when true, so legacy payloads
+          and flag-off builds render exactly as before. F4's session
+          re-rank already position-locks wildcard cards (sessionRerank). */}
+      {data.wildcard === true && (
+        <View
+          style={styles.wildcardChip}
+          accessibilityLabel="Wildcard — outside your usual"
+          testID="trade-card.wildcard-chip"
+        >
+          <View style={styles.wildcardTick} />
+          <Text style={styles.wildcardLabel}>WILDCARD — OUTSIDE YOUR USUAL</Text>
+        </View>
+      )}
+
       <View style={styles.header}>
         <View>
           <Text style={type.label}>Trade with</Text>
@@ -538,6 +557,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
   },
   likesYouText: { color: chalk.base },
+  // F7 wildcard chip: ProvenanceChip's data-encoding chip construction
+  // (1px hairline on ink-1, radius xs, flare tick, mono micro-label).
+  wildcardChip: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    minHeight: 24,
+    paddingHorizontal: space.sm,
+    borderRadius: radii.xs,
+    borderWidth: 1,
+    borderColor: flare.base,
+    backgroundColor: ink.ink1,
+  },
+  wildcardTick: {
+    width: 3,
+    height: 10,
+    backgroundColor: flare.base,
+  },
+  wildcardLabel: {
+    fontFamily: fonts.dataSemi,
+    fontSize: 10,
+    letterSpacing: 0.5,
+    color: chalk.base,
+  },
   // Consensus-basis note: deliberately muted — it's a caveat, not a sell.
   consensusNote: { gap: space.xs },
   // FB-47 partner-fit line: hint-tier row — 6px hollow square marker (same

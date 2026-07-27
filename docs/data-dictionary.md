@@ -224,8 +224,8 @@ TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-
 | `deck_job_id` | str | generation job id (`_trade_jobs`) |
 | `card_index` | int | 0 = top card, final served order |
 | `trade_hash` | str | sha256[:16] of sorted give ids \| sorted receive ids \| partner |
-| `features_json` | JSON text | **frozen at serve time** — shape, basis, likes_you, lane, give/receive positions, values + 500-wide value bands, `involves_pick`, `partner_user_id`, surplus margin (mismatch), fairness, need/partner fit, fit_premium, aggression_variant, relaxed, plus board-state-at-serve: `ranked_player_count`, `last_board_update_at`, `user_value_basis` (`personal`/`consensus`); `deck_source` only on F10 cron-pre-generated decks; `taste_attrs` (F5, only while `deck.taste_vectors` is on) — the card's frozen taste-attribute keys consumed by `user_taste` updates |
-| `propensity` | float NOT NULL | the Thompson multiplier **actually applied** to this card's sort key (`0.5 + beta draw`, in (0.5, 1.5)); `1.0` when ordering was off (deterministic serve) |
+| `features_json` | JSON text | **frozen at serve time** — shape, basis, likes_you, lane, give/receive positions, values + 500-wide value bands, `involves_pick`, `partner_user_id`, surplus margin (mismatch), fairness, need/partner fit, fit_premium, aggression_variant, relaxed, plus board-state-at-serve: `ranked_player_count`, `last_board_update_at`, `user_value_basis` (`personal`/`consensus`); `deck_source` only on F10 cron-pre-generated decks; `taste_attrs` (F5, only while `deck.taste_vectors` is on) — the card's frozen taste-attribute keys consumed by `user_taste` updates; `wildcard: true` + `wildcard_pool_size` + `wildcard_provenance` (`taste_tercile`/`low_data_arm`/`uniform`/`audition`) only on the F7 exploration wildcard (flag `deck.exploration`) |
+| `propensity` | float NOT NULL | the Thompson multiplier **actually applied** to this card's sort key (`0.5 + beta draw`, in (0.5, 1.5)); `1.0` when ordering was off (deterministic serve). **F7 exception:** on a wildcard row (features_json `wildcard: true`) this is instead `exploration_rate × 1/wildcard_pool_size` — the uniform-draw probability that REPLACES the Thompson multiplier (the wildcard never entered the ordering draw) |
 | `base_score` | float | `composite_score` before presentation multipliers |
 | `final_score` | float | ordering key after Thompson/diversity multipliers (= base when ordering off) |
 | `archetype` | str | lane label when stamped (`window`/`value`), else null |
@@ -319,6 +319,21 @@ TikTok-discovery **F5 trade-taste vectors** (flag `deck.taste_vectors`, `docs/pl
 | `w_short` | float | short-interest weight (τ = `taste_tau_short_days`, 21d); always 0 on `prior:` rows |
 | `w_long` | float | long-interest weight (τ = `taste_tau_long_days`, 180d); carries the prior mass on `prior:` rows |
 | `updated_at` | str | ISO UTC of the last decay+reward write — the lazy-decay anchor |
+
+---
+
+## `archetype_auditions`
+
+TikTok-discovery **F7 exploration slots & archetype audition** (flag `deck.exploration`, `docs/plans/tiktok-discovery/prds/F7-exploration-slots.md`). One **global** row per archetype label (`deck_impressions.archetype` — lane today): the follower-blind staged pool. New/low-data archetypes (all-time viewed < `audition_min_views`, and not one of the established lanes `window`/`value`, which are grandfathered straight to `general`) enter `test` and serve ONLY via wildcard slots across all users; at `viewed_impressions ≥ audition_min_views` they **graduate** to `general` when like-rate ≥ `audition_like_rate_frac` × the global base rate, else **retire** for `audition_retire_days` (excluded from decks and wildcard draws), then re-enter `test` with a fresh window. State machine is evaluated **lazily at wildcard-draw time** by `server._audition_statuses` (no cron); counts refresh from `deck_impressions ⨝ deck_outcomes` (viewed-gated — likes counted only on viewed impressions). `entered_at`/`retired_at` double as the transition log.
+
+| Column | Type | Notes |
+|---|---|---|
+| `archetype` | str PK | archetype label (lane today, e.g. `window`, `value`) |
+| `status` | str | `test` \| `general` \| `retired` |
+| `viewed_impressions` | int | viewed count in the CURRENT audition window (since `entered_at`) |
+| `likes` | int | liked-and-viewed count in the current window |
+| `entered_at` | str | ISO UTC — current window start |
+| `retired_at` | str | ISO UTC — set while `status='retired'`; re-audition unlocks at `retired_at + audition_retire_days` |
 
 ---
 

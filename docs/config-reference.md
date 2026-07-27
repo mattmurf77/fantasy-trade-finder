@@ -369,6 +369,20 @@ All read via `taste_service._cfg` (same live-dict pattern as `server._deck_cfg`)
 | `taste_prior_shrink` | 20.0 | Per-attribute ranked-count shrinkage `n/(n+this)` on the board prior |
 | `taste_prior_ref_delta` | 0.25 | Board-vs-consensus relative delta treated as "strong" (prior scales on `mean_delta/this`, clamped ±1) |
 
+### F7 — exploration slots & archetype audition (flag `deck.exploration`)
+
+Read via `server._deck_cfg`, consumed by the exploration layer that runs AFTER `_order_deck` in `_run_trade_job` (`_apply_exploration_slot` + `_audition_statuses`). One honestly-labeled wildcard per deck of ≥ `exploration_min_deck` cards, drawn uniformly from gate-passing candidates OUTSIDE the served deck (the engine over-generates `exploration_overgen` extra cards per opponent while the flag is on) — bottom prefMatch tercile → low-data F2 arms → uniform, plus auditioning-archetype candidates. Quality gates never relax; F3 decline suppressions still bind on the draw pool. The wildcard's logged propensity is `exploration_rate × 1/|eligible pool|` (replaces the Thompson multiplier — see `deck_impressions.propensity` in the data dictionary).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `exploration_rate` | 0.125 | Propensity numerator only (PRD's ≈1-in-8 slot share); slot frequency itself is 1 per eligible deck |
+| `exploration_slot_position` | 5 | 1-indexed served slot for the wildcard, clamped to positions 4–6 (F4's client lock keeps it pinned) |
+| `exploration_min_deck` | 8 | Decks below this many cards get no wildcard |
+| `exploration_overgen` | 3 | Extra per-opponent candidates generated (on top of the flag-off 5) to form the outside-the-deck draw pool |
+| `audition_min_views` | 30 | Viewed impressions (global, viewed-gated) before an auditioning archetype gets a graduate/retire verdict; also the all-time bar below which a first-seen archetype enters `test` |
+| `audition_like_rate_frac` | 0.5 | Graduate when window like-rate ≥ this × the global base rate (F2's cached trailing-30d p̂) |
+| `audition_retire_days` | 30 | Retirement window for a failed archetype before it re-enters `test` with a fresh counting window |
+
 ### Tier 3 (flag-gated, landing imminently)
 
 | Key | Default | Meaning |
@@ -402,3 +416,17 @@ Numeric knobs for the playoff/championship-odds pipeline (gated by `outlook.odds
 | `verdict_lopsided_min_gap_pct` | 0.20 | `classify_verdict` band cut: gap ≥ this → `lopsided`; else `slight` |
 
 These were introduced by backlog #6 (verdict banner) and are **vendored into `_DEFAULT_CFG` by backlog #27** (open calculator) when #6 is not yet integrated — the public `/api/calc/score` calls `classify_verdict`, so it shares the exact band thresholds in-app trade cards use. If #6 lands first, the keys already exist and #27's copy is a harmless duplicate to drop on merge.
+
+---
+
+## Offline eval harness (F8, `backend/eval/` — operator tooling, unflagged)
+
+No feature flag and no `model_config` keys: the harness is a read-only CLI/library (`python3 -m backend.eval.replay`) that never touches product behavior. Its knobs are env vars (all optional), read at import/call time:
+
+| Var | Used by | Purpose |
+|---|---|---|
+| `EVAL_ESS_MIN` | `backend/eval/replay.py` | Effective-sample-size gate (default **100**). Any replay run whose Kish ESS falls below it has its verdict labeled `UNRELIABLE` — the numbers are still printed, never silently capped. Rationale: at ESS≈100 a 95% CI on a ~10–20% like-rate already spans ±6–8pp, wider than any plausible ranking effect. CLI `--ess-min` overrides per run. |
+| `EVAL_BOOTSTRAP` | `backend/eval/replay.py` | Cluster-bootstrap resample count for CIs (default **1000**; clusters = deck jobs). CLI `--bootstrap` overrides. |
+| `EVAL_RUNS_DIR` | `backend/eval/persistence.py` | Directory for the append-only `runs.jsonl` run records. Default `data/eval_runs/` (inside the already-gitignored `/data/`). Tests point it at a tmp dir. |
+
+Fixed estimator constants (in `backend/eval/replay.py`, changed only by code review because they change what the numbers mean): propensity-tilt clip bounds `TILT_MIN=0.5` / `TILT_MAX=2.0` (clip **count** is reported on every run), exposure-curve floor `EXPOSURE_FLOOR=0.02`, Laplace `+1/+2` smoothing on the served→viewed curve.

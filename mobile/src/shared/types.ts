@@ -146,9 +146,12 @@ export interface TradeCard {
   // session re-rank (utils/sessionRerank.isPositionLocked) so the retest's
   // deliberate serve position is never moved. No UI reads it.
   retest?: boolean;
-  // F7 (future wildcard/exploration slot): reserved marker — when F7 lands,
-  // its cards are position-locked by the same F4 guard with zero changes
-  // here. Never serialized by today's backend.
+  // F7 (flag deck.exploration): true when this card is the deck's ONE
+  // exploration wildcard (drawn from outside the user's taste
+  // neighborhood, served at the fixed mid-deck slot). Backend serializes
+  // `wildcard` only when true. Read by F4's session re-rank
+  // (utils/sessionRerank.isPositionLocked — the slot never moves) and by
+  // TradeCard's "WILDCARD — OUTSIDE YOUR USUAL" provenance chip.
   wildcard?: boolean;
   // Low-value player added by the engine to balance an otherwise-unfair
   // trade. The player is ALREADY in give_players/receive_players — this

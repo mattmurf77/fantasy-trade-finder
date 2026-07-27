@@ -292,6 +292,23 @@ _DEFAULT_CFG: dict[str, float] = {
     "taste_prior_shrink":        20.0,   # per-attr ranked-count shrinkage n/(n+this)
     "taste_prior_ref_delta":     0.25,   # |board-vs-consensus| rel delta treated as "strong"
     # ------------------------------------------------------------------
+    # F7 — exploration slots & archetype audition (flag: deck.exploration
+    # — consumed by server's exploration layer after _order_deck).
+    # One wildcard per deck of ≥ exploration_min_deck cards, inserted at
+    # the fixed slot position, drawn uniformly from gate-passing
+    # candidates OUTSIDE the served deck (bottom prefMatch tercile /
+    # low-data F2 arms / uniform fallback, plus auditioning archetypes).
+    # exploration_rate feeds ONLY the logged propensity
+    # (rate × 1/|eligible pool|) — slot frequency is 1 per eligible deck.
+    # ------------------------------------------------------------------
+    "exploration_rate":           0.125, # propensity numerator (PRD ≈ 1-in-8 slot share)
+    "exploration_slot_position":  5.0,   # 1-indexed served slot, clamped to [4, 6]
+    "exploration_min_deck":       8.0,   # decks below this get no wildcard
+    "exploration_overgen":        3.0,   # extra per-opponent candidates generated for the draw pool
+    "audition_min_views":        30.0,   # viewed impressions before an audition verdict
+    "audition_like_rate_frac":    0.5,   # graduate at like-rate ≥ this × global base rate
+    "audition_retire_days":      30.0,   # retirement window before a failed archetype re-auditions
+    # ------------------------------------------------------------------
     # F10 — weekly deck replenishment (flag: deck.replenishment —
     # consumed by server._run_weekly_replenishment inside daily-tick)
     # ------------------------------------------------------------------

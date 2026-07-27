@@ -86,6 +86,9 @@ from .database import (
     mark_deck_suppression_retested, resuppress_deck_suppression,
     lift_latest_deck_suppression, load_deck_pass_after,
     set_deck_fatigue_reset, load_deck_fatigue_reset,
+    # F7 (deck.exploration) — archetype audition state + engagement counts
+    load_archetype_auditions, upsert_archetype_audition,
+    count_archetype_engagement,
     # F10 (deck.replenishment) — weekly deck pre-generation
     load_active_deck_user_leagues, load_latest_trade_impression_batch,
     replenish_week_done, log_deck_replenish,
@@ -2172,6 +2175,14 @@ def _deck_taste_enabled() -> bool:
     return getattr(FLAGS, "deck_taste_vectors", False)
 
 
+def _deck_exploration_enabled() -> bool:
+    """F7 — exploration slots & archetype audition (docs/plans/
+    tiktok-discovery/prds/F7-exploration-slots.md). Every exploration code
+    path checks this; off ⇒ byte-identical decks, payloads, and DB writes
+    (no over-generation, no wildcard, no audition reads)."""
+    return getattr(FLAGS, "deck_exploration", False)
+
+
 def _deck_cfg(key: str, default: float) -> float:
     """model_config key via trade_service's live config dict (same pattern
     as _fuzzy_match_tau). Defaults inline so a missing key never breaks
@@ -2678,6 +2689,18 @@ def _log_deck_signal_impressions(
         if _deck_taste_enabled():
             features["taste_attrs"] = _taste_service.card_taste_attrs(
                 card, players_dict, seed_map or {})
+        # F7 (deck.exploration) — wildcard provenance, frozen at serve time.
+        # For wildcard rows the `propensity` column is NOT a Thompson
+        # multiplier: it is exploration_rate × 1/|eligible draw pool| (the
+        # uniform-draw probability, stamped into `capture` by the worker) —
+        # the randomization traffic F8's IPS estimators key on. Keys appear
+        # only on wildcard cards, so flag-off rows stay byte-identical.
+        if getattr(card, "wildcard", False):
+            features["wildcard"] = True
+            features["wildcard_pool_size"] = getattr(
+                card, "wildcard_pool_size", None)
+            features["wildcard_provenance"] = getattr(
+                card, "wildcard_provenance", None)
         base = float(getattr(card, "composite_score", 0.0) or 0.0)
         impression_id = uuid.uuid4().hex
         imp_by_card[id(card)] = impression_id
@@ -3095,6 +3118,409 @@ def _refresh_taste_board_prior(user_id: str, service) -> None:
         log.warning("taste board-prior refresh failed (non-fatal): %s", e)
 
 
+# ── F7 (flag deck.exploration) — wildcard slot & archetype audition ─────────
+# docs/plans/tiktok-discovery/prds/F7-exploration-slots.md. Every deck of
+# ≥ exploration_min_deck cards gets exactly ONE honestly-labeled wildcard,
+# inserted at the fixed mid-deck slot (exploration_slot_position, 1-indexed,
+# clamped to positions 4–6) AFTER _order_deck ran — the displaced card shifts
+# down. The wildcard is drawn uniformly at random from GATE-PASSING
+# candidates that did NOT make the served deck (the engine over-generates
+# exploration_overgen extra cards per opponent while the flag is on;
+# _split_exploration_pool separates the top-N deck from the overflow pool),
+# preferring, in order:
+#   1. bottom prefMatch tercile of the pool (F5 taste cosine — "outside the
+#      taste neighborhood"),
+#   2. low-data F2 arms (child arm below _THOMPSON_V2_WARM_MIN_OBS raw
+#      observations) when taste vectors are cold/off,
+#   3. uniform over the whole pool,
+# plus every AUDITIONING archetype's candidates (staged pools §3: a test-
+# pool archetype serves ONLY via wildcard slots, so its candidates are
+# always draw-eligible and its cards are removed from the main deck).
+# Quality gates NEVER relax: the pool holds candidates that cleared every
+# generation gate and F3's active decline suppressions still bind — a
+# wildcard is off-taste, never lower-quality.
+#
+# Propensity honesty (PRD §4): the wildcard's deck_impressions.propensity is
+# exploration_rate × 1/|eligible pool| — the uniform-draw probability that
+# REPLACES the Thompson multiplier for that card. F8's IPS estimators read
+# it as-is; the semantics are documented on the impression writer too.
+
+_AUDITION_ESTABLISHED = frozenset({"window", "value"})
+# Today's shipped lane labels. They are proven shapes, not the "new trade
+# archetypes with no audition path" the PRD targets — seeding them straight
+# into the general pool prevents the cold-start failure where a fresh
+# deployment (0 viewed impressions everywhere) would strip every laned card
+# from every deck the moment the flag flips on.
+
+_EXPLORATION_BASE_PER_OPP = 5   # generate_trades' max_per_opponent default —
+                                # the served-deck per-opponent budget the
+                                # flag-off path has always used.
+_EXPLORATION_SLOT_MIN = 4       # PRD: slot fixed mid-deck, positions 4–6
+_EXPLORATION_SLOT_MAX = 6
+
+
+def _split_exploration_pool(cards: list, base_per_opp: int) -> tuple[list, list]:
+    """Split an over-generated card list into (deck, pool): the deck keeps
+    the top `base_per_opp` cards per opponent (cards arrive sorted by
+    composite descending, and the per-pair generators return true top-N, so
+    this reproduces the flag-off deck membership per opponent), the rest —
+    gate-passing candidates that did NOT make the deck — become the
+    wildcard draw pool. Global order is preserved on both sides."""
+    per_opp: dict = {}
+    deck: list = []
+    pool: list = []
+    for c in cards:
+        target = getattr(c, "target_user_id", None)
+        n = per_opp.get(target, 0)
+        if n < base_per_opp:
+            per_opp[target] = n + 1
+            deck.append(c)
+        else:
+            pool.append(c)
+    return deck, pool
+
+
+def _audition_statuses(archetypes) -> dict[str, str]:
+    """F7 §3 — the lazy successive-elimination state machine, evaluated at
+    draw time (no cron). Returns {archetype: 'test'|'general'|'retired'}
+    for every requested archetype, creating/updating rows as it goes:
+
+      first seen  → 'general' when established (_AUDITION_ESTABLISHED) or
+                    all-time viewed ≥ audition_min_views; else 'test'.
+      'test'      → counts refreshed (global, since entered_at); at
+                    n ≥ audition_min_views: like-rate ≥
+                    audition_like_rate_frac × global base rate (F2's cached
+                    p̂) ⇒ 'general', else 'retired' (retired_at = now).
+      'retired'   → re-enters 'test' (fresh window) once retired_at +
+                    audition_retire_days passes; excluded from decks AND
+                    wildcard draws until then.
+
+    Transitions are logged; entered_at/retired_at on the row double as the
+    durable transition record."""
+    out: dict[str, str] = {}
+    archetypes = {a for a in (archetypes or ()) if a}
+    if not archetypes:
+        return out
+    now         = datetime.now(timezone.utc)
+    now_iso     = now.isoformat()
+    min_views   = max(1, int(_deck_cfg("audition_min_views", 30)))
+    rate_frac   = max(0.0, _deck_cfg("audition_like_rate_frac", 0.5))
+    retire_days = max(1, int(_deck_cfg("audition_retire_days", 30)))
+    rows = load_archetype_auditions()
+
+    for arch in sorted(archetypes):
+        row = rows.get(arch)
+        if row is None:
+            if arch in _AUDITION_ESTABLISHED:
+                status, viewed, likes = "general", 0, 0
+            else:
+                viewed, likes = count_archetype_engagement(arch)   # all-time
+                status = "general" if viewed >= min_views else "test"
+            upsert_archetype_audition(
+                arch, status=status, viewed_impressions=viewed,
+                likes=likes, entered_at=now_iso, retired_at=None)
+            if status == "test":
+                log.info("archetype audition: %s entered the test pool "
+                         "(all-time viewed=%d)", arch, viewed)
+        elif row["status"] == "retired":
+            retired_at = row.get("retired_at")
+            expired = True   # a junk/missing timestamp fails toward re-audition
+            if retired_at:
+                try:
+                    rdt = datetime.fromisoformat(str(retired_at))
+                    if rdt.tzinfo is None:
+                        rdt = rdt.replace(tzinfo=timezone.utc)
+                    expired = now >= rdt + timedelta(days=retire_days)
+                except ValueError:
+                    pass
+            if expired:
+                status = "test"
+                upsert_archetype_audition(
+                    arch, status="test", viewed_impressions=0, likes=0,
+                    entered_at=now_iso, retired_at=None)
+                log.info("archetype audition: %s re-entered the test pool "
+                         "after its %dd retirement window", arch, retire_days)
+            else:
+                status = "retired"
+        elif row["status"] == "test":
+            viewed, likes = count_archetype_engagement(
+                arch, since_iso=row.get("entered_at"))
+            status = "test"
+            retired_at = None
+            if viewed >= min_views:
+                base = _thompson_prior_base_rate()
+                like_rate = likes / viewed if viewed else 0.0
+                if like_rate >= rate_frac * base:
+                    status = "general"
+                    log.info("archetype audition: %s GRADUATED to the general "
+                             "pool (viewed=%d likes=%d rate=%.3f ≥ %.3f)",
+                             arch, viewed, likes, like_rate, rate_frac * base)
+                else:
+                    status = "retired"
+                    retired_at = now_iso
+                    log.info("archetype audition: %s RETIRED for %dd "
+                             "(viewed=%d likes=%d rate=%.3f < %.3f)",
+                             arch, retire_days, viewed, likes, like_rate,
+                             rate_frac * base)
+            upsert_archetype_audition(
+                arch, status=status, viewed_impressions=viewed, likes=likes,
+                entered_at=row.get("entered_at") or now_iso,
+                retired_at=retired_at)
+        else:
+            status = "general"
+        out[arch] = status
+    return out
+
+
+def _exploration_off_taste(
+    general: list,
+    *,
+    user_id: str,
+    league_id: str,
+    players_dict: dict,
+    seed_map: dict,
+) -> tuple[list, str]:
+    """The "outside your taste neighborhood" subset of the general-pool
+    candidates, with its provenance label. Tiered per the PRD:
+
+      taste_tercile — bottom third by the F5 taste multiplier formula
+                      (unclamped (1+η_l·prefMatch_long)(1+η_s·prefMatch_short)
+                      over the same cosine + attr helpers serving uses).
+      low_data_arm  — taste cold/off: candidates whose F2 child arm has
+                      < _THOMPSON_V2_WARM_MIN_OBS raw viewed-gated
+                      observations (arch-less cards: shape unseen at the
+                      parent level).
+      uniform       — no taste signal and no arm data (or v2 off): the
+                      whole pool.
+    """
+    if not general:
+        return [], "uniform"
+    if _deck_taste_enabled():
+        try:
+            short, long_ = _taste_service.load_taste_vectors(user_id)
+            if short or long_:
+                eta_l = _deck_cfg("taste_eta_long", 0.2)
+                eta_s = _deck_cfg("taste_eta_short", 0.3)
+                scored = []
+                for c in general:
+                    attrs = _taste_service.card_taste_attrs(
+                        c, players_dict or {}, seed_map or {})
+                    m = ((1.0 + eta_l * _taste_service._pref_match(long_, attrs))
+                         * (1.0 + eta_s * _taste_service._pref_match(short, attrs)))
+                    scored.append((m, c))
+                scored.sort(key=lambda t: t[0])   # stable — ties keep pool order
+                n = max(1, math.ceil(len(scored) / 3))
+                return [c for _m, c in scored[:n]], "taste_tercile"
+        except Exception as e:
+            log.warning("exploration: taste tercile failed (falling back): %s", e)
+    if _deck_thompson_v2_enabled():
+        try:
+            child, parent = _thompson_v2_arm_stats(user_id, league_id)
+            low = []
+            for c in general:
+                arch, shape = _card_archetype(c), _card_shape(c)
+                if arch is not None:
+                    n_raw = child.get((arch, shape), (0.0, 0.0, 0))[2]
+                    if n_raw < _THOMPSON_V2_WARM_MIN_OBS:
+                        low.append(c)
+                elif shape not in parent:
+                    low.append(c)
+            if low:
+                return low, "low_data_arm"
+        except Exception as e:
+            log.warning("exploration: low-data-arm scan failed (falling back): %s", e)
+    return list(general), "uniform"
+
+
+def _filter_suppressed_for_exploration(
+    candidates: list,
+    *,
+    user_id: str,
+    league_id: str,
+    seed_map: dict,
+) -> list:
+    """Drop pool candidates matching an ACTIVE F3 decline suppression —
+    quality/respect gates never relax for exploration, and the wildcard
+    path bypasses _apply_deck_suppression (which only saw the served deck).
+    Read-only: no retest grants here (retests belong to the main deck's
+    lazy resolution). Any read failure keeps the pool intact — the F3
+    layer already failed soft for the deck itself in that case."""
+    if not candidates:
+        return candidates
+    try:
+        rows = load_deck_suppressions(user_id, league_id)
+    except Exception as e:
+        log.warning("exploration: suppression read failed (soft-off): %s", e)
+        return candidates
+    now_iso = datetime.now(timezone.utc).isoformat()
+    active = [r for r in rows if r["expires_at"] > now_iso]
+    if not active:
+        return candidates
+    band = max(0.0, _deck_cfg("fatigue_decline_value_band", 0.10))
+
+    def _hit(r, center, shape, value):
+        if r["centerpiece_id"] != center or r["shape_bucket"] != shape:
+            return False
+        rv = r.get("package_value")
+        if rv is None or value is None or rv <= 0:
+            return True
+        return abs(value - rv) <= band * rv
+
+    kept = []
+    for c in candidates:
+        give   = list(getattr(c, "give_player_ids", None) or [])
+        recv   = list(getattr(c, "receive_player_ids", None) or [])
+        center = _fatigue_centerpiece(give, recv, seed_map)
+        shape  = _card_shape(c)
+        value  = _fatigue_package_value(give, recv, seed_map)
+        if center is not None and any(
+                _hit(r, center, shape, value) for r in active):
+            continue
+        kept.append(c)
+    return kept
+
+
+def _apply_exploration_slot(
+    cards: list,
+    pool: list,
+    *,
+    user_id: str,
+    league_id: str,
+    job_id: str,
+    players_dict: dict,
+    seed_map: dict,
+) -> tuple[list, object | None, dict]:
+    """The F7 layer, run AFTER _order_deck on the final served order.
+
+    1. Audition pass — evaluate every archetype in deck+pool lazily
+       (_audition_statuses); cards of 'test'/'retired' archetypes are
+       removed from the MAIN deck (test-pool archetypes serve only via the
+       wildcard slot; retired ones not at all), with the same
+       ≥ _DECK_MIN_CARDS floor idiom as F3's suppression pass. likes_you
+       cards are never removed.
+    2. Wildcard draw — decks of ≥ exploration_min_deck cards draw ONE
+       candidate uniformly (deterministic per-job RNG, separate stream from
+       the Thompson draw) from: auditioning-archetype candidates ∪ the
+       off-taste subset of the general pool (_exploration_off_taste),
+       minus retired archetypes, active F3 suppressions, and anything
+       already in the deck.
+    3. Insert at the fixed slot (exploration_slot_position 1-indexed,
+       clamped 4–6); the displaced card shifts down. The card is stamped
+       wildcard/wildcard_pool_size/wildcard_provenance for the payload +
+       impression writer.
+
+    Returns (deck, wildcard_card | None, info). info carries
+    "deck_changed" (snapshot republish needed) and, when a wildcard was
+    drawn, "propensity" (exploration_rate × 1/|eligible|), "pool_size" and
+    "provenance"."""
+    info: dict = {"deck_changed": False}
+    deck = list(cards)
+
+    archetypes = {_card_archetype(c) for c in deck + list(pool)}
+    try:
+        statuses = _audition_statuses(archetypes)
+    except Exception as e:
+        log.warning("exploration: audition evaluation failed (soft-off): %s", e)
+        statuses = {}
+
+    # 1. Audition removal — test/retired archetypes leave the main deck.
+    blocked = {a for a, s in statuses.items() if s in ("test", "retired")}
+    removed_test: list = []
+    if blocked:
+        kept, removed = [], []
+        for c in deck:
+            arch = _card_archetype(c)
+            if (arch in blocked and not getattr(c, "likes_you", False)):
+                removed.append(c)
+            else:
+                kept.append(c)
+        if removed and len(kept) < _DECK_MIN_CARDS:
+            removed.sort(
+                key=lambda c: float(getattr(c, "composite_score", 0.0) or 0.0),
+                reverse=True)
+            restored = 0
+            while len(kept) < _DECK_MIN_CARDS and removed:
+                kept.append(removed.pop(0))
+                restored += 1
+            log.warning(
+                "exploration: audition floor engaged — restored %d card(s) "
+                "to keep the deck at %d (user=%s league=%s)",
+                restored, _DECK_MIN_CARDS, user_id, league_id)
+        if len(kept) != len(deck):
+            info["deck_changed"] = True
+        removed_test = [c for c in removed
+                        if statuses.get(_card_archetype(c)) == "test"]
+        deck = kept
+
+    # 2. Eligible draw pool.
+    min_deck = max(1, int(_deck_cfg("exploration_min_deck", 8)))
+    if len(deck) < min_deck:
+        return deck, None, info
+
+    deck_keys = {
+        (frozenset(getattr(c, "give_player_ids", None) or []),
+         frozenset(getattr(c, "receive_player_ids", None) or []),
+         getattr(c, "target_user_id", None))
+        for c in deck
+    }
+    candidates = []
+    for c in list(pool) + removed_test:
+        key = (frozenset(getattr(c, "give_player_ids", None) or []),
+               frozenset(getattr(c, "receive_player_ids", None) or []),
+               getattr(c, "target_user_id", None))
+        if key in deck_keys:
+            continue   # likes-you mirroring etc. can duplicate a pool card
+        if statuses.get(_card_archetype(c)) == "retired":
+            continue
+        candidates.append(c)
+    if _deck_fatigue_enabled():
+        candidates = _filter_suppressed_for_exploration(
+            candidates, user_id=user_id, league_id=league_id,
+            seed_map=seed_map)
+    if not candidates:
+        return deck, None, info
+
+    test_ids   = {id(c) for c in candidates
+                  if statuses.get(_card_archetype(c)) == "test"}
+    test_cards = [c for c in candidates if id(c) in test_ids]
+    general    = [c for c in candidates if id(c) not in test_ids]
+
+    off_taste, provenance = _exploration_off_taste(
+        general, user_id=user_id, league_id=league_id,
+        players_dict=players_dict, seed_map=seed_map)
+    eligible = test_cards + off_taste
+    if not eligible:
+        return deck, None, info
+
+    # 3. Uniform draw + fixed-slot insert. Separate deterministic RNG
+    # stream: the Thompson ordering draw must be unaffected by F7.
+    rng = random.Random(_deck_rng_seed(user_id, league_id,
+                                       f"{job_id}|exploration"))
+    wildcard = eligible[rng.randrange(len(eligible))]
+    rate = max(0.0, _deck_cfg("exploration_rate", 0.125))
+    propensity = rate / len(eligible)
+    wc_provenance = "audition" if id(wildcard) in test_ids else provenance
+
+    slot = int(_deck_cfg("exploration_slot_position", 5))
+    slot = min(_EXPLORATION_SLOT_MAX, max(_EXPLORATION_SLOT_MIN, slot))
+    idx = min(slot - 1, len(deck))
+
+    try:
+        wildcard.wildcard = True
+        wildcard.wildcard_pool_size = len(eligible)
+        wildcard.wildcard_provenance = wc_provenance
+    except Exception:
+        pass
+    deck = deck[:idx] + [wildcard] + deck[idx:]
+    info.update(
+        deck_changed=True,
+        propensity=propensity,
+        pool_size=len(eligible),
+        provenance=wc_provenance,
+    )
+    return deck, wildcard, info
+
+
 def _user_pick_share(user_id: str, league_id: str) -> float:
     """The user's share of total draft-pick value in a league (0.0 when no
     picks synced). Feeds the #8 outlook seed and #1's classifier."""
@@ -3303,6 +3729,24 @@ def _run_trade_job(
                 log.warning("trade-job: owned-pick injection failed (continuing): %s",
                             pick_inj_err)
 
+        # F7 (flag deck.exploration) — over-generate per opponent so the
+        # wildcard draw has gate-passing candidates from OUTSIDE the served
+        # deck (_split_exploration_pool trims back to the flag-off top-N per
+        # opponent below). Skipped for pinned/opponent-scoped jobs (like
+        # likes-you: an intent-scoped deck shouldn't carry an unrelated
+        # wildcard) and the demo league. Flag off ⇒ gen_kwargs stays empty
+        # and generate_trades runs byte-identically.
+        explore_active = (
+            _deck_exploration_enabled() and league_id != "league_demo"
+            and not pinned_give and not pinned_receive
+            and not opponent_user_id)
+        gen_kwargs: dict = {}
+        if explore_active:
+            _overgen = max(0, int(_deck_cfg("exploration_overgen", 3)))
+            if _overgen:
+                gen_kwargs["max_per_opponent"] = (
+                    _EXPLORATION_BASE_PER_OPP + _overgen)
+
         final_cards = trade_service.generate_trades(
             user_id              = g_user_id,
             user_elo             = elo_map_rt,
@@ -3325,7 +3769,28 @@ def _run_trade_job(
             untouchable_ids      = untouchable_ids or None,
             target_ids           = target_ids or None,
             not_interested_ids   = not_interested_ids or None,
+            **gen_kwargs,
         )
+
+        # F7 — split the over-generated list into the served deck (top
+        # _EXPLORATION_BASE_PER_OPP per opponent — the flag-off membership)
+        # and the wildcard draw pool, then republish so the trimmed deck
+        # replaces the last streaming snapshot (which contained pool cards).
+        exploration_pool: list = []
+        if explore_active:
+            final_cards, exploration_pool = _split_exploration_pool(
+                final_cards, _EXPLORATION_BASE_PER_OPP)
+            if exploration_pool:
+                snapshot = []
+                for c in final_cards:
+                    d = trade_card_to_dict(c, players_dict)
+                    d["real_opponent"] = c.target_user_id in real_user_ids
+                    d["outlook"]       = outlook_value
+                    snapshot.append(d)
+                with _trade_jobs_lock:
+                    j = _trade_jobs.get(job_id)
+                    if j is not None and j["status"] == "running":
+                        j["cards"] = snapshot
 
         # Tier 2 (2.3a) — likes-you queue. Inject/boost cards league-mates
         # already liked the mirror of, then republish the final snapshot so
@@ -3470,6 +3935,47 @@ def _run_trade_job(
                             j["cards"] = snapshot
             except Exception as ord_err:
                 log.warning("deck ordering (A5/A6) failed (non-fatal): %s", ord_err)
+
+        # F7 (flag deck.exploration) — wildcard slot + archetype audition,
+        # applied AFTER ordering (the slot is a fixed served position, not a
+        # score) and BEFORE impression logging (the wildcard must appear in
+        # both impression streams at its true slot). The wildcard's logged
+        # propensity is exploration_rate × 1/|eligible pool| — it REPLACES
+        # the Thompson multiplier for that card (it was never in the
+        # ordering draw). Non-fatal: any failure serves the deck exactly as
+        # ordered. Flag off ⇒ explore_active is False and every payload/DB
+        # write is byte-identical.
+        if explore_active:
+            try:
+                final_cards, _wc_card, _wc_info = _apply_exploration_slot(
+                    final_cards, exploration_pool,
+                    user_id      = g_user_id,
+                    league_id    = league_id,
+                    job_id       = job_id,
+                    players_dict = players_dict,
+                    seed_map     = seed_map,
+                )
+                if _wc_card is not None and _deck_signal_v2_enabled():
+                    # Propensity honesty (PRD §4) — stamp the exploration
+                    # propensity where the F1 writer reads it. A capture
+                    # dict may not exist when no ordering flag ran.
+                    if signal_capture is None:
+                        signal_capture = {}
+                    signal_capture.setdefault("propensity", {})[
+                        id(_wc_card)] = _wc_info["propensity"]
+                if _wc_info.get("deck_changed"):
+                    snapshot = []
+                    for c in final_cards:
+                        d = trade_card_to_dict(c, players_dict)
+                        d["real_opponent"] = c.target_user_id in real_user_ids
+                        d["outlook"]       = outlook_value
+                        snapshot.append(d)
+                    with _trade_jobs_lock:
+                        j = _trade_jobs.get(job_id)
+                        if j is not None and j["status"] == "running":
+                            j["cards"] = snapshot
+            except Exception as ex_err:
+                log.warning("deck exploration layer failed (non-fatal): %s", ex_err)
 
         # Tier 2 (2.4) — impression logging: one row per card in final deck
         # order, once per completed job (NOT per /status poll — polls only
@@ -6731,6 +7237,12 @@ def trade_card_to_dict(card, players: dict) -> dict:
     # flag-off payloads stay byte-identical.
     if getattr(card, "fatigue_retest", False):
         out["retest"] = True
+    # F7 (deck.exploration) — honest exploration label ("Wildcard — outside
+    # your usual"): the attribute is only ever set while the flag is on, so
+    # flag-off payloads stay byte-identical. F4's client session re-rank
+    # position-locks cards carrying this marker (sessionRerank.isPositionLocked).
+    if getattr(card, "wildcard", False):
+        out["wildcard"] = True
     # #189 — relaxed-fallback annotation, only when the relaxed pass emitted
     # this card (targeted job, zero cards under normal gates). Additive:
     # ordinary cards' payloads stay byte-identical. Clients label these
@@ -11361,6 +11873,24 @@ def cron_daily_tick():
         except Exception as e:
             log.warning("daily-tick: replenishment pass failed: %s", e)
             replenish_stats = {"error": str(e)}
+
+    # ── F8 — offline eval nightly (operator tooling, unflagged) ──
+    # Idempotent per (UTC day, scorer, window) via data/eval_runs/runs.jsonl,
+    # so daily-tick retries are free. Never fails the tick.
+    eval_summary: str | None = None
+    try:
+        from .eval.nightly import run_all as _eval_run_all
+        _eval_stats = _eval_run_all(window_days=30)
+        eval_summary = _eval_stats.get("summary")
+        if _eval_stats.get("ran"):
+            counters["eval_scorers_graded"] = _eval_stats["ran"]
+        if _eval_stats.get("errors"):
+            log.warning("daily-tick eval: %s scorer(s) errored (recorded in runs.jsonl)",
+                        _eval_stats["errors"])
+    except Exception as e:
+        log.warning("daily-tick: offline-eval pass failed (non-fatal): %s", e)
+    if eval_summary:
+        log.info("daily-tick eval: %s", eval_summary)
 
     log.info("daily-tick: %s", counters)
     if replenish_stats is not None:
