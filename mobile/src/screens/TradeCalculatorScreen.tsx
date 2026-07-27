@@ -673,7 +673,23 @@ export default function TradeCalculatorScreen({ route }: any) {
 
         {isLive ? (
           anySide && evalQuery.data ? (
-            <View testID="calc.verdict"><ConsensusVerdictCard evaluation={evalQuery.data} stale={evalQuery.isFetching} /></View>
+            <View testID="calc.verdict">
+              <ConsensusVerdictCard
+                evaluation={evalQuery.data}
+                stale={evalQuery.isFetching}
+                // Eveners (2026-07-26): add the recommended asset(s) to the
+                // side gap.add_to points at; the debounced evaluate re-run
+                // refreshes or clears the rows.
+                onAddEvener={(e) => {
+                  const addTo = evalQuery.data?.gap?.add_to;
+                  if (!addTo) return;
+                  haptics.selection();
+                  const ids = e.ids ?? [e.id];
+                  const setter = addTo === 'give' ? setLiveSendIds : setLiveReceiveIds;
+                  setter((cur) => [...cur, ...ids.filter((id) => !cur.includes(id))]);
+                }}
+              />
+            </View>
           ) : anySide && evalQuery.isLoading ? (
             <Card>
               <View style={styles.loadingRow}>

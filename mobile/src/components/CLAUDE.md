@@ -15,6 +15,7 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `ConsensusVerdictCard` | Calculator: server-authoritative consensus verdict from /api/trade/evaluate (live mode) |
 | `InLeagueCalculator` | Calculator "In league" mode: real opponent + rosters, two-board mutual-gain verdict (evaluate Mode B), carries Send in Sleeper. #190: optional `initialOpponentId`/`initialGiveIds`/`initialReceiveIds` props (deck "Edit in calculator" prefill via TradeCalculatorScreen's `prefill` route param; initial values only) |
 | `SuggestionCard` | Calculator: tappable fair-package suggestion |
+| `EvenerRows` | Calculator: "Recommended to even it" one-tap balance rows from `/api/trade/evaluate` `eveners` (DynastyGM teardown 2026-07-26) — ≤3 single assets (players/owned picks, pick label shown) + at most one 2-piece package row; + button adds to the side `gap.add_to` points at, re-evaluate refreshes/clears the rows. Used by `InLeagueCalculator` (Mode B roster/pick eveners) and `ConsensusVerdictCard` via `onAddEvener` (open calculator's generic-pick evener) |
 | `PlayerPickerModal` | Calculator: search + position-filter player picker |
 | `OutlookSheet` | Bottom sheet for team outlook selection |
 | `SendInSleeperButton` | Flagged-beta ("Send in Sleeper"): propose a trade to Sleeper directly; routes to connect / deep-link fallback. Self-gates to Sleeper leagues (#146): renders null when its `leagueId` is an imported ESPN league (platform check against `useSession.leagues`) — mounts never need their own gate. #180: calls `POST /api/trades/validate` pre-confirm and surfaces advisory warnings (archived league / player moved / roster limit) with Cancel / Send anyway |
@@ -150,5 +151,8 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 
 **MFL auth-link tranche (2026-07-25, #177, flag `mfl.auth_link`):**
 - PlatformLinkSheet (MFL only): `platform-link.mfl-auth-toggle` (reveals the sign-in fields) · `platform-link.mfl-username` · `platform-link.mfl-password` (secureTextEntry) · `platform-link.mfl-signin` · `platform-link.mfl-league.<league_id>` (checkbox row, pre-checked when the franchise auto-binds) · `platform-link.mfl-import` · `platform-link.mfl-open` (auth-done summary CTA); errors reuse `platform-link.error`
+
+**Calculator eveners tranche (2026-07-26, DynastyGM teardown):**
+- EvenerRows (In-league calculator + open calculator's ConsensusVerdictCard): `calc.evener.<id>` (row container; `<id>` = player_id, pick_id, or `<a>+<b>` for the 2-piece package row) · `calc.evener-add.<id>` (the + button — adds the asset(s) to the side `gap.add_to` points at and re-evaluates)
 
 **League rankings (#14 completion, 2026-07-20):** `RankChipBadge` — "#3 of 12" consensus power-rank chip from the open `GET /api/league/rank-chip` read (60s server cache); silent-fail enrichment (error/old-server/demo → renders nothing); ice text when top-3. Mounted on LeaguePicker rows + the League tab hero chips. testID `league.rank-chip.<league_id>`

@@ -2,7 +2,8 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Card, Meter } from './chalkline';
 import TradeValueBar from './TradeValueBar';
-import type { CalcEvaluation } from '../api/calc';
+import EvenerRows from './EvenerRows';
+import type { CalcEvaluation, CalcEvener } from '../api/calc';
 import { semantic, space, type } from '../theme/chalkline';
 
 // Server-authoritative verdict for the Trade Calculator's live mode: one
@@ -13,13 +14,21 @@ import { semantic, space, type } from '../theme/chalkline';
 // The verdict is presented as a pick-denominated diverging value bar
 // (TradeValueBar, feedback #157 + #169) — who wins and by how many picks. The
 // raw give/get totals stay below as secondary reference.
+//
+// Eveners (DynastyGM teardown 2026-07-26): when the host passes onAddEvener
+// and the evaluation carries `eveners` (uneven trade), "Recommended to even
+// it" rows render under the totals — in the rosterless open calculator
+// that's the single generic pick nearest the gap. Tapping + hands the asset
+// back to the host, which adds it to the side `gap.add_to` points at.
 
 export default function ConsensusVerdictCard({
   evaluation,
   stale,
+  onAddEvener,
 }: {
   evaluation: CalcEvaluation;
   stale?: boolean;
+  onAddEvener?: (evener: CalcEvener) => void;
 }) {
   const both = evaluation.verdict !== null;
   const maxSide = Math.max(evaluation.give_value, evaluation.receive_value, 1);
@@ -57,6 +66,18 @@ export default function ConsensusVerdictCard({
             {Math.round(evaluation.receive_value).toLocaleString()}
           </Text>
         </View>
+
+        {onAddEvener && evaluation.eveners && evaluation.eveners.length > 0 && evaluation.gap?.add_to ? (
+          <EvenerRows
+            eveners={evaluation.eveners}
+            title={
+              evaluation.gap.add_to === 'give'
+                ? 'Recommended to even it — add to Side A'
+                : 'Recommended to even it — add to Side B'
+            }
+            onAdd={onAddEvener}
+          />
+        ) : null}
 
         {evaluation.dropped_player_ids.length > 0 ? (
           <Text style={styles.note}>

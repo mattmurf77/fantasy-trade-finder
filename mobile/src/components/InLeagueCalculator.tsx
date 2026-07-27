@@ -9,6 +9,7 @@ import {
   evaluateTradesInLeague,
   getTradeValues,
   type CalcEvaluationInLeague,
+  type CalcEvener,
   type TradeProbe,
 } from '../api/calc';
 import {
@@ -21,6 +22,7 @@ import {
 import TradeSide from './TradeSide';
 import PlayerPickerModal from './PlayerPickerModal';
 import SuggestionCard from './SuggestionCard';
+import EvenerRows from './EvenerRows';
 import SendInSleeperButton from './SendInSleeperButton';
 import { Badge, Button, Card, Icon, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
@@ -346,6 +348,20 @@ export default function InLeagueCalculator({
     else setReceiveIds((cur) => [...cur, ...ids]);
   };
 
+  // Eveners (DynastyGM teardown 2026-07-26): server-picked one-tap assets
+  // from the WINNING side's real roster + owned picks (POST /api/trade/
+  // evaluate `eveners`). gap.add_to names the side that adds — 'give' =
+  // your roster, 'receive' = theirs. Adding re-runs the debounced evaluate,
+  // which refreshes or clears the rows as the trade evens.
+  const addEvener = (e: CalcEvener) => {
+    const addTo = ev?.gap?.add_to;
+    if (!addTo) return;
+    haptics.selection();
+    const ids = e.ids ?? [e.id];
+    const setter = addTo === 'give' ? setGiveIds : setReceiveIds;
+    setter((cur) => [...cur, ...ids.filter((id) => !cur.includes(id))]);
+  };
+
   const bothSides = giveIds.length > 0 && receiveIds.length > 0;
   const anySide = giveIds.length > 0 || receiveIds.length > 0;
   const clear = () => {
@@ -494,6 +510,18 @@ export default function InLeagueCalculator({
             <Text style={type.bodySm}>Evaluating…</Text>
           </View>
         </Card>
+      ) : null}
+
+      {anySide && ev?.eveners && ev.eveners.length > 0 && ev.gap?.add_to ? (
+        <EvenerRows
+          eveners={ev.eveners}
+          title={
+            ev.gap.add_to === 'give'
+              ? 'Recommended to even it — add from your roster'
+              : `Recommended to even it — ask @${opponent?.username ?? 'them'} to add`
+          }
+          onAdd={addEvener}
+        />
       ) : null}
 
       {balancePlan && balanceQ.data && balanceQ.data.length > 0 ? (

@@ -812,6 +812,110 @@ def _value_verdict_payload(give_value: float, receive_value: float,
     }
 
 
+# ── One-tap eveners (DynastyGM teardown 2026-07-26) ────────────────────────
+# The calculator's `gap` names the delta; eveners make it actionable: concrete
+# assets the WINNING side (the one whose received value is higher) can add to
+# what they GIVE to balance the trade. `gap.add_to` already points at that
+# give-pile ('give' = the caller's outgoing side, 'receive' = the opponent's),
+# so eveners are drawn from that side's owner — real roster + owned picks in
+# Mode B, the single nearest generic pick in rosterless Mode A.
+_EVENER_WINDOW = (0.4, 1.5)   # candidate value as a fraction of the gap
+_EVENER_MAX = 3               # single-asset rows (one 2-piece combo may follow)
+_EVENER_PAIR_POOL = 15        # top-N sub-gap assets scanned pairwise for the combo
+
+
+def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
+                    exclude_ids: set, pool_players: list,
+                    seed_value) -> list[dict]:
+    """Evener candidates from one owner's roster + owned picks (Mode B).
+
+    Up to _EVENER_MAX single assets whose consensus value falls inside the
+    _EVENER_WINDOW around `gap_value`, closest-to-gap first, plus at most ONE
+    2-piece combo (`is_package`, additive value — the client re-evaluates on
+    add) built from the same pool. The owner's untouchables are never
+    recommended — asset preferences are keyed (user_id, league_id), so this
+    holds for the caller AND the counterparty alike.
+    """
+    lo, hi = gap_value * _EVENER_WINDOW[0], gap_value * _EVENER_WINDOW[1]
+    try:
+        prefs = load_asset_preferences(user_id=owner_user_id, league_id=league_id)
+        untouchable = set(prefs.get("untouchables") or [])
+    except Exception as ap_err:
+        log.warning("eveners: asset-prefs load failed (continuing): %s", ap_err)
+        untouchable = set()
+    skip = set(exclude_ids) | untouchable
+
+    roster: list[str] = []
+    for m in load_league_members(league_id):
+        if str(m.get("user_id")) == str(owner_user_id):
+            roster = [str(p) for p in (m.get("player_ids") or [])]
+            break
+
+    by_id = {p.id: p for p in pool_players}
+    assets: list[dict] = []   # every priced, non-excluded asset (window-free)
+    for pid in roster:
+        p = by_id.get(pid)
+        if p is None or pid in skip:
+            continue
+        assets.append({
+            "id":       pid,
+            "name":     p.name,
+            "position": p.position,
+            "team":     getattr(p, "team", None),
+            "value":    round(seed_value(pid), 1),
+            "is_pick":  False,
+        })
+    for pk in load_draft_picks(league_id=league_id, owner_user_id=owner_user_id):
+        pid = str(pk["pick_id"])
+        val = float(pk.get("pool_value") or 0.0)
+        if pid in skip or val <= 0:
+            continue
+        assets.append({
+            "id":       pid,
+            "name":     _owned_pick_label(pk),
+            "position": "PICK",
+            "team":     None,
+            "value":    round(val, 1),
+            "is_pick":  True,
+        })
+
+    singles = sorted(
+        (a for a in assets if lo <= a["value"] <= hi),
+        key=lambda a: abs(a["value"] - gap_value),
+    )[:_EVENER_MAX]
+
+    # One best 2-piece combo (stretch): pairwise over the top-N sub-gap
+    # assets; combined (additive) value must land in the same window. Shown
+    # alongside singles when it exists — the '+' adds both pieces.
+    pair_pool = sorted(
+        (a for a in assets if a["value"] < gap_value),
+        key=lambda a: a["value"], reverse=True,
+    )[:_EVENER_PAIR_POOL]
+    best_pair = None
+    for i in range(len(pair_pool)):
+        for j in range(i + 1, len(pair_pool)):
+            combined = pair_pool[i]["value"] + pair_pool[j]["value"]
+            if not (lo <= combined <= hi):
+                continue
+            if best_pair is None or abs(combined - gap_value) < abs(best_pair[0] - gap_value):
+                best_pair = (combined, pair_pool[i], pair_pool[j])
+
+    out = singles
+    if best_pair is not None:
+        combined, a, b = best_pair
+        out = out + [{
+            "id":         f"{a['id']}+{b['id']}",
+            "ids":        [a["id"], b["id"]],
+            "name":       f"{a['name']} + {b['name']}",
+            "position":   "PKG",
+            "team":       None,
+            "value":      round(combined, 1),
+            "is_pick":    False,
+            "is_package": True,
+        }]
+    return out
+
+
 # ── Pick-anchor wizard (POST /api/anchor/save) ─────────────────────────────
 # Anchor keys are a cross-client enum (mobile sends them verbatim — see
 # docs/cross-client-invariants.md). Single-pick anchors pin directly to that
@@ -5919,6 +6023,32 @@ def trade_evaluate_route():
                 "their_value_delta":     their_delta,
                 "mutual_gain":           bool(your_delta > 0 and their_delta > 0),
             })
+
+        # ── Eveners (DynastyGM teardown 2026-07-26) ──────────────────────────
+        # Additive `eveners` list: one-tap assets to balance an uneven trade.
+        # Present only on an uneven two-sided read. gap.add_to names the side
+        # that adds — 'give' = the caller's roster, 'receive' = the opponent's
+        # (Mode B); rosterless Mode A falls back to the nearest generic pick
+        # (already a calculator-addable pool id — never a fabricated one).
+        # Build failures omit the field; they never fail the route.
+        if favors is not None and favors != "even" and gap and gap.get("add_to"):
+            try:
+                in_trade = set(give_raw) | set(recv_raw)
+                if mode_b:
+                    owner = (caller_user_id if gap["add_to"] == "give"
+                             else opponent_user_id)
+                    result["eveners"] = _roster_eveners(
+                        league_id, owner, gap["value"], in_trade,
+                        _pool_players, seed_value)
+                else:
+                    pe = gap.get("pick_equivalent")
+                    result["eveners"] = (
+                        [] if pe is None or pe["pick_id"] in in_trade
+                        else [{"id": pe["pick_id"], "name": pe["label"],
+                               "position": "PICK", "team": None,
+                               "value": pe["value"], "is_pick": True}])
+            except Exception as evn_err:
+                log.warning("evaluate: evener build failed (omitted): %s", evn_err)
 
         # FR-20 (analytics P0, LLD §6.4b): calc_trade_evaluated — load-bearing
         # for the WAT north star (PRD FR-20). Mode A is a public route, so
