@@ -61,6 +61,10 @@ def _flags(thompson: bool, diversity: bool):
     stack = ExitStack()
     stack.enter_context(patch.object(server, "_thompson_deck_enabled", lambda: thompson))
     stack.enter_context(patch.object(server, "_deck_diversity_enabled", lambda: diversity))
+    # These tests predate F2/F3; they exercise the v1 sampler, so the v2
+    # sampler and fatigue layer are pinned off regardless of features.json.
+    stack.enter_context(patch.object(server, "_deck_thompson_v2_enabled", lambda: False))
+    stack.enter_context(patch.object(server, "_deck_fatigue_enabled", lambda: False))
     return stack
 
 
