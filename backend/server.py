@@ -175,6 +175,7 @@ from .database import (
 )
 from . import sleeper_write as _sleeper_write
 from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
+from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
 from . import trends_service as _trends_service_mod
@@ -2237,6 +2238,49 @@ def _deck_exploration_enabled() -> bool:
     return getattr(FLAGS, "deck_exploration", False)
 
 
+def _deck_value_model_enabled() -> bool:
+    """F6 — learned acceptance heads × V-vector (docs/plans/
+    tiktok-discovery/prds/F6-value-model.md). SHIPS DARK until an F8
+    replay win with adequate ESS. Gates BOTH serving (the base-ordering
+    swap in _deck_value_scores/_order_deck) AND the automatic nightly
+    refit inside daily-tick, so dark = truly inert (zero model reads,
+    writes, or training). The flag-independent exceptions are operator-
+    explicit: the `python3 -m backend.value_model --refit` CLI (a model
+    must exist BEFORE the flag flips so F8 can grade it) and the
+    registered `value_model` eval scorer."""
+    return getattr(FLAGS, "deck_value_model", False)
+
+
+def _deck_value_scores(
+    cards: list,
+    *,
+    user_id: str,
+    league_id: str,
+    players_dict: dict,
+    seed_map: dict,
+    scoring_format: str | None,
+) -> dict | None:
+    """F6 serving layer: {id(card): rank_score} to use as _order_deck's
+    BASE ordering key, or None whenever the model must stay out — flag
+    off, demo league, no trained model persisted, zero-history user, or
+    any error (soft-off, logged). None ⇒ every downstream path is
+    byte-identical to pre-F6: the composite stays the base key."""
+    if not _deck_value_model_enabled() or league_id == "league_demo":
+        return None
+    try:
+        return _value_model.serving_scores(
+            cards,
+            user_id        = user_id,
+            league_id      = league_id,
+            players_dict   = players_dict,
+            seed_map       = seed_map,
+            scoring_format = scoring_format,
+        )
+    except Exception as vm_err:
+        log.warning("deck value-model layer failed (non-fatal): %s", vm_err)
+        return None
+
+
 def _deck_cfg(key: str, default: float) -> float:
     """model_config key via trade_service's live config dict (same pattern
     as _fuzzy_match_tau). Defaults inline so a missing key never breaks
@@ -2511,6 +2555,7 @@ def _order_deck(
     capture: dict | None = None,
     fatigue_mult: dict | None = None,
     taste_mult: dict | None = None,
+    value_scores: dict | None = None,
 ) -> list:
     """Apply A5 (Thompson ordering — v1, or the F2 v2 sampler when
     deck.thompson_v2 is on) and A6 (diversification) to a generated deck.
@@ -2535,14 +2580,35 @@ def _order_deck(
     ordering key, composing multiplicatively with the Thompson draw, the
     F3 discount and the diversity penalty (order immaterial). None (the
     flag-off / zero-history caller value) ⇒ byte-identical pre-F5
-    behavior."""
+    behavior.
+
+    `value_scores` (F6, deck.value_model): {id(card): rank_score} from
+    the learned acceptance heads × V-vector. THIS IS THE F6 SEAM — when
+    provided, it replaces composite_score as the BASE ordering key the
+    multiplier stack (Thompson draw, F3 fatigue, F5 taste, diversity
+    penalty) applies to. Everything else — likes-you pinning, per-target
+    caps, capture semantics — is untouched: the model has ordering
+    authority only, over gate-passing candidates the engine already
+    admitted. A card missing from the map keeps its composite. None (the
+    flag-off / no-model / zero-history / error caller value) ⇒
+    byte-identical pre-F6 behavior."""
     thompson_v2 = _deck_thompson_v2_enabled()   # F2 — supersedes the v1 draw
     thompson  = _thompson_deck_enabled() or thompson_v2
     diversity = _deck_diversity_enabled()
-    if not cards or not (thompson or diversity or fatigue_mult or taste_mult):
+    if not cards or not (thompson or diversity or fatigue_mult or taste_mult
+                         or value_scores):
         return cards
 
     key = {id(c): float(getattr(c, "composite_score", 0.0) or 0.0) for c in cards}
+
+    # F6 (deck.value_model) — base-key swap. Applied FIRST, before any
+    # presentation multiplier, because it replaces the base signal rather
+    # than modulating it.
+    if value_scores:
+        for c in cards:
+            v = value_scores.get(id(c))
+            if v is not None:
+                key[id(c)] = float(v)
 
     if thompson:
         rng = random.Random(_deck_rng_seed(user_id, league_id, job_id))
@@ -3948,6 +4014,26 @@ def _run_trade_job(
                 log.warning("deck taste layer failed (non-fatal): %s", taste_err)
                 taste_mults = None
 
+        # F6 (flag deck.value_model — SHIPS DARK) — learned rank_scores to
+        # swap in as _order_deck's BASE ordering key. Computed AFTER the F3
+        # suppression pass (gate-passing survivors only — the model orders
+        # admitted candidates, it can never rescue a gated/suppressed one)
+        # and BEFORE _order_deck, whose multiplier stack (Thompson, F3, F5,
+        # diversity) then applies ON TOP unchanged. None in every fallback
+        # case — flag off, demo league, no trained model, zero-history
+        # user, or any error — so every downstream path is byte-identical
+        # to pre-F6 (the kill-switch acceptance criterion).
+        value_scores: dict | None = None
+        if _deck_value_model_enabled() and league_id != "league_demo":
+            value_scores = _deck_value_scores(
+                final_cards,
+                user_id        = g_user_id,
+                league_id      = league_id,
+                players_dict   = players_dict,
+                seed_map       = seed_map,
+                scoring_format = active_format,
+            )
+
         # Tier 2 amendments A5 + A6 — Thompson-sampled ordering + league-wide
         # diversification. Runs AFTER likes-you injection (so pinning sees
         # the final likes_you flags) and BEFORE impression logging (so
@@ -3958,7 +4044,8 @@ def _run_trade_job(
         signal_capture: dict | None = None
         if league_id != "league_demo" and (
                 _thompson_deck_enabled() or _deck_thompson_v2_enabled()
-                or _deck_diversity_enabled() or fatigue_mults or taste_mults):
+                or _deck_diversity_enabled() or fatigue_mults or taste_mults
+                or value_scores):
             try:
                 # F1: capture the drawn Thompson multipliers + final ordering
                 # keys for deck_impressions. None when the flag is off — the
@@ -3974,6 +4061,7 @@ def _run_trade_job(
                     capture   = signal_capture,
                     fatigue_mult = fatigue_mults,
                     taste_mult   = taste_mults,   # F5 — None when off/zero-history
+                    value_scores = value_scores,  # F6 — None when off/no-model/cold
                 )
                 if [id(c) for c in ordered] != [id(c) for c in final_cards]:
                     final_cards = ordered
@@ -12130,6 +12218,21 @@ def cron_daily_tick():
         log.warning("daily-tick: offline-eval pass failed (non-fatal): %s", e)
     if eval_summary:
         log.info("daily-tick eval: %s", eval_summary)
+
+    # ── F6 (flag deck.value_model — SHIPS DARK) — nightly refit ──
+    # Runs AFTER the F8 eval block so the eval pass grades yesterday's
+    # model before today's supersedes it. Flag-gated (training AND serving
+    # are both dark until the F8 replay win), idempotent per UTC date via
+    # data/value_model/models.jsonl, never fails the tick, and never
+    # changes the flag-off response payload.
+    if _deck_value_model_enabled():
+        try:
+            vm_stats = _value_model.nightly_refit(now=now)
+            log.info("daily-tick value-model refit: %s", vm_stats)
+            if vm_stats.get("status") == "trained":
+                counters["value_model_trained"] = 1
+        except Exception as e:
+            log.warning("daily-tick: value-model refit failed (non-fatal): %s", e)
 
     log.info("daily-tick: %s", counters)
     if replenish_stats is not None:

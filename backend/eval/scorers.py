@@ -121,3 +121,43 @@ class RandomOrderScorer:
 
     def score(self, card: dict) -> float:
         return self._rng.random()
+
+
+@register
+class ValueModelScorer:
+    """F6 — learned acceptance heads × V-vector (backend/value_model.py,
+    flag deck.value_model — dark). Loads the LATEST persisted nightly
+    model, so the nightly job automatically grades the production-trained
+    artifact vs the production baseline; the F8-replay-win verdict on this
+    scorer is the PRD's graduation gate for flipping the flag.
+
+    Honest candidate: features come from the frozen features_json only —
+    card_index / final_score / propensity are never read (served position
+    is a train-time debias feature pinned to its training mean at
+    predict). predict_proba emits the calibrated P(like) for the
+    reliability tables.
+
+    Until a model has been trained (`python3 -m backend.value_model
+    --refit`, or the flag-gated nightly refit once deck.value_model is
+    on), every score()/predict_proba() call raises — the harness then
+    excludes each deck under its printed `scorer_error` accounting, which
+    is the honest signal: there is no model to grade, and falling back to
+    any proxy score would grade a fake."""
+    name = "value_model"
+
+    def __init__(self):
+        from backend.value_model import load_latest_model
+        self._model = load_latest_model()
+
+    def _require_model(self):
+        if self._model is None:
+            raise RuntimeError(
+                "no persisted value model (data/value_model/models.jsonl) — "
+                "train one with `python3 -m backend.value_model --refit`")
+        return self._model
+
+    def score(self, card: dict) -> float:
+        return float(self._require_model().rank_score_from_card(card))
+
+    def predict_proba(self, card: dict) -> float:
+        return float(self._require_model().p_like_from_card(card))

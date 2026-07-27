@@ -222,7 +222,7 @@ flags flipped ON at its TestFlight ship. F8 (offline eval harness) is unflagged 
 | `deck.session_rerank` | false | F4 client-side re-rank of remaining deck after each disposition (last-k session boost vector; peeked card/pins/wildcard never move). |
 | `deck.taste_vectors` | false | F5 per-user decayed attribute-preference vectors (short τ=21d / long τ=180d) + board-derived prior, applied as a bounded multiplicative re-rank at generation (`user_taste` table, `backend/taste_service.py`; keys in the F5 model_config section below). |
 | `deck.exploration` | false | F7 one labeled Wildcard slot per deck (positions 4–6), archetype audition pools, exploration propensity logging. |
-| `deck.value_model` | false | F6 learned P(like)/P(propose) heads × hand-set V-vector as base ordering. **Stays dark until an F8 replay win with adequate ESS (PRD gate).** |
+| `deck.value_model` | false | F6 learned P(like)/P(propose) heads × hand-set V-vector as base ordering (`backend/value_model.py`; §F6 keys below). Gates BOTH serving and the automatic nightly refit — dark = truly inert. **Stays dark until an F8 replay win with adequate ESS (PRD gate).** |
 | `deck.first_session` | false | F9 confidence-weighted first-5 cards on a user's first deck + honest visible-adaptation moment. |
 | `deck.replenishment` | false | F10 deck-completion summary card + weekly post-waivers pre-generation (daily-tick hook) + 1/week preference-gated fresh-deck push. |
 
@@ -386,6 +386,20 @@ Read via `server._deck_cfg`, consumed by the exploration layer that runs AFTER `
 | `audition_min_views` | 30 | Viewed impressions (global, viewed-gated) before an auditioning archetype gets a graduate/retire verdict; also the all-time bar below which a first-seen archetype enters `test` |
 | `audition_like_rate_frac` | 0.5 | Graduate when window like-rate ≥ this × the global base rate (F2's cached trailing-30d p̂) |
 | `audition_retire_days` | 30 | Retirement window for a failed archetype before it re-enters `test` with a fresh counting window |
+
+### F6 — learned acceptance heads × V-vector (flag `deck.value_model` — **dark**)
+
+All read via `value_model._cfg` (same live-dict pattern as `taste_service._cfg` — keys are NOT in `trade_service._DEFAULT_CFG`; set them as `model_config` rows to override the inline defaults). Consumed by `backend/value_model.py`. The V-vector is the hand-set strategy layer (PRD §2): `rank_score = P(like)·value_model_v_like + P(like)·P(propose|like)·value_model_v_propose`, read LIVE at scoring time so strategy changes need no retraining. The rank_score replaces `composite_score` as `_order_deck`'s **base ordering key only** (the F6 seam — `server._order_deck(value_scores=…)`); all gates and presentation multipliers apply on top unchanged, and `deck_impressions.base_score` keeps logging the composite. **Both serving and the automatic nightly refit (daily-tick, after the F8 eval block) are gated on `deck.value_model`** — dark means zero model reads/writes/training. Flag-independent operator tools: `python3 -m backend.value_model --refit` (train; needed BEFORE the flag flips so F8 can grade the model) and the registered `value_model` eval scorer.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `value_model_v_like` | 1.0 | V(like) — hand-set value of a predicted like |
+| `value_model_v_propose` | 6.0 | V(propose) — hand-set value of a predicted proposal (6:1 vs like, mirroring the Elo K-ratios; utility-not-time-spent) |
+| `value_model_calib_frac` | 0.2 | Trailing time-slice fraction of training rows held out for Platt calibration (clamped 0.05–0.5) |
+| `value_model_l2` | 0.01 | L2 on the numeric/dense feature group (bias exempt) |
+| `value_model_l2_cat` | 0.5 | L2 on one-hot features — much stronger by design: at this data volume one-hots overfit label noise (validated on the F8 synthetic fixtures), while personalized categorical taste reaches the model through the F5 prefMatch numerics |
+
+Env var: `VALUE_MODEL_DIR` (default `data/value_model/` — inside the gitignored `/data/`) — directory for the append-only `models.jsonl` model store (latest parseable record = the served model; nightly refit is idempotent per UTC `train_date`). Tests point it at a tmp dir, F8-`EVAL_RUNS_DIR`-style.
 
 ### Tier 3 (flag-gated, landing imminently)
 
