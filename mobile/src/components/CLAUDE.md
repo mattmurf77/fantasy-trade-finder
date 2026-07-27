@@ -16,6 +16,7 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `InLeagueCalculator` | Calculator "In league" mode: real opponent + rosters, two-board mutual-gain verdict (evaluate Mode B), carries Send in Sleeper. #190: optional `initialOpponentId`/`initialGiveIds`/`initialReceiveIds` props (deck "Edit in calculator" prefill via TradeCalculatorScreen's `prefill` route param; initial values only) |
 | `SuggestionCard` | Calculator: tappable fair-package suggestion |
 | `EvenerRows` | Calculator: "Recommended to even it" one-tap balance rows from `/api/trade/evaluate` `eveners` (DynastyGM teardown 2026-07-26) — ≤3 single assets (players/owned picks, pick label shown) + at most one 2-piece package row; + button adds to the side `gap.add_to` points at, re-evaluate refreshes/clears the rows. Used by `InLeagueCalculator` (Mode B roster/pick eveners) and `ConsensusVerdictCard` via `onAddEvener` (open calculator's generic-pick evener) |
+| `AdjustmentsDisclosure` | Calculator: collapsed-by-default "Value adjustments" disclosure (DynastyDealer teardown 2026-07-26) — itemizes why each side's displayed package value differs from the naive sum of its assets (`/api/trade/evaluate` `adjustments` + `naive_totals`: package-depth discount, crown consolidation premium), signed green/red amounts + plain-language why + "Sum of parts N → M". Renders nothing without data. Mounted in `ConsensusVerdictCard` and the In-league verdict card |
 | `PlayerPickerModal` | Calculator: search + position-filter player picker |
 | `OutlookSheet` | Bottom sheet for team outlook selection |
 | `SendInSleeperButton` | Flagged-beta ("Send in Sleeper"): propose a trade to Sleeper directly; routes to connect / deep-link fallback. Self-gates to Sleeper leagues (#146): renders null when its `leagueId` is an imported ESPN league (platform check against `useSession.leagues`) — mounts never need their own gate. #180: calls `POST /api/trades/validate` pre-confirm and surfaces advisory warnings (archived league / player moved / roster limit) with Cancel / Send anyway |
@@ -157,6 +158,9 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 
 **Calculator eveners tranche (2026-07-26, DynastyGM teardown):**
 - EvenerRows (In-league calculator + open calculator's ConsensusVerdictCard): `calc.evener.<id>` (row container; `<id>` = player_id, pick_id, or `<a>+<b>` for the 2-piece package row) · `calc.evener-add.<id>` (the + button — adds the asset(s) to the side `gap.add_to` points at and re-evaluates)
+
+**Calculator adjustments tranche (2026-07-26, DynastyDealer teardown):**
+- AdjustmentsDisclosure (ConsensusVerdictCard + In-league verdict): `calc.adjustments.toggle` (the collapsed-by-default "Value adjustments" chevron row) · `calc.adjustments.row.<side>-<key>` (one itemized row; `<side>` = `give|receive`, `<key>` = `package_depth|consolidation` — side-qualified because the same key can appear on both sides). Rendered only when `/api/trade/evaluate` returned `adjustments`
 
 **League Analyzer replication tranche (2026-07-26, DynastyGM teardown — LeagueSummaryScreen):**
 - `league-summary.bar.<user_id>` — one VERTICAL stacked column in the rank-axis chart (a11y label "Rank N, TeamName, X total"); tapping focuses the team (its bar keeps position colors, every other bar goes muted-gray)

@@ -370,6 +370,95 @@ def test_mode_a_eveners_absent_when_even_or_one_sided():
     assert "eveners" not in one
 
 
+# ── Itemized value adjustments (`adjustments`) — DynastyDealer 2026-07-26 ──
+# Transparency-only decomposition of the displayed side totals: per side,
+# naive_totals + Σ row amounts == the displayed package value (0.1 rounding).
+# Only the two adjustments the evaluate path actually applies can appear:
+# package_depth (gamma weighting, always on) and consolidation (crown flag,
+# outnumbered side only). Displayed totals must be byte-identical to before.
+
+
+def _side_rows(d, side):
+    return {r["key"]: r for r in d.get("adjustments", {}).get(side, [])}
+
+
+def test_adjustments_1for1_depth_on_weaker_side_only():
+    d = _post({"give_player_ids": ["stud"], "receive_player_ids": ["good"]}).get_json()
+    # stud IS the trade's best asset → contributes 100%, no rows on give.
+    assert d["adjustments"]["give"] == []
+    give_naive = d["naive_totals"]["give"]
+    assert give_naive == pytest.approx(d["give_value"], abs=0.11)
+    # good sits below v_max → depth weighting shaves it; no consolidation
+    # (equal counts).
+    rows = _side_rows(d, "receive")
+    assert set(rows) == {"package_depth"}
+    depth = rows["package_depth"]
+    assert depth["amount"] < 0
+    assert depth["label"] == "Package depth"
+    assert depth["why"]
+    assert (d["naive_totals"]["receive"] + depth["amount"]
+            == pytest.approx(d["receive_value"], abs=0.15))
+
+
+def test_adjustments_2for1_depth_and_consolidation():
+    # give 2 (good+mid), receive 1 (stud): the give side is depth-discounted;
+    # the single-asset receive side earns the crown consolidation premium
+    # (flag trade.crown_asset is ON in config/features.json).
+    d = _post({"give_player_ids": ["good", "mid"],
+               "receive_player_ids": ["stud"]}).get_json()
+    grows = _side_rows(d, "give")
+    assert "package_depth" in grows and grows["package_depth"]["amount"] < 0
+    assert "consolidation" not in grows          # give is the BIGGER side
+    rrows = _side_rows(d, "receive")
+    assert "consolidation" in rrows and rrows["consolidation"]["amount"] > 0
+    assert "package_depth" not in rrows          # stud == v_max → no discount
+    # Attribution identity per side: naive + Σamounts == displayed value.
+    for side, total in (("give", d["give_value"]), ("receive", d["receive_value"])):
+        amounts = sum(r["amount"] for r in d["adjustments"][side])
+        assert (d["naive_totals"][side] + amounts
+                == pytest.approx(total, abs=0.15))
+
+
+def test_adjustments_equal_counts_never_show_consolidation():
+    d = _post({"give_player_ids": ["stud", "mid"],
+               "receive_player_ids": ["good", "bench"]}).get_json()
+    for side in ("give", "receive"):
+        assert "consolidation" not in _side_rows(d, side)
+
+
+def test_adjustments_absent_when_none_apply():
+    # Symmetric 1-for-1: both sides ARE the trade max → zero depth, equal
+    # counts → zero crown → the field is omitted entirely.
+    d = _post({"give_player_ids": ["stud"], "receive_player_ids": ["stud"]}).get_json()
+    assert "adjustments" not in d and "naive_totals" not in d
+
+
+def test_adjustments_do_not_change_displayed_totals():
+    # Pure transparency: totals must match an independent recomputation of
+    # the pre-existing math (_consensus_packages) exactly.
+    from backend.trade_optimizer import _consensus_packages
+    e2v = srv._trade_service_mod.elo_to_value
+    gv, rv = _consensus_packages(
+        ["good", "mid"], ["stud"], lambda p: e2v(_SEED[p]))
+    d = _post({"give_player_ids": ["good", "mid"],
+               "receive_player_ids": ["stud"]}).get_json()
+    assert d["give_value"] == round(gv, 1)
+    assert d["receive_value"] == round(rv, 1)
+
+
+def test_adjustments_mode_b_match_consensus_itemization(monkeypatch):
+    # Mode B carries the same consensus-based itemization (the "Consensus"
+    # row both cards display) — board-priced totals are not itemized.
+    a = _post({"give_player_ids": ["good", "mid"],
+               "receive_player_ids": ["stud"]}).get_json()
+    b = _post_authed({
+        "give_player_ids": ["good", "mid"], "receive_player_ids": ["stud"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    assert b["adjustments"] == a["adjustments"]
+    assert b["naive_totals"] == a["naive_totals"]
+
+
 def test_values_endpoint_shape_and_etag():
     with srv.app.test_client() as c:
         r = c.get("/api/trade/values?scoring_format=1qb_ppr")

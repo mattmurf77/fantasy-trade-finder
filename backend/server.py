@@ -816,6 +816,60 @@ def _value_verdict_payload(give_value: float, receive_value: float,
     }
 
 
+# ── Itemized value adjustments (DynastyDealer teardown 2026-07-26) ─────────
+# Pure transparency for the calculator verdict: decompose each side's
+# DISPLAYED package value into the naive sum of its asset values plus the
+# adjustments the evaluate path actually applies. Audit
+# (docs/feedback/items/2026-07-26-adjustments-breakdown/status.md): the only
+# value math in /api/trade/evaluate is _consensus_packages → package_value_v2,
+# i.e. (a) the depth weighting (package_adj_gamma — lesser assets contribute
+# below face value) and (b) the crown consolidation premium (flag
+# trade.crown_asset, outnumbered side only). Amounts are DERIVED by calling
+# package_value_v2 with and without n_other — no valuation math is changed
+# or duplicated, so displayed totals cannot drift.
+
+_ADJ_DEPTH_WHY = ("Lesser pieces count below face value — four quarters "
+                  "don't buy a dollar in the trade market.")
+_ADJ_CROWN_WHY = ("The side trading fewer, better assets earns a bonus — "
+                  "elite assets are harder to acquire than parts.")
+
+
+def _evaluate_adjustments(give: list[str], recv: list[str],
+                          seed_value) -> tuple[dict, dict]:
+    """({side: [{key, label, amount, why}]}, {side: naive_total}).
+
+    amount is the signed value effect vs the side's naive sum, in the same
+    value units the verdict displays; naive_total + Σamounts equals the
+    displayed side value up to 0.1 rounding. Zero-amount rows are omitted.
+    """
+    pkg = _trade_service_mod.package_value_v2
+    gvals = [seed_value(p) for p in give]
+    rvals = [seed_value(p) for p in recv]
+    v_max = max(gvals + rvals)
+
+    rows: dict[str, list[dict]] = {}
+    naive_totals: dict[str, float] = {}
+    for side, vals, n_other in (("give", gvals, len(recv)),
+                                ("receive", rvals, len(give))):
+        naive = round(sum(vals), 1)
+        base = pkg(vals, v_max)                      # depth weighting only
+        full = pkg(vals, v_max, n_other=n_other)     # + crown premium, if any
+        depth = round(base - naive, 1)
+        crown = round(full - base, 1)
+        side_rows = []
+        if depth != 0:
+            side_rows.append({"key": "package_depth",
+                              "label": "Package depth",
+                              "amount": depth, "why": _ADJ_DEPTH_WHY})
+        if crown != 0:
+            side_rows.append({"key": "consolidation",
+                              "label": "Consolidation premium",
+                              "amount": crown, "why": _ADJ_CROWN_WHY})
+        rows[side] = side_rows
+        naive_totals[side] = naive
+    return rows, naive_totals
+
+
 # ── One-tap eveners (DynastyGM teardown 2026-07-26) ────────────────────────
 # The calculator's `gap` names the delta; eveners make it actionable: concrete
 # assets the WINNING side (the one whose received value is higher) can add to
@@ -6564,6 +6618,17 @@ def trade_evaluate_route():
             "dropped_player_ids": dropped,
             "basis":              "consensus",
         }
+
+        # Itemized value adjustments (DynastyDealer teardown 2026-07-26) —
+        # additive transparency over the CONSENSUS totals above (the numbers
+        # both verdict cards display; Mode B's board-priced totals go through
+        # the same math but are not itemized). Present only when at least one
+        # adjustment actually moved a side's value.
+        if give or recv:
+            _adj_rows, _adj_naive = _evaluate_adjustments(give, recv, seed_value)
+            if _adj_rows["give"] or _adj_rows["receive"]:
+                result["adjustments"] = _adj_rows
+                result["naive_totals"] = _adj_naive
 
         # ── Mode B — in-league, both owners' boards ──────────────────────────
         # Reuse the finder's per-package math (_consensus_packages) once per
