@@ -243,6 +243,89 @@ export async function getTradeStatus(jobId: string): Promise<TradeJobSnapshot> {
   return normalizeJobSnapshot(res);
 }
 
+// ── Asset-centric trade ideas (#172/#189 follow-up, flag trade.asset_ideas) ──
+// POST /api/trades/asset-ideas — grouped Upgrade / Lateral / Downgrade ideas
+// for ONE pinned asset (player or pick), consensus basis, synchronous.
+// direction 'give' = pin leaves the roster (ideas = the return);
+// direction 'receive' = pin is acquired (ideas = what the user gives).
+
+export interface AssetIdea {
+  counterparty_user_id: string;
+  counterparty_username: string;
+  give: Player[];
+  receive: Player[];
+  give_player_ids: string[];
+  receive_player_ids: string[];
+  give_value: number;
+  receive_value: number;
+  difference: number;         // receive − give (consensus); + = user ahead
+  fairness: number;           // 0–1 min/max package ratio
+  relaxed?: boolean;          // #189 convention: outside the strict band
+  relaxed_reason?: string;
+}
+
+export interface AssetIdeasResponse {
+  asset: Player | null;
+  direction: 'give' | 'receive';
+  basis: 'consensus';
+  groups: {
+    upgrade: AssetIdea[];
+    lateral: AssetIdea[];
+    downgrade: AssetIdea[];
+  };
+}
+
+function normalizeAssetIdea(raw: any): AssetIdea {
+  const give: Player[] = Array.isArray(raw?.give) ? raw.give : [];
+  const receive: Player[] = Array.isArray(raw?.receive) ? raw.receive : [];
+  return {
+    counterparty_user_id: String(raw?.counterparty_user_id ?? ''),
+    counterparty_username: String(raw?.counterparty_username ?? ''),
+    give,
+    receive,
+    give_player_ids: Array.isArray(raw?.give_player_ids)
+      ? raw.give_player_ids.map(String)
+      : give.map((p) => p.id),
+    receive_player_ids: Array.isArray(raw?.receive_player_ids)
+      ? raw.receive_player_ids.map(String)
+      : receive.map((p) => p.id),
+    give_value: typeof raw?.give_value === 'number' ? raw.give_value : 0,
+    receive_value: typeof raw?.receive_value === 'number' ? raw.receive_value : 0,
+    difference: typeof raw?.difference === 'number' ? raw.difference : 0,
+    fairness: typeof raw?.fairness === 'number' ? raw.fairness : 0,
+    ...(raw?.relaxed === true
+      ? {
+          relaxed: true,
+          ...(typeof raw?.relaxed_reason === 'string'
+            ? { relaxed_reason: raw.relaxed_reason }
+            : {}),
+        }
+      : {}),
+  };
+}
+
+export async function fetchAssetIdeas(body: {
+  league_id: string;
+  asset_id: string;
+  direction: 'give' | 'receive';
+  fairness_threshold?: number;
+}): Promise<AssetIdeasResponse> {
+  const res = await api.post<any>('/api/trades/asset-ideas', body);
+  const g = res?.groups ?? {};
+  const norm = (arr: any) =>
+    Array.isArray(arr) ? arr.map(normalizeAssetIdea) : [];
+  return {
+    asset: res?.asset ?? null,
+    direction: res?.direction === 'receive' ? 'receive' : 'give',
+    basis: 'consensus',
+    groups: {
+      upgrade: norm(g.upgrade),
+      lateral: norm(g.lateral),
+      downgrade: norm(g.downgrade),
+    },
+  };
+}
+
 // GET /api/trades?league_id=X — cached most-recent generated trades.
 // Separate from the streaming job snapshots; this is the long-tail "show
 // me undecided cards" view used outside the Find-a-Trade flow.

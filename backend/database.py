@@ -1596,6 +1596,9 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── #189 — relaxed fallback for empty targeted sweeps ────────────────
     ("relaxed_fairness_threshold", 0.55, "#189: stage-1 fairness bar for the relaxed fallback pass on empty targeted jobs (never tightens below the caller's threshold)"),
     ("relaxed_surplus_floor",      0.0,  "#189: stage-2 value for min_side_surplus(_marginal) in the relaxed pass; 0 still requires non-negative surplus both sides"),
+    # ── #172/#189 follow-up — asset-centric trade ideas (trade.asset_ideas) ──
+    ("asset_ideas_lateral_band", 0.10,  "asset ideas: ± consensus-value band around the pinned asset classifying a counterpart as Lateral; above=Upgrade, below=Downgrade piece"),
+    ("asset_ideas_group_cap",    6.0,   "asset ideas: max ideas returned per group (upgrade/lateral/downgrade), ordered by |difference|"),
     ("bench_credit_qb",          0.10,  "interview: bench credit for QB depth in 1QB formats"),
     ("bench_credit_rb",          0.30,  "interview: bench credit for RB depth (near-startable insurance)"),
     ("bench_credit_wr",          0.30,  "interview: bench credit for WR depth (near-startable insurance)"),

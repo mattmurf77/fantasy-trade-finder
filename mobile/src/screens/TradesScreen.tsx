@@ -68,8 +68,11 @@ import {
   flagBadTrade,
   getLikedTrades,
   undoDeckSuppression,
+  fetchAssetIdeas,
+  type AssetIdea,
   type SwipeSignal,
 } from '../api/trades';
+import AssetIdeasPanel from '../components/AssetIdeasPanel';
 import {
   getLeaguePreferences,
   saveLeaguePreferences,
@@ -741,6 +744,55 @@ export default function TradesScreen({ navigation, route }: any) {
   const setPackageMode = useFinderTargets((s) => s.setPackageMode);
   const clearTargets = useFinderTargets((s) => s.clear);
   const [targetPickerOpen, setTargetPickerOpen] = useState(false);
+
+  // ── #172/#189 follow-up — asset-centric grouped ideas (flag
+  // trade.asset_ideas). When exactly ONE finder target is pinned (either
+  // direction), fetch the Upgrade / Lateral / Downgrade sweep for it and
+  // render the grouped panel ALONGSIDE the normal deck: the deck flow
+  // (Find a Trade button, job polling, pins → generate payload) is
+  // untouched, and 2+ pins keep today's behavior exactly. The query is
+  // pin-driven (no button tap needed — the endpoint is a cheap synchronous
+  // consensus sweep) and keyed on pin + direction + fairness so a re-pin
+  // refetches. Tap-through hands the package to the calculator via the
+  // #190 prefill param — the least-invasive full-detail view.
+  const assetIdeasOn = useFlag('trade.asset_ideas');
+  const singlePin =
+    targetingEnabled &&
+    assetIdeasOn &&
+    pinnedGive.length + pinnedReceive.length === 1
+      ? pinnedGive.length === 1
+        ? { player: pinnedGive[0], direction: 'give' as const }
+        : { player: pinnedReceive[0], direction: 'receive' as const }
+      : null;
+  const assetIdeasQuery = useQuery({
+    queryKey: [
+      'asset-ideas',
+      leagueId,
+      singlePin?.player.id,
+      singlePin?.direction,
+      effectiveFairness,
+    ],
+    queryFn: () =>
+      fetchAssetIdeas({
+        league_id: leagueId!,
+        asset_id: singlePin!.player.id,
+        direction: singlePin!.direction,
+        fairness_threshold: effectiveFairness,
+      }),
+    enabled: !!leagueId && !!singlePin && !switching,
+    staleTime: 60_000,
+  });
+
+  function handleOpenAssetIdea(idea: AssetIdea) {
+    haptics.selection();
+    navigation?.navigate?.('TradeCalculator', {
+      prefill: {
+        opponentUserId: idea.counterparty_user_id,
+        giveIds: idea.give_player_ids,
+        receiveIds: idea.receive_player_ids,
+      },
+    });
+  }
 
   // ── Find-a-Trade: streaming job snapshot ─────────────────────────────
   // The backend runs generation in a background thread and we poll for
@@ -3063,6 +3115,20 @@ export default function TradesScreen({ navigation, route }: any) {
           )}
           </View>
         </Card>
+
+        {/* #172/#189 follow-up (flag trade.asset_ideas) — grouped Upgrade /
+            Lateral / Downgrade ideas for the single pinned asset, rendered
+            alongside the deck. 0 or 2+ pins ⇒ nothing here; the deck flow
+            is untouched. */}
+        {!firstRun && singlePin ? (
+          <AssetIdeasPanel
+            data={assetIdeasQuery.data}
+            loading={assetIdeasQuery.isFetching}
+            pinnedName={singlePin.player.name}
+            direction={singlePin.direction}
+            onOpenIdea={handleOpenAssetIdea}
+          />
+        ) : null}
 
         {/* Phase-2 one-tap outlook confirm — replaces the force-opened
             OutlookSheet when the backend inferred an outlook from the

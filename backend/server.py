@@ -6799,6 +6799,144 @@ def generate_trades():
     return jsonify(snapshot)
 
 
+@app.route("/api/trades/asset-ideas", methods=["POST"])
+@_gate_unverified_write
+def asset_trade_ideas():
+    """POST /api/trades/asset-ideas   (flag trade.asset_ideas; #172/#189 follow-up)
+
+    Asset-centric Upgrade / Lateral / Downgrade ideas for ONE pinned asset
+    (player or owned pick) — the grouped "Smart Trade Finder" presentation.
+    Synchronous (consensus-basis sweep, no job machinery): the deck engine's
+    async pipeline exists for divergence math + streaming; this surface is a
+    deterministic grouped read.
+
+    Body: {
+      asset_id:  str            (required — player id or injected pick id)
+      direction: "give"|"receive"  (default "give": pinned asset leaves the
+                                    user's roster; "receive": user acquires
+                                    it — ideas are what they'd GIVE)
+      league_id?: str           (default: active session league)
+      fairness_threshold?: float  (default 0.50, the pinned-job wide net)
+    }
+
+    Response: {
+      asset: {player}, direction, basis: "consensus",
+      groups: { upgrade: [idea], lateral: [idea], downgrade: [idea] }
+    }
+    idea = { counterparty_user_id, counterparty_username, give: [player],
+             receive: [player], give_player_ids, receive_player_ids,
+             give_value, receive_value, difference, fairness,
+             relaxed?: true, relaxed_reason?: "fairness_band" }
+
+    Gates mirror consensus-basis generation (#108 user-gain, #141 filler,
+    untouchables / not-interested, fairness band); a group that would be
+    empty refills from the widened #189 band, labeled `relaxed`. 404 when
+    the flag is off.
+    """
+    if not is_enabled("trade.asset_ideas"):
+        return jsonify({"error": "not found"}), 404
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess.get("league")
+    if not (g_user_id and g_league):
+        return jsonify({"error": "session missing user/league"}), 400
+
+    body      = request.get_json(force=True) or {}
+    asset_id  = str(body.get("asset_id") or "")
+    direction = body.get("direction") or "give"
+    league_id = body.get("league_id") or g_league.league_id
+    if not asset_id:
+        return jsonify({"error": "asset_id required"}), 400
+    if direction not in ("give", "receive"):
+        return jsonify({"error": "direction must be 'give' or 'receive'"}), 400
+    # Same wide-net default as pinned generate jobs.
+    fairness_threshold = float(body.get("fairness_threshold", 0.50))
+
+    fmt           = _active_format(sess)
+    services      = sess.get("services") or {}
+    trade_svcs    = sess.get("trade_svcs") or {}
+    service       = services.get(fmt) or sess.get("service")
+    trade_service = trade_svcs.get(fmt) or sess.get("trade_svc")
+    g_user_roster = sess.get("user_roster")
+    g_players     = sess.get("players")
+    if not (service and trade_service and g_user_roster and g_players):
+        return jsonify({"error": "session missing required state"}), 400
+
+    user_rankings = service.get_rankings(position=None)
+    raw_user_elo  = {rp.player.id: rp.elo for rp in user_rankings.rankings}
+    seed_map      = dict(service._seed or {})
+    players_dict  = {p.id: p for p in g_players}
+    user_roster   = list(g_user_roster)
+
+    # Backlog #2 / #163 — exclusion lists, same wiring as the generate job:
+    # untouchables never leave the user's roster, not-interested players
+    # never enter the receive side. Never relaxed.
+    untouchable_ids: set = set()
+    not_interested_ids: set = set()
+    if FLAGS.trade_preference_lists:
+        try:
+            ap = load_asset_preferences(user_id=g_user_id, league_id=league_id)
+            untouchable_ids = set(ap.get("untouchables", []))
+            not_interested_ids = set(ap.get("not_interested", []))
+        except Exception as ap_err:
+            log.warning("asset-ideas: asset prefs load failed: %s", ap_err)
+
+    # #170/#171/#185 — owned-pick injection, same guard as the generate job,
+    # so a pick can be the pinned asset, a sweetener or a downgrade piece.
+    if (FLAGS.trade_picks_in_pool
+            and getattr(g_league, "platform", None) != "espn"
+            and league_id != "league_demo"):
+        try:
+            seed_map, user_roster, _n = _inject_owned_picks(
+                league_id      = league_id,
+                scoring_format = fmt,
+                trade_service  = trade_service,
+                players_dict   = players_dict,
+                seed_map       = seed_map,
+                user_elo       = raw_user_elo,
+                user_id        = g_user_id,
+                user_roster    = user_roster,
+                league         = g_league,
+            )
+        except Exception as pick_err:
+            log.warning("asset-ideas: owned-pick injection failed (continuing): %s",
+                        pick_err)
+
+    if asset_id not in players_dict:
+        return jsonify({"error": "unknown_asset"}), 404
+
+    groups = trade_service.generate_asset_ideas(
+        user_id            = g_user_id,
+        user_roster        = user_roster,
+        league_id          = league_id,
+        seed_elo           = seed_map,
+        asset_id           = asset_id,
+        direction          = direction,
+        fairness_threshold = fairness_threshold,
+        raw_user_elo       = raw_user_elo,
+        untouchable_ids    = untouchable_ids or None,
+        not_interested_ids = not_interested_ids or None,
+    )
+
+    def _idea_row(idea: dict) -> dict:
+        out = dict(idea)
+        out["give"]    = [player_to_dict(players_dict[p])
+                          for p in idea["give_player_ids"] if p in players_dict]
+        out["receive"] = [player_to_dict(players_dict[p])
+                          for p in idea["receive_player_ids"] if p in players_dict]
+        return out
+
+    return jsonify({
+        "asset":       player_to_dict(players_dict[asset_id]),
+        "asset_value": round(_trade_service_mod.elo_to_value(
+                           seed_map.get(asset_id, 1500.0)), 1),
+        "direction":   direction,
+        "basis":       "consensus",
+        "groups":      {k: [_idea_row(i) for i in v] for k, v in groups.items()},
+    })
+
+
 @app.route("/api/trades/suppressions/undo", methods=["POST"])
 @_gate_unverified_write
 def undo_deck_suppression():
