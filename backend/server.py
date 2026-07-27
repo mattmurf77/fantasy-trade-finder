@@ -137,7 +137,7 @@ from .database import (
     load_user_cross_league_exposure,
     # Player value history (#57 / #17)
     record_value_snapshots, load_value_history, load_value_extremes,
-    load_value_snapshot_baseline,
+    load_value_snapshot_baseline, value_snapshot_formats_for,
     # Agent 1 additions — user_player_skips helpers
     add_skip as _skip_add,
     load_skips as _skip_load,
@@ -10729,6 +10729,20 @@ def session_init():
                              len(_n_picks), _rounds, _cur_season)
             except Exception as pk_err:
                 log.warning("  owned-pick sync failed (continuing): %s", pk_err)
+
+            # ── Market-data readiness: capture executed league trades ──
+            # Raw Sleeper trade transactions → sleeper_trades (PRD #43
+            # Phase-1 data foundation / backlog #26). Capture only — no
+            # scoring, no UI. Sleeper league ids only (numeric); idempotent
+            # on transaction_id, so a flake just misses one pass and the
+            # next sync self-heals. Best-effort, off the request path.
+            try:
+                if is_enabled("market.trade_capture") and str(league_id).isdigit():
+                    from .sleeper_trades_service import sync_league_trades
+                    _n_tr = sync_league_trades(league_id)
+                    log.info("  ✅ league trades captured (%d new)", _n_tr)
+            except Exception as tr_err:
+                log.warning("  trade capture failed (continuing): %s", tr_err)
         except Exception:
             # Daemon top-level catch — see docstring. Never silently die.
             log.exception("session/init background writes crashed")
@@ -11683,6 +11697,22 @@ def cron_hourly_tick():
     _require_cron_auth()
     now_iso = datetime.now(timezone.utc).isoformat()
 
+    # ── 0. Daily value-snapshot fallback guard (market-data readiness) ──
+    # The dedicated /api/cron/value-snapshot job is the primary writer,
+    # but a missed day is chart history lost forever (runbook #57). If
+    # today's UTC date has no snapshot rows for every scoring format yet,
+    # write them here — idempotent (uq_value_snapshot), so the guard and
+    # the dedicated job can never duplicate. Failure-isolated: a snapshot
+    # error must not touch the push work below (and vice versa — the
+    # guard runs first and is wrapped).
+    value_snapshot: dict[str, int] | None = None
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if not set(SCORING_FORMATS) <= value_snapshot_formats_for(today):
+            _, value_snapshot = _write_daily_value_snapshots()
+    except Exception as e:
+        log.warning("hourly-tick: value-snapshot fallback failed (continuing): %s", e)
+
     # ── 1. Drain the quiet-hours queue and bundle per-user ──
     drained = drain_due_queued_notifications(now_iso)
     bundled_users = 0
@@ -11723,8 +11753,11 @@ def cron_hourly_tick():
         ZoneInfo = None  # type: ignore
     if ZoneInfo is None:
         log.warning("hourly-tick: zoneinfo unavailable, skipping digest scan")
-        return jsonify({"ok": True, "bundled_users": bundled_users,
-                        "digest_sent": 0, "review_sent": 0})
+        body = {"ok": True, "bundled_users": bundled_users,
+                "digest_sent": 0, "review_sent": 0}
+        if value_snapshot is not None:
+            body["value_snapshot"] = value_snapshot
+        return jsonify(body)
 
     week_window = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
     for u in load_all_signed_up_users():
@@ -11765,8 +11798,11 @@ def cron_hourly_tick():
 
     log.info("hourly-tick: bundled=%d digest=%d review=%d",
              bundled_users, digest_sent, review_sent)
-    return jsonify({"ok": True, "bundled_users": bundled_users,
-                    "digest_sent": digest_sent, "review_sent": review_sent})
+    body = {"ok": True, "bundled_users": bundled_users,
+            "digest_sent": digest_sent, "review_sent": review_sent}
+    if value_snapshot is not None:
+        body["value_snapshot"] = value_snapshot
+    return jsonify(body)
 
 
 @app.route("/api/cron/daily-tick", methods=["POST"])
@@ -11914,6 +11950,22 @@ def cron_value_snapshot():
     duplicating (uq_value_snapshot). Auth: X-Cron-Secret, same as /api/cron/*.
     """
     _require_cron_auth()
+    today, counters = _write_daily_value_snapshots()
+    return jsonify({"ok": True, "snapshot_date": today, **counters})
+
+
+def _write_daily_value_snapshots() -> tuple[str, dict[str, int]]:
+    """Upsert today's consensus value snapshot for every universal-pool
+    player, per scoring format, into player_value_history.
+
+    Shared by POST /api/cron/value-snapshot (the dedicated daily job) and
+    the hourly-tick fallback guard (market-data readiness: the snapshot
+    must land daily for BOTH formats even if the dedicated cron is never
+    provisioned or misses a day). Idempotent per UTC day via
+    uq_value_snapshot, so the two callers can never duplicate rows.
+
+    Returns (snapshot_date, {scoring_format: rows_written}).
+    """
     from .trade_service import elo_to_value
     _ensure_universal_pools()
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -11938,7 +11990,7 @@ def cron_value_snapshot():
         counters[fmt] = record_value_snapshots(rows)
 
     log.info("value-snapshot: %s (%s)", counters, today)
-    return jsonify({"ok": True, "snapshot_date": today, **counters})
+    return today, counters
 
 
 # ---------------------------------------------------------------------------

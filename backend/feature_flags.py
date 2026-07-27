@@ -270,6 +270,13 @@ FLAG_KEYS: tuple[str, ...] = (
     # In-league calculator's owned-pick rows. Off ⇒ no owned-pick rows written
     # or shown (byte-identical today).
     "picks.owned_sync",
+    # ── Market-data readiness (PRD #43 Phase-1 data foundation / #26) ────
+    # market.trade_capture: capture executed Sleeper league trades (public
+    # v1 /league/<id>/transactions/<week>, type=trade + complete) into the
+    # sleeper_trades table during session_init's background daemon
+    # (backend/sleeper_trades_service.py). Capture ONLY — raw payload
+    # retained, no scoring/aggregation/UI. Off ⇒ no fetch, no rows.
+    "market.trade_capture",
     # trade.picks_in_pool: inject each team's owned picks (capped picks_pool_cap)
     # as priced PICK pseudo-assets into the suggestion candidate pool so a card
     # can send/receive a pick (#170/#171). DATA inclusion only — scoring

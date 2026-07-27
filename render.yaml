@@ -69,3 +69,20 @@ services:
     envVars:
       - key: CRON_SECRET
         sync: false
+
+  # Daily consensus value snapshot (#57 / market-data readiness) — the
+  # dedicated data-retention job, deliberately separate from daily-tick so
+  # a push-scan bug can't stop history collection. The hourly-tick handler
+  # also carries an idempotent fallback guard (writes today's snapshot if
+  # missing), so a missed run here self-heals within the hour.
+  - type: cron
+    name: value-snapshot-daily
+    runtime: python
+    schedule: "0 6 * * *"        # 06:00 UTC — quiet window, well before daily-tick
+    buildCommand: "true"
+    startCommand: >
+      curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET"
+      https://fantasy-trade-finder.onrender.com/api/cron/value-snapshot
+    envVars:
+      - key: CRON_SECRET
+        sync: false
