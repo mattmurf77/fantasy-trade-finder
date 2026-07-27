@@ -327,6 +327,8 @@ The per-position age NOW/FUTURE curves are deliberately a code constant table (`
 | `diversity_penalty` | 0.6 | Ordering-key multiplier for saturated targets |
 | `deck_max_per_target` | 3.0 | Intra-deck cap: cards per top receive asset (deck never shrinks below 5) |
 | `fuzzy_match_tau` | 0.8 | Min Jaccard similarity per side for a fuzzy mirror match (read inline in `server._fuzzy_match_tau`) |
+| `thompson_prior_base_rate` | 0.59 | **F2** (flag `deck.thompson_v2`) — fallback p̂ for the pessimistic prior Beta(1, 1/p̂) when the trailing-30-day GLOBAL like rate (`load_global_like_rate`, cached 6h in `server._thompson_prior_base_rate`) has < 10 decisions or the read fails. Clamped to [0.05, 0.9]. Default = all-time global like rate 13/22 as of 2026-07-26. Read via `server._deck_cfg` |
+| `thompson_decay_gamma` | 0.995 | **F2** (flag `deck.thompson_v2`) — per-day posterior decay γ: effective like/pass mass = γ^age_days, computed lazily at read time in `server._thompson_v2_arm_stats` (no cron mutates state). Clamped to [0.5, 0.99999]. Start conservative; tunable without deploy |
 | `replenish_weekday` | 2.0 | **F10** (flag `deck.replenishment`) — Python `weekday()` on which the weekly replenishment pass inside `/api/cron/daily-tick` unlocks (2 = Wednesday, post-waivers). The gate is `>=`, so later days of the same ISO week self-heal a missed cron run; the `deck_replenish_log` marker keeps everything 1/week. Read via `server._deck_cfg` |
 
 ### Tier 3 (flag-gated, landing imminently)

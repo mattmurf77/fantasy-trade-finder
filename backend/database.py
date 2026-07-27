@@ -3831,6 +3831,137 @@ def load_trade_decision_shape_counts(
     return counts
 
 
+def load_deck_arm_events(user_id: str, league_id: str) -> list[tuple]:
+    """F2 (deck.thompson_v2) — viewed-gated bandit events for one user+league.
+
+    Read-only. Returns [(archetype|None, shape_bucket, action, acted_at), …]
+    for every like/pass deck_outcomes row whose impression ALSO has a
+    `viewed` outcome (cascade rule: a card served but never fronted must
+    update nothing, so its like/pass rows — which can't legitimately exist
+    without a view, but might via late/duplicated labels — are excluded at
+    the source). Decay/aggregation is the caller's job (server-side, lazy):
+    this stays a dumb event read so late `viewed` labels self-heal on the
+    next read with no stored state to reconcile.
+    """
+    viewed_alias = deck_outcomes_table.alias("viewed_evt")
+    has_viewed = (
+        select(viewed_alias.c.id)
+        .where(and_(
+            viewed_alias.c.impression_id == deck_outcomes_table.c.impression_id,
+            viewed_alias.c.action == "viewed",
+        ))
+        .exists()
+    )
+    q = (
+        select(
+            deck_impressions_table.c.archetype,
+            deck_impressions_table.c.shape_bucket,
+            deck_outcomes_table.c.action,
+            deck_outcomes_table.c.acted_at,
+        )
+        .select_from(deck_outcomes_table.join(
+            deck_impressions_table,
+            deck_impressions_table.c.impression_id
+            == deck_outcomes_table.c.impression_id,
+        ))
+        .where(and_(
+            deck_impressions_table.c.user_id   == user_id,
+            deck_impressions_table.c.league_id == league_id,
+            deck_outcomes_table.c.action.in_(("like", "pass")),
+            has_viewed,
+        ))
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(q).fetchall()
+    return [(r.archetype, r.shape_bucket, r.action, r.acted_at) for r in rows]
+
+
+def load_legacy_shape_counts(
+    user_id: str,
+    league_id: str,
+) -> dict[str, tuple[int, int, str]]:
+    """F2 (deck.thompson_v2) — FROZEN pre-impression-spine shape counts.
+
+    The legacy/F1 seam: trade_decisions rows created BEFORE this user+
+    league's first deck_impressions row (MIN(served_at)) predate the
+    impression spine and can never be viewed-gated — they form the frozen
+    starting state of the v2 posteriors. Rows at/after the seam only ever
+    count through the viewed-gated deck_outcomes path (load_deck_arm_events),
+    so nothing is double counted; the legacy set stops growing the moment
+    the first impression lands. No impressions yet ⇒ every decision is
+    legacy.
+
+    Returns {shape: (likes, passes, last_created_at)} — last_created_at is
+    the newest legacy decision per shape, the `last_updated` the caller's
+    lazy γ-decay runs from. Same shape derivation and skip rules as
+    load_trade_decision_shape_counts.
+    """
+    with engine.connect() as conn:
+        seam = conn.execute(
+            select(func.min(deck_impressions_table.c.served_at)).where(and_(
+                deck_impressions_table.c.user_id   == user_id,
+                deck_impressions_table.c.league_id == league_id,
+            ))
+        ).scalar()
+        q = select(
+            trade_decisions_table.c.give_player_ids,
+            trade_decisions_table.c.receive_player_ids,
+            trade_decisions_table.c.decision,
+            trade_decisions_table.c.created_at,
+        ).where(
+            and_(
+                trade_decisions_table.c.user_id   == user_id,
+                trade_decisions_table.c.league_id == league_id,
+            )
+        )
+        if seam is not None:
+            q = q.where(trade_decisions_table.c.created_at < seam)
+        rows = conn.execute(q).fetchall()
+
+    counts: dict[str, tuple[int, int, str]] = {}
+    for r in rows:
+        try:
+            give = json.loads(r.give_player_ids)
+            recv = json.loads(r.receive_player_ids)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if r.decision not in ("like", "pass"):
+            continue
+        shape = f"{len(give)}x{len(recv)}"
+        likes, passes, last_at = counts.get(shape, (0, 0, ""))
+        if r.decision == "like":
+            likes += 1
+        else:
+            passes += 1
+        last_at = max(last_at, r.created_at or "")
+        counts[shape] = (likes, passes, last_at)
+    return counts
+
+
+def load_global_like_rate(days: int = 30) -> tuple[int, int]:
+    """F2 (deck.thompson_v2) — trailing-window GLOBAL like/pass volume.
+
+    Across ALL users and leagues (the pessimistic-prior base rate p̂ is a
+    product-wide quantity — per-user rates are what the posteriors learn).
+    Returns (likes, total) so the caller can apply its own minimum-sample
+    rule before trusting the rate.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    q = (
+        select(trade_decisions_table.c.decision, func.count())
+        .where(and_(
+            trade_decisions_table.c.decision.in_(("like", "pass")),
+            trade_decisions_table.c.created_at >= cutoff,
+        ))
+        .group_by(trade_decisions_table.c.decision)
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(q).fetchall()
+    by_decision = {r[0]: int(r[1]) for r in rows}
+    likes = by_decision.get("like", 0)
+    return likes, likes + by_decision.get("pass", 0)
+
+
 def load_recent_impression_target_user_counts(
     league_id: str,
     exclude_user_id: str,

@@ -305,7 +305,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # routes append deck_outcomes rows keyed by it. OFF (default) ⇒ zero new
     # rows, byte-identical payloads, old-client behavior everywhere.
     "deck.signal_v2",
-    "deck.thompson_v2",     # F2 — reserved (no consumer yet)
+    "deck.thompson_v2",     # F2 — v2 deck sampler: pessimistic priors, decay, viewed-gated counts, lane×shape arms
     "deck.fatigue",         # F3 — reserved (no consumer yet)
     "deck.session_rerank",  # F4 — reserved (no consumer yet)
     "deck.taste_vectors",   # F5 — reserved (no consumer yet)

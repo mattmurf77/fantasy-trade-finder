@@ -240,6 +240,12 @@ _DEFAULT_CFG: dict[str, float] = {
     "diversity_penalty":          0.6,   # ordering-key multiplier for saturated targets
     "deck_max_per_target":        3.0,   # intra-deck cap: cards per top receive asset
     # ------------------------------------------------------------------
+    # F2 — Thompson v2 bandit hygiene (flag: deck.thompson_v2 —
+    # consumed by server's v2 sampler inside _order_deck)
+    # ------------------------------------------------------------------
+    "thompson_prior_base_rate":   0.59,  # p̂ fallback when the trailing-30d global like rate is too thin (all-time global rate 13/22 as of 2026-07-26)
+    "thompson_decay_gamma":       0.995, # per-day posterior decay γ, applied lazily at read time
+    # ------------------------------------------------------------------
     # F10 — weekly deck replenishment (flag: deck.replenishment —
     # consumed by server._run_weekly_replenishment inside daily-tick)
     # ------------------------------------------------------------------

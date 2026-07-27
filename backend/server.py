@@ -78,6 +78,9 @@ from .database import (
     load_engine_telemetry,
     # F1 (deck.signal_v2) — impression_id spine
     save_deck_impressions, save_deck_outcome, load_board_state,
+    # F2 (deck.thompson_v2) — bandit hygiene (viewed-gated arm events,
+    # frozen legacy seam, global prior base rate)
+    load_deck_arm_events, load_legacy_shape_counts, load_global_like_rate,
     # F10 (deck.replenishment) — weekly deck pre-generation
     load_active_deck_user_leagues, load_latest_trade_impression_batch,
     replenish_week_done, log_deck_replenish,
@@ -2025,6 +2028,16 @@ def _deck_replenishment_enabled() -> bool:
     return getattr(FLAGS, "deck_replenishment", False)
 
 
+def _deck_thompson_v2_enabled() -> bool:
+    """F2 — Thompson v2 bandit hygiene (docs/plans/tiktok-discovery/prds/
+    F2-thompson-v2.md). Gates ONLY which sampler feeds the deck-ordering
+    draw: on ⇒ the v2 sampler (pessimistic priors, lazy decay, viewed-gated
+    counts, archetype×shape arms) replaces the v1 draw; off ⇒ the v1 path
+    runs byte-identically. Self-sufficient: v2 on with trade.thompson_deck
+    off still orders the deck."""
+    return getattr(FLAGS, "deck_thompson_v2", False)
+
+
 def _deck_cfg(key: str, default: float) -> float:
     """model_config key via trade_service's live config dict (same pattern
     as _fuzzy_match_tau). Defaults inline so a missing key never breaks
@@ -2089,6 +2102,206 @@ def _cap_per_target(ordered: list, seed_map: dict, max_per: int) -> list:
     return kept
 
 
+# ── F2 (flag deck.thompson_v2) — Thompson v2 bandit hygiene ─────────────────
+# docs/plans/tiktok-discovery/prds/F2-thompson-v2.md. Upgrades WHAT feeds the
+# per-arm Beta draw; the draw's authority is unchanged (sort-key multiplier
+# bounded to [0.5, 1.5], one draw per arm per job, deterministic per-job
+# seed, same-arm cards keep their relative composite order).
+#
+# v1 defects fixed (models-research §5; Deezer arXiv 2009.06546, DoorDash
+# warm-start):
+#   1. Pessimistic priors — Beta(1, 1/p̂) at the trailing-30d GLOBAL like
+#      rate instead of the optimistic Beta(1+likes, 2+passes) start.
+#   2. Posterior decay — effective counts decay γ^age_days, computed lazily
+#      at read time from event timestamps; no cron mutates stored state.
+#   3. Cascade updates — only outcomes whose impression has a `viewed` event
+#      (F1 join) count. Cards served but never fronted update NOTHING.
+#   4. Arm hierarchy — arms are archetype (F1's frozen per-card label; lane
+#      today) × shape_bucket, warm-started from the parent shape posterior
+#      below _THOMPSON_V2_WARM_MIN_OBS raw observations.
+#
+# Arm state is NOT materialized. It is derived at read time from the F1
+# tables (deck_impressions ⨝ deck_outcomes) plus the frozen legacy seam
+# (trade_decisions rows created before the user's first deck impression —
+# load_legacy_shape_counts). This extends the existing derive-on-read
+# shape-stat pattern (load_trade_decision_shape_counts): no new table, no
+# write-path hooks, and late `viewed` labels self-heal on the next read.
+
+_THOMPSON_V2_TTL_DAYS     = 120   # arm-inactivity TTL, applied on read
+_THOMPSON_V2_WARM_MIN_OBS = 5     # child arms below this sample the parent
+
+_THOMPSON_PRIOR_CACHE_TTL_S = 6 * 3600
+_THOMPSON_PRIOR_MIN_N       = 10  # trailing-window decisions needed to trust p̂
+_thompson_prior_cache: dict = {"rate": None, "at": 0.0}
+
+
+def _thompson_prior_base_rate() -> float:
+    """p̂ for the pessimistic prior Beta(1, 1/p̂): the trailing-30-day GLOBAL
+    like rate, cached for 6h (the PRD's nightly recompute without a cron);
+    model_config `thompson_prior_base_rate` when the window is too thin or
+    the read fails. Clamped to [0.05, 0.9] so 1/p̂ stays finite and the
+    prior stays a proper pessimist."""
+    now = time.time()
+    cached = _thompson_prior_cache["rate"]
+    if cached is not None and now - _thompson_prior_cache["at"] < _THOMPSON_PRIOR_CACHE_TTL_S:
+        return cached
+    rate = None
+    try:
+        likes, total = load_global_like_rate(days=30)
+        if total >= _THOMPSON_PRIOR_MIN_N:
+            rate = likes / total
+    except Exception as e:
+        log.warning("thompson v2: global like-rate read failed: %s", e)
+    if rate is None:
+        rate = _deck_cfg("thompson_prior_base_rate", 0.59)
+    rate = min(0.9, max(0.05, float(rate)))
+    _thompson_prior_cache.update(rate=rate, at=now)
+    return rate
+
+
+def _iso_age_days(ts, now: datetime) -> float | None:
+    """Age of an ISO timestamp in fractional days; None when unparseable.
+    Naive timestamps are treated as UTC; future timestamps clamp to 0."""
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(ts))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return max(0.0, (now - dt).total_seconds() / 86400.0)
+
+
+def _card_archetype(card) -> str | None:
+    """F2 arm dimension — the same per-card label F1 freezes into
+    deck_impressions.archetype (lane is today's closest archetype)."""
+    return getattr(card, "lane", None) or None
+
+
+def _thompson_v2_arm_stats(user_id: str, league_id: str) -> tuple[dict, dict]:
+    """Decayed like/pass masses per arm, derived at read time.
+
+    Returns (child, parent):
+      child : {(archetype, shape): (likes_eff, passes_eff, n_raw)} from
+              F1-era viewed-gated outcomes only (cascade rule).
+      parent: {shape: (likes_eff, passes_eff)} = frozen legacy counts +
+              every F1-era viewed-gated event for the shape (including
+              NULL-archetype ones, which belong to no child).
+
+    Effective mass per F1 event = γ^age_days (per-event lazy decay); the
+    legacy block decays as one (count, last_updated) unit from its newest
+    decision. Arms/shapes with no activity in _THOMPSON_V2_TTL_DAYS days
+    drop out entirely (inactivity TTL on read)."""
+    now   = datetime.now(timezone.utc)
+    gamma = min(0.99999, max(0.5, _deck_cfg("thompson_decay_gamma", 0.995)))
+
+    child_acc:  dict[tuple, list] = {}   # [likes, passes, n_raw, newest_age]
+    parent_acc: dict[str, list]   = {}   # [likes, passes, newest_age]
+
+    for arch, shape, action, acted_at in load_deck_arm_events(user_id, league_id):
+        age = _iso_age_days(acted_at, now)
+        if age is None or not shape:
+            continue
+        w   = gamma ** age
+        idx = 0 if action == "like" else 1
+        p = parent_acc.setdefault(shape, [0.0, 0.0, float("inf")])
+        p[idx] += w
+        p[2] = min(p[2], age)
+        if arch:
+            c = child_acc.setdefault((arch, shape), [0.0, 0.0, 0, float("inf")])
+            c[idx] += w
+            c[2] += 1
+            c[3] = min(c[3], age)
+
+    # Legacy/F1 seam — decisions predating the impression spine, frozen at
+    # the shape (parent) level. Decisions AFTER the seam only ever count
+    # through the viewed-gated path above; post-seam decisions on
+    # impression-less cards are dropped by design (no double counting).
+    try:
+        legacy = load_legacy_shape_counts(user_id, league_id)
+    except Exception as e:
+        log.warning("thompson v2: legacy shape counts unavailable: %s", e)
+        legacy = {}
+    for shape, (likes, passes, last_at) in legacy.items():
+        age = _iso_age_days(last_at, now)
+        if age is None:
+            continue
+        w = gamma ** age
+        p = parent_acc.setdefault(shape, [0.0, 0.0, float("inf")])
+        p[0] += likes * w
+        p[1] += passes * w
+        p[2] = min(p[2], age)
+
+    child = {k: (v[0], v[1], v[2]) for k, v in child_acc.items()
+             if v[3] <= _THOMPSON_V2_TTL_DAYS}
+    parent = {k: (v[0], v[1]) for k, v in parent_acc.items()
+              if v[2] <= _THOMPSON_V2_TTL_DAYS}
+    return child, parent
+
+
+def _thompson_v2_posterior(
+    arch: str | None,
+    shape: str,
+    child: dict,
+    parent: dict,
+    a0: float,
+    b0: float,
+) -> tuple[float, float]:
+    """(alpha, beta) for one arm. Child arms with fewer than
+    _THOMPSON_V2_WARM_MIN_OBS raw observations warm-start by returning the
+    PARENT posterior (their few events are already inside the parent mass),
+    so they sample near the parent instead of near the bare prior. Cards
+    with no archetype label sample the parent directly."""
+    pl, pp = parent.get(shape, (0.0, 0.0))
+    parent_ab = (a0 + pl, b0 + pp)
+    if arch is None:
+        return parent_ab
+    cl, cp, n_raw = child.get((arch, shape), (0.0, 0.0, 0))
+    if n_raw < _THOMPSON_V2_WARM_MIN_OBS:
+        return parent_ab
+    return (a0 + cl, b0 + cp)
+
+
+def _thompson_v2_multipliers(
+    cards: list,
+    *,
+    rng: random.Random,
+    user_id: str,
+    league_id: str,
+) -> dict[int, float]:
+    """One Beta draw per (archetype, shape) arm per job → bounded sort-key
+    multiplier per card: clamp(draw / prior_mean, 0.5, 1.5).
+
+    Normalizing by the PRIOR mean anchors "no evidence" at ≈ 1.0 — a new
+    arm neither boosts nor buries its cards (no v1-style optimistic junk
+    exploration) — while keeping the multiplier's authority identical to
+    v1's (0.5, 1.5) band. Arms are drawn in sorted order so rng consumption
+    (hence the ordering) is independent of incoming card order, matching
+    v1's determinism contract. Any read failure degrades to prior-only
+    draws — ordering never breaks."""
+    p_hat = _thompson_prior_base_rate()
+    a0 = 1.0
+    b0 = 1.0 / p_hat
+    m0 = a0 / (a0 + b0)   # prior mean — the zero-evidence anchor
+    try:
+        child, parent = _thompson_v2_arm_stats(user_id, league_id)
+    except Exception as e:
+        log.warning("thompson v2: arm stats unavailable: %s", e)
+        child, parent = {}, {}
+    arms = sorted({(_card_archetype(c) or "", _card_shape(c)) for c in cards})
+    mult_by_arm: dict[tuple, float] = {}
+    for arch_key, shape in arms:
+        alpha, beta = _thompson_v2_posterior(
+            arch_key or None, shape, child, parent, a0, b0)
+        draw = rng.betavariate(alpha, beta)
+        mult_by_arm[(arch_key, shape)] = min(1.5, max(0.5, draw / m0))
+    return {
+        id(c): mult_by_arm[(_card_archetype(c) or "", _card_shape(c))]
+        for c in cards
+    }
+
+
 def _order_deck(
     cards: list,
     *,
@@ -2098,17 +2311,19 @@ def _order_deck(
     seed_map: dict,
     capture: dict | None = None,
 ) -> list:
-    """Apply A5 (Thompson ordering) and A6 (diversification) to a generated
-    deck. Returns a new list; the input is never mutated. Both flags off →
-    the input list is returned untouched. Likes-you cards stay pinned to
-    the top regardless of sampling or penalties.
+    """Apply A5 (Thompson ordering — v1, or the F2 v2 sampler when
+    deck.thompson_v2 is on) and A6 (diversification) to a generated deck.
+    Returns a new list; the input is never mutated. All flags off → the
+    input list is returned untouched. Likes-you cards stay pinned to the
+    top regardless of sampling or penalties.
 
     `capture` (F1, deck.signal_v2): when a dict is passed, it is filled with
     {"propensity": {id(card): multiplier}, "final_key": {id(card): key}} —
     the Thompson multiplier ACTUALLY applied per card and the post-multiplier
     ordering key, for deck_impressions logging. Pure out-param: ordering math
     is untouched and callers that pass None see identical behavior."""
-    thompson  = _thompson_deck_enabled()
+    thompson_v2 = _deck_thompson_v2_enabled()   # F2 — supersedes the v1 draw
+    thompson  = _thompson_deck_enabled() or thompson_v2
     diversity = _deck_diversity_enabled()
     if not cards or not (thompson or diversity):
         return cards
@@ -2117,27 +2332,39 @@ def _order_deck(
 
     if thompson:
         rng = random.Random(_deck_rng_seed(user_id, league_id, job_id))
-        try:
-            shape_counts = load_trade_decision_shape_counts(user_id, league_id)
-        except Exception as e:
-            log.warning("thompson deck: shape counts unavailable: %s", e)
-            shape_counts = {}
-        sample_by_shape: dict[str, float] = {}
-        # Sample shapes in sorted order so the draw sequence (hence the
-        # ordering) doesn't depend on the incoming card order.
-        for shape in sorted({_card_shape(c) for c in cards}):
-            likes, passes = shape_counts.get(shape, (0, 0))
-            # Beta(1 + likes, 2 + passes): exploration-friendly prior that
-            # still expects passes (mean 1/3 at n=0).
-            sample_by_shape[shape] = rng.betavariate(1 + likes, 2 + passes)
-        for c in cards:
-            # Bounded multiplier in (0.5, 1.5) — exploration reorders across
-            # buckets but never fully inverts quality.
-            key[id(c)] *= 0.5 + sample_by_shape[_card_shape(c)]
-        if capture is not None:
-            capture["propensity"] = {
-                id(c): 0.5 + sample_by_shape[_card_shape(c)] for c in cards
-            }
+        if thompson_v2:
+            # F2 — v2 sampler: pessimistic priors, lazy decay, viewed-gated
+            # counts, archetype×shape arms. Same bounded authority as v1;
+            # the captured propensity is still the multiplier ACTUALLY
+            # applied to this card's key.
+            mult_by_card = _thompson_v2_multipliers(
+                cards, rng=rng, user_id=user_id, league_id=league_id)
+            for c in cards:
+                key[id(c)] *= mult_by_card[id(c)]
+            if capture is not None:
+                capture["propensity"] = dict(mult_by_card)
+        else:
+            try:
+                shape_counts = load_trade_decision_shape_counts(user_id, league_id)
+            except Exception as e:
+                log.warning("thompson deck: shape counts unavailable: %s", e)
+                shape_counts = {}
+            sample_by_shape: dict[str, float] = {}
+            # Sample shapes in sorted order so the draw sequence (hence the
+            # ordering) doesn't depend on the incoming card order.
+            for shape in sorted({_card_shape(c) for c in cards}):
+                likes, passes = shape_counts.get(shape, (0, 0))
+                # Beta(1 + likes, 2 + passes): exploration-friendly prior that
+                # still expects passes (mean 1/3 at n=0).
+                sample_by_shape[shape] = rng.betavariate(1 + likes, 2 + passes)
+            for c in cards:
+                # Bounded multiplier in (0.5, 1.5) — exploration reorders across
+                # buckets but never fully inverts quality.
+                key[id(c)] *= 0.5 + sample_by_shape[_card_shape(c)]
+            if capture is not None:
+                capture["propensity"] = {
+                    id(c): 0.5 + sample_by_shape[_card_shape(c)] for c in cards
+                }
 
     if diversity:
         user_cap = int(_deck_cfg("diversity_user_cap", 3))
@@ -2592,7 +2819,9 @@ def _run_trade_job(
         # seeded per job, so /status re-polls see a stable order. Non-fatal:
         # any failure serves the deck exactly as generated.
         signal_capture: dict | None = None
-        if league_id != "league_demo" and (_thompson_deck_enabled() or _deck_diversity_enabled()):
+        if league_id != "league_demo" and (
+                _thompson_deck_enabled() or _deck_thompson_v2_enabled()
+                or _deck_diversity_enabled()):
             try:
                 # F1: capture the drawn Thompson multipliers + final ordering
                 # keys for deck_impressions. None when the flag is off — the
