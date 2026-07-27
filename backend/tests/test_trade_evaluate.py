@@ -459,6 +459,105 @@ def test_adjustments_mode_b_match_consensus_itemization(monkeypatch):
     assert b["naive_totals"] == a["naive_totals"]
 
 
+# ── Starter impact (`starter_impact`) — DTF teardown 2026-07-27 ──────────
+# Mode B only: optimal-lineup value before vs after the trade, per side,
+# via power_rankings.optimal_starters over the league's slot template.
+# Omitted without a template (non-Sleeper league / meta miss) and in Mode A.
+
+
+_SI_EXTRA = [
+    (_P("wr_low",  "Low Wideout", "WR", "TB", 24), 1400.0),
+    (_P("te_stud", "Elite Tight", "TE", "LV", 26), 1800.0),
+]
+
+
+def _install_starter_world(monkeypatch, *, slots=("RB", "WR"),
+                           caller_roster=("good", "bench", "wr_low"),
+                           opp_roster=("stud", "mid")):
+    """Slot template + both rosters; pool extended with wr_low/mid2."""
+    players = _POOL_PLAYERS + [p for p, _ in _SI_EXTRA]
+    seed = dict(_SEED)
+    seed.update({p.id: elo for p, elo in _SI_EXTRA})
+    monkeypatch.setitem(
+        srv.g_universal_by_format, "1qb_ppr", {"players": players, "seed": seed})
+    monkeypatch.setattr(srv, "_sleeper_lineup_slots",
+                        lambda league_id: list(slots) if slots else None)
+    monkeypatch.setattr(srv, "load_league_members", lambda league_id: [
+        {"user_id": CALLER, "player_ids": list(caller_roster)},
+        {"user_id": OPP,    "player_ids": list(opp_roster)},
+    ])
+    monkeypatch.setattr(
+        srv, "load_draft_picks", lambda *a, **k: [])
+    monkeypatch.setattr(
+        srv, "load_asset_preferences",
+        lambda user_id=None, league_id=None: {"untouchables": [], "targets": [],
+                                              "not_interested": []},
+    )
+    return seed
+
+
+def test_starter_impact_before_after_lineup_math(monkeypatch):
+    # Slots RB+WR. Caller [good RB, bench RB, wr_low WR] gives good,
+    # receives stud WR: lineup good+wr_low → bench+stud. Opponent
+    # [stud WR, mid TE] flips stud → good: WR slot empties, RB slot fills.
+    seed = _install_starter_world(monkeypatch)
+    e2v = srv._trade_service_mod.elo_to_value
+    v = lambda pid: e2v(seed[pid])
+    d = _post_authed({
+        "give_player_ids": ["good"], "receive_player_ids": ["stud"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    si = d["starter_impact"]
+    you_before = v("good") + v("wr_low")
+    you_after = v("bench") + v("stud")
+    assert si["your_delta"] == pytest.approx(you_after - you_before, abs=0.15)
+    # Opponent: before = stud alone (no RB to fill); after = good alone
+    # (no WR left) — mid is a TE, outside the RB/WR template.
+    assert si["their_delta"] == pytest.approx(v("good") - v("stud"), abs=0.15)
+    assert si["your_delta"] > 0 > si["their_delta"]
+    assert si["note"] == "You likely gain immediate lineup value."
+
+
+def test_starter_impact_bench_depth_and_future_value_notes(monkeypatch):
+    _install_starter_world(monkeypatch)
+    # bench (RB, never starts here) for mid (TE, can't start in RB/WR):
+    # neither lineup slot moves for the caller → bench-depth note.
+    d = _post_authed({
+        "give_player_ids": ["bench"], "receive_player_ids": ["mid"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    si = d["starter_impact"]
+    assert si["your_delta"] == 0
+    assert si["note"] == ("This mostly trades bench depth — your starting "
+                          "lineup barely moves.")
+    # give the RB starter for a pricier TE: receive_value > give_value (more
+    # raw value in) but the TE can't start in an RB/WR template, so the RB
+    # slot drops good → bench = lineup strength lost.
+    d = _post_authed({
+        "give_player_ids": ["good"], "receive_player_ids": ["te_stud"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    assert d["receive_value"] > d["give_value"]
+    si = d["starter_impact"]
+    assert si["your_delta"] < 0
+    assert si["note"] == ("You gain future value but lose immediate lineup "
+                          "strength.")
+
+
+def test_starter_impact_omitted_without_slot_template(monkeypatch):
+    _install_starter_world(monkeypatch, slots=None)
+    d = _post_authed({
+        "give_player_ids": ["good"], "receive_player_ids": ["stud"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    assert "starter_impact" not in d
+
+
+def test_starter_impact_omitted_in_mode_a():
+    d = _post({"give_player_ids": ["stud"], "receive_player_ids": ["good"]}).get_json()
+    assert "starter_impact" not in d
+
+
 def test_values_endpoint_shape_and_etag():
     with srv.app.test_client() as c:
         r = c.get("/api/trade/values?scoring_format=1qb_ppr")

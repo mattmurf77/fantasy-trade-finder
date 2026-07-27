@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { useQuery } from '@tanstack/react-query';
 
 import { getLeagueRosters } from '../api/sleeper';
-import { getLeagueCoverage, getLeaguePicks } from '../api/league';
+import { getLeagueCoverage, getLeaguePicks, getPowerRankings } from '../api/league';
 import {
   evaluateTradeInLeague,
   evaluateTradesInLeague,
@@ -25,10 +25,12 @@ import SuggestionCard from './SuggestionCard';
 import EvenerRows from './EvenerRows';
 import AdjustmentsDisclosure from './AdjustmentsDisclosure';
 import SendInSleeperButton from './SendInSleeperButton';
+import ShareTradeImage, { type ShareAsset } from './ShareTradeImage';
 import { Badge, Button, Card, Icon, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
 import { useSession } from '../state/useSession';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
+import { posColor, type Position } from '../theme/colors';
 import type { CalcPlayer, CalcPos } from '../data/tradeCalcMock';
 import type { ScoringFormat } from '../shared/types';
 
@@ -58,6 +60,8 @@ const FORMAT_LABEL: Record<string, string> = {
   '1qb_ppr': '1QB PPR',
   sf_tep: 'SF TEP',
 };
+// Partner-summary display order (DTF teardown 2026-07-27).
+const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
 
 // #192 — partner ranked-status, rendered as a small text badge instead of
 // the old (misleading) flare dot: R = ranked in the active calculator
@@ -136,6 +140,34 @@ export default function InLeagueCalculator({
     queryFn: () => getLeaguePicks(leagueId),
     staleTime: 5 * 60_000,
   });
+  // Partner positional summary (DTF teardown 2026-07-27): one consensus
+  // power-rankings read already carries every team's per-position values +
+  // draft capital — same queryKey as LeagueSummaryScreen, so a league the
+  // user has viewed costs nothing here. Silent-fail enrichment: no data →
+  // the chips render exactly as before.
+  const powerQ = useQuery({
+    queryKey: ['league-power-rankings', leagueId, 'consensus'],
+    queryFn: () => getPowerRankings(leagueId, 'consensus'),
+    staleTime: 5 * 60_000,
+  });
+  const partnerSummaries = useMemo(() => {
+    const m: Record<
+      string,
+      { pos: Record<Position, number>; picks: number | null }
+    > = {};
+    for (const t of powerQ.data?.teams ?? []) {
+      m[t.user_id] = {
+        pos: {
+          QB: t.positions?.QB?.value ?? 0,
+          RB: t.positions?.RB?.value ?? 0,
+          WR: t.positions?.WR?.value ?? 0,
+          TE: t.positions?.TE?.value ?? 0,
+        },
+        picks: t.picks && t.picks.count > 0 ? t.picks.value : null,
+      };
+    }
+    return m;
+  }, [powerQ.data]);
 
   // A CalcPlayer per owned pick, keyed by pick_id, priced at pool_value.
   const pickById = useMemo(() => {
@@ -363,6 +395,16 @@ export default function InLeagueCalculator({
     setter((cur) => [...cur, ...ids.filter((id) => !cur.includes(id))]);
   };
 
+  // Share-as-image inputs: names/positions/values from the merged
+  // player+pick map (picks share the same map, so they render too).
+  const shareAssets = (ids: string[]): ShareAsset[] =>
+    (ids.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]).map((p) => ({
+      id: p.id,
+      name: p.name,
+      position: p.pos,
+      value: board[p.id] ?? 0,
+    }));
+
   const bothSides = giveIds.length > 0 && receiveIds.length > 0;
   const anySide = giveIds.length > 0 || receiveIds.length > 0;
   const clear = () => {
@@ -420,6 +462,16 @@ export default function InLeagueCalculator({
           const active = o.user_id === opponentId;
           // #192 — R / R* / NR text badge replaces the old flare dot.
           const state = rankStateFor(o, format);
+          // DTF teardown 2026-07-27 — team-shape line under the handle:
+          // color-coded positional values + picks from power-rankings.
+          const summary = partnerSummaries[o.user_id];
+          const a11ySummary = summary
+            ? ', ' +
+              POSITIONS.map(
+                (pos) => `${pos} ${Math.round(summary.pos[pos])}`,
+              ).join(', ') +
+              (summary.picks != null ? `, picks ${Math.round(summary.picks)}` : '')
+            : '';
           return (
             <Pressable
               key={o.user_id}
@@ -430,14 +482,38 @@ export default function InLeagueCalculator({
               }}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
-              accessibilityLabel={`@${o.username}, ${RANK_STATE_A11Y[state]}`}
+              accessibilityLabel={`@${o.username}, ${RANK_STATE_A11Y[state]}${a11ySummary}`}
             >
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>@{o.username}</Text>
-              <Badge
-                label={state}
-                color={state === 'NR' ? chalk.dim : semantic.pos}
-                colorText
-              />
+              <View style={styles.chipTop}>
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>@{o.username}</Text>
+                <Badge
+                  label={state}
+                  color={state === 'NR' ? chalk.dim : semantic.pos}
+                  colorText
+                />
+              </View>
+              {summary ? (
+                <Text
+                  testID={`calc.partner-summary.${o.user_id}`}
+                  style={styles.summaryLine}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {POSITIONS.map((pos, i) => (
+                    <Text key={pos}>
+                      {i > 0 ? ' · ' : ''}
+                      <Text style={{ color: posColor(pos) }}>{pos} </Text>
+                      {Math.round(summary.pos[pos]).toLocaleString()}
+                    </Text>
+                  ))}
+                  {summary.picks != null ? (
+                    <Text>
+                      {' · Picks '}
+                      {Math.round(summary.picks).toLocaleString()}
+                    </Text>
+                  ) : null}
+                </Text>
+              ) : null}
             </Pressable>
           );
         })}
@@ -552,6 +628,27 @@ export default function InLeagueCalculator({
               receivePlayerIds={receiveIds}
             />
           ) : null}
+          {/* Share-as-image (DynastyDealer teardown 2026-07-26): render the
+              verdict to a PNG for the native share sheet; text fallback. */}
+          {bothSides && ev ? (
+            <ShareTradeImage
+              caption={`vs @${opponent?.username ?? 'them'} · ${FORMAT_LABEL[format]}`}
+              sendTitle="You send"
+              receiveTitle="You receive"
+              sendAssets={shareAssets(giveIds)}
+              receiveAssets={shareAssets(receiveIds)}
+              sendTotal={ev.give_value}
+              receiveTotal={ev.receive_value}
+              verdictLine={shareVerdictLine(ev, opponent?.username ?? 'them')}
+              fallbackText={[
+                `Trade idea vs @${opponent?.username ?? 'them'} (Dynasty Trade Finder · ${FORMAT_LABEL[format]})`,
+                `I send: ${giveIds.map((id) => playerById[id]?.name ?? id).join(', ')}`,
+                `I get: ${receiveIds.map((id) => playerById[id]?.name ?? id).join(', ')}`,
+                `Consensus: ${Math.round(ev.give_value).toLocaleString()} vs ${Math.round(ev.receive_value).toLocaleString()}`,
+                shareVerdictLine(ev, opponent?.username ?? 'them'),
+              ].join('\n')}
+            />
+          ) : null}
           <Button label="Clear trade" variant="ghost" onPress={clear} />
         </View>
       ) : null}
@@ -582,6 +679,20 @@ export default function InLeagueCalculator({
       />
     </View>
   );
+}
+
+// One-line verdict for the share card / text fallback — mirrors the
+// LeagueVerdict headline's logic, compressed.
+function shareVerdictLine(ev: CalcEvaluationInLeague, oppName: string): string {
+  if (ev.basis === 'divergence') {
+    if (ev.mutual_gain) return 'Win–win by both boards';
+    if (ev.your_value_delta > 0 && ev.their_value_delta <= 0)
+      return `Wins by my board — @${oppName} likely disagrees`;
+    if (ev.your_value_delta <= 0 && ev.their_value_delta > 0)
+      return `@${oppName} wins this one by their board`;
+    return 'Roughly even by both boards';
+  }
+  return ev.verdict ? `Consensus verdict: ${ev.verdict}` : 'Consensus read';
 }
 
 // Two-board verdict: how the trade reads by YOUR rankings and by THEIRS.
@@ -651,6 +762,15 @@ function LeagueVerdict({
           {Math.round(ev.give_value).toLocaleString()} vs {Math.round(ev.receive_value).toLocaleString()}
         </Text>
       </View>
+      {/* Starter impact (DTF teardown 2026-07-27) — how the trade moves the
+          IMMEDIATE optimal lineup, not just raw value. Server-derived; the
+          field is absent without a lineup-slot template (old servers,
+          non-Sleeper leagues) and the line simply doesn't render. */}
+      {ev.starter_impact ? (
+        <Text testID="calc.starter-impact" style={styles.starterImpact}>
+          {ev.starter_impact.note}
+        </Text>
+      ) : null}
       {/* Why the consensus totals differ from the naive sum of parts —
           collapsed by default, only when the server itemized adjustments. */}
       {ev.adjustments ? (
@@ -673,17 +793,28 @@ const styles = StyleSheet.create({
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   chip: {
     minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.xs,
+    maxWidth: '100%',
+    justifyContent: 'center',
+    gap: 2,
     borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: ink.lineStrong,
     paddingHorizontal: space.md,
+    paddingVertical: space.xs,
   },
   chipActive: { borderColor: ice.base },
+  chipTop: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
   chipText: { fontFamily: fonts.uiSemi, fontSize: 13, lineHeight: 18, color: chalk.dim },
   chipTextActive: { color: chalk.base },
+  // DTF teardown 2026-07-27 — compact positional line under the handle.
+  // Plex Mono at the 11px type floor; position labels carry the position
+  // hexes (data encoding, always paired with the text label).
+  summaryLine: {
+    fontFamily: fonts.data,
+    fontSize: 11,
+    lineHeight: 14,
+    color: chalk.dim,
+  },
   note: { ...type.bodySm },
   suggestions: { gap: space.sm },
   swap: { flexDirection: 'row', alignItems: 'center', gap: space.md },
@@ -694,5 +825,6 @@ const styles = StyleSheet.create({
   derivedNote: { marginTop: space.xs, color: chalk.dim },
   boards: { gap: space.xs, marginTop: space.sm },
   boardRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  starterImpact: { ...type.bodySm, color: chalk.dim, marginTop: space.xs },
   adjustments: { marginTop: space.sm },
 });

@@ -977,6 +977,78 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
     return out
 
 
+# ── Starter impact (DTF teardown 2026-07-27, "Trade Snapshot") ─────────────
+# Mode B only: how the trade moves each side's IMMEDIATE optimal lineup, not
+# just raw value. Reuses power_rankings.optimal_starters (the League Analyzer
+# derived-starters math) over the league's Sleeper slot template
+# (_sleeper_lineup_slots) — no per-week lineup data, value-optimal fill.
+# Deltas are consensus-priced (seed_value), matching the verdict's totals.
+#
+# Note thresholds (documented in docs/api-reference.md + the calc-polish
+# status doc): a lineup delta is "noise" when |delta| falls below
+# max(_STARTER_IMPACT_MIN_ABS, _STARTER_IMPACT_FRAC × the caller's
+# before-trade lineup total) — bench churn shouldn't read as a lineup move.
+_STARTER_IMPACT_MIN_ABS = 50.0    # absolute noise floor, value units
+_STARTER_IMPACT_FRAC = 0.025      # …or 2.5% of the before-lineup total
+
+
+def _starter_impact(league_id: str, caller_user_id: str,
+                    opponent_user_id: str, give: list[str], recv: list[str],
+                    pool_players: list, seed_value,
+                    give_value: float, receive_value: float) -> dict | None:
+    """{your_delta, their_delta, note} — optimal-lineup value BEFORE vs AFTER
+    the trade for the caller (your_delta) and the opponent (their_delta),
+    positive = that side's starting lineup gets stronger. None when the
+    league has no known slot template or either roster is missing (omit,
+    never fabricate). Picks and out-of-pool assets can't start, so they
+    contribute 0 to lineups by construction.
+    """
+    from .power_rankings import optimal_starters
+    slots = _sleeper_lineup_slots(league_id)
+    if not slots:
+        return None
+    rosters: dict[str, list[str]] = {}
+    for m in load_league_members(league_id):
+        uid = str(m.get("user_id"))
+        if uid in (str(caller_user_id), str(opponent_user_id)):
+            rosters[uid] = [str(p) for p in (m.get("player_ids") or [])]
+    if str(caller_user_id) not in rosters or str(opponent_user_id) not in rosters:
+        return None
+
+    by_id = {p.id: p for p in pool_players}
+
+    def lineup_total(pids: list[str]) -> float:
+        rows = [{"player_id": pid, "position": by_id[pid].position,
+                 "value": seed_value(pid)}
+                for pid in pids if pid in by_id]
+        vals = {r["player_id"]: r["value"] for r in rows}
+        return sum(vals[pid] for pid in optimal_starters(rows, slots))
+
+    def after(roster: list[str], out_ids: list[str], in_ids: list[str]) -> list[str]:
+        kept = [p for p in roster if p not in set(out_ids)]
+        return kept + [p for p in in_ids if p not in set(kept)]
+
+    you_before = lineup_total(rosters[str(caller_user_id)])
+    you_after = lineup_total(after(rosters[str(caller_user_id)], give, recv))
+    them_before = lineup_total(rosters[str(opponent_user_id)])
+    them_after = lineup_total(after(rosters[str(opponent_user_id)], recv, give))
+    your_delta = round(you_after - you_before, 1)
+    their_delta = round(them_after - them_before, 1)
+
+    eps = max(_STARTER_IMPACT_MIN_ABS, _STARTER_IMPACT_FRAC * you_before)
+    if your_delta >= eps:
+        note = "You likely gain immediate lineup value."
+    elif your_delta <= -eps and receive_value > give_value:
+        # You receive more raw value overall but your lineup gets weaker —
+        # the surplus lives in depth/picks, i.e. future value.
+        note = "You gain future value but lose immediate lineup strength."
+    elif your_delta <= -eps:
+        note = "You likely lose immediate lineup value."
+    else:
+        note = "This mostly trades bench depth — your starting lineup barely moves."
+    return {"your_delta": your_delta, "their_delta": their_delta, "note": note}
+
+
 # ── Pick-anchor wizard (POST /api/anchor/save) ─────────────────────────────
 # Anchor keys are a cross-client enum (mobile sends them verbatim — see
 # docs/cross-client-invariants.md). Single-pick anchors pin directly to that
@@ -7054,6 +7126,21 @@ def trade_evaluate_route():
                 "their_value_delta":     their_delta,
                 "mutual_gain":           bool(your_delta > 0 and their_delta > 0),
             })
+
+            # Starter impact (DTF teardown 2026-07-27) — additive lineup
+            # read: optimal-lineup value before vs after, both sides.
+            # Requires the league's slot template; absent template (or any
+            # build failure) omits the field, never fails the route.
+            if give or recv:
+                try:
+                    _si = _starter_impact(
+                        league_id, caller_user_id, opponent_user_id,
+                        give, recv, _pool_players, seed_value,
+                        give_value, receive_value)
+                    if _si is not None:
+                        result["starter_impact"] = _si
+                except Exception as si_err:
+                    log.warning("evaluate: starter-impact build failed (omitted): %s", si_err)
 
         # ── Eveners (DynastyGM teardown 2026-07-26) ──────────────────────────
         # Additive `eveners` list: one-tap assets to balance an uneven trade.
