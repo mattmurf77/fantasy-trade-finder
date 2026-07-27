@@ -50,6 +50,22 @@ def test_superflex_demands_two_qbs():
     assert "QB" not in one_qb["position_needs"]
 
 
+def test_needs_and_surplus_mutually_exclusive():
+    # FB #193 invariant — the analyzer must never recommend chasing AND
+    # shopping the same position. Sweep starter counts 0..6 at every position
+    # and both QB regimes (incl. the superflex boundary, where the QB need
+    # threshold of 2 meets the QB surplus threshold of 2).
+    for pos in ("QB", "RB", "WR", "TE"):
+        for n in range(7):
+            players = _build([_P(f"p{i}", pos, 30) for i in range(n)])
+            for fmt in ("1qb_ppr", "sf_tep"):
+                profile = analyze_roster_strengths(list(players), players, fmt)
+                overlap = set(profile["position_needs"]) & set(profile["position_surplus"])
+                assert not overlap, (
+                    f"{pos} x{n} ({fmt}): {sorted(overlap)} in both needs and surplus"
+                )
+
+
 def test_match_context_overlap_message():
     user_profile = {"position_needs": ["RB", "TE"], "position_surplus": []}
     opp_profile  = {"position_needs": [], "position_surplus": ["RB"]}

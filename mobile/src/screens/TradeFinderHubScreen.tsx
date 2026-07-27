@@ -33,6 +33,7 @@ import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { useFlag } from '../state/useFeatureFlags';
 import { haptics } from '../utils/haptics';
+import { splitDnaChips } from '../utils/dnaChips';
 import {
   getLeaguePreferences,
   saveLeaguePreferences,
@@ -201,15 +202,18 @@ export default function TradeFinderHubScreen({ navigation }: any) {
 
   // Trade DNA: acquire/shed position chips, plus recommendation chips from
   // the roster-strength needs/surplus the backend now surfaces (FB #156).
-  const acquire = prefs?.acquire_positions ?? [];
-  const shed = prefs?.trade_away_positions ?? [];
-  const recNeeds = useMemo(
-    () => (prefs?.position_needs ?? []).filter((p) => !acquire.includes(p)),
-    [prefs?.position_needs, acquire],
-  );
-  const recSurplus = useMemo(
-    () => (prefs?.position_surplus ?? []).filter((p) => !shed.includes(p)),
-    [prefs?.position_surplus, shed],
+  // #193 — splitDnaChips de-conflicts across sides (explicit prefs win over
+  // recommendations everywhere), so a position renders on at most one side.
+  const dna = useMemo(
+    () =>
+      splitDnaChips({
+        acquire: prefs?.acquire_positions ?? [],
+        shed: prefs?.trade_away_positions ?? [],
+        needs: prefs?.position_needs ?? [],
+        surplus: prefs?.position_surplus ?? [],
+        posOrder: POS_ORDER,
+      }),
+    [prefs],
   );
 
   const outlookLabel = prefs?.team_outlook
@@ -341,27 +345,21 @@ export default function TradeFinderHubScreen({ navigation }: any) {
 
           <Text style={styles.dnaGroupLabel}>Chasing</Text>
           <View style={styles.chipWrap}>
-            {acquire.length === 0 && recNeeds.length === 0 ? (
+            {dna.chasing.length === 0 ? (
               <Text style={styles.dnaEmpty}>Nothing set</Text>
             ) : null}
-            {POS_ORDER.filter((p) => acquire.includes(p)).map((p) => (
-              <PosChip key={`acq-${p}`} pos={p} />
-            ))}
-            {POS_ORDER.filter((p) => recNeeds.includes(p)).map((p) => (
-              <PosChip key={`need-${p}`} pos={p} rec tag="need" />
+            {dna.chasing.map((c) => (
+              <PosChip key={`chase-${c.pos}`} pos={c.pos} rec={c.rec} tag={c.tag} />
             ))}
           </View>
 
           <Text style={styles.dnaGroupLabel}>Shopping</Text>
           <View style={styles.chipWrap}>
-            {shed.length === 0 && recSurplus.length === 0 ? (
+            {dna.shopping.length === 0 ? (
               <Text style={styles.dnaEmpty}>Nothing set</Text>
             ) : null}
-            {POS_ORDER.filter((p) => shed.includes(p)).map((p) => (
-              <PosChip key={`shed-${p}`} pos={p} />
-            ))}
-            {POS_ORDER.filter((p) => recSurplus.includes(p)).map((p) => (
-              <PosChip key={`deep-${p}`} pos={p} rec tag="deep" />
+            {dna.shopping.map((c) => (
+              <PosChip key={`shop-${c.pos}`} pos={c.pos} rec={c.rec} tag={c.tag} />
             ))}
           </View>
         </View>

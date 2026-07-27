@@ -538,10 +538,21 @@ export default function QuickSetTiersScreen() {
           disabled={saving}
           onPress={onSkip}
         />
+        {/* #159 R-1/R-2/R-3 — with zero chips selected the label flips to the
+            empty-state wording (short-fit "No players here" on the last tier,
+            where " & finish" would overflow), reverting instantly via
+            `selectedCount` (derived from the selection state) the moment a
+            chip is tapped. LABEL ONLY: the press still runs onSave, whose
+            empty branch composes as a Skip (and #161 demotion only ever fires
+            on a save with ≥1 pick — see onSave). */}
         <Pressable
           testID="quick-set.save-btn"
           accessibilityRole="button"
-          accessibilityLabel={`Save ${TIER_LABEL[tier]}${isLastTier ? ' and finish' : ''}`}
+          accessibilityLabel={
+            selectedCount === 0
+              ? `No players for this tier, save it empty${isLastTier ? ' and finish' : ''}`
+              : `Save ${TIER_LABEL[tier]}${isLastTier ? ' and finish' : ''}`
+          }
           accessibilityState={{ disabled: saving || rankingsQuery.isLoading, busy: saving }}
           disabled={saving || rankingsQuery.isLoading}
           onPress={onSave}
@@ -555,8 +566,11 @@ export default function QuickSetTiersScreen() {
             <ActivityIndicator color={ice.on} />
           ) : (
             <Text style={styles.saveBtnText}>
-              {`Save ${TIER_LABEL[tier]}${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
-              {isLastTier ? ' & finish' : ''}
+              {selectedCount === 0
+                ? isLastTier
+                  ? 'No players here & finish'
+                  : 'No players for this tier'
+                : `Save ${TIER_LABEL[tier]} (${selectedCount})${isLastTier ? ' & finish' : ''}`}
             </Text>
           )}
         </Pressable>
