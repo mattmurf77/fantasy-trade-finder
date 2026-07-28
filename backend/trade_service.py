@@ -149,9 +149,12 @@ _DEFAULT_CFG: dict[str, float] = {
     # ideas (flag: trade.asset_ideas; TradeService.generate_asset_ideas).
     # A counterpart asset within ±asset_ideas_lateral_band of the pinned
     # asset's consensus value classifies as a Lateral 1-for-1; above the
-    # band it's an Upgrade target, below it a Downgrade piece. Each of
-    # the three groups is capped at asset_ideas_group_cap ideas, ordered
-    # by |difference| (closest deals first).
+    # band it's an Upgrade target, below it a Downgrade piece. #198:
+    # Upgrade/Lateral counterparts are additionally constrained to the
+    # pin's POSITION (PICK pins keep pure value bands). Each of the three
+    # groups is capped at asset_ideas_group_cap ideas, ordered by
+    # |difference| (closest deals first; Downgrade puts same-position
+    # headliners first).
     # ------------------------------------------------------------------
     "asset_ideas_lateral_band":   0.10,
     "asset_ideas_group_cap":      6.0,
@@ -2123,18 +2126,34 @@ class TradeService:
         them) and return candidate deals grouped Upgrade / Lateral /
         Downgrade around the pinned asset's CONSENSUS value.
 
+        POSITION-CENTRIC semantics (#198): upgrading means upgrading the
+        PINNED ASSET'S POSITION. For a player pin at position P, the
+        Upgrade and Lateral groups are constrained to counterpart players
+        at P — a cross-position return is never an "upgrade at P", however
+        valuable. The Downgrade group stays value-based (a spread-out
+        return is inherently multi-positional) but PREFERS same-position
+        headliners when available. The position constraint is a semantic,
+        not a gate knob: it is NEVER relaxed (the #189 refill widens only
+        the fairness band, within the same position). For a PICK pin
+        "same position" doesn't apply — all three groups fall back to pure
+        value bands (better picks/value up, band swaps across).
+
         direction="give" (pinned asset leaves the user's roster — "what can
-        I get for X?"): ideas enumerate the RETURN. A counterpart asset
-        above the ±asset_ideas_lateral_band band is an Upgrade target (the
-        user adds a sweetener from their own roster when a straight 1-for-1
-        can't close the gap); inside the band it's a Lateral 1-for-1; below
-        it, 2-3 lesser pieces are packaged back as a Downgrade.
+        I get for X?"): ideas enumerate the RETURN. A same-position
+        counterpart above the ±asset_ideas_lateral_band band is an Upgrade
+        target (the user adds own-roster sweeteners — any position, picks
+        included — when a straight 1-for-1 can't close the gap); inside
+        the band it's a same-position Lateral 1-for-1; below it, 2-3
+        lesser pieces (any position) are packaged back as a Downgrade,
+        same-position headliners first.
 
         direction="receive" (pinned asset is acquired from its owner —
         "what would X cost me?"): the mirror. Ideas enumerate what the USER
-        GIVES — a package of lesser own assets tiers UP into the pin
-        (Upgrade), a band-value own asset swaps straight across (Lateral),
-        and a single better own asset comes back as the pin plus owner
+        GIVES — a lesser own asset AT THE PIN'S POSITION headlines the
+        tier-up into the pin (Upgrade; the optional second own piece may be
+        any position), a band-value same-position own asset swaps straight
+        across (Lateral), and a single better own asset (any position,
+        same-position ordered first) comes back as the pin plus owner
         sweetener(s) (Downgrade).
 
         Valuation and gates are the consensus-basis reuse set from
@@ -2155,8 +2174,9 @@ class TradeService:
         adjusted package values (give_value / receive_value — same value
         space as the calculator), signed difference (receive − give; + =
         user ahead on consensus), fairness. Groups are capped at
-        asset_ideas_group_cap, ordered by |difference| ascending.
-        Deterministic for a fixed league snapshot.
+        asset_ideas_group_cap, ordered by |difference| ascending (the
+        Downgrade group orders same-position headliners first, then
+        |difference|). Deterministic for a fixed league snapshot.
         """
         empty: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
         league = self._leagues.get(league_id)
@@ -2186,6 +2206,15 @@ class TradeService:
         lo, hi = v_pin * (1.0 - band), v_pin * (1.0 + band)
         cap = max(1, int(_c("asset_ideas_group_cap")))
         relaxed_thr = min(fairness_threshold, _c("relaxed_fairness_threshold"))
+
+        # #198 — the pin's position drives the Upgrade/Lateral constraint.
+        # PICK pins (and metadata-less pins) have no position to upgrade:
+        # they keep pure value-band semantics.
+        pin_pos = getattr(players[asset_id], "position", None)
+        pos_constrained = pin_pos not in (None, "PICK")
+
+        def _same_pos(pid: str) -> bool:
+            return getattr(players.get(pid), "position", None) == pin_pos
 
         def _eval(give_ids: list[str], recv_ids: list[str]):
             """All non-fairness gates + the WIDENED fairness band. Returns
@@ -2277,6 +2306,10 @@ class TradeService:
                     and not (not_interested_ids and p in not_interested_ids))
                 for c in pool:
                     vc = _v(c)
+                    # #198 — Upgrade/Lateral counterparts must play the
+                    # pin's position (semantic constraint, never relaxed).
+                    if pos_constrained and not _same_pos(c) and vc >= lo:
+                        continue
                     if lo <= vc <= hi:
                         res = _eval([asset_id], [c])
                         if res:
@@ -2294,6 +2327,10 @@ class TradeService:
                 # Downgrade: 2-3 lesser pieces back for the pin. Best 2
                 # combos per opponent with DISTINCT headliners (recombining
                 # the same top piece is a near-duplicate, not variety).
+                # #198 — value-based (a spread-out return is inherently
+                # multi-positional) but same-position headliners are
+                # preferred when available (after the strict-band split,
+                # before deal closeness).
                 down = [p for p in pool if _v(p) < lo][:_POOL]
                 combos = []
                 for r in (2, 3):
@@ -2302,6 +2339,7 @@ class TradeService:
                         if res:
                             combos.append((list(combo), res))
                 combos.sort(key=lambda cr: (cr[1][0] < fairness_threshold,
+                                            pos_constrained and not _same_pos(cr[0][0]),
                                             abs(cr[1][2] - cr[1][1]),
                                             tuple(cr[0])))
                 kept_headliners: set[str] = set()
@@ -2332,13 +2370,18 @@ class TradeService:
                 and not (not_interested_ids and p in not_interested_ids))[:_POOL]
             for g in give_pool:
                 vg = _v(g)
+                # #198 mirror — the Upgrade headliner and the Lateral swap
+                # must play the pin's position (upgrading/swapping AT that
+                # position); the Downgrade give may be any position.
+                if pos_constrained and not _same_pos(g) and vg <= hi:
+                    continue
                 if lo <= vg <= hi:
                     res = _eval([g], [asset_id])
                     if res:
                         _emit(owner, [g], [asset_id], res, "lateral")
                 elif vg < lo:
                     # Tier UP into the pin: this asset headlines, optionally
-                    # plus one more own piece to close the gap.
+                    # plus one more own piece (any position) to close the gap.
                     variants = []
                     res = _eval([g], [asset_id])
                     if res:
@@ -2369,11 +2412,23 @@ class TradeService:
         order_key = lambda i: (abs(i["difference"]), i["counterparty_user_id"],
                                tuple(i["give_player_ids"]),
                                tuple(i["receive_player_ids"]))
+
+        # #198 — downgrade ordering: same-position headliners first (the
+        # counterpart side's top piece plays the pin's position), then deal
+        # closeness. Upgrade/Lateral are position-constrained already, so
+        # their pure |difference| ordering is unchanged.
+        def _down_key(i):
+            side = (i["receive_player_ids"] if direction == "give"
+                    else i["give_player_ids"])
+            cross = pos_constrained and not (side and _same_pos(side[0]))
+            return (cross,) + order_key(i)
+
         for group in ("upgrade", "lateral", "downgrade"):
             # #189 convention: relaxed-band ideas surface ONLY when the
             # group would otherwise be empty, and stay labeled.
             chosen = strict[group] or relaxed[group]
-            out[group] = sorted(chosen, key=order_key)[:cap]
+            key = _down_key if group == "downgrade" else order_key
+            out[group] = sorted(chosen, key=key)[:cap]
         return out
 
     # ------------------------------------------------------------------

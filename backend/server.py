@@ -7974,6 +7974,13 @@ def asset_trade_ideas():
     async pipeline exists for divergence math + streaming; this surface is a
     deterministic grouped read.
 
+    #198 — semantics are POSITION-CENTRIC: for a player pin the Upgrade and
+    Lateral groups return only players at the pin's position (upgrading =
+    upgrading that position; the give side funds it with sweeteners of any
+    kind); Downgrade stays value-based with same-position headliners
+    preferred. PICK pins keep pure value bands (see
+    TradeService.generate_asset_ideas).
+
     Body: {
       asset_id:  str            (required — player id or injected pick id)
       direction: "give"|"receive"  (default "give": pinned asset leaves the
@@ -11342,8 +11349,25 @@ def session_init():
             # only in this daemon (session/init is the Sleeper login path;
             # MFL normalizes at link/import time). Gated on
             # picks.owned_sync; a flake just leaves the prior snapshot.
+            #
+            # #200 — platform-imported ids are NUMERIC too (MFL/Fleaflicker
+            # native ids), so the isdigit() split alone misroutes them
+            # here (the #149/#150 failure class): the Sleeper fetches come
+            # back empty and sync_draft_picks REPLACE-synced the league to
+            # an EMPTY grid, wiping the picks the MFL link normalized —
+            # League Summary then honestly showed no draft capital. Guard
+            # with is_linked_platform_league and instead re-run the MFL
+            # normalization from the stored raw list (no network; ESPN /
+            # Fleaflicker rows have no MFL picks row and return 0), which
+            # also self-heals leagues clobbered before this guard.
             try:
-                if is_enabled("picks.owned_sync") and str(league_id).isdigit():
+                if (is_enabled("picks.owned_sync")
+                        and str(league_id).isdigit()
+                        and is_linked_platform_league(league_id)):
+                    _npk = _sync_mfl_owned_picks(league_id)
+                    if _npk:
+                        log.info("  ✅ MFL owned picks re-normalized (%d picks)", _npk)
+                elif is_enabled("picks.owned_sync") and str(league_id).isdigit():
                     _tp = _fetch_sleeper_traded_picks(league_id)
                     _prosters = _fetch_league_rosters(league_id) or []
                     _pmeta = _fetch_sleeper_league_meta(league_id) or {}

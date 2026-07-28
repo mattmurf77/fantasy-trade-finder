@@ -12,6 +12,12 @@ import type { Player } from '../shared/types';
 // TradesScreen when exactly ONE finder target is pinned; each compact row is
 // "your side ↔ their side · counterparty" with a signed difference chip, and
 // tapping it hands the package to the calculator (#190 prefill).
+//
+// #198 — semantics are position-centric: Upgrade/Lateral are constrained to
+// the pin's position server-side, so the group headers name it ("Upgrade at
+// WR"). Downgrade stays value-based (same-position headliners ordered first
+// by the backend) and keeps a neutral header. PICK pins have no position —
+// headers fall back to the generic labels.
 
 interface Props {
   data: AssetIdeasResponse | undefined;
@@ -21,14 +27,16 @@ interface Props {
   onOpenIdea: (idea: AssetIdea) => void;
 }
 
-const GROUPS: Array<{
-  key: keyof AssetIdeasResponse['groups'];
-  title: string;
-}> = [
-  { key: 'upgrade', title: 'Upgrade ideas' },
-  { key: 'lateral', title: 'Lateral moves' },
-  { key: 'downgrade', title: 'Downgrade ideas' },
-];
+const GROUP_KEYS = ['upgrade', 'lateral', 'downgrade'] as const;
+
+function groupTitle(
+  key: (typeof GROUP_KEYS)[number],
+  pinPos: string | null,
+): string {
+  if (key === 'upgrade') return pinPos ? `Upgrade at ${pinPos}` : 'Upgrade ideas';
+  if (key === 'lateral') return pinPos ? `Lateral moves at ${pinPos}` : 'Lateral moves';
+  return 'Downgrade ideas';
+}
 
 function sideLabel(players: Player[]): string {
   return players.map((p) => p.name).join(' + ') || '?';
@@ -110,6 +118,18 @@ export default function AssetIdeasPanel({
   const total = groups
     ? groups.upgrade.length + groups.lateral.length + groups.downgrade.length
     : 0;
+  // #198 — the pin's position drives the group headers/copy; PICK pins (and
+  // a not-yet-loaded asset) fall back to the generic value-band labels.
+  const rawPos = data?.asset?.position;
+  const pinPos = rawPos && rawPos !== 'PICK' ? rawPos : null;
+  const subtitle =
+    direction === 'give'
+      ? pinPos
+        ? `A better ${pinPos} back (add pieces to close the gap), a sideways ${pinPos} swap, or a spread-out package.`
+        : 'What league-mates could send back — tier up, sideways, or down.'
+      : pinPos
+        ? `What it could cost you — your lesser ${pinPos} plus pieces, an even ${pinPos} swap, or a stud for them plus change.`
+        : 'What it could cost you — tier up into them, swap even, or cash down.';
   return (
     <Card>
       <View testID="trades.asset-ideas" style={styles.inner}>
@@ -119,11 +139,7 @@ export default function AssetIdeasPanel({
         <Text style={[type.title, styles.assetName]} numberOfLines={1}>
           {pinnedName}
         </Text>
-        <Text style={[type.bodySm, styles.subtitle]}>
-          {direction === 'give'
-            ? 'What league-mates could send back — tier up, sideways, or down.'
-            : 'What it could cost you — tier up into them, swap even, or cash down.'}
-        </Text>
+        <Text style={[type.bodySm, styles.subtitle]}>{subtitle}</Text>
         {loading ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color={chalk.dim} size="small" />
@@ -134,12 +150,14 @@ export default function AssetIdeasPanel({
             No defensible packages found around this asset right now.
           </Text>
         ) : (
-          GROUPS.map(({ key, title }) => {
+          GROUP_KEYS.map((key) => {
             const ideas = groups[key];
             if (ideas.length === 0) return null;
             return (
               <View key={key} style={styles.group}>
-                <Text style={[type.label, styles.groupTitle]}>{title}</Text>
+                <Text style={[type.label, styles.groupTitle]}>
+                  {groupTitle(key, pinPos)}
+                </Text>
                 {ideas.map((idea, i) => (
                   <IdeaRow
                     key={`${key}-${i}-${idea.counterparty_user_id}`}
