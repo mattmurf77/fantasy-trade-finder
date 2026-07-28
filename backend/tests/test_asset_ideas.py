@@ -11,6 +11,11 @@ rosters and group candidate deals around the pin's CONSENSUS value:
   downgrade — 2-3 lesser pieces packaged back (give dir) / pin + owner
               sweetener(s) for a single better own asset (receive dir)
 
+#198 — semantics are POSITION-CENTRIC for player pins: Upgrade and Lateral
+counterparts must play the pin's position (never relaxed); Downgrade stays
+value-based but orders same-position headliners first. PICK pins keep pure
+value bands.
+
 Gates are the consensus-basis reuse set (package_value_v2, fairness ratio,
 #108 user-gain, #141 filler, consolidation raw-loss). A group that would be
 EMPTY refills from the widened #189 band, labeled relaxed=True +
@@ -194,6 +199,99 @@ def test_give_ideas_deterministic():
     assert _give_ideas() == _give_ideas()
 
 
+# ── #198 — position-centric semantics ─────────────────────────────────────
+
+def _cross_pos_service():
+    """The operator's complaint case: the opponent holds a HIGHER-VALUE WR
+    (XW 1705 > U 1700) and an in-band WR (WL 1570) alongside the RB assets.
+    Pure value bands would classify both as Upgrade/Lateral for the RB pin."""
+    elos = {**GIVE_ELO, "XW": 1705.0, "WL": 1570.0}
+    players = {pid: _Player(pid) for pid in GIVE_ELO}
+    players["XW"] = _Player("XW", position="WR")
+    players["WL"] = _Player("WL", position="WR")
+    opp = LeagueMember(user_id="opp", username="OppTeam",
+                       roster=["U", "L", "L2", "D1", "D2", "XW", "WL"],
+                       elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[opp]))
+    return svc, elos
+
+
+def test_upgrade_and_lateral_are_position_locked():
+    """#198 — the pinned RB's Upgrade group returns better RBs only, and the
+    Lateral group same-position swaps only; the higher-value WR never
+    surfaces as an 'upgrade' (the operator's complaint case)."""
+    svc, elos = _cross_pos_service()
+    groups = svc.generate_asset_ideas(
+        user_id="user", user_roster=["P", "S1"], league_id="L1",
+        seed_elo=dict(elos), asset_id="P", direction="give",
+        fairness_threshold=0.50, raw_user_elo=dict(elos))
+    assert [i["receive_player_ids"] for i in groups["upgrade"]] == [["U"]]
+    assert [i["receive_player_ids"] for i in groups["lateral"]] == [["L"]]
+    for g in groups.values():
+        for idea in g:
+            assert "XW" not in idea["receive_player_ids"]
+            assert "WL" not in idea["receive_player_ids"]
+
+
+def test_downgrade_prefers_same_position_headliner():
+    """#198 — Downgrade stays value-based (cross-position pieces allowed) but
+    combos headlined by the pin's position order first, even when a
+    cross-position headliner lands a closer deal."""
+    # Pieces (all below the band): DA is the only RB; the WR pair (WA+WB)
+    # sums to the CLOSEST deal that still clears the #108 gate, so pure
+    # |difference| ordering would lead with the WR-headlined combo.
+    elos = {"P": 1560.0, "DA": 1524.0, "WA": 1510.0, "WB": 1508.0}
+    players = {
+        "P":  _Player("P"),                     # RB pin
+        "DA": _Player("DA"),                    # RB
+        "WA": _Player("WA", position="WR"),
+        "WB": _Player("WB", position="WR"),
+    }
+    opp = LeagueMember(user_id="opp", username="OppTeam",
+                       roster=["DA", "WA", "WB"], elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[opp]))
+    groups = svc.generate_asset_ideas(
+        user_id="user", user_roster=["P"], league_id="L1",
+        seed_elo=dict(elos), asset_id="P", direction="give",
+        fairness_threshold=0.50, raw_user_elo=dict(elos))
+    down = groups["downgrade"]
+    assert down, "expected downgrade packages"
+    # The leading combo is headlined by the RB.
+    assert down[0]["receive_player_ids"][0] == "DA"
+    # Preference did real work: the WR-headlined combo exists with a SMALLER
+    # |difference| — pure closeness ordering would have led with it.
+    wr_headed = [i for i in down if i["receive_player_ids"][0] == "WA"]
+    assert wr_headed
+    assert abs(wr_headed[0]["difference"]) < abs(down[0]["difference"])
+
+
+def test_pick_pin_keeps_value_bands():
+    """#198 — a PICK pin has no position to upgrade: groups keep the pure
+    value-band semantics (any better asset is an upgrade target)."""
+    elos = {"PK": 1560.0, "S1": 1610.0, "U": 1700.0, "L": 1570.0}
+    players = {
+        "PK": _Player("PK", position="PICK"),
+        "S1": _Player("S1"),
+        "U":  _Player("U", position="WR"),      # cross-"position" on purpose
+        "L":  _Player("L", position="QB"),
+    }
+    opp = LeagueMember(user_id="opp", username="OppTeam",
+                       roster=["U", "L"], elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[opp]))
+    groups = svc.generate_asset_ideas(
+        user_id="user", user_roster=["PK", "S1"], league_id="L1",
+        seed_elo=dict(elos), asset_id="PK", direction="give",
+        fairness_threshold=0.50, raw_user_elo=dict(elos))
+    assert [i["receive_player_ids"] for i in groups["upgrade"]] == [["U"]]
+    assert [i["receive_player_ids"] for i in groups["lateral"]] == [["L"]]
+
+
 # ── Receive-direction fixture ─────────────────────────────────────────────
 # Pin T (elo 1700, v≈2718; band → [2446, 2990]) on opp2's roster (which also
 # holds extra E 1650, v≈2117). User roster: G_up 1650 (v≈2117, below band —
@@ -271,6 +369,30 @@ def test_receive_direction_exclusions():
 
 def test_receive_ideas_deterministic():
     assert _recv_ideas() == _recv_ideas()
+
+
+def test_receive_direction_position_locked():
+    """#198 mirror — acquiring an RB pin: the tier-up headliner and the
+    lateral swap must be the user's own RBs; equally-valued WRs never
+    headline either group (the second tier-up piece may be any position)."""
+    elos = {**RECV_ELO, "WU": 1650.0, "WLat": 1690.0}
+    players = {pid: _Player(pid) for pid in RECV_ELO}
+    players["WU"] = _Player("WU", position="WR")     # value-twin of G_up
+    players["WLat"] = _Player("WLat", position="WR")  # value-twin of G_lat
+    owner = LeagueMember(user_id="opp2", username="Owner",
+                         roster=["T", "E"], elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[owner]))
+    groups = svc.generate_asset_ideas(
+        user_id="user",
+        user_roster=["G_up", "G2", "G_lat", "G_down", "WU", "WLat"],
+        league_id="L1", seed_elo=dict(elos), asset_id="T",
+        direction="receive", fairness_threshold=0.50,
+        raw_user_elo=dict(elos))
+    for idea in groups["upgrade"]:
+        assert idea["give_player_ids"][0] not in ("WU", "WLat")
+    assert [i["give_player_ids"] for i in groups["lateral"]] == [["G_lat"]]
 
 
 def test_unknown_asset_or_direction_returns_empty():

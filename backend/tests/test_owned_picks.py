@@ -170,6 +170,62 @@ def test_mfl_normalization_same_row_shape(_mfl_seeded):
     assert acq["is_traded"] == 1
 
 
+# ── #200 — numeric platform ids must not hit the Sleeper grid sync ─────────
+# MFL native league ids are NUMERIC, so session-init's old
+# `str(league_id).isdigit()` gate misrouted them into the Sleeper pick sync:
+# the Sleeper fetches came back empty and sync_draft_picks REPLACE-synced the
+# league to an EMPTY grid, wiping the picks the MFL link normalized (League
+# Summary then showed no draft capital). The daemon now discriminates with
+# is_linked_platform_league and re-runs _sync_mfl_owned_picks instead, which
+# also self-heals leagues clobbered before the guard.
+
+_MFL_NUMERIC = "990062846"          # numeric, like real MFL ids
+
+
+@pytest.fixture
+def _mfl_numeric_seeded():
+    db.upsert_platform_league(
+        league_id=_MFL_NUMERIC, user_id="link_user", name="MFL Numeric",
+        platform="mfl", season=2026, auth="public", my_team="0001",
+        total_rosters=12, host="www44.myfantasyleague.com",
+        future_picks=[
+            {"franchise_id": "0001", "year": "2027", "round": "1",
+             "original_owner": "0001"},
+            {"franchise_id": "0001", "year": "2027", "round": "2",
+             "original_owner": "0002"},
+        ],
+    )
+    db.replace_espn_league_members(_MFL_NUMERIC, [
+        {"user_id": "link_user", "username": "Me", "display_name": "Me", "player_ids": []},
+        {"user_id": srv._mfl_member_id(_MFL_NUMERIC, "0002"),
+         "username": "Rival", "display_name": "Rival", "player_ids": []},
+    ])
+    yield _MFL_NUMERIC
+    db.replace_draft_picks(_MFL_NUMERIC, [])
+
+
+def test_numeric_mfl_id_detected_as_platform_league(_mfl_numeric_seeded):
+    # The old gate's discriminator says "Sleeper"; the platform lookup — the
+    # #149/#150-style guard the daemon now uses — says otherwise.
+    assert str(_MFL_NUMERIC).isdigit()
+    assert db.is_linked_platform_league(_MFL_NUMERIC) is True
+
+
+def test_mfl_renormalization_restores_clobbered_picks(_mfl_numeric_seeded):
+    # Link-time normalization writes the picks…
+    assert srv._sync_mfl_owned_picks(_MFL_NUMERIC) == 2
+    assert len(db.load_draft_picks(_MFL_NUMERIC)) == 2
+    # …the pre-fix daemon wiped them (replace-sync to an empty grid)…
+    db.replace_draft_picks(_MFL_NUMERIC, [])
+    assert db.load_draft_picks(_MFL_NUMERIC) == []
+    # …and the daemon's re-normalization self-heals from the stored raw list.
+    assert srv._sync_mfl_owned_picks(_MFL_NUMERIC) == 2
+    picks = db.load_draft_picks(_MFL_NUMERIC)
+    assert len(picks) == 2
+    assert all(p["platform"] == "mfl" and p["pool_value"] is not None
+               for p in picks)
+
+
 # ── /api/trade/evaluate resolves league-pick ids (FR-5) ────────────────────
 
 _EVAL_POOL = [type("P", (), {"id": "stud", "name": "Stud", "position": "WR"})()]

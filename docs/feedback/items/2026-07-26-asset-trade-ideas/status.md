@@ -2,6 +2,13 @@
 
 **Status: built (backend engine + route + mobile grouped panel)** · 2026-07-26 · branch `teardown-remediation` worktree · flag `trade.asset_ideas` (default **ON**)
 
+> **2026-07-27 — semantics amended by #198** (operator: upgrading means
+> upgrading the PIN'S POSITION). Upgrade/Lateral are now constrained to the
+> pin's position; Downgrade stays value-based with same-position headliners
+> preferred; PICK pins keep the value bands described below. See
+> `docs/feedback/items/198-upgrade-semantics/status.md` — the value-band
+> description in this doc is otherwise historical.
+
 ## Context
 
 Operator, on the Dynasty Trade Factory teardown
