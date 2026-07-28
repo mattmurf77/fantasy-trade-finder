@@ -18,6 +18,11 @@ interface Props {
   /** Fired AFTER the league swap completes successfully. The screen using
    *  this sheet typically resets local state (e.g. trade deck) here. */
   onSwitched?: (leagueId: string) => void;
+  /** #199 — optional "Add a league" row at the bottom of the list. The host
+   *  screen owns navigation (typically: close the sheet, then route to the
+   *  LeaguePicker, whose footer carries the link-platform flows). Row is
+   *  hidden when the prop is absent. */
+  onAddLeague?: () => void;
 }
 
 // Bottom-sheet picker for the user's leagues (Chalkline sheet construction:
@@ -27,7 +32,7 @@ interface Props {
 // while that's in flight the row shows a spinner and the rest of the list is
 // disabled (sessionInit can take several seconds on Render free tier and
 // we don't want concurrent switches racing).
-export default function LeagueSwitcherSheet({ visible, onClose, onSwitched }: Props) {
+export default function LeagueSwitcherSheet({ visible, onClose, onSwitched, onAddLeague }: Props) {
   const leagues       = useSession((s) => s.leagues);
   const activeLeague  = useSession((s) => s.league);
   const switchLeague  = useSession((s) => s.switchLeague);
@@ -135,6 +140,29 @@ export default function LeagueSwitcherSheet({ visible, onClose, onSwitched }: Pr
           )}
         </ScrollView>
 
+        {/* #199 — upfront link-another-league entry point, pinned under the
+            list so it's reachable without scrolling a long league list. Ice
+            = action accent (Chalkline); routes to the LeaguePicker where the
+            per-platform link flows (ESPN/MFL/Fleaflicker) live. */}
+        {onAddLeague ? (
+          <Pressable
+            testID="league.switcher.add-league"
+            accessibilityRole="button"
+            accessibilityLabel="Add a league"
+            accessibilityHint="Opens the league picker, where you can link another league"
+            onPress={() => (busyId ? null : onAddLeague())}
+            disabled={busyId !== null}
+            style={({ pressed }) => [
+              styles.addRow,
+              busyId !== null && styles.rowDim,
+              pressed && busyId === null && styles.rowPressed,
+            ]}
+          >
+            <Icon name="plus" size={20} color={ice.base} />
+            <Text style={[type.title, styles.addLabel]}>Add a league</Text>
+          </Pressable>
+        ) : null}
+
         <Button
           label="Cancel"
           variant="ghost"
@@ -195,5 +223,16 @@ const styles = StyleSheet.create({
     gap: space.sm,
   },
   rowNameText: { flexShrink: 1 },
+  addRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingVertical: space.md,
+    paddingHorizontal: space.xs,
+    minHeight: 44,
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
+  },
+  addLabel: { color: ice.base },
   cancel: { marginTop: space.md },
 });

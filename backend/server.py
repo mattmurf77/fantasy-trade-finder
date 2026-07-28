@@ -16189,6 +16189,38 @@ def _mfl_resolve(body: dict):
     return league_id, year, host
 
 
+def _mfl_store_scoring_format(league_id: str, raw: dict, where: str) -> str | None:
+    """#201 — detect + persist the league's scoring format from an MFL bundle.
+
+    Nothing ever wrote leagues.default_scoring for MFL leagues, so every
+    consumer (get_league_scoring, /api/league/scoring-format, the trade
+    engine's format lookup) fell to the '1qb_ppr' default — an SF TEP league
+    rendered as 1QB. Detection rules live in mfl_service.detect_scoring_format
+    (superflex = max startable QBs ≥ 2 from the league export's lineup config;
+    TEP = TE per-reception points > WR's from the rules export; SF or TEP →
+    'sf_tep', mirroring the Sleeper collapse convention). Best-effort: runs
+    AFTER upsert_platform_league (set_league_scoring is an UPDATE on the
+    existing row) and never fails the import. Returns the stored format, or
+    None when detection/persistence failed."""
+    from . import mfl_service as _mfl
+    try:
+        fmt = _mfl.detect_scoring_format(raw)
+        set_league_scoring(league_id, fmt)
+        log.info("%s: scoring format detected for league %s: %s",
+                 where, league_id, fmt)
+        return fmt
+    except Exception as e:
+        log.warning("%s: scoring-format detect failed for league %s "
+                    "(stays default): %s", where, league_id, e)
+        return None
+
+
+# #201 — leagues whose missing-format backfill was already attempted this
+# process (see mfl_leagues). Keeps the one-shot fetch from re-running on
+# every league-list read when MFL is flaky.
+_mfl_scoring_backfill_attempted: set = set()
+
+
 @app.route("/api/mfl/link", methods=["POST"])
 @_gate_unverified_write
 def mfl_link():
@@ -16265,6 +16297,9 @@ def mfl_link():
         except Exception as _mpk_err:
             log.warning("mfl_link: owned-pick normalization failed (continuing): %s", _mpk_err)
 
+    # #201 — detect + store the league's scoring format from the bundle.
+    _mfl_store_scoring_format(league_id, raw, "mfl_link")
+
     r = mapped["report"]
     log.info("mfl_link: user=%s league=%s year=%s teams=%d match_rate=%.1f%% "
              "unmatched=%d picks=%d", user_id, league_id, year, len(members),
@@ -16284,12 +16319,40 @@ def mfl_link():
 def mfl_leagues():
     if not is_enabled("mfl.link"):
         return jsonify({"error": "feature_disabled"}), 404
-    from .database import load_platform_leagues_for_user
+    from . import mfl_service as _mfl
+    from .database import load_platform_leagues_for_user, get_platform_league
     sess = _require_session()
     user_id = sess.get("user_id")
     if not user_id:
         return jsonify({"error": "no_user"}), 401
     leagues = load_platform_leagues_for_user(user_id, "mfl")
+
+    # #201 — automatic fix-up for leagues linked BEFORE format detection
+    # existed (default_scoring never written → everything rendered as 1QB).
+    # This list read fires whenever the mobile league picker refreshes, so a
+    # stale league self-heals without asking the user to re-link. Inline and
+    # bounded: only rows still missing a format, only the two exports
+    # detection needs (league + rules), at most one attempt per league per
+    # process. Failures log and leave the default in place.
+    for lg in leagues:
+        lid = lg["league_id"]
+        if lid in _mfl_scoring_backfill_attempted:
+            continue
+        _mfl_scoring_backfill_attempted.add(lid)
+        try:
+            row = get_platform_league(lid, "mfl")
+            if not row or row.get("default_scoring"):
+                continue
+            year = row.get("platform_season") or _MFL_DEFAULT_YEAR
+            host = row.get("platform_host") or _mfl.resolve_host(lid, year)
+            cookie = (_mfl_cookie_for(sess, user_id)
+                      if row.get("platform_auth") == "cookie" else None)
+            raw = _mfl.fetch_scoring_inputs(lid, year, host, cookie=cookie)
+            _mfl_store_scoring_format(lid, raw, "mfl_leagues backfill")
+        except Exception as e:
+            log.warning("mfl_leagues: scoring backfill failed for %s "
+                        "(stays default): %s", lid, e)
+
     for lg in leagues:
         lg["members"] = [
             {"user_id": m["user_id"], "username": m.get("username") or "",
@@ -16369,6 +16432,10 @@ def mfl_import():
             log.info("mfl_import: normalized %d owned picks", _npk)
         except Exception as _mpk_err:
             log.warning("mfl_import: owned-pick normalization failed (continuing): %s", _mpk_err)
+
+    # #201 — re-detect on every re-sync. This is also the manual fix-up path
+    # for leagues linked before format detection existed.
+    _mfl_store_scoring_format(league_id, raw, "mfl_import")
 
     return jsonify({
         "ok": True, "league_id": league_id, "name": parsed["name"],
@@ -16465,6 +16532,9 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
         except Exception as _mpk_err:
             log.warning("mfl_auth_import: owned-pick normalization failed "
                         "(continuing): %s", _mpk_err)
+
+    # #201 — detect + store the league's scoring format from the bundle.
+    _mfl_store_scoring_format(league_id, raw, "mfl_auth_import")
 
     r = mapped["report"]
     return {

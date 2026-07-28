@@ -43,8 +43,8 @@ def _opener_by_type(bundle):
     """Dispatch a fetch to the right slice of the fixture bundle by TYPE=."""
     def _opener(request, timeout=None):
         url = request.full_url
-        for t in ("league", "rosters", "futureDraftPicks", "players"):
-            if f"TYPE={t}" in url:
+        for t in ("league", "rosters", "futureDraftPicks", "players", "rules"):
+            if f"TYPE={t}" in url and t in bundle:
                 return _FakeResp(json.dumps(bundle[t]))
         return _FakeResp("{}")
     return _opener
@@ -184,6 +184,109 @@ def test_flip_name():
     assert mfl._flip_name("Chase, Ja'Marr") == "Ja'Marr Chase"
     assert mfl._flip_name("Bills, Buffalo") == "Buffalo Bills"
     assert mfl._flip_name("Madonna") == "Madonna"
+
+
+# ── scoring-format detection (#201) ─────────────────────────────────────────
+
+def _scoring_raw(qb_limit=None, te_pts=None, wr_pts=None):
+    """Build a minimal raw bundle carrying an MFL-shaped league (starting
+    lineup config) + rules (scoring) export. te/wr points are the MFL points
+    strings for the per-reception event 'CC' (e.g. '1.5*'); the TE rule uses
+    MFL's {"$t": …} text-node wrapping and a list, the WR rule the bare-value
+    single-dict form — both shapes appear in live exports."""
+    league = {"id": "10005", "name": "Detect Me"}
+    if qb_limit is not None:
+        league["starters"] = {
+            "count": "10",
+            "position": [{"name": "QB", "limit": qb_limit},
+                         {"name": "RB", "limit": "2-4"},
+                         {"name": "WR", "limit": "3-5"}],
+        }
+    raw = {"league": {"league": league}}
+    prs = []
+    if te_pts is not None:
+        prs.append({"positions": "TE",
+                    "rule": [{"points": {"$t": te_pts},
+                              "event": {"$t": "CC"},
+                              "range": {"$t": "0-100"}}]})
+    if wr_pts is not None:
+        prs.append({"positions": "WR|RB",
+                    "rule": {"points": wr_pts, "event": "CC",
+                             "range": "0-100"}})
+    if prs:
+        raw["rules"] = {"rules": {"positionRules": prs}}
+    return raw
+
+
+def test_detect_sf_tep_league():
+    # The operator's Dependables case: superflex QB slot + TE reception premium.
+    raw = _scoring_raw(qb_limit="1-2", te_pts="1.5*", wr_pts="1*")
+    assert mfl.detect_scoring_format(raw) == "sf_tep"
+
+
+def test_detect_plain_1qb_ppr_league():
+    raw = _scoring_raw(qb_limit="1", te_pts="1*", wr_pts="1*")
+    assert mfl.detect_scoring_format(raw) == "1qb_ppr"
+
+
+def test_detect_superflex_without_tep_collapses_to_sf_tep():
+    # Mirror of the Sleeper convention: SF alone is enough for the sf_tep
+    # bucket (QB scarcity dominates), even with flat reception scoring.
+    raw = _scoring_raw(qb_limit="2", te_pts="1*", wr_pts="1*")
+    assert mfl.detect_scoring_format(raw) == "sf_tep"
+
+
+def test_detect_tep_without_superflex_collapses_to_sf_tep():
+    raw = _scoring_raw(qb_limit="1", te_pts="1.5*", wr_pts="1*")
+    assert mfl.detect_scoring_format(raw) == "sf_tep"
+
+
+def test_detect_degrades_without_rules_export():
+    # rules fetch failed / trimmed → TEP undetectable, lineup signal only.
+    assert mfl.detect_scoring_format(_scoring_raw(qb_limit="1-2")) == "sf_tep"
+    assert mfl.detect_scoring_format(_scoring_raw(qb_limit="1")) == "1qb_ppr"
+
+
+def test_detect_defaults_1qb_on_empty_bundle():
+    # Old trimmed fixtures carry no starters config at all.
+    assert mfl.detect_scoring_format(_bundle()) == "1qb_ppr"
+    assert mfl.detect_scoring_format({}) == "1qb_ppr"
+
+
+def test_fetch_bundle_includes_rules_and_degrades_on_rules_error():
+    bundle = _bundle()
+
+    def _opener(request, timeout=None):
+        url = request.full_url
+        if "TYPE=rules" in url:
+            raise urllib.error.HTTPError(url, 500, "err", {}, io.BytesIO(b"{}"))
+        for t in ("league", "rosters", "futureDraftPicks", "players"):
+            if f"TYPE={t}" in url:
+                return _FakeResp(json.dumps(bundle[t]))
+        return _FakeResp("{}")
+
+    raw = mfl.fetch_league_bundle("10005", 2026, "www48.myfantasyleague.com",
+                                  _opener=_opener)
+    assert raw["rules"] == {}          # best-effort, never a hard error
+    assert raw["league"]
+
+
+def test_fetch_scoring_inputs_league_and_rules_only():
+    fetched = []
+    payload = _scoring_raw(qb_limit="1-2", te_pts="1.5*", wr_pts="1*")
+
+    def _opener(request, timeout=None):
+        url = request.full_url
+        for t in ("league", "rules"):
+            if f"TYPE={t}" in url:
+                fetched.append(t)
+                return _FakeResp(json.dumps(payload[t]))
+        raise AssertionError(f"unexpected fetch: {url}")
+
+    raw = mfl.fetch_scoring_inputs("10005", 2026, "www48.myfantasyleague.com",
+                                   _opener=_opener)
+    assert fetched == ["league", "rules"]
+    assert mfl.detect_scoring_format(raw) == "sf_tep"
 
 
 # ── crosswalk mapping ───────────────────────────────────────────────────────

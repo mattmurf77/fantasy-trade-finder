@@ -223,3 +223,100 @@ def test_import_unknown_league_404(client):
     r = c.post("/api/mfl/import", headers=_h(token),
                data=json.dumps({"league_id": "99999"}))
     assert r.status_code == 404 and r.get_json()["error"] == "mfl_not_linked"
+
+
+# ── scoring-format detection at link/import time (#201) ─────────────────────
+
+def _sf_tep_bundle():
+    """Fixture bundle + the two format signals a live bundle carries: a
+    superflex lineup config (QB limit 1-2) in the league export and a TE
+    reception premium (1.5 vs 1.0) in the rules export."""
+    b = _bundle()
+    b["league"]["league"]["starters"] = {
+        "count": "10",
+        "position": [{"name": "QB", "limit": "1-2"},
+                     {"name": "RB", "limit": "2-4"}],
+    }
+    b["rules"] = {"rules": {"positionRules": [
+        {"positions": "TE",
+         "rule": [{"points": {"$t": "1.5*"}, "event": {"$t": "CC"},
+                   "range": {"$t": "0-100"}}]},
+        {"positions": "WR|RB",
+         "rule": {"points": "1*", "event": "CC", "range": "0-100"}},
+    ]}}
+    return b
+
+
+def _stored_scoring(engine):
+    with engine.connect() as conn:
+        return conn.execute(
+            select(db_module.leagues_table.c.default_scoring)).scalar()
+
+
+def test_link_import_stores_sf_tep_format(client):
+    c, token, engine = client
+    with patch.object(mfl, "fetch_league_bundle",
+                      lambda *a, **kw: _sf_tep_bundle()):
+        assert _link(c, token, franchise_id="0001").status_code == 200
+    assert _stored_scoring(engine) == "sf_tep"
+
+
+def test_link_import_stores_1qb_when_no_signals(client):
+    # The base fixture has no starters/rules exports → honest 1qb_ppr, but
+    # WRITTEN (not left null) so consumers stop guessing.
+    c, token, engine = client
+    assert _link(c, token, franchise_id="0001").status_code == 200
+    assert _stored_scoring(engine) == "1qb_ppr"
+
+
+def test_import_resync_redetects_format(client):
+    # The manual fix-up path: a league imported before detection (or whose
+    # settings changed) picks up the right format on re-sync.
+    c, token, engine = client
+    _link(c, token, franchise_id="0001")
+    assert _stored_scoring(engine) == "1qb_ppr"
+    with patch.object(mfl, "fetch_league_bundle",
+                      lambda *a, **kw: _sf_tep_bundle()):
+        r = c.post("/api/mfl/import", headers=_h(token),
+                   data=json.dumps({"league_id": MFL_LEAGUE}))
+    assert r.status_code == 200
+    assert _stored_scoring(engine) == "sf_tep"
+
+
+def test_leagues_list_backfills_missing_format(client):
+    # Automatic fix-up for ALREADY-LINKED leagues (rows from before #201 have
+    # default_scoring NULL): the league-list read fetches just league+rules
+    # and stores the detected format, once per league per process.
+    c, token, engine = client
+    _link(c, token, franchise_id="0001")
+    with engine.begin() as conn:            # simulate a pre-#201 row
+        conn.execute(db_module.leagues_table.update()
+                     .values(default_scoring=None))
+    assert _stored_scoring(engine) is None
+
+    calls = []
+
+    def _fake_inputs(league_id, year, host, cookie=None, **kw):
+        calls.append(league_id)
+        return _sf_tep_bundle()
+
+    server._mfl_scoring_backfill_attempted.clear()
+    with patch.object(mfl, "fetch_scoring_inputs", _fake_inputs):
+        assert c.get("/api/mfl/leagues", headers=_h(token)).status_code == 200
+        assert _stored_scoring(engine) == "sf_tep"
+        # attempted-set: the next list read doesn't re-fetch
+        assert c.get("/api/mfl/leagues", headers=_h(token)).status_code == 200
+    assert calls == [MFL_LEAGUE]
+
+
+def test_leagues_list_skips_backfill_when_format_present(client):
+    c, token, engine = client
+    _link(c, token, franchise_id="0001")    # writes 1qb_ppr
+    server._mfl_scoring_backfill_attempted.clear()
+
+    def _boom(*a, **kw):
+        raise AssertionError("backfill fetch should not run")
+
+    with patch.object(mfl, "fetch_scoring_inputs", _boom):
+        assert c.get("/api/mfl/leagues", headers=_h(token)).status_code == 200
+    assert _stored_scoring(engine) == "1qb_ppr"

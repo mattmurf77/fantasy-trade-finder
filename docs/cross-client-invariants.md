@@ -61,7 +61,9 @@ Authoritative defaults live in `model_config` (`elo_k`, `trade_k_like`, `trade_k
 
 Allowed values: `'1qb_ppr'`, `'sf_tep'`. Null in legacy rows is treated as `'1qb_ppr'`.
 
-**Locations:** `backend/database.py` (defaults), `backend/data_loader.py`, `backend/server.py`, `mobile/src/api/league.ts`, `web/js/app.js`. Tables affected: `swipe_decisions`, `member_rankings`, `elo_history`, `user_player_skips`, `leagues.default_scoring`.
+**Detection collapse convention (two buckets only):** Superflex **or** TE Premium → `'sf_tep'`; otherwise `'1qb_ppr'`. SF is the dominant value-driver, and a TEP-only league is still closer to the sf_tep board than to plain 1QB PPR. Implementations: Sleeper `server._detect_scoring_format_from_meta` (`SUPER_FLEX` slot / QB count ≥ 2; `bonus_rec_te > 0`) and MFL `mfl_service.detect_scoring_format` (#201: max startable QBs ≥ 2 from the `league` export's lineup config; TE per-reception points > WR's from the `rules` export). Any new platform detector must use the same collapse.
+
+**Locations:** `backend/database.py` (defaults), `backend/data_loader.py`, `backend/server.py`, `backend/mfl_service.py` (detection), `mobile/src/api/league.ts`, `web/js/app.js`. Tables affected: `swipe_decisions`, `member_rankings`, `elo_history`, `user_player_skips`, `leagues.default_scoring`.
 
 ---
 
