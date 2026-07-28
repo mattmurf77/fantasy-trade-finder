@@ -10,11 +10,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import PositionChip from './PositionChip';
-import { Badge, Button } from './chalkline';
+import { Badge, Button, TickLabel } from './chalkline';
 import { CalcPlayer, CalcPos } from '../data/tradeCalcMock';
 import {
   ink,
   chalk,
+  flare,
   position as positionColor,
   type,
   space,
@@ -25,10 +26,20 @@ import {
 
 const POSITIONS: CalcPos[] = ['QB', 'RB', 'WR', 'TE', 'PICK'];
 
+// #203 — one "Suggested" row: an asset close in value to the current trade
+// gap, with `need` marking that its position is a roster need of the team
+// that would receive it. The host computes the list; this modal only renders.
+export interface SuggestedPlayer {
+  player: CalcPlayer;
+  need: boolean;
+}
+
 interface Props {
   visible: boolean;
   title: string;
   players: CalcPlayer[];
+  /** #203 — gap-closing suggestions pinned above the list (≤4 rows). */
+  suggested?: SuggestedPlayer[];
   selectedIds: string[];
   /** Value on the roster owner's board (what it costs them / what they'd demand). */
   ownerBoardValue: (p: CalcPlayer) => number;
@@ -49,6 +60,7 @@ export default function PlayerPickerModal({
   visible,
   title,
   players,
+  suggested,
   selectedIds,
   ownerBoardValue,
   secondaryValue,
@@ -68,6 +80,50 @@ export default function PlayerPickerModal({
       .filter((p) => (q ? p.name.toLowerCase().includes(q) : true))
       .sort((a, b) => ownerBoardValue(b) - ownerBoardValue(a));
   }, [players, selectedIds, posFilter, query, ownerBoardValue]);
+
+  // #203 — suggestions render only in the untouched picker state; a search
+  // or position filter means the user is looking for someone specific.
+  const showSuggested =
+    !!suggested && suggested.length > 0 && !query.trim() && !posFilter;
+
+  // Shared row renderer — the suggested rows are the same row with their own
+  // testID plus a flare NEED badge (informational highlight, not an action).
+  const renderRow = (item: CalcPlayer, testID: string, need = false) => (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.name}, ${item.pos}, ${
+        item.pick ? 'draft capital' : `${item.nflTeam}, ${item.age} years`
+      }, value ${ownerBoardValue(item).toLocaleString()}${
+        need ? ', fills a roster need for the receiving team' : ''
+      }`}
+      accessibilityHint="Adds this player to the trade"
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      onPress={() => onPick(item)}
+    >
+      <PositionChip position={item.pos} size="sm" />
+      <View style={styles.info}>
+        <View style={styles.nameRow}>
+          <Text style={type.title}>{item.name}</Text>
+          {need ? <Badge label="NEED" color={flare.base} colorText /> : null}
+          {badgeFor?.(item) ? (
+            <Badge label={badgeFor(item)!.label} color={badgeFor(item)!.color} colorText />
+          ) : null}
+        </View>
+        <Text style={type.bodySm}>
+          {item.pick ? 'Draft capital' : `${item.nflTeam} · ${item.age} yrs`}
+        </Text>
+      </View>
+      <View style={styles.values}>
+        <Text style={type.data}>{ownerBoardValue(item).toLocaleString()}</Text>
+        {secondaryValue ? (
+          <Text style={styles.yourValue}>
+            {secondaryPrefix}: {secondaryValue(item).toLocaleString()}
+          </Text>
+        ) : null}
+      </View>
+    </Pressable>
+  );
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -117,43 +173,22 @@ export default function PlayerPickerModal({
               data={filtered}
               keyExtractor={(p) => p.id}
               contentContainerStyle={{ paddingBottom: space.xl }}
-              renderItem={({ item }) => (
-                <Pressable
-                  testID={`calc.picker.row.${item.id}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${item.name}, ${item.pos}, ${
-                    item.pick ? 'draft capital' : `${item.nflTeam}, ${item.age} years`
-                  }, value ${ownerBoardValue(item).toLocaleString()}`}
-                  accessibilityHint="Adds this player to the trade"
-                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-                  onPress={() => onPick(item)}
-                >
-                  <PositionChip position={item.pos} size="sm" />
-                  <View style={styles.info}>
-                    <View style={styles.nameRow}>
-                      <Text style={type.title}>{item.name}</Text>
-                      {badgeFor?.(item) ? (
-                        <Badge
-                          label={badgeFor(item)!.label}
-                          color={badgeFor(item)!.color}
-                          colorText
-                        />
-                      ) : null}
+              ListHeaderComponent={
+                showSuggested ? (
+                  <View style={styles.suggestedWrap}>
+                    <TickLabel>Suggested</TickLabel>
+                    {suggested!.map((s) => (
+                      <React.Fragment key={s.player.id}>
+                        {renderRow(s.player, `calc.picker.suggested.${s.player.id}`, s.need)}
+                      </React.Fragment>
+                    ))}
+                    <View style={styles.suggestedFoot}>
+                      <TickLabel>All players</TickLabel>
                     </View>
-                    <Text style={type.bodySm}>
-                      {item.pick ? 'Draft capital' : `${item.nflTeam} · ${item.age} yrs`}
-                    </Text>
                   </View>
-                  <View style={styles.values}>
-                    <Text style={type.data}>{ownerBoardValue(item).toLocaleString()}</Text>
-                    {secondaryValue ? (
-                      <Text style={styles.yourValue}>
-                        {secondaryPrefix}: {secondaryValue(item).toLocaleString()}
-                      </Text>
-                    ) : null}
-                  </View>
-                </Pressable>
-              )}
+                ) : null
+              }
+              renderItem={({ item }) => renderRow(item, `calc.picker.row.${item.id}`)}
             />
           </SafeAreaView>
         </View>
@@ -217,6 +252,8 @@ const styles = StyleSheet.create({
     borderBottomColor: ink.line,
   },
   rowPressed: { backgroundColor: ink.ink3 },
+  suggestedWrap: { paddingTop: space.xs },
+  suggestedFoot: { paddingTop: space.md },
   info: { flex: 1 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   values: { alignItems: 'flex-end' },

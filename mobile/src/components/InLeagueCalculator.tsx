@@ -20,7 +20,8 @@ import {
   type CalcSuggestion,
 } from '../utils/tradeCalcMath';
 import TradeSide from './TradeSide';
-import PlayerPickerModal from './PlayerPickerModal';
+import TradeValueBar from './TradeValueBar';
+import PlayerPickerModal, { type SuggestedPlayer } from './PlayerPickerModal';
 import SuggestionCard from './SuggestionCard';
 import EvenerRows from './EvenerRows';
 import AdjustmentsDisclosure from './AdjustmentsDisclosure';
@@ -115,6 +116,11 @@ export default function InLeagueCalculator({
   const [giveIds, setGiveIds] = useState<string[]>(initialGiveIds ?? []);
   const [receiveIds, setReceiveIds] = useState<string[]>(initialReceiveIds ?? []);
   const [picker, setPicker] = useState<'give' | 'receive' | null>(null);
+  // #202 — a prefilled mount (deck "Edit in calculator") already made the
+  // partner decision, so the picker section collapses to one compact row
+  // ("Trading with @x · Change") and the trade itself leads. "Change"
+  // expands today's chips; no-prefill mounts keep today's layout.
+  const [partnerCollapsed, setPartnerCollapsed] = useState(!!initialOpponentId);
 
   const valuesQ = useQuery({
     queryKey: ['calc-values', format],
@@ -165,6 +171,24 @@ export default function InLeagueCalculator({
         },
         picks: t.picks && t.picks.count > 0 ? t.picks.value : null,
       };
+    }
+    return m;
+  }, [powerQ.data]);
+  // #203 — cheapest honest need signal: league-relative positional weakness
+  // from the SAME power-rankings read as the partner summaries (no caller-only
+  // /api/league/preferences call can serve the OPPONENT's needs). A position
+  // is a "need" for a team when its positional value ranks in the league's
+  // bottom third. Works symmetrically for the opponent (adding to what you
+  // send) and for you (adding to what you receive).
+  const needsByTeam = useMemo(() => {
+    const teams = powerQ.data?.teams ?? [];
+    const m: Record<string, Position[]> = {};
+    for (const pos of POSITIONS) {
+      const sorted = [...teams].sort(
+        (a, b) => (b.positions?.[pos]?.value ?? 0) - (a.positions?.[pos]?.value ?? 0),
+      );
+      const cut = Math.ceil((sorted.length * 2) / 3);
+      for (const t of sorted.slice(cut)) (m[t.user_id] ??= []).push(pos);
     }
     return m;
   }, [powerQ.data]);
@@ -247,6 +271,9 @@ export default function InLeagueCalculator({
   }, [opponentId]);
 
   const opponent = opponents.find((o) => o.user_id === opponentId) ?? null;
+  // #202 — collapse only while the prefilled partner actually resolves;
+  // an unknown initialOpponentId falls back to the full picker.
+  const collapsedPartner = partnerCollapsed && !!opponent;
   const myPoolPlayers = [
     ...((rosterByOwner[userId] ?? []).map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]),
     ...(picksByOwner[userId] ?? []),
@@ -276,6 +303,39 @@ export default function InLeagueCalculator({
   // the same Mode B evaluate call that renders the verdict — a card only
   // survives if the evaluator itself scores the sweetened trade as fairer.
   const ev = evalQ.data;
+
+  // #203 v1 — "Suggested" rows at the top of the add-player picker: only when
+  // the current trade is uneven AND this picker adds to the side gap.add_to
+  // points at. Ranked by value-closeness to the gap; a NEED badge marks
+  // assets whose position is a league-relative weakness of the RECEIVING
+  // team (needsByTeam above). Need-fillers inside the evener value window
+  // (0.4–1.5 × gap, mirroring the backend's _EVENER_WINDOW) sort first;
+  // outside it, value-closeness wins the order and the badge stays visible.
+  let pickerSuggestions: SuggestedPlayer[] = [];
+  if (picker && ev?.gap && ev.gap.add_to === picker && ev.gap.value > 0) {
+    const gapV = ev.gap.value;
+    const inTrade = new Set([...giveIds, ...receiveIds]);
+    const receiverId = picker === 'give' ? opponentId : userId;
+    const needs = new Set(receiverId ? needsByTeam[receiverId] ?? [] : []);
+    pickerSuggestions = (picker === 'give' ? myPoolPlayers : oppPoolPlayers)
+      .filter((p) => !inTrade.has(p.id))
+      .map((p) => {
+        const v = board[p.id] ?? 0;
+        return {
+          player: p,
+          need: needs.has(p.pos as Position),
+          dist: Math.abs(v - gapV),
+          inWindow: v >= gapV * 0.4 && v <= gapV * 1.5,
+        };
+      })
+      .sort(
+        (a, b) =>
+          Number(b.need && b.inWindow) - Number(a.need && a.inWindow) || a.dist - b.dist,
+      )
+      .slice(0, 4)
+      .map(({ player, need }) => ({ player, need }));
+  }
+
   const balancePlan = useMemo(() => {
     if (!ev || debGive.length === 0 || debReceive.length === 0) return null;
     const agreeable =
@@ -433,6 +493,27 @@ export default function InLeagueCalculator({
 
   return (
     <View style={styles.wrap}>
+      {collapsedPartner ? (
+        <View style={styles.partnerCollapsed} testID="calc.partner-collapsed" accessible={false}>
+          <Text style={styles.partnerCollapsedText} numberOfLines={1}>
+            Trading with <Text style={styles.partnerCollapsedName}>@{opponent!.username}</Text>
+          </Text>
+          <Pressable
+            testID="calc.partner-change"
+            onPress={() => {
+              haptics.selection();
+              setPartnerCollapsed(false);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={`Change trade partner, currently @${opponent!.username}`}
+            hitSlop={6}
+            style={({ pressed }) => [styles.changeBtn, pressed && styles.changeBtnPressed]}
+          >
+            <Text style={styles.changeText}>Change</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <TickLabel>Scoring format</TickLabel>
       <View style={styles.chipRow}>
         {FORMATS.map((f) => {
@@ -456,6 +537,8 @@ export default function InLeagueCalculator({
         })}
       </View>
 
+      {!collapsedPartner ? (
+        <>
       <TickLabel>Trade partner</TickLabel>
       <View style={styles.chipRow}>
         {opponents.map((o) => {
@@ -540,6 +623,8 @@ export default function InLeagueCalculator({
         }
         return <Text style={styles.note}>Priced by your rankings and @{opponent.username}'s.</Text>;
       })() : null}
+        </>
+      ) : null}
       {!picksSupported ? (
         <Text style={styles.note}>Draft picks aren't available for ESPN leagues.</Text>
       ) : null}
@@ -657,6 +742,7 @@ export default function InLeagueCalculator({
         visible={picker === 'give'}
         title="Send from your roster"
         players={myPoolPlayers}
+        suggested={pickerSuggestions}
         selectedIds={[...giveIds, ...receiveIds]}
         ownerBoardValue={(p: CalcPlayer) => board[p.id] ?? 0}
         onPick={(p) => {
@@ -669,6 +755,7 @@ export default function InLeagueCalculator({
         visible={picker === 'receive'}
         title={opponent ? `Receive from @${opponent.username}` : 'Receive'}
         players={oppPoolPlayers}
+        suggested={pickerSuggestions}
         selectedIds={[...giveIds, ...receiveIds]}
         ownerBoardValue={(p: CalcPlayer) => board[p.id] ?? 0}
         onPick={(p) => {
@@ -695,7 +782,12 @@ function shareVerdictLine(ev: CalcEvaluationInLeague, oppName: string): string {
   return ev.verdict ? `Consensus verdict: ${ev.verdict}` : 'Consensus read';
 }
 
-// Two-board verdict: how the trade reads by YOUR rankings and by THEIRS.
+// In-league verdict. #204: the shared pick-denominated TradeValueBar is the
+// headline visual (consistent with live mode's ConsensusVerdictCard), fed by
+// the same evaluate response's consensus fields. The two-board divergence
+// read stays below it — that's DIFFERENT information (each owner's board),
+// not a duplicate of the bar's market read. What the bar replaced: the old
+// consensus-basis headline sentence (now a one-line provenance note).
 function LeagueVerdict({
   ev,
   oppName,
@@ -708,11 +800,8 @@ function LeagueVerdict({
   const both = ev.give_value > 0 && ev.receive_value > 0;
   const youGain = ev.your_value_delta > 0;
   const theyGain = ev.their_value_delta > 0;
-  const headline = !both
-    ? 'Add a player to each side for a verdict.'
-    : ev.basis === 'consensus'
-    ? `Consensus read — @${oppName} hasn't ranked, so this is market value only.`
-    : ev.mutual_gain
+  // Two-board headline — only meaningful on a two-sided divergence read.
+  const headline = ev.mutual_gain
     ? 'Win–win — you both come out ahead by your own rankings.'
     : youGain && !theyGain
     ? `You win by your board — @${oppName} likely sees it as a loss.`
@@ -731,7 +820,23 @@ function LeagueVerdict({
         </Text>
         {stale ? <ActivityIndicator size="small" color={ice.base} /> : null}
       </View>
-      <Text style={[type.body, styles.headline]}>{headline}</Text>
+      {!both ? (
+        <Text style={[type.body, styles.headline]}>Add a player to each side for a verdict.</Text>
+      ) : (
+        <View style={styles.bar}>
+          <TradeValueBar
+            giveValue={ev.give_value}
+            receiveValue={ev.receive_value}
+            favors={ev.favors}
+            gap={ev.gap}
+          />
+        </View>
+      )}
+      {both && ev.basis === 'consensus' ? (
+        <Text style={[type.bodySm, styles.derivedNote]}>
+          Market values only — @{oppName} hasn't ranked.
+        </Text>
+      ) : null}
       {/* #191 — derived-board honesty line: their side of the verdict was
           value-mapped from the other format's board, not ranked here. */}
       {ev.basis === 'divergence' && ev.opponent_board_derived ? (
@@ -739,6 +844,9 @@ function LeagueVerdict({
           @{oppName}'s board converted from{' '}
           {FORMAT_LABEL[ev.opponent_board_derived_from ?? ''] ?? 'their other format'}.
         </Text>
+      ) : null}
+      {both && ev.basis === 'divergence' ? (
+        <Text style={[type.body, styles.headline]}>{headline}</Text>
       ) : null}
       {ev.basis === 'divergence' ? (
         <View style={styles.boards}>
@@ -816,11 +924,34 @@ const styles = StyleSheet.create({
     color: chalk.dim,
   },
   note: { ...type.bodySm },
+  // #202 — collapsed partner row ("Trading with @x · Change").
+  partnerCollapsed: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    minHeight: 44,
+    backgroundColor: ink.ink1,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: ink.line,
+    paddingHorizontal: space.md,
+  },
+  partnerCollapsedText: { ...type.bodySm, flex: 1, color: chalk.dim },
+  partnerCollapsedName: { color: chalk.base, fontFamily: fonts.uiSemi },
+  changeBtn: {
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingHorizontal: space.sm,
+    borderRadius: radii.sm,
+  },
+  changeBtnPressed: { backgroundColor: ink.ink3 },
+  changeText: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
   suggestions: { gap: space.sm },
   swap: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   rule: { flex: 1, height: 1, backgroundColor: ink.line },
   actions: { gap: space.sm, alignItems: 'stretch' },
   verdictHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  bar: { marginTop: space.sm },
   headline: { marginTop: space.xs },
   derivedNote: { marginTop: space.xs, color: chalk.dim },
   boards: { gap: space.xs, marginTop: space.sm },
