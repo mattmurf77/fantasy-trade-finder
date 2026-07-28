@@ -303,28 +303,54 @@ def _fetch_one(host: str, year: int, type_: str, league_id: str,
 def fetch_league_bundle(league_id: str, year: int, host: str,
                         cookie: str | None = None, timeout: int = 15,
                         _opener=None) -> dict:
-    """Fetch the four league-scoped exports (league, rosters,
-    futureDraftPicks, players) from the league's host.
+    """Fetch the five league-scoped exports (league, rosters,
+    futureDraftPicks, players, rules) from the league's host.
 
-    Returns {"league":…, "rosters":…, "futureDraftPicks":…, "players":…} of
-    raw MFL payloads. Spaces the live calls ≥1s apart (MFL guidance); no pause
-    when `_opener` is injected (tests). `players` is best-effort — a failure
-    there degrades to id-only crosswalk (positions unknown → those players
-    report as unmatched), never a hard error.
+    Returns {"league":…, "rosters":…, "futureDraftPicks":…, "players":…,
+    "rules":…} of raw MFL payloads. Spaces the live calls ≥1s apart (MFL
+    guidance); no pause when `_opener` is injected (tests). `players` and
+    `rules` are best-effort — a players failure degrades to id-only crosswalk
+    (positions unknown → those players report as unmatched); a rules failure
+    degrades scoring-format detection to lineup-only (#201, TEP undetectable)
+    — never a hard error.
     """
     if not str(league_id).strip().isdigit():
         raise MflError(f"league_id must be numeric, got {league_id!r}", kind="input")
 
     out: dict = {}
-    types = ["league", "rosters", "futureDraftPicks", "players"]
+    types = ["league", "rosters", "futureDraftPicks", "players", "rules"]
     for i, t in enumerate(types):
         if _opener is None and i > 0:
             time.sleep(_REQUEST_SPACING_SECONDS)
         try:
             out[t] = _fetch_one(host, year, t, league_id, cookie, timeout, _opener)
         except MflError:
-            if t == "players":
-                out[t] = {}      # degrade gracefully — positions best-effort
+            if t in ("players", "rules"):
+                out[t] = {}      # degrade gracefully — both are best-effort
+            else:
+                raise
+    return out
+
+
+def fetch_scoring_inputs(league_id: str, year: int, host: str,
+                         cookie: str | None = None, timeout: int = 15,
+                         _opener=None) -> dict:
+    """Fetch just the two exports detect_scoring_format needs (league +
+    rules) — the lightweight backfill path for leagues linked before format
+    detection existed (#201). Same best-effort contract as
+    fetch_league_bundle: a rules failure degrades to {}, a league failure
+    raises."""
+    if not str(league_id).strip().isdigit():
+        raise MflError(f"league_id must be numeric, got {league_id!r}", kind="input")
+    out: dict = {}
+    for i, t in enumerate(["league", "rules"]):
+        if _opener is None and i > 0:
+            time.sleep(_REQUEST_SPACING_SECONDS)
+        try:
+            out[t] = _fetch_one(host, year, t, league_id, cookie, timeout, _opener)
+        except MflError:
+            if t == "rules":
+                out[t] = {}
             else:
                 raise
     return out
@@ -426,6 +452,85 @@ def parse_bundle(raw: dict) -> dict:
         "franchises": franchises,
         "future_picks": future_picks,
     }
+
+
+# ---------------------------------------------------------------------------
+# Scoring-format detection (#201)
+# ---------------------------------------------------------------------------
+#
+# The app has exactly two format buckets ('1qb_ppr' / 'sf_tep'), and the
+# collapse convention mirrors Sleeper's server._detect_scoring_format_from_meta:
+#   Superflex OR TE Premium → 'sf_tep'; otherwise → '1qb_ppr'.
+# (SF is the dominant value-driver; a TEP-only league is still closer to the
+# sf_tep board than to plain 1QB PPR — same rationale, same bucketing.)
+#
+# MFL sources:
+#   • Superflex — the `league` export's starting-lineup config
+#     (league.starters.position: [{"name": "QB", "limit": "1-2"}, …]). MFL has
+#     no named superflex slot; SF leagues express it as a QB limit whose MAX
+#     is ≥ 2 ("2", "1-2"). We take the max integer in the QB limit string.
+#   • TE Premium — the `rules` export's scoring rules: TE per-reception
+#     points (event "CC" = every reception caught) strictly greater than
+#     WR per-reception points. MFL's JSON conversion wraps XML text nodes as
+#     {"$t": "…"} and collapses single-member lists to bare dicts — both are
+#     normalised here.
+
+def _txt(value) -> str:
+    """Unwrap MFL's JSON text-node convention ({"$t": "1.5*"} or "1.5*")."""
+    if isinstance(value, dict):
+        value = value.get("$t")
+    return "" if value is None else str(value)
+
+
+def _max_qb_starters(league: dict) -> int:
+    """Max startable QBs from the league export's starters config (0 when
+    the config is absent — old fixtures / trimmed exports)."""
+    import re
+    starters = league.get("starters") or {}
+    for pos in _as_list(starters.get("position")):
+        if not isinstance(pos, dict):
+            continue
+        if str(pos.get("name") or "").strip().upper() != "QB":
+            continue
+        nums = re.findall(r"\d+", _txt(pos.get("limit")))
+        return max((int(n) for n in nums), default=0)
+    return 0
+
+
+def _reception_points(raw: dict, position: str) -> float:
+    """Per-reception points for `position` from the rules export (event CC).
+    0.0 when the export is missing or carries no reception rule for it."""
+    best = 0.0
+    rules = (raw.get("rules") or {}).get("rules") or {}
+    for pr in _as_list(rules.get("positionRules")):
+        if not isinstance(pr, dict):
+            continue
+        positions = {p.strip().upper()
+                     for p in _txt(pr.get("positions")).split("|") if p.strip()}
+        if position.upper() not in positions:
+            continue
+        for rule in _as_list(pr.get("rule")):
+            if not isinstance(rule, dict):
+                continue
+            if _txt(rule.get("event")).strip().upper() != "CC":
+                continue
+            pts_str = _txt(rule.get("points")).replace("*", "").strip()
+            try:
+                pts = float(pts_str)
+            except ValueError:
+                continue
+            best = max(best, pts)
+    return best
+
+
+def detect_scoring_format(raw: dict) -> str:
+    """Derive the app's scoring-format key from a raw MFL bundle (needs the
+    `league` export; `rules` is optional — without it TEP is undetectable and
+    detection falls back to the lineup signal alone)."""
+    league = (raw.get("league") or {}).get("league") or {}
+    is_superflex = _max_qb_starters(league) >= 2
+    is_tep = _reception_points(raw, "TE") > _reception_points(raw, "WR")
+    return "sf_tep" if (is_superflex or is_tep) else "1qb_ppr"
 
 
 # ---------------------------------------------------------------------------

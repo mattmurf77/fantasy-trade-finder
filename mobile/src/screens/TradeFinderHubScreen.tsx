@@ -28,7 +28,6 @@ import { Icon, Button } from '../components/chalkline';
 import LeaguePill from '../components/LeaguePill';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import OutlookSheet from '../components/OutlookSheet';
-import FeedbackFAB from '../components/FeedbackFAB';
 import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { useFlag } from '../state/useFeatureFlags';
@@ -529,10 +528,13 @@ export default function TradeFinderHubScreen({ navigation }: any) {
         </View>
       </Modal>
 
-      {/* #188-adjacent — in-app feedback capture on the hub (every authed
-          screen carries the FAB during TestFlight; this screen is new
-          surface, so it mounts its own). */}
-      <FeedbackFAB activeScreen="TradesHome" />
+      {/* #196/#197 — NO local FeedbackFAB here. TradesHome is a Trades-stack
+          TAB screen, so RootNav's global mount already floats a FAB above the
+          tab bar (activeScreen tracks the focused route → "TradesHome"). The
+          hub's own mount (added in the hub-finish batch) rendered a SECOND
+          flag at a different height — the two don't overlap because this one
+          offsets from the screen's bottom edge, above the tab bar. Per the
+          #188 convention only root-stack pushes mount their own. */}
     </SafeAreaView>
   );
 }

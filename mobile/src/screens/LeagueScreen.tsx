@@ -462,6 +462,13 @@ export default function LeagueScreen() {
       <LeagueSwitcherSheet
         visible={switcherOpen}
         onClose={() => setSwitcherOpen(false)}
+        // #199 — upfront add-a-league entry: close the sheet and route to
+        // the root-stack LeaguePicker (navigate bubbles up from the tab
+        // stack), whose footer carries the ESPN/MFL/Fleaflicker link flows.
+        onAddLeague={() => {
+          setSwitcherOpen(false);
+          navigation.navigate('LeaguePicker');
+        }}
       />
 
       {/* league.rookie_board_entry — read-only rookie board (fetches only

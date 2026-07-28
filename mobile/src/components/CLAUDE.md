@@ -140,7 +140,7 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 - `trades.package-toggle` (#174 "Trade as one package" switch — renders with 2+ pinned give players, both board layouts; ON ⇒ `pinned_give_mode:'all'`)
 - `trades.team-picker.<user_id>` (#156 item 4 — in-screen manager sheet from the mode bar's Team chip; lands via setParams, in-place scope change auto-regenerates)
 - TradeCard (swipe variant only): `trade-card.keep-give` / `trade-card.keep-receive` (#186 per-side "Keep · more offers" — pins that side + regenerates) · `trade-card.edit-in-calc` (#190 → `TradeCalculator` with a `prefill` route param)
-- TradeFinderHubScreen: `finder-hub.dna.untouchables` (#173 — opens the untouchables management sheet) · `finder-hub.untouchables.row.<player_id>` · `finder-hub.untouchables.remove.<player_id>`; the hub also mounts its own `feedback.fab`
+- TradeFinderHubScreen: `finder-hub.dna.untouchables` (#173 — opens the untouchables management sheet) · `finder-hub.untouchables.row.<player_id>` · `finder-hub.untouchables.remove.<player_id>` (the hub's own `feedback.fab` mount was removed in #196 — RootNav's global mount covers it)
 
 **League outlook-odds tranche (2026-07-23, #169, flag `outlook.odds` — DARK):**
 - LeagueSummaryScreen: `league-summary.odds.section` (the gated playoff-picture container — present only when `outlook.odds` is on AND GET /api/league/outlook returns teams) · `league-summary.odds.beta-ribbon` (the load-bearing "Projected · preseason · beta" honesty label) · `league-summary.odds.source` (strength-source caption, e.g. "Preseason roster-value projection · 10,000 sims · top 6 make the playoffs") · `league-summary.odds.row.<roster_id>` (one team's projected playoff% / title% row, payload order). Flag off ⇒ none of these render and the endpoint is never called (it 404s while the modeling backend is dark). Basis toggle + dynasty-chart IDs unchanged.
@@ -186,5 +186,9 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 - TradeCard (swipe variant, top card only): `trade-card.remove-asset.<player_id>` (per-row ✕ — drops the asset + re-prices; dimmed with `accessibilityState.disabled` when it's the side's last asset, tap then voices the hint toast)
 - PlayerContextMenu on the top deck card: `trade-card.swap-suggest.<player_id>` (the "Swap suggestions" row — registry-specced override of the default `player-menu.<key>` id) · `player-menu.remove-asset` ("Remove from trade" row)
 - SwapSuggestSheet: `trade-card.swap-suggest-sheet` (sheet container) · `trade-card.swap-option.<id>` (one-tap replacement row; `<id>` = player_id, pick_id, or `<a>+<b>` for the 2-piece package) · `trade-card.swap-suggest-empty` (honest no-candidates state)
+
+**League switcher add-league + FAB dedup tranche (2026-07-27, #199/#196):**
+- LeagueSwitcherSheet: `league.switcher.add-league` (#199 — optional "Add a league" row pinned under the league list, rendered only when the host passes `onAddLeague`; wired on LeagueScreen's mount → closes the sheet and navigates to the root-stack `LeaguePicker`, whose footer carries the ESPN/MFL/Fleaflicker link flows)
+- TradeFinderHubScreen no longer mounts its own `feedback.fab` (#196/#197 — TradesHome is a tab-stack screen, RootNav's global mount covers it; the local mount rendered a second flag at a different height)
 
 **League rankings (#14 completion, 2026-07-20):** `RankChipBadge` — "#3 of 12" consensus power-rank chip from the open `GET /api/league/rank-chip` read (60s server cache); silent-fail enrichment (error/old-server/demo → renders nothing); ice text when top-3. Mounted on LeaguePicker rows + the League tab hero chips. testID `league.rank-chip.<league_id>`
