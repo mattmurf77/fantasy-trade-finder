@@ -99,7 +99,7 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-export default function TradeCalculatorScreen({ route }: any) {
+export default function TradeCalculatorScreen({ route, navigation }: any) {
   // #190 — deck "Edit in calculator": land in In-league mode with the
   // card's opponent + both sides preloaded. Route param only — no
   // calculator restructuring (InLeagueCalculator accepts the initial
@@ -562,6 +562,29 @@ export default function TradeCalculatorScreen({ route }: any) {
           })}
         </View>
 
+        {/* #213 — one quiet path from the hand-built calculator to the
+            finder. A single text-link row under the mode tabs covers every
+            calculator surface (In-league, live, demo) with one affordance —
+            InLeagueCalculator is only ever mounted here, so this is the one
+            "Find a trade" entry for the whole create-a-trade feature.
+            Chalk-dim text-link tier (the "More ways to rank" precedent),
+            never a button — the calculator's own actions keep primacy. */}
+        <Pressable
+          testID="calc.find-a-trade"
+          accessibilityRole="button"
+          accessibilityLabel="Find a trade"
+          accessibilityHint="Opens the trade finder for suggested trades"
+          onPress={() => navigation.navigate('TradesHome')}
+          hitSlop={8}
+          style={styles.findTradeRow}
+        >
+          {({ pressed }) => (
+            <Text style={[styles.findTradeText, pressed && { color: chalk.base }]}>
+              Want ideas instead? Find a trade →
+            </Text>
+          )}
+        </Pressable>
+
         {mode === 'league' && league && user ? (
           <InLeagueCalculator
             // #190 — remount when a different card is handed off so a
@@ -936,6 +959,9 @@ const styles = StyleSheet.create({
   modeChipActive: { backgroundColor: ink.ink3 },
   modeText: { fontFamily: fonts.uiSemi, fontSize: 13, lineHeight: 18, color: chalk.dim },
   modeTextActive: { color: ice.base },
+  // #213 — quiet finder hand-off row under the mode tabs.
+  findTradeRow: { alignSelf: 'flex-end' },
+  findTradeText: { ...type.bodySm, color: chalk.dim, fontFamily: fonts.uiSemi },
   partnerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   partnerChip: {
     minHeight: 44,
