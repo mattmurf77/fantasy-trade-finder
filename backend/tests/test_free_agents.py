@@ -78,6 +78,28 @@ def test_pick_pseudo_players_are_not_free_agents():
     assert "pick1" not in _ids(rows)
 
 
+def test_generic_pool_picks_are_not_free_agents():
+    """#222 — the universal pool's GENERIC picks carry a REAL position
+    (round 1 → RB, per server._PICK_POS, so they mix into the trio tabs)
+    with team == "PICK", and are never rostered — so the position filter
+    alone let a high-value "Early 1st Round Pick" top the RB free-agent
+    list. Pick assets must be excluded regardless of their position."""
+    pool = POOL + [
+        _p("generic_pick_1_early", "RB", name="Early 1st Round Pick", team="PICK"),
+        _p("generic_pick_2_mid", "WR", name="Mid 2nd Round Pick", team="PICK"),
+    ]
+    seed = {**SEED, "generic_pick_1_early": 1720.0, "generic_pick_2_mid": 1460.0}
+    rows = compute_free_agents(
+        pool_players=pool, seed_elo=seed, user_elo={},
+        rostered_ids={"qb1"}, user_roster=["rb1"],
+    )
+    ids = _ids(rows)
+    assert "generic_pick_1_early" not in ids
+    assert "generic_pick_2_mid" not in ids
+    # the real players still surface normally
+    assert "rb2" in ids and "wr1" in ids
+
+
 def test_empty_league_surfaces_whole_pool():
     """No rosters at all (e.g. league_members not yet synced) → every
     non-PICK pool player is a free agent."""

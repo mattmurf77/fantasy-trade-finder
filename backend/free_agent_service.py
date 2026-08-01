@@ -26,10 +26,14 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from .trade_service import elo_to_value
+from .trade_service import elo_to_value, is_pick_asset
 
-# Fantasy positions the finder surfaces. PICK pseudo-players (and any other
-# non-lineup asset in the universal pool) are never "free agents".
+# Fantasy positions the finder surfaces. Draft-pick assets are never "free
+# agents" — but the position filter alone does NOT exclude them (#222): the
+# universal pool's generic picks carry a REAL position (RB/WR/TE/QB, so they
+# mix into the trio tabs) and are never rostered, so round-1 generics were
+# surfacing as top "RB free agents". Pick assets are excluded explicitly via
+# trade_service.is_pick_asset (team == "PICK" or position == "PICK").
 FA_POSITIONS = ("QB", "RB", "WR", "TE")
 
 # Default cap on returned rows (applied AFTER the position filter, so a
@@ -96,7 +100,8 @@ def compute_free_agents(pool_players: list,
     ranked = sorted(
         ((p, board_value(p.id, user_elo, seed_elo))
          for p in pool_players
-         if p.position in FA_POSITIONS and p.id not in rostered),
+         if p.position in FA_POSITIONS and p.id not in rostered
+         and not is_pick_asset(p)),         # #222 — picks are never FAs
         key=lambda t: t[1], reverse=True,
     )
 
@@ -174,7 +179,7 @@ def compute_drop_candidates(pool_players: list,
     rows: list[dict] = []
     for pid in dict.fromkeys(str(x) for x in user_roster):
         p = players_by_id.get(pid)
-        if p is None or p.position not in FA_POSITIONS:
+        if p is None or p.position not in FA_POSITIONS or is_pick_asset(p):
             continue
         if pid in exclude:
             excluded_count += 1

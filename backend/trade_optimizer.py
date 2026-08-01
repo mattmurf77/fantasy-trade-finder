@@ -56,6 +56,7 @@ from .trade_service import (
     elo_to_value,
     filler_ok,
     fit_premium_1for1,
+    pick_swap_ok,
     marginal_value,
     outlook_blend_mult,
     package_value_v2,
@@ -472,6 +473,11 @@ def generate_pair_trades_v3(
             _allowed, _fit_paid = fit_premium_1for1(
                 give_ids, recv_ids, raw_user_elo, players, user_needs)
             if not _allowed:
+                continue
+            # #227 — a 1-for-1 pick-for-pick swap is pointless churn
+            # (mirrors the v2 _consider gate; gated before the near-miss
+            # collection below so the 3.4 sweetener pass can't rescue it).
+            if not pick_swap_ok(give_ids, recv_ids, players):
                 continue
             # #141 — junk-filler gate: any piece beyond a side's headliner
             # must clear filler_min_frac of that headliner on the MAX of

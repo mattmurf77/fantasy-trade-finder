@@ -749,6 +749,40 @@ def filler_ok(give_ids: list[str], recv_ids: list[str],
     return True
 
 
+def is_pick_asset(p) -> bool:
+    """True for any draft-pick asset in the player maps: owned-pick
+    pseudo-players (position == "PICK", injected by
+    server._owned_pick_assets) and the universal pool's generic picks
+    (which carry a REAL position so they mix into the trio tabs, but are
+    always team == "PICK"). None → False."""
+    return bool(p is not None and (
+        getattr(p, "position", None) == "PICK"
+        or getattr(p, "team", None) == "PICK"))
+
+
+def pick_swap_ok(give_ids: list[str], recv_ids: list[str],
+                 players: dict) -> bool:
+    """#227 — degenerate pick-churn gate: a 1-for-1 card where BOTH sides
+    are draft picks is never a suggestion. Picks carry zero divergence by
+    construction (every board is primed with the same bridged Elo), so a
+    pick-for-pick swap the fairness gate passes is ~equal-value churn with
+    no mutual-gain basis.
+
+    Deliberately NARROW (documented decision):
+      • pick + player for anything, and player-for-pick 1-for-1s, PASS —
+        picks as sweeteners/headline compensation are real trades.
+      • pure pick-for-pick PACKAGES (2-for-1 etc.) PASS — consolidating
+        two lesser picks into a better one changes asset shape, which has
+        genuine utility even at equal value.
+    Only the 1-for-1 both-sides-pick shape is banned outright. Shared by
+    the v2 pair path, the v3 optimizer and the consensus fallback.
+    """
+    if len(give_ids) != 1 or len(recv_ids) != 1:
+        return True
+    return not (is_pick_asset(players.get(give_ids[0]))
+                and is_pick_asset(players.get(recv_ids[0])))
+
+
 # ---------------------------------------------------------------------------
 # Roster strength analysis (Feature 2: roster-aware match context)
 # ---------------------------------------------------------------------------
@@ -3062,6 +3096,10 @@ class TradeService:
                 give_ids, recv_ids, raw_user_elo, players, user_needs)
             if not _allowed:
                 return
+            # #227 — a 1-for-1 pick-for-pick swap is pointless churn
+            # (picks carry zero divergence by construction).
+            if not pick_swap_ok(give_ids, recv_ids, players):
+                return
             # #141 — junk-filler gate: any piece beyond a side's headliner
             # must clear filler_min_frac of that headliner on the MAX of
             # the two raw boards. Junk both sides value low never pads a
@@ -3380,6 +3418,9 @@ class TradeService:
             # #108 — and when the user DOES have both players on their own
             # raw board, a 1-for-1 must respect that ordering too.
             if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
+                return
+            # #227 — a 1-for-1 pick-for-pick swap is pointless churn.
+            if not pick_swap_ok(give_ids, recv_ids, players):
                 return
             # #141 — junk-filler gate (2-for-1 shape): the added give piece
             # must clear filler_min_frac of the side's headliner on

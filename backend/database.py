@@ -6877,6 +6877,7 @@ def sync_draft_picks(
     seasons_ahead: int = 3,
     league_size: int = 12,
     scoring_format: str = "1qb_ppr",
+    exclude_seasons: tuple[int, ...] | set[int] = (),
 ) -> list[dict]:
     """
     Build the full pick grid for a dynasty league and persist it to the DB.
@@ -6899,8 +6900,23 @@ def sync_draft_picks(
     current_season     : current NFL year (default 2026)
     rounds             : number of draft rounds (default 3)
     seasons_ahead      : how many future seasons to include (default 3)
+    exclude_seasons    : seasons whose picks must NOT be synced (#228 —
+                         the caller passes the current season when that
+                         season's rookie draft is already complete; the
+                         replace-sync then also cleans previously synced
+                         rows for those seasons)
+
+    #220 guard: with NO roster_ids the "grid" would be empty and the
+    replace-sync below would WIPE the league's existing picks — the only
+    real producer of that input is an upstream Sleeper fetch failure
+    (the #200 clobber class), so this is a no-op that keeps the prior
+    snapshot instead. Returns [] without touching the DB.
     """
+    if not roster_ids:
+        return []
+
     now = _now()
+    exclude = {int(s) for s in exclude_seasons}
 
     # Step 1: build the pristine pick grid (everyone keeps their own picks)
     picks: dict[str, dict] = {}
@@ -6909,6 +6925,8 @@ def sync_draft_picks(
         user_id  = roster_id_to_user.get(rid_str, "")
         username = user_id_to_name.get(user_id, f"Roster {rid_str}")
         for season in range(current_season, current_season + seasons_ahead + 1):
+            if season in exclude:               # #228 — draft already held
+                continue
             for rnd in range(1, rounds + 1):
                 pick_id = f"{league_id}_{season}_{rnd}_{rid_str}"
                 picks[pick_id] = {
@@ -6938,6 +6956,8 @@ def sync_draft_picks(
             continue
 
         if not orig_rid or not new_rid or rnd < 1 or season < current_season:
+            continue
+        if season in exclude:                   # #228 — draft already held
             continue
 
         pick_id = f"{league_id}_{season}_{rnd}_{orig_rid}"
