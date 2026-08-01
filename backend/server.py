@@ -7667,6 +7667,78 @@ def _sync_mfl_owned_picks(league_id: str) -> int:
     return len(rows)
 
 
+def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
+                              scoring_format: str) -> list[dict] | None:
+    """#158 Sleeper owned-pick grid sync for one league (session-init daemon
+    step, extracted so the skip conditions are unit-testable).
+
+    #220 — sync_draft_picks REPLACE-syncs the league's grid, so running it
+    with a flaked Sleeper read used to WIPE the league's picks until the
+    next successful init (the same clobber class #200 fixed for misrouted
+    MFL ids, but on the genuine-Sleeper path: League Summary, suggestions
+    and the calculator all showed no draft capital in the window). When the
+    rosters or league-meta read is unavailable the sync now SKIPS and keeps
+    the prior snapshot — returns None (callers log and move on; the next
+    init retries).
+
+    #228 — leagues whose CURRENT-season rookie draft is already complete
+    must not carry that season's picks (they no longer exist as assets).
+    The drafts read is best-effort: a flake excludes nothing (today's
+    behavior); future seasons are always included. The replace-sync cleans
+    previously synced stale rows for the excluded season automatically.
+    """
+    _tp = _fetch_sleeper_traded_picks(league_id)
+    _prosters = _fetch_league_rosters(league_id)
+    _pmeta = _fetch_sleeper_league_meta(league_id)
+    if not _prosters or not _pmeta:
+        log.warning("  owned-pick sync skipped for %s — Sleeper %s "
+                    "unavailable (keeping prior snapshot)", league_id,
+                    "rosters" if not _prosters else "league meta")
+        return None
+    _rid_to_user = {
+        str(r.get("roster_id")): str(r.get("owner_id") or "")
+        for r in _prosters if isinstance(r, dict)
+    }
+    _rounds = 3
+    try:
+        _rounds = int((_pmeta.get("settings") or {}).get("draft_rounds") or 3)
+    except (TypeError, ValueError):
+        _rounds = 3
+    _cur_season = 2026
+    try:
+        _cur_season = int(_pmeta.get("season") or 2026)
+    except (TypeError, ValueError):
+        _cur_season = 2026
+    _lsize = 12
+    try:
+        _lsize = int(_pmeta.get("total_rosters") or len(_prosters) or 12)
+    except (TypeError, ValueError):
+        _lsize = len(_prosters) or 12
+    # #228 — current season's draft already held ⇒ exclude that season.
+    _exclude: set[int] = set()
+    for d in _fetch_sleeper_drafts(league_id):
+        try:
+            if (isinstance(d, dict) and d.get("status") == "complete"
+                    and int(d.get("season") or 0) == _cur_season):
+                _exclude.add(_cur_season)
+        except (TypeError, ValueError):
+            continue
+    return sync_draft_picks(
+        league_id         = league_id,
+        roster_ids        = [r.get("roster_id") for r in _prosters
+                             if isinstance(r, dict) and r.get("roster_id") is not None],
+        traded_picks      = _tp,
+        roster_id_to_user = _rid_to_user,
+        user_id_to_name   = uid_to_name,
+        current_season    = _cur_season,
+        rounds            = max(1, _rounds),
+        seasons_ahead     = 3,
+        league_size       = _lsize,
+        scoring_format    = scoring_format,
+        exclude_seasons   = _exclude,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Trade API Routes
 # ---------------------------------------------------------------------------
@@ -8657,6 +8729,25 @@ def _fetch_sleeper_traded_picks(league_id: str) -> list[dict]:
     except Exception:
         return []
     return tp if isinstance(tp, list) else []
+
+
+def _fetch_sleeper_drafts(league_id: str) -> list[dict]:
+    """Public drafts list for a Sleeper league (fail-soft → []).
+
+    Endpoint: https://api.sleeper.app/v1/league/<id>/drafts — unauth, same
+    trust level as _fetch_sleeper_traded_picks. Each entry carries
+    {draft_id, status ("pre_draft"|"drafting"|"complete"), season(str),
+    type, ...}. #228 uses `status`/`season` to hide current-season picks
+    once that season's rookie draft is complete; a fetch failure returns []
+    (no exclusion — degrade to today's behavior, never fabricate).
+    """
+    if not league_id or not str(league_id).isdigit():
+        return []
+    try:
+        ds = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/drafts")
+    except Exception:
+        return []
+    return ds if isinstance(ds, list) else []
 
 
 def _roster_id_for_owner(rosters, owner_id) -> int | None:
@@ -11368,49 +11459,23 @@ def session_init():
                     if _npk:
                         log.info("  ✅ MFL owned picks re-normalized (%d picks)", _npk)
                 elif is_enabled("picks.owned_sync") and str(league_id).isdigit():
-                    _tp = _fetch_sleeper_traded_picks(league_id)
-                    _prosters = _fetch_league_rosters(league_id) or []
-                    _pmeta = _fetch_sleeper_league_meta(league_id) or {}
-                    _rid_to_user = {
-                        str(r.get("roster_id")): str(r.get("owner_id") or "")
-                        for r in _prosters if isinstance(r, dict)
-                    }
+                    # #220 — the fetch + replace-sync now lives in
+                    # _sync_sleeper_owned_picks, which SKIPS (returns None,
+                    # keeping the prior snapshot) when the Sleeper rosters
+                    # or meta read is unavailable instead of replace-syncing
+                    # an empty grid; #228 excludes the current season once
+                    # its rookie draft is complete.
                     _uid_to_name = {
                         str(m.user_id): (m.username or "")
                         for m in (members or []) if getattr(m, "user_id", None)
                     }
                     # Include the logged-in user (not part of `members`).
                     _uid_to_name[str(user_id)] = display_name or username or str(user_id)
-                    _rounds = 3
-                    try:
-                        _rounds = int((_pmeta.get("settings") or {}).get("draft_rounds") or 3)
-                    except (TypeError, ValueError):
-                        _rounds = 3
-                    _cur_season = 2026
-                    try:
-                        _cur_season = int(_pmeta.get("season") or 2026)
-                    except (TypeError, ValueError):
-                        _cur_season = 2026
-                    _lsize = 12
-                    try:
-                        _lsize = int(_pmeta.get("total_rosters") or len(_prosters) or 12)
-                    except (TypeError, ValueError):
-                        _lsize = len(_prosters) or 12
-                    _n_picks = sync_draft_picks(
-                        league_id         = league_id,
-                        roster_ids        = [r.get("roster_id") for r in _prosters
-                                             if isinstance(r, dict) and r.get("roster_id") is not None],
-                        traded_picks      = _tp,
-                        roster_id_to_user = _rid_to_user,
-                        user_id_to_name   = _uid_to_name,
-                        current_season    = _cur_season,
-                        rounds            = max(1, _rounds),
-                        seasons_ahead     = 3,
-                        league_size       = _lsize,
-                        scoring_format    = active_format,
-                    )
-                    log.info("  ✅ owned draft picks synced (%d picks, %d rounds, season %d)",
-                             len(_n_picks), _rounds, _cur_season)
+                    _n_picks = _sync_sleeper_owned_picks(
+                        league_id, _uid_to_name, active_format)
+                    if _n_picks is not None:
+                        log.info("  ✅ owned draft picks synced (%d picks)",
+                                 len(_n_picks))
             except Exception as pk_err:
                 log.warning("  owned-pick sync failed (continuing): %s", pk_err)
 

@@ -126,6 +126,143 @@ def test_double_traded_pick_resolves_to_last_owner(_clean_league):
     assert pk["owner_user_id"] == "u3"
 
 
+# ── #220 — a flaked Sleeper read must never wipe the pick grid ─────────────
+# sync_draft_picks REPLACE-syncs, so the daemon feeding it an empty rosters
+# list (the only real producer is an upstream Sleeper fetch failure) deleted
+# every pick the league had — League Summary, suggestions and the calculator
+# then showed no draft capital until the next successful init. The sync now
+# no-ops on empty roster_ids, and the daemon step (_sync_sleeper_owned_picks)
+# skips outright when the rosters or meta read is unavailable.
+
+def _seed_grid(league_id):
+    return db.sync_draft_picks(
+        league_id=league_id, roster_ids=[1, 2], traded_picks=[],
+        roster_id_to_user={"1": "u1", "2": "u2"},
+        user_id_to_name={"u1": "Alice", "u2": "Bob"},
+        current_season=2026, rounds=4, seasons_ahead=3,
+    )
+
+
+def test_sync_empty_roster_ids_keeps_prior_snapshot(_clean_league):
+    before = _seed_grid(_LEAGUE)
+    assert len(before) == 32
+    # The pre-#220 behavior: an empty roster list replace-synced to nothing.
+    out = db.sync_draft_picks(
+        league_id=_LEAGUE, roster_ids=[], traded_picks=[],
+        roster_id_to_user={}, user_id_to_name={},
+        current_season=2026, rounds=4, seasons_ahead=3,
+    )
+    assert out == []
+    assert len(db.load_draft_picks(_LEAGUE)) == 32   # snapshot preserved
+
+
+def test_daemon_step_skips_when_sleeper_rosters_unavailable(
+        _clean_league, monkeypatch):
+    _seed_grid(_LEAGUE)
+    monkeypatch.setattr(srv, "_fetch_sleeper_traded_picks", lambda lid: [])
+    monkeypatch.setattr(srv, "_fetch_league_rosters", lambda lid: None)
+    monkeypatch.setattr(srv, "_fetch_sleeper_league_meta",
+                        lambda lid: {"season": "2026", "total_rosters": 2,
+                                     "settings": {"draft_rounds": 4}})
+    assert srv._sync_sleeper_owned_picks(_LEAGUE, {}, "1qb_ppr") is None
+    assert len(db.load_draft_picks(_LEAGUE)) == 32   # snapshot preserved
+
+
+def test_daemon_step_skips_when_league_meta_unavailable(
+        _clean_league, monkeypatch):
+    _seed_grid(_LEAGUE)
+    monkeypatch.setattr(srv, "_fetch_sleeper_traded_picks", lambda lid: [])
+    monkeypatch.setattr(
+        srv, "_fetch_league_rosters",
+        lambda lid: [{"roster_id": 1, "owner_id": "u1"},
+                     {"roster_id": 2, "owner_id": "u2"}])
+    monkeypatch.setattr(srv, "_fetch_sleeper_league_meta", lambda lid: None)
+    assert srv._sync_sleeper_owned_picks(_LEAGUE, {}, "1qb_ppr") is None
+    assert len(db.load_draft_picks(_LEAGUE)) == 32   # snapshot preserved
+
+
+# ── #228 — completed rookie draft hides that season's picks ────────────────
+
+def test_sync_excludes_completed_draft_season(_clean_league):
+    rows = db.sync_draft_picks(
+        league_id=_LEAGUE, roster_ids=[1, 2],
+        traded_picks=[
+            # a traded CURRENT-season pick must be excluded too
+            {"season": "2026", "round": 1, "roster_id": 1, "owner_id": 2},
+            # future-season trades keep applying
+            {"season": "2027", "round": 1, "roster_id": 1, "owner_id": 2},
+        ],
+        roster_id_to_user={"1": "u1", "2": "u2"},
+        user_id_to_name={"u1": "Alice", "u2": "Bob"},
+        current_season=2026, rounds=4, seasons_ahead=3,
+        exclude_seasons={2026},
+    )
+    assert all(r["season"] != 2026 for r in rows)
+    # 2 rosters × 3 remaining seasons (2027..2029) × 4 rounds
+    assert len(rows) == 2 * 3 * 4
+    traded = next(r for r in rows if r["season"] == 2027 and r["round"] == 1
+                  and r["original_roster_id"] == "1")
+    assert traded["owner_user_id"] == "u2" and traded["is_traded"] == 1
+
+
+def test_replace_sync_cleans_stale_current_season_rows(_clean_league):
+    # Synced BEFORE the draft: 2026 rows exist…
+    _seed_grid(_LEAGUE)
+    assert any(p["season"] == 2026 for p in db.load_draft_picks(_LEAGUE))
+    # …the draft completes; the next sync excludes 2026 and the replace-sync
+    # semantics clean the stale rows.
+    db.sync_draft_picks(
+        league_id=_LEAGUE, roster_ids=[1, 2], traded_picks=[],
+        roster_id_to_user={"1": "u1", "2": "u2"},
+        user_id_to_name={"u1": "Alice", "u2": "Bob"},
+        current_season=2026, rounds=4, seasons_ahead=3,
+        exclude_seasons={2026},
+    )
+    picks = db.load_draft_picks(_LEAGUE)
+    assert picks and all(p["season"] != 2026 for p in picks)
+
+
+def test_daemon_step_excludes_current_season_when_draft_complete(
+        _clean_league, monkeypatch):
+    monkeypatch.setattr(srv, "_fetch_sleeper_traded_picks", lambda lid: [])
+    monkeypatch.setattr(
+        srv, "_fetch_league_rosters",
+        lambda lid: [{"roster_id": 1, "owner_id": "u1"},
+                     {"roster_id": 2, "owner_id": "u2"}])
+    monkeypatch.setattr(srv, "_fetch_sleeper_league_meta",
+                        lambda lid: {"season": "2026", "total_rosters": 2,
+                                     "settings": {"draft_rounds": 4}})
+    monkeypatch.setattr(srv, "_fetch_sleeper_drafts",
+                        lambda lid: [{"draft_id": "d1", "status": "complete",
+                                      "season": "2026", "type": "linear"}])
+    rows = srv._sync_sleeper_owned_picks(_LEAGUE, {"u1": "Alice"}, "1qb_ppr")
+    assert rows is not None
+    assert all(r["season"] != 2026 for r in rows)
+    assert any(r["season"] == 2027 for r in rows)     # future seasons intact
+
+
+def test_daemon_step_no_exclusion_when_draft_pending_or_flaked(
+        _clean_league, monkeypatch):
+    monkeypatch.setattr(srv, "_fetch_sleeper_traded_picks", lambda lid: [])
+    monkeypatch.setattr(
+        srv, "_fetch_league_rosters",
+        lambda lid: [{"roster_id": 1, "owner_id": "u1"},
+                     {"roster_id": 2, "owner_id": "u2"}])
+    monkeypatch.setattr(srv, "_fetch_sleeper_league_meta",
+                        lambda lid: {"season": "2026", "total_rosters": 2,
+                                     "settings": {"draft_rounds": 4}})
+    # pre_draft status → keep current-season picks
+    monkeypatch.setattr(srv, "_fetch_sleeper_drafts",
+                        lambda lid: [{"draft_id": "d1", "status": "pre_draft",
+                                      "season": "2026", "type": "linear"}])
+    rows = srv._sync_sleeper_owned_picks(_LEAGUE, {}, "1qb_ppr")
+    assert any(r["season"] == 2026 for r in rows)
+    # drafts read flaked ([]) → degrade to today's behavior (no exclusion)
+    monkeypatch.setattr(srv, "_fetch_sleeper_drafts", lambda lid: [])
+    rows = srv._sync_sleeper_owned_picks(_LEAGUE, {}, "1qb_ppr")
+    assert any(r["season"] == 2026 for r in rows)
+
+
 # ── MFL normalization (FR-2) ───────────────────────────────────────────────
 
 _MFL_LEAGUE = "test_owned_picks_mfl"
