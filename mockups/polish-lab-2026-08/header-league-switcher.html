@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Header League Switcher (#223/#224)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+.note{max-width:980px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note b{color:var(--chalk)}
+.note ul{margin:6px 0 0 18px}.note li{margin:3px 0}
+.lab{display:flex;flex-wrap:wrap;gap:28px;justify-content:center;align-items:flex-start;max-width:1400px}
+.side{display:flex;flex-direction:column;gap:12px;align-items:center}
+.side>.tag{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:15px;padding:4px 12px;border-radius:2px;border:1px solid var(--line)}
+.tag.cur{color:var(--dim)} .tag.pro{color:var(--ice);border-color:var(--ice)}
+.frames{display:flex;gap:20px;flex-wrap:wrap;justify-content:center;align-items:flex-start}
+.frameWrap{display:flex;flex-direction:column;gap:8px;align-items:center}
+.cap{font-size:12px;color:var(--faint);max-width:390px;text-align:center;line-height:1.5}
+
+.phone{width:390px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55);position:relative}
+.status{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+
+svg.i{fill:none;stroke-width:1.75;stroke-linecap:square;stroke-linejoin:miter}
+
+/* ── Current TopBar (faithful: TopBar.tsx) ── */
+.topbar{height:44px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:var(--ink0)}
+.wordmark{display:flex;align-items:center;gap:8px}
+.wordmark .tick{width:3px;height:14px;background:var(--ice)}
+.wordmark .txt{font-family:var(--f-display);font-weight:600;font-size:16px;letter-spacing:.03em;text-transform:uppercase;color:var(--chalk)}
+.tbActions{display:flex;align-items:center}
+.iconBtn{width:36px;height:36px;border-radius:4px;display:flex;align-items:center;justify-content:center;position:relative}
+.iconBtn svg{stroke:var(--dim)}
+.iconBtn+.iconBtn{margin-left:8px}
+.dot{position:absolute;top:-2px;right:-2px;min-width:18px;height:18px;border-radius:999px;background:var(--neg);border:1.5px solid var(--ink0);
+  display:flex;align-items:center;justify-content:center;padding:0 4px;font-family:var(--f-mono);font-size:10px;color:var(--chalk)}
+
+/* body bits */
+.body{padding:16px;display:flex;flex-direction:column;gap:12px;min-height:480px}
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.hero{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px}
+.heroHead{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.heroName{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:22px;line-height:1.18}
+.heroChips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.badge{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--lineStrong);border-radius:2px;padding:2px 6px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.badge.ice{border-color:var(--ice);color:var(--ice)}
+.tilegrid{display:flex;gap:12px}
+.tile{flex:1;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:12px}
+.tile .n{font-family:var(--f-mono);font-weight:600;font-size:22px}
+.tile .t{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-top:2px}
+.leaguepill{display:flex;align-items:center;gap:12px;background:var(--ink1);border:1px solid var(--lineStrong);border-radius:2px;padding:12px 16px;min-height:44px}
+.leaguepill .nm{font-size:16px;font-weight:600;margin-top:2px}
+.ghostrow{height:56px;border:1px solid var(--line);border-radius:8px;background:var(--ink1);opacity:.5}
+
+/* annotations */
+.ann{position:absolute;z-index:5;font-size:11px;font-family:var(--f-mono);color:var(--flare);background:rgba(12,14,17,.92);border:1px solid var(--flare);border-radius:2px;padding:2px 6px;max-width:180px;line-height:1.4}
+.ann.iceA{color:var(--ice);border-color:var(--ice)}
+
+/* ── Proposed header ── */
+.topbar2{height:52px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:var(--ink0)}
+.lgBtn{display:flex;align-items:center;gap:8px;min-width:0;flex:1;margin-right:8px}
+.lgBtn .tick{width:3px;height:22px;background:var(--ice);flex:0 0 auto}
+.lgStack{min-width:0}
+.lgStack .k{font-size:11px;line-height:12px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--faint)}
+.lgRow{display:flex;align-items:center;gap:5px;min-width:0}
+.lgRow .nm{font-size:15px;line-height:19px;font-weight:600;color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lgRow svg{stroke:var(--ice);flex:0 0 auto}
+
+/* tab bar */
+.tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink0)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 14px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{stroke:var(--faint)}
+.tab.on{color:var(--ice)} .tab.on svg{stroke:var(--ice)}
+
+/* switcher sheet overlay */
+.scrim{position:absolute;inset:0;background:rgba(7,9,12,.78);z-index:8}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:9;background:var(--ink2);border:1px solid var(--line);
+  border-radius:8px 8px 0 0;padding:16px 16px 32px;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+.grab{width:32px;height:4px;background:var(--lineStrong);margin:0 auto 8px}
+.shTitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:22px}
+.shSub{font-size:13px;color:var(--dim);margin:2px 0 8px}
+.lrow{display:flex;align-items:center;gap:12px;padding:12px 4px;min-height:44px;border-bottom:1px solid var(--line)}
+.lrow .nm{font-size:16px;font-weight:600}
+.lrow .meta{font-size:13px;color:var(--dim);margin-top:2px}
+.lrow svg{margin-left:auto;flex:0 0 auto}
+.addrow{display:flex;align-items:center;gap:12px;padding:12px 4px;min-height:44px;border-top:1px solid var(--line)}
+.addrow .nm{font-size:16px;font-weight:600;color:var(--ice)}
+.cancel{margin-top:12px;text-align:center;color:var(--dim);font-size:14px;padding:10px}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Header League Switcher — #223 / #224</h1>
+  <p><b>Operator ask:</b> "league switcher should be built into the header where the settings and bell icon is… builds the league name into the header with some sort of visual indicator that users can click it and switch."</p>
+  <p><b>Left = current</b> (faithful to <code>TopBar.tsx</code> + <code>LeagueScreen</code> hero + <code>LeaguePill</code>). <b>Right = proposed</b> global header carrying the league name on every tab, plus the opened switcher sheet (the shipped <code>LeagueSwitcherSheet</code>, unchanged, incl. the #199 "Add a league" row).</p>
+</div>
+
+<div class="lab">
+
+  <!-- ══════════ CURRENT ══════════ -->
+  <div class="side">
+    <div class="tag cur">Current</div>
+    <div class="frames">
+      <div class="frameWrap">
+        <div class="phone">
+          <div class="ann" style="top:88px;right:10px">wordmark only —<br>no league context</div>
+          <div class="ann" style="top:196px;left:10px">switching lives here,<br>League tab only</div>
+          <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+          <div class="topbar">
+            <div class="wordmark"><div class="tick"></div><div class="txt">Trade Finder</div></div>
+            <div class="tbActions">
+              <div class="iconBtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg></div>
+              <div class="iconBtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+                <div class="dot">2</div></div>
+            </div>
+          </div>
+          <div class="body">
+            <!-- League home hero: heroHead label + chevron, name, chips -->
+            <div class="hero">
+              <div class="heroHead"><span class="lbl">League</span>
+                <svg class="i" width="16" height="16" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M5 8l5 5 5-5"/></svg></div>
+              <div class="heroName">Dynasty Degens Superflex</div>
+              <div class="heroChips">
+                <span class="badge ice">#3 of 12</span>
+                <span class="badge">12 teams</span>
+                <span class="badge">SF TEP</span>
+              </div>
+            </div>
+            <div class="lbl" style="margin-top:4px">Matches</div>
+            <div class="tilegrid">
+              <div class="tile"><div class="n">2</div><div class="t">Mutual</div></div>
+              <div class="tile"><div class="n">1</div><div class="t">Awaiting</div></div>
+            </div>
+            <div class="lbl" style="margin-top:4px">Explore</div>
+            <div class="ghostrow"></div>
+            <div class="ghostrow"></div>
+          </div>
+          <div class="tabbar">
+            <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M4 18v-6h4v6M9 18V6h4v12M14 18v-9h4v9"/></svg>Rank</div>
+            <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M4 8h12M13 5l3 3-3 3M18 15H6M9 12l-3 3 3 3"/></svg>Trades</div>
+            <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M8 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M14 9a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+            <div class="tab on"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M11 3l7 4v8l-7 4-7-4V7z"/></svg>League</div>
+          </div>
+        </div>
+        <div class="cap">League tab. The hero card is the switcher entry point (tap opens the sheet). The top bar spends its left half on the static wordmark.</div>
+      </div>
+
+      <div class="frameWrap">
+        <div class="phone">
+          <div class="ann" style="top:150px;left:10px">Trades adds its own<br>"Trading in" pill — a second,<br>screen-local switcher</div>
+          <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+          <div class="topbar">
+            <div class="wordmark"><div class="tick"></div><div class="txt">Trade Finder</div></div>
+            <div class="tbActions">
+              <div class="iconBtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg></div>
+              <div class="iconBtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg></div>
+            </div>
+          </div>
+          <div class="body" style="min-height:300px">
+            <div style="font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:22px">Find a Trade</div>
+            <div class="leaguepill">
+              <div style="flex:1;min-width:0"><div class="lbl">Trading in</div>
+                <div class="nm" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Dynasty Degens Superflex</div></div>
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M5 8l5 5 5-5"/></svg>
+            </div>
+            <div class="ghostrow" style="height:120px"></div>
+            <div class="ghostrow"></div>
+          </div>
+          <div class="tabbar">
+            <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M4 18v-6h4v6M9 18V6h4v12M14 18v-9h4v9"/></svg>Rank</div>
+            <div class="tab on"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M4 8h12M13 5l3 3-3 3M18 15H6M9 12l-3 3 3 3"/></svg>Trades</div>
+            <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M8 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M14 9a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+            <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M11 3l7 4v8l-7 4-7-4V7z"/></svg>League</div>
+          </div>
+        </div>
+        <div class="cap">Trades hub today: the <code>LeaguePill</code> re-states the league below the title. Rank and Matches show no league at all — you must trek to League (or a pill screen) to switch.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ PROPOSED ══════════ -->
+  <div class="side">
+    <div class="tag pro">Proposed</div>
+    <div class="frames">
+      <div class="frameWrap">
+        <div class="phone">
+          <div class="ann iceA" style="top:78px;left:120px">league name IS the header —<br>ice chevron = "tap to switch"</div>
+          <div class="ann iceA" style="top:196px;right:10px">LeaguePill removed —<br>header already says it</div>
+          <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+          <div class="topbar2">
+            <div class="lgBtn">
+              <div class="tick"></div>
+              <div class="lgStack">
+                <div class="k">League</div>
+                <div class="lgRow">
+                  <span class="nm">Dynasty Degens Superflex</span>
+                  <svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg>
+                </div>
+              </div>
+            </div>
+            <div class="tbActions">
+              <div class="iconBtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+                <div class="dot">2</div></div>
+              <div class="iconBtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg></div>
+            </div>
+          </div>
+          <div class="body" style="min-height:392px">
+            <div style="font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:22px">Find a Trade</div>
+            <div class="ghostrow" style="height:120px"></div>
+            <div class="ghostrow" style="height:64px"></div>
+            <div class="ghostrow" style="height:64px"></div>
+          </div>
+          <div class="tabbar">
+            <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M4 18v-6h4v6M9 18V6h4v12M14 18v-9h4v9"/></svg>Rank</div>
+            <div class="tab on"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M4 8h12M13 5l3 3-3 3M18 15H6M9 12l-3 3 3 3"/></svg>Trades</div>
+            <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M8 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M14 9a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+            <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M11 3l7 4v8l-7 4-7-4V7z"/></svg>League</div>
+          </div>
+        </div>
+        <div class="cap">The same header renders on Rank, Trades, Matches and League — that's the point. On the Trades tab the pill row disappears and its ~63pt goes back to content (feeds directly into the #218 fit-to-screen pass). Long names tail-truncate at ~200pt.</div>
+      </div>
+
+      <div class="frameWrap">
+        <div class="phone" style="height:620px">
+          <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+          <div class="topbar2">
+            <div class="lgBtn">
+              <div class="tick"></div>
+              <div class="lgStack">
+                <div class="k">League</div>
+                <div class="lgRow">
+                  <span class="nm">Dynasty Degens Superflex</span>
+                  <svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg>
+                </div>
+              </div>
+            </div>
+            <div class="tbActions">
+              <div class="iconBtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg></div>
+              <div class="iconBtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg></div>
+            </div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div class="shTitle">Switch league</div>
+            <div class="shSub">Picking a league reloads your team rosters and trade pool.</div>
+            <div class="lrow">
+              <div style="flex:1;min-width:0"><div class="nm">Dynasty Degens Superflex</div><div class="meta">12 teams</div></div>
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" style="stroke:var(--ice)"><path d="M4 10.5l4 4 8-9"/></svg>
+            </div>
+            <div class="lrow">
+              <div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px"><span class="nm">The Gauntlet</span><span class="badge">ESPN</span></div><div class="meta">10 teams</div></div>
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M8 5l5 5-5 5"/></svg>
+            </div>
+            <div class="lrow" style="border-bottom:0">
+              <div style="flex:1;min-width:0"><div class="nm">Murph's Dynasty Empire</div><div class="meta">12 teams</div></div>
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M8 5l5 5-5 5"/></svg>
+            </div>
+            <div class="addrow">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" style="stroke:var(--ice)"><path d="M10 4v12M4 10h12"/></svg>
+              <span class="nm">Add a league</span>
+            </div>
+            <div class="cancel">Cancel</div>
+          </div>
+        </div>
+        <div class="cap">Tapping the league name opens the existing <code>LeagueSwitcherSheet</code> — untouched: active check in ice, ESPN badge, #199 "Add a league" row → LeaguePicker. The sheet just becomes reachable from every tab.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <h1 style="font-size:16px">What changed &amp; why</h1>
+  <ul>
+    <li><b>League name replaces the wordmark</b> in the global TopBar (11px "LEAGUE" micro-label over the name; brand survives as the ice tick). Users think in leagues, not app names — the header should answer "where am I trading?" on every tab.</li>
+    <li><b>Ice chevron-down beside the name = the click indicator</b> (ice = action, per Chalkline). Whole left cluster is one ≥44pt hit target; pressed state = ink-3 fill, same as today's icon buttons.</li>
+    <li><b>Bell and gear stay put</b> (bell moved inboard of gear so the unread badge sits away from the screen edge) — muscle memory for #topbar.settings / the bell is preserved.</li>
+    <li><b>One switcher, everywhere:</b> the LeagueScreen hero keeps its card but drops the chevron affordance duty; the Trades <code>LeaguePill</code> row is removed, returning ~63pt to the hub (see hub-fit-to-screen.html). The sheet itself (LeagueSwitcherSheet incl. "Add a league") ships as-is.</li>
+    <li><b>Bar grows 44→52pt</b> to fit the two-line label/name stack at the 11px type floor — cheaper than it looks, since the pill/hero rows it replaces cost 60+pt per screen.</li>
+  </ul>
+</div>
+
+</body>
+</html>

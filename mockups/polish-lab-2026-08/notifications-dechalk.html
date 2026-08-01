@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Notifications De-Chalk (#225)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+.note{max-width:980px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note b{color:var(--chalk)}
+.note ul{margin:6px 0 0 18px}.note li{margin:3px 0}
+.lab{display:flex;flex-wrap:wrap;gap:36px;justify-content:center;align-items:flex-start}
+.side{display:flex;flex-direction:column;gap:12px;align-items:center}
+.side>.tag{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:15px;padding:4px 12px;border-radius:2px;border:1px solid var(--line)}
+.tag.cur{color:var(--dim)} .tag.pro{color:var(--ice);border-color:var(--ice)}
+.cap{font-size:12px;color:var(--faint);max-width:400px;text-align:center;line-height:1.5}
+
+.phone{width:390px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55);position:relative}
+.status{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+svg.i{fill:none;stroke-width:1.75;stroke-linecap:square;stroke-linejoin:miter}
+.ann{position:absolute;z-index:7;font-size:11px;font-family:var(--f-mono);background:rgba(12,14,17,.94);border-radius:2px;padding:2px 6px;line-height:1.45}
+.ann.f{color:var(--flare);border:1px solid var(--flare)}
+.ann.c{color:var(--ice);border:1px solid var(--ice)}
+
+/* ── iOS push banners (OS chrome depiction, not app UI) ── */
+.pushzone{padding:10px 10px 16px;background:#101418;display:flex;flex-direction:column;gap:8px}
+.pushzone .zlabel{font-family:var(--f-mono);font-size:11px;color:var(--faint);padding:2px 6px}
+.banner{background:#23262b;border-radius:14px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start;box-shadow:0 6px 18px rgba(0,0,0,.4)}
+.appic{width:34px;height:34px;border-radius:8px;background:var(--ink0);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.appic .tick{width:3px;height:12px;background:var(--ice);margin-right:3px}
+.appic span{font-family:var(--f-display);font-weight:700;font-size:12px;color:var(--chalk)}
+.banner .bt{font-size:13px;font-weight:600;line-height:1.35}
+.banner .bb{font-size:13px;color:#c8cdd4;line-height:1.35;margin-top:1px}
+.banner .when{margin-left:auto;font-size:11px;color:#8a9099;flex:0 0 auto}
+
+/* ── in-app bell sheet ── */
+.sheetwrap{position:relative;background:rgba(7,9,12,.78);padding-top:36px}
+.sheet{background:var(--ink2);border:1px solid var(--line);border-radius:8px 8px 0 0;padding:16px 16px 28px;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+.grab{width:32px;height:4px;background:var(--lineStrong);margin:0 auto 8px}
+.shHead{display:flex;align-items:center;justify-content:space-between}
+.shTitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:22px}
+.ghost{font-size:13px;font-weight:600;color:var(--dim);padding:6px 8px}
+
+/* current rows: title/body/time stack, no icon (TopBar.tsx styles.item) */
+.crow{border-bottom:1px solid var(--line);padding:12px 0;display:flex;flex-direction:column;gap:4px}
+.crow .t{font-size:16px;font-weight:600;line-height:22px}
+.crow .b{font-size:13px;color:var(--dim);line-height:18px}
+.crow .w{font-family:var(--f-mono);font-size:11px;color:var(--faint);margin-top:4px}
+
+/* proposed rows: NotificationRow spec — icon in status color, unread flare square + ink2 fill */
+.prow{border-bottom:1px solid var(--line);padding:12px 8px;display:flex;gap:12px;align-items:flex-start;position:relative}
+.prow.unread{background:var(--ink2)}
+.prow .ic{width:20px;height:20px;flex:0 0 auto;margin-top:1px}
+.prow .t{font-size:14px;font-weight:600;line-height:19px}
+.prow .b{font-size:13px;color:var(--dim);line-height:18px;margin-top:1px}
+.prow .w{font-family:var(--f-mono);font-size:11px;color:var(--faint);margin-top:3px}
+.udot{position:absolute;right:10px;top:16px;width:6px;height:6px;background:var(--flare)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Notifications — De-Chalk Pass (#225)</h1>
+  <p><b>Operator ask:</b> "Notifications still have the Claude design vibe with emojis that we've removed from the rest of the app."</p>
+  <p><b>Left = current</b>, with verbatim template strings from <code>backend/server.py</code> (<code>create_notification</code> / <code>_send_typed_push</code>): emoji-prefixed titles on both push and inbox. The mobile bell sheet already strips leading 🤝✅❌🎯🔔 from <i>bodies</i> (<code>TopBar.tsx</code>) — but titles keep them, and title+body say the same sentence twice. <b>Right = proposed</b>: emoji dropped server-side, copy tightened, in-app rows adopt the specced <code>NotificationRow</code> (monochrome status-colored glyph + flare unread square).</p>
+</div>
+
+<div class="lab">
+
+  <!-- ══════════ CURRENT ══════════ -->
+  <div class="side">
+    <div class="tag cur">Current</div>
+    <div class="phone">
+      <div class="ann f" style="top:64px;right:12px">emoji as icon</div>
+      <div class="ann f" style="top:356px;right:12px">title repeated in body</div>
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+
+      <!-- push banners -->
+      <div class="pushzone">
+        <div class="zlabel">iOS push — current templates (verbatim)</div>
+        <div class="banner">
+          <div class="appic"><span class="tick"></span><span>TF</span></div>
+          <div style="min-width:0">
+            <div class="bt">&#127919; Match with @BortlesFan</div>
+            <div class="bb">Breece Hall for DK Metcalf</div>
+          </div>
+          <div class="when">now</div>
+        </div>
+        <div class="banner">
+          <div class="appic"><span class="tick"></span><span>TF</span></div>
+          <div style="min-width:0">
+            <div class="bt">&#127881; You got your first trade match!</div>
+            <div class="bb">@murph matched a trade with you. Tap to review.</div>
+          </div>
+          <div class="when">2h</div>
+        </div>
+        <div class="banner">
+          <div class="appic"><span class="tick"></span><span>TF</span></div>
+          <div style="min-width:0">
+            <div class="bt">&#128293; Trade matches are waiting</div>
+            <div class="bb">You have 2 unreviewed matches.</div>
+          </div>
+          <div class="when">1d</div>
+        </div>
+      </div>
+
+      <!-- bell inbox sheet -->
+      <div class="sheetwrap">
+        <div class="sheet">
+          <div class="grab"></div>
+          <div class="shHead"><span class="shTitle">Notifications</span><span class="ghost">Clear all</span></div>
+          <div class="crow">
+            <div class="t">&#129309; New trade match with BortlesFan in Dynasty Degens!</div>
+            <div class="b">New trade match with BortlesFan in Dynasty Degens! Breece Hall for DK Metcalf</div>
+            <div class="w">2m ago</div>
+          </div>
+          <div class="crow">
+            <div class="t">&#9989; murph accepted your trade in Dynasty Degens</div>
+            <div class="b">murph accepted your trade in Dynasty Degens: Jahmyr Gibbs for CeeDee Lamb</div>
+            <div class="w">1h ago</div>
+          </div>
+          <div class="crow">
+            <div class="t">&#10060; TeamJanet declined your trade in Dynasty Degens</div>
+            <div class="b">TeamJanet declined your trade in Dynasty Degens: Puka Nacua for Trey McBride</div>
+            <div class="w">3h ago</div>
+          </div>
+          <div class="crow" style="border-bottom:0">
+            <div class="t">&#129309; New leaguemate on Fantasy Trade Finder</div>
+            <div class="b">@spags joined Dynasty Degens. More trades may unlock.</div>
+            <div class="w">1d ago</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="cap">Top: push banners (<code>_send_typed_push</code> titles keep 🎯🎉🔥⏳👀📰🏈👋🔓). Bottom: the bell sheet — rows are bare text stacks; bodies are emoji-stripped client-side but restate the whole title before the useful part (the players).</div>
+  </div>
+
+  <!-- ══════════ PROPOSED ══════════ -->
+  <div class="side">
+    <div class="tag pro">Proposed</div>
+    <div class="phone">
+      <div class="ann c" style="top:64px;right:12px">plain title — the app icon<br>already brands the banner</div>
+      <div class="ann c" style="top:368px;left:12px">SVG glyph in status color<br>(match / check / x / bell)</div>
+      <div class="ann c" style="top:344px;right:12px">unread = flare square<br>+ ink-2 row fill</div>
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+
+      <!-- push banners -->
+      <div class="pushzone">
+        <div class="zlabel">iOS push — proposed templates</div>
+        <div class="banner">
+          <div class="appic"><span class="tick"></span><span>TF</span></div>
+          <div style="min-width:0">
+            <div class="bt">Match with @BortlesFan</div>
+            <div class="bb">Breece Hall for DK Metcalf. Both boards say yes.</div>
+          </div>
+          <div class="when">now</div>
+        </div>
+        <div class="banner">
+          <div class="appic"><span class="tick"></span><span>TF</span></div>
+          <div style="min-width:0">
+            <div class="bt">Your first trade match</div>
+            <div class="bb">@murph matched a trade with you. Tap to review.</div>
+          </div>
+          <div class="when">2h</div>
+        </div>
+        <div class="banner">
+          <div class="appic"><span class="tick"></span><span>TF</span></div>
+          <div style="min-width:0">
+            <div class="bt">2 matches waiting</div>
+            <div class="bb">Your leaguemates have been busy. Tap to review.</div>
+          </div>
+          <div class="when">1d</div>
+        </div>
+      </div>
+
+      <!-- bell inbox sheet, NotificationRow spec -->
+      <div class="sheetwrap">
+        <div class="sheet">
+          <div class="grab"></div>
+          <div class="shHead"><span class="shTitle">Notifications</span><span class="ghost">Clear all</span></div>
+
+          <div class="prow unread">
+            <svg class="i ic" viewBox="0 0 20 20" style="stroke:var(--ice)"><path d="M7 12a3.6 3.6 0 0 1 0-5.2l1.8-1.8a3.6 3.6 0 0 1 5.2 5.2l-.9.9M13 8a3.6 3.6 0 0 1 0 5.2l-1.8 1.8a3.6 3.6 0 0 1-5.2-5.2l.9-.9"/></svg>
+            <div style="min-width:0;flex:1">
+              <div class="t">Trade match with @BortlesFan</div>
+              <div class="b">Breece Hall for DK Metcalf &#183; Dynasty Degens</div>
+              <div class="w">2m ago</div>
+            </div>
+            <span class="udot"></span>
+          </div>
+
+          <div class="prow">
+            <svg class="i ic" viewBox="0 0 20 20" style="stroke:var(--pos)"><path d="M4 10.5l4 4 8-9"/></svg>
+            <div style="min-width:0;flex:1">
+              <div class="t">@murph accepted your trade</div>
+              <div class="b">Jahmyr Gibbs for CeeDee Lamb &#183; Tap to ratify on Sleeper</div>
+              <div class="w">1h ago</div>
+            </div>
+          </div>
+
+          <div class="prow">
+            <svg class="i ic" viewBox="0 0 20 20" style="stroke:var(--neg)"><path d="M5 5l10 10M15 5L5 15"/></svg>
+            <div style="min-width:0;flex:1">
+              <div class="t">@TeamJanet declined your trade</div>
+              <div class="b">Puka Nacua for Trey McBride &#183; Dynasty Degens</div>
+              <div class="w">3h ago</div>
+            </div>
+          </div>
+
+          <div class="prow" style="border-bottom:0">
+            <svg class="i ic" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+            <div style="min-width:0;flex:1">
+              <div class="t">@spags joined Dynasty Degens</div>
+              <div class="b">A new leaguemate can mean new trade matches.</div>
+              <div class="w">1d ago</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="cap">Same events, Chalkline construction: 20px stroke glyphs (match=ice, accept=pos, decline=neg, info=chalk-dim), titles lead with the fact, bodies carry only the new information (players &#183; league). Unread rows take the specced flare 6px square + ink-2 fill.</div>
+  </div>
+</div>
+
+<div class="note">
+  <h1 style="font-size:16px">What changed &amp; why</h1>
+  <ul>
+    <li><b>Emoji removed at the source</b> — every <code>create_notification</code>/<code>_send_typed_push</code> title in <code>backend/server.py</code> (🤝 ✅ ❌ 🎯 🎉 ⏳ 📰 👀 🏈 👋 🔥 🔓) drops its prefix, so the clients' defensive strip regexes become dead code instead of a band-aid. Design-system prohibition #1: no emoji in UI.</li>
+    <li><b>In-app rows adopt the specced <code>NotificationRow</code></b> (components.md): monochrome SVG glyph in the status color replaces the emoji's job; unread = flare 6px square + ink-2 row fill — signal moves from decoration to structure.</li>
+    <li><b>Copy tightened to the app's voice:</b> title states the fact ("@murph accepted your trade"), body carries only new info (players &#183; league). Kills the current title-repeated-in-body redundancy in match/disposition templates.</li>
+    <li><b>Push titles lose the hype register</b> ("🔥 Trade matches are waiting" → "2 matches waiting") — the iOS banner already shows the app icon, so the title doesn't need a brand costume; counts move into the title where they scan fastest.</li>
+    <li><b>No layout or routing changes</b> — sheet construction, tap-routing (notif.tap_routing_v2), Clear all, and timestamps are untouched; this is a copy + row-construction pass only.</li>
+  </ul>
+</div>
+
+</body>
+</html>
