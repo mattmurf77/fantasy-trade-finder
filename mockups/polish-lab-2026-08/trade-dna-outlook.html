@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Trade DNA &amp; Outlook (#212 · #231 · #206)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --first1:#2dd4bf;
+  --f-display:'Barlow Condensed','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:22px;min-height:100vh}
+
+.note{max-width:840px;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note ul{margin:4px 0 0 18px} .note li{margin:3px 0}
+.q{border-left:3px solid var(--lineStrong);padding-left:10px;margin:6px 0;font-style:italic}
+
+.pairwrap{display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}
+.slot{display:flex;flex-direction:column;gap:8px;align-items:center}
+.slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim);display:flex;align-items:center;gap:7px}
+.slotlbl::before{content:"";width:3px;height:12px;background:var(--lineStrong)}
+.slot.proposed .slotlbl{color:var(--ice)} .slot.proposed .slotlbl::before{background:var(--ice)}
+.caption{max-width:390px;font-size:12px;line-height:1.5;color:var(--dim);text-align:left}
+
+.phone{width:390px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+.status{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.scroll{padding:4px 16px 14px;display:flex;flex-direction:column;gap:12px}
+.pagetitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:22px}
+.leaguepill{align-self:flex-start;display:flex;align-items:center;gap:6px;background:var(--ink2);border:1px solid var(--line);border-radius:999px;padding:5px 11px;font-size:12px;color:var(--dim)}
+.leaguepill .dot{width:7px;height:7px;border-radius:999px;background:var(--ice)}
+.leaguepill b{color:var(--chalk);font-weight:600}
+
+/* ---- shared bits ---- */
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.pdot{width:8px;height:8px;border-radius:2px;flex:0 0 auto;display:inline-block}
+.pos-qb{background:var(--qb)} .pos-rb{background:var(--rb)} .pos-wr{background:var(--wr)} .pos-te{background:var(--te)}
+svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+/* ---- CURRENT: Trade DNA panel (TradeFinderHubScreen.tsx, faithful) ---- */
+.dna{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:12px;display:flex;flex-direction:column;gap:8px}
+.dna .top{display:flex;align-items:center;justify-content:space-between}
+.dna .edit{font-size:13px;font-weight:600;color:var(--ice);cursor:pointer}
+.dnarow{display:flex;flex-wrap:wrap;gap:6px 24px;font-size:14px;color:var(--chalk)}
+.dnarow .k{color:var(--faint)}
+.dnarow .manage{color:var(--ice);font-weight:600;font-size:13px}
+.grouplbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim);margin-top:4px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.poschip{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:999px;border:1px solid var(--line);background:var(--ink2);font-size:13px;font-weight:600;color:var(--chalk)}
+.poschip.rec{border-style:dashed;border-color:var(--lineStrong)}
+.poschip .tag{font-size:9px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--flare);margin-left:2px}
+.emptytxt{font-size:13px;color:var(--faint)}
+
+.seclabel{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim);margin-top:2px}
+.modecard{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:12px;cursor:pointer}
+.modecard .icwell{width:40px;height:40px;border-radius:8px;background:var(--ink2);display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:var(--ice)}
+.modecard .body{flex:1;min-width:0}
+.modecard .trow{display:flex;align-items:center;gap:8px}
+.modecard .t{font-size:16px;font-weight:600}
+.modecard .rec{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--flare)}
+.modecard .d{font-size:13px;color:var(--dim);margin-top:1px;line-height:1.4}
+.modecard .chev{color:var(--faint);flex:0 0 auto}
+.fade{height:34px;margin:-10px -16px -14px;background:linear-gradient(transparent,var(--ink0))}
+/* the fade above is a mockup viewport cue, not a UI gradient */
+
+.tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink1)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 12px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:20px;height:20px;stroke:var(--faint);stroke-width:1.75;fill:none;stroke-linecap:square}
+.tab.on{color:var(--ice)} .tab.on svg{stroke:var(--ice)}
+
+/* ---- PROPOSED: DNA panel v2 ---- */
+.dna2{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:12px;display:flex;flex-direction:column;gap:10px}
+.dna2 .top{display:flex;align-items:center;justify-content:space-between}
+.editbtn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border:1px solid var(--lineStrong);border-radius:4px;background:transparent;color:var(--chalk);font-family:var(--f-ui);font-size:13px;font-weight:600;cursor:pointer}
+.editbtn:hover{border-color:var(--ice)}
+.editbtn svg{width:14px;height:14px;stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+.outgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.outcard{border:1px solid var(--line);border-radius:8px;background:var(--ink2);padding:10px 10px 9px;cursor:pointer;position:relative}
+.outcard .t{font-size:14px;font-weight:600}
+.outcard .d{font-size:11px;color:var(--dim);margin-top:2px;line-height:1.35}
+.outcard.sel{border-color:var(--ice)}
+.outcard.sel::after{content:"";position:absolute;top:8px;right:8px;width:3px;height:12px;background:var(--ice)}
+.outcard.sel .d{color:var(--chalk)}
+
+.needchips{display:flex;flex-wrap:wrap;gap:8px}
+.needchip{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:999px;border:1px solid var(--line);background:var(--ink2);font-size:13px;font-weight:600;color:var(--chalk)}
+.needchip .tag{font-size:9px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-left:2px}
+.tag.starter{color:var(--flare)}
+.tag.depth{color:var(--dim)}
+.needkey{font-size:11px;color:var(--faint);line-height:1.45}
+
+/* ---- PROPOSED frame 2: deck + bias receipt ---- */
+.modebar .back{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--ice);margin-bottom:8px}
+.swrow{display:flex;gap:6px;overflow:hidden}
+.sw{flex:0 0 auto;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--ink1);font-size:12px;color:var(--dim);min-height:32px;display:flex;align-items:center}
+.sw.on{border-color:var(--ice);background:var(--ink2);color:var(--chalk)}
+.receipt{display:flex;align-items:center;gap:8px;background:var(--ink2);border:1px solid var(--line);border-radius:4px;padding:8px 10px;font-size:12.5px;color:var(--dim)}
+.receipt .tick{width:3px;height:12px;background:var(--flare);flex:0 0 auto}
+.receipt b{color:var(--chalk);font-weight:600}
+.receipt .chg{margin-left:auto;color:var(--ice);font-weight:600;cursor:pointer;flex:0 0 auto}
+
+.tcard{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.tcard .hdr .lbl{display:block}
+.tcard .opp{font-size:16px;font-weight:600;margin-top:1px}
+.strength{display:flex;flex-direction:column;gap:4px}
+.strength .row{display:flex;justify-content:space-between;align-items:baseline}
+.strength .val{font-family:var(--f-mono);font-size:13px}
+.track{height:4px;background:var(--ink3)}
+.track .fill{height:4px;background:var(--rb)}
+.split{display:flex;gap:12px}
+.split .vrule{width:1px;background:var(--line)}
+.side{flex:1;display:flex;flex-direction:column;gap:6px}
+.ticklbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.ticklbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+.prow{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-left:3px solid var(--wr);border-radius:8px;background:var(--ink2);padding:8px}
+.prow .nm{font-size:13px;font-weight:600;line-height:1.25}
+.prow .meta{font-size:11px;color:var(--dim);font-family:var(--f-mono)}
+.vbar{display:flex;flex-direction:column;gap:6px}
+.vbar .who{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:18px;color:var(--pos)}
+.vbar .margin{font-size:12px;color:var(--dim)}
+.vbar .margin b{font-family:var(--f-mono);color:var(--pos);font-weight:600}
+.vbar .pick{color:var(--first1);font-weight:600}
+.dtrack{position:relative;height:14px;background:var(--ink3);border-radius:2px;margin-top:2px}
+.dtrack .cen{position:absolute;left:50%;top:-4px;width:1px;height:22px;background:var(--lineStrong)}
+.dtrack .t1{position:absolute;left:21.5%;top:-4px;width:1px;height:22px;background:var(--line)}
+.dtrack .t2{position:absolute;left:78.5%;top:-4px;width:1px;height:22px;background:var(--line)}
+.dtrack .fillr{position:absolute;left:50%;width:11%;height:14px;background:var(--pos);border-radius:2px}
+.scalerow{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:9px;color:var(--faint)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Polish Lab · Trade DNA &amp; Outlook — #212 + #231 + #206</h1>
+  <p><b>Operator asks:</b></p>
+  <p class="q">#212 — "The ranking graphic/UX is a little too passive for users to realize you can change the outlook. The section should have an edit button and the change options should be more prominent."</p>
+  <p class="q">#231 — "Make the outlook selection more visual or card-based, and surface the resulting bias more clearly in the trade results ('These suggestions lean young + picks because you selected Rebuilding')."</p>
+  <p class="q">#206 — "An extra layer to positional needs that looks at position depth compared to starting lineup requirements… Specific tag for starting lineups vs depth need (no duplication — starting-lineup need implies depth)."</p>
+  <p style="margin-top:8px">CURRENT frames are faithful recreations of <b>mobile/src/screens/TradeFinderHubScreen.tsx</b> (Trade DNA panel + mode cards) and the deck top of <b>TradesScreen.tsx</b>. PROPOSED honors the #205 tenets: one clear thing per surface, plain-language receipts, nothing that needs the app explained.</p>
+</div>
+
+<!-- ═══════════════ ROW 1 · The hub panel ═══════════════ -->
+<div class="pairwrap">
+
+  <!-- CURRENT hub -->
+  <div class="slot">
+    <div class="slotlbl">Current — hub (from code)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="pagetitle">Find a Trade</div>
+        <div class="leaguepill"><span class="dot"></span>Trading in&nbsp;·&nbsp;<b>Dynasty Degens</b></div>
+
+        <div class="dna">
+          <div class="top">
+            <span class="lbl">Your Trade DNA</span>
+            <span class="edit">Edit prefs</span>
+          </div>
+          <div class="dnarow">
+            <span><span class="k">Outlook </span>Rebuilder (inferred)</span>
+            <span><span class="k">Untouchables </span>2&nbsp;&nbsp;<span class="manage">Manage</span></span>
+          </div>
+          <div class="grouplbl">Chasing</div>
+          <div class="chips">
+            <span class="poschip"><span class="pdot pos-wr"></span>WR</span>
+            <span class="poschip rec"><span class="pdot pos-te"></span>TE<span class="tag">need</span></span>
+          </div>
+          <div class="grouplbl">Shopping</div>
+          <div class="chips">
+            <span class="poschip rec"><span class="pdot pos-rb"></span>RB<span class="tag">deep</span></span>
+          </div>
+        </div>
+
+        <div class="seclabel">How do you want to find trades?</div>
+
+        <div class="modecard">
+          <div class="icwell"><svg class="ic" width="22" height="22" viewBox="0 0 20 20"><path d="M3 14 6 6l4 5 4-7 3 10z"/></svg></div>
+          <div class="body">
+            <div class="trow"><span class="t">Fully Guided</span><span class="rec">recommended</span></div>
+            <div class="d">We read your roster &amp; league and walk you to the best deals.</div>
+          </div>
+          <svg class="ic chev" width="18" height="18" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+        </div>
+        <div class="modecard">
+          <div class="icwell"><svg class="ic" width="22" height="22" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg></div>
+          <div class="body">
+            <div class="trow"><span class="t">Specific Team</span></div>
+            <div class="d">Target one league-mate and see only mutual-gain deals.</div>
+          </div>
+          <svg class="ic chev" width="18" height="18" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+        </div>
+        <div class="modecard">
+          <div class="icwell"><svg class="ic" width="22" height="22" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg></div>
+          <div class="body">
+            <div class="trow"><span class="t">Specific Player</span></div>
+            <div class="d">Trade for someone, away someone, or both — engine fills the rest.</div>
+          </div>
+          <svg class="ic chev" width="18" height="18" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+        </div>
+        <div class="fade"></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Outlook is one line of body text inside a KV row; "Edit prefs" is a quiet text link. The need/deep tags exist but are one 9px word — a single flat layer, no starter-vs-depth distinction. (Tag copy "need"/"deep" verified in <code>splitDnaChips</code> usage; league-pill wording approximated.)</div>
+  </div>
+
+  <!-- PROPOSED hub -->
+  <div class="slot proposed">
+    <div class="slotlbl">Proposed — hub</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="pagetitle">Find a Trade</div>
+        <div class="leaguepill"><span class="dot"></span>Trading in&nbsp;·&nbsp;<b>Dynasty Degens</b></div>
+
+        <div class="dna2">
+          <div class="top">
+            <span class="lbl">Your Trade DNA</span>
+            <button class="editbtn"><svg viewBox="0 0 20 20"><path d="M13 3l4 4L7 17H3v-4z"/></svg>Edit</button>
+          </div>
+
+          <div class="grouplbl" style="margin-top:0">My team is…</div>
+          <div class="outgrid">
+            <div class="outcard sel">
+              <div class="t">Rebuilding</div>
+              <div class="d">Leans young + picks</div>
+            </div>
+            <div class="outcard">
+              <div class="t">Contending</div>
+              <div class="d">Balanced moves</div>
+            </div>
+            <div class="outcard">
+              <div class="t">All-in</div>
+              <div class="d">Win now, spend picks</div>
+            </div>
+            <div class="outcard">
+              <div class="t">Tanking</div>
+              <div class="d">Max youth, high picks</div>
+            </div>
+          </div>
+
+          <div class="grouplbl">Chasing</div>
+          <div class="needchips">
+            <span class="needchip"><span class="pdot pos-te"></span>TE<span class="tag starter">Starter need</span></span>
+            <span class="needchip"><span class="pdot pos-wr"></span>WR<span class="tag depth">Depth</span></span>
+          </div>
+          <div class="grouplbl">Shopping</div>
+          <div class="needchips">
+            <span class="needchip"><span class="pdot pos-rb"></span>RB<span class="tag depth">Deep</span></span>
+          </div>
+          <div class="needkey">Starter need = a hole in your lineup. Depth = your bench is thin there.</div>
+        </div>
+
+        <div class="seclabel">How do you want to find trades?</div>
+        <div class="modecard">
+          <div class="icwell"><svg class="ic" width="22" height="22" viewBox="0 0 20 20"><path d="M3 14 6 6l4 5 4-7 3 10z"/></svg></div>
+          <div class="body">
+            <div class="trow"><span class="t">Fully Guided</span><span class="rec">recommended</span></div>
+            <div class="d">We read your roster &amp; league and walk you to the best deals.</div>
+          </div>
+          <svg class="ic chev" width="18" height="18" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+        </div>
+        <div class="modecard">
+          <div class="icwell"><svg class="ic" width="22" height="22" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg></div>
+          <div class="body">
+            <div class="trow"><span class="t">Specific Team</span></div>
+            <div class="d">Target one league-mate and see only mutual-gain deals.</div>
+          </div>
+          <svg class="ic chev" width="18" height="18" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+        </div>
+        <div class="fade"></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Outlook = four tappable cards <b>in the panel itself</b> (tap switches directly; the Edit button opens the full sheet for position prefs). Selected card carries the ice border + tick and names its bias in plain words. Needs are two-tier: flare <b>STARTER NEED</b> (lineup hole) vs dim <b>DEPTH</b> — never both on one chip, since a starter need implies depth (#206).</div>
+  </div>
+</div>
+
+<!-- ═══════════════ ROW 2 · The results receipt ═══════════════ -->
+<div class="pairwrap">
+
+  <!-- CURRENT deck -->
+  <div class="slot">
+    <div class="slotlbl">Current — trade results (from code)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="modebar">
+          <div class="back"><svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>Hub</div>
+          <div class="swrow">
+            <span class="sw on">Guided</span><span class="sw">Team</span><span class="sw">Player</span><span class="sw">Calc</span>
+          </div>
+        </div>
+
+        <div class="tcard">
+          <div class="hdr">
+            <span class="lbl">Trade with</span>
+            <div class="opp">@rebuild_randy</div>
+          </div>
+          <div class="strength">
+            <div class="row"><span class="lbl">Match strength</span><span class="val">78</span></div>
+            <div class="track"><div class="fill" style="width:78%"></div></div>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">You send</div>
+              <div class="prow" style="border-left-color:var(--rb)"><div><div class="nm">Breece Hall</div><div class="meta">RB · NYJ</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">You get</div>
+              <div class="prow"><div><div class="nm">Marvin Harrison Jr.</div><div class="meta">WR · ARI</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2027 2nd (mid)</div><div class="meta">PICK</div></div></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <span class="lbl">Dynasty value swing</span>
+            <div class="who">You win</div>
+            <div class="margin">by <b>+380</b> &nbsp;·&nbsp; <span class="pick">a Mid 3rd</span> (≈ 0.2 firsts)</div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr"></div><div class="cen"></div></div>
+            <div class="scalerow"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div>
+          </div>
+        </div>
+        <div class="fade"></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">The deck never says <i>why</i> it looks the way it does. The outlook silently biased generation (young + picks coming back), but a user who forgot — or never noticed — the setting has no way to connect the deck's shape to it.</div>
+  </div>
+
+  <!-- PROPOSED deck with receipt -->
+  <div class="slot proposed">
+    <div class="slotlbl">Proposed — results carry the bias receipt</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="modebar">
+          <div class="back"><svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>Hub</div>
+          <div class="swrow">
+            <span class="sw on">Guided</span><span class="sw">Team</span><span class="sw">Player</span><span class="sw">Calc</span>
+          </div>
+        </div>
+
+        <div class="receipt">
+          <span class="tick"></span>
+          <span>Leaning <b>young + picks</b> — you're <b>Rebuilding</b>.</span>
+          <span class="chg">Change</span>
+        </div>
+
+        <div class="tcard">
+          <div class="hdr">
+            <span class="lbl">Trade with</span>
+            <div class="opp">@rebuild_randy</div>
+          </div>
+          <div class="strength">
+            <div class="row"><span class="lbl">Match strength</span><span class="val">78</span></div>
+            <div class="track"><div class="fill" style="width:78%"></div></div>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">You send</div>
+              <div class="prow" style="border-left-color:var(--rb)"><div><div class="nm">Breece Hall</div><div class="meta">RB · NYJ</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">You get</div>
+              <div class="prow"><div><div class="nm">Marvin Harrison Jr.</div><div class="meta">WR · ARI · 23 yrs</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2027 2nd (mid)</div><div class="meta">PICK</div></div></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <span class="lbl">Dynasty value swing</span>
+            <div class="who">You win</div>
+            <div class="margin">by <b>+380</b> &nbsp;·&nbsp; <span class="pick">a Mid 3rd</span> (≈ 0.2 firsts)</div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr"></div><div class="cen"></div></div>
+            <div class="scalerow"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div>
+          </div>
+        </div>
+        <div class="fade"></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">One quiet receipt line above the deck (flare tick = informational, ADR-005): <i>"Leaning young + picks — you're Rebuilding."</i> The ice <b>Change</b> link jumps straight to the outlook cards. Same construction as the shipped "Built from your updated board" note, so it costs no new pattern.</div>
+  </div>
+</div>
+
+<div class="note">
+  <h2>Why this design</h2>
+  <ul>
+    <li><b>Edit is a button, not a whisper (#212).</b> The panel's edit affordance becomes a bordered secondary button with a pencil glyph — the Chalkline secondary-button spec — and the outlook itself is directly tappable, so "you can change this" is self-evident with zero context.</li>
+    <li><b>Outlook reads as a choice, not a fact (#231).</b> Four cards replace one line of body text; each names its bias in plain words ("Leans young + picks"), so picking one already teaches what it does — nothing to learn later.</li>
+    <li><b>The bias gets a receipt where it acts (#231).</b> Results carry one sentence connecting deck shape to the setting, with an inline Change link — closing the loop between cause and effect on the same screen.</li>
+    <li><b>Two-tier needs without duplication (#206).</b> STARTER NEED (flare) marks a lineup hole; DEPTH (dim) marks a thin bench; a chip carries at most one tag because starter need implies depth. One quiet key line defines both terms in league-speak.</li>
+    <li><b>Tenets check (#205):</b> the panel still shows exactly three things (outlook, chasing, shopping); everything added is either a label made honest or a tap made obvious — no new data, no new concepts to explain.</li>
+  </ul>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Find-a-Trade-for-Player Layout (#216 · #209)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --first1:#2dd4bf;
+  --f-display:'Barlow Condensed','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:22px;min-height:100vh}
+
+.note{max-width:840px;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note ul{margin:4px 0 0 18px} .note li{margin:3px 0}
+.q{border-left:3px solid var(--lineStrong);padding-left:10px;margin:6px 0;font-style:italic}
+
+.pairwrap{display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}
+.slot{display:flex;flex-direction:column;gap:8px;align-items:center}
+.slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim);display:flex;align-items:center;gap:7px}
+.slotlbl::before{content:"";width:3px;height:12px;background:var(--lineStrong)}
+.slot.proposed .slotlbl{color:var(--ice)} .slot.proposed .slotlbl::before{background:var(--ice)}
+.caption{max-width:390px;font-size:12px;line-height:1.5;color:var(--dim);text-align:left}
+
+.phone{width:390px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+.status{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.scroll{padding:4px 16px 14px;display:flex;flex-direction:column;gap:12px}
+.fade{height:34px;margin:-10px -16px -14px;background:linear-gradient(transparent,var(--ink0))}
+/* the fade is a mockup viewport cue, not a UI gradient */
+
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.pdot{width:7px;height:7px;border-radius:2px;flex:0 0 auto;display:inline-block}
+.pos-qb{background:var(--qb)} .pos-rb{background:var(--rb)} .pos-wr{background:var(--wr)} .pos-te{background:var(--te)}
+svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+/* mode bar */
+.back{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--ice);margin-bottom:8px}
+.swrow{display:flex;gap:6px;overflow:hidden}
+.sw{flex:0 0 auto;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--ink1);font-size:12px;color:var(--dim);min-height:32px;display:flex;align-items:center}
+.sw.on{border-color:var(--ice);background:var(--ink2);color:var(--chalk)}
+.mtitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:20px;margin-top:6px}
+.mhint{font-size:12px;color:var(--dim);line-height:1.4}
+
+/* controls card + pin board */
+.ctrlcard{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.board{display:flex;gap:8px}
+.col{flex:1;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:10px;min-height:110px;display:flex;flex-direction:column;gap:8px}
+.col.for{border-top:2px solid var(--pos)} .col.away{border-top:2px solid var(--flare)}
+.colh{font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.col.for .colh{color:var(--pos)} .col.away .colh{color:var(--flare)}
+.mini{display:flex;align-items:center;gap:7px;min-height:36px;padding:0 8px;border-radius:4px;background:var(--ink2);font-size:12.5px;font-weight:600}
+.mini .x{margin-left:auto;color:var(--faint);font-size:12px}
+.addbtn{min-height:40px;border:1px dashed var(--lineStrong);background:transparent;color:var(--dim);border-radius:4px;font-size:12px;font-family:var(--f-ui);cursor:pointer}
+.cta{width:100%;height:44px;border:none;border-radius:4px;background:var(--ice);color:var(--onIce);font-family:var(--f-ui);font-weight:700;font-size:14px;cursor:pointer}
+
+/* asset ideas panel (current) */
+.ideas{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.ticklbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.ticklbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+.assetname{font-size:16px;font-weight:600;margin-top:2px}
+.subtitle{font-size:13px;color:var(--dim);line-height:1.45;margin-bottom:4px}
+.grouph{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim);margin-top:8px}
+.idea{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--line);border-radius:2px;background:var(--ink1)}
+.idea .main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.idea .sides{display:flex;align-items:center;gap:4px;font-size:13px;white-space:nowrap;overflow:hidden}
+.idea .sides svg{flex:0 0 auto;color:var(--faint)}
+.idea .meta{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.idea .meta .mono{font-family:var(--f-mono)}
+.diff{padding:2px 8px;border-radius:2px;border:1px solid rgba(34,197,94,.4);font-family:var(--f-mono);font-size:12px;color:var(--pos);flex:0 0 auto}
+.diff.neg{border-color:rgba(239,68,68,.4);color:var(--neg)}
+
+/* trade card (proposed lead + current buried) */
+.tcard{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.tcard .opp{font-size:16px;font-weight:600;margin-top:1px}
+.split{display:flex;gap:12px}
+.split .vrule{width:1px;background:var(--line)}
+.side{flex:1;display:flex;flex-direction:column;gap:6px}
+.prow{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-left:3px solid var(--rb);border-radius:8px;background:var(--ink2);padding:8px}
+.prow .nm{font-size:13px;font-weight:600;line-height:1.25}
+.prow .meta{font-size:11px;color:var(--dim);font-family:var(--f-mono)}
+.vbar{display:flex;flex-direction:column;gap:6px}
+.vbar .who{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:18px;color:var(--pos)}
+.vbar .margin{font-size:12px;color:var(--dim)}
+.vbar .margin b{font-family:var(--f-mono);color:var(--pos);font-weight:600}
+.vbar .pick{color:var(--first1);font-weight:600}
+.dtrack{position:relative;height:14px;background:var(--ink3);border-radius:2px;margin-top:2px}
+.dtrack .cen{position:absolute;left:50%;top:-4px;width:1px;height:22px;background:var(--lineStrong)}
+.dtrack .t1{position:absolute;left:21.5%;top:-4px;width:1px;height:22px;background:var(--line)}
+.dtrack .t2{position:absolute;left:78.5%;top:-4px;width:1px;height:22px;background:var(--line)}
+.dtrack .fillr{position:absolute;left:50%;width:13%;height:14px;background:var(--pos);border-radius:2px}
+.scalerow{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:9px;color:var(--faint)}
+.moreopts{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--ice);cursor:pointer;margin-top:2px}
+.moreopts svg{width:14px;height:14px}
+.lessopts{color:var(--dim)}
+
+/* scroll annotation */
+.buriednote{display:flex;align-items:center;gap:8px;background:var(--ink2);border:1px dashed var(--lineStrong);border-radius:4px;padding:8px 10px;font-size:12px;color:var(--warn)}
+.buriednote svg{flex:0 0 auto;color:var(--warn)}
+
+.tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink1)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 12px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:20px;height:20px;stroke:var(--faint);stroke-width:1.75;fill:none;stroke-linecap:square}
+.tab.on{color:var(--ice)} .tab.on svg{stroke:var(--ice)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Polish Lab · Find-a-Trade-for-Player Layout — #216 + #209</h1>
+  <p><b>Operator asks:</b></p>
+  <p class="q">#216 — "When finding a trade for a player, the trade suggestion and value bar should be presented first. The other options should be hidden by default and available to display via a 'More options' link under the trade away section of a suggested trade."</p>
+  <p class="q">#209 — "Trade away and trade for sides should be swapped (trade away on left, trade for on right)."</p>
+  <p style="margin-top:8px">CURRENT is a faithful recreation of the single-pin flow in <b>mobile/src/screens/TradesScreen.tsx</b> (pin board + <b>AssetIdeasPanel.tsx</b> + deck) and <b>TradeCard.tsx</b>. <b>Code fact:</b> today's TradeCard already renders "YOU SEND" (trade away) on the <b>left</b> — the #209 swap actually applies to the pin board, which renders TRADE FOR left / TRADE AWAY right and so contradicts the card directly above/below it.</p>
+</div>
+
+<!-- ═══════════════ ROW · current vs proposed collapsed vs proposed expanded ═══════════════ -->
+<div class="pairwrap">
+
+  <!-- CURRENT -->
+  <div class="slot">
+    <div class="slotlbl">Current — single-pin result view (from code)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="back"><svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>Hub</div>
+        <div class="swrow">
+          <span class="sw">Guided</span><span class="sw">Team</span><span class="sw on">Player</span><span class="sw">Calc</span>
+        </div>
+
+        <div class="ctrlcard">
+          <div class="board">
+            <div class="col for">
+              <div class="colh">Trade for</div>
+              <button class="addbtn">+ Add target</button>
+            </div>
+            <div class="col away">
+              <div class="colh">Trade away</div>
+              <div class="mini"><span class="pdot pos-rb"></span>Breece Hall<span class="x">✕</span></div>
+              <button class="addbtn">+ Add asset</button>
+            </div>
+          </div>
+          <button class="cta">Find a Trade</button>
+        </div>
+
+        <div class="ideas">
+          <div class="ticklbl">Ideas for trading away</div>
+          <div class="assetname">Breece Hall</div>
+          <div class="subtitle">A better RB back (add pieces to close the gap), a sideways RB swap, or a spread-out package.</div>
+
+          <div class="grouph">Upgrade at RB</div>
+          <div class="idea">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall + 2026 2nd<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Bijan Robinson</div>
+              <div class="meta">DynastyDan &nbsp;·&nbsp; <span class="mono">8010</span> ↔ <span class="mono">8450</span></div>
+            </div>
+            <span class="diff">+440</span>
+          </div>
+          <div class="idea">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall + R. White<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Jahmyr Gibbs</div>
+              <div class="meta">tundra_tim &nbsp;·&nbsp; <span class="mono">7480</span> ↔ <span class="mono">7790</span></div>
+            </div>
+            <span class="diff">+310</span>
+          </div>
+
+          <div class="grouph">Lateral moves at RB</div>
+          <div class="idea">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Jonathan Taylor</div>
+              <div class="meta">gridiron_gus &nbsp;·&nbsp; <span class="mono">6800</span> ↔ <span class="mono">6650</span></div>
+            </div>
+            <span class="diff neg">−150</span>
+          </div>
+
+          <div class="grouph">Downgrade ideas</div>
+          <div class="idea">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>James Cook + 2027 1st</div>
+              <div class="meta">rebuild_randy &nbsp;·&nbsp; <span class="mono">6800</span> ↔ <span class="mono">7320</span></div>
+            </div>
+            <span class="diff">+520</span>
+          </div>
+        </div>
+
+        <div class="buriednote">
+          <svg class="ic" width="16" height="16" viewBox="0 0 20 20"><path d="M10 4v9m0 0-4-4m4 4 4-4"/></svg>
+          The best full trade card + value bar renders below all of this — off-screen.
+        </div>
+        <div class="fade"></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Everything at once: the full Upgrade / Lateral / Downgrade list renders expanded above the deck, and the actual best suggestion (the trade card with its value bar) is pushed below the fold. The pin board also puts TRADE FOR on the left — the opposite of the trade card, where "YOU SEND" is the left column.</div>
+  </div>
+
+  <!-- PROPOSED collapsed -->
+  <div class="slot proposed">
+    <div class="slotlbl">Proposed — best trade leads (collapsed)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="back"><svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>Hub</div>
+        <div class="swrow">
+          <span class="sw">Guided</span><span class="sw">Team</span><span class="sw on">Player</span><span class="sw">Calc</span>
+        </div>
+
+        <div class="ctrlcard">
+          <div class="board">
+            <div class="col away">
+              <div class="colh">Trade away</div>
+              <div class="mini"><span class="pdot pos-rb"></span>Breece Hall<span class="x">✕</span></div>
+              <button class="addbtn">+ Add asset</button>
+            </div>
+            <div class="col for">
+              <div class="colh">Trade for</div>
+              <button class="addbtn">+ Add target</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="tcard">
+          <div class="ticklbl" style="margin-bottom:2px">Best trade for Breece Hall</div>
+          <div class="opp">@rebuild_randy</div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">Trade away</div>
+              <div class="prow"><div><div class="nm">Breece Hall</div><div class="meta">RB · NYJ</div></div></div>
+              <div class="moreopts">More options
+                <svg class="ic" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+              </div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">Trade for</div>
+              <div class="prow" style="border-left-color:var(--rb)"><div><div class="nm">James Cook</div><div class="meta">RB · BUF</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2027 1st (mid)</div><div class="meta">PICK</div></div></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <span class="lbl">Dynasty value swing</span>
+            <div class="who">You win</div>
+            <div class="margin">by <b>+520</b> &nbsp;·&nbsp; <span class="pick">a Mid 3rd</span> (≈ 0.3 firsts)</div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr"></div><div class="cen"></div></div>
+            <div class="scalerow"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div>
+          </div>
+        </div>
+        <div class="fade"></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">One clear thing first: the best suggested trade IS the screen — full card, value bar immediately visible, no Find button needed (the pin drives it). Sides swapped everywhere: <b>Trade away left, Trade for right</b> — board and card now agree (#209). A quiet ice "More options" link sits under the trade-away column (#216).</div>
+  </div>
+
+  <!-- PROPOSED expanded -->
+  <div class="slot proposed">
+    <div class="slotlbl">Proposed — "More options" expanded</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="back"><svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>Hub</div>
+        <div class="swrow">
+          <span class="sw">Guided</span><span class="sw">Team</span><span class="sw on">Player</span><span class="sw">Calc</span>
+        </div>
+
+        <div class="tcard">
+          <div class="ticklbl" style="margin-bottom:2px">Best trade for Breece Hall</div>
+          <div class="opp">@rebuild_randy</div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">Trade away</div>
+              <div class="prow"><div><div class="nm">Breece Hall</div><div class="meta">RB · NYJ</div></div></div>
+              <div class="moreopts lessopts">Fewer options
+                <svg class="ic" viewBox="0 0 20 20"><path d="M4 13l6-6 6 6"/></svg>
+              </div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">Trade for</div>
+              <div class="prow" style="border-left-color:var(--rb)"><div><div class="nm">James Cook</div><div class="meta">RB · BUF</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2027 1st (mid)</div><div class="meta">PICK</div></div></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <div class="margin">You win by <b>+520</b> &nbsp;·&nbsp; <span class="pick">a Mid 3rd</span></div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr"></div><div class="cen"></div></div>
+          </div>
+        </div>
+
+        <div class="ideas">
+          <div class="ticklbl">More trades for Breece Hall</div>
+
+          <div class="grouph">Upgrade at RB</div>
+          <div class="idea">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Hall + 2026 2nd<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Bijan Robinson</div>
+              <div class="meta">DynastyDan</div>
+            </div>
+            <span class="diff">+440</span>
+          </div>
+          <div class="idea">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Hall + R. White<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Jahmyr Gibbs</div>
+              <div class="meta">tundra_tim</div>
+            </div>
+            <span class="diff">+310</span>
+          </div>
+
+          <div class="grouph">Lateral moves at RB</div>
+          <div class="idea">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Jonathan Taylor</div>
+              <div class="meta">gridiron_gus</div>
+            </div>
+            <span class="diff neg">−150</span>
+          </div>
+
+          <div class="grouph">Downgrade ideas</div>
+          <div class="idea">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Cook + 2027 1st</div>
+              <div class="meta">rebuild_randy&nbsp;&nbsp;·&nbsp;&nbsp;shown above</div>
+            </div>
+            <span class="diff">+520</span>
+          </div>
+        </div>
+        <div class="fade"></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Tapping "More options" expands the same grouped Upgrade / Lateral / Downgrade rows beneath the lead card (which compresses its verdict to one line to stay in view). Rows drop the raw ↔ value pair — the signed diff chip carries the number, honoring "too much info is worse than none". "Fewer options" collapses back.</div>
+  </div>
+</div>
+
+<div class="note">
+  <h2>Why this design</h2>
+  <ul>
+    <li><b>Answer first, menu second (#216).</b> A user who pins a player wants "what's my best trade for him?" — so the top of the screen IS that answer: one full card with the value bar visible, not a taxonomy of options to study first.</li>
+    <li><b>Depth on demand, in place (#216).</b> The Upgrade/Lateral/Downgrade groups survive untouched behind "More options" under the trade-away column — the exact spot the operator named — so power users lose nothing and newcomers never see it uninvited.</li>
+    <li><b>One side order everywhere (#209).</b> Code check: today's TradeCard already puts "YOU SEND" left; it's the pin board that's flipped (TRADE FOR left). Proposed swaps the board to away-left / for-right so board, card, and ideas rows all read give → get, left → right.</li>
+    <li><b>Fewer numbers per row.</b> Idea rows keep only the counterparty + the signed diff chip; the raw value pair (8010 ↔ 8450) moves behind the tap into the calculator, which already itemizes it.</li>
+    <li><b>Zero-context labels.</b> "Best trade for Breece Hall" and "More trades for Breece Hall" replace the abstract "Ideas for trading away" framing — no app concepts needed to parse the screen.</li>
+  </ul>
+</div>
+
+</body>
+</html>
