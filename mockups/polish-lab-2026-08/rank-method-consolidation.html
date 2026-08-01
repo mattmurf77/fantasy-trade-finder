@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish lab — Rank method consolidation (#232 · #233)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ─────────
+     Canonical hexes; --line-strong is the 2026-07-19 a11y value #59647A.
+     Tier hexes from docs/cross-client-invariants.md.
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --tier-firsts-4plus:#f87171; --tier-firsts-3:#e879f9; --tier-firsts-2:#fbbf24;
+    --tier-first-1:#2dd4bf; --tier-second:#38bdf8; --tier-third:#f472b6;
+    --tier-fourth:#a3e635; --tier-fa:#7a7f96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px}
+  .wrap{max-width:880px;margin:0 auto}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:24px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.1;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note p,.note ul{margin:0;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .note ul{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:4px}
+  .note strong{color:var(--chalk);font-weight:600}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:32px 0 12px}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice)}
+
+  .compare{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+  .col{flex:1 1 390px;max-width:420px;display:flex;flex-direction:column;gap:20px}
+  .colcap{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+          color:var(--chalk-dim);margin:0 0 -8px;display:flex;align-items:center;gap:8px}
+  .colcap .dot{width:8px;height:8px;border-radius:2px;background:var(--line-strong)}
+  .colcap.prop .dot{background:var(--ice)}
+  .cap{font:400 12px/1.5 var(--ui);color:var(--chalk-faint)}
+
+  .phone{position:relative;width:390px;background:var(--ink-0);
+         border:1px solid var(--line-strong);border-radius:8px;overflow:hidden}
+  .phone.fixed{height:844px}
+  .statusbar{height:40px;display:flex;align-items:flex-end;justify-content:space-between;
+             padding:0 20px 6px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)}
+  .batt{display:inline-block;width:20px;height:10px;border:1px solid var(--chalk-dim);
+        border-radius:2px;position:relative}
+  .batt::after{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:70%;
+               background:var(--chalk-dim)}
+  .topbar{height:48px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .wordmark{display:flex;align-items:center;gap:8px;font-family:var(--cond);font-weight:600;
+            font-size:17px;letter-spacing:.06em;text-transform:uppercase}
+  .wordmark::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .stackhdr{height:44px;display:flex;align-items:center;justify-content:space-between;
+            padding:0 16px;position:relative}
+  .backctl{display:flex;align-items:center;gap:4px;font:600 14px var(--ui);color:var(--chalk);z-index:1}
+  .stackhdr .shtitle{position:absolute;left:0;right:0;text-align:center;font-family:var(--cond);
+           font-weight:600;font-size:18px;letter-spacing:.03em;text-transform:uppercase;
+           pointer-events:none}
+  .moreways{font:600 13px var(--ui);color:var(--chalk-dim);z-index:1}
+  .shtitle.narrow{left:36px !important;right:140px !important;text-align:left !important}
+
+  .scroll{padding:16px 16px 24px;display:flex;flex-direction:column;gap:12px}
+  .lab{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .mono{font:500 13px/18px var(--mono);font-variant-numeric:tabular-nums}
+  .heading{font-family:var(--cond);font-weight:600;font-size:22px;line-height:26px;
+           letter-spacing:.03em;text-transform:uppercase}
+
+  /* RankHome callout + cards */
+  .callout{display:flex;gap:8px;background:var(--ink-2);border:1px solid var(--line-strong);
+           border-radius:4px;padding:12px}
+  .callout .tx{font:400 13px/19px var(--ui);color:var(--chalk-dim);flex:1}
+  .callout .tx b{color:var(--chalk);font-weight:500}
+  .mcard{background:var(--ink-1);border:1px solid var(--line);border-radius:4px;
+         padding:12px;display:flex;flex-direction:column;gap:8px}
+  .mcard.featured{border-color:var(--ice)}
+  .mhead{display:flex;align-items:center;gap:8px}
+  .mtitle{font:600 16px/22px var(--ui);flex:1}
+  .rectag{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--flare)}
+  .mbody{font:400 13px/19px var(--ui);color:var(--chalk-dim)}
+  .mfoot{display:flex;align-items:center;justify-content:space-between}
+  .thint{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-faint)}
+  .meter4{display:flex;gap:3px}
+  .meter4 span{width:14px;height:4px;border-radius:2px;background:var(--ink-3)}
+  .meter4 span.on{background:var(--ice)}
+  .axis{display:flex;align-items:center;gap:8px;margin-top:4px}
+  .axis .ln{flex:1;height:1px;background:var(--line)}
+  .mixnote{font:400 13px/18px var(--ui);color:var(--chalk-faint);text-align:center}
+
+  /* sheet */
+  .sheetstage{position:relative;width:390px;height:800px;border:1px solid var(--line-strong);
+              border-radius:8px;overflow:hidden;background:var(--ink-0)}
+  .scrim{position:absolute;inset:0;background:rgba(7,9,12,0.78)}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--ink-2);
+         border:1px solid var(--line);border-radius:8px 8px 0 0;padding:16px 16px 32px;
+         display:flex;flex-direction:column;gap:8px;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+  .grabber{align-self:center;width:32px;height:4px;border-radius:2px;background:var(--line-strong);
+           margin-bottom:8px}
+  .srow{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:4px;
+        border-bottom:1px solid var(--line)}
+  .srow .m{flex:1}
+  .srow .t{font:600 16px/22px var(--ui);display:flex;align-items:center;gap:8px}
+  .srow .s{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .sheetsub{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-bottom:8px}
+
+  /* buttons */
+  .btn{height:40px;border-radius:4px;display:flex;align-items:center;justify-content:center;
+       font:600 14px var(--ui);padding:0 16px}
+  .btn.primary{background:var(--ice);color:var(--on-ice)}
+  .btn.secondary{border:1px solid var(--line-strong);color:var(--chalk)}
+  .btn.ghost{color:var(--chalk-dim)}
+  .btn.compact{height:36px;font-size:13px}
+  .btn.dis{opacity:.45}
+
+  /* quick set walk */
+  .fmt{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--ink-1)}
+  .fmt div{flex:1;min-height:36px;display:flex;align-items:center;justify-content:center;
+           font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .fmt div.on{background:var(--ink-3);color:var(--chalk);border-bottom:2px solid var(--ice)}
+  .postabs{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--ink-1)}
+  .postabs div{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;
+               font:600 11px var(--ui);letter-spacing:.08em;color:var(--chalk-dim);
+               border-bottom:2px solid transparent}
+  .postabs div.on{background:var(--ink-3);color:var(--chalk);border-bottom-color:var(--qb)}
+  .stephead{display:flex;align-items:center;gap:8px}
+  .stephead .tl{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+                color:var(--tier-firsts-4plus);display:flex;align-items:center;gap:8px}
+  .stephead .tl::before{content:"";width:3px;height:14px;background:var(--tier-firsts-4plus)}
+  .stephead .pg{margin-left:auto;font:600 11px var(--ui);letter-spacing:.08em;
+                text-transform:uppercase;color:var(--chalk-dim)}
+  .stephint{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .search{height:40px;background:var(--ink-2);border:1px solid var(--line-strong);border-radius:4px;
+          display:flex;align-items:center;padding:0 12px;font:400 14px var(--ui);color:var(--chalk-faint)}
+  .grid{display:flex;flex-direction:column;gap:4px}
+  .grow{display:flex;gap:4px}
+  .chip{flex:1;min-height:48px;background:var(--ink-1);border:1px solid var(--line);border-radius:4px;
+        padding:6px 8px;display:flex;flex-direction:column;justify-content:center;gap:2px}
+  .chip.sel{border-color:var(--ice)}
+  .chip .nm{font:600 12px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+            display:flex;align-items:center;gap:4px}
+  .chip .meta{display:flex;align-items:center;gap:6px}
+  .chip .tm{font:600 11px var(--ui);letter-spacing:.5px;color:var(--chalk-dim);text-transform:uppercase}
+  .chip .ag{font:500 11px var(--mono);color:var(--chalk-dim)}
+  .chip .tr{font:600 11px var(--ui);letter-spacing:.5px;text-transform:uppercase}
+  .walkfoot{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:8px;
+            padding:12px;background:var(--ink-0);border-top:1px solid var(--line)}
+  .walkfoot .btn.grow1{flex:1}
+
+  /* proposed chooser */
+  .roletag{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .subrow{border-top:1px solid var(--line);margin-top:2px;padding-top:8px;
+          font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .subrow b{color:var(--chalk);font-weight:600}
+  .morehdr{display:flex;align-items:center;gap:8px;padding:12px 4px 4px;font:600 14px var(--ui);
+           color:var(--chalk)}
+  .qrow{display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--line)}
+  .qrow .m{flex:1}
+  .qrow .t{font:600 14px/20px var(--ui)}
+  .qrow .s{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+
+  svg.i{display:block}
+
+  .rationale{margin-top:36px}
+  .rationale .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+                   padding:16px 20px}
+  .rationale h2{font-family:var(--cond);font-weight:600;font-size:18px;letter-spacing:.03em;
+                text-transform:uppercase;margin:0 0 8px;display:flex;align-items:center;gap:8px}
+  .rationale h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .rationale ul{margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .rationale li{margin-bottom:6px}
+  .rationale strong{color:var(--chalk);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <h1>Rank method consolidation — #232 · #233</h1>
+    <p><strong>CURRENT</strong> is recreated from <code style="color:var(--chalk)">RankHomeScreen.tsx</code>
+       (5-card chooser), the <code style="color:var(--chalk)">RankMenu</code> sheet in
+       <code style="color:var(--chalk)">TabNav.tsx</code> (7 rows), and
+       <code style="color:var(--chalk)">QuickSetTiersScreen.tsx</code> (empty-tier CTA, #159/#217 state).
+       <strong>PROPOSED</strong>: one chooser with three outcome-labeled primary paths + a
+       "More ways to rank" disclosure, Quick rank presented as a follow-on pass (not a peer),
+       and an action-first empty-tier CTA.</p>
+  </div>
+
+  <!-- ══════════ SECTION A — chooser surfaces ══════════ -->
+  <div class="sec">A · Choosing how to rank — two surfaces today, one proposed</div>
+  <div class="compare">
+
+    <!-- CURRENT column: two frames -->
+    <div class="col">
+      <div class="colcap"><span class="dot"></span>Current 1 of 2 — RankHome chooser (5 cards)</div>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="stackhdr">
+          <span class="shtitle">Rank</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll">
+          <div class="heading">Build your board</div>
+
+          <div class="callout">
+            <svg class="i" width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#F0508C" stroke-width="1.75"><path d="M3 7h11l-2.5-2.5M17 13H6l2.5 2.5"/></svg>
+            <div class="tx"><b>Every trade we suggest is priced off this board.</b> The closer it
+              matches what you really believe, the better the deals we find — sharper targets,
+              fairer offers, fewer duds. Five ways to build it; pick how hands-on you want to be.</div>
+          </div>
+
+          <div class="mcard featured">
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#56D9EC" stroke-width="1.75"><path d="M4 10.5 8.5 15 16 6"/></svg>
+              <span class="mtitle">Tap players into tiers</span><span class="rectag">recommended</span>
+            </div>
+            <div class="mbody">We deal you one value tier at a time — tap the players who belong,
+              save, next. The fastest route to a board good enough to trade off.</div>
+            <div class="mfoot"><span class="thint">~2 min per position</span>
+              <span class="meter4"><span class="on"></span><span></span><span></span><span></span></span></div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 17v-6M10 17V3M17 17v-9"/></svg>
+              <span class="mtitle">Answer quick head-to-heads</span>
+            </div>
+            <div class="mbody">We show you three players — you put them in order. A few seconds
+              each, and your board builds itself from the pattern of your answers.</div>
+            <div class="mfoot"><span class="thint">30 sec at a time</span>
+              <span class="meter4"><span class="on"></span><span></span><span></span><span></span></span></div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 7h11l-2.5-2.5M17 13H6l2.5 2.5"/></svg>
+              <span class="mtitle">Price players in picks</span>
+            </div>
+            <div class="mbody">One player at a time: worth two 1sts? One? A mid 2nd? Each answer
+              locks in a value everyone in your league understands the same way.</div>
+            <div class="mfoot"><span class="thint">~5 min for your top 50</span>
+              <span class="meter4"><span class="on"></span><span class="on"></span><span></span><span></span></span></div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 15 4 8l3.5 2.5L10 5l2.5 5.5L16 8l1 7H3Z"/></svg>
+              <span class="mtitle">Sort players into groups</span>
+            </div>
+            <div class="mbody">Drag players into value groups, from untouchable to bench. You
+              decide the shape of your board — we handle the exact numbers inside each group.</div>
+            <div class="mfoot"><span class="thint">~10 min per position</span>
+              <span class="meter4"><span class="on"></span><span class="on"></span><span class="on"></span><span></span></span></div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 14l4-4 3 3 7-7"/><path d="M13 6h4v4"/></svg>
+              <span class="mtitle">Order every player yourself</span>
+            </div>
+            <div class="mbody">The full list, in your exact order, top to bottom. Nothing inferred,
+              nothing suggested — total control over every slot.</div>
+            <div class="mfoot"><span class="thint">The long way — your way</span>
+              <span class="meter4"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span></span></div>
+          </div>
+
+          <div class="axis"><span class="thint">We steer</span><span class="ln"></span><span class="thint">You steer</span></div>
+          <div class="mixnote">Mix them anytime — every method writes to the same board, and you
+            can fine-tune any player later. Change your pick in Settings.</div>
+        </div>
+      </div>
+      <div class="cap">Reached from "More ways to rank" in Quick set's header. Five peer cards;
+        effort is encoded twice (time hint + hands-on meter) and the axis label is an
+        abstraction ("we steer / you steer").</div>
+
+      <div class="colcap"><span class="dot"></span>Current 2 of 2 — Rank-tab action sheet (7 rows)</div>
+      <div class="sheetstage">
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="grabber"></div>
+          <div class="heading">Rank</div>
+          <div class="sheetsub">Pick how you want to rank players.</div>
+          <div class="srow"><div class="m"><div class="t">Quick set <span class="rectag">recommended</span></div>
+            <div class="s">Tap players into pick-value tiers, one tier at a time — the fastest board</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="srow"><div class="m"><div class="t">Quick rank</div>
+            <div class="s">Order players within each tier — tap them best-first, tier by tier</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="srow"><div class="m"><div class="t">Trios</div>
+            <div class="s">3-at-a-time swipe ranking</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="srow"><div class="m"><div class="t">Pick Anchors</div>
+            <div class="s">Say what each player is worth in draft picks — 4 1sts down to no value</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="srow"><div class="m"><div class="t">Tiers</div>
+            <div class="s">Drag players into pick-value tiers (4+ 1sts down to FA)</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="srow"><div class="m"><div class="t">Overall Ranks</div>
+            <div class="s">Drag rows or tap a rank number to re-order your board by hand</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="srow"><div class="m"><div class="t">Trends</div>
+            <div class="s">See your biggest movers and how you differ from consensus</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="btn ghost" style="margin-top:8px">Cancel</div>
+        </div>
+      </div>
+      <div class="cap">Opened by the Rank tab / "More ways to rank" (flag
+        <span class="mono" style="font-size:11px">ux.rank_tab_destination</span> on). Seven peer
+        rows with different names for the same things the chooser lists ("Quick set" vs "Tap
+        players into tiers", "Trios" vs "head-to-heads") — the #232 confusion.</div>
+    </div>
+
+    <!-- PROPOSED column: one frame -->
+    <div class="col">
+      <div class="colcap prop"><span class="dot"></span>Proposed — one chooser, both entry points</div>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="stackhdr">
+          <span class="shtitle">Rank</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll">
+          <div class="heading">Build your board</div>
+
+          <div class="callout">
+            <svg class="i" width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#F0508C" stroke-width="1.75"><path d="M3 7h11l-2.5-2.5M17 13H6l2.5 2.5"/></svg>
+            <div class="tx"><b>Trades are priced off this board.</b> The better it matches you,
+              the better the deals we find.</div>
+          </div>
+
+          <div class="mcard featured">
+            <div class="mhead">
+              <span class="roletag">Fastest</span>
+              <span style="flex:1"></span><span class="rectag">recommended</span>
+            </div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#56D9EC" stroke-width="1.75"><path d="M4 10.5 8.5 15 16 6"/></svg>
+              <span class="mtitle">Quick set</span>
+            </div>
+            <div class="mbody">Tap players into value tiers, one tier at a time. A usable board
+              in a few minutes per position.</div>
+            <div class="subrow"><b>Then, if you want:</b> Quick rank — a follow-on pass that
+              fine-tunes the order inside each tier. Offered when you finish.</div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead"><span class="roletag">Most precise</span></div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 17v-6M10 17V3M17 17v-9"/></svg>
+              <span class="mtitle">Head-to-heads</span>
+            </div>
+            <div class="mbody">Put three players in order at a time — a few seconds each, and
+              your board sharpens with every answer.</div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead"><span class="roletag">Most control</span></div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 14l4-4 3 3 7-7"/><path d="M13 6h4v4"/></svg>
+              <span class="mtitle">Your full board</span>
+            </div>
+            <div class="mbody">Drag every player into your exact order. Nothing inferred,
+              nothing suggested.</div>
+          </div>
+
+          <div class="morehdr">
+            More ways to rank
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 6l5 5 5-5"/></svg>
+          </div>
+          <div style="border:1px solid var(--line);border-radius:4px;padding:0 12px;background:var(--ink-1)">
+            <div class="qrow"><div class="m"><div class="t">Pick Anchors</div>
+              <div class="s">Price players in draft picks, one at a time</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+            <div class="qrow"><div class="m"><div class="t">Tiers board</div>
+              <div class="s">Drag players between tiers on the full board</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+            <div class="qrow" style="border-bottom:0"><div class="m"><div class="t">Trends</div>
+              <div class="s">Your biggest movers vs consensus</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          </div>
+
+          <div class="mixnote">Every method writes to the same board — mix anytime.</div>
+        </div>
+      </div>
+      <div class="cap">One content model rendered on both surfaces: as this screen (from
+        "More ways to rank" in a rank header) and as the Rank-tab sheet (same three cards +
+        disclosure, scrolling). Shown with the disclosure OPEN; it defaults closed. Labels are
+        outcomes (<b>Fastest / Most precise / Most control</b>) instead of the hands-on meter and
+        steer axis; the same names appear everywhere ("Quick set" is called Quick set on the card,
+        in headers, and in the walk). Quick rank is a sub-line of Quick set, not a peer row.</div>
+    </div>
+  </div>
+
+  <!-- ══════════ SECTION B — empty-tier CTA ══════════ -->
+  <div class="sec">B · Quick set — the empty-tier primary button (#233)</div>
+  <div class="compare">
+
+    <div class="col">
+      <div class="colcap"><span class="dot"></span>Current — QuickSetTiersScreen.tsx (0 selected)</div>
+      <div class="phone fixed" style="height:700px">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="stackhdr">
+          <span class="shtitle narrow">Quick Set Tiers</span>
+          <span></span>
+          <span class="moreways">More ways to rank</span>
+        </div>
+        <div class="scroll" style="gap:8px">
+          <div class="fmt"><div class="on">1QB PPR</div><div>SF TEP</div></div>
+          <div class="postabs"><div class="on">QB</div><div>RB</div><div>WR</div><div>TE</div></div>
+          <div class="stephead"><span class="tl">4+ 1sts</span><span class="pg">Tier 1 of 8</span></div>
+          <div class="stephint">Tap every QB who belongs in 4+ 1sts, then save to move on. Each
+            card shows the tier the player is in now.</div>
+          <div class="search">Search QBs…</div>
+          <div class="grid">
+            <div class="grow">
+              <div class="chip"><span class="nm">Josh Allen</span>
+                <span class="meta"><span class="tm">BUF</span><span class="ag">29</span><span class="tr" style="color:var(--tier-firsts-2)">2 1sts</span></span></div>
+              <div class="chip"><span class="nm">Lamar Jackson</span>
+                <span class="meta"><span class="tm">BAL</span><span class="ag">29</span><span class="tr" style="color:var(--tier-first-1)">1st</span></span></div>
+              <div class="chip"><span class="nm">Jayden Daniels</span>
+                <span class="meta"><span class="tm">WAS</span><span class="ag">25</span><span class="tr" style="color:var(--tier-firsts-2)">2 1sts</span></span></div>
+            </div>
+            <div class="grow">
+              <div class="chip"><span class="nm">Patrick Mahomes</span>
+                <span class="meta"><span class="tm">KC</span><span class="ag">30</span><span class="tr" style="color:var(--tier-first-1)">1st</span></span></div>
+              <div class="chip"><span class="nm">Jalen Hurts</span>
+                <span class="meta"><span class="tm">PHI</span><span class="ag">27</span><span class="tr" style="color:var(--tier-first-1)">1st</span></span></div>
+              <div class="chip"><span class="nm">C.J. Stroud</span>
+                <span class="meta"><span class="tm">HOU</span><span class="ag">24</span><span class="tr" style="color:var(--tier-second)">2nd</span></span></div>
+            </div>
+            <div class="grow">
+              <div class="chip"><span class="nm">Joe Burrow</span>
+                <span class="meta"><span class="tm">CIN</span><span class="ag">29</span><span class="tr" style="color:var(--tier-first-1)">1st</span></span></div>
+              <div class="chip"><span class="nm">Caleb Williams</span>
+                <span class="meta"><span class="tm">CHI</span><span class="ag">24</span><span class="tr" style="color:var(--tier-second)">2nd</span></span></div>
+              <div class="chip"><span class="nm">Drake Maye</span>
+                <span class="meta"><span class="tm">NE</span><span class="ag">23</span><span class="tr" style="color:var(--tier-second)">2nd</span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="walkfoot">
+          <div class="btn ghost compact dis">Back</div>
+          <div class="btn secondary compact">Skip</div>
+          <div class="btn primary grow1">No players for this tier</div>
+        </div>
+      </div>
+      <div class="cap">The #159 label: with zero chips selected the primary reads
+        "No players for this tier" (last tier: "No players here &amp; finish"). It states a fact,
+        not an action — users scanning for "Continue" don't find one, and it sits NEXT to a Skip
+        that does the identical thing at 0 selected.</div>
+    </div>
+
+    <div class="col">
+      <div class="colcap prop"><span class="dot"></span>Proposed — action-first, one advance path</div>
+      <div class="phone fixed" style="height:700px">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="stackhdr">
+          <span class="shtitle narrow">Quick Set Tiers</span>
+          <span></span>
+          <span class="moreways">More ways to rank</span>
+        </div>
+        <div class="scroll" style="gap:8px">
+          <div class="fmt"><div class="on">1QB PPR</div><div>SF TEP</div></div>
+          <div class="postabs"><div class="on">QB</div><div>RB</div><div>WR</div><div>TE</div></div>
+          <div class="stephead"><span class="tl">4+ 1sts</span><span class="pg">Tier 1 of 8</span></div>
+          <div class="stephint">Tap every QB who belongs in 4+ 1sts, then save to move on. Each
+            card shows the tier the player is in now.</div>
+          <div class="search">Search QBs…</div>
+          <div class="grid">
+            <div class="grow">
+              <div class="chip"><span class="nm">Josh Allen</span>
+                <span class="meta"><span class="tm">BUF</span><span class="ag">29</span><span class="tr" style="color:var(--tier-firsts-2)">2 1sts</span></span></div>
+              <div class="chip"><span class="nm">Lamar Jackson</span>
+                <span class="meta"><span class="tm">BAL</span><span class="ag">29</span><span class="tr" style="color:var(--tier-first-1)">1st</span></span></div>
+              <div class="chip"><span class="nm">Jayden Daniels</span>
+                <span class="meta"><span class="tm">WAS</span><span class="ag">25</span><span class="tr" style="color:var(--tier-firsts-2)">2 1sts</span></span></div>
+            </div>
+            <div class="grow">
+              <div class="chip"><span class="nm">Patrick Mahomes</span>
+                <span class="meta"><span class="tm">KC</span><span class="ag">30</span><span class="tr" style="color:var(--tier-first-1)">1st</span></span></div>
+              <div class="chip"><span class="nm">Jalen Hurts</span>
+                <span class="meta"><span class="tm">PHI</span><span class="ag">27</span><span class="tr" style="color:var(--tier-first-1)">1st</span></span></div>
+              <div class="chip"><span class="nm">C.J. Stroud</span>
+                <span class="meta"><span class="tm">HOU</span><span class="ag">24</span><span class="tr" style="color:var(--tier-second)">2nd</span></span></div>
+            </div>
+            <div class="grow">
+              <div class="chip"><span class="nm">Joe Burrow</span>
+                <span class="meta"><span class="tm">CIN</span><span class="ag">29</span><span class="tr" style="color:var(--tier-first-1)">1st</span></span></div>
+              <div class="chip"><span class="nm">Caleb Williams</span>
+                <span class="meta"><span class="tm">CHI</span><span class="ag">24</span><span class="tr" style="color:var(--tier-second)">2nd</span></span></div>
+              <div class="chip"><span class="nm">Drake Maye</span>
+                <span class="meta"><span class="tm">NE</span><span class="ag">23</span><span class="tr" style="color:var(--tier-second)">2nd</span></span></div>
+            </div>
+          </div>
+
+          <!-- selected-state inset -->
+          <div style="margin-top:16px;border:1px dashed var(--line-strong);border-radius:8px;padding:10px 12px">
+            <div class="lab" style="margin-bottom:8px">With 1+ selected (unchanged behavior)</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="btn ghost compact dis">Back</div>
+              <div class="btn secondary compact">Skip</div>
+              <div class="btn primary compact" style="flex:1">Save 4+ 1sts (1)</div>
+            </div>
+          </div>
+        </div>
+        <div class="walkfoot">
+          <div class="btn ghost compact dis">Back</div>
+          <div class="btn primary grow1">Continue — no QBs this high</div>
+        </div>
+      </div>
+      <div class="cap">At 0 selected the primary reads
+        <b>"Continue — no QBs this high"</b> (last tier: "Continue &amp; finish") and the Skip
+        secondary is hidden — at zero selections Skip and the primary were behaviorally identical,
+        so only one advance control remains. Tap a chip and the footer instantly reverts to
+        Back / Skip / "Save 4+ 1sts (1)" (inset), where Skip regains its distinct meaning:
+        advance WITHOUT saving your taps.</div>
+    </div>
+  </div>
+
+  <!-- ══════════ RATIONALE ══════════ -->
+  <div class="rationale">
+    <div class="card">
+      <h2>Rationale</h2>
+      <ul>
+        <li><strong>One chooser, not two (#232):</strong> the RankHome cards and the Rank-tab
+          sheet currently describe the same flows under different names ("Quick set" vs "Tap
+          players into tiers", "Trios" vs "head-to-heads"). The proposal is one content model —
+          three primary cards + one disclosure — rendered as either a sheet or a screen, with one
+          name per method used everywhere.</li>
+        <li><strong>Outcome labels beat effort abstractions:</strong> FASTEST / MOST PRECISE /
+          MOST CONTROL answers the only question a new user has ("which one should I use?") in
+          their own words; the hands-on meter, duplicate time hints and the WE STEER / YOU STEER
+          axis all required learning the app's mental model first (tenet: zero-context UX).</li>
+        <li><strong>Quick rank is a refinement, not a method:</strong> it only operates on tiers
+          Quick set already built, and the app itself offers it at Quick set's finish — listing it
+          as a peer row is the #232 confusion in miniature. It moves into the Quick set card as
+          "Then, if you want: Quick rank".</li>
+        <li><strong>Advanced paths survive, demoted:</strong> Pick Anchors, the Tiers drag board
+          and Trends keep their rows behind "More ways to rank" (default collapsed) — simple &gt;
+          complex without deleting power-user routes; 5 cards + 7 sheet rows become 3 cards + 1
+          disclosure.</li>
+        <li><strong>"Continue — no players this high" over "Skip — no players here" (#233):</strong>
+          Continue is the verb users scan for in the primary slot (the exact expectation #233
+          reports); it states the outcome positionally ("no QBs this high" — the walk moves DOWN
+          the ladder, so lower tiers are still coming) rather than a bare fact; and it lets the
+          redundant Skip hide at 0 selected — two side-by-side buttons that do the same thing is
+          the worse confusion. Skip returns with selections, where it means something different.</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
