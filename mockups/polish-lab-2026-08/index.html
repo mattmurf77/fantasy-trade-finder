@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FTF Polish Lab — 2026-08 · current vs proposed</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#12151B; --ink-2:#1A1E26; --ink-3:#232834;
+    --line:#2A303C; --line-strong:#59647A;
+    --chalk:#E8EBF0; --chalk-dim:#9AA3B2; --chalk-faint:#6B7484;
+    --ice:#56D9EC; --flare:#FFB454;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0C0E11;color:#E8EBF0;font-family:'Archivo','Helvetica Neue',Arial,sans-serif;min-height:100vh}
+  header{padding:20px 24px 0}
+  header h1{font-family:'Barlow Condensed','Arial Narrow',sans-serif;font-size:26px;letter-spacing:.5px;text-transform:uppercase}
+  header p{color:#9AA3B2;font-size:13px;margin-top:4px;max-width:900px}
+  nav{display:flex;flex-wrap:wrap;gap:6px;padding:16px 24px;position:sticky;top:0;background:#0C0E11;z-index:5;border-bottom:1px solid #2A303C}
+  nav button{
+    background:#1A1E26;color:#9AA3B2;border:1px solid #2A303C;border-radius:6px;
+    padding:8px 14px;font-family:'Barlow Condensed','Arial Narrow',sans-serif;font-size:14px;
+    letter-spacing:.4px;text-transform:uppercase;cursor:pointer;
+  }
+  nav button:hover{color:#E8EBF0;border-color:#59647A}
+  nav button.active{color:#0C0E11;background:#56D9EC;border-color:#56D9EC;font-weight:600}
+  nav button .fb{display:block;font-size:10px;letter-spacing:.3px;opacity:.75;text-transform:none}
+  main{padding:0}
+  iframe{width:100%;height:calc(100vh - 130px);border:0;display:block;background:#0C0E11}
+  .hint{padding:6px 24px 14px;color:#6B7484;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Polish Lab · current vs proposed</h1>
+  <p>Operator feedback #206–#234 design candidates. Each tab: today's screen recreated from the real app code (left) beside the proposed redesign (right). Pick winners, mix and match — nothing here is built yet.</p>
+</header>
+<nav id="tabs"></nav>
+<main><iframe id="frame" src="" title="mockup"></iframe></main>
+<div class="hint">Tabs are keyboard-navigable (←/→). Each page also opens standalone from this folder.</div>
+<script>
+const PAGES = [
+  { file:'header-league-switcher.html',    label:'Header · league switcher', fb:'#223 #224' },
+  { file:'trade-dna-outlook.html',         label:'Trade DNA · outlook',      fb:'#212 #231 #206' },
+  { file:'asset-ideas-layout.html',        label:'Find-a-trade layout',      fb:'#216 #209' },
+  { file:'hub-fit-to-screen.html',         label:'Hub fit-to-screen',        fb:'#218 #219' },
+  { file:'empty-states-progress.html',     label:'Empty states · progress',  fb:'#229 #230 #234' },
+  { file:'rank-method-consolidation.html', label:'Rank chooser',             fb:'#232 #233' },
+  { file:'notifications-dechalk.html',     label:'Notifications',            fb:'#225' },
+];
+const nav = document.getElementById('tabs');
+const frame = document.getElementById('frame');
+let current = 0;
+PAGES.forEach((p, i) => {
+  const b = document.createElement('button');
+  b.innerHTML = p.label + '<span class="fb">' + p.fb + '</span>';
+  b.onclick = () => select(i);
+  nav.appendChild(b);
+});
+function select(i){
+  current = i;
+  [...nav.children].forEach((b, j) => b.classList.toggle('active', j === i));
+  frame.src = PAGES[i].file;
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight') select((current + 1) % PAGES.length);
+  if (e.key === 'ArrowLeft')  select((current - 1 + PAGES.length) % PAGES.length);
+});
+select(0);
+</script>
+</body>
+</html>
