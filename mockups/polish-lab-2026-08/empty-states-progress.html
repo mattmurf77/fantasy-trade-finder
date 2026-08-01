@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish lab — Empty states &amp; progress (#229 · #230 · #234)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ─────────
+     Canonical hexes; --line-strong is the 2026-07-19 a11y value #59647A.
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px}
+  .wrap{max-width:880px;margin:0 auto}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:24px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.1;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note p,.note ul{margin:0;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .note ul{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:4px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note a{color:var(--ice);text-decoration:none}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:32px 0 12px}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice)}
+
+  .compare{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+  .col{flex:1 1 390px;max-width:420px}
+  .colcap{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+          color:var(--chalk-dim);margin:0 0 8px;display:flex;align-items:center;gap:8px}
+  .colcap .dot{width:8px;height:8px;border-radius:2px;background:var(--line-strong)}
+  .colcap.prop .dot{background:var(--ice)}
+  .cap{font:400 12px/1.5 var(--ui);color:var(--chalk-faint);margin-top:10px}
+
+  /* ── iPhone frame ── */
+  .phone{position:relative;width:390px;background:var(--ink-0);
+         border:1px solid var(--line-strong);border-radius:8px;overflow:hidden}
+  .phone.fixed{height:844px}
+  .statusbar{height:40px;display:flex;align-items:flex-end;justify-content:space-between;
+             padding:0 20px 6px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)}
+  .batt{display:inline-block;width:20px;height:10px;border:1px solid var(--chalk-dim);
+        border-radius:2px;position:relative}
+  .batt::after{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:70%;
+               background:var(--chalk-dim)}
+
+  /* TopBar (global) + stack header */
+  .topbar{height:48px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .wordmark{display:flex;align-items:center;gap:8px;font-family:var(--cond);font-weight:600;
+            font-size:17px;letter-spacing:.06em;text-transform:uppercase}
+  .wordmark::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .stackhdr{height:44px;display:flex;align-items:center;padding:0 16px;position:relative}
+  .backctl{display:flex;align-items:center;gap:4px;font:600 14px var(--ui);color:var(--chalk)}
+  .stackhdr .shtitle{position:absolute;left:0;right:0;text-align:center;font-family:var(--cond);
+           font-weight:600;font-size:18px;letter-spacing:.03em;text-transform:uppercase;
+           pointer-events:none}
+
+  .scroll{padding:16px 16px 24px;display:flex;flex-direction:column;gap:12px}
+
+  .tick{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+        color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin-top:4px}
+  .tick::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .divider{height:1px;background:var(--line);margin-top:12px}
+
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:16px}
+
+  /* hero */
+  .herohead{display:flex;align-items:center;justify-content:space-between}
+  .lab{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .heroname{font-family:var(--cond);font-weight:600;font-size:22px;line-height:26px;
+            letter-spacing:.03em;text-transform:uppercase;margin-top:8px}
+  .chips{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
+  .badge{display:inline-block;padding:2px 6px;border-radius:2px;font:600 11px/14px var(--ui);
+         text-transform:uppercase;letter-spacing:.08em;border:1px solid var(--line-strong);
+         color:var(--chalk)}
+  .badge.rankchip{border-radius:4px;font-family:var(--mono);text-transform:none;letter-spacing:0}
+  .joinedchip{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:2px;
+              border:1px solid var(--line-strong)}
+  .joinedchip .n{font:500 13px var(--mono);font-variant-numeric:tabular-nums}
+  .joinedchip .t{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+                 color:var(--chalk-dim)}
+
+  /* stat tiles */
+  .statrow{display:flex;gap:12px}
+  .stat{flex:1;background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px;display:flex;flex-direction:column;gap:6px}
+  .stat .v{font:600 22px/26px var(--mono);font-variant-numeric:tabular-nums}
+  .stat .lr{display:flex;align-items:center;gap:4px}
+  .stat .sub{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+
+  /* explore rows */
+  .xrow{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .xrow .m{flex:1}
+  .xrow .t{font:600 16px/22px var(--ui)}
+  .xrow .s{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:2px}
+
+  .emptyline{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+
+  /* meter */
+  .meter{height:4px;background:var(--ink-3);margin-top:10px}
+  .meter .fill{height:4px;background:var(--ice)}
+  .statbetween{display:flex;justify-content:space-between;align-items:center}
+  .mono{font:500 13px/18px var(--mono);font-variant-numeric:tabular-nums}
+  .hint{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:8px}
+
+  /* leaderboard tabs + rows */
+  .ftabs{display:flex;gap:16px;margin-top:8px}
+  .ftab{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+        color:var(--chalk-dim);padding-bottom:4px;border-bottom:2px solid transparent}
+  .ftab.on{color:var(--chalk);border-bottom-color:var(--ice)}
+  .lbrow{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
+  .lbrow:last-child{border-bottom:0}
+  .lbrow .rk{font:500 13px var(--mono);color:var(--chalk-dim);width:24px;text-align:right}
+  .lbrow .nm{font:600 14px var(--ui);flex:1}
+  .lbrow .sc{font:500 13px var(--mono);font-variant-numeric:tabular-nums}
+  .lbrow .un{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-faint)}
+
+  /* buttons */
+  .btn{height:40px;border-radius:4px;display:flex;align-items:center;justify-content:center;
+       font:600 14px var(--ui);padding:0 16px}
+  .btn.primary{background:var(--ice);color:var(--on-ice)}
+  .btn.secondary{border:1px solid var(--line-strong);color:var(--chalk)}
+  .btn.ghost{color:var(--chalk-dim)}
+  .btn.compact{height:36px;font-size:13px}
+
+  /* tab bar */
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink-0)}
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 10px;
+      color:var(--chalk-dim);font:600 11px var(--ui)}
+  .tb.on{color:var(--ice)}
+  .phone.fixed .tabbar{position:absolute;left:0;right:0;bottom:0}
+
+  svg.i{display:block}
+
+  /* ── PROPOSED building blocks ── */
+  .ringrow{display:flex;gap:16px;align-items:center}
+  .ringwrap{position:relative;width:72px;height:72px;flex:none}
+  .ringwrap .rc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+                justify-content:center;gap:1px}
+  .ringwrap .rv{font:600 16px var(--mono);font-variant-numeric:tabular-nums}
+  .ringwrap .rl{font:600 8px var(--ui);letter-spacing:.06em;color:var(--chalk-dim);text-transform:uppercase}
+  .ptitle{font:600 16px/22px var(--ui)}
+  .pbody{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:2px}
+
+  .segbar{display:flex;gap:2px;margin-top:8px}
+  .segbar .seg{flex:1;height:8px;background:var(--ink-3)}
+  .segbar .seg.you{background:var(--ice)}
+  .seglab{display:flex;justify-content:space-between;margin-top:6px}
+  .unlockline{font:400 13px/18px var(--ui);color:var(--chalk);margin-top:8px}
+  .unlockline .em{color:var(--ice);font-weight:600}
+  .foldline{font:400 13px/18px var(--ui);color:var(--chalk-dim);border-top:1px solid var(--line);
+            margin-top:12px;padding-top:10px}
+
+  .exlabel{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--flare)}
+  .extrade{border:1px solid var(--line);border-radius:8px;background:var(--ink-0);
+           padding:10px 12px;margin-top:8px}
+  .excols{display:flex;gap:0;margin-top:6px}
+  .excol{flex:1;padding:0 10px}
+  .excol:first-child{padding-left:0;border-right:1px solid var(--line)}
+  .excol:last-child{padding-right:0;padding-left:12px}
+  .exhead{font:600 10px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+          color:var(--chalk-dim);display:flex;align-items:center;gap:6px}
+  .exhead::before{content:"";width:3px;height:10px;background:var(--ice)}
+  .exrow{display:flex;align-items:center;gap:6px;margin-top:6px}
+  .prail{width:3px;height:14px;flex:none}
+  .exnm{font:600 12px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .expos{font:600 9px var(--ui);letter-spacing:.05em}
+  .exmeter{height:4px;background:var(--ink-3);margin-top:10px;position:relative}
+  .exmeter .f{height:4px;background:var(--pos);width:88%}
+  .exmeterlab{display:flex;justify-content:space-between;margin-top:4px}
+
+  .rationale{margin-top:36px}
+  .rationale .card{padding:16px 20px}
+  .rationale h2{font-family:var(--cond);font-weight:600;font-size:18px;letter-spacing:.03em;
+                text-transform:uppercase;margin:0 0 8px;display:flex;align-items:center;gap:8px}
+  .rationale h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .rationale ul{margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .rationale li{margin-bottom:6px}
+  .rationale strong{color:var(--chalk);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <h1>Empty states &amp; progress — #229 · #230 · #234</h1>
+    <p><strong>CURRENT</strong> is recreated from <code style="color:var(--chalk)">mobile/src/screens/LeagueScreen.tsx</code>
+       and <code style="color:var(--chalk)">MatchesScreen.tsx</code> (day-one league: 0/11 joined, nothing ranked, no matches).
+       <strong>PROPOSED</strong> is one system: empty states lead with the solo value that works today,
+       a single progress module owns every unlock, and zero-rows collapse until they have data.</p>
+    <ul>
+      <li>#229 — League home's zeros are honest but demotivating; lead with solo value.</li>
+      <li>#230 — ranking is the foundation; incomplete ranking should be prominent and motivating.</li>
+      <li>#234 — say plainly what leaguemates ranking unlocks ("X of 12 ranked → unlocks Y").</li>
+    </ul>
+  </div>
+
+  <!-- ══════════ SECTION A — League home ══════════ -->
+  <div class="sec">A · League home — day-one low-activity state (full scroll shown)</div>
+  <div class="compare">
+
+    <!-- ── CURRENT ── -->
+    <div class="col">
+      <div class="colcap"><span class="dot"></span>Current — LeagueScreen.tsx</div>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="topbar">
+          <span class="wordmark">Trade Finder</span>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M10 3a5 5 0 0 1 5 5v3l1.5 2.5H3.5L5 11V8a5 5 0 0 1 5-5Z"/><path d="M8.5 16a1.5 1.5 0 0 0 3 0"/></svg>
+        </div>
+        <div class="stackhdr">
+          <span class="shtitle">League Home</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll">
+
+          <div class="card">
+            <div class="herohead">
+              <span class="lab">League</span>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 6l5 5 5-5"/></svg>
+            </div>
+            <div class="heroname">The Gridiron Gang</div>
+            <div class="chips">
+              <span class="badge">1QB PPR</span>
+              <span class="badge rankchip">#7 of 12</span>
+              <span class="badge">12 teams</span>
+              <span class="joinedchip"><span class="n">0/11</span><span class="t">joined</span>
+                <svg class="i" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></span>
+            </div>
+          </div>
+
+          <div class="tick">Matches</div>
+          <div class="statrow">
+            <div class="stat">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M8 12 12 8M7 13a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M13 7a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>
+              <span class="v">0</span>
+              <span class="lr"><span class="lab">Mutual matches</span>
+                <svg class="i" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></span>
+              <span class="sub">Liked by both sides</span>
+            </div>
+            <div class="stat">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z"/><circle cx="10" cy="10" r="2.5"/></svg>
+              <span class="v">0</span>
+              <span class="lr"><span class="lab">Awaiting them</span>
+                <svg class="i" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></span>
+              <span class="sub">Your like, waiting on theirs</span>
+            </div>
+          </div>
+
+          <div class="tick">Explore</div>
+          <div>
+            <div class="xrow">
+              <div class="m"><div class="t">League rankings</div>
+                <div class="s">Every team ranked by total roster value</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg>
+            </div>
+            <div class="xrow">
+              <div class="m"><div class="t">Free agents</div>
+                <div class="s">Best available players in this league</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+          <div class="tick">Contrarian ranks</div>
+          <div class="card"><span class="emptyline">Invite leaguemates to unlock — need 3+ ranking-takers.</span></div>
+
+          <div class="divider"></div>
+          <div class="tick">Coverage</div>
+          <div class="card">
+            <div class="statbetween">
+              <span style="font:400 14px/21px var(--ui)">Opponents you've ranked vs</span>
+              <span class="mono">0/11</span>
+            </div>
+            <div class="meter"><div class="fill" style="width:0%"></div></div>
+            <div class="hint">Rank more players to widen the trade pool — 100% to go.</div>
+          </div>
+
+          <div class="divider"></div>
+          <div class="tick">Leaderboards</div>
+          <div class="tick">League leaderboard</div>
+          <div class="ftabs">
+            <span class="ftab on">Streaks</span><span class="ftab">This week</span>
+            <span class="ftab">This month</span><span class="ftab">Season</span>
+          </div>
+          <span class="emptyline">No leaguemates on the board yet — ranks count once they sign in.</span>
+
+          <div class="tick">Global leaderboard</div>
+          <div class="ftabs">
+            <span class="ftab on">Streaks</span><span class="ftab">This week</span>
+            <span class="ftab">This month</span><span class="ftab">Season</span>
+          </div>
+          <div class="card" style="padding:8px 16px">
+            <div class="lbrow"><span class="rk">1</span><span class="nm">@pickhoarder</span><span class="sc">21</span><span class="un">days</span></div>
+            <div class="lbrow"><span class="rk">2</span><span class="nm">@dynasty_dan</span><span class="sc">14</span><span class="un">days</span></div>
+            <div class="lbrow"><span class="rk">3</span><span class="nm">@taxi_squad</span><span class="sc">9</span><span class="un">days</span></div>
+          </div>
+
+          <div class="btn secondary" style="margin-top:16px">Switch league</div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Trades</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="cap">Faithful zero state: "0/11 joined" chip, two 0-value Matches tiles,
+        "Invite leaguemates to unlock" contrarian card, a 0% coverage bar with the easy-to-miss
+        "100% to go" hint, and an empty league leaderboard — five separate surfaces all saying
+        "nothing here yet".</div>
+    </div>
+
+    <!-- ── PROPOSED ── -->
+    <div class="col">
+      <div class="colcap prop"><span class="dot"></span>Proposed — one progress system</div>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="topbar">
+          <span class="wordmark">Trade Finder</span>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M10 3a5 5 0 0 1 5 5v3l1.5 2.5H3.5L5 11V8a5 5 0 0 1 5-5Z"/><path d="M8.5 16a1.5 1.5 0 0 0 3 0"/></svg>
+        </div>
+        <div class="stackhdr">
+          <span class="shtitle">League Home</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll">
+
+          <div class="card">
+            <div class="herohead">
+              <span class="lab">League</span>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 6l5 5 5-5"/></svg>
+            </div>
+            <div class="heroname">The Gridiron Gang</div>
+            <div class="chips">
+              <span class="badge">1QB PPR</span>
+              <span class="badge rankchip">#7 of 12</span>
+              <span class="badge">12 teams</span>
+            </div>
+          </div>
+
+          <!-- (a)+(c) — solo value first, one action -->
+          <div class="tick">Works right now</div>
+          <div class="card">
+            <div class="ptitle">Find trades today — no leaguemates needed</div>
+            <div class="pbody">Suggestions are priced off community consensus until your board
+              takes over. Invite leaguemates later for league-specific matches.</div>
+            <div class="extrade">
+              <span class="exlabel">Example — not from your league</span>
+              <div class="excols">
+                <div class="excol">
+                  <div class="exhead">You send</div>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span>
+                    <span class="exnm">Breece Hall</span><span class="expos" style="color:var(--rb)">RB</span></div>
+                </div>
+                <div class="excol">
+                  <div class="exhead">You get</div>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span>
+                    <span class="exnm">De'Von Achane</span><span class="expos" style="color:var(--rb)">RB</span></div>
+                  <div class="exrow"><span class="prail" style="background:var(--line-strong)"></span>
+                    <span class="exnm">2027 2nd</span></div>
+                </div>
+              </div>
+              <div class="exmeter"><div class="f"></div></div>
+              <div class="exmeterlab"><span class="lab" style="font-size:10px">Fairness</span>
+                <span class="mono" style="font-size:11px;color:var(--chalk-dim)">88</span></div>
+            </div>
+            <div class="btn primary" style="margin-top:12px">Find a trade</div>
+          </div>
+
+          <!-- (b) — the single progress module -->
+          <div class="tick">League progress</div>
+          <div class="card">
+            <div class="ringrow">
+              <div class="ringwrap">
+                <svg class="i" width="72" height="72" viewBox="0 0 72 72" fill="none">
+                  <circle cx="36" cy="36" r="31" stroke="#232833" stroke-width="5"/>
+                  <!-- 0 of 4 positions: start nub only -->
+                  <path d="M36 5 A31 31 0 0 1 38.4 5.1" stroke="#56D9EC" stroke-width="5" stroke-linecap="square"/>
+                </svg>
+                <div class="rc"><span class="rv">0/4</span><span class="rl">positions</span></div>
+              </div>
+              <div style="flex:1">
+                <div class="ptitle">Rank your players first</div>
+                <div class="pbody">Your board is what prices every trade. Quick set builds
+                  a position in ~2 minutes.</div>
+              </div>
+            </div>
+            <div class="btn primary compact" style="margin-top:12px">Start Quick set</div>
+
+            <div class="foldline" style="margin-top:14px;border-top:1px solid var(--line)"></div>
+            <div class="statbetween" style="margin-top:2px">
+              <span class="lab">Leaguemates ranked</span>
+              <span class="mono">1/12 <span style="color:var(--chalk-dim)">(you)</span></span>
+            </div>
+            <div class="segbar">
+              <span class="seg you"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+            </div>
+            <div class="unlockline"><span class="em">2 more ranked leaguemates</span> unlocks
+              mutual matches — trades both sides already like.</div>
+            <div class="btn ghost compact" style="align-self:flex-start;padding:0;justify-content:flex-start">Invite leaguemates</div>
+
+            <div class="foldline">Leaderboards and contrarian ranks appear here once
+              3 leaguemates have ranked.</div>
+          </div>
+
+          <div class="tick">Explore</div>
+          <div>
+            <div class="xrow">
+              <div class="m"><div class="t">League rankings</div>
+                <div class="s">Every team ranked by total roster value</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg>
+            </div>
+            <div class="xrow">
+              <div class="m"><div class="t">Free agents</div>
+                <div class="s">Best available players in this league</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg>
+            </div>
+          </div>
+
+          <div class="btn secondary" style="margin-top:16px">Switch league</div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Trades</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="cap">Same truthful zeros, reframed: solo value leads with one action; the ring
+        (your ranking — the foundation, #230), the 12-slot leaguemate bar and the unlock sentence
+        (#234) live in ONE module; the joined chip, coverage card, empty contrarian card, empty
+        league leaderboard and 0-value Matches tiles are all absorbed by it until they have data.
+        The tiles/sections return unchanged once their counts are &gt; 0.</div>
+    </div>
+  </div>
+
+  <!-- ══════════ SECTION B — Matches empty inbox ══════════ -->
+  <div class="sec">B · Matches — empty inbox</div>
+  <div class="compare">
+
+    <div class="col">
+      <div class="colcap"><span class="dot"></span>Current — MatchesScreen.tsx</div>
+      <div class="phone fixed">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="topbar">
+          <span class="wordmark">Trade Finder</span>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M10 3a5 5 0 0 1 5 5v3l1.5 2.5H3.5L5 11V8a5 5 0 0 1 5-5Z"/><path d="M8.5 16a1.5 1.5 0 0 0 3 0"/></svg>
+        </div>
+        <div class="scroll" style="height:660px">
+          <div style="display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--ink-1)">
+            <div style="flex:1;min-height:40px;display:flex;align-items:center;justify-content:center;background:var(--ink-3);border-bottom:2px solid var(--ice);font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase">Mutual matches</div>
+            <div style="flex:1;min-height:40px;display:flex;align-items:center;justify-content:center;font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)">Awaiting them</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:0 24px;text-align:center">
+            <div style="font-family:var(--cond);font-weight:600;font-size:22px;line-height:26px;letter-spacing:.03em;text-transform:uppercase">No matches in any of your leagues yet</div>
+            <div class="emptyline">Head to the Trades tab and swipe on some proposals. When a
+              leaguemate likes the same trade, it'll show up here.</div>
+            <div class="btn primary" style="width:200px">Go to Trades</div>
+            <div class="btn ghost compact">Refresh</div>
+            <div class="emptyline" style="color:var(--chalk-dim);text-decoration:underline;text-underline-offset:3px">How matching works</div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Trades</div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="cap">Current empty state (with S4 PRD-05 CTAs on). Correct action, but it
+        never says WHY the inbox is empty or what would fill it.</div>
+    </div>
+
+    <div class="col">
+      <div class="colcap prop"><span class="dot"></span>Proposed — same story as League home</div>
+      <div class="phone fixed">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="topbar">
+          <span class="wordmark">Trade Finder</span>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M10 3a5 5 0 0 1 5 5v3l1.5 2.5H3.5L5 11V8a5 5 0 0 1 5-5Z"/><path d="M8.5 16a1.5 1.5 0 0 0 3 0"/></svg>
+        </div>
+        <div class="scroll" style="height:660px">
+          <div style="display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--ink-1)">
+            <div style="flex:1;min-height:40px;display:flex;align-items:center;justify-content:center;background:var(--ink-3);border-bottom:2px solid var(--ice);font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase">Mutual matches</div>
+            <div style="flex:1;min-height:40px;display:flex;align-items:center;justify-content:center;font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)">Awaiting them</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:0 24px;text-align:center">
+            <div style="font-family:var(--cond);font-weight:600;font-size:22px;line-height:26px;letter-spacing:.03em;text-transform:uppercase">No mutual matches yet</div>
+            <div class="emptyline">A match needs two boards — yours and a leaguemate's. You can
+              find trade ideas right now; matches appear when a leaguemate likes the same trade.</div>
+            <div class="btn primary" style="width:200px">Find a trade</div>
+            <div class="card" style="width:100%;padding:12px 16px;text-align:left">
+              <div class="statbetween">
+                <span class="lab">Leaguemates ranked</span>
+                <span class="mono" style="font-size:12px">1/12 <span style="color:var(--chalk-dim)">(you)</span></span>
+              </div>
+              <div class="segbar" style="margin-top:6px">
+                <span class="seg you"></span><span class="seg"></span><span class="seg"></span>
+                <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+                <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+                <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              </div>
+              <div class="unlockline" style="font-size:12px;line-height:17px"><span class="em">2 more
+                ranked leaguemates</span> unlocks mutual matches.</div>
+            </div>
+            <div class="emptyline" style="color:var(--chalk-dim);text-decoration:underline;text-underline-offset:3px">How matching works</div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Trades</div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="cap">Explains the mechanic in one sentence, points at the action that works
+        today, and repeats the SAME unlock module (1/12 · "2 more unlocks") so League home and
+        Matches never tell different stories. "Refresh" is dropped — pull-to-refresh covers it.</div>
+    </div>
+  </div>
+
+  <!-- ══════════ RATIONALE ══════════ -->
+  <div class="rationale">
+    <div class="card">
+      <h2>Rationale</h2>
+      <ul>
+        <li><strong>Lead with what works now (#229):</strong> the day-one page opens with a
+          "Works right now" card — consensus-priced trade finding needs zero leaguemates — with
+          exactly one action (Find a trade). The sample trade is honestly labeled
+          <strong>EXAMPLE — not from your league</strong> (flare = informational highlight, ADR-005).</li>
+        <li><strong>One progress module owns every unlock (#230 + #234):</strong> the ring makes
+          "rank your players" the visibly unfinished foundation, the 12-slot bar counts ranked
+          leaguemates (you included, honestly: "1/12 (you)"), and one plain unlock sentence —
+          "2 more ranked leaguemates unlocks mutual matches" — replaces the buried
+          "100% to go" coverage hint.</li>
+        <li><strong>Kill demotivating zero-rows:</strong> the 0-value Matches tiles, the empty
+          contrarian card, the 0% coverage card and the empty league leaderboard collapse into one
+          line inside the progress module ("appear once 3 leaguemates have ranked") and return
+          unchanged the moment they have real data — five "nothing here" surfaces become one
+          forward-looking one.</li>
+        <li><strong>Honesty rules respected:</strong> no fabricated league data, no fake sample
+          rows presented as real; every number shown is the same truth the current screen shows,
+          restated as distance-to-unlock instead of absence.</li>
+        <li><strong>One story across surfaces:</strong> the Matches empty state reuses the same
+          unlock module and the same primary action, so League home and Matches can never
+          disagree about what to do next (mirrors the FB-91 tiles-mirror-segments rule).</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
