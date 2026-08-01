@@ -186,6 +186,43 @@ def test_flip_name():
     assert mfl._flip_name("Madonna") == "Madonna"
 
 
+# ── #210 — MFL display strings arrive with HTML entities / messy whitespace ─
+
+def test_clean_text_unescapes_entities_and_normalises_whitespace():
+    assert mfl._clean_text("&#201;ire Rebels") == "Éire Rebels"        # numeric
+    assert mfl._clean_text("Fish &amp; Chips") == "Fish & Chips"            # named
+    assert mfl._clean_text("&amp;#201;ire Rebels") == "Éire Rebels"    # double-escaped
+    assert mfl._clean_text("  Two  Spaces\t Team \n") == "Two Spaces Team"
+    assert mfl._clean_text(None) == ""
+    assert mfl._clean_text("Plain Name") == "Plain Name"
+
+
+def test_parse_bundle_cleans_entity_laden_names():
+    # The operator's Dependables case: MFL serving '&#201;ire Rebels'.
+    raw = {
+        "league": {"league": {
+            "id": "62846", "name": "The Dependables &amp; Friends",
+            "franchises": {"count": "2", "franchise": [
+                {"id": "0001", "name": "&#201;ire  Rebels"},
+                {"id": "0002", "name": "Smash &amp; Grab"},
+            ]},
+        }},
+        "rosters": {"rosters": {"franchise": [
+            {"id": "0001", "player": {"id": "15281", "status": "ROSTER"}},
+            {"id": "0002"},
+        ]}},
+        "players": {"players": {"player": {
+            "id": "15281", "name": "O&#8217;Connell, Kirby", "position": "QB"}}},
+    }
+    parsed = mfl.parse_bundle(raw)
+    assert parsed["name"] == "The Dependables & Friends"
+    assert parsed["franchises"][0]["name"] == "Éire Rebels"
+    assert parsed["franchises"][1]["name"] == "Smash & Grab"
+    # player names get the same cleanup before the flip
+    assert parsed["franchises"][0]["players"] == [
+        ("15281", "Kirby O’Connell", "QB")]
+
+
 # ── scoring-format detection (#201) ─────────────────────────────────────────
 
 def _scoring_raw(qb_limit=None, te_pts=None, wr_pts=None):

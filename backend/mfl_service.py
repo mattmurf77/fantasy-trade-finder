@@ -39,8 +39,10 @@ Design notes
 
 from __future__ import annotations
 
+import html
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -257,10 +259,10 @@ def fetch_my_leagues(cookie: str, year: int, timeout: int = 15,
         fid = str(lg.get("franchise_id") or "").strip()
         out.append({
             "league_id": league_id,
-            "name": lg.get("name") or f"MFL league {league_id}",
+            "name": _clean_text(lg.get("name")) or f"MFL league {league_id}",
             "host": parse_host_from_url(url_field),
             "franchise_id": fid or None,
-            "franchise_name": lg.get("franchise_name") or None,
+            "franchise_name": _clean_text(lg.get("franchise_name")) or None,
         })
     return out
 
@@ -368,15 +370,35 @@ def _as_list(value) -> list:
     return value if isinstance(value, list) else [value]
 
 
+_WS_RUN = re.compile(r"\s+")
+
+
+def _clean_text(value) -> str:
+    """Normalise an MFL-sourced display string (#210 — 'Éire Rebels' arriving
+    as '&#201;ire Rebels'). MFL serves names with HTML entities — numeric
+    (`&#201;`), named (`&amp;`), occasionally double-escaped
+    (`&amp;#201;`) — plus stray/non-breaking whitespace. Unescape until
+    stable (2 passes cover the double-escaped case) and collapse whitespace
+    runs to single spaces."""
+    text = "" if value is None else str(value)
+    for _ in range(2):
+        unescaped = html.unescape(text)
+        if unescaped == text:
+            break
+        text = unescaped
+    return _WS_RUN.sub(" ", text).strip()
+
+
 def _flip_name(mfl_name: str) -> str:
     """MFL player names are 'Last, First' — flip to 'First Last' so the
     shared normalise_name+position fallback matches DP's forename-first
     names. Team defenses ('Bills, Buffalo') flip harmlessly; they're out of
     pool anyway."""
+    mfl_name = _clean_text(mfl_name)
     if "," in mfl_name:
         last, first = mfl_name.split(",", 1)
         return f"{first.strip()} {last.strip()}".strip()
-    return mfl_name.strip()
+    return mfl_name
 
 
 def parse_bundle(raw: dict) -> dict:
@@ -392,7 +414,7 @@ def parse_bundle(raw: dict) -> dict:
     """
     league = (raw.get("league") or {}).get("league") or {}
     franchises_raw = _as_list((league.get("franchises") or {}).get("franchise"))
-    fr_name = {f.get("id"): (f.get("name") or "") for f in franchises_raw}
+    fr_name = {f.get("id"): _clean_text(f.get("name")) for f in franchises_raw}
 
     # players DB: mfl_id → (name, position)
     players_db: dict[str, tuple[str, str]] = {}
@@ -446,7 +468,7 @@ def parse_bundle(raw: dict) -> dict:
 
     return {
         "league_id": str(league.get("id") or ""),
-        "name": league.get("name") or "",
+        "name": _clean_text(league.get("name")),
         "total_teams": int(league.get("franchises", {}).get("count")
                            or len(franchises) or 0),
         "franchises": franchises,

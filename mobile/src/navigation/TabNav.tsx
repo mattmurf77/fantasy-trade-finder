@@ -143,6 +143,22 @@ const rankSubScreenOptions = (title: string, fallback: string) =>
     headerRight: () => <MoreWaysButton />,
   });
 
+// #217 — QuickSetTiers doubles as the Rank tab's launch route (#122). At the
+// stack ROOT there is no history to pop, so the always-on back control
+// (#162/#165) could only fall through to RankHome — duplicating the "More
+// ways to rank" header path (flag off: → RankHome directly; flag on: the
+// RankMenu sheet). Hide it there, and ONLY there: pushed from anywhere
+// (RankHome chooser, Tiers header, Rank menu), the route sits above index 0
+// and the shared control renders as usual. The nav-loop fix's never-strand
+// guarantee holds in both cases — root keeps the More-ways path, pushed
+// keeps real back history.
+function quickSetBackWhenPushed(navigation: any, route: any) {
+  const routes = navigation.getState()?.routes ?? [];
+  const selfIndex = routes.findIndex((r: any) => r.key === route.key);
+  if (selfIndex === 0) return null;
+  return <HeaderBack navigation={navigation} fallback="RankHome" />;
+}
+
 // PRD 01-05 / 01-02: pop a tab's nested stack to its root. Returns false
 // when the tab has no nested history (caller falls back to scroll-to-top).
 // Reads the partial nested state off the tab `route` — absent until the
@@ -246,11 +262,17 @@ function RankStackNav() {
         // RankMenu sheet like every other rank surface (RankHome stays
         // reachable — the menu's rows and this header's back-fallbacks
         // cover mode switching). Flag off: today's link to RankHome.
+        // #217 (both flag states): the back control renders only when the
+        // screen was PUSHED — see quickSetBackWhenPushed.
         options={
           rankDest
-            ? rankSubScreenOptions('Quick Set Tiers', 'RankHome')
-            : ({ navigation }) => ({
+            ? ({ navigation, route }) => ({
+                ...rankSubScreenOptions('Quick Set Tiers', 'RankHome')({ navigation }),
+                headerLeft: () => quickSetBackWhenPushed(navigation, route),
+              })
+            : ({ navigation, route }) => ({
                 ...subScreenOptions('Quick Set Tiers', 'RankHome')({ navigation }),
+                headerLeft: () => quickSetBackWhenPushed(navigation, route),
                 // #122: Quick Set is the no-pref default, so the demoted chooser
                 // stays one tap away ("More ways to rank", item 9's Q1 ruling) —
                 // it's the only path to RankHome from here (the Rank menu sheet

@@ -192,3 +192,7 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 - TradeFinderHubScreen no longer mounts its own `feedback.fab` (#196/#197 — TradesHome is a tab-stack screen, RootNav's global mount covers it; the local mount rendered a second flag at a different height)
 
 **League rankings (#14 completion, 2026-07-20):** `RankChipBadge` — "#3 of 12" consensus power-rank chip from the open `GET /api/league/rank-chip` read (60s server cache); silent-fail enrichment (error/old-server/demo → renders nothing); ice text when top-3. Mounted on LeaguePicker rows + the League tab hero chips. testID `league.rank-chip.<league_id>`
+
+**Calculator finder hand-off + trade-card badge reflow tranche (2026-08-01, #213/#226):**
+- TradeCalculatorScreen: `calc.find-a-trade` (#213 — the ONE quiet "Want ideas instead? Find a trade →" text-link row under the mode tabs; covers In-league/live/demo with a single affordance and navigates to the Trades stack home `TradesHome` — the finder hub with `trades.finder_hub` on, the classic deck off)
+- No new IDs for #226, but the trade-card row layout changed: `PlayerCard` gained a `badgeSlot` prop (informational badges rendered INSIDE the wrapping header badge row) and its classic-branch `rightSlot` is now in-flow (reserves width) instead of absolutely positioned; `TradeCard` moved OTB/UNTOUCHABLE badges to `badgeSlot` on BOTH columns and stacks the lock/swap/remove controls vertically in `rightSlot` (`trade-card.remove-asset.<player_id>` etc. unchanged)

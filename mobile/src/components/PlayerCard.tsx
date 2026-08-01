@@ -39,6 +39,12 @@ export interface PlayerCardProps {
   posRank?: string;                // e.g. "QB4"
   compact?: boolean;               // shorter card for tier bins / trade cards
   rightSlot?: React.ReactNode;     // optional right-side widget (drag handle, trend arrow, etc.)
+  // #226 — extra informational badges (OTB, UNTOUCHABLE) rendered INSIDE the
+  // header badge row, which wraps (flexWrap). rightSlot is absolutely
+  // positioned and overlapped the position tag on narrow trade-card columns;
+  // badges belong in flow so they reflow instead of colliding. Classic
+  // branch only (the dense branch has its own in-flow layout).
+  badgeSlot?: React.ReactNode;
   showInjury?: boolean;            // render the injury-status tag (default true). Off for Trios tiles (feedback #33).
   // #58 (cozy) — dense 60px two-line row, used ONLY by the Tiers board.
   // Renders a separate layout branch: line 1 = name + team + RK/injury
@@ -92,6 +98,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     posRank,
     compact = false,
     rightSlot,
+    badgeSlot,
     showInjury = true,
     dense = false,
     statsSlot,
@@ -286,45 +293,54 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
         </View>
       )}
 
-      <View style={styles.header}>
-        {isStdPos ? (
-          <PositionBadge pos={player.position as 'QB' | 'RB' | 'WR' | 'TE'} />
-        ) : (
-          <Badge label={String(player.position)} />
-        )}
-        {tier && <TierChalkBadge t={tier} />}
-        {posRank ? <Badge label={posRank} /> : null}
-        {isRookie && <RookieBadge />}
-        {injury ? (
-          injCode ? (
-            <InjuryBadge status={injCode} />
-          ) : (
-            <Badge label={injury} color={semantic.neg} colorText />
-          )
-        ) : null}
+      {/* #226 — rightSlot participates in layout (it was absolutely
+          positioned over the top-right, where it overlapped the header
+          badge row on narrow trade-card columns). The content column
+          shrinks/wraps beside it instead of being covered. */}
+      <View style={styles.contentRow}>
+        <View style={styles.contentMain}>
+          <View style={styles.header}>
+            {isStdPos ? (
+              <PositionBadge pos={player.position as 'QB' | 'RB' | 'WR' | 'TE'} />
+            ) : (
+              <Badge label={String(player.position)} />
+            )}
+            {tier && <TierChalkBadge t={tier} />}
+            {posRank ? <Badge label={posRank} /> : null}
+            {isRookie && <RookieBadge />}
+            {injury ? (
+              injCode ? (
+                <InjuryBadge status={injCode} />
+              ) : (
+                <Badge label={injury} color={semantic.neg} colorText />
+              )
+            ) : null}
+            {badgeSlot}
+          </View>
+
+          <Text scale="body" style={[type.title, styles.name]} numberOfLines={1}>
+            {player.name}
+          </Text>
+
+          <View style={styles.meta}>
+            <Text scale="body" style={type.bodySm}>{teamStr}</Text>
+            {ageStr && (
+              <>
+                <Text scale="body" style={styles.metaDot}>·</Text>
+                <Text scale="body" style={type.bodySm}>{ageStr}</Text>
+              </>
+            )}
+            {expStr && !compact && (
+              <>
+                <Text scale="body" style={styles.metaDot}>·</Text>
+                <Text scale="body" style={type.bodySm}>{expStr}</Text>
+              </>
+            )}
+          </View>
+        </View>
+
+        {rightSlot ? <View style={styles.rightSlot}>{rightSlot}</View> : null}
       </View>
-
-      <Text scale="body" style={[type.title, styles.name]} numberOfLines={1}>
-        {player.name}
-      </Text>
-
-      <View style={styles.meta}>
-        <Text scale="body" style={type.bodySm}>{teamStr}</Text>
-        {ageStr && (
-          <>
-            <Text scale="body" style={styles.metaDot}>·</Text>
-            <Text scale="body" style={type.bodySm}>{ageStr}</Text>
-          </>
-        )}
-        {expStr && !compact && (
-          <>
-            <Text scale="body" style={styles.metaDot}>·</Text>
-            <Text scale="body" style={type.bodySm}>{expStr}</Text>
-          </>
-        )}
-      </View>
-
-      {rightSlot ? <View style={styles.rightSlot}>{rightSlot}</View> : null}
     </Pressable>
   );
 });
@@ -401,7 +417,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   metaDot: { color: chalk.faint, marginHorizontal: space.xs },
-  rightSlot: { position: 'absolute', right: space.md, top: space.md },
+  // #226 — content column + in-flow right slot (was absolute top-right).
+  contentRow: { flexDirection: 'row' },
+  contentMain: { flex: 1, minWidth: 0 },
+  rightSlot: { marginLeft: space.sm, justifyContent: 'center' },
 
   // ── Dense (cozy) variant — #58, Tiers board only ─────────────────────
   // 60px fixed-height two-line row (mockups/tier-density/cozy.html). The

@@ -171,6 +171,10 @@ function TradeCardComp({
   // flag-off builds render exactly as before. Label shortened from
   // "ON THE BLOCK" (#153 — the long badge overlapped the position tags);
   // screen readers still hear the full phrase via rowA11y below.
+  // #226 — the badge now renders via PlayerCard's badgeSlot (inside the
+  // wrapping header badge row, both columns) instead of the overlay
+  // rightSlot, so it reflows next to the position tag rather than
+  // colliding with it on narrow split columns / large text sizes.
   const blockBadge = (p: Player) =>
     p.on_block ? <Badge label="OTB" color={flare.base} colorText /> : null;
 
@@ -423,17 +427,24 @@ function TradeCardComp({
                 compact
                 {...rowA11y(p, 'give')}
                 onLongPress={longPressFor(p, 'give')}
-                rightSlot={
-                  p.on_block ||
-                  untouchableIds?.has(p.id) ||
-                  onSwapPlayer ||
-                  onRemoveAsset ||
-                  (onPlayerMenu && onToggleUntouchable) ? (
-                    <View style={styles.rightSlotRow}>
+                // #226 — informational badges live in the wrapping header
+                // row; the in-flow rightSlot keeps only the interactive
+                // controls (stacked, so the narrow column keeps its width).
+                badgeSlot={
+                  p.on_block || untouchableIds?.has(p.id) ? (
+                    <>
                       {blockBadge(p)}
                       {untouchableIds?.has(p.id) ? (
                         <Badge label="UNTOUCHABLE" color={flare.base} />
                       ) : null}
+                    </>
+                  ) : undefined
+                }
+                rightSlot={
+                  onSwapPlayer ||
+                  (variant === 'swipe' && onRemoveAsset) ||
+                  (onPlayerMenu && onToggleUntouchable) ? (
+                    <View style={styles.rightSlotStack}>
                       {lockSlot(p)}
                       {swapSlot(p, 'give')}
                       {removeSlot(p, 'give')}
@@ -461,10 +472,12 @@ function TradeCardComp({
                 compact
                 {...rowA11y(p, 'receive')}
                 onLongPress={longPressFor(p, 'receive')}
+                // #226 — same treatment as the give column: badge in the
+                // header row, controls stacked in the in-flow rightSlot.
+                badgeSlot={p.on_block ? blockBadge(p) : undefined}
                 rightSlot={
-                  p.on_block || onSwapPlayer || onRemoveAsset ? (
-                    <View style={styles.rightSlotRow}>
-                      {blockBadge(p)}
+                  onSwapPlayer || (variant === 'swipe' && onRemoveAsset) ? (
+                    <View style={styles.rightSlotStack}>
                       {swapSlot(p, 'receive')}
                       {removeSlot(p, 'receive')}
                     </View>
@@ -706,10 +719,12 @@ const styles = StyleSheet.create({
   actionBtn: { flex: 1 },
   sendRow: { marginTop: space.sm },
 
-  // Player-swap (feedback #86) — per-row icon button + shared rightSlot
-  // row (swap button beside the UNTOUCHABLE badge on give-side rows).
-  rightSlotRow: {
-    flexDirection: 'row',
+  // Player-swap (feedback #86) — per-row icon buttons. #226: the slot is
+  // in-flow now (PlayerCard reserves its width), and the controls stack
+  // VERTICALLY so the slot stays one button wide — the narrow split
+  // columns keep room for the name/badges beside up to three controls.
+  rightSlotStack: {
+    flexDirection: 'column',
     alignItems: 'center',
     gap: space.xs,
   },
