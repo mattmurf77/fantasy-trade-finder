@@ -1,13 +1,17 @@
 # Polish Lab — 2026-08
 
-Design mockups for the August polish batch. Each page is self-contained HTML
-(inline CSS/JS, Chalkline tokens from `docs/design/design-system.md`), showing
-**CURRENT** (faithful recreation from the real screen code) beside **PROPOSED**
-in ~390px iPhone frames, with a rationale block under each page. Proposed
-designs are held to the #205 tenets: simple beats complex, too much info is
-worse than none, zero-context UX.
+Current-vs-proposed design mockups for the August polish batch (operator
+feedback #206–#234). Each page: faithful recreation of today's screen (left)
+beside the proposed redesign (right) in 390px phone frames, rationale below.
+Chalkline tokens throughout; all assets inline. Master viewer: `index.html`
+(one tab per item).
 
-| Page | Feedback items | What it shows |
+| Page | Feedback | What it shows |
 |---|---|---|
-| [`trade-dna-outlook.html`](trade-dna-outlook.html) | #212 · #231 · #206 | Trade DNA panel (TradeFinderHubScreen): CURRENT = passive outlook KV row + "Edit prefs" text link + flat need/deep chips. PROPOSED = bordered Edit button, outlook as four directly-tappable cards each naming its bias in plain words ("Leans young + picks"), two-tier needs chips (flare **STARTER NEED** = lineup hole vs dim **DEPTH** = thin bench, never both on one chip), and a one-line bias receipt above the deck ("Leaning young + picks — you're Rebuilding · Change") reusing the shipped quiet-note construction. |
-| [`asset-ideas-layout.html`](asset-ideas-layout.html) | #216 · #209 | Find-a-trade-for-player single-pin flow (TradesScreen + AssetIdeasPanel + TradeCard): CURRENT = full Upgrade/Lateral/Downgrade list expanded above the deck, best card + value bar below the fold; pin board TRADE FOR left. PROPOSED = best suggested trade leads (full card, value bar visible), give column left / receive right everywhere, quiet "More options →" under the trade-away column expanding the grouped list in place (collapsed + expanded frames). **Code fact:** today's `TradeCard.tsx` already renders "YOU SEND" left — the #209 swap applies to the pin board, which renders TRADE FOR left and contradicts the card. |
+| [`header-league-switcher.html`](header-league-switcher.html) | #223/#224 | League name built into the global TopBar (ice chevron = switchable) + the opened LeagueSwitcherSheet (with #199 Add-a-league); replaces the League-hero / per-screen-pill switching |
+| [`hub-fit-to-screen.html`](hub-fit-to-screen.html) | #218/#219 | Trade-Finding Hub density pass — annotated margin/padding reductions (~120pt reclaimed) that put the whole hub above the fold (no content removed) |
+| [`notifications-dechalk.html`](notifications-dechalk.html) | #225 | Emoji-free notifications: fact-first push titles + Chalkline inbox rows with stroke glyphs (current strings verbatim from the backend templates) |
+| [`trade-dna-outlook.html`](trade-dna-outlook.html) | #212/#231/#206 | Tappable outlook cards with plain-words bias, explicit Edit button, STARTER NEED vs DEPTH two-tier need chips, bias receipt line on the deck |
+| [`asset-ideas-layout.html`](asset-ideas-layout.html) | #216/#209 | Best suggested trade leads (value bar visible), give-left/get-right everywhere (fixes the pin board's reversed columns), Upgrade/Lateral/Downgrade behind "More options →" |
+| [`empty-states-progress.html`](empty-states-progress.html) | #229/#230/#234 | Solo-value-first empty states, one unified progress module (position ring + leaguemate meter + honest unlock line), zero-rows collapsed until they have data |
+| [`rank-method-consolidation.html`](rank-method-consolidation.html) | #232/#233 | One chooser: Fastest / Most precise / Most control; Quick rank demoted to a follow-on; the rest behind "More ways to rank"; empty-tier CTA reworded "Continue — no QBs this high" |

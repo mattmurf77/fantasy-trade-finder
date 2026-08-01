@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Hub Fit-to-Screen (#218/#219)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+.note{max-width:980px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note b{color:var(--chalk)}
+.note ul{margin:6px 0 0 18px}.note li{margin:3px 0}
+.lab{display:flex;flex-wrap:wrap;gap:36px;justify-content:center;align-items:flex-start}
+.side{display:flex;flex-direction:column;gap:12px;align-items:center}
+.side>.tag{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:15px;padding:4px 12px;border-radius:2px;border:1px solid var(--line)}
+.tag.cur{color:var(--dim)} .tag.pro{color:var(--ice);border-color:var(--ice)}
+.cap{font-size:12px;color:var(--faint);max-width:420px;text-align:center;line-height:1.5}
+
+/* iPhone 15 Pro–class frame: 390 × 846 (393×852pt scaled). */
+.phone{width:390px;height:846px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;
+  box-shadow:0 12px 32px rgba(0,0,0,.55);position:relative;display:flex;flex-direction:column}
+.status{height:54px;flex:0 0 auto;display:flex;align-items:flex-end;justify-content:space-between;padding:0 22px 6px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.topbar{height:44px;flex:0 0 auto;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 12px}
+.wordmark{display:flex;align-items:center;gap:8px}
+.wordmark .tick{width:3px;height:14px;background:var(--ice)}
+.wordmark .txt{font-family:var(--f-display);font-weight:600;font-size:16px;letter-spacing:.03em;text-transform:uppercase}
+.tbIcons{display:flex;gap:8px}
+.tbIcons svg{stroke:var(--dim)}
+.content{flex:1 1 auto;position:relative;overflow:hidden}
+.tabbar{flex:0 0 auto;display:flex;border-top:1px solid var(--line);background:var(--ink0);padding-bottom:18px}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 4px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{stroke:var(--faint)}
+.tab.on{color:var(--ice)} .tab.on svg{stroke:var(--ice)}
+svg.i{fill:none;stroke-width:1.75;stroke-linecap:square;stroke-linejoin:miter}
+
+/* ── hub content, parameterized by variant class ── */
+.stack{display:flex;flex-direction:column}
+.cur .stack{padding:16px;gap:12px}
+.pro .stack{padding:12px;gap:8px}
+.pageTitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:22px;line-height:26px}
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+
+.leaguepill{display:flex;align-items:center;gap:12px;background:var(--ink1);border:1px solid var(--lineStrong);border-radius:2px}
+.cur .leaguepill{padding:12px 16px;min-height:44px}
+.pro .leaguepill{padding:8px 12px}
+.leaguepill .nm{font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cur .leaguepill .nm{font-size:16px}
+.pro .leaguepill .nm{font-size:13px}
+.leaguepill svg{margin-left:auto;stroke:var(--dim);flex:0 0 auto}
+
+.dna{border:1px solid var(--line);border-radius:8px;background:var(--ink1);display:flex;flex-direction:column}
+.cur .dna{padding:12px;gap:8px}
+.pro .dna{padding:10px;gap:6px}
+.dnaTop{display:flex;align-items:center;justify-content:space-between}
+.dnaEdit{font-size:13px;font-weight:600;color:var(--ice)}
+.dnaRow{display:flex;gap:24px;flex-wrap:wrap;font-size:14px}
+.dnaK{color:var(--faint)}
+.dnaGroup{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.cur .dnaGroup{flex-direction:column;align-items:flex-start;gap:4px}
+.cur .dnaGroup .lbl{margin-top:4px}
+.pro .dnaGroup .lbl{width:64px;flex:0 0 auto}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.posChip{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:999px;border:1px solid var(--line);background:var(--ink2);font-size:13px;font-weight:600}
+.posChip.rec{border-style:dashed;border-color:var(--lineStrong)}
+.posChip .pdot{width:8px;height:8px;border-radius:2px}
+.posChip .tag{font-size:9px;color:var(--flare);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-left:2px}
+
+.secLbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.cur .secLbl{margin-top:8px}
+.pro .secLbl{margin-top:0}
+
+.card{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:8px;background:var(--ink1)}
+.cur .card{padding:12px}
+.pro .card{padding:9px 12px}
+.cardIcon{border-radius:8px;background:var(--ink2);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.cur .cardIcon{width:40px;height:40px}
+.pro .cardIcon{width:34px;height:34px}
+.cardIcon svg{stroke:var(--ice)}
+.cardTitleRow{display:flex;align-items:center;gap:8px}
+.cardTitle{font-size:16px;font-weight:600;line-height:22px}
+.recTag{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--flare)}
+.cardBody{font-size:13px;line-height:18px;color:var(--dim);margin-top:1px}
+.card>.arr{margin-left:auto;stroke:var(--faint);flex:0 0 auto}
+
+/* fold + annotations */
+.fold{position:absolute;left:0;right:0;bottom:0;border-top:2px dashed var(--flare);z-index:6}
+.fold .flabel{position:absolute;right:8px;top:-22px;font-family:var(--f-mono);font-size:11px;color:var(--flare);background:rgba(12,14,17,.9);padding:1px 6px;border:1px solid var(--flare);border-radius:2px}
+.spill{width:390px;border:1px dashed var(--flare);border-top:none;border-radius:0 0 12px 12px;opacity:.55;overflow:hidden;position:relative}
+.spill .slabel{position:absolute;right:8px;top:6px;font-family:var(--f-mono);font-size:11px;color:var(--flare);background:rgba(12,14,17,.92);border:1px solid var(--flare);border-radius:2px;padding:1px 6px;z-index:3}
+.ann{position:absolute;z-index:7;font-size:11px;font-family:var(--f-mono);color:var(--ice);background:rgba(12,14,17,.94);border:1px solid var(--ice);border-radius:2px;padding:2px 6px;line-height:1.45}
+.ann.f{color:var(--flare);border-color:var(--flare)}
+.fit{position:absolute;left:12px;right:12px;bottom:6px;z-index:6;text-align:center;font-family:var(--f-mono);font-size:11px;color:var(--pos);border:1px dashed var(--pos);border-radius:2px;padding:3px}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Trade-Finding Hub — Fit To Screen (#218/#219)</h1>
+  <p><b>Operator ask:</b> "There is a very small scroll on this page… reduce the margins slightly to make it fit on screen without scroll."</p>
+  <p><b>Left = current</b> <code>TradeFinderHubScreen.tsx</code> at real proportions (spacing tokens: screen padding <code>lg 16</code>, stack gap <code>md 12</code>, card padding <code>md 12</code>, 40pt icon wells) — the last card's bottom edge slips under the fold by roughly a card-footer's worth, producing the tiny scroll. <b>Right = the density pass</b>: nothing removed, ~120pt reclaimed via smaller margins/paddings and two compact variants. Annotations show exact value changes.</p>
+</div>
+
+<div class="lab">
+
+  <!-- ══════════ CURRENT ══════════ -->
+  <div class="side cur">
+    <div class="tag cur">Current</div>
+    <div>
+      <div class="phone">
+        <div class="ann f" style="top:120px;right:8px">pad 16 · gap 12</div>
+        <div class="ann f" style="top:196px;right:8px">full pill · 63pt</div>
+        <div class="ann f" style="top:330px;right:8px">stacked labels</div>
+        <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="wordmark"><div class="tick"></div><div class="txt">Trade Finder</div></div>
+          <div class="tbIcons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          </div>
+        </div>
+        <div class="content">
+          <div class="stack">
+            <div class="pageTitle">Find a Trade</div>
+            <div class="leaguepill">
+              <div style="flex:1;min-width:0"><div class="lbl">Trading in</div><div class="nm">Dynasty Degens Superflex</div></div>
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg>
+            </div>
+            <div class="dna">
+              <div class="dnaTop"><span class="lbl">Your Trade DNA</span><span class="dnaEdit">Edit prefs</span></div>
+              <div class="dnaRow">
+                <span><span class="dnaK">Outlook </span>Contend</span>
+                <span><span class="dnaK">Untouchables </span>2<span class="dnaEdit">&nbsp;&nbsp;Manage</span></span>
+              </div>
+              <div class="dnaGroup">
+                <span class="lbl">Chasing</span>
+                <span class="chips">
+                  <span class="posChip"><span class="pdot" style="background:var(--wr)"></span>WR</span>
+                  <span class="posChip rec"><span class="pdot" style="background:var(--rb)"></span>RB<span class="tag">need</span></span>
+                </span>
+              </div>
+              <div class="dnaGroup">
+                <span class="lbl">Shopping</span>
+                <span class="chips">
+                  <span class="posChip rec"><span class="pdot" style="background:var(--te)"></span>TE<span class="tag">deep</span></span>
+                </span>
+              </div>
+            </div>
+            <div class="secLbl">How do you want to find trades?</div>
+            <div class="card">
+              <div class="cardIcon"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M3 16l2-9 4 4 2-7 2 7 4-4 2 9zM3 16h16v2H3z"/></svg></div>
+              <div style="flex:1;min-width:0">
+                <div class="cardTitleRow"><span class="cardTitle">Fully Guided</span><span class="recTag">recommended</span></div>
+                <div class="cardBody">We read your roster &amp; league and walk you to the best deals.</div>
+              </div>
+              <svg class="i arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+            </div>
+            <div class="card">
+              <div class="cardIcon"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M8 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M14 9a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg></div>
+              <div style="flex:1;min-width:0">
+                <div class="cardTitleRow"><span class="cardTitle">Specific Team</span></div>
+                <div class="cardBody">Target one league-mate and see only mutual-gain deals.</div>
+              </div>
+              <svg class="i arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+            </div>
+            <div class="card">
+              <div class="cardIcon"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M14 4h4v4M18 4l-6 6M8 18H4v-4M4 18l6-6"/></svg></div>
+              <div style="flex:1;min-width:0">
+                <div class="cardTitleRow"><span class="cardTitle">Specific Player</span></div>
+                <div class="cardBody">Trade for someone, away someone, or both — engine fills the rest.</div>
+              </div>
+              <svg class="i arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+            </div>
+            <div class="card">
+              <div class="cardIcon"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M4 8h12M13 5l3 3-3 3M18 15H6M9 12l-3 3 3 3"/></svg></div>
+              <div style="flex:1;min-width:0">
+                <div class="cardTitleRow"><span class="cardTitle">Manual Calculator</span></div>
+                <div class="cardBody">Hand-build any trade, get the dual-board fairness verdict.</div>
+              </div>
+              <svg class="i arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+            </div>
+          </div>
+          <div class="fold"><span class="flabel">fold — bottom of viewport</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M4 18v-6h4v6M9 18V6h4v12M14 18v-9h4v9"/></svg>Rank</div>
+          <div class="tab on"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M4 8h12M13 5l3 3-3 3M18 15H6M9 12l-3 3 3 3"/></svg>Trades</div>
+          <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M8 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M14 9a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+          <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M11 3l7 4v8l-7 4-7-4V7z"/></svg>League</div>
+        </div>
+      </div>
+      <!-- the sliver that hides below the fold -->
+      <div class="spill">
+        <span class="slabel">the sliver you scroll for: ~40pt</span>
+        <div style="padding:4px 16px 14px">
+          <div class="card" style="margin-top:-34px">
+            <div class="cardIcon" style="width:40px;height:40px"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M4 8h12M13 5l3 3-3 3M18 15H6M9 12l-3 3 3 3"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Manual Calculator</span></div>
+              <div class="cardBody">Hand-build any trade, get the dual-board fairness verdict.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="cap">iPhone 15 Pro–class viewport (390×846 shown). The Manual Calculator card's lower half + bottom padding cross the fold — a "very small scroll" with no payoff.</div>
+  </div>
+
+  <!-- ══════════ PROPOSED ══════════ -->
+  <div class="side pro">
+    <div class="tag pro">Proposed</div>
+    <div class="phone">
+      <div class="ann" style="top:104px;right:8px">pad 16&#8594;12 · gap 12&#8594;8</div>
+      <div class="ann" style="top:168px;right:8px">pill &#8594; compact: 63&#8594;46pt<br>(pad 12/16&#8594;8/12, name 16&#8594;13)</div>
+      <div class="ann" style="top:282px;right:8px">DNA pad 12&#8594;10, gap 8&#8594;6<br>labels inline: &#8722;34pt</div>
+      <div class="ann" style="top:420px;right:8px">card pad-v 12&#8594;9<br>icon well 40&#8594;34</div>
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="wordmark"><div class="tick"></div><div class="txt">Trade Finder</div></div>
+        <div class="tbIcons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+        </div>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="pageTitle">Find a Trade</div>
+          <div class="leaguepill">
+            <div style="flex:1;min-width:0"><div class="lbl">Trading in</div><div class="nm">Dynasty Degens Superflex</div></div>
+            <svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg>
+          </div>
+          <div class="dna">
+            <div class="dnaTop"><span class="lbl">Your Trade DNA</span><span class="dnaEdit">Edit prefs</span></div>
+            <div class="dnaRow">
+              <span><span class="dnaK">Outlook </span>Contend</span>
+              <span><span class="dnaK">Untouchables </span>2<span class="dnaEdit">&nbsp;&nbsp;Manage</span></span>
+            </div>
+            <div class="dnaGroup">
+              <span class="lbl">Chasing</span>
+              <span class="chips">
+                <span class="posChip"><span class="pdot" style="background:var(--wr)"></span>WR</span>
+                <span class="posChip rec"><span class="pdot" style="background:var(--rb)"></span>RB<span class="tag">need</span></span>
+              </span>
+            </div>
+            <div class="dnaGroup">
+              <span class="lbl">Shopping</span>
+              <span class="chips">
+                <span class="posChip rec"><span class="pdot" style="background:var(--te)"></span>TE<span class="tag">deep</span></span>
+              </span>
+            </div>
+          </div>
+          <div class="secLbl">How do you want to find trades?</div>
+          <div class="card">
+            <div class="cardIcon"><svg class="i" width="20" height="20" viewBox="0 0 22 22"><path d="M3 16l2-9 4 4 2-7 2 7 4-4 2 9zM3 16h16v2H3z"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Fully Guided</span><span class="recTag">recommended</span></div>
+              <div class="cardBody">We read your roster &amp; league and walk you to the best deals.</div>
+            </div>
+            <svg class="i arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+          </div>
+          <div class="card">
+            <div class="cardIcon"><svg class="i" width="20" height="20" viewBox="0 0 22 22"><path d="M8 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M14 9a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Specific Team</span></div>
+              <div class="cardBody">Target one league-mate and see only mutual-gain deals.</div>
+            </div>
+            <svg class="i arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+          </div>
+          <div class="card">
+            <div class="cardIcon"><svg class="i" width="20" height="20" viewBox="0 0 22 22"><path d="M14 4h4v4M18 4l-6 6M8 18H4v-4M4 18l6-6"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Specific Player</span></div>
+              <div class="cardBody">Trade for someone, away someone, or both — engine fills the rest.</div>
+            </div>
+            <svg class="i arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+          </div>
+          <div class="card">
+            <div class="cardIcon"><svg class="i" width="20" height="20" viewBox="0 0 22 22"><path d="M4 8h12M13 5l3 3-3 3M18 15H6M9 12l-3 3 3 3"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Manual Calculator</span></div>
+              <div class="cardBody">Hand-build any trade, get the dual-board fairness verdict.</div>
+            </div>
+            <svg class="i arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+          </div>
+        </div>
+        <div class="fit">fits — everything above the fold, ~70pt spare</div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M4 18v-6h4v6M9 18V6h4v12M14 18v-9h4v9"/></svg>Rank</div>
+        <div class="tab on"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M4 8h12M13 5l3 3-3 3M18 15H6M9 12l-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M8 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M14 9a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg class="i" width="22" height="22" viewBox="0 0 22 22"><path d="M11 3l7 4v8l-7 4-7-4V7z"/></svg>League</div>
+      </div>
+    </div>
+    <div class="cap">Same content, same order, same hierarchy — a pure density pass. Every card, chip, label and both DNA groups survive; ~120pt reclaimed puts the whole hub above the fold with headroom for a 5-line DNA panel or a longer league name.</div>
+  </div>
+</div>
+
+<div class="note">
+  <h1 style="font-size:16px">What changed &amp; why</h1>
+  <ul>
+    <li><b>Screen padding <code>lg 16 → md 12</code> and stack gap <code>md 12 → sm 8</code></b> (both existing 4-pt-scale tokens): the hub is a launcher, not a reading surface — six inter-block gaps at −4pt each is the cheapest 32pt on the page.</li>
+    <li><b>LeaguePill switches to its existing <code>compact</code> variant</b> (padding 12/16→8/12, name 16→13): −17pt with zero new code. (If the #223 header-league-switcher ships, this row disappears entirely and the page gains another ~50pt.)</li>
+    <li><b>Trade DNA: Chasing/Shopping labels move inline</b> (label column beside the chips instead of stacked above), padding 12→10, inner gap 8→6: −34pt while both groups and every chip remain visible.</li>
+    <li><b>Mode cards: vertical padding 12→9, icon well 40→34</b> (icon 22→20): −8pt per card ×4. Title/body type untouched, so card hierarchy and tap targets (still ≥58pt tall) hold.</li>
+    <li><b>Nothing deleted, nothing reordered</b> — total ≈ −120pt vs an observed overflow of ~40pt, so the fix also absorbs Dynamic-Type growth and 2-line league names without the scroll returning.</li>
+  </ul>
+</div>
+
+</body>
+</html>
