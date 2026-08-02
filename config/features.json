@@ -91,6 +91,8 @@
   "marketplace.publisher_sets": false,
   "marketplace.contributor_sales": false,
   "marketplace.cash_payouts": false,
+  "_comment_ranks_import": "#232 follow-on (2026-08-02): paste-first rankings import. ON by default - this key is a kill switch for the import-match/import-apply routes + the mobile chooser entry, not a dark launch.",
+  "ranks.import": true,
   "_comment_teardown": "2026-07-19 app-teardown remediation (branch teardown-remediation; PRDs in gitignored app-teardown-review/). ALL dark until operator review. Exceptions shipped unflagged by design: the league-prefs authz fix (security), doc/legal-copy corrections, and inert accessibility annotations (labels/roles/traits). Flag-per-behavior below; rollout notes live in each PRD.",
   "ux.sheet_guard": true,
   "ux.rank_tab_destination": true,

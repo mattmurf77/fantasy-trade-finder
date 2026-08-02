@@ -1,122 +1,60 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Icon, type IconName } from '../components/chalkline';
+import { Icon } from '../components/chalkline';
+import RankImportSheet from '../components/RankImportSheet';
+import Toast from '../components/Toast';
 import { setRankingMethod } from '../api/rankings';
-import { useSession, type RankMethodPref } from '../state/useSession';
-import { chalk, flare, ice, ink, radii, space, type } from '../theme/chalkline';
+import { useSession } from '../state/useSession';
+import { useFlag } from '../state/useFeatureFlags';
+import { chalk, flare, ice, ink, radii, space, type, fonts } from '../theme/chalkline';
 import { haptics } from '../utils/haptics';
-import type { RankRoute } from '../navigation/TabNav';
+import {
+  MORE_METHODS,
+  PRIMARY_METHODS,
+  type ChooserMethod,
+} from '../navigation/rankChooserModel';
 
-// Build-your-board chooser — reached from Quick Set's "More ways to rank"
-// header link (since #122 the Rank tab defaults no-pref users straight into
-// Quick Set, not here). Describes the
-// five ranking flows by PROCESS (how guided vs. hands-on), not feature name,
-// ordered most-guided → most-manual. Picking one saves the preference
-// (useSession.rankingMethodPref) so subsequent launches route straight to
-// that flow; the Settings steer slider changes it later. The intro carries
-// the value prop: trade suggestions are priced off this board, so accuracy
-// here is what buys good trades.
-
-interface Method {
-  pref: RankMethodPref;
-  route: RankRoute;
-  icon: IconName;
-  title: string;
-  body: string;
-  time: string;
-  /** Hands-on level, 1 (we steer) → 4 (you steer). Drives the meter. */
-  level: 1 | 2 | 3 | 4;
-  /** #119 — the lowest-effort flow, tagged "recommended" (flare). */
-  recommended?: boolean;
-}
-
-const METHODS: Method[] = [
-  // #119 — Quick set promoted to a first-class method: the lowest-effort
-  // way to a usable board, so it leads the list and carries the tag.
-  {
-    pref: 'quickset',
-    route: 'QuickSetTiers',
-    icon: 'check',
-    title: 'Tap players into tiers',
-    body:
-      'We deal you one value tier at a time — tap the players who belong, ' +
-      'save, next. The fastest route to a board good enough to trade off.',
-    time: '~2 MIN PER POSITION',
-    level: 1,
-    recommended: true,
-  },
-  {
-    pref: 'trio',
-    route: 'Trios',
-    icon: 'rank',
-    title: 'Answer quick head-to-heads',
-    body:
-      'We show you three players — you put them in order. A few seconds ' +
-      'each, and your board builds itself from the pattern of your answers.',
-    time: '30 SEC AT A TIME',
-    level: 1,
-  },
-  {
-    pref: 'anchor',
-    route: 'Anchors',
-    icon: 'swap',
-    title: 'Price players in picks',
-    body:
-      'One player at a time: worth two 1sts? One? A mid 2nd? Each answer ' +
-      'locks in a value everyone in your league understands the same way.',
-    time: '~5 MIN FOR YOUR TOP 50',
-    level: 2,
-  },
-  {
-    pref: 'tiers',
-    route: 'Tiers',
-    icon: 'crown',
-    title: 'Sort players into groups',
-    body:
-      'Drag players into value groups, from untouchable to bench. You ' +
-      'decide the shape of your board — we handle the exact numbers inside ' +
-      'each group.',
-    time: '~10 MIN PER POSITION',
-    level: 3,
-  },
-  {
-    pref: 'manual',
-    route: 'ManualRanks',
-    icon: 'trends',
-    title: 'Order every player yourself',
-    body:
-      'The full list, in your exact order, top to bottom. Nothing inferred, ' +
-      'nothing suggested — total control over every slot.',
-    time: 'THE LONG WAY — YOUR WAY',
-    level: 4,
-  },
-];
-
-function HandsOnMeter({ level }: { level: 1 | 2 | 3 | 4 }) {
-  return (
-    <View style={styles.meter} accessibilityLabel={`hands-on level ${level} of 4`}>
-      {[1, 2, 3, 4].map((i) => (
-        <View
-          key={i}
-          style={[styles.meterSeg, i <= level && styles.meterSegOn]}
-        />
-      ))}
-    </View>
-  );
-}
+// Build-your-board chooser — reached from the rank surfaces' "More ways to
+// rank" header path (since #122 the Rank tab defaults no-pref users straight
+// into Quick Set, not here).
+//
+// #232 consolidation (approved mocks rank-method-consolidation-v2 + -v3):
+// THREE primary cards labeled by outcome — FASTEST = Quick set (recommended,
+// with the Quick-rank follow-on subrow) · MOST PRECISE = Head-to-heads
+// (Trios) · MOST CONTROL = Tiers board — with Pick Anchors / Overall ranks /
+// Trends behind a collapsed "More ways to rank" disclosure. Content comes
+// from the shared model (navigation/rankChooserModel.ts) also consumed by
+// the Rank-tab RankMenu sheet, so the two surfaces can't diverge.
+//
+// Import entry (flag `ranks.import`, v3 Variant A): a quiet text link right
+// of the heading — chalk-dim question, ice underline + upload glyph — that
+// opens the "Bring your rankings" paste-first sheet. It shares the heading's
+// line; when they can't fit, the intact link wraps under, right-aligned
+// (never truncate the link, never shrink the heading).
+//
+// Picking a method saves the preference (useSession.rankingMethodPref) so
+// subsequent launches route straight to that flow; the Settings steer
+// slider changes it later. The callout carries the value prop: trades are
+// priced off this board.
 
 export default function RankHomeScreen({ navigation }: any) {
   const setPref = useSession((s) => s.setRankingMethodPref);
+  const importOn = useFlag('ranks.import');
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const choose = (m: Method) => {
+  const choose = (m: ChooserMethod) => {
     haptics.selection();
-    // Persist locally first (this is what routes future launches), then
-    // record on the backend fire-and-forget — a failed POST must never
-    // block the user from starting to rank.
-    void setPref(m.pref);
-    setRankingMethod(m.pref).catch(() => {});
+    if (m.pref) {
+      // Persist locally first (this is what routes future launches), then
+      // record on the backend fire-and-forget — a failed POST must never
+      // block the user from starting to rank.
+      void setPref(m.pref);
+      setRankingMethod(m.pref).catch(() => {});
+    }
     // #162/#165 — navigate, don't replace: replace() removed this chooser
     // from the stack, so back (header, iOS edge-swipe, Android hardware)
     // from the chosen surface could never return here — testers read that
@@ -125,30 +63,64 @@ export default function RankHomeScreen({ navigation }: any) {
     navigation.navigate(m.route);
   };
 
+  const onImportApplied = (count: number) => {
+    setImportOpen(false);
+    setToast(`Imported ${count} rank${count === 1 ? '' : 's'} onto your board`);
+    // Land on the Overall board so the imported order is immediately
+    // visible (every method writes to the same board).
+    navigation.navigate('ManualRanks');
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <Toast
+        visible={!!toast}
+        message={toast || ''}
+        tone="success"
+        onDismiss={() => setToast(null)}
+      />
       <ScrollView contentContainerStyle={styles.body}>
-        <Text style={styles.title} accessibilityRole="header">Build your board</Text>
+        <View style={styles.headingRow}>
+          <Text style={styles.title} accessibilityRole="header">Build your board</Text>
+          {importOn ? (
+            <Pressable
+              testID="rank-home.import"
+              accessibilityRole="button"
+              accessibilityLabel="Have rankings already? Import them"
+              onPress={() => {
+                haptics.selection();
+                setImportOpen(true);
+              }}
+              hitSlop={space.sm}
+              style={({ pressed }) => [styles.importLink, pressed && { opacity: 0.6 }]}
+            >
+              <Icon name="upload" size={14} color={ice.base} />
+              <Text style={styles.importLinkText}>Have rankings already?</Text>
+            </Pressable>
+          ) : null}
+        </View>
 
         <View style={styles.callout}>
           <Icon name="trade" size={18} color={flare.base} />
           <Text style={styles.calloutText}>
             <Text style={styles.calloutLead}>
-              Every trade we suggest is priced off this board.{' '}
+              Trades are priced off this board.{' '}
             </Text>
-            The closer it matches what you really believe, the better the
-            deals we find — sharper targets, fairer offers, fewer duds. Five
-            ways to build it; pick how hands-on you want to be.
+            The better it matches you, the better the deals we find.
           </Text>
         </View>
 
-        {METHODS.map((m) => (
+        {PRIMARY_METHODS.map((m) => (
           <Pressable
-            key={m.pref}
-            testID={`rank-home.card.${m.pref}`}
+            key={m.key}
+            testID={`rank-home.card.${m.key}`}
             accessibilityRole="button"
-            accessibilityLabel={m.recommended ? `${m.title}, recommended` : m.title}
-            accessibilityHint={`${m.body} ${m.time}`}
+            accessibilityLabel={
+              m.recommended
+                ? `${m.title}, ${m.role}, recommended`
+                : `${m.title}, ${m.role}`
+            }
+            accessibilityHint={m.body}
             onPress={() => choose(m)}
             style={({ pressed }) => [
               styles.card,
@@ -157,34 +129,88 @@ export default function RankHomeScreen({ navigation }: any) {
             ]}
           >
             <View style={styles.cardHead}>
+              <Text style={styles.roleTag}>{m.role}</Text>
+              <View style={{ flex: 1 }} />
+              {m.recommended ? (
+                <Text style={styles.recommendedTag}>recommended</Text>
+              ) : null}
+            </View>
+            <View style={styles.cardHead}>
               <Icon
                 name={m.icon}
                 size={20}
                 color={m.recommended ? ice.base : chalk.dim}
               />
               <Text style={styles.cardTitle}>{m.title}</Text>
-              {m.recommended ? (
-                <Text style={styles.recommendedTag}>recommended</Text>
-              ) : null}
             </View>
             <Text style={styles.cardBody}>{m.body}</Text>
-            <View style={styles.cardFoot}>
-              <Text style={styles.timeHint}>{m.time}</Text>
-              <HandsOnMeter level={m.level} />
-            </View>
+            {m.sub ? (
+              <View style={styles.subRow}>
+                <Text style={styles.cardBody}>
+                  <Text style={styles.subLead}>Then, if you want: </Text>
+                  {m.sub}
+                </Text>
+              </View>
+            ) : null}
           </Pressable>
         ))}
 
-        <View style={styles.axis}>
-          <Text style={styles.axisLabel}>WE STEER</Text>
-          <View style={styles.axisLine} />
-          <Text style={styles.axisLabel}>YOU STEER</Text>
-        </View>
+        <Pressable
+          testID="rank-home.more-toggle"
+          accessibilityRole="button"
+          accessibilityLabel="More ways to rank"
+          accessibilityState={{ expanded: moreOpen }}
+          onPress={() => {
+            haptics.selection();
+            setMoreOpen((v) => !v);
+          }}
+          style={styles.moreHeader}
+        >
+          <Text style={styles.moreHeaderText}>More ways to rank</Text>
+          <Icon
+            name={moreOpen ? 'chevron-up' : 'chevron-down'}
+            size={16}
+            color={chalk.dim}
+          />
+        </Pressable>
+
+        {moreOpen ? (
+          <View style={styles.moreBox}>
+            {MORE_METHODS.map((m, i) => (
+              <Pressable
+                key={m.key}
+                testID={`rank-home.card.${m.key}`}
+                accessibilityRole="button"
+                accessibilityLabel={m.title}
+                accessibilityHint={m.body}
+                onPress={() => choose(m)}
+                style={({ pressed }) => [
+                  styles.moreRow,
+                  i === MORE_METHODS.length - 1 && { borderBottomWidth: 0 },
+                  pressed && { backgroundColor: ink.ink3 },
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.moreRowTitle}>{m.title}</Text>
+                  <Text style={styles.moreRowSub}>{m.body}</Text>
+                </View>
+                <Icon name="chevron-right" size={16} color={chalk.dim} />
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+
         <Text style={styles.mixNote}>
-          Mix them anytime — every method writes to the same board, and you
-          can fine-tune any player later. Change your pick in Settings.
+          Every method writes to the same board — mix anytime. Change your
+          pick in Settings.
         </Text>
       </ScrollView>
+
+      <RankImportSheet
+        visible={importOpen}
+        onClose={() => setImportOpen(false)}
+        onApplied={onImportApplied}
+      />
     </SafeAreaView>
   );
 }
@@ -192,7 +218,31 @@ export default function RankHomeScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
   body: { padding: space.lg, gap: space.md },
+
+  // v3 heading row — heading left, import entry right, baseline-aligned.
+  // The heading never wraps internally; if the pair can't share the row,
+  // the whole link wraps under, right-aligned (marginLeft: 'auto').
+  headingRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
+    columnGap: space.md,
+    rowGap: space.xs,
+  },
   title: { ...type.heading },
+  importLink: {
+    marginLeft: 'auto',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs + 2,
+  },
+  importLinkText: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 13,
+    color: chalk.dim,
+    textDecorationLine: 'underline',
+    textDecorationColor: ice.base,
+  },
 
   callout: {
     flexDirection: 'row',
@@ -216,33 +266,52 @@ const styles = StyleSheet.create({
   },
   cardFeatured: { borderColor: ice.base },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  // Outcome label (FASTEST / MOST PRECISE / MOST CONTROL).
+  roleTag: { ...type.label, color: chalk.dim },
   cardTitle: { ...type.title, flex: 1 },
   // #119 — flare tag = informational highlight (ADR-005), never on the
   // action itself; the card's featured state stays the ice border.
   recommendedTag: { ...type.label, color: flare.base },
   cardBody: { ...type.bodySm, lineHeight: 19 },
-  cardFoot: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  subRow: {
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
+    paddingTop: space.sm,
+    marginTop: 2,
   },
-  timeHint: { ...type.label, color: chalk.faint },
-  meter: { flexDirection: 'row', gap: 3 },
-  meterSeg: {
-    width: 14,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: ink.ink3,
-  },
-  meterSegOn: { backgroundColor: ice.base },
+  subLead: { color: chalk.base, fontFamily: fonts.uiSemi },
 
-  axis: {
+  moreHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    marginTop: space.xs,
+    paddingHorizontal: space.xs,
+    paddingTop: space.sm,
+    minHeight: 44,
   },
-  axisLabel: { ...type.label, color: chalk.faint },
-  axisLine: { flex: 1, height: 1, backgroundColor: ink.line },
+  moreHeaderText: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 14,
+    color: chalk.base,
+  },
+  moreBox: {
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.md,
+  },
+  moreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingVertical: space.sm + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
+    minHeight: 44,
+  },
+  moreRowTitle: { fontFamily: fonts.uiSemi, fontSize: 14, color: chalk.base },
+  moreRowSub: { ...type.bodySm, marginTop: 2 },
+
   mixNote: { ...type.bodySm, color: chalk.faint, textAlign: 'center' },
 });

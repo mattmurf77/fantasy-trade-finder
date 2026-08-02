@@ -12,6 +12,11 @@ import { useSession } from '../state/useSession';
 import { onboardingEnabled, useFlag } from '../state/useFeatureFlags';
 import { requestScrollToTop } from './scrollToTop';
 import { getOnboardingState } from '../state/useOnboardingState';
+import {
+  MORE_METHODS,
+  PRIMARY_METHODS,
+  type ChooserMethod,
+} from './rankChooserModel';
 import RankScreen from '../screens/RankScreen';
 import RankHomeScreen from '../screens/RankHomeScreen';
 import PickAnchorScreen from '../screens/PickAnchorScreen';
@@ -663,23 +668,35 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
     );
   };
 
-  const items: { route: RankRoute; label: string; sub: string; testID: string; recommended?: boolean }[] = [
-    // #119 — Quick set is a first-class method: lowest effort, recommended.
-    { route: 'QuickSetTiers', label: 'Quick set',     sub: 'Tap players into pick-value tiers, one tier at a time — the fastest board', testID: 'rankmenu.quickset', recommended: true },
-    // #136 — the polish pass after Quick set: order players inside each tier.
-    { route: 'QuickRank',     label: 'Quick rank',    sub: 'Order players within each tier — tap them best-first, tier by tier', testID: 'rankmenu.quickrank' },
-    { route: 'Trios',         label: 'Trios',         sub: '3-at-a-time swipe ranking', testID: 'rankmenu.trios' },
-    { route: 'Anchors',       label: 'Pick Anchors',  sub: 'Say what each player is worth in draft picks — 4 1sts down to no value', testID: 'rankmenu.anchors' },
-    { route: 'Tiers',         label: 'Tiers',         sub: 'Drag players into pick-value tiers (4+ 1sts down to FA)', testID: 'rankmenu.tiers' },
-    { route: 'ManualRanks',   label: 'Overall Ranks', sub: 'Drag rows or tap a rank number to re-order your board by hand', testID: 'rankmenu.manual' },
-    { route: 'Trends',        label: 'Trends',        sub: 'See your biggest movers and how you differ from consensus', testID: 'rankmenu.trends' },
-  ];
+  // #232 — the sheet renders the SAME content model as the RankHome
+  // chooser (navigation/rankChooserModel.ts): three primary rows labeled
+  // by outcome + the "More ways to rank" disclosure (collapsed per open).
+  // Quick rank left both surfaces — it's Quick set's follow-on pass,
+  // offered when the walk finishes (approved mock rationale). testIDs keep
+  // their historical segments (rankmenu.trios for Head-to-heads etc.).
+  const MENU_TESTID: Record<string, string> = {
+    quickset: 'rankmenu.quickset',
+    trio:     'rankmenu.trios',
+    tiers:    'rankmenu.tiers',
+    anchor:   'rankmenu.anchors',
+    manual:   'rankmenu.manual',
+    trends:   'rankmenu.trends',
+  };
+  const [moreOpen, setMoreOpen] = useState(false);
+  const closeSheet = () => {
+    setMoreOpen(false);
+    onClose();
+  };
+  const pick = (m: ChooserMethod) => {
+    setMoreOpen(false);
+    go(m.route);
+  };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={closeSheet}>
       <Pressable
         style={styles.backdrop}
-        onPress={onClose}
+        onPress={closeSheet}
         accessibilityRole="button"
         accessibilityLabel="Close"
       />
@@ -687,16 +704,18 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
         <View style={styles.handle} />
         <Text style={type.heading} accessibilityRole="header">Rank</Text>
         <Text style={styles.sheetSub}>Pick how you want to rank players.</Text>
-        {items.map((it) => (
+        {PRIMARY_METHODS.map((it) => (
           <Pressable
-            key={it.route}
-            testID={it.testID}
+            key={it.key}
+            testID={MENU_TESTID[it.key]}
             accessibilityRole="button"
             accessibilityLabel={
-              it.recommended ? `${it.label}, recommended` : it.label
+              it.recommended
+                ? `${it.title}, ${it.role}, recommended`
+                : `${it.title}, ${it.role}`
             }
-            accessibilityHint={it.sub}
-            onPress={() => go(it.route)}
+            accessibilityHint={it.body}
+            onPress={() => pick(it)}
             style={({ pressed }) => [
               styles.item,
               pressed && { backgroundColor: ink.ink3 },
@@ -704,19 +723,57 @@ function RankMenu({ visible, onClose }: { visible: boolean; onClose: () => void 
           >
             <View style={{ flex: 1 }}>
               <View style={styles.itemLabelRow}>
-                <Text style={styles.itemLabel}>{it.label}</Text>
+                <Text style={styles.itemRole}>{it.role}</Text>
                 {/* #119 — flare label = informational highlight (ADR-005),
                     same treatment as the rank-home chooser's tag. */}
                 {it.recommended ? (
                   <Text style={styles.recommendedTag}>recommended</Text>
                 ) : null}
               </View>
-              <Text style={styles.itemSub}>{it.sub}</Text>
+              <Text style={styles.itemLabel}>{it.title}</Text>
+              <Text style={styles.itemSub}>{it.body}</Text>
             </View>
             <Icon name="chevron-right" size={16} color={chalk.dim} />
           </Pressable>
         ))}
-        <Button label="Cancel" variant="ghost" onPress={onClose} style={styles.cancel} />
+        <Pressable
+          testID="rankmenu.more-toggle"
+          accessibilityRole="button"
+          accessibilityLabel="More ways to rank"
+          accessibilityState={{ expanded: moreOpen }}
+          onPress={() => setMoreOpen((v) => !v)}
+          style={styles.moreHeader}
+        >
+          <Text style={styles.moreHeaderText}>More ways to rank</Text>
+          <Icon
+            name={moreOpen ? 'chevron-up' : 'chevron-down'}
+            size={16}
+            color={chalk.dim}
+          />
+        </Pressable>
+        {moreOpen
+          ? MORE_METHODS.map((it) => (
+              <Pressable
+                key={it.key}
+                testID={MENU_TESTID[it.key]}
+                accessibilityRole="button"
+                accessibilityLabel={it.title}
+                accessibilityHint={it.body}
+                onPress={() => pick(it)}
+                style={({ pressed }) => [
+                  styles.item,
+                  pressed && { backgroundColor: ink.ink3 },
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.itemLabel}>{it.title}</Text>
+                  <Text style={styles.itemSub}>{it.body}</Text>
+                </View>
+                <Icon name="chevron-right" size={16} color={chalk.dim} />
+              </Pressable>
+            ))
+          : null}
+        <Button label="Cancel" variant="ghost" onPress={closeSheet} style={styles.cancel} />
       </View>
     </Modal>
   );
@@ -788,6 +845,17 @@ const styles = StyleSheet.create({
   },
   itemLabel: type.title,
   itemLabelRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  // #232 — outcome label (FASTEST / MOST PRECISE / MOST CONTROL) above the
+  // primary rows' titles, mirroring the RankHome chooser cards.
+  itemRole: { ...type.label, color: chalk.dim },
+  moreHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    minHeight: 44,
+  },
+  moreHeaderText: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
   // #119 — mirrors RankHomeScreen's recommended tag (flare, informational).
   recommendedTag: { ...type.label, color: flare.base },
   itemSub: { ...type.bodySm, marginTop: 2 },

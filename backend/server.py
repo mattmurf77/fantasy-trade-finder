@@ -180,6 +180,7 @@ from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
+from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
 from . import trends_service as _trends_service_mod
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
 from .trade_service import TradeService, TradeCard, League, LeagueMember
@@ -6721,6 +6722,164 @@ def reorder_rankings():
         return jsonify({"ok": True, "count": len(ordered_ids), "scoring_format": fmt})
     except Exception as e:
         log.error("reorder_rankings error: %s", e)
+        return jsonify({"error": "bad_request"}), 400
+
+
+# ---------------------------------------------------------------------------
+# Rankings import (#232 follow-on, 2026-08-02) — flag `ranks.import`
+# ---------------------------------------------------------------------------
+# Paste-first import v1 (approved mock rank-method-consolidation-v2/-v3):
+# the client pastes a rankings table, import-match fuzzy-resolves each row
+# against the universal pool, the user reviews ambiguous rows, and
+# import-apply writes the resolved order onto the user's board through the
+# same apply_reorder machinery /api/rankings/reorder uses.
+
+_IMPORT_MAX_ROWS = 500
+
+
+@app.route("/api/rankings/import-match", methods=["POST"])
+def rankings_import_match():
+    """POST /api/rankings/import-match {names: [...], scoring_format?}
+
+    ``names`` is the pasted table's lines (the client may pre-filter blank
+    lines; each entry is still run through the tolerant per-line extractor,
+    so raw "12. Josh Allen QB BUF" rows work). A raw ``text`` blob is also
+    accepted and split on newlines. Matches against the UNIVERSAL pool for
+    the scoring format (body ``scoring_format`` > X-Scoring-Format header >
+    session active format). Read-only — no board writes. 404 while
+    `ranks.import` is off.
+    """
+    if not is_enabled("ranks.import"):
+        return jsonify({"error": "not found"}), 404
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    body = request.get_json(force=True) or {}
+
+    names = body.get("names")
+    if not isinstance(names, list):
+        text = body.get("text")
+        names = text.splitlines() if isinstance(text, str) else []
+    names = [str(n) for n in names if isinstance(n, (str, int, float))]
+    if not names:
+        return jsonify({"error": "names (or text) required"}), 400
+    if len(names) > _IMPORT_MAX_ROWS:
+        return jsonify({"error": "too_many_rows", "max": _IMPORT_MAX_ROWS}), 400
+
+    from .database import SCORING_FORMATS as DB_SCORING_FORMATS
+    fmt = body.get("scoring_format") or _active_format(sess)
+    if fmt not in DB_SCORING_FORMATS:
+        return jsonify({"error": f"unknown scoring_format {fmt!r}"}), 400
+
+    players, seed = _get_universal_pool(fmt)
+    rows = _rankings_import.match_rank_list(names, players, seed)
+    counts = {"matched": 0, "ambiguous": 0, "unmatched": 0}
+    for r in rows:
+        counts[r["status"]] += 1
+    return jsonify({"rows": rows, "counts": counts, "scoring_format": fmt})
+
+
+@app.route("/api/rankings/import-apply", methods=["POST"])
+@_gate_unverified_write
+def rankings_import_apply():
+    """POST /api/rankings/import-apply {ordered_player_ids, scoring_format?}
+
+    Apply a reviewed import as the user's board. Semantics (documented in
+    docs/api-reference.md): the imported ids, in imported order, become the
+    TOP of a full-board permutation; every other pool player follows below
+    in their CURRENT board order (consensus order for an untouched board).
+    The whole ordering is applied via service.apply_reorder — a pure
+    permutation of the board's existing Elo multiset — so the value curve
+    and tier occupancy are preserved while the imported order lands
+    exactly. Skipped/unlisted players therefore keep their relative
+    consensus order, below the imported players. 404 while `ranks.import`
+    is off.
+    """
+    if not is_enabled("ranks.import"):
+        return jsonify({"error": "not found"}), 404
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess.get("league")
+    body      = request.get_json(force=True) or {}
+
+    ordered = body.get("ordered_player_ids")
+    if not isinstance(ordered, list) or not ordered:
+        return jsonify({"error": "ordered_player_ids required"}), 400
+    if len(ordered) > _IMPORT_MAX_ROWS:
+        return jsonify({"error": "too_many_rows", "max": _IMPORT_MAX_ROWS}), 400
+
+    from .database import SCORING_FORMATS as DB_SCORING_FORMATS
+    fmt = body.get("scoring_format") or _active_format(sess)
+    if fmt not in DB_SCORING_FORMATS:
+        return jsonify({"error": f"unknown scoring_format {fmt!r}"}), 400
+    services = sess.get("services") or {}
+    service  = services.get(fmt) or sess.get("service")
+    if service is None:
+        return jsonify({"error": "session missing required state"}), 400
+
+    try:
+        # Full-board permutation: imported ids first (deduped, pool-filtered,
+        # imported order), then the rest of the board in its current order.
+        current_ids = [rp.player.id
+                       for rp in service.get_rankings(position=None).rankings]
+        pool_ids = set(current_ids)
+        seen: set = set()
+        imported = []
+        for pid in ordered:
+            pid = str(pid)
+            if pid in pool_ids and pid not in seen:
+                seen.add(pid)
+                imported.append(pid)
+        if not imported:
+            return jsonify({"error": "no_matching_players"}), 400
+        full_order = imported + [pid for pid in current_ids if pid not in seen]
+        if len(full_order) >= 2:
+            service.apply_reorder(position=None, ordered_ids=full_order)
+
+        try:
+            record_event(
+                g_user_id, "rankings_import_applied",
+                league_id=getattr(g_league, "league_id", None),
+                source="api",
+                props={"imported_count": len(imported),
+                       "submitted_count": len(ordered)},
+                tz=getattr(g, "user_tz", None),
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as ev_err:
+            log.warning("record_event(rankings_import_applied) failed: %s", ev_err)
+
+        # Same persistence side effects as /api/rankings/reorder: overrides
+        # survive session rebuilds, leaguemates see the published board,
+        # taste prior + Trends refresh.
+        try:
+            save_tier_overrides(g_user_id, service._elo_overrides, scoring_format=fmt)
+        except Exception as db_err:
+            log.warning("save_tier_overrides after import failed: %s", db_err)
+        try:
+            if g_league and g_league.league_id not in ("league_demo",):
+                all_rankings = service.get_rankings(position=None)
+                upsert_member_rankings(
+                    user_id        = g_user_id,
+                    league_id      = g_league.league_id,
+                    rankings       = [{"player_id": rp.player.id, "elo": rp.elo}
+                                      for rp in all_rankings.rankings],
+                    scoring_format = fmt,
+                )
+        except Exception as db_err:
+            log.warning("member_rankings publish after import failed: %s", db_err)
+        _refresh_taste_board_prior(g_user_id, service)
+        try:
+            _record_trends_snapshot(service, g_user_id, g_league, fmt, imported)
+        except Exception as tr_err:
+            log.warning("trends snapshot after import failed: %s", tr_err)
+
+        return jsonify({"ok": True,
+                        "imported_count": len(imported),
+                        "board_count": len(full_order),
+                        "scoring_format": fmt})
+    except Exception as e:
+        log.error("rankings_import_apply error: %s", e)
         return jsonify({"error": "bad_request"}), 400
 
 

@@ -166,6 +166,7 @@ One flag per monetization strategy — each independently flippable, ALL default
 | `ranks.accuracy_scoring` | false | Passive board snapshots + quarterly scoring + leaderboard ([marketplace plan](../docs/business/product/2026-07-17-rankings-marketplace-plan.md) phase 1). |
 | `ranks.rank_sets` | false | Publish/adopt rank sets, free only (phase 2). |
 | `ranks.set_types_extended` | false | `redraft`/`bestball` set types (platform-thesis test; `dynasty`/`rookie` are unflagged launch types). |
+| `ranks.import` | false (ON in features.json) | #232 follow-on (2026-08-02): paste-first rankings import — gates `POST /api/rankings/import-match` + `/import-apply` (404 while off) and the mobile chooser's "Have rankings already?" entry. Ships **true** — the key is a kill switch, not a dark launch (also baked into the mobile `LAUNCHED_FLAG_DEFAULTS`). |
 | `marketplace.publisher_sets` | false | Publisher IAP + subscriber account-linking (phase 3). |
 | `marketplace.contributor_sales` | false | Contributor credit-priced sales (phase 4). |
 | `marketplace.cash_payouts` | false | Stripe Connect cash-out rung (phase 5). |
