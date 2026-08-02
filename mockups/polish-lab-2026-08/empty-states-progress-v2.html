@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish lab — Empty states &amp; progress v2 (#229 · #230 · #234)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ─────────
+     Canonical hexes; --line-strong is the 2026-07-19 a11y value #59647A.
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --tier-1st:#2DD4BF;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px}
+  .wrap{max-width:880px;margin:0 auto}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:24px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.1;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note p,.note ul{margin:0;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .note ul{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:4px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note a{color:var(--ice);text-decoration:none}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:32px 0 12px}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice)}
+
+  .compare{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+  .col{flex:1 1 390px;max-width:420px}
+  .colcap{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+          color:var(--chalk-dim);margin:0 0 8px;display:flex;align-items:center;gap:8px}
+  .colcap .dot{width:8px;height:8px;border-radius:2px;background:var(--line-strong)}
+  .colcap.prop .dot{background:var(--ice)}
+  .cap{font:400 12px/1.5 var(--ui);color:var(--chalk-faint);margin-top:10px}
+
+  /* ── iPhone frame ── */
+  .phone{position:relative;width:390px;background:var(--ink-0);
+         border:1px solid var(--line-strong);border-radius:8px;overflow:hidden}
+  .statusbar{height:40px;display:flex;align-items:flex-end;justify-content:space-between;
+             padding:0 20px 6px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)}
+  .batt{display:inline-block;width:20px;height:10px;border:1px solid var(--chalk-dim);
+        border-radius:2px;position:relative}
+  .batt::after{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:70%;
+               background:var(--chalk-dim)}
+
+  /* TopBar (global) + stack header */
+  .topbar{height:48px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .wordmark{display:flex;align-items:center;gap:8px;font-family:var(--cond);font-weight:600;
+            font-size:17px;letter-spacing:.06em;text-transform:uppercase}
+  .wordmark::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .stackhdr{height:44px;display:flex;align-items:center;padding:0 16px;position:relative}
+  .backctl{display:flex;align-items:center;gap:4px;font:600 14px var(--ui);color:var(--chalk)}
+  .stackhdr .shtitle{position:absolute;left:0;right:0;text-align:center;font-family:var(--cond);
+           font-weight:600;font-size:18px;letter-spacing:.03em;text-transform:uppercase;
+           pointer-events:none}
+
+  .scroll{padding:16px 16px 24px;display:flex;flex-direction:column;gap:12px}
+
+  .tick{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+        color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin-top:4px}
+  .tick::before{content:"";width:3px;height:14px;background:var(--ice)}
+
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:16px}
+
+  /* hero */
+  .herohead{display:flex;align-items:center;justify-content:space-between}
+  .lab{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .heroname{font-family:var(--cond);font-weight:600;font-size:22px;line-height:26px;
+            letter-spacing:.03em;text-transform:uppercase;margin-top:8px}
+  .chips{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
+  .badge{display:inline-block;padding:2px 6px;border-radius:2px;font:600 11px/14px var(--ui);
+         text-transform:uppercase;letter-spacing:.08em;border:1px solid var(--line-strong);
+         color:var(--chalk)}
+  .badge.rankchip{border-radius:4px;font-family:var(--mono);text-transform:none;letter-spacing:0}
+
+  /* explore rows */
+  .xrow{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .xrow .m{flex:1}
+  .xrow .t{font:600 16px/22px var(--ui)}
+  .xrow .s{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:2px}
+
+  .statbetween{display:flex;justify-content:space-between;align-items:center}
+  .mono{font:500 13px/18px var(--mono);font-variant-numeric:tabular-nums}
+
+  /* buttons */
+  .btn{height:40px;border-radius:4px;display:flex;align-items:center;justify-content:center;
+       font:600 14px var(--ui);padding:0 16px}
+  .btn.primary{background:var(--ice);color:var(--on-ice)}
+  .btn.secondary{border:1px solid var(--line-strong);color:var(--chalk)}
+  .btn.ghost{color:var(--chalk-dim)}
+  .btn.compact{height:36px;font-size:13px}
+  .btnrow{display:flex;gap:8px}
+  .btnrow .btn{flex:1;white-space:nowrap}
+
+  /* tab bar */
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink-0)}
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 10px;
+      color:var(--chalk-dim);font:600 11px var(--ui)}
+  .tb.on{color:var(--ice)}
+
+  svg.i{display:block}
+
+  /* ── progress module blocks (v1) ── */
+  .ringrow{display:flex;gap:16px;align-items:center}
+  .ringwrap{position:relative;width:72px;height:72px;flex:none}
+  .ringwrap .rc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+                justify-content:center;gap:1px}
+  .ringwrap .rv{font:600 16px var(--mono);font-variant-numeric:tabular-nums}
+  .ringwrap .rl{font:600 8px var(--ui);letter-spacing:.06em;color:var(--chalk-dim);text-transform:uppercase}
+  .ptitle{font:600 16px/22px var(--ui)}
+  .pbody{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:2px}
+
+  .segbar{display:flex;gap:2px;margin-top:8px}
+  .segbar .seg{flex:1;height:8px;background:var(--ink-3)}
+  .segbar .seg.you{background:var(--ice)}
+  .unlockline{font:400 13px/18px var(--ui);color:var(--chalk);margin-top:8px}
+  .unlockline .em{color:var(--ice);font-weight:600}
+  .foldline{font:400 13px/18px var(--ui);color:var(--chalk-dim);border-top:1px solid var(--line);
+            margin-top:12px;padding-top:10px}
+
+  /* example trade card */
+  .exlabel{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--flare)}
+  .extrade{border:1px solid var(--line);border-radius:8px;background:var(--ink-0);
+           padding:10px 12px;margin-top:8px}
+  .excols{display:flex;gap:0;margin-top:6px}
+  .excol{flex:1;padding:0 10px}
+  .excol:first-child{padding-left:0;border-right:1px solid var(--line)}
+  .excol:last-child{padding-right:0;padding-left:12px}
+  .exhead{font:600 10px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+          color:var(--chalk-dim);display:flex;align-items:center;gap:6px}
+  .exhead::before{content:"";width:3px;height:10px;background:var(--ice)}
+  .exrow{display:flex;align-items:center;gap:6px;margin-top:6px}
+  .prail{width:3px;height:14px;flex:none}
+  .exnm{font:600 12px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .expos{font:600 9px var(--ui);letter-spacing:.05em}
+
+  /* ── TradeValueBar recreation (mobile/src/components/TradeValueBar.tsx) ──
+     Diverging bar centered on Even, ±1 Mid 1st half-scale; inner ticks at the
+     ±2nd landmark (SECOND_IN_FIRSTS = 0.57 → 21.5% / 78.5%). Example gap:
+     favors=receive (You win), gap.value=380, gap.firsts=0.6 → fill grows right
+     from center, width = 0.6 × 50% = 30%; fill color = --pos (semantic.pos). */
+  .vb{margin-top:10px;border-top:1px solid var(--line);padding-top:10px}
+  .vbhead{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .vbwin{font-family:var(--cond);font-weight:600;font-size:18px;line-height:22px;
+         letter-spacing:.03em;text-transform:uppercase;color:var(--pos);margin-top:4px}
+  .vbmargin{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .vbdata{font:500 13px var(--mono);font-variant-numeric:tabular-nums}
+  .vbpick{font:600 13px var(--ui);color:var(--tier-1st)}
+  .vbtrack{position:relative;height:16px;margin-top:12px}
+  .vbrail{position:absolute;left:0;right:0;top:1px;height:14px;background:var(--ink-3);border-radius:2px}
+  .vbfill{position:absolute;top:1px;height:14px;border-radius:2px;background:var(--pos);
+          left:50%;width:30%}
+  .vbtick{position:absolute;top:-4px;height:24px;width:1px;background:var(--line)}
+  .vbcenter{position:absolute;left:50%;margin-left:-1px;top:-4px;height:24px;width:1px;
+            background:var(--line-strong)}
+  .vbscale{display:flex;align-items:center;margin-top:8px}
+  .vbend{font:500 9px var(--mono);color:var(--chalk-faint);width:30px}
+  .vbend.r{text-align:right}
+  .vbmid{flex:1;position:relative;height:12px}
+  .vblbl{position:absolute;width:44px;margin-left:-22px;text-align:center;
+         font:500 9px var(--mono);color:var(--chalk-faint)}
+  .vbends{display:flex;justify-content:space-between;margin-top:4px}
+  .vbendlbl{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .vbverdict{margin-top:10px;background:var(--ink-2);border:1px solid var(--line);
+             border-left:3px solid var(--pos);border-radius:8px;padding:12px;
+             font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .vbverdict strong{color:var(--chalk);font-weight:600}
+
+  /* v1 reference frame, shrunk */
+  .v1ref{zoom:.72}
+
+  .rationale{margin-top:36px}
+  .rationale .card{padding:16px 20px}
+  .rationale h2{font-family:var(--cond);font-weight:600;font-size:18px;letter-spacing:.03em;
+                text-transform:uppercase;margin:0 0 8px;display:flex;align-items:center;gap:8px}
+  .rationale h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .rationale ul{margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .rationale li{margin-bottom:6px}
+  .rationale strong{color:var(--chalk);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <h1>Empty states &amp; progress v2 — #229 · #230 · #234</h1>
+    <p>Iteration on <a href="empty-states-progress.html">v1</a> from operator review. Both
+       variants apply the same corrections: <strong>Explore moves to the top</strong> (under the
+       League card), <strong>League progress sits above "Works right now"</strong>, the example
+       trade carries the <strong>real TradeValueBar</strong> (diverging pick-denominated bar from
+       <code style="color:var(--chalk)">mobile/src/components/TradeValueBar.tsx</code>), and the
+       two CTAs lose their descriptions and get terse labels
+       (<strong>Find a trade</strong> · <strong>Rank players</strong>).</p>
+    <ul>
+      <li><strong>Variant A</strong> — corrected order; each button stays inside its own section, as in v1.</li>
+      <li><strong>Variant B</strong> — operator's alternative: both actions as an equal-width
+          side-by-side row directly under the League card; the sections below carry no buttons.</li>
+    </ul>
+  </div>
+
+  <!-- ══════════ Variants A + B side by side ══════════ -->
+  <div class="sec">Proposed v2 — League home, day-one low-activity state (full scroll shown)</div>
+  <div class="compare">
+
+    <!-- ── VARIANT A ── -->
+    <div class="col">
+      <div class="colcap prop"><span class="dot"></span>Variant A — buttons in place</div>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="topbar">
+          <span class="wordmark">Trade Finder</span>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M10 3a5 5 0 0 1 5 5v3l1.5 2.5H3.5L5 11V8a5 5 0 0 1 5-5Z"/><path d="M8.5 16a1.5 1.5 0 0 0 3 0"/></svg>
+        </div>
+        <div class="stackhdr">
+          <span class="shtitle">League Home</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll">
+
+          <div class="card">
+            <div class="herohead">
+              <span class="lab">League</span>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 6l5 5 5-5"/></svg>
+            </div>
+            <div class="heroname">The Gridiron Gang</div>
+            <div class="chips">
+              <span class="badge">1QB PPR</span>
+              <span class="badge rankchip">#7 of 12</span>
+              <span class="badge">12 teams</span>
+            </div>
+          </div>
+
+          <!-- Explore first (operator) -->
+          <div class="tick">Explore</div>
+          <div>
+            <div class="xrow">
+              <div class="m"><div class="t">League rankings</div>
+                <div class="s">Every team ranked by total roster value</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg>
+            </div>
+            <div class="xrow">
+              <div class="m"><div class="t">Free agents</div>
+                <div class="s">Best available players in this league</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg>
+            </div>
+          </div>
+
+          <!-- League progress above Works right now (operator) -->
+          <div class="tick">League progress</div>
+          <div class="card">
+            <div class="ringrow">
+              <div class="ringwrap">
+                <svg class="i" width="72" height="72" viewBox="0 0 72 72" fill="none">
+                  <circle cx="36" cy="36" r="31" stroke="#232833" stroke-width="5"/>
+                  <!-- 0 of 4 positions: start nub only -->
+                  <path d="M36 5 A31 31 0 0 1 38.4 5.1" stroke="#56D9EC" stroke-width="5" stroke-linecap="square"/>
+                </svg>
+                <div class="rc"><span class="rv">0/4</span><span class="rl">positions</span></div>
+              </div>
+              <div style="flex:1">
+                <div class="btn primary compact">Rank players</div>
+              </div>
+            </div>
+
+            <div class="foldline" style="margin-top:14px;padding-top:0;border-top:1px solid var(--line)"></div>
+            <div class="statbetween" style="margin-top:2px">
+              <span class="lab">Leaguemates ranked</span>
+              <span class="mono">1/12 <span style="color:var(--chalk-dim)">(you)</span></span>
+            </div>
+            <div class="segbar">
+              <span class="seg you"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+            </div>
+            <div class="unlockline"><span class="em">2 more ranked leaguemates</span> unlocks
+              mutual matches — trades both sides already like.</div>
+            <div class="btn ghost compact" style="align-self:flex-start;padding:0;justify-content:flex-start">Invite leaguemates</div>
+
+            <div class="foldline">Leaderboards and contrarian ranks appear here once
+              3 leaguemates have ranked.</div>
+          </div>
+
+          <!-- Works right now last -->
+          <div class="tick">Works right now</div>
+          <div class="card">
+            <div class="extrade">
+              <span class="exlabel">Example — not from your league</span>
+              <div class="excols">
+                <div class="excol">
+                  <div class="exhead">You send</div>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span>
+                    <span class="exnm">Breece Hall</span><span class="expos" style="color:var(--rb)">RB</span></div>
+                </div>
+                <div class="excol">
+                  <div class="exhead">You get</div>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span>
+                    <span class="exnm">De'Von Achane</span><span class="expos" style="color:var(--rb)">RB</span></div>
+                  <div class="exrow"><span class="prail" style="background:var(--line-strong)"></span>
+                    <span class="exnm">2027 2nd</span></div>
+                </div>
+              </div>
+
+              <!-- TradeValueBar (faithful recreation) -->
+              <div class="vb">
+                <div class="vbhead">Dynasty value swing</div>
+                <div class="vbwin">You win</div>
+                <div class="vbmargin">by <span class="vbdata" style="color:var(--pos)">+380</span>&ensp;·&ensp;<span class="vbpick">a Mid 2nd</span> (≈ 0.6 firsts)</div>
+                <div class="vbtrack">
+                  <div class="vbrail"></div>
+                  <div class="vbfill"></div>
+                  <div class="vbtick" style="left:21.5%"></div>
+                  <div class="vbtick" style="left:78.5%"></div>
+                  <div class="vbcenter"></div>
+                </div>
+                <div class="vbscale">
+                  <span class="vbend">−1st</span>
+                  <div class="vbmid">
+                    <span class="vblbl" style="left:21.5%">−2nd</span>
+                    <span class="vblbl" style="left:50%">Even</span>
+                    <span class="vblbl" style="left:78.5%">+2nd</span>
+                  </div>
+                  <span class="vbend r">+1st</span>
+                </div>
+                <div class="vbends">
+                  <span class="vbendlbl">They win</span>
+                  <span class="vbendlbl" style="color:var(--pos)">You win</span>
+                </div>
+                <div class="vbverdict"><strong>You win</strong> the equivalent of
+                  <span class="vbpick">a Mid 2nd</span> in dynasty value. Accept as-is, or offer
+                  a small give-back.</div>
+              </div>
+            </div>
+            <div class="btn primary" style="margin-top:12px">Find a trade</div>
+          </div>
+
+          <div class="btn secondary" style="margin-top:16px">Switch league</div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Trades</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="cap">Corrected order: Explore → League progress → Works right now. The two CTAs
+        keep their v1 homes but drop all descriptive copy — "Rank players" sits beside the ring,
+        "Find a trade" under the example. The example carries the real value bar: winner headline
+        + pick-denominated margin, diverging fill from center (0.6 firsts → 30% right), ±2nd
+        ticks, who-wins end labels, and the counteroffer verdict strip.</div>
+    </div>
+
+    <!-- ── VARIANT B ── -->
+    <div class="col">
+      <div class="colcap prop"><span class="dot"></span>Variant B — action row under the League card</div>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="topbar">
+          <span class="wordmark">Trade Finder</span>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M10 3a5 5 0 0 1 5 5v3l1.5 2.5H3.5L5 11V8a5 5 0 0 1 5-5Z"/><path d="M8.5 16a1.5 1.5 0 0 0 3 0"/></svg>
+        </div>
+        <div class="stackhdr">
+          <span class="shtitle">League Home</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll">
+
+          <div class="card">
+            <div class="herohead">
+              <span class="lab">League</span>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 6l5 5 5-5"/></svg>
+            </div>
+            <div class="heroname">The Gridiron Gang</div>
+            <div class="chips">
+              <span class="badge">1QB PPR</span>
+              <span class="badge rankchip">#7 of 12</span>
+              <span class="badge">12 teams</span>
+            </div>
+          </div>
+
+          <!-- The operator's alternative: both actions side by side, right under the League card -->
+          <div class="btnrow">
+            <div class="btn primary">Find a trade</div>
+            <div class="btn secondary">Rank players</div>
+          </div>
+
+          <div class="tick">Explore</div>
+          <div>
+            <div class="xrow">
+              <div class="m"><div class="t">League rankings</div>
+                <div class="s">Every team ranked by total roster value</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg>
+            </div>
+            <div class="xrow">
+              <div class="m"><div class="t">Free agents</div>
+                <div class="s">Best available players in this league</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg>
+            </div>
+          </div>
+
+          <div class="tick">League progress</div>
+          <div class="card">
+            <div class="ringrow">
+              <div class="ringwrap">
+                <svg class="i" width="72" height="72" viewBox="0 0 72 72" fill="none">
+                  <circle cx="36" cy="36" r="31" stroke="#232833" stroke-width="5"/>
+                  <path d="M36 5 A31 31 0 0 1 38.4 5.1" stroke="#56D9EC" stroke-width="5" stroke-linecap="square"/>
+                </svg>
+                <div class="rc"><span class="rv">0/4</span><span class="rl">positions</span></div>
+              </div>
+              <div style="flex:1">
+                <div class="statbetween">
+                  <span class="lab">Leaguemates ranked</span>
+                  <span class="mono">1/12 <span style="color:var(--chalk-dim)">(you)</span></span>
+                </div>
+                <div class="segbar">
+                  <span class="seg you"></span><span class="seg"></span><span class="seg"></span>
+                  <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+                  <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+                  <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+                </div>
+              </div>
+            </div>
+            <div class="unlockline"><span class="em">2 more ranked leaguemates</span> unlocks
+              mutual matches — trades both sides already like.</div>
+            <div class="btn ghost compact" style="align-self:flex-start;padding:0;justify-content:flex-start">Invite leaguemates</div>
+            <div class="foldline">Leaderboards and contrarian ranks appear here once
+              3 leaguemates have ranked.</div>
+          </div>
+
+          <div class="tick">Works right now</div>
+          <div class="card">
+            <div class="extrade">
+              <span class="exlabel">Example — not from your league</span>
+              <div class="excols">
+                <div class="excol">
+                  <div class="exhead">You send</div>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span>
+                    <span class="exnm">Breece Hall</span><span class="expos" style="color:var(--rb)">RB</span></div>
+                </div>
+                <div class="excol">
+                  <div class="exhead">You get</div>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span>
+                    <span class="exnm">De'Von Achane</span><span class="expos" style="color:var(--rb)">RB</span></div>
+                  <div class="exrow"><span class="prail" style="background:var(--line-strong)"></span>
+                    <span class="exnm">2027 2nd</span></div>
+                </div>
+              </div>
+
+              <!-- TradeValueBar (faithful recreation) -->
+              <div class="vb">
+                <div class="vbhead">Dynasty value swing</div>
+                <div class="vbwin">You win</div>
+                <div class="vbmargin">by <span class="vbdata" style="color:var(--pos)">+380</span>&ensp;·&ensp;<span class="vbpick">a Mid 2nd</span> (≈ 0.6 firsts)</div>
+                <div class="vbtrack">
+                  <div class="vbrail"></div>
+                  <div class="vbfill"></div>
+                  <div class="vbtick" style="left:21.5%"></div>
+                  <div class="vbtick" style="left:78.5%"></div>
+                  <div class="vbcenter"></div>
+                </div>
+                <div class="vbscale">
+                  <span class="vbend">−1st</span>
+                  <div class="vbmid">
+                    <span class="vblbl" style="left:21.5%">−2nd</span>
+                    <span class="vblbl" style="left:50%">Even</span>
+                    <span class="vblbl" style="left:78.5%">+2nd</span>
+                  </div>
+                  <span class="vbend r">+1st</span>
+                </div>
+                <div class="vbends">
+                  <span class="vbendlbl">They win</span>
+                  <span class="vbendlbl" style="color:var(--pos)">You win</span>
+                </div>
+                <div class="vbverdict"><strong>You win</strong> the equivalent of
+                  <span class="vbpick">a Mid 2nd</span> in dynasty value. Accept as-is, or offer
+                  a small give-back.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="btn secondary" style="margin-top:16px">Switch league</div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Trades</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+        </div>
+      </div>
+      <div class="cap">Same corrected order below the fold, but both actions live in one
+        equal-width row directly under the League card — the buttons are then removed from their
+        sections so no action appears twice. "Find a trade" keeps the single ice fill (one primary
+        per screen); "Rank players" is the secondary. The progress ring and the leaguemate bar
+        merge onto one line since the ring no longer shares its row with a button.</div>
+    </div>
+  </div>
+
+  <!-- ══════════ V1 reference ══════════ -->
+  <div class="sec">V1 — for comparison (superseded proposal)</div>
+  <div class="compare">
+    <div class="col">
+      <div class="colcap"><span class="dot"></span>V1 proposed — order: Works right now → Progress → Explore</div>
+      <div class="v1ref">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="topbar">
+          <span class="wordmark">Trade Finder</span>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M10 3a5 5 0 0 1 5 5v3l1.5 2.5H3.5L5 11V8a5 5 0 0 1 5-5Z"/><path d="M8.5 16a1.5 1.5 0 0 0 3 0"/></svg>
+        </div>
+        <div class="stackhdr">
+          <span class="shtitle">League Home</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll">
+
+          <div class="card">
+            <div class="herohead">
+              <span class="lab">League</span>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 6l5 5 5-5"/></svg>
+            </div>
+            <div class="heroname">The Gridiron Gang</div>
+            <div class="chips">
+              <span class="badge">1QB PPR</span>
+              <span class="badge rankchip">#7 of 12</span>
+              <span class="badge">12 teams</span>
+            </div>
+          </div>
+
+          <div class="tick">Works right now</div>
+          <div class="card">
+            <div class="ptitle">Find trades today — no leaguemates needed</div>
+            <div class="pbody">Suggestions are priced off community consensus until your board
+              takes over. Invite leaguemates later for league-specific matches.</div>
+            <div class="extrade">
+              <span class="exlabel">Example — not from your league</span>
+              <div class="excols">
+                <div class="excol">
+                  <div class="exhead">You send</div>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span>
+                    <span class="exnm">Breece Hall</span><span class="expos" style="color:var(--rb)">RB</span></div>
+                </div>
+                <div class="excol">
+                  <div class="exhead">You get</div>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span>
+                    <span class="exnm">De'Von Achane</span><span class="expos" style="color:var(--rb)">RB</span></div>
+                  <div class="exrow"><span class="prail" style="background:var(--line-strong)"></span>
+                    <span class="exnm">2027 2nd</span></div>
+                </div>
+              </div>
+              <div style="height:4px;background:var(--ink-3);margin-top:10px;position:relative">
+                <div style="height:4px;background:var(--pos);width:88%"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:4px">
+                <span class="lab" style="font-size:10px">Fairness</span>
+                <span class="mono" style="font-size:11px;color:var(--chalk-dim)">88</span>
+              </div>
+            </div>
+            <div class="btn primary" style="margin-top:12px">Find a trade</div>
+          </div>
+
+          <div class="tick">League progress</div>
+          <div class="card">
+            <div class="ringrow">
+              <div class="ringwrap">
+                <svg class="i" width="72" height="72" viewBox="0 0 72 72" fill="none">
+                  <circle cx="36" cy="36" r="31" stroke="#232833" stroke-width="5"/>
+                  <path d="M36 5 A31 31 0 0 1 38.4 5.1" stroke="#56D9EC" stroke-width="5" stroke-linecap="square"/>
+                </svg>
+                <div class="rc"><span class="rv">0/4</span><span class="rl">positions</span></div>
+              </div>
+              <div style="flex:1">
+                <div class="ptitle">Rank your players first</div>
+                <div class="pbody">Your board is what prices every trade. Quick set builds
+                  a position in ~2 minutes.</div>
+              </div>
+            </div>
+            <div class="btn primary compact" style="margin-top:12px">Start Quick set</div>
+            <div class="foldline" style="margin-top:14px;padding-top:0;border-top:1px solid var(--line)"></div>
+            <div class="statbetween" style="margin-top:2px">
+              <span class="lab">Leaguemates ranked</span>
+              <span class="mono">1/12 <span style="color:var(--chalk-dim)">(you)</span></span>
+            </div>
+            <div class="segbar">
+              <span class="seg you"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span>
+            </div>
+            <div class="unlockline"><span class="em">2 more ranked leaguemates</span> unlocks
+              mutual matches — trades both sides already like.</div>
+            <div class="btn ghost compact" style="align-self:flex-start;padding:0;justify-content:flex-start">Invite leaguemates</div>
+            <div class="foldline">Leaderboards and contrarian ranks appear here once
+              3 leaguemates have ranked.</div>
+          </div>
+
+          <div class="tick">Explore</div>
+          <div>
+            <div class="xrow">
+              <div class="m"><div class="t">League rankings</div>
+                <div class="s">Every team ranked by total roster value</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg>
+            </div>
+            <div class="xrow">
+              <div class="m"><div class="t">Free agents</div>
+                <div class="s">Best available players in this league</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg>
+            </div>
+          </div>
+
+          <div class="btn secondary" style="margin-top:16px">Switch league</div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Trades</div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+        </div>
+      </div>
+      </div>
+      <div class="cap">Kept for reference only — v1's proposed order and the flat fairness meter
+        the operator asked to replace. Full page: <a href="empty-states-progress.html"
+        style="color:var(--ice);text-decoration:none">empty-states-progress.html</a>.</div>
+    </div>
+  </div>
+
+  <!-- ══════════ RATIONALE ══════════ -->
+  <div class="rationale">
+    <div class="card">
+      <h2>Rationale — what changed from v1 and why</h2>
+      <ul>
+        <li><strong>Explore first:</strong> the two Explore rows (League rankings · Free agents)
+          are the destinations that already work with zero setup, so they now sit directly under
+          the League card in both variants — day-one value is one tap from the top.</li>
+        <li><strong>Progress before the example:</strong> League progress moves above "Works right
+          now", making the unfinished-foundation story (ring + leaguemate bar + unlock sentence)
+          the page's spine; the example trade becomes supporting evidence, not the lead.</li>
+        <li><strong>Real value bar on the example (fidelity to
+          <code style="color:var(--chalk)">TradeValueBar.tsx</code>):</strong> diverging bar
+          centered on Even spanning ±1 Mid 1st; fill = gap.firsts (0.6 → 30% of the track,
+          rightward), colored <strong>--pos</strong> because favors=receive; inner ticks at the
+          ±2nd landmark (SECOND_IN_FIRSTS = 0.57 → 21.5% / 78.5%); 9px mono scale labels
+          (−1st · −2nd · Even · +2nd · +1st); They win / You win end labels with the winning side
+          tinted; margin line "by +380 · a Mid 2nd (≈ 0.6 firsts)" with the pick name in the
+          1st-tier teal; counteroffer verdict strip with the 3px winner-colored left border.
+          Replaces v1's flat "Fairness 88" meter. Still explicitly labeled
+          <strong>EXAMPLE — not from your league</strong> (flare).</li>
+        <li><strong>Terse CTAs, no descriptions:</strong> "Start Quick set" + two lines of copy
+          becomes <strong>Rank players</strong>; the "Find trades today…" title/body above the
+          example is gone — <strong>Find a trade</strong> stands alone. Both cards get
+          meaningfully shorter.</li>
+        <li><strong>A vs B tradeoff:</strong> A keeps each action next to the thing it acts on
+          (ring → Rank players, example → Find a trade). B fronts both actions in one equal-width
+          row under the League card — fastest possible access, at the cost of separating the
+          buttons from their context; the in-section buttons are removed in B so no action appears
+          twice, and only "Find a trade" keeps the ice fill (one primary per screen).</li>
+        <li><strong>Unchanged from v1:</strong> the Matches empty-state proposal (section B of
+          <a href="empty-states-progress.html" style="color:var(--ice);text-decoration:none">v1</a>)
+          is untouched by this feedback and is not repeated here; all zero-row collapsing rules
+          (#229/#230/#234) carry over as specced in v1.</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
