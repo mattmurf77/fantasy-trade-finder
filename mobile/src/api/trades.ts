@@ -284,6 +284,11 @@ export interface AssetIdea {
   fairness: number;           // 0–1 min/max package ratio
   relaxed?: boolean;          // #189 convention: outside the strict band
   relaxed_reason?: string;
+  // #216 featured-trade window — pick-denominated verdict per idea, same
+  // shape as evaluate / deck cards (server single-sources the construction).
+  // Undefined on old servers ⇒ the window's TradeValueBar hides.
+  favors?: 'give' | 'receive' | 'even' | null;
+  gap?: CalcGap | null;
 }
 
 export interface AssetIdeasResponse {
@@ -323,6 +328,19 @@ function normalizeAssetIdea(raw: any): AssetIdea {
             : {}),
         }
       : {}),
+    // #216 — validated like normalizeTradeCard's favors/gap so an old
+    // server (fields absent) degrades to undefined and the featured
+    // window's value bar simply hides.
+    ...(raw?.favors === 'give' || raw?.favors === 'receive' || raw?.favors === 'even'
+      ? { favors: raw.favors as 'give' | 'receive' | 'even' }
+      : raw?.favors === null
+        ? { favors: null }
+        : {}),
+    ...(raw?.gap && typeof raw.gap === 'object'
+      ? { gap: raw.gap as CalcGap }
+      : raw?.gap === null
+        ? { gap: null }
+        : {}),
   };
 }
 

@@ -65,6 +65,10 @@ interface Props {
   // when the asset is the last one on its side (a trade needs ≥1 per
   // side); the handler owns the honest hint + pinned-package confirm.
   onRemoveAsset?: (player: Player, side: 'give' | 'receive') => void;
+  // #216 — featured-trade window reuse: asset-idea cards have no match
+  // score (consensus sweep, not the divergence engine), so the window
+  // hides the bar instead of rendering an honest-looking 0%.
+  hideMatchStrength?: boolean;
 }
 
 // FB-47 — partner-fit line copy. `partner_fit` is a 0–1 scalar; the exact
@@ -107,6 +111,7 @@ function TradeCardComp({
   onKeepSide,
   onEditInCalculator,
   onRemoveAsset,
+  hideMatchStrength = false,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
   // The pick-denominated TradeValueBar (feedback #157) is the universal
@@ -414,7 +419,9 @@ function TradeCardComp({
       {/* Match strength was computed for the ORIGINAL package; after a
           player swap it's stale, so edited cards hide it and lean on the
           re-priced value bar below. */}
-      {!data.edited && <StrengthBar value={matchPct} label="Match strength" />}
+      {!data.edited && !hideMatchStrength && (
+        <StrengthBar value={matchPct} label="Match strength" />
+      )}
 
       <View style={styles.split}>
         <View style={styles.side}>

@@ -487,6 +487,31 @@ def test_route_groups_shape(route_client):
     assert isinstance(up["difference"], float)
 
 
+def test_route_ideas_carry_value_verdict(route_client):
+    """#216 — every serialized idea carries the pick-denominated verdict
+    (favors + gap) in the same shape evaluate / deck cards use, so the
+    featured-trade window's TradeValueBar renders from it directly."""
+    ff._flags_cache = {**ff.DEFAULT_FLAGS, "trade.asset_ideas": True}
+    r = _post(route_client, {"asset_id": "P", "direction": "give"})
+    assert r.status_code == 200, r.get_json()
+    groups = r.get_json()["groups"]
+    ideas = [i for g in groups.values() for i in g]
+    assert ideas
+    for idea in ideas:
+        assert idea["favors"] in ("give", "receive", "even")
+        gap = idea["gap"]
+        assert gap["value"] == round(
+            abs(idea["receive_value"] - idea["give_value"]), 1)
+        assert isinstance(gap["firsts"], float)
+        # favors agrees with the package values (even ⇔ fairness ≥ 0.95).
+        if idea["fairness"] >= 0.95:
+            assert idea["favors"] == "even"
+        elif idea["receive_value"] > idea["give_value"]:
+            assert idea["favors"] == "receive"
+        else:
+            assert idea["favors"] == "give"
+
+
 def test_route_validation(route_client):
     ff._flags_cache = {**ff.DEFAULT_FLAGS, "trade.asset_ideas": True}
     assert _post(route_client, {}).status_code == 400
