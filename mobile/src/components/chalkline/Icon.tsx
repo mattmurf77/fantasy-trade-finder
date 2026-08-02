@@ -26,7 +26,8 @@ export type IconName =
   | 'settings'
   | 'plus'
   | 'swap'
-  | 'flag';
+  | 'flag'
+  | 'upload';
 
 interface Props {
   name: IconName;
@@ -91,4 +92,7 @@ const GLYPHS: Record<IconName, React.ReactNode> = {
   plus: <Path d="M10 4v12M4 10h12" />,
   swap: <Path d="M4 7h12M13 4l3 3-3 3M16 13H4M7 10l-3 3 3 3" />,
   flag: <Path d="M5 3v14M5 4h9l-2 3 2 3H5" />,
+  // #232 rankings import — arrow UP out of the tray ("the user is giving us
+  // their rankings"; the v3 mock corrected v2's download-direction arrow).
+  upload: <Path d="M10 12V3M6 7l4-4 4 4M4 14v3h12v-3" />,
 };

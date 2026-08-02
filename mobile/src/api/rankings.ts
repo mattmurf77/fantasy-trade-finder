@@ -138,6 +138,62 @@ export async function reorderRankings(
   );
 }
 
+// ── Rankings import (#232 follow-on, flag `ranks.import`) ──────────────
+// Paste-first import v1: the client sends the pasted table's lines; the
+// backend's tolerant parser + fuzzy matcher (backend/rankings_import.py)
+// resolves each against the universal pool for the active format.
+
+export interface ImportPlayer {
+  id: string;
+  name: string;
+  team: string | null;
+  position: string | null;
+}
+
+export interface ImportMatchRow {
+  /** The original pasted line (trimmed). */
+  input: string;
+  /** The name the parser extracted from the line. */
+  name: string;
+  status: 'matched' | 'ambiguous' | 'unmatched';
+  player: ImportPlayer | null;
+  /** ≤3 candidates for ambiguous rows, consensus-best first. */
+  candidates: ImportPlayer[];
+}
+
+export interface ImportMatchResponse {
+  rows: ImportMatchRow[];
+  counts: { matched: number; ambiguous: number; unmatched: number };
+  scoring_format: string;
+}
+
+// POST /api/rankings/import-match — resolve pasted lines against the pool.
+// Read-only (no board writes). Header scopes the format like reorder.
+export async function importMatchRankings(names: string[]) {
+  return api.post<ImportMatchResponse>(
+    '/api/rankings/import-match',
+    { names },
+    { headers: await formatHeader() },
+  );
+}
+
+// POST /api/rankings/import-apply — apply the reviewed order as the user's
+// board. Backend semantics (docs/api-reference.md): imported ids land on
+// top in imported order; every unlisted player keeps its relative current
+// (consensus) order below, via the reorder permutation machinery.
+export async function importApplyRankings(orderedPlayerIds: string[]) {
+  return api.post<{
+    ok: true;
+    imported_count: number;
+    board_count: number;
+    scoring_format: string;
+  }>(
+    '/api/rankings/import-apply',
+    { ordered_player_ids: orderedPlayerIds },
+    { headers: await formatHeader() },
+  );
+}
+
 // POST /api/tiers/save — save a tier assignment for a position.
 // Body shape matches the web's save_tiers_route expectation:
 //   { position: 'RB', tiers: { firsts_4plus: [id,...], first_1: [...], ... },

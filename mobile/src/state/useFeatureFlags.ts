@@ -44,6 +44,10 @@ const FLAG_REFETCH_THROTTLE_MS = 30 * 60_000;
 const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   'espn.link': true,
   'auth.accounts': true,
+  // #232 follow-on — rankings import ships ON (the flag is a kill switch,
+  // not a dark launch), so the chooser entry is visible from first paint;
+  // a server `false` still hides it on the next successful revalidate.
+  'ranks.import': true,
 };
 
 export const useFeatureFlags = create<FlagState>((set, get) => ({

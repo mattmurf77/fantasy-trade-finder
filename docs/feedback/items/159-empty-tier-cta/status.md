@@ -29,3 +29,16 @@ label rule does not apply; no change made.
 
 Test plan: covered by the PRD's manual steps; Maestro label assertions ride
 the existing `quick-set.save-btn` id (CTA copy is asserted via visible text).
+
+---
+
+**Superseded 2026-08-02 by #233** (rank-method consolidation batch, approved
+mock `mockups/polish-lab-2026-08/rank-method-consolidation-v2.html` §C — see
+`../232-rank-chooser-consolidation/status.md`): at 0 selected the primary
+label is now the position-aware, action-first **"Continue — no QBs this
+high"** (last tier: short-fit **"Continue & finish"**), replacing R-1's
+"No players for this tier" / "No players here & finish" wording, and the
+**Skip button is hidden at 0 selected** (it duplicated the primary). The
+R-2 (≥1 selected unchanged) and R-3 (instant selection-driven swap)
+guarantees — and the #161 no-demotion-on-empty-save interaction — carry
+forward unchanged.

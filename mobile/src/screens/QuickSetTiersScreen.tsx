@@ -531,26 +531,37 @@ export default function QuickSetTiersScreen() {
           disabled={tierIdx === 0 || saving}
           onPress={onBack}
         />
-        <Button
-          variant="secondary"
-          compact
-          label={isLastTier ? 'Skip & finish' : 'Skip'}
-          disabled={saving}
-          onPress={onSkip}
-        />
-        {/* #159 R-1/R-2/R-3 — with zero chips selected the label flips to the
-            empty-state wording (short-fit "No players here" on the last tier,
-            where " & finish" would overflow), reverting instantly via
-            `selectedCount` (derived from the selection state) the moment a
-            chip is tapped. LABEL ONLY: the press still runs onSave, whose
-            empty branch composes as a Skip (and #161 demotion only ever fires
-            on a save with ≥1 pick — see onSave). */}
+        {/* #233 — with zero selected, Skip is HIDDEN: it duplicated the
+            primary (the empty save composes as a skip), so two buttons
+            offered one advance path. It reappears the moment a chip is
+            picked. */}
+        {selectedCount > 0 ? (
+          <Button
+            variant="secondary"
+            compact
+            label={isLastTier ? 'Skip & finish' : 'Skip'}
+            disabled={saving}
+            onPress={onSkip}
+          />
+        ) : null}
+        {/* #233 (supersedes the #159 label; approved mock
+            rank-method-consolidation-v2 §C) — with zero chips selected the
+            primary becomes the position-aware action-first CTA
+            "Continue — no QBs this high" ("Continue & finish" on the last
+            tier, the short-fit fallback: "this high" reads wrong at FA and
+            the full string + suffix would overflow). It reverts instantly
+            via `selectedCount` (derived from the selection state) the
+            moment a chip is tapped. LABEL ONLY: the press still runs
+            onSave, whose empty branch composes as a Skip (and #161
+            demotion only ever fires on a save with ≥1 pick — see onSave). */}
         <Pressable
           testID="quick-set.save-btn"
           accessibilityRole="button"
           accessibilityLabel={
             selectedCount === 0
-              ? `No players for this tier, save it empty${isLastTier ? ' and finish' : ''}`
+              ? isLastTier
+                ? 'No players this tier, continue and finish'
+                : `No ${position}s this high, continue to the next tier`
               : `Save ${TIER_LABEL[tier]}${isLastTier ? ' and finish' : ''}`
           }
           accessibilityState={{ disabled: saving || rankingsQuery.isLoading, busy: saving }}
@@ -568,8 +579,8 @@ export default function QuickSetTiersScreen() {
             <Text style={styles.saveBtnText}>
               {selectedCount === 0
                 ? isLastTier
-                  ? 'No players here & finish'
-                  : 'No players for this tier'
+                  ? 'Continue & finish'
+                  : `Continue — no ${position}s this high`
                 : `Save ${TIER_LABEL[tier]} (${selectedCount})${isLastTier ? ' & finish' : ''}`}
             </Text>
           )}

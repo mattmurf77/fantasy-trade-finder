@@ -212,6 +212,11 @@ FLAG_KEYS: tuple[str, ...] = (
     "ranks.accuracy_scoring",      # passive snapshot + scoring cron + leaderboard (phase 1)
     "ranks.rank_sets",             # publish/adopt rank sets, free only (phase 2)
     "ranks.set_types_extended",    # redraft/bestball set types (platform-thesis test)
+    # ── #232 follow-on — paste-first rankings import (2026-08-02) ──
+    # Gates POST /api/rankings/import-match + /import-apply and the mobile
+    # "Have rankings already?" chooser entry. Ships ON in features.json —
+    # this key is a kill switch, not a dark launch.
+    "ranks.import",                # paste-a-table rankings import v1
     "marketplace.publisher_sets",  # publisher IAP + subscriber linking (phase 3)
     "marketplace.contributor_sales", # contributor credit-priced sales (phase 4)
     "marketplace.cash_payouts",    # Stripe Connect cash-out rung (phase 5)
