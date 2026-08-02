@@ -22,7 +22,13 @@ import Toast from '../components/Toast';
 import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
 import HelpSheet from '../components/HelpSheet';
 import { getAllMatches, getAwaitingTrades, dismissMatch } from '../api/trades';
-import { getAssetPrefs, setAssetPref } from '../api/league';
+import {
+  getAssetPrefs,
+  setAssetPref,
+  getLeagueCoverage,
+  getLeagueSummary,
+} from '../api/league';
+import LeagueProgressModule from '../components/LeagueProgressModule';
 import { useSession } from '../state/useSession';
 import { usePushPriming } from '../state/usePushPriming';
 import { useFlag } from '../state/useFeatureFlags';
@@ -126,6 +132,26 @@ export default function MatchesScreen() {
     queryFn:  getAwaitingTrades,
     staleTime: 15_000,
     enabled:  segment === 'awaiting',
+  });
+
+  // #229/#234 — the mutual empty state mounts the compact
+  // LeagueProgressModule for the ACTIVE league (same story League home
+  // tells; the two surfaces can't disagree). Same query keys/staleTime as
+  // LeagueScreen, so the cache is shared and this is usually free.
+  const activeLeagueId = activeLeague?.league_id || null;
+  const leagueSummaryQuery = useQuery({
+    queryKey: ['league-summary', activeLeagueId],
+    queryFn:  () => getLeagueSummary(activeLeagueId!),
+    enabled:  !!activeLeagueId,
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+  const leagueCoverageQuery = useQuery({
+    queryKey: ['league-coverage', activeLeagueId],
+    queryFn:  () => getLeagueCoverage(activeLeagueId!),
+    enabled:  !!activeLeagueId,
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 
   // Dismiss = archive the match from THIS user's inbox. Persisted + per-user
@@ -353,6 +379,23 @@ export default function MatchesScreen() {
         || allAwaiting.find((a) => a.league_id === filterLeagueId)?.league_name
         || 'this league';
 
+  // #229/#234 — compact-module inputs for the mutual empty state. Rendered
+  // only for the active league's view ('All' or its own filter chip) and
+  // only once BOTH league reads have confirmed data (no fabricated counts).
+  const matchesSummary = leagueSummaryQuery.data;
+  const matchesCoverage = leagueCoverageQuery.data;
+  const emptyModule =
+    (filterLeagueId === 'all' || filterLeagueId === activeLeagueId)
+    && matchesSummary
+    && matchesCoverage
+      ? {
+          rankedMates: matchesCoverage.ranked || 0,
+          totalTeams:
+            matchesSummary.total_teams
+            || (matchesSummary.leaguemates_total || 0) + 1,
+        }
+      : null;
+
   const isLoading = segment === 'mutual' ? matchesQuery.isLoading : awaitingQuery.isLoading;
   const isError   = segment === 'mutual' ? matchesQuery.isError   : awaitingQuery.isError;
   const isFetching =
@@ -475,32 +518,48 @@ export default function MatchesScreen() {
         </View>
       ) : segment === 'mutual' ? (
         visibleMatches.length === 0 ? (
+          // #229/#234 (approved mock empty-states-progress-v3.html, ships
+          // live): the empty inbox explains the mechanic, points at the
+          // action that works today, and repeats League home's unlock
+          // module so the two surfaces never tell different stories.
           <View style={styles.centered}>
             <Text testID="matches.empty-text" style={styles.emptyTitle}>
               {filterLeagueId === 'all'
-                ? 'No matches in any of your leagues yet'
+                ? 'No mutual matches yet'
                 : `No matches in ${filteredLeagueName} yet`}
             </Text>
             <Text style={styles.emptyBody}>
-              Head to the Trades tab and swipe on some proposals. When a
-              leaguemate likes the same trade, it'll show up here.
+              A match needs two boards — yours and a leaguemate's. You can
+              find trade ideas right now; matches appear when a leaguemate
+              likes the same trade.
             </Text>
-            {/* S4 PRD-05 (ux.empty_state_ctas): the primary button DOES what
-                the copy says — navigate into the core loop. Refresh demotes
-                to a quiet secondary. Flag off: Refresh alone, as before. */}
-            {emptyCtasOn ? (
-              <>
-                <Button
-                  testID="matches.go-to-trades"
-                  label="Go to Trades"
-                  variant="primary"
-                  onPress={() => navigation.navigate('Trades')}
-                />
-                <Button label="Refresh" variant="ghost" compact onPress={onRefresh} />
-              </>
-            ) : (
-              <Button label="Refresh" variant="secondary" compact onPress={onRefresh} />
-            )}
+            {/* Primary action mirrors League home ("Find a trade" → the
+                Trades hub). Supersedes the S4 PRD-05 flag-gated "Go to
+                Trades" on THIS state only (same destination, now always
+                on); testID kept so existing flows keep passing. Refresh
+                stays as the quiet ghost — the empty state is a plain View,
+                so pull-to-refresh can't cover it (documented deviation
+                from the mock's "Refresh is dropped"). */}
+            <Button
+              testID="matches.go-to-trades"
+              label="Find a trade"
+              variant="primary"
+              onPress={() => navigation.navigate('Trades', { screen: 'TradesHome' })}
+            />
+            {/* Compact unlock module — ACTIVE league only (its counts are
+                league-scoped; hidden while a different league's filter is
+                selected or the league data hasn't arrived). */}
+            {emptyModule ? (
+              <LeagueProgressModule
+                testID="matches.progress-module"
+                compact
+                positionsRanked={null}
+                rankedMates={emptyModule.rankedMates}
+                totalTeams={emptyModule.totalTeams}
+                style={styles.progressModule}
+              />
+            ) : null}
+            <Button label="Refresh" variant="ghost" compact onPress={onRefresh} />
             {/* S4 PRD-01 (ux.help_surface): answer "how does matching work?"
                 at the moment the empty inbox raises it. */}
             {helpOn ? (
@@ -961,6 +1020,9 @@ const styles = StyleSheet.create({
     backgroundColor: ink.ink3,
   },
   emptyTitle: { ...type.heading, textAlign: 'center' },
+  // #229/#234 — the compact unlock module stretches to the empty state's
+  // full width (its own copy is left-aligned inside the card).
+  progressModule: { alignSelf: 'stretch' },
   emptyBody: {
     ...type.bodySm,
     textAlign: 'center',

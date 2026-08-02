@@ -7,6 +7,7 @@ import {
   ScrollView,
   RefreshControl,
   Modal,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -16,10 +17,13 @@ import {
   ink,
   chalk,
   ice,
+  flare,
   semantic,
+  position as positionColors,
   space,
   radii,
   type,
+  fonts,
   shadowSheet,
   scrim,
 } from '../theme/chalkline';
@@ -31,6 +35,7 @@ import {
   Meter,
   Icon,
   IconName,
+  Text as ChalkText,
 } from '../components/chalkline';
 import {
   getLeagueSummary,
@@ -40,6 +45,7 @@ import {
   getActivityFeed,
   getContrarianLeaderboard,
 } from '../api/league';
+import { getProgress, getTiersStatus } from '../api/rankings';
 import { importEspnLeague } from '../api/espn';
 import { initLeagueSession } from '../api/auth';
 import { useSession } from '../state/useSession';
@@ -51,6 +57,9 @@ import ActivityFeed from '../components/ActivityFeed';
 import ContrarianLeaderboard from '../components/ContrarianLeaderboard';
 import CoachMark from '../components/CoachMark';
 import RookieDraftBoardSheet from '../components/RookieDraftBoardSheet';
+import LeagueProgressModule from '../components/LeagueProgressModule';
+import TradeValueBar from '../components/TradeValueBar';
+import { buildInviteUrl } from '../components/InviteLeaguematesBanner';
 
 // League home (tab v1; since #181 the pushed 'LeagueHome' sub-route of the
 // League tab's stack — the tab now LANDS on the rankings view, and this
@@ -63,6 +72,13 @@ import RookieDraftBoardSheet from '../components/RookieDraftBoardSheet';
 //   • Ranking-coverage bar (ranked opponents / total)
 // League SWITCHING no longer lives here (#223): the global TopBar carries
 // the active-league affordance + the single LeagueSwitcherSheet instance.
+// #229/#230/#234 (approved mock empty-states-progress-v3.html): in the
+// low-activity state the page adds an action row (Rank players | Find a
+// trade), ONE LeagueProgressModule owning every unlock, and a "Works right
+// now" EXAMPLE-trade card, while the confirmed-zero sections (Matches
+// tiles, joined chip, contrarian, coverage, leaderboards) fold into the
+// module and return automatically once their counts are > 0. A fully
+// unlocked league renders exactly the classic populated layout.
 export default function LeagueScreen() {
   const league   = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
@@ -170,6 +186,24 @@ export default function LeagueScreen() {
     placeholderData: (prev) => prev,
   });
 
+  // #229/#230 — the progress module's ring needs per-position ranking
+  // state. Same keys as the Rank surfaces so the cache is shared.
+  const activeFormat = useSession((s) => s.activeFormat);
+  const progressQuery = useQuery({
+    queryKey: ['progress', leagueId, activeFormat],
+    queryFn:  getProgress,
+    enabled:  !!leagueId,
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+  const tiersStatusQuery = useQuery({
+    queryKey: ['tiers-status'],
+    queryFn:  getTiersStatus,
+    enabled:  !!leagueId,
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+
   // Map user_id → unlock state for cheap per-row chip lookups. Backend
   // returns `flag_off: true` and `members: []` when the flag is off, which
   // collapses to an empty Map naturally.
@@ -191,6 +225,8 @@ export default function LeagueScreen() {
     if (showActivity) activityQuery.refetch();
     contrarianQuery.refetch();
     if (showUnlockBadges) unlocksQuery.refetch();
+    progressQuery.refetch();
+    tiersStatusQuery.refetch();
   };
 
   // No league yet — funnel back to the picker. Should be rare since the
@@ -233,6 +269,71 @@ export default function LeagueScreen() {
   const rankedOpps      = num(coverage?.ranked);
 
   const coveragePct = totalOpps > 0 ? Math.round((rankedOpps / totalOpps) * 100) : 0;
+
+  // ── #229/#230/#234 — low-activity progress system (approved mock
+  // mockups/polish-lab-2026-08/empty-states-progress-v3.html) ──────────
+  // Positions ranked (0–4): a position counts once its trio interaction
+  // count clears the threshold OR it has saved tiers (Quick set / Tiers
+  // commit through /api/tiers/save). progress.unlocked — which also folds
+  // in the manual method and the monotonic unlock floor — short-circuits
+  // to 4/4. null while the progress payload hasn't arrived yet.
+  const progress = progressQuery.data;
+  const tiersSaved = tiersStatusQuery.data?.saved ?? [];
+  const positionsRanked = progress
+    ? progress.unlocked
+      ? 4
+      : (['QB', 'RB', 'WR', 'TE'] as const).filter(
+          (p) => num(progress[p]) >= num(progress.threshold, 10) || tiersSaved.includes(p),
+        ).length
+    : null;
+
+  // Confirmed-zero fold conditions. A section folds ONLY once its own
+  // data confirms it is empty (loading/error ⇒ render as today — never
+  // hide a possibly-populated section) and returns automatically the
+  // moment its counts move:
+  //   • Matches tiles       — fold when both segment counts are 0
+  //   • hero "joined" chip  — fold when 0 leaguemates have joined
+  //   • Coverage card       — fold when 0 leaguemates have rankings
+  //   • Contrarian ranks + Leaderboards — fold on the server's own
+  //     insufficient_data flag (/api/league/contrarian needs 3 ranked
+  //     members; the module's fold line states exactly that)
+  const matchesZero = !!summary && matchesMutual === 0 && matchesAwaiting === 0;
+  const joinedZero = !!summary && joinedMates === 0;
+  const coverageZero = !!coverage && rankedOpps === 0;
+  const contrarianInsufficient = contrarianQuery.data?.insufficient_data === true;
+
+  // Populated-state rule (documented): the progress module renders while
+  // ANY unlock it tracks is outstanding — ring < 4/4, no matches yet, or
+  // contrarian/leaderboards still locked — and hides entirely once all
+  // three are live, at which point the page renders exactly as today's
+  // populated layout. The action row is part of the same scaffolding; the
+  // "Works right now" example card retires as soon as REAL matches exist.
+  const ringIncomplete = positionsRanked != null && positionsRanked < 4;
+  const moduleVisible =
+    !!summary && !!coverage && (ringIncomplete || matchesZero || contrarianInsufficient);
+  const worksNowVisible = matchesZero;
+
+  const totalTeamsN = summary
+    ? num(summary.total_teams, num((summary as any)?.leaguemates_total) + 1)
+    : 0;
+
+  const goRank = () => navigation.navigate('Rank');
+  const goFindTrade = () => navigation.navigate('Trades', { screen: 'TradesHome' });
+
+  // Module "Invite leaguemates" — the OS share sheet with the same
+  // referral URL the InviteLeaguematesBanner builds (?league=&ref=).
+  async function inviteLeaguemates() {
+    if (!leagueId) return;
+    const url = buildInviteUrl(leagueId, user?.username);
+    const where = summary?.league_name || league?.league_name || 'our league';
+    try {
+      await Share.share({
+        message: `Join me on Dynasty Trade Finder to find trades in ${where} → ${url}`,
+      });
+    } catch {
+      /* user dismissed the share sheet */
+    }
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -295,20 +396,25 @@ export default function LeagueScreen() {
                 />
                 {/* FB-38/42 — joined summary lives in the hero; tapping it
                     opens the member-roster overlay. The chevron icon is the
-                    clickability cue the feedback asked for. */}
-                <Pressable
-                  onPress={() => setMembersOpen(true)}
-                  hitSlop={12}
-                  style={({ pressed: p }) => [styles.joinedChip, p && styles.joinedChipPressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel="View league members and join status"
-                >
-                  <Text style={type.data}>
-                    {summaryPending ? '—' : `${joinedMates}/${totalMates || '—'}`}
-                  </Text>
-                  <Text style={type.label}>joined</Text>
-                  <Icon name="chevron-right" size={12} color={chalk.dim} />
-                </Pressable>
+                    clickability cue the feedback asked for. #229 zero-fold:
+                    the chip is absorbed by the progress module while ZERO
+                    leaguemates have joined (its overlay would only list
+                    "Not joined" rows) and returns the moment one joins. */}
+                {joinedZero ? null : (
+                  <Pressable
+                    onPress={() => setMembersOpen(true)}
+                    hitSlop={12}
+                    style={({ pressed: p }) => [styles.joinedChip, p && styles.joinedChipPressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel="View league members and join status"
+                  >
+                    <Text style={type.data}>
+                      {summaryPending ? '—' : `${joinedMates}/${totalMates || '—'}`}
+                    </Text>
+                    <Text style={type.label}>joined</Text>
+                    <Icon name="chevron-right" size={12} color={chalk.dim} />
+                  </Pressable>
+                )}
               </View>
               {isEspn ? (
                 <Text style={[type.bodySm, styles.espnNote]}>
@@ -319,26 +425,54 @@ export default function LeagueScreen() {
             </Card>
         </View>
 
+        {/* #229 (approved v3 mock) — day-one action row: Rank players
+            LEFT / outlined-secondary, Find a trade RIGHT / solid ice.
+            Same low-activity scaffolding lifecycle as the progress module. */}
+        {moduleVisible ? (
+          <View style={styles.actionRow}>
+            <Button
+              testID="league.action.rank"
+              label="Rank players"
+              variant="secondary"
+              onPress={goRank}
+              style={styles.actionBtn}
+            />
+            <Button
+              testID="league.action.find"
+              label="Find a trade"
+              variant="primary"
+              onPress={goFindTrade}
+              style={styles.actionBtn}
+            />
+          </View>
+        ) : null}
+
         {/* Matches roll-up — tiles route to the Matches tab (FB-37), each
             deep-linking into its own segment (FB-91). `at` forces the param
-            effect to re-fire when the same tile is tapped twice. */}
-        <TickLabel>Matches</TickLabel>
-        <View style={styles.statRow}>
-          <StatCard
-            label="Mutual matches"
-            sub="Liked by both sides"
-            value={summaryPending ? '—' : matchesMutual}
-            icon="match"
-            onPress={() => navigation.navigate('Matches', { segment: 'mutual', at: Date.now() })}
-          />
-          <StatCard
-            label="Awaiting them"
-            sub="Your like, waiting on theirs"
-            value={summaryPending ? '—' : matchesAwaiting}
-            icon="eye"
-            onPress={() => navigation.navigate('Matches', { segment: 'awaiting', at: Date.now() })}
-          />
-        </View>
+            effect to re-fire when the same tile is tapped twice. #229
+            zero-fold: both-zero tiles collapse into the progress module's
+            unlock line and return once either count is > 0. */}
+        {matchesZero ? null : (
+          <>
+            <TickLabel>Matches</TickLabel>
+            <View style={styles.statRow}>
+              <StatCard
+                label="Mutual matches"
+                sub="Liked by both sides"
+                value={summaryPending ? '—' : matchesMutual}
+                icon="match"
+                onPress={() => navigation.navigate('Matches', { segment: 'mutual', at: Date.now() })}
+              />
+              <StatCard
+                label="Awaiting them"
+                sub="Your like, waiting on theirs"
+                value={summaryPending ? '—' : matchesAwaiting}
+                icon="eye"
+                onPress={() => navigation.navigate('Matches', { segment: 'awaiting', at: Date.now() })}
+              />
+            </View>
+          </>
+        )}
 
         {/* #142/#144 (League rankings) + FA finder — league-wide explore
             rows, LeagueRow construction (hairline list rows, not cards).
@@ -382,43 +516,103 @@ export default function LeagueScreen() {
           </>
         ) : null}
 
-        {/* Contrarian ranks — always shown; renders an invite-prompt empty
-            state when the league has too few ranking-takers for a baseline. */}
-        <View style={styles.divider} />
-        <TickLabel>Contrarian ranks</TickLabel>
-        <ContrarianLeaderboard
-          rows={contrarianQuery.data?.rows ?? []}
-          insufficientData={!!contrarianQuery.data?.insufficient_data}
-          message={contrarianQuery.data?.message}
-        />
+        {/* Contrarian ranks — #229 zero-fold: while the server reports
+            insufficient_data (needs 3 ranked members) the empty card is
+            absorbed by the progress module's fold line; returns with data. */}
+        {contrarianInsufficient ? null : (
+          <>
+            <View style={styles.divider} />
+            <TickLabel>Contrarian ranks</TickLabel>
+            <ContrarianLeaderboard
+              rows={contrarianQuery.data?.rows ?? []}
+              insufficientData={!!contrarianQuery.data?.insufficient_data}
+              message={contrarianQuery.data?.message}
+            />
+          </>
+        )}
 
-        {/* Ranking coverage */}
-        <View style={styles.divider} />
-        <TickLabel>Coverage</TickLabel>
-        <Card>
-          <View style={styles.statBetween}>
-            <Text style={type.body}>Opponents you've ranked vs</Text>
-            <Text style={type.data}>
-              {coveragePending ? '—' : `${rankedOpps}/${totalOpps || '—'}`}
-            </Text>
-          </View>
-          <Meter
-            value={coveragePending ? 0 : coveragePct / 100}
-            color={coveragePct >= 100 ? semantic.pos : ice.base}
-          />
-          {coveragePending ? null : (
-            <Text style={[type.bodySm, styles.coverageHint]}>
-              {coveragePct === 100
-                ? "You're matched up against every leaguemate. Nice."
-                : `Rank more players to widen the trade pool — ${100 - coveragePct}% to go.`}
-            </Text>
-          )}
-        </Card>
+        {/* Ranking coverage — #229 zero-fold: the 0% bar (and its buried
+            "100% to go" hint) is replaced by the progress module's
+            segmented bar + unlock line; the card returns once ranked > 0. */}
+        {coverageZero ? null : (
+          <>
+            <View style={styles.divider} />
+            <TickLabel>Coverage</TickLabel>
+            <Card>
+              <View style={styles.statBetween}>
+                <Text style={type.body}>Opponents you've ranked vs</Text>
+                <Text style={type.data}>
+                  {coveragePending ? '—' : `${rankedOpps}/${totalOpps || '—'}`}
+                </Text>
+              </View>
+              <Meter
+                value={coveragePending ? 0 : coveragePct / 100}
+                color={coveragePct >= 100 ? semantic.pos : ice.base}
+              />
+              {coveragePending ? null : (
+                <Text style={[type.bodySm, styles.coverageHint]}>
+                  {coveragePct === 100
+                    ? "You're matched up against every leaguemate. Nice."
+                    : `Rank more players to widen the trade pool — ${100 - coveragePct}% to go.`}
+                </Text>
+              )}
+            </Card>
+          </>
+        )}
 
-        {/* Leaderboards — League-specific + Universal sections inline. */}
-        <View style={styles.divider} />
-        <TickLabel>Leaderboards</TickLabel>
-        <LeaderboardsSection leagueId={leagueId} />
+        {/* #229/#230/#234 — the single progress module. Ring = positions
+            ranked; 12-slot bar = ranked members (you + ranked leaguemates);
+            one unlock sentence; fold line covers the collapsed sections. */}
+        {moduleVisible ? (
+          <>
+            <View style={styles.divider} />
+            <TickLabel>League progress</TickLabel>
+            <LeagueProgressModule
+              testID="league.progress-module"
+              positionsRanked={positionsRanked}
+              rankedMates={rankedOpps}
+              totalTeams={totalTeamsN}
+              showFoldLine={contrarianInsufficient}
+              onRankPlayers={goRank}
+              onInvite={inviteLeaguemates}
+            />
+          </>
+        ) : null}
+
+        {/* #229 — "Works right now": the clearly-labeled EXAMPLE trade
+            renders the real TradeValueBar with static props so the quiet
+            league still demonstrates the product's actual verdict
+            language. Retires the moment REAL matches exist. */}
+        {worksNowVisible ? (
+          <>
+            <View style={styles.divider} />
+            <TickLabel>Works right now</TickLabel>
+            <View testID="league.works-now">
+              <Card>
+                <ExampleTrade />
+                {/* Operator tweak on the approved v3 mock: in-section
+                    buttons are BOTH solid ice. */}
+                <Button
+                  label="Find a trade"
+                  variant="primary"
+                  onPress={goFindTrade}
+                  style={styles.worksNowBtn}
+                />
+              </Card>
+            </View>
+          </>
+        ) : null}
+
+        {/* Leaderboards — League-specific + Universal sections inline.
+            #229 zero-fold: folded alongside contrarian (same 3-ranked-
+            members threshold the module's fold line states). */}
+        {contrarianInsufficient ? null : (
+          <>
+            <View style={styles.divider} />
+            <TickLabel>Leaderboards</TickLabel>
+            <LeaderboardsSection leagueId={leagueId} />
+          </>
+        )}
 
         {/* ESPN leagues: manual roster re-sync (POST /api/espn/import). */}
         {isEspn ? (
@@ -595,6 +789,70 @@ function StatCard({ label, sub, value, icon, onPress }: {
   );
 }
 
+// #229 "Works right now" — the EXAMPLE trade card (approved v3 mock).
+// Static, honest demo content: the flare label (informational highlight,
+// ADR-005) says outright it is not from the user's league, and the value
+// readout is the REAL TradeValueBar component with fixed props (favors
+// receive, +380 ≈ 0.6 firsts → "a Mid 2nd") — same verdict language the
+// calculator and deck speak, no invented UI.
+const EXAMPLE_GAP = {
+  value: 380,
+  add_to: 'give' as const,
+  firsts: 0.6,
+  pick_equivalent: {
+    pick_id: 'example_mid_2nd',
+    label: 'Mid 2nd Round Pick',
+    value: 380,
+  },
+};
+
+function ExampleTradeRow({ rail, name, pos }: {
+  rail: string; name: string; pos?: string;
+}) {
+  return (
+    <View style={styles.exRow}>
+      <View style={[styles.exRail, { backgroundColor: rail }]} />
+      <ChalkText scale="dense" style={styles.exName} numberOfLines={1}>
+        {name}
+      </ChalkText>
+      {pos ? (
+        <ChalkText scale="dense" style={[type.label, { color: rail }]}>
+          {pos}
+        </ChalkText>
+      ) : null}
+    </View>
+  );
+}
+
+function ExampleTrade() {
+  return (
+    <View style={styles.exTrade}>
+      <ChalkText scale="dense" style={styles.exLabel}>
+        Example — not from your league
+      </ChalkText>
+      <View style={styles.exCols}>
+        <View style={[styles.exCol, styles.exColFirst]}>
+          <ChalkText scale="dense" style={type.label}>You send</ChalkText>
+          <ExampleTradeRow rail={positionColors.rb} name="Breece Hall" pos="RB" />
+        </View>
+        <View style={styles.exCol}>
+          <ChalkText scale="dense" style={type.label}>You get</ChalkText>
+          <ExampleTradeRow rail={positionColors.rb} name="De'Von Achane" pos="RB" />
+          <ExampleTradeRow rail={ink.lineStrong} name="2027 2nd" />
+        </View>
+      </View>
+      <View style={styles.exValueBar}>
+        <TradeValueBar
+          giveValue={0}
+          receiveValue={0}
+          favors="receive"
+          gap={EXAMPLE_GAP}
+        />
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
   scroll: { padding: space.lg, paddingBottom: space.xxl, gap: space.md },
@@ -663,6 +921,39 @@ const styles = StyleSheet.create({
   joinedChipPressed: { backgroundColor: ink.ink3 },
 
   statRow: { flexDirection: 'row', gap: space.md },
+
+  // #229 — day-one action row (v3 mock: equal-width pair under the hero).
+  actionRow: { flexDirection: 'row', gap: space.sm },
+  actionBtn: { flex: 1 },
+
+  // #229 — "Works right now" EXAMPLE trade card internals.
+  exTrade: {
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.md,
+    backgroundColor: ink.ink0,
+    padding: space.md,
+    gap: space.sm,
+  },
+  exLabel: { ...type.label, color: flare.base },
+  exCols: { flexDirection: 'row' },
+  exCol: { flex: 1, gap: space.sm, paddingLeft: space.md },
+  exColFirst: {
+    paddingLeft: 0,
+    paddingRight: space.md,
+    borderRightWidth: 1,
+    borderRightColor: ink.line,
+  },
+  exRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  exRail: { width: 3, height: 14 },
+  exName: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi, flexShrink: 1 },
+  exValueBar: {
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
+    paddingTop: space.sm + 2,
+    marginTop: 2,
+  },
+  worksNowBtn: { marginTop: space.md },
 
   // #142/#144 — explore rows (LeagueRow list construction)
   exploreRow: {
