@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Find-a-Trade-for-Player Layout v3 (#216 · #209 iteration)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --first1:#2dd4bf;
+  --f-display:'Barlow Condensed','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:22px;min-height:100vh}
+
+.note{max-width:840px;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note ul{margin:4px 0 0 18px} .note li{margin:3px 0}
+.q{border-left:3px solid var(--lineStrong);padding-left:10px;margin:6px 0;font-style:italic}
+
+.pairwrap{display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}
+.slot{display:flex;flex-direction:column;gap:8px;align-items:center}
+.slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--ice);display:flex;align-items:center;gap:7px}
+.slotlbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+.caption{max-width:390px;font-size:12px;line-height:1.5;color:var(--dim);text-align:left}
+.caption b{color:var(--chalk)}
+
+.phone{width:390px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+.status{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.scroll{padding:4px 16px 14px;display:flex;flex-direction:column;gap:12px;height:648px;overflow-y:auto}
+/* fixed-height scrollable viewport so the demo behaves like a phone */
+
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.pdot{width:7px;height:7px;border-radius:2px;flex:0 0 auto;display:inline-block}
+.pos-qb{background:var(--qb)} .pos-rb{background:var(--rb)} .pos-wr{background:var(--wr)} .pos-te{background:var(--te)}
+svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+/* mode bar */
+.back{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--ice);margin-bottom:8px}
+.swrow{display:flex;gap:6px;overflow:hidden}
+.sw{flex:0 0 auto;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--ink1);font-size:12px;color:var(--dim);min-height:32px;display:flex;align-items:center}
+.sw.on{border-color:var(--ice);background:var(--ink2);color:var(--chalk)}
+
+/* pin board (#209 order: away left, for right) */
+.ctrlcard{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.board{display:flex;gap:8px}
+.col{flex:1;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:10px;min-height:96px;display:flex;flex-direction:column;gap:8px}
+.col.for{border-top:2px solid var(--pos)} .col.away{border-top:2px solid var(--flare)}
+.colh{font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.col.for .colh{color:var(--pos)} .col.away .colh{color:var(--flare)}
+.mini{display:flex;align-items:center;gap:7px;min-height:36px;padding:0 8px;border-radius:4px;background:var(--ink2);font-size:12.5px;font-weight:600}
+.mini .x{margin-left:auto;color:var(--faint);font-size:12px}
+.addbtn{min-height:40px;border:1px dashed var(--lineStrong);background:transparent;color:var(--dim);border-radius:4px;font-size:12px;font-family:var(--f-ui);cursor:pointer}
+
+/* ═══ featured trade window ═══ */
+.tcard{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.ticklbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.ticklbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+.backchip{display:inline-flex;align-items:center;gap:4px;min-height:28px;padding:0 10px 0 6px;border:1px solid var(--lineStrong);border-radius:4px;background:var(--ink2);color:var(--ice);font-family:var(--f-ui);font-size:12px;font-weight:600;cursor:pointer;flex:0 0 auto;align-self:flex-start}
+.backchip:hover{background:var(--ink3);border-color:var(--ice)}
+.backchip:active{background:var(--ink3);color:var(--icePress)}
+.backchip svg{width:12px;height:12px}
+/* Variant A: chip on its own row above the header (standard) */
+.backrow{display:flex;margin-bottom:-2px}
+.backrow[hidden]{display:none}
+/* Variant B: chip inside the header row, label pushed right (denser) */
+.fwheadB{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.tcard .opp{font-size:16px;font-weight:600;margin-top:1px}
+.split{display:flex;gap:12px}
+.split .vrule{width:1px;background:var(--line)}
+.side{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.prow{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-left:3px solid var(--rb);border-radius:8px;background:var(--ink2);padding:8px}
+.prow .nm{font-size:13px;font-weight:600;line-height:1.25}
+.prow .meta{font-size:11px;color:var(--dim);font-family:var(--f-mono)}
+
+/* Dynasty Value Swing verdict (v2 format, carried forward verbatim) */
+.vbar{display:flex;flex-direction:column;gap:6px}
+.vbar .who{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:18px;color:var(--pos)}
+.vbar .who.neg{color:var(--neg)}
+.vbar .margin{font-size:12px;color:var(--dim)}
+.vbar .margin b{font-family:var(--f-mono);color:var(--pos);font-weight:600}
+.vbar .margin b.neg{color:var(--neg)}
+.vbar .pick{color:var(--first1);font-weight:600}
+.dtrack{position:relative;height:14px;background:var(--ink3);border-radius:2px;margin-top:2px}
+.dtrack .cen{position:absolute;left:50%;top:-4px;width:1px;height:22px;background:var(--lineStrong)}
+.dtrack .t1{position:absolute;left:21.5%;top:-4px;width:1px;height:22px;background:var(--line)}
+.dtrack .t2{position:absolute;left:78.5%;top:-4px;width:1px;height:22px;background:var(--line)}
+.dtrack .fillr{position:absolute;height:14px;background:var(--pos);border-radius:2px}
+.scalerow{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:9px;color:var(--faint)}
+
+/* ═══ "More trades" list — rows are tappable cards ═══ */
+.ideas{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.grouph{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim);margin-top:8px}
+.idea{display:flex;align-items:center;gap:8px;width:100%;min-height:48px;padding:8px;border:1px solid var(--line);border-radius:2px;background:var(--ink1);
+  font-family:var(--f-ui);color:var(--chalk);text-align:left;cursor:pointer}
+.idea:hover{background:var(--ink2);border-color:var(--lineStrong)}
+.idea:active{background:var(--ink3);border-color:var(--lineStrong)}          /* pressed: surface + border shift, no lift */
+.idea:focus-visible,.backchip:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
+.idea .main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.idea .sides{display:flex;align-items:center;gap:4px;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden}
+.idea .sides svg{flex:0 0 auto;color:var(--faint)}
+.idea .meta{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:400}
+.diff{padding:2px 8px;border-radius:2px;border:1px solid rgba(34,197,94,.4);font-family:var(--f-mono);font-size:12px;color:var(--pos);flex:0 0 auto}
+.diff.neg{border-color:rgba(239,68,68,.4);color:var(--neg)}
+.idea .go{flex:0 0 auto;color:var(--faint)}
+.idea:hover .go{color:var(--ice)}
+.idea.featured{border-color:var(--ice);background:var(--ink2);cursor:default}
+.idea.featured .go{display:none}
+.intag{display:none;flex:0 0 auto;padding:2px 6px;border-radius:2px;background:var(--ink3);border:1px solid var(--line);font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--ice);font-weight:600}
+.idea.featured .intag{display:inline-block}
+
+.tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink1)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 12px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:20px;height:20px;stroke:var(--faint);stroke-width:1.75;fill:none;stroke-linecap:square}
+.tab.on{color:var(--ice)} .tab.on svg{stroke:var(--ice)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Polish Lab · Find-a-Trade-for-Player v3 — operator iteration on v2</h1>
+  <p><b>Operator feedback on v2 (verbatim):</b></p>
+  <p class="q">"Remove the player name from the 'Featured Trade' header. Present the previous trade button in the top left (either above or below it. Not sure so draft both options - or just tell me what is the common approach."</p>
+  <p style="margin-top:8px"><b>What changed from v2:</b> the featured-window header is now just <b>Featured trade</b> — the "· Breece Hall" suffix is gone (the pinned player is already visible in the pin board and inside the trade itself). The <b>‹ Previous trade</b> chip moves from the top-right corner to the <b>top left</b>, drafted both ways: <b>Variant A</b> puts the chip on its own slim row <b>above</b> the header (the standard); <b>Variant B</b> puts it <b>in</b> the header row, left-aligned, with the label pushed right (denser). Frame 1 below is the <b>live demo — tap the rows</b>; frames 2–3 are static post-tap snapshots of A and B.</p>
+</div>
+
+<div class="pairwrap">
+
+  <!-- ═══ FRAME 1 · Variant A, default state (interactive) ═══ -->
+  <div class="slot">
+    <div class="slotlbl">V3 Variant A — chip above the header (live demo: tap the rows)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll" id="demoScroll">
+        <div class="back"><svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>Hub</div>
+        <div class="swrow">
+          <span class="sw">Guided</span><span class="sw">Team</span><span class="sw on">Player</span><span class="sw">Calc</span>
+        </div>
+
+        <div class="ctrlcard">
+          <div class="board">
+            <div class="col away">
+              <div class="colh">Trade away</div>
+              <div class="mini"><span class="pdot pos-rb"></span>Breece Hall<span class="x">✕</span></div>
+              <button class="addbtn">+ Add asset</button>
+            </div>
+            <div class="col for">
+              <div class="colh">Trade for</div>
+              <button class="addbtn">+ Add target</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- featured trade window · variant A: back chip on its own row above the header -->
+        <div class="tcard" id="fw">
+          <div class="backrow" id="backRow" hidden>
+            <button class="backchip" id="backChip" aria-label="Back to previous trade">
+              <svg class="ic" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>Previous trade
+            </button>
+          </div>
+          <div class="ticklbl">Featured trade</div>
+          <div class="opp" id="fwOpp"></div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">Trade away</div>
+              <div style="display:flex;flex-direction:column;gap:6px" id="fwAway"></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">Trade for</div>
+              <div style="display:flex;flex-direction:column;gap:6px" id="fwGet"></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <span class="lbl">Dynasty value swing</span>
+            <div class="who" id="fwWho"></div>
+            <div class="margin" id="fwMargin"></div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" id="fwFill"></div><div class="cen"></div></div>
+            <div class="scalerow"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div>
+          </div>
+        </div>
+
+        <!-- more trades — visible by default, rows tappable -->
+        <div class="ideas" id="demoList">
+          <div class="ticklbl">More trades for Breece Hall</div>
+
+          <div class="grouph">Upgrade at RB</div>
+          <button class="idea" data-id="up1">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Hall + 2026 2nd<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Bijan Robinson</div>
+              <div class="meta">DynastyDan</div>
+            </div>
+            <span class="diff">+440</span><span class="intag">In window</span>
+            <svg class="ic go" width="14" height="14" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+          </button>
+          <button class="idea" data-id="up2">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Hall + R. White<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Jahmyr Gibbs</div>
+              <div class="meta">tundra_tim</div>
+            </div>
+            <span class="diff">+310</span><span class="intag">In window</span>
+            <svg class="ic go" width="14" height="14" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+          </button>
+
+          <div class="grouph">Lateral moves at RB</div>
+          <button class="idea" data-id="lat1">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Jonathan Taylor</div>
+              <div class="meta">gridiron_gus</div>
+            </div>
+            <span class="diff neg">−150</span><span class="intag">In window</span>
+            <svg class="ic go" width="14" height="14" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+          </button>
+
+          <div class="grouph">Downgrade ideas</div>
+          <button class="idea" data-id="best">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Cook + 2027 1st</div>
+              <div class="meta">rebuild_randy</div>
+            </div>
+            <span class="diff">+520</span><span class="intag">In window</span>
+            <svg class="ic go" width="14" height="14" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+          </button>
+          <button class="idea" data-id="down2">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Wright + 2026 1st</div>
+              <div class="meta">TankCommand</div>
+            </div>
+            <span class="diff">+380</span><span class="intag">In window</span>
+            <svg class="ic go" width="14" height="14" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption"><b>Variant A, default state.</b> Header reads just <b>Featured trade</b> — no player name. <b>This frame is interactive:</b> tap any row to load that trade into the window above; once there's history, the ‹ Previous trade chip appears on its own slim row at the <b>top left, above the header</b>, and the whole card grows by one 28px row. When history empties the row collapses again — no dead reserved space.</div>
+  </div>
+
+  <!-- ═══ FRAME 2 · Variant A, post-tap (static snapshot) ═══ -->
+  <div class="slot">
+    <div class="slotlbl">V3 Variant A — post-tap state (static snapshot)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="back"><svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>Hub</div>
+        <div class="swrow">
+          <span class="sw">Guided</span><span class="sw">Team</span><span class="sw on">Player</span><span class="sw">Calc</span>
+        </div>
+
+        <div class="ctrlcard">
+          <div class="board">
+            <div class="col away">
+              <div class="colh">Trade away</div>
+              <div class="mini"><span class="pdot pos-rb"></span>Breece Hall<span class="x">✕</span></div>
+              <button class="addbtn">+ Add asset</button>
+            </div>
+            <div class="col for">
+              <div class="colh">Trade for</div>
+              <button class="addbtn">+ Add target</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="tcard">
+          <div class="backrow">
+            <button class="backchip">
+              <svg class="ic" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>Previous trade
+            </button>
+          </div>
+          <div class="ticklbl">Featured trade</div>
+          <div class="opp">@TankCommand</div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">Trade away</div>
+              <div class="prow"><div><div class="nm">Breece Hall</div><div class="meta">RB · NYJ</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">Trade for</div>
+              <div class="prow" style="border-left-color:var(--rb)"><div><div class="nm">Jaylen Wright</div><div class="meta">RB · MIA</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 1st (early)</div><div class="meta">PICK</div></div></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <span class="lbl">Dynasty value swing</span>
+            <div class="who">You win</div>
+            <div class="margin">by <b>+380</b> &nbsp;·&nbsp; <span class="pick">an Early 4th</span> (≈ 0.22 firsts)</div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:11%"></div><div class="cen"></div></div>
+            <div class="scalerow"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div>
+          </div>
+        </div>
+
+        <div class="ideas">
+          <div class="ticklbl">More trades for Breece Hall</div>
+
+          <div class="grouph">Downgrade ideas</div>
+          <button class="idea">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Cook + 2027 1st</div>
+              <div class="meta">rebuild_randy</div>
+            </div>
+            <span class="diff">+520</span>
+            <svg class="ic go" width="14" height="14" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+          </button>
+          <button class="idea featured">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Wright + 2026 1st</div>
+              <div class="meta">TankCommand</div>
+            </div>
+            <span class="diff">+380</span><span class="intag">In window</span>
+            <svg class="ic go" width="14" height="14" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption"><b>Variant A, post-tap (static).</b> The state frame 1 reaches after tapping the TankCommand idea: the ‹ Previous trade chip sits alone at the top left of the window, <b>above</b> the Featured trade header, exactly where an iOS navigation-bar back control would be — reachable, unambiguous, and it never fights the header label for space.</div>
+  </div>
+
+  <!-- ═══ FRAME 3 · Variant B, post-tap (static snapshot) ═══ -->
+  <div class="slot">
+    <div class="slotlbl">V3 Variant B — chip in the header row (static snapshot)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="back"><svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>Hub</div>
+        <div class="swrow">
+          <span class="sw">Guided</span><span class="sw">Team</span><span class="sw on">Player</span><span class="sw">Calc</span>
+        </div>
+
+        <div class="ctrlcard">
+          <div class="board">
+            <div class="col away">
+              <div class="colh">Trade away</div>
+              <div class="mini"><span class="pdot pos-rb"></span>Breece Hall<span class="x">✕</span></div>
+              <button class="addbtn">+ Add asset</button>
+            </div>
+            <div class="col for">
+              <div class="colh">Trade for</div>
+              <button class="addbtn">+ Add target</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="tcard">
+          <div class="fwheadB">
+            <button class="backchip">
+              <svg class="ic" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>Previous trade
+            </button>
+            <div class="ticklbl">Featured trade</div>
+          </div>
+          <div class="opp">@TankCommand</div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">Trade away</div>
+              <div class="prow"><div><div class="nm">Breece Hall</div><div class="meta">RB · NYJ</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">Trade for</div>
+              <div class="prow" style="border-left-color:var(--rb)"><div><div class="nm">Jaylen Wright</div><div class="meta">RB · MIA</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 1st (early)</div><div class="meta">PICK</div></div></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <span class="lbl">Dynasty value swing</span>
+            <div class="who">You win</div>
+            <div class="margin">by <b>+380</b> &nbsp;·&nbsp; <span class="pick">an Early 4th</span> (≈ 0.22 firsts)</div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr" style="left:50%;width:11%"></div><div class="cen"></div></div>
+            <div class="scalerow"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div>
+          </div>
+        </div>
+
+        <div class="ideas">
+          <div class="ticklbl">More trades for Breece Hall</div>
+
+          <div class="grouph">Downgrade ideas</div>
+          <button class="idea">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Cook + 2027 1st</div>
+              <div class="meta">rebuild_randy</div>
+            </div>
+            <span class="diff">+520</span>
+            <svg class="ic go" width="14" height="14" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+          </button>
+          <button class="idea featured">
+            <div class="main">
+              <div class="sides"><span class="pdot pos-rb"></span>Breece Hall<svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg><span class="pdot pos-rb"></span>Wright + 2026 1st</div>
+              <div class="meta">TankCommand</div>
+            </div>
+            <span class="diff">+380</span><span class="intag">In window</span>
+            <svg class="ic go" width="14" height="14" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption"><b>Variant B, post-tap (static).</b> Same state, but the chip shares the header row: chip left, <b>Featured trade</b> label pushed right. One row shorter than A, at a cost — the section label leaves the left edge where every other Chalkline tick-label sits, and when the chip is hidden (no history) the label either snaps back left or stays orphaned right; either way the header jumps.</div>
+  </div>
+</div>
+
+<div class="note">
+  <h2>Back-chip placement — the common approach, honestly</h2>
+  <ul>
+    <li><b>The convention: back affordances sit at the top left, ABOVE the content they revert.</b> iOS puts Back at the leading edge of the navigation bar, its own strip above the page; Android's app bar does the same. Users reach top-left expecting "take me back one step" without reading. <b>Variant A follows that convention;</b> Variant B is the denser non-standard cousin.</li>
+    <li><b>Recommendation: Variant A.</b> It costs one 28px row (only while history exists — the row collapses when the stack is empty), keeps the Featured-trade tick-label in the same left-aligned position as every other section label on the screen, and the header never reflows when the chip appears/disappears. B saves that row but makes the header the only right-aligned tick-label in the app and shifts layout on chip show/hide.</li>
+    <li><b>Header de-named:</b> "Featured trade · Breece Hall" → <b>Featured trade</b>. The pinned player already appears in the pin board directly above and on the Trade-away side of every trade in the window — the header repeat was noise.</li>
+  </ul>
+  <h2>Carried forward from v2 (unchanged)</h2>
+  <ul>
+    <li><b>Tap a row → it becomes the featured trade;</b> the replaced trade becomes the back target; full per-pin history (reset on pin change); the in-window row is tagged and inert; Dynasty Value Swing verdict is the calc presentation for every trade in the window; #209 give-left/get-right order holds everywhere.</li>
+    <li><b>The back chip stays part of the FeaturedTradeWindow pattern by default</b> — any surface that swaps a trade into the window gets the same revert affordance; it renders only when history exists.</li>
+  </ul>
+</div>
+
+<script>
+(function(){
+  var T = {
+    best:{opp:'@rebuild_randy',
+      away:[{nm:'Breece Hall',meta:'RB · NYJ',c:'var(--rb)'}],
+      get:[{nm:'James Cook',meta:'RB · BUF',c:'var(--rb)'},{nm:'2027 1st (mid)',meta:'PICK',c:'var(--first1)'}],
+      who:'You win',neg:false,margin:'+520',pick:'a Mid 3rd',firsts:'≈ 0.3 firsts',fill:13},
+    up1:{opp:'@DynastyDan',
+      away:[{nm:'Breece Hall',meta:'RB · NYJ',c:'var(--rb)'},{nm:'2026 2nd (own)',meta:'PICK',c:'var(--first1)'}],
+      get:[{nm:'Bijan Robinson',meta:'RB · ATL',c:'var(--rb)'}],
+      who:'You win',neg:false,margin:'+440',pick:'a Late 3rd',firsts:'≈ 0.25 firsts',fill:12},
+    up2:{opp:'@tundra_tim',
+      away:[{nm:'Breece Hall',meta:'RB · NYJ',c:'var(--rb)'},{nm:'Rachaad White',meta:'RB · TB',c:'var(--rb)'}],
+      get:[{nm:'Jahmyr Gibbs',meta:'RB · DET',c:'var(--rb)'}],
+      who:'You win',neg:false,margin:'+310',pick:'a Mid 4th',firsts:'≈ 0.18 firsts',fill:9},
+    lat1:{opp:'@gridiron_gus',
+      away:[{nm:'Breece Hall',meta:'RB · NYJ',c:'var(--rb)'}],
+      get:[{nm:'Jonathan Taylor',meta:'RB · IND',c:'var(--rb)'}],
+      who:'They win',neg:true,margin:'−150',pick:'a Late 4th',firsts:'≈ 0.09 firsts',fill:4},
+    down2:{opp:'@TankCommand',
+      away:[{nm:'Breece Hall',meta:'RB · NYJ',c:'var(--rb)'}],
+      get:[{nm:'Jaylen Wright',meta:'RB · MIA',c:'var(--rb)'},{nm:'2026 1st (early)',meta:'PICK',c:'var(--first1)'}],
+      who:'You win',neg:false,margin:'+380',pick:'an Early 4th',firsts:'≈ 0.22 firsts',fill:11}
+  };
+  var cur='best', stack=[];
+  function prow(a){return '<div class="prow" style="border-left-color:'+a.c+'"><div><div class="nm">'+a.nm+'</div><div class="meta">'+a.meta+'</div></div></div>';}
+  function render(scroll){
+    var t=T[cur];
+    document.getElementById('fwOpp').textContent=t.opp;
+    document.getElementById('fwAway').innerHTML=t.away.map(prow).join('');
+    document.getElementById('fwGet').innerHTML=t.get.map(prow).join('');
+    var who=document.getElementById('fwWho');
+    who.textContent=t.who; who.className='who'+(t.neg?' neg':'');
+    document.getElementById('fwMargin').innerHTML='by <b class="'+(t.neg?'neg':'')+'">'+t.margin+'</b> &nbsp;·&nbsp; <span class="pick">'+t.pick+'</span> ('+t.firsts+')';
+    var f=document.getElementById('fwFill');
+    if(t.neg){f.style.left='calc(50% - '+t.fill+'%)';f.style.width=t.fill+'%';f.style.background='var(--neg)';}
+    else{f.style.left='50%';f.style.width=t.fill+'%';f.style.background='var(--pos)';}
+    /* v3: the back chip lives on its own row ABOVE the header (variant A);
+       the whole row hides when there is no history so no dead space is reserved */
+    document.getElementById('backRow').hidden = stack.length===0;
+    var rows=document.querySelectorAll('#demoList .idea');
+    for(var i=0;i<rows.length;i++){rows[i].classList.toggle('featured', rows[i].getAttribute('data-id')===cur);}
+    if(scroll){document.getElementById('demoScroll').scrollTo({top:0,behavior:'smooth'});}
+  }
+  document.getElementById('demoList').addEventListener('click',function(e){
+    var btn=e.target.closest('.idea'); if(!btn) return;
+    var id=btn.getAttribute('data-id');
+    if(!id||id===cur) return;
+    stack.push(cur); cur=id; render(true);
+  });
+  document.getElementById('backChip').addEventListener('click',function(){
+    if(!stack.length) return;
+    cur=stack.pop(); render(true);
+  });
+  render(false);
+})();
+</script>
+
+</body>
+</html>
