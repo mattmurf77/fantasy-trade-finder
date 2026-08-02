@@ -576,15 +576,25 @@
     }
 
     .notif-content { flex: 1; min-width: 0; }
-    .notif-body {
+    /* #225 fact-first split: title = the fact (semi), body = detail (dim). */
+    .notif-title {
       font-size: 13px;
+      font-weight: 600;
       line-height: 1.4;
       color: var(--text);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .notif-row.unread .notif-body { font-weight: 600; }
+    .notif-body {
+      font-size: 13px;
+      line-height: 1.4;
+      color: var(--muted);
+      margin-top: 1px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .notif-time {
       font-size: 11px;
       color: var(--muted);

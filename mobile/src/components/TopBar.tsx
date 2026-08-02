@@ -8,8 +8,9 @@ import {
   ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ink, chalk, ice, semantic, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
+import { ink, chalk, ice, flare, semantic, space, radii, type, fonts, shadowSheet, scrim } from '../theme/chalkline';
 import { Icon, Button } from './chalkline';
+import type { IconName } from './chalkline';
 import { useNotifications, type AppNotification } from '../state/useNotifications';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
@@ -44,16 +45,35 @@ import LeagueSwitcherSheet from './LeagueSwitcherSheet';
 // edges={['bottom']}) so we don't double-pad.
 export const TOP_BAR_HEIGHT = 52;
 
-// Backend used to prefix match-notification bodies with an emoji that's
-// already conveyed by the visual icon badge — so it would render twice.
-// Backend stopped emitting the prefix in PR #13 (commit 397d8f1), but
-// older notifications already in the DB still carry it. Strip leading
-// type-icon emojis defensively so re-deliveries / DB residue look clean.
-// Mirrors the regex in web/js/app.js _renderNotifList.
-const LEADING_TYPE_EMOJI_RE = /^\s*(?:🤝|✅|❌|🎯|🔔)\s*/u;
-function stripLeadingTypeEmoji(body: string): string {
-  return body.replace(LEADING_TYPE_EMOJI_RE, '');
+// #225: backend notification templates no longer carry emoji anywhere
+// (titles or bodies), but rows stored before the de-chalk pass persist in
+// the DB with emoji prefixes. Strip on render — titles AND bodies — so
+// history looks clean too. Mirrors the regex in web/js/app.js
+// _renderNotifList.
+const LEADING_LEGACY_EMOJI_RE =
+  /^\s*(?:🤝|✅|❌|🎯|🎉|⏳|📰|👀|🏈|👋|🔥|🔓|🌅|🔔)\s*/u;
+function stripLegacyEmoji(text: string): string {
+  return text.replace(LEADING_LEGACY_EMOJI_RE, '');
 }
+
+// NotificationRow glyphs (#225, components.md spec + the approved
+// notifications-dechalk mock): 20px Chalkline stroke icon in the status
+// color — the emoji's old job, moved from decoration to structure.
+// match = ice link glyph · accepted = pos check · declined = neg x ·
+// everything else = chalk-dim bell. Keys are `data.type` (backend
+// notification types + push kinds).
+const ROW_GLYPHS: Record<string, { name: IconName; color: string }> = {
+  trade_match:    { name: 'match', color: ice.base },
+  new_match:      { name: 'match', color: ice.base },
+  first_match:    { name: 'match', color: ice.base },
+  trade_accepted: { name: 'check', color: semantic.pos },
+  match_accepted: { name: 'check', color: semantic.pos },
+  trade_declined: { name: 'x',     color: semantic.neg },
+};
+const DEFAULT_ROW_GLYPH: { name: IconName; color: string } = {
+  name: 'bell',
+  color: chalk.dim,
+};
 
 export default function TopBar() {
   const insets = useSafeAreaInsets();
@@ -266,15 +286,23 @@ export default function TopBar() {
           ) : (
             <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
               {items.map((it) => {
+                const glyph =
+                  ROW_GLYPHS[String(it.data?.type ?? '')] ?? DEFAULT_ROW_GLYPH;
                 const body = (
                   <>
-                    <Text style={styles.itemTitle}>{it.title}</Text>
-                    {it.body ? (
-                      <Text style={styles.itemBody}>{stripLeadingTypeEmoji(it.body)}</Text>
-                    ) : null}
-                    <Text style={styles.itemTime}>
-                      {relativeTime(new Date(it.receivedAt).toISOString())}
-                    </Text>
+                    <View style={styles.itemGlyph}>
+                      <Icon name={glyph.name} size={20} color={glyph.color} />
+                    </View>
+                    <View style={styles.itemContent}>
+                      <Text style={styles.itemTitle}>{stripLegacyEmoji(it.title)}</Text>
+                      {it.body ? (
+                        <Text style={styles.itemBody}>{stripLegacyEmoji(it.body)}</Text>
+                      ) : null}
+                      <Text style={styles.itemTime}>
+                        {relativeTime(new Date(it.receivedAt).toISOString())}
+                      </Text>
+                    </View>
+                    {!it.read && <View style={styles.itemUnreadDot} />}
                   </>
                 );
                 // Flag on: rows route like push taps. Flag off: inert rows,
@@ -284,13 +312,20 @@ export default function TopBar() {
                     key={it.id}
                     testID={`topbar.notif-row.${it.id}`}
                     onPress={() => onRowTap(it)}
-                    style={({ pressed }) => [styles.item, pressed && { backgroundColor: ink.ink3 }]}
+                    style={({ pressed }) => [
+                      styles.item,
+                      !it.read && styles.itemUnread,
+                      pressed && { backgroundColor: ink.ink3 },
+                    ]}
                     accessibilityRole="button"
                   >
                     {body}
                   </Pressable>
                 ) : (
-                  <View key={it.id} style={styles.item}>
+                  <View
+                    key={it.id}
+                    style={[styles.item, !it.read && styles.itemUnread]}
+                  >
                     {body}
                   </View>
                 );
@@ -424,15 +459,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   list: { maxHeight: 480 },
+  // NotificationRow (#225, components.md): hairline-separated row — 20px
+  // stroke glyph in status color · title/body/time stack · unread = flare
+  // 6px SQUARE (not circle) + one-surface-step row fill. The sheet itself
+  // sits on ink-2, so the unread fill takes ink-3 (the spec's "--ink-2
+  // fill" is one step above the web panel's ink-1 ground — same intent).
   item: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space.md,
     borderBottomWidth: 1,
     borderBottomColor: ink.line,
     paddingVertical: space.md,
-    gap: 4,
+    paddingHorizontal: space.sm,
   },
-  itemTitle: type.title,
+  itemUnread: { backgroundColor: ink.ink3 },
+  itemGlyph: { marginTop: 1 },
+  itemContent: { flex: 1, minWidth: 0, gap: 2 },
+  itemUnreadDot: {
+    width: 6,
+    height: 6,
+    marginTop: 6,
+    backgroundColor: flare.base,
+  },
+  itemTitle: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 14,
+    lineHeight: 19,
+    color: chalk.base,
+  },
   itemBody:  type.bodySm,
-  itemTime:  { fontFamily: fonts.data, fontSize: 11, fontVariant: ['tabular-nums'], color: chalk.faint, marginTop: 4 },
+  itemTime:  { fontFamily: fonts.data, fontSize: 11, fontVariant: ['tabular-nums'], color: chalk.faint, marginTop: 2 },
 
   empty: {
     paddingVertical: space.xxl,
