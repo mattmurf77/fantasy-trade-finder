@@ -55,6 +55,7 @@ import HelpSheet, { InfoButton } from '../components/HelpSheet';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 import OutlookSheet from '../components/OutlookSheet';
 import TradeFinderModeBar from '../components/TradeFinderModeBar';
+import OutlookBiasReceipt from '../components/OutlookBiasReceipt';
 import QueueChip from '../components/QueueChip';
 import SwapPlayerSheet from '../components/SwapPlayerSheet';
 import PlayerPickerModal from '../components/PlayerPickerModal';
@@ -2975,6 +2976,8 @@ export default function TradesScreen({ navigation, route }: any) {
             onHub={() => navigation?.navigate?.('TradesHome')}
           />
         ) : null}
+        {/* #231 — outlook bias receipt (self-contained; single-line mount). */}
+        {finderMode ? <OutlookBiasReceipt navigation={navigation} /> : null}
 
         {/* Onboarding item 4 (F5) — first-run identity confirm. A valid-
             but-wrong username silently loads a stranger's team; this is
