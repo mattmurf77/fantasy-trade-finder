@@ -5283,7 +5283,7 @@ def get_rankings_progress():
                         _send_typed_push(
                             _p["user_id"],
                             "league_member_unlocked_trades",
-                            title = "🔓 New trade options in your league",
+                            title = "New trade options in your league",
                             body  = f"@{_my_username} just unlocked Trade Finder. Tap to look for matches.",
                             data  = {"unlocker_user_id": g_user_id,
                                      "league_id": _league_id,
@@ -8453,18 +8453,22 @@ def swipe_trade():
                             "receive":         _receive_names,
                         }
                         _league_name = getattr(g_league, "name", None) or ""
-                        _in_league   = f" in {_league_name}" if _league_name else ""
+                        # #225 de-chalk: fact-first title, body carries only
+                        # NEW information (players · league) — never repeats
+                        # the title. No emoji (ADR-004).
+                        def _match_body(give: list, recv: list) -> str:
+                            if give and recv:
+                                detail = f"{', '.join(give)} for {', '.join(recv)}"
+                                return (f"{detail} · {_league_name}"
+                                        if _league_name else detail)
+                            return "Tap to review the matched trade."
                         try:
                             # Notification for current user (user_a)
                             create_notification(
                                 user_id  = g_user_id,
                                 type_    = "trade_match",
-                                title    = f"🤝 New trade match with {_partner_a}{_in_league}!",
-                                body     = (
-                                    f"New trade match with {_partner_a}{_in_league}! "
-                                    + (f"{', '.join(_give_names)} for {', '.join(_receive_names)}"
-                                       if _give_names and _receive_names else "")
-                                ).strip(),
+                                title    = f"Trade match with @{_partner_a}",
+                                body     = _match_body(_give_names, _receive_names),
                                 metadata = {**_meta_base, "partner_username": _partner_a,
                                             "league_name": _league_name},
                             )
@@ -8472,12 +8476,8 @@ def swipe_trade():
                             create_notification(
                                 user_id  = card.target_user_id,
                                 type_    = "trade_match",
-                                title    = f"🤝 New trade match with {_my_username}{_in_league}!",
-                                body     = (
-                                    f"New trade match with {_my_username}{_in_league}! "
-                                    + (f"{', '.join(_receive_names)} for {', '.join(_give_names)}"
-                                       if _give_names and _receive_names else "")
-                                ).strip(),
+                                title    = f"Trade match with @{_my_username}",
+                                body     = _match_body(_receive_names, _give_names),
                                 metadata = {
                                     **_meta_base,
                                     "partner_username": _my_username,
@@ -8502,7 +8502,8 @@ def swipe_trade():
                             (card.target_user_id, _my_username,  _receive_names, _give_names),
                         ]:
                             _body_detail = (
-                                f"{', '.join(_give)} for {', '.join(_recv)}"
+                                f"{', '.join(_give)} for {', '.join(_recv)}. "
+                                "Both boards say yes."
                                 if _give and _recv else
                                 "Tap to view the matched trade."
                             )
@@ -8514,7 +8515,7 @@ def swipe_trade():
                                 _send_typed_push(
                                     _recipient_id,
                                     "first_match",
-                                    title = "🎉 You got your first trade match!",
+                                    title = "Your first trade match",
                                     body  = f"@{_partner_name} matched a trade with you. Tap to review.",
                                     data  = _push_data,
                                     dedup_key = "lifetime",
@@ -8523,7 +8524,7 @@ def swipe_trade():
                                 _send_typed_push(
                                     _recipient_id,
                                     "new_match",
-                                    title = f"🎯 Match with @{_partner_name}",
+                                    title = f"Match with @{_partner_name}",
                                     body  = _body_detail,
                                     data  = _push_data,
                                     dedup_key = str(match_data["id"]),
@@ -9495,7 +9496,7 @@ def disposition_trade_match(match_id):
                     _send_typed_push(
                         _other_uid,
                         "match_accepted",
-                        title = f"✅ @{_my_name} accepted your trade",
+                        title = f"@{_my_name} accepted your trade",
                         body  = "Tap to ratify on Sleeper.",
                         data  = {"match_id": match_id,
                                  "league_id": g_league.league_id if g_league else None},
@@ -9591,8 +9592,6 @@ def disposition_trade_match(match_id):
                                 if _gv_names and _rv_names else "")
 
                 _league_name  = getattr(g_league, "name", None) or ""
-                _in_league    = f" in {_league_name}" if _league_name else ""
-                _emoji   = "✅" if outcome == "accepted" else "❌"
                 _verb    = "accepted" if outcome == "accepted" else "declined"
                 _type_k  = f"trade_{outcome}"
                 _meta_a  = {"match_id": match_id, "partner_username": _partner_name,
@@ -9600,12 +9599,23 @@ def disposition_trade_match(match_id):
                 _meta_b  = {"match_id": match_id, "partner_username": _my_name,
                             "league_name": _league_name, "give": _rv_names, "receive": _gv_names}
 
+                # #225 de-chalk: fact-first title ("@x accepted your trade"),
+                # body carries only NEW information — players, then the next
+                # step (accepted → ratify hint) or the league (declined).
+                # Never repeats the title, no emoji (ADR-004).
+                def _dispo_body(trade_str: str) -> str:
+                    tail = ("Tap to ratify on Sleeper"
+                            if outcome == "accepted" else _league_name)
+                    if trade_str and tail:
+                        return f"{trade_str} · {tail}"
+                    return trade_str or tail or "Tap to view the trade."
+
                 # Current user notification
                 create_notification(
                     user_id  = g_user_id,
                     type_    = _type_k,
-                    title    = f"{_emoji} {_partner_name} {_verb} your trade{_in_league}",
-                    body     = f"{_emoji} {_partner_name} {_verb} your trade{_in_league}: {_trade_str_a}".strip(),
+                    title    = f"@{_partner_name} {_verb} your trade",
+                    body     = _dispo_body(_trade_str_a),
                     metadata = _meta_a,
                 )
                 # Partner notification
@@ -9613,8 +9623,8 @@ def disposition_trade_match(match_id):
                     create_notification(
                         user_id  = _partner_uid,
                         type_    = _type_k,
-                        title    = f"{_emoji} {_my_name} {_verb} your trade{_in_league}",
-                        body     = f"{_emoji} {_my_name} {_verb} your trade{_in_league}: {_trade_str_b}".strip(),
+                        title    = f"@{_my_name} {_verb} your trade",
+                        body     = _dispo_body(_trade_str_b),
                         metadata = _meta_b,
                     )
             except Exception as _notif_err:
@@ -11291,7 +11301,7 @@ def session_init():
                             push_notification(
                                 user_id=referrer_uid,
                                 type="referral_joined",
-                                body=f"🤝 @{new_username} joined Fantasy Trade Finder via your invite.",
+                                body=f"@{new_username} joined Fantasy Trade Finder via your invite.",
                                 meta={
                                     "new_user_id":   user_id,
                                     "new_username":  new_username,
@@ -11324,8 +11334,10 @@ def session_init():
                             _send_typed_push(
                                 _p["user_id"],
                                 "league_member_joined",
-                                title = "🤝 New leaguemate on Fantasy Trade Finder",
-                                body  = f"@{_new_username} joined {league_name}. More trades may unlock.",
+                                title = (f"@{_new_username} joined {league_name}"
+                                         if league_name else
+                                         f"@{_new_username} joined your league"),
+                                body  = "A new leaguemate can mean new trade matches.",
                                 data  = {"new_user_id":  user_id,
                                          "new_username": _new_username,
                                          "league_id":    league_id,
@@ -12385,8 +12397,8 @@ def _summary_push(items: list[dict]) -> tuple[str, str]:
     """Build (title, body) for the bundled morning summary push.
     Adapts based on the count + mix of queued items:
       1 item → preserve original title/body
-      multi-of-one-kind → "You have N new trade matches"
-      mixed → "N new matches and M updates while you slept"
+      multi-of-one-kind → "N new trade matches"
+      mixed → "N new matches and M updates"
     """
     if len(items) == 1:
         it = items[0]
@@ -12395,16 +12407,20 @@ def _summary_push(items: list[dict]) -> tuple[str, str]:
     by_kind: dict[str, int] = {}
     for it in items:
         by_kind[it["kind"]] = by_kind.get(it["kind"], 0) + 1
+    # #225 de-chalk: fact-first titles carry the counts (they scan fastest
+    # there); bodies add only what the title doesn't say. No emoji.
     matches = by_kind.get("new_match", 0)
     if len(by_kind) == 1 and matches:
-        return ("🌅 Good morning",
-                f"You have {matches} new trade matches waiting.")
+        return (f"{matches} new trade match{'es' if matches != 1 else ''}",
+                "They arrived overnight. Tap to review.")
     other = sum(c for k, c in by_kind.items() if k != "new_match")
     if matches and other:
-        return ("🌅 Good morning",
-                f"{matches} new matches and {other} updates while you slept.")
-    return ("🌅 Good morning",
-            f"{sum(by_kind.values())} updates while you slept.")
+        return (f"{matches} new match{'es' if matches != 1 else ''} "
+                f"and {other} update{'s' if other != 1 else ''}",
+                "From overnight. Tap to review.")
+    total = sum(by_kind.values())
+    return (f"{total} update{'s' if total != 1 else ''} overnight",
+            "Tap to review.")
 
 
 @app.route("/api/cron/realtime-tick", methods=["POST"])
@@ -12427,7 +12443,7 @@ def cron_realtime_tick():
             _send_typed_push(
                 uid,
                 "match_expiring",
-                title = "⏳ A trade match is expiring soon",
+                title = "A trade match is expiring soon",
                 body  = "Tap to review before it disappears.",
                 data  = {"match_id":  r["id"], "league_id": r.get("league_id")},
                 dedup_key = str(r["id"]),
@@ -12525,7 +12541,7 @@ def cron_hourly_tick():
                 _send_typed_push(
                     u["sleeper_user_id"],
                     "weekly_digest",
-                    title = "📰 Your weekly trade roundup",
+                    title = "Your weekly trade roundup",
                     body  = "Tap to see what's new in your leagues.",
                     data  = {"week": local.strftime("%Y-W%U")},
                 )
@@ -12539,8 +12555,9 @@ def cron_hourly_tick():
                 _send_typed_push(
                     u["sleeper_user_id"],
                     "pending_review",
-                    title = "👀 You have unreviewed matches",
-                    body  = f"You have {unread} match{'es' if unread != 1 else ''} waiting.",
+                    title = (f"{unread} unreviewed "
+                             f"match{'es' if unread != 1 else ''}"),
+                    body  = "Waiting for your call. Tap to review.",
                     data  = {"unread_count": unread},
                 )
                 review_sent += 1
@@ -12584,7 +12601,7 @@ def cron_daily_tick():
         if is_aug25:
             _send_typed_push(
                 uid, "season_start",
-                title = "🏈 Football is back",
+                title = "Football is back",
                 body  = "Re-rank your players to find this year's trades.",
                 data  = {"season": now.year},
             )
@@ -12595,7 +12612,7 @@ def cron_daily_tick():
         if signup_at and signup_at < cutoff_3d and not unlocked:
             _send_typed_push(
                 uid, "finish_ranking",
-                title = "🎯 You're 5 minutes away from your first trade",
+                title = "You're 5 minutes from your first trade",
                 body  = "Finish ranking your players to unlock matches.",
                 data  = {},
             )
@@ -12622,7 +12639,7 @@ def cron_daily_tick():
                     continue
                 _send_typed_push(
                     uid, "winback_dormant",
-                    title = "👋 Your league misses you",
+                    title = "Your league misses you",
                     body  = (f"You have {unread} unreviewed trade "
                              f"match{'es' if unread != 1 else ''} waiting."),
                     data  = {"unread_count": unread},
@@ -12630,7 +12647,7 @@ def cron_daily_tick():
             else:
                 _send_typed_push(
                     uid, "winback_dormant",
-                    title = "👋 Your league misses you",
+                    title = "Your league misses you",
                     body  = "New trade matches are waiting when you're ready.",
                     data  = {},
                 )
@@ -12643,8 +12660,9 @@ def cron_daily_tick():
             if unread > 0:
                 _send_typed_push(
                     uid, "winback_matches",
-                    title = "🔥 Trade matches are waiting",
-                    body  = f"You have {unread} unreviewed match{'es' if unread != 1 else ''}.",
+                    title = (f"{unread} match{'es' if unread != 1 else ''} "
+                             "waiting"),
+                    body  = "Your leaguemates have been busy. Tap to review.",
                     data  = {"unread_count": unread},
                 )
                 counters["winback_matches"] += 1

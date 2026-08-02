@@ -115,26 +115,29 @@ def main():
             base = {"match_id": mid, "partner_username": cp, "league_name": "Lakeview League (Test)",
                     "give": [you_send], "receive": [you_get], "seed_marker": MARK}
 
-            # (1) match-formed event — every match
+            # (1) match-formed event — every match (#225 templates: fact-first
+            # title, body = players · league, no emoji)
             c.execute(insert(NO).values(
                 user_id=MATT, type="trade_match",
-                title=f"🤝 New trade match with {cp} in Lakeview League (Test)!",
-                body=f"New trade match with {cp}! {you_send} for {you_get}",
+                title=f"Trade match with @{cp}",
+                body=f"{you_send} for {you_get} · Lakeview League (Test)",
                 metadata_json=json.dumps(base),
                 is_read=0 if status == "pending" else 1, created_at=now(mins)))
 
             # (2) other-owner OUTCOME event — accepted / declined
             outcome = None
             if status == "accepted":
-                outcome = ("trade_accepted", "✅", "accepted")
+                outcome = ("trade_accepted", "accepted",
+                           "Tap to ratify on Sleeper")
             elif status == "declined":
-                outcome = ("trade_declined", "❌", "declined")
+                outcome = ("trade_declined", "declined",
+                           "Lakeview League (Test)")
             if outcome:
-                t, emoji, verb = outcome
+                t, verb, tail = outcome
                 c.execute(insert(NO).values(
                     user_id=MATT, type=t,
-                    title=f"{emoji} {cp} {verb} your trade in Lakeview League (Test)",
-                    body=f"{emoji} {cp} {verb} your trade: {you_send} for {you_get}",
+                    title=f"@{cp} {verb} your trade",
+                    body=f"{you_send} for {you_get} · {tail}",
                     metadata_json=json.dumps(base),
                     is_read=0, created_at=now(mins-2)))
             created.append((mid, cp, label, you_send, you_get, status))

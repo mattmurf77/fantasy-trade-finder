@@ -4721,12 +4721,19 @@
       listEl.innerHTML = visible.map(n => {
         const unreadCls = n.is_read ? '' : ' unread';
         const icon      = notifTypeIcon(n.type);
-        // Strip a leading type-icon emoji from the body so it isn't shown
-        // twice alongside the visual icon badge (legacy notifications stored
-        // an emoji prefix in the body; new notifications no longer do).
-        const rawBody   = (n.body || n.title || '');
-        const cleanBody = rawBody.replace(/^\s*(?:\u{1F91D}|\u2705|\u274C|\u{1F3AF}|\u{1F514})\s*/u, '');
-        const body      = escapeHtml(cleanBody);
+        // #225: backend templates no longer carry emoji, but rows stored
+        // before the de-chalk pass persist in the DB with emoji prefixes -
+        // strip on render (titles AND bodies) so history looks clean too.
+        // Mirrors the regex in mobile TopBar.tsx.
+        const strip = (s) => (s || '').replace(
+          /^\s*(?:\u{1F91D}|\u2705|\u274C|\u{1F3AF}|\u{1F389}|\u{23F3}|\u{1F4F0}|\u{1F440}|\u{1F3C8}|\u{1F44B}|\u{1F525}|\u{1F513}|\u{1F305}|\u{1F514})\s*/u, '');
+        // Fact-first templates (#225) split the fact (title) from the
+        // detail (body) - render both lines. Legacy rows restated the
+        // title in the body (or stored title === body); collapse those
+        // to a single line.
+        const title    = strip(n.title);
+        const rawBody  = strip(n.body);
+        const bodyLine = rawBody && rawBody !== title ? rawBody : '';
         const rel  = relativeTime(n.created_at);
         const abs  = absoluteTime(n.created_at);
         const time = abs ? `${rel} · ${abs}` : rel;
@@ -4734,7 +4741,8 @@
           <div class="notif-unread-dot"></div>
           <div class="notif-icon">${icon}</div>
           <div class="notif-content">
-            <div class="notif-body">${body}</div>
+            <div class="notif-title">${escapeHtml(title || bodyLine)}</div>
+            ${title && bodyLine ? `<div class="notif-body">${escapeHtml(bodyLine)}</div>` : ''}
             <div class="notif-time">${time}</div>
           </div>
         </div>`;
