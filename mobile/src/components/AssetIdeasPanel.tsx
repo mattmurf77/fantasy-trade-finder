@@ -1,8 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
 import { ink, chalk, ice, space, radii, type, semantic } from '../theme/chalkline';
 import { posColor } from '../theme/colors';
-import { Icon, TickLabel, Card } from './chalkline';
+import { Icon, TickLabel, Card, Text } from './chalkline';
 import { assetIdeaKey } from './FeaturedTradeWindow';
 import type { AssetIdea, AssetIdeasResponse } from '../api/trades';
 import type { Player } from '../shared/types';
@@ -79,6 +79,13 @@ function IdeaRow({
         pressed && !featured && styles.rowPressed,
       ]}
     >
+      {/* #240 — the give↔receive line owns (nearly) the full row width so
+          names render fully or ellipsize; the diff chip and IN WINDOW tag
+          live on the meta line below instead of squeezing the name column
+          from a fixed-width right rail (which crushed names to a few
+          characters and, at large Dynamic Type sizes, overflowed the
+          fixed-size dots/swap glyph underneath the chip). Only the 14pt
+          chevron stays beside the names. */}
       <View style={styles.rowMain}>
         <View style={styles.sides}>
           {givePos ? (
@@ -99,33 +106,39 @@ function IdeaRow({
             {sideLabel(idea.receive)}
           </Text>
         </View>
-        <Text style={[type.bodySm, styles.metaLine]} numberOfLines={1}>
-          {idea.counterparty_username}
-          {idea.relaxed ? '  ·  Stretch — outside your fairness band' : ''}
-        </Text>
-      </View>
-      <View
-        style={[
-          styles.diffChip,
-          gain ? styles.diffChipPos : styles.diffChipNeg,
-        ]}
-      >
-        <Text
-          style={[
-            type.data,
-            styles.diffText,
-            { color: gain ? semantic.pos : semantic.neg },
-          ]}
-        >
-          {gain ? '+' : ''}
-          {Math.round(diff)}
-        </Text>
-      </View>
-      {featured ? (
-        <View style={styles.inTag}>
-          <Text style={styles.inTagText}>IN WINDOW</Text>
+        <View style={styles.metaRow}>
+          <Text style={[type.bodySm, styles.metaLine]} numberOfLines={1}>
+            {idea.counterparty_username}
+            {idea.relaxed ? '  ·  Stretch — outside your fairness band' : ''}
+          </Text>
+          <View
+            style={[
+              styles.diffChip,
+              gain ? styles.diffChipPos : styles.diffChipNeg,
+            ]}
+          >
+            <Text
+              scale="dense"
+              style={[
+                type.data,
+                styles.diffText,
+                { color: gain ? semantic.pos : semantic.neg },
+              ]}
+            >
+              {gain ? '+' : ''}
+              {Math.round(diff)}
+            </Text>
+          </View>
+          {featured ? (
+            <View style={styles.inTag}>
+              <Text scale="dense" style={styles.inTagText}>
+                IN WINDOW
+              </Text>
+            </View>
+          ) : null}
         </View>
-      ) : (
+      </View>
+      {featured ? null : (
         <Icon name="chevron-right" size={14} color={chalk.faint} />
       )}
     </Pressable>
@@ -171,7 +184,7 @@ export default function AssetIdeasPanel({
             if (ideas.length === 0) return null;
             return (
               <View key={key} style={styles.group}>
-                <Text style={[type.label, styles.groupTitle]}>
+                <Text scale="dense" style={[type.label, styles.groupTitle]}>
                   {groupTitle(key, pinPos)}
                 </Text>
                 {ideas.map((idea) => {
@@ -229,7 +242,10 @@ const styles = StyleSheet.create({
   },
   sideText: { flexShrink: 1 },
   posDot: { width: 6, height: 6, borderRadius: 3 },
-  metaLine: { color: chalk.dim },
+  // #240 — meta line carries the counterparty (flexes + ellipsizes) with the
+  // diff chip / IN WINDOW tag right-aligned after it.
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  metaLine: { color: chalk.dim, flex: 1 },
   diffChip: {
     paddingHorizontal: space.sm,
     paddingVertical: 2,
