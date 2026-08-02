@@ -71,6 +71,7 @@ import {
   type SwipeSignal,
 } from '../api/trades';
 import AssetIdeasPanel from '../components/AssetIdeasPanel';
+import FeaturedTradeWindow, { assetIdeaKey } from '../components/FeaturedTradeWindow';
 import {
   getLeaguePreferences,
   saveLeaguePreferences,
@@ -155,6 +156,10 @@ import type { Player, TradeCard, TradeJobSnapshot, ScoringFormat } from '../shar
 
 const SCREEN_W = Dimensions.get('window').width;
 const SWIPE_THRESHOLD = 120;
+// #216 — featured-trade window: per-pin-session back-stack cap. Full
+// history (not 1-level) per the approved mock's interaction rules; the cap
+// only bounds memory.
+const FEATURED_HISTORY_CAP = 10;
 // Triage undo (S3 PRD-03, flag ux.swipe_undo): how long a pass swipe's
 // disposition POST is held (and the Undo toast shown) before committing.
 const UNDO_HOLD_MS = 5000;
@@ -820,6 +825,64 @@ export default function TradesScreen({ navigation, route }: any) {
         giveIds: idea.give_player_ids,
         receiveIds: idea.receive_player_ids,
       },
+    });
+  }
+
+  // ── #216/#209 — featured-trade window (single-pin mode) ──────────────
+  // The best idea leads as a full trade card (Dynasty Value Swing verdict
+  // via the reused TradeCard/TradeValueBar); the grouped list below is
+  // tappable and swaps ideas into the window. History is a per-pin-session
+  // stack (reset on pin change AND on a fresh sweep — a new payload
+  // invalidates old idea references), capped at FEATURED_HISTORY_CAP.
+  const [featuredIdea, setFeaturedIdea] = useState<AssetIdea | null>(null);
+  const [ideaHistory, setIdeaHistory] = useState<AssetIdea[]>([]);
+  // Window's y inside the ScrollView content (the mount is a direct child
+  // of the content container) so a row tap can scroll it back into view.
+  const featuredWindowY = useRef(0);
+  const pinKey = singlePin
+    ? `${singlePin.player.id}:${singlePin.direction}`
+    : null;
+  const ideasUpdatedAt = assetIdeasQuery.dataUpdatedAt;
+  useEffect(() => {
+    setFeaturedIdea(null);
+    setIdeaHistory([]);
+  }, [pinKey, ideasUpdatedAt]);
+
+  // Default featured trade = the idea with the best signed difference for
+  // the user across all groups (the mock's "best" seed).
+  const bestIdea = useMemo(() => {
+    const g = assetIdeasQuery.data?.groups;
+    if (!g) return null;
+    const all = [...g.upgrade, ...g.lateral, ...g.downgrade];
+    if (all.length === 0) return null;
+    return all.reduce((best, i) => (i.difference > best.difference ? i : best));
+  }, [assetIdeasQuery.data]);
+  const featuredShown = featuredIdea ?? bestIdea;
+
+  function handleSelectIdea(idea: AssetIdea) {
+    // No no-op taps: the in-window row is inert (also disabled in the row).
+    if (!featuredShown || assetIdeaKey(idea) === assetIdeaKey(featuredShown)) {
+      return;
+    }
+    haptics.selection();
+    const replaced = featuredShown;
+    setIdeaHistory((h) => [...h, replaced].slice(-FEATURED_HISTORY_CAP));
+    setFeaturedIdea(idea);
+    mainScrollRef.current?.scrollTo({
+      y: featuredWindowY.current,
+      animated: true,
+    });
+  }
+
+  function handleFeaturedBack() {
+    const prev = ideaHistory[ideaHistory.length - 1];
+    if (!prev) return;
+    haptics.selection();
+    setIdeaHistory((h) => h.slice(0, -1));
+    setFeaturedIdea(prev);
+    mainScrollRef.current?.scrollTo({
+      y: featuredWindowY.current,
+      animated: true,
     });
   }
 
@@ -3199,59 +3262,17 @@ export default function TradesScreen({ navigation, route }: any) {
 
           {/* FB-47 — finder targeting (flag trade.finder_targeting).
               #156 finish item 1: in the hub's Specific Player mode the
-              section renders as the mockup's two-column TRADE FOR / TRADE
-              AWAY board; everywhere else the original direction-toggle
-              construction is untouched. Position-level targeting stays in
-              OutlookSheet's chips; this is the player-level entry point. */}
+              section renders as the mockup's two-column TRADE AWAY / TRADE
+              FOR board (#209 order); everywhere else the original
+              direction-toggle construction is untouched. Position-level
+              targeting stays in OutlookSheet's chips; this is the
+              player-level entry point. */}
           {!firstRun && targetingEnabled && finderMode === 'player' ? (
             <View style={styles.targetSection}>
+              {/* #209 — give→get reading order everywhere: AWAY (what you
+                  send) renders LEFT, FOR (what you get) RIGHT, matching the
+                  featured card's and the idea rows' columns. */}
               <View style={styles.playerBoard}>
-                <View style={[styles.boardCol, styles.boardColFor]}>
-                  <Text style={[styles.boardColH, styles.boardColHFor]}>
-                    TRADE FOR
-                  </Text>
-                  {pinnedReceive.map((p) => (
-                    <Pressable
-                      key={p.id}
-                      testID={`trades.board.for.${p.id}`}
-                      onPress={() => handleRemoveTarget(p.id, 'acquire')}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Remove ${p.name} from trade-for targets`}
-                      style={({ pressed }) => [
-                        styles.boardMini,
-                        pressed && styles.subnavPillPressed,
-                      ]}
-                    >
-                      {p.position ? (
-                        <View
-                          style={[
-                            styles.boardPosDot,
-                            { backgroundColor: posColor(p.position as any) },
-                          ]}
-                        />
-                      ) : null}
-                      <Text style={styles.boardMiniText} numberOfLines={1}>
-                        {p.name}
-                      </Text>
-                      <Icon name="x" size={12} color={chalk.faint} />
-                    </Pressable>
-                  ))}
-                  <Pressable
-                    testID="trades.board.add-for"
-                    accessibilityRole="button"
-                    accessibilityLabel="Add a player to trade for"
-                    onPress={() => {
-                      setTargetDirection('acquire');
-                      setTargetPickerOpen(true);
-                    }}
-                    style={({ pressed }) => [
-                      styles.boardAddBtn,
-                      pressed && styles.subnavPillPressed,
-                    ]}
-                  >
-                    <Text style={styles.boardAddText}>+ Add target</Text>
-                  </Pressable>
-                </View>
                 <View style={[styles.boardCol, styles.boardColAway]}>
                   <Text style={[styles.boardColH, styles.boardColHAway]}>
                     TRADE AWAY
@@ -3296,6 +3317,52 @@ export default function TradesScreen({ navigation, route }: any) {
                     ]}
                   >
                     <Text style={styles.boardAddText}>+ Add asset</Text>
+                  </Pressable>
+                </View>
+                <View style={[styles.boardCol, styles.boardColFor]}>
+                  <Text style={[styles.boardColH, styles.boardColHFor]}>
+                    TRADE FOR
+                  </Text>
+                  {pinnedReceive.map((p) => (
+                    <Pressable
+                      key={p.id}
+                      testID={`trades.board.for.${p.id}`}
+                      onPress={() => handleRemoveTarget(p.id, 'acquire')}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${p.name} from trade-for targets`}
+                      style={({ pressed }) => [
+                        styles.boardMini,
+                        pressed && styles.subnavPillPressed,
+                      ]}
+                    >
+                      {p.position ? (
+                        <View
+                          style={[
+                            styles.boardPosDot,
+                            { backgroundColor: posColor(p.position as any) },
+                          ]}
+                        />
+                      ) : null}
+                      <Text style={styles.boardMiniText} numberOfLines={1}>
+                        {p.name}
+                      </Text>
+                      <Icon name="x" size={12} color={chalk.faint} />
+                    </Pressable>
+                  ))}
+                  <Pressable
+                    testID="trades.board.add-for"
+                    accessibilityRole="button"
+                    accessibilityLabel="Add a player to trade for"
+                    onPress={() => {
+                      setTargetDirection('acquire');
+                      setTargetPickerOpen(true);
+                    }}
+                    style={({ pressed }) => [
+                      styles.boardAddBtn,
+                      pressed && styles.subnavPillPressed,
+                    ]}
+                  >
+                    <Text style={styles.boardAddText}>+ Add target</Text>
                   </Pressable>
                 </View>
               </View>
@@ -3469,18 +3536,38 @@ export default function TradesScreen({ navigation, route }: any) {
           </View>
         </Card>
 
-        {/* #172/#189 follow-up (flag trade.asset_ideas) — grouped Upgrade /
-            Lateral / Downgrade ideas for the single pinned asset, rendered
-            alongside the deck. 0 or 2+ pins ⇒ nothing here; the deck flow
-            is untouched. */}
+        {/* #216/#209 (flag trade.asset_ideas) — single-pin find-a-trade:
+            the FEATURED TRADE window leads (best idea as a full trade card
+            with the Dynasty Value Swing verdict + #190 edit-in-calculator),
+            the grouped Upgrade / Lateral / Downgrade list sits beneath it,
+            visible by default; row taps swap ideas into the window (the
+            replaced trade becomes the ‹ Previous trade back target). 0 or
+            2+ pins ⇒ nothing here; the deck flow is untouched. */}
         {!firstRun && singlePin ? (
-          <AssetIdeasPanel
-            data={assetIdeasQuery.data}
-            loading={assetIdeasQuery.isFetching}
-            pinnedName={singlePin.player.name}
-            direction={singlePin.direction}
-            onOpenIdea={handleOpenAssetIdea}
-          />
+          <>
+            {featuredShown ? (
+              <View
+                onLayout={(e) => {
+                  featuredWindowY.current = e.nativeEvent.layout.y;
+                }}
+              >
+                <FeaturedTradeWindow
+                  idea={featuredShown}
+                  leagueId={leagueId ?? ''}
+                  onBack={ideaHistory.length > 0 ? handleFeaturedBack : undefined}
+                  onEditInCalculator={() => handleOpenAssetIdea(featuredShown)}
+                />
+              </View>
+            ) : null}
+            <AssetIdeasPanel
+              data={assetIdeasQuery.data}
+              loading={assetIdeasQuery.isFetching}
+              pinnedName={singlePin.player.name}
+              direction={singlePin.direction}
+              featuredKey={featuredShown ? assetIdeaKey(featuredShown) : null}
+              onSelectIdea={handleSelectIdea}
+            />
+          </>
         ) : null}
 
         {/* Phase-2 one-tap outlook confirm — replaces the force-opened

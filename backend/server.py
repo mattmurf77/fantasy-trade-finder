@@ -8168,6 +8168,18 @@ def asset_trade_ideas():
                           for p in idea["give_player_ids"] if p in players_dict]
         out["receive"] = [player_to_dict(players_dict[p])
                           for p in idea["receive_player_ids"] if p in players_dict]
+        # #216 featured-trade window — pick-denominated verdict per idea
+        # (favors + gap), the same single-source construction evaluate and
+        # the deck cards use so the three surfaces can never drift. `even`
+        # mirrors evaluate's point_ratio >= 0.95 test; an idea's `fairness`
+        # IS that min/max package ratio.
+        verdict = _value_verdict_payload(
+            float(out.get("give_value") or 0.0),
+            float(out.get("receive_value") or 0.0),
+            even=float(out.get("fairness") or 0.0) >= 0.95,
+        )
+        out["favors"] = verdict["favors"]
+        out["gap"]    = verdict["gap"]
         return out
 
     return jsonify({

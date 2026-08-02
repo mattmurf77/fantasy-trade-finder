@@ -1,30 +1,35 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
-import { ink, chalk, space, radii, type, semantic } from '../theme/chalkline';
+import { ink, chalk, ice, space, radii, type, semantic } from '../theme/chalkline';
 import { posColor } from '../theme/colors';
 import { Icon, TickLabel, Card } from './chalkline';
+import { assetIdeaKey } from './FeaturedTradeWindow';
 import type { AssetIdea, AssetIdeasResponse } from '../api/trades';
 import type { Player } from '../shared/types';
 
 // #172/#189 follow-up (flag trade.asset_ideas) — grouped Upgrade / Lateral /
-// Downgrade ideas for the single pinned asset, the Dynasty-Trade-Factory
-// "Smart Trade Finder" presentation. Renders alongside the deck on
-// TradesScreen when exactly ONE finder target is pinned; each compact row is
-// "your side ↔ their side · counterparty" with a signed difference chip, and
-// tapping it hands the package to the calculator (#190 prefill).
+// Downgrade ideas for the single pinned asset. #216 reworked the panel into
+// the "More trades for <pin>" list under the FeaturedTradeWindow (approved
+// mock: mockups/polish-lab-2026-08/asset-ideas-layout-v2 + -v3): rows are
+// tappable and load their trade INTO the window above (the host owns the
+// window + history state); the row currently in the window carries an
+// "In window" tag (ice border, no chevron) and ignores taps. Rows keep the
+// signed diff chip and DROP the raw value pair (v2 tenet note) — the full
+// verdict lives in the window.
 //
-// #198 — semantics are position-centric: Upgrade/Lateral are constrained to
-// the pin's position server-side, so the group headers name it ("Upgrade at
-// WR"). Downgrade stays value-based (same-position headliners ordered first
-// by the backend) and keeps a neutral header. PICK pins have no position —
-// headers fall back to the generic labels.
+// #198 — semantics stay position-centric: Upgrade/Lateral are constrained
+// to the pin's position server-side, so the group headers name it
+// ("Upgrade at WR"). PICK pins fall back to the generic labels.
 
 interface Props {
   data: AssetIdeasResponse | undefined;
   loading: boolean;
   pinnedName: string;
   direction: 'give' | 'receive';
-  onOpenIdea: (idea: AssetIdea) => void;
+  /** assetIdeaKey of the idea currently in the featured window. */
+  featuredKey: string | null;
+  /** Tap a row → feature that idea (host swaps the window + records history). */
+  onSelectIdea: (idea: AssetIdea) => void;
 }
 
 const GROUP_KEYS = ['upgrade', 'lateral', 'downgrade'] as const;
@@ -42,7 +47,15 @@ function sideLabel(players: Player[]): string {
   return players.map((p) => p.name).join(' + ') || '?';
 }
 
-function IdeaRow({ idea, onPress }: { idea: AssetIdea; onPress: () => void }) {
+function IdeaRow({
+  idea,
+  featured,
+  onPress,
+}: {
+  idea: AssetIdea;
+  featured: boolean;
+  onPress: () => void;
+}) {
   const diff = idea.difference;
   const gain = diff >= 0;
   // Position dot keyed off each side's first (headline) asset.
@@ -50,12 +63,21 @@ function IdeaRow({ idea, onPress }: { idea: AssetIdea; onPress: () => void }) {
   const recvPos = idea.receive[0]?.position;
   return (
     <Pressable
-      onPress={onPress}
+      testID={`featured-trade.idea.${assetIdeaKey(idea)}`}
+      onPress={featured ? undefined : onPress}
+      disabled={featured}
       accessibilityRole="button"
-      accessibilityLabel={`Trade ${sideLabel(idea.give)} for ${sideLabel(
-        idea.receive,
-      )} with ${idea.counterparty_username}`}
-      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      accessibilityState={featured ? { selected: true, disabled: true } : undefined}
+      accessibilityLabel={
+        `Trade ${sideLabel(idea.give)} for ${sideLabel(idea.receive)} with ` +
+        `${idea.counterparty_username}` +
+        (featured ? ', currently in the featured window' : '')
+      }
+      style={({ pressed }) => [
+        styles.row,
+        featured && styles.rowFeatured,
+        pressed && !featured && styles.rowPressed,
+      ]}
     >
       <View style={styles.rowMain}>
         <View style={styles.sides}>
@@ -79,10 +101,6 @@ function IdeaRow({ idea, onPress }: { idea: AssetIdea; onPress: () => void }) {
         </View>
         <Text style={[type.bodySm, styles.metaLine]} numberOfLines={1}>
           {idea.counterparty_username}
-          {'  ·  '}
-          <Text style={type.data}>{Math.round(idea.give_value)}</Text>
-          {' ↔ '}
-          <Text style={type.data}>{Math.round(idea.receive_value)}</Text>
           {idea.relaxed ? '  ·  Stretch — outside your fairness band' : ''}
         </Text>
       </View>
@@ -103,6 +121,13 @@ function IdeaRow({ idea, onPress }: { idea: AssetIdea; onPress: () => void }) {
           {Math.round(diff)}
         </Text>
       </View>
+      {featured ? (
+        <View style={styles.inTag}>
+          <Text style={styles.inTagText}>IN WINDOW</Text>
+        </View>
+      ) : (
+        <Icon name="chevron-right" size={14} color={chalk.faint} />
+      )}
     </Pressable>
   );
 }
@@ -112,34 +137,25 @@ export default function AssetIdeasPanel({
   loading,
   pinnedName,
   direction,
-  onOpenIdea,
+  featuredKey,
+  onSelectIdea,
 }: Props) {
   const groups = data?.groups;
   const total = groups
     ? groups.upgrade.length + groups.lateral.length + groups.downgrade.length
     : 0;
-  // #198 — the pin's position drives the group headers/copy; PICK pins (and
-  // a not-yet-loaded asset) fall back to the generic value-band labels.
+  // #198 — the pin's position drives the group headers; PICK pins (and a
+  // not-yet-loaded asset) fall back to the generic value-band labels.
   const rawPos = data?.asset?.position;
   const pinPos = rawPos && rawPos !== 'PICK' ? rawPos : null;
-  const subtitle =
-    direction === 'give'
-      ? pinPos
-        ? `A better ${pinPos} back (add pieces to close the gap), a sideways ${pinPos} swap, or a spread-out package.`
-        : 'What league-mates could send back — tier up, sideways, or down.'
-      : pinPos
-        ? `What it could cost you — your lesser ${pinPos} plus pieces, an even ${pinPos} swap, or a stud for them plus change.`
-        : 'What it could cost you — tier up into them, swap even, or cash down.';
   return (
     <Card>
       <View testID="trades.asset-ideas" style={styles.inner}>
         <TickLabel>
-          {direction === 'give' ? 'Ideas for trading away' : 'Ideas for landing'}
+          {direction === 'give'
+            ? `More trades for ${pinnedName}`
+            : `More ways to land ${pinnedName}`}
         </TickLabel>
-        <Text style={[type.title, styles.assetName]} numberOfLines={1}>
-          {pinnedName}
-        </Text>
-        <Text style={[type.bodySm, styles.subtitle]}>{subtitle}</Text>
         {loading ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color={chalk.dim} size="small" />
@@ -158,13 +174,17 @@ export default function AssetIdeasPanel({
                 <Text style={[type.label, styles.groupTitle]}>
                   {groupTitle(key, pinPos)}
                 </Text>
-                {ideas.map((idea, i) => (
-                  <IdeaRow
-                    key={`${key}-${i}-${idea.counterparty_user_id}`}
-                    idea={idea}
-                    onPress={() => onOpenIdea(idea)}
-                  />
-                ))}
+                {ideas.map((idea) => {
+                  const k = assetIdeaKey(idea);
+                  return (
+                    <IdeaRow
+                      key={`${key}-${k}`}
+                      idea={idea}
+                      featured={k === featuredKey}
+                      onPress={() => onSelectIdea(idea)}
+                    />
+                  );
+                })}
               </View>
             );
           })
@@ -176,8 +196,6 @@ export default function AssetIdeasPanel({
 
 const styles = StyleSheet.create({
   inner: { gap: space.xs },
-  assetName: { marginTop: 2 },
-  subtitle: { marginBottom: space.xs },
   loadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -191,6 +209,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
+    minHeight: 48,
     paddingHorizontal: space.sm,
     paddingVertical: space.sm,
     borderRadius: radii.xs,
@@ -199,6 +218,8 @@ const styles = StyleSheet.create({
     backgroundColor: ink.ink1,
   },
   rowPressed: { backgroundColor: ink.ink3 },
+  // In-window row: ice border + raised surface, tap-inert, no chevron.
+  rowFeatured: { borderColor: ice.base, backgroundColor: ink.ink2 },
   rowMain: { flex: 1, minWidth: 0, gap: 2 },
   sides: {
     flexDirection: 'row',
@@ -218,4 +239,17 @@ const styles = StyleSheet.create({
   diffChipPos: { borderColor: 'rgba(34,197,94,0.4)' },
   diffChipNeg: { borderColor: 'rgba(239,68,68,0.4)' },
   diffText: { fontSize: 12, lineHeight: 16 },
+  inTag: {
+    paddingHorizontal: space.xs,
+    paddingVertical: 2,
+    borderRadius: radii.xs,
+    borderWidth: 1,
+    borderColor: ink.line,
+    backgroundColor: ink.ink3,
+  },
+  inTagText: {
+    ...type.label,
+    fontSize: 10,
+    color: ice.base,
+  },
 });
