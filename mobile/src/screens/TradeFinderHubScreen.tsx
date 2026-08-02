@@ -1078,7 +1078,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    maxHeight: '80%',
+    // #242 — tall enough that a 12-team league's 11 manager rows fit
+    // without scrolling on modern iPhones (shared with the untouchables
+    // sheet, which also just sizes to content up to this bound).
+    maxHeight: '85%',
     backgroundColor: ink.ink2,
     borderWidth: 1,
     borderColor: ink.line,
@@ -1095,7 +1098,10 @@ const styles = StyleSheet.create({
     backgroundColor: ink.lineStrong,
     marginBottom: space.xs,
   },
-  pickerScroll: { maxHeight: 360, marginTop: space.sm },
+  // #242 — size to content (the fixed 360pt cap forced a 12-team league to
+  // scroll); the sheet's maxHeight is the only bound, and flexShrink lets
+  // the list compress into it (and scroll) when content exceeds it.
+  pickerScroll: { flexGrow: 0, flexShrink: 1, marginTop: space.sm },
   pickerRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -3482,7 +3482,11 @@ export default function TradesScreen({ navigation, route }: any) {
           {/* Find-a-Trade button. While a job is running, the button is
               disabled — the progress strip below acts as the live signal.
               `generateMutation.isPending` is only true during the brief
-              POST round-trip; after that, status flows through `job`. */}
+              POST round-trip; after that, status flows through `job`.
+              #241: hidden in single-pin featured mode — the featured window
+              + idea list replace the deck there, so a generate would build
+              cards with nowhere to render. */}
+          {!firstRun && singlePin ? null : (
           <Button
             variant="primary"
             testID="trades.find-btn"
@@ -3494,11 +3498,13 @@ export default function TradesScreen({ navigation, route }: any) {
             }}
             style={styles.findBtn}
           />
+          )}
 
           {/* Progress strip — visible only during a running job. Cards are
               streaming into the deck above; this just narrates the work.
-              Opponent coverage renders as a ice Meter with mono counts. */}
-          {job?.status === 'running' && (
+              Opponent coverage renders as a ice Meter with mono counts.
+              #241: hidden alongside the deck in single-pin featured mode. */}
+          {!(!firstRun && singlePin) && job?.status === 'running' && (
             <View testID="trades.progress-strip" style={styles.progressStrip}>
               <View style={styles.progressInfo}>
                 <ActivityIndicator color={chalk.dim} size="small" />
@@ -3789,6 +3795,14 @@ export default function TradesScreen({ navigation, route }: any) {
           </View>
         ) : null}
 
+        {/* #241 — single-pin featured mode: the featured window + idea list
+            above IS the page (approved mock asset-ideas-layout-v3); the
+            swipe deck must not also render beneath it. The #216 build left
+            this block mounting alongside the new surface, so the old deck
+            card showed up as a mystery second trade card under the idea
+            rows. Multi-pin / no-pin / classic modes keep the deck exactly
+            as before. */}
+        {!firstRun && singlePin ? null : (
         <View style={styles.deckWrap} ref={deckWrapRef} collapsable={false}>
           {quicksetPromptShown ? (
             // Item 7 — inline prompt card holds the top-of-deck slot until
@@ -4135,6 +4149,7 @@ export default function TradesScreen({ navigation, route }: any) {
             </Card>
           )}
         </View>
+        )}
         </>
         )}
 
@@ -4863,7 +4878,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    maxHeight: '80%',
+    // #242 — tall enough that a 12-team league's 11 manager rows fit
+    // without scrolling on modern iPhones; scrolling remains only as
+    // overflow for very large leagues / small screens.
+    maxHeight: '85%',
     backgroundColor: ink.ink2,
     borderWidth: 1,
     borderColor: ink.line,
@@ -4880,7 +4898,10 @@ const styles = StyleSheet.create({
     backgroundColor: ink.lineStrong,
     marginBottom: space.xs,
   },
-  teamPickerScroll: { maxHeight: 360, marginTop: space.sm },
+  // #242 — size to content (the fixed 360pt cap forced a 12-team league to
+  // scroll); the sheet's maxHeight is the only bound, and flexShrink lets
+  // the list compress into it (and scroll) when content exceeds it.
+  teamPickerScroll: { flexGrow: 0, flexShrink: 1, marginTop: space.sm },
   teamPickerRow: {
     flexDirection: 'row',
     alignItems: 'center',
