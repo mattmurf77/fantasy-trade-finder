@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Trade DNA &amp; Outlook V3 (#212 · #231 · #206)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --first1:#2dd4bf;
+  --f-display:'Barlow Condensed','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:22px;min-height:100vh}
+
+.note{max-width:840px;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note ul{margin:4px 0 0 18px} .note li{margin:3px 0}
+.q{border-left:3px solid var(--lineStrong);padding-left:10px;margin:6px 0;font-style:italic}
+
+.pairwrap{display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}
+.slot{display:flex;flex-direction:column;gap:8px;align-items:center}
+.slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim);display:flex;align-items:center;gap:7px}
+.slotlbl::before{content:"";width:3px;height:12px;background:var(--lineStrong)}
+.slot.proposed .slotlbl{color:var(--ice)} .slot.proposed .slotlbl::before{background:var(--ice)}
+.caption{max-width:390px;font-size:12px;line-height:1.5;color:var(--dim);text-align:left}
+
+/* mock annotation chips — meta, not UI */
+.hchip{font-family:var(--f-mono);font-size:11px;color:var(--warn);border:1px dashed var(--warn);border-radius:4px;padding:3px 9px;background:rgba(245,158,11,.06)}
+.hchip b{color:var(--warn);font-weight:600}
+
+.phone{width:390px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+.status{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.scroll{padding:4px 16px 14px;display:flex;flex-direction:column;gap:12px}
+/* both v3 phones share one fixed viewport so the fold story stays honest */
+.vp .scroll{height:600px;overflow:hidden;position:relative}
+.vp .scroll::after{content:"";position:absolute;left:0;right:0;bottom:0;height:36px;background:linear-gradient(transparent,var(--ink0))}
+/* the gradient above is a mockup viewport cue, not a UI gradient */
+.pagetitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:22px}
+.leaguepill{align-self:flex-start;display:flex;align-items:center;gap:6px;background:var(--ink2);border:1px solid var(--line);border-radius:999px;padding:5px 11px;font-size:12px;color:var(--dim)}
+.leaguepill .dot{width:7px;height:7px;border-radius:999px;background:var(--ice)}
+.leaguepill b{color:var(--chalk);font-weight:600}
+
+/* ---- shared bits ---- */
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.pdot{width:8px;height:8px;border-radius:2px;flex:0 0 auto;display:inline-block}
+.pos-qb{background:var(--qb)} .pos-rb{background:var(--rb)} .pos-wr{background:var(--wr)} .pos-te{background:var(--te)} .pos-pk{background:var(--first1)}
+svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+.grouplbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim);margin-top:4px}
+.grouplbl .ms{color:var(--ice)}
+.editbtn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border:1px solid var(--lineStrong);border-radius:4px;background:transparent;color:var(--chalk);font-family:var(--f-ui);font-size:13px;font-weight:600;cursor:pointer}
+.editbtn:hover{border-color:var(--ice)}
+.editbtn svg{width:14px;height:14px;stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+.donebtn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 14px;border:none;border-radius:4px;background:var(--ice);color:var(--onIce);font-family:var(--f-ui);font-size:13px;font-weight:700;cursor:pointer}
+.donebtn:hover{background:var(--icePress)}
+
+.seclabel{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim);margin-top:2px}
+.modecard{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:12px;cursor:pointer}
+.modecard .icwell{width:40px;height:40px;border-radius:8px;background:var(--ink2);display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:var(--ice)}
+.modecard .body{flex:1;min-width:0}
+.modecard .trow{display:flex;align-items:center;gap:8px}
+.modecard .t{font-size:16px;font-weight:600}
+.modecard .rec{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--flare)}
+.modecard .d{font-size:13px;color:var(--dim);margin-top:1px;line-height:1.4}
+.modecard .chev{color:var(--faint);flex:0 0 auto}
+
+.tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink1)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 12px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:20px;height:20px;stroke:var(--faint);stroke-width:1.75;fill:none;stroke-linecap:square}
+.tab.on{color:var(--ice)} .tab.on svg{stroke:var(--ice)}
+
+/* ---- collapsed panel (v3) ---- */
+.dna3{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.dna3 .top{display:flex;align-items:center;justify-content:space-between}
+.outchip{align-self:flex-start;display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:999px;background:var(--ink2);padding:4px 11px;font-size:12px;font-weight:600;color:var(--chalk)}
+.outchip .tick{width:3px;height:11px;background:var(--ice);flex:0 0 auto}
+.outchip .bias{color:var(--dim);font-weight:400}
+.sumline{display:flex;align-items:center;flex-wrap:wrap;gap:4px 7px;font-size:13px;color:var(--chalk);line-height:1.4}
+.sumline .k{color:var(--faint)}
+.sumline .sep{color:var(--faint)}
+.mini{display:inline-flex;align-items:center;gap:5px;font-weight:600}
+.mini .pdot{width:7px;height:7px}
+/* v3: untouchable mini-cards (collapsed only) */
+.untrow{display:flex;align-items:center;flex-wrap:wrap;gap:5px;font-size:12px}
+.untrow .k{color:var(--faint);margin-right:1px}
+.pchip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;background:var(--ink2);padding:3px 9px;font-size:12px;font-weight:600;color:var(--chalk)}
+.pchip .dot6{width:6px;height:6px;border-radius:999px;flex:0 0 auto;display:inline-block}
+.untrow .more{color:var(--dim);font-family:var(--f-mono);font-weight:600}
+
+/* ---- expanded panel ---- */
+.dna2{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:12px;display:flex;flex-direction:column;gap:10px}
+.dna2 .top{display:flex;align-items:center;justify-content:space-between}
+.outgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.outcard{border:1px solid var(--line);border-radius:8px;background:var(--ink2);padding:10px 10px 9px;cursor:pointer;position:relative}
+.outcard .t{font-size:14px;font-weight:600}
+.outcard .d{font-size:11px;color:var(--dim);margin-top:2px;line-height:1.35}
+.outcard.sel{border-color:var(--ice)}
+.outcard.sel::after{content:"";position:absolute;top:8px;right:8px;width:3px;height:12px;background:var(--ice)}
+.outcard.sel .d{color:var(--chalk)}
+.outcard.tight{padding:8px 9px 7px}
+.outcard.tight .t{font-size:13px}
+.outgrid.tight{gap:6px}
+.togglerow{display:flex;gap:6px}
+.pt{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0}
+.ptb{width:100%;min-height:44px;display:flex;align-items:center;justify-content:center;gap:5px;border-radius:4px;border:1px solid var(--lineStrong);background:transparent;color:var(--chalk);font-family:var(--f-ui);font-size:13px;font-weight:600;cursor:pointer;padding:0 2px}
+.ptb:hover{background:var(--ink3)}
+.ptb .pdot{width:7px;height:7px}
+.ptb svg{width:12px;height:12px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:square;flex:0 0 auto}
+.ptb.on{border-color:transparent;color:var(--onIce)}
+.ptb.on-qb{background:var(--qb)} .ptb.on-rb{background:var(--rb)} .ptb.on-wr{background:var(--wr);color:#04070C} .ptb.on-te{background:var(--te)} .ptb.on-pk{background:var(--first1)}
+.ptag{font-size:11px;letter-spacing:.06em;font-weight:700;text-transform:uppercase;min-height:15px;line-height:15px;text-align:center}
+.ptag.need{color:var(--flare)} .ptag.deep{color:var(--dim)}
+.needkey{font-size:11px;color:var(--faint);line-height:1.45}
+.untline{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--chalk)}
+.untline .k{color:var(--faint)}
+.untline .n{font-family:var(--f-mono);font-weight:600}
+.untline .manage{margin-left:auto;color:var(--ice);font-weight:600;font-size:13px;cursor:pointer}
+
+/* ---- reference frame: deck + bias receipt (verbatim from v1/v2) ---- */
+.ref{zoom:.85}
+.modebar .back{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--ice);margin-bottom:8px}
+.swrow{display:flex;gap:6px;overflow:hidden}
+.sw{flex:0 0 auto;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--ink1);font-size:12px;color:var(--dim);min-height:32px;display:flex;align-items:center}
+.sw.on{border-color:var(--ice);background:var(--ink2);color:var(--chalk)}
+.receipt{display:flex;align-items:center;gap:8px;background:var(--ink2);border:1px solid var(--line);border-radius:4px;padding:8px 10px;font-size:12.5px;color:var(--dim)}
+.receipt .tick{width:3px;height:12px;background:var(--flare);flex:0 0 auto}
+.receipt b{color:var(--chalk);font-weight:600}
+.receipt .chg{margin-left:auto;color:var(--ice);font-weight:600;cursor:pointer;flex:0 0 auto}
+.tcard{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.tcard .hdr .lbl{display:block}
+.tcard .opp{font-size:16px;font-weight:600;margin-top:1px}
+.strength{display:flex;flex-direction:column;gap:4px}
+.strength .row{display:flex;justify-content:space-between;align-items:baseline}
+.strength .val{font-family:var(--f-mono);font-size:13px}
+.track{height:4px;background:var(--ink3)}
+.track .fill{height:4px;background:var(--rb)}
+.split{display:flex;gap:12px}
+.split .vrule{width:1px;background:var(--line)}
+.side{flex:1;display:flex;flex-direction:column;gap:6px}
+.ticklbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.ticklbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+.prow{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-left:3px solid var(--wr);border-radius:8px;background:var(--ink2);padding:8px}
+.prow .nm{font-size:13px;font-weight:600;line-height:1.25}
+.prow .meta{font-size:11px;color:var(--dim);font-family:var(--f-mono)}
+.vbar{display:flex;flex-direction:column;gap:6px}
+.vbar .who{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:18px;color:var(--pos)}
+.vbar .margin{font-size:12px;color:var(--dim)}
+.vbar .margin b{font-family:var(--f-mono);color:var(--pos);font-weight:600}
+.vbar .pick{color:var(--first1);font-weight:600}
+.dtrack{position:relative;height:14px;background:var(--ink3);border-radius:2px;margin-top:2px}
+.dtrack .cen{position:absolute;left:50%;top:-4px;width:1px;height:22px;background:var(--lineStrong)}
+.dtrack .t1{position:absolute;left:21.5%;top:-4px;width:1px;height:22px;background:var(--line)}
+.dtrack .t2{position:absolute;left:78.5%;top:-4px;width:1px;height:22px;background:var(--line)}
+.dtrack .fillr{position:absolute;left:50%;width:11%;height:14px;background:var(--pos);border-radius:2px}
+.scalerow{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:9px;color:var(--faint)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Polish Lab · Trade DNA &amp; Outlook — V3 iteration (#212 · #231 · #206)</h1>
+  <p><b>Operator feedback on v2:</b></p>
+  <p class="q">"Perfect. Just confirm that both the initial and the edit screens support multiselect for trading for and away preferences. Also, the untouchable list should have the players present as little player cards with color coded dots for position next to the player name (only for the initial, collapsed version)."</p>
+  <p style="margin-top:8px"><b>V3 = v2 with two adjustments.</b> ① Multi-select was already the v2 rule — this iteration makes it undeniable: the collapsed summary and the edit rows both show <b>multiple selections per row</b> (Chasing: WR + TE · Shopping: QB + RB), and the editor carries an explicit <b>multi-select</b> caption. ② The collapsed card's bare untouchables count is replaced with <b>player mini-cards</b> — 6px position-color dot + name, wrapping row, capped at 3 + "+2". The mini-cards are <b>collapsed-only</b> per the operator; the expanded editor keeps v2's count + Manage line. Everything else — outlook cards, toggle mechanics, mutual exclusion, hint tags, the deck bias receipt — is v2 verbatim.</p>
+</div>
+
+<!-- ═══════════════ ROW 1 · V3 collapsed + V3 expanded ═══════════════ -->
+<div class="pairwrap">
+
+  <!-- V3 collapsed -->
+  <div class="slot proposed">
+    <div class="slotlbl">V3 — collapsed (default on entry)</div>
+    <div class="hchip">① multi summary &nbsp;② untouchable mini-cards · panel <b>140px</b> (v2: 111px, v1: 355px — measured)</div>
+    <div class="phone vp">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="pagetitle">Find a Trade</div>
+        <div class="leaguepill"><span class="dot"></span>Trading in&nbsp;·&nbsp;<b>Dynasty Degens</b></div>
+
+        <div class="dna3" id="v3collapsed">
+          <div class="top">
+            <span class="lbl">Your Trade DNA</span>
+            <button class="editbtn"><svg viewBox="0 0 20 20"><path d="M13 3l4 4L7 17H3v-4z"/></svg>Edit</button>
+          </div>
+          <div class="outchip"><span class="tick"></span>Rebuilding<span class="bias">·&nbsp;leans young + picks</span></div>
+          <div class="sumline">
+            <span class="k">Chasing</span>
+            <span class="mini"><span class="pdot pos-wr"></span>WR</span>
+            <span class="mini"><span class="pdot pos-te"></span>TE</span>
+            <span class="sep">—</span>
+            <span class="k">Shopping</span>
+            <span class="mini"><span class="pdot pos-qb"></span>QB</span>
+            <span class="mini"><span class="pdot pos-rb"></span>RB</span>
+          </div>
+          <div class="untrow">
+            <span class="k">Untouchables</span>
+            <span class="pchip"><span class="dot6 pos-rb"></span>Jeanty</span>
+            <span class="pchip"><span class="dot6 pos-wr"></span>Chase</span>
+            <span class="pchip"><span class="dot6 pos-te"></span>Bowers</span>
+            <span class="more">+2</span>
+          </div>
+        </div>
+
+        <div class="seclabel">How do you want to find trades?</div>
+        <div class="modecard">
+          <div class="icwell"><svg class="ic" width="22" height="22" viewBox="0 0 20 20"><path d="M3 14 6 6l4 5 4-7 3 10z"/></svg></div>
+          <div class="body">
+            <div class="trow"><span class="t">Fully Guided</span><span class="rec">recommended</span></div>
+            <div class="d">We read your roster &amp; league and walk you to the best deals.</div>
+          </div>
+          <svg class="ic chev" width="18" height="18" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+        </div>
+        <div class="modecard">
+          <div class="icwell"><svg class="ic" width="22" height="22" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg></div>
+          <div class="body">
+            <div class="trow"><span class="t">Specific Team</span></div>
+            <div class="d">Target one league-mate and see only mutual-gain deals.</div>
+          </div>
+          <svg class="ic chev" width="18" height="18" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+        </div>
+        <div class="modecard">
+          <div class="icwell"><svg class="ic" width="22" height="22" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg></div>
+          <div class="body">
+            <div class="trow"><span class="t">Specific Player</span></div>
+            <div class="d">Trade for someone, away someone, or both — engine fills the rest.</div>
+          </div>
+          <svg class="ic chev" width="18" height="18" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption"><b>① Multi-select, visible in the summary:</b> the chasing/shopping line lists <i>every</i> selected position ("Chasing WR · TE — Shopping QB · RB"), not one exemplar each — the line wraps if a row somehow carries all four. <b>② Untouchable mini-cards (collapsed only):</b> compact pill chips — 6px round position-color dot + last name — replace the bare count. Capped at 3 chips + a mono "+2" overflow chip; the row wraps if names run long. All three mode cards still clear the 600px fold. Nothing in the summary is tappable — Edit (or the card itself) remains the single affordance.</div>
+  </div>
+
+  <!-- V3 expanded -->
+  <div class="slot proposed">
+    <div class="slotlbl">V3 — tap Edit → expands in place</div>
+    <div class="hchip">① two filled toggles per row + <b>multi-select</b> caption · editor <b>498px</b> (measured)</div>
+    <div class="phone vp">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="pagetitle">Find a Trade</div>
+        <div class="leaguepill"><span class="dot"></span>Trading in&nbsp;·&nbsp;<b>Dynasty Degens</b></div>
+
+        <div class="dna2" id="v3expanded">
+          <div class="top">
+            <span class="lbl">Your Trade DNA</span>
+            <button class="donebtn"><svg viewBox="0 0 20 20" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:square"><path d="M4 11l4 4 8-10"/></svg>Done</button>
+          </div>
+
+          <div class="grouplbl" style="margin-top:0">My team is…</div>
+          <div class="outgrid tight">
+            <div class="outcard tight sel"><div class="t">Rebuilding</div><div class="d">Leans young + picks</div></div>
+            <div class="outcard tight"><div class="t">Contending</div><div class="d">Balanced moves</div></div>
+            <div class="outcard tight"><div class="t">All-in</div><div class="d">Win now, spend picks</div></div>
+            <div class="outcard tight"><div class="t">Tanking</div><div class="d">Max youth, high picks</div></div>
+          </div>
+
+          <div class="grouplbl">Chasing — tap all that apply <span class="ms">· multi-select</span></div>
+          <div class="togglerow">
+            <div class="pt">
+              <button class="ptb"><span class="pdot pos-qb"></span>QB</button>
+              <span class="ptag"></span>
+            </div>
+            <div class="pt">
+              <button class="ptb"><span class="pdot pos-rb"></span>RB</button>
+              <span class="ptag"></span>
+            </div>
+            <div class="pt">
+              <button class="ptb on on-wr"><svg viewBox="0 0 20 20"><path d="M4 11l4 4 8-10"/></svg>WR</button>
+              <span class="ptag deep">Depth</span>
+            </div>
+            <div class="pt">
+              <button class="ptb on on-te"><svg viewBox="0 0 20 20"><path d="M4 11l4 4 8-10"/></svg>TE</button>
+              <span class="ptag need">Need</span>
+            </div>
+            <div class="pt">
+              <button class="ptb"><span class="pdot pos-pk"></span>Picks</button>
+              <span class="ptag"></span>
+            </div>
+          </div>
+
+          <div class="grouplbl" style="margin-top:0">Shopping — tap all that apply <span class="ms">· multi-select</span></div>
+          <div class="togglerow">
+            <div class="pt">
+              <button class="ptb on on-qb"><svg viewBox="0 0 20 20"><path d="M4 11l4 4 8-10"/></svg>QB</button>
+              <span class="ptag"></span>
+            </div>
+            <div class="pt">
+              <button class="ptb on on-rb"><svg viewBox="0 0 20 20"><path d="M4 11l4 4 8-10"/></svg>RB</button>
+              <span class="ptag deep">Deep</span>
+            </div>
+            <div class="pt">
+              <button class="ptb"><span class="pdot pos-wr"></span>WR</button>
+              <span class="ptag"></span>
+            </div>
+            <div class="pt">
+              <button class="ptb"><span class="pdot pos-te"></span>TE</button>
+              <span class="ptag"></span>
+            </div>
+            <div class="pt">
+              <button class="ptb"><span class="pdot pos-pk"></span>Picks</button>
+              <span class="ptag"></span>
+            </div>
+          </div>
+
+          <div class="needkey">Pick as many per row as apply — every toggle is independent. A position still can't be both chased and shopped: tapping it on one row clears it on the other. Need = hole in your starting lineup · Depth/Deep = bench strength; tags are hints from your roster scan, not selections.</div>
+
+          <div class="untline">
+            <span class="k">Untouchables</span><span class="n">5</span><span style="color:var(--dim)">protected</span>
+            <span class="manage">Manage</span>
+          </div>
+        </div>
+
+        <div class="seclabel">How do you want to find trades?</div>
+        <div class="modecard">
+          <div class="icwell"><svg class="ic" width="22" height="22" viewBox="0 0 20 20"><path d="M3 14 6 6l4 5 4-7 3 10z"/></svg></div>
+          <div class="body">
+            <div class="trow"><span class="t">Fully Guided</span><span class="rec">recommended</span></div>
+            <div class="d">We read your roster &amp; league and walk you to the best deals.</div>
+          </div>
+          <svg class="ic chev" width="18" height="18" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6"/></svg>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption"><b>① Multi-select demonstrated:</b> Chasing carries two filled toggles (WR blue + TE purple) and Shopping carries two (QB orange + RB green) — each row's toggles are independent checkboxes, not radios, and the ice "· multi-select" caption on both group labels says so in the UI itself. Mutual exclusion across rows is unchanged from v2. <b>② Expanded untouchables keep v2's treatment</b> — count + Manage link only; the mini-cards are the collapsed card's job (operator: "only for the initial, collapsed version"). Managing the list stays behind Manage, where full player rows with search live.</div>
+  </div>
+</div>
+
+<!-- ═══════════════ ROW 2 · reference: deck bias receipt (unchanged) ═══════════════ -->
+<div class="pairwrap">
+  <div class="slot">
+    <div class="slotlbl">Reference — deck bias receipt (unchanged, approved in v1)</div>
+    <div class="ref">
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="modebar">
+          <div class="back"><svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>Hub</div>
+          <div class="swrow">
+            <span class="sw on">Guided</span><span class="sw">Team</span><span class="sw">Player</span><span class="sw">Calc</span>
+          </div>
+        </div>
+
+        <div class="receipt">
+          <span class="tick"></span>
+          <span>Leaning <b>young + picks</b> — you're <b>Rebuilding</b>.</span>
+          <span class="chg">Change</span>
+        </div>
+
+        <div class="tcard">
+          <div class="hdr">
+            <span class="lbl">Trade with</span>
+            <div class="opp">@rebuild_randy</div>
+          </div>
+          <div class="strength">
+            <div class="row"><span class="lbl">Match strength</span><span class="val">78</span></div>
+            <div class="track"><div class="fill" style="width:78%"></div></div>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">You send</div>
+              <div class="prow" style="border-left-color:var(--rb)"><div><div class="nm">Breece Hall</div><div class="meta">RB · NYJ</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">You get</div>
+              <div class="prow"><div><div class="nm">Marvin Harrison Jr.</div><div class="meta">WR · ARI · 23 yrs</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2027 2nd (mid)</div><div class="meta">PICK</div></div></div>
+            </div>
+          </div>
+          <div class="vbar">
+            <span class="lbl">Dynasty value swing</span>
+            <div class="who">You win</div>
+            <div class="margin">by <b>+380</b> &nbsp;·&nbsp; <span class="pick">a Mid 3rd</span> (≈ 0.2 firsts)</div>
+            <div class="dtrack"><div class="t1"></div><div class="t2"></div><div class="fillr"></div><div class="cen"></div></div>
+            <div class="scalerow"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    </div>
+    <div class="caption">Approved in v1, untouched through v2 and v3: one receipt line above the deck connects its shape to the outlook, with an ice <b>Change</b> link back to the panel (lands on the compact card, auto-expands the editor).</div>
+  </div>
+</div>
+
+<div class="note">
+  <h2>V3 rationale — what changed from v2</h2>
+  <ul>
+    <li><b>Multi-select made undeniable (operator confirm).</b> It was always the v2 spec ("multi-select within a row is fine") but v2's frames showed one selection per row, which read as radio behavior. V3 demonstrates it in both states: collapsed lists every selection ("Chasing WR · TE — Shopping QB · RB"), expanded shows two filled toggles per row, and both group labels now carry an in-UI "· multi-select" caption so the rule survives without this document.</li>
+    <li><b>Untouchable mini-cards, collapsed only (operator ask).</b> The bare count told you protection existed but not <i>who</i> — the one fact you actually want at a glance before shopping a player. Mini-cards are read-only pill chips: 6px round position-color dot + last name, ink-2 fill, hairline border. Capped at 3 + a mono "+N" chip so a 10-player list can't blow up the compact card; the row wraps under long names. Not tappable — Edit stays the panel's single affordance.</li>
+    <li><b>Expanded keeps the count.</b> Per the operator the mini-cards are for the initial, collapsed version only — the editor keeps v2's "Untouchables 5 protected · Manage" line. Duplicating the chips there would just pad the editor's height for a list you manage behind Manage anyway.</li>
+    <li><b>Cost of the chips: +29px.</b> Collapsed grows from v2's 111px to 140px (measured) — still −61% vs v1's 355px, and all three finder modes stay above the 600px fold with room to spare.</li>
+    <li><b>Position color is never the only encoding.</b> Chip dots pair with the name, and position is recoverable in Manage; summary minis keep their QB/RB/WR/TE text labels, per the a11y floor.</li>
+    <li><b>Everything else is v2 verbatim.</b> Outlook chip + tight cards, toggle fill/check mechanics, chase/shop mutual exclusion, passive NEED/DEPTH tags, the WR-fill contrast build note, and the deck bias receipt.</li>
+  </ul>
+</div>
+
+</body>
+</html>

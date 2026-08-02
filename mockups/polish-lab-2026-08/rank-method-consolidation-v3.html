@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish lab — Rank method consolidation v3 (#232 · #233)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ─────────
+     Canonical hexes; --line-strong is the 2026-07-19 a11y value #59647A.
+     Real Chalkline fonts loaded (unlike v2's fallback-only approach) because the
+     v3 question — does the entry share the heading's line at 390px? — depends on
+     Barlow Condensed's actual width. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px}
+  .wrap{max-width:1300px;margin:0 auto}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:24px;max-width:880px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.1;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note p,.note ul{margin:0;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .note ul{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:4px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .q{border-left:3px solid var(--line-strong);padding-left:10px;margin:6px 0;font-style:italic}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:32px 0 12px}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice)}
+
+  .compare{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+  .col{flex:0 1 420px;display:flex;flex-direction:column;gap:12px}
+  .colcap{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+          color:var(--chalk-dim);margin:0;display:flex;align-items:center;gap:8px}
+  .colcap .dot{width:8px;height:8px;border-radius:2px;background:var(--line-strong)}
+  .colcap.prop .dot{background:var(--ice)}
+  .cap{font:400 12px/1.5 var(--ui);color:var(--chalk-faint);max-width:390px}
+
+  /* mock annotation chips — meta, not UI */
+  .hchip{align-self:flex-start;font-family:var(--mono);font-size:11px;color:var(--warn);
+         border:1px dashed var(--warn);border-radius:4px;padding:3px 9px;
+         background:rgba(245,158,11,.06)}
+  .hchip b{color:var(--warn);font-weight:600}
+
+  .phone{position:relative;width:390px;background:var(--ink-0);
+         border:1px solid var(--line-strong);border-radius:8px;overflow:hidden}
+  .phone.crop{height:470px}
+  .phone.crop::after{content:"CHOOSER CONTINUES — UNCHANGED FROM V2";position:absolute;left:0;right:0;
+         bottom:0;padding:8px 0 10px;text-align:center;background:var(--ink-0);
+         border-top:1px dashed var(--line-strong);
+         font:600 10px var(--ui);letter-spacing:.08em;color:var(--chalk-faint)}
+  .phone.narrow{width:330px}
+  .statusbar{height:40px;display:flex;align-items:flex-end;justify-content:space-between;
+             padding:0 20px 6px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)}
+  .batt{display:inline-block;width:20px;height:10px;border:1px solid var(--chalk-dim);
+        border-radius:2px;position:relative}
+  .batt::after{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:70%;
+               background:var(--chalk-dim)}
+  .stackhdr{height:44px;display:flex;align-items:center;justify-content:space-between;
+            padding:0 16px;position:relative}
+  .backctl{display:flex;align-items:center;gap:4px;font:600 14px var(--ui);color:var(--chalk);z-index:1}
+  .stackhdr .shtitle{position:absolute;left:0;right:0;text-align:center;font-family:var(--cond);
+           font-weight:600;font-size:18px;letter-spacing:.03em;text-transform:uppercase;
+           pointer-events:none}
+
+  .scroll{padding:16px 16px 24px;display:flex;flex-direction:column;gap:12px}
+  .heading{font-family:var(--cond);font-weight:600;font-size:22px;line-height:26px;
+           letter-spacing:.03em;text-transform:uppercase}
+  /* v3: heading row — heading left, import entry right.
+     Heading never wraps internally; if the pair can't share the row, the whole
+     entry wraps to its own line and margin-left:auto keeps it right-aligned. */
+  .hrow{display:flex;align-items:baseline;justify-content:space-between;gap:8px 12px;flex-wrap:wrap}
+  .hrow .heading{flex:0 0 auto;white-space:nowrap}
+  .hrow .implink,.hrow .impbtn,.hrow .impchip{margin-left:auto}
+  .hrow.center{align-items:center}
+
+  /* variant A — text link */
+  .implink{display:inline-flex;align-items:center;gap:6px;flex:none;
+           font:600 13px/18px var(--ui);color:var(--chalk-dim);cursor:pointer;
+           text-decoration:underline;text-underline-offset:3px;
+           text-decoration-color:var(--ice);text-decoration-thickness:1.5px;white-space:nowrap}
+  .implink svg{flex:none}
+  .implink.wrapln{margin-top:-2px}
+
+  /* variant B — compact solid ice button */
+  .impbtn{display:inline-flex;align-items:center;gap:6px;flex:none;min-height:32px;
+          padding:0 12px;border-radius:4px;background:var(--ice);color:var(--on-ice);
+          font:600 13px var(--ui);cursor:pointer;white-space:nowrap}
+
+  /* variant C — ice-outlined chip */
+  .impchip{display:inline-flex;align-items:center;gap:6px;flex:none;min-height:32px;
+           padding:0 12px;border-radius:4px;border:1px solid var(--ice);background:transparent;
+           color:var(--ice);font:600 13px var(--ui);cursor:pointer;white-space:nowrap}
+
+  /* chooser body (verbatim from v2) */
+  .callout{display:flex;gap:8px;background:var(--ink-2);border:1px solid var(--line-strong);
+           border-radius:4px;padding:12px}
+  .callout .tx{font:400 13px/19px var(--ui);color:var(--chalk-dim);flex:1}
+  .callout .tx b{color:var(--chalk);font-weight:500}
+  .mcard{background:var(--ink-1);border:1px solid var(--line);border-radius:4px;
+         padding:12px;display:flex;flex-direction:column;gap:8px}
+  .mcard.featured{border-color:var(--ice)}
+  .mhead{display:flex;align-items:center;gap:8px}
+  .mtitle{font:600 16px/22px var(--ui);flex:1}
+  .rectag{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--flare)}
+  .mbody{font:400 13px/19px var(--ui);color:var(--chalk-dim)}
+  .roletag{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .subrow{border-top:1px solid var(--line);margin-top:2px;padding-top:8px;
+          font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .subrow b{color:var(--chalk);font-weight:600}
+
+  /* glyph correction inset */
+  .glyphbox{display:flex;gap:20px;align-items:center;background:var(--ink-1);
+            border:1px solid var(--line);border-radius:8px;padding:14px 18px;max-width:520px}
+  .gcell{display:flex;flex-direction:column;align-items:center;gap:6px;
+         font:600 10px var(--ui);letter-spacing:.08em;text-transform:uppercase}
+  .gcell.bad{color:var(--neg)} .gcell.good{color:var(--pos)}
+  .gnote{font:400 12px/1.5 var(--ui);color:var(--chalk-dim);flex:1}
+
+  /* reference frame (v2 sheet, scaled) */
+  .ref{zoom:.62}
+  .sheetstage{position:relative;width:390px;height:620px;border:1px solid var(--line-strong);
+              border-radius:8px;overflow:hidden;background:var(--ink-0)}
+  .scrim{position:absolute;inset:0;background:rgba(7,9,12,0.78)}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--ink-2);
+         border:1px solid var(--line);border-radius:8px 8px 0 0;padding:16px 16px 32px;
+         display:flex;flex-direction:column;gap:8px;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+  .grabber{align-self:center;width:32px;height:4px;border-radius:2px;background:var(--line-strong);
+           margin-bottom:8px}
+  .srow{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:4px;
+        border-bottom:1px solid var(--line)}
+  .srow .m{flex:1}
+  .srow .t{font:600 16px/22px var(--ui);display:flex;align-items:center;gap:8px}
+  .srow .s{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .sheetsub{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-bottom:8px}
+  .honesty{display:flex;gap:8px;background:var(--ink-3);border-radius:4px;padding:10px 12px;
+           font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:4px}
+  .btn{height:40px;border-radius:4px;display:flex;align-items:center;justify-content:center;
+       font:600 14px var(--ui);padding:0 16px}
+  .btn.ghost{color:var(--chalk-dim)}
+
+  svg.i{display:block;flex:none}
+
+  .rationale{margin-top:36px}
+  .rationale .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+                   padding:16px 20px;max-width:880px}
+  .rationale h2{font-family:var(--cond);font-weight:600;font-size:18px;letter-spacing:.03em;
+                text-transform:uppercase;margin:0 0 8px;display:flex;align-items:center;gap:8px}
+  .rationale h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .rationale ul{margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .rationale li{margin-bottom:6px}
+  .rationale strong{color:var(--chalk);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <h1>Rank method consolidation — v3 (#232 · #233)</h1>
+    <p><strong>Operator feedback on v2:</strong></p>
+    <p class="q">"Can we try fitting it to the right of the 'Build your board'? And it should be an upload icon rather than a download icon. Try a few versions of examples that fit it to the right. One with the 'Have rankings already' text be a link. Another version just 'Import Rankings' as a cyan button."</p>
+    <p style="margin-top:8px"><strong>V3 scope = the chooser header row only.</strong> Three
+      variants of the import entry fitted to the right of "Build your board", all using a
+      corrected <strong>upload</strong> glyph (arrow UP out of the tray — v2's icon pointed
+      down). The Bring-your-rankings sheet, paste state, and match review are unchanged from
+      v2 — one scaled reference frame below. Section C (empty-tier CTA) is also unchanged and
+      not repeated here; see <code style="color:var(--chalk)">rank-method-consolidation-v2.html</code>.</p>
+  </div>
+
+  <!-- ══════════ glyph correction ══════════ -->
+  <div class="sec">Icon correction — upload, not download</div>
+  <div class="glyphbox">
+    <div class="gcell bad">
+      <svg class="i" width="28" height="28" viewBox="0 0 16 16" fill="none" stroke="#EF4444" stroke-width="1.5"><path d="M8 2v7M5 6.5 8 9.5l3-3M3 11v2.5h10V11"/></svg>
+      v2 — down
+    </div>
+    <div class="gcell good">
+      <svg class="i" width="28" height="28" viewBox="0 0 16 16" fill="none" stroke="#22C55E" stroke-width="1.5"><path d="M8 9.5v-7M5 5 8 2l3 3M3 11v2.5h10V11"/></svg>
+      v3 — up
+    </div>
+    <div class="gnote">v2's chip glyph had the arrow pointing <b>down into</b> the tray —
+      that reads "download". The user is <b>giving us</b> their rankings, so the arrow now
+      points <b>up out of</b> the tray. Same 16×16 stroke geometry otherwise; every variant
+      below uses the corrected glyph.</div>
+  </div>
+
+  <!-- ══════════ SECTION A — three header-row variants ══════════ -->
+  <div class="sec">A · Import entry to the right of "Build your board" — three variants</div>
+  <div class="compare">
+
+    <!-- Variant A — text link -->
+    <div class="col">
+      <div class="colcap prop"><span class="dot"></span>A — text link (recommended)</div>
+      <div class="hchip">quiet: chalk-dim text · ice underline · upload glyph</div>
+      <div class="phone crop">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="stackhdr">
+          <span class="shtitle">Rank</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll">
+          <div class="hrow">
+            <div class="heading">Build your board</div>
+            <span class="implink"><svg class="i" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#56D9EC" stroke-width="1.75"><path d="M8 9.5v-7M5 5 8 2l3 3M3 11v2.5h10V11"/></svg>Have rankings already?</span>
+          </div>
+
+          <div class="callout">
+            <svg class="i" width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#F0508C" stroke-width="1.75"><path d="M3 7h11l-2.5-2.5M17 13H6l2.5 2.5"/></svg>
+            <div class="tx"><b>Trades are priced off this board.</b> The better it matches you,
+              the better the deals we find.</div>
+          </div>
+
+          <div class="mcard featured">
+            <div class="mhead">
+              <span class="roletag">Fastest</span>
+              <span style="flex:1"></span><span class="rectag">recommended</span>
+            </div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#56D9EC" stroke-width="1.75"><path d="M4 10.5 8.5 15 16 6"/></svg>
+              <span class="mtitle">Quick set</span>
+            </div>
+            <div class="mbody">Tap players into value tiers, one tier at a time. A usable board
+              in a few minutes per position.</div>
+            <div class="subrow"><b>Then, if you want:</b> Quick rank — a follow-on pass that
+              fine-tunes the order inside each tier. Offered when you finish.</div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead"><span class="roletag">Most precise</span></div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 17v-6M10 17V3M17 17v-9"/></svg>
+              <span class="mtitle">Head-to-heads</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cap">The whole phrase is the link: 13px chalk-dim with an ice underline and
+        an ice upload glyph — the operator's sentence, reading as a question only people with
+        existing rankings will answer. Baseline-aligned with the 22px condensed heading. It is
+        the quietest of the three: zero competition with the cards' Fastest / Most precise /
+        Most control hierarchy.</div>
+
+      <!-- narrow-width wrap treatment -->
+      <div class="colcap prop" style="margin-top:8px"><span class="dot"></span>A — narrow width: link wraps under, right-aligned</div>
+      <div class="phone narrow">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="scroll" style="padding-top:4px;padding-bottom:16px">
+          <div class="hrow" style="row-gap:2px">
+            <div class="heading">Build your board</div>
+            <span class="implink wrapln"><svg class="i" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#56D9EC" stroke-width="1.75"><path d="M8 9.5v-7M5 5 8 2l3 3M3 11v2.5h10V11"/></svg>Have rankings already?</span>
+          </div>
+          <div class="callout">
+            <svg class="i" width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#F0508C" stroke-width="1.75"><path d="M3 7h11l-2.5-2.5M17 13H6l2.5 2.5"/></svg>
+            <div class="tx"><b>Trades are priced off this board.</b> The better it matches you…</div>
+          </div>
+        </div>
+      </div>
+      <div class="cap">When the row can't fit both (330px frame, or large Dynamic Type), the
+        link never truncates or squeezes the heading — the row wraps and the intact link drops
+        to its own line, right-aligned under the heading. Same rule for B and C.</div>
+    </div>
+
+    <!-- Variant B — solid ice button -->
+    <div class="col">
+      <div class="colcap"><span class="dot"></span>B — compact ice button (operator's ask, shown honestly)</div>
+      <div class="hchip">loud: solid ice fill — competes with Quick set's primary slot</div>
+      <div class="phone crop">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="stackhdr">
+          <span class="shtitle">Rank</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll">
+          <div class="hrow center">
+            <div class="heading">Build your board</div>
+            <span class="impbtn"><svg class="i" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#071013" stroke-width="1.75"><path d="M8 9.5v-7M5 5 8 2l3 3M3 11v2.5h10V11"/></svg>Import Rankings</span>
+          </div>
+
+          <div class="callout">
+            <svg class="i" width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#F0508C" stroke-width="1.75"><path d="M3 7h11l-2.5-2.5M17 13H6l2.5 2.5"/></svg>
+            <div class="tx"><b>Trades are priced off this board.</b> The better it matches you,
+              the better the deals we find.</div>
+          </div>
+
+          <div class="mcard featured">
+            <div class="mhead">
+              <span class="roletag">Fastest</span>
+              <span style="flex:1"></span><span class="rectag">recommended</span>
+            </div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#56D9EC" stroke-width="1.75"><path d="M4 10.5 8.5 15 16 6"/></svg>
+              <span class="mtitle">Quick set</span>
+            </div>
+            <div class="mbody">Tap players into value tiers, one tier at a time. A usable board
+              in a few minutes per position.</div>
+            <div class="subrow"><b>Then, if you want:</b> Quick rank — a follow-on pass that
+              fine-tunes the order inside each tier. Offered when you finish.</div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead"><span class="roletag">Most precise</span></div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 17v-6M10 17V3M17 17v-9"/></svg>
+              <span class="mtitle">Head-to-heads</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cap">"Import Rankings" as a 32px solid ice button, center-aligned to the
+        heading's cap height (baseline alignment floats a filled box oddly). Most discoverable
+        by far — but it is the only ice <i>fill</i> on the screen, which makes it read as the
+        page's primary action before the eye ever reaches the recommended Quick set card. See
+        rationale: we'd only ship this if import discoverability is the top goal.</div>
+    </div>
+
+    <!-- Variant C — ice-outlined chip -->
+    <div class="col">
+      <div class="colcap"><span class="dot"></span>C — ice-outlined chip ("a few versions")</div>
+      <div class="hchip">middle: ice border + text, no fill · shortest label</div>
+      <div class="phone crop">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="stackhdr">
+          <span class="shtitle">Rank</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll">
+          <div class="hrow center">
+            <div class="heading">Build your board</div>
+            <span class="impchip"><svg class="i" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#56D9EC" stroke-width="1.75"><path d="M8 9.5v-7M5 5 8 2l3 3M3 11v2.5h10V11"/></svg>Import</span>
+          </div>
+
+          <div class="callout">
+            <svg class="i" width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#F0508C" stroke-width="1.75"><path d="M3 7h11l-2.5-2.5M17 13H6l2.5 2.5"/></svg>
+            <div class="tx"><b>Trades are priced off this board.</b> The better it matches you,
+              the better the deals we find.</div>
+          </div>
+
+          <div class="mcard featured">
+            <div class="mhead">
+              <span class="roletag">Fastest</span>
+              <span style="flex:1"></span><span class="rectag">recommended</span>
+            </div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#56D9EC" stroke-width="1.75"><path d="M4 10.5 8.5 15 16 6"/></svg>
+              <span class="mtitle">Quick set</span>
+            </div>
+            <div class="mbody">Tap players into value tiers, one tier at a time. A usable board
+              in a few minutes per position.</div>
+            <div class="subrow"><b>Then, if you want:</b> Quick rank — a follow-on pass that
+              fine-tunes the order inside each tier. Offered when you finish.</div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead"><span class="roletag">Most precise</span></div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 17v-6M10 17V3M17 17v-9"/></svg>
+              <span class="mtitle">Head-to-heads</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cap">Upload glyph + "Import" in an ice-outlined 32px chip — a clear control
+        without a fill, and the shortest label, so it survives the narrowest headings without
+        wrapping. Louder than A (ice border draws the eye) but it stays in the "secondary
+        control" register: outlined, not filled, so Quick set keeps the only solid-ice claim
+        on the screen. The chip alone loses A's self-selecting question — the sheet's
+        "Bring your rankings" title does that work one tap later.</div>
+    </div>
+  </div>
+
+  <!-- ══════════ reference: import flow unchanged ══════════ -->
+  <div class="sec">Reference — import flow unchanged from v2 (sheet · paste · match review)</div>
+  <div class="compare">
+    <div class="col">
+      <div class="colcap"><span class="dot"></span>v2 "Bring your rankings" sheet — reference only, not iterated here</div>
+      <div class="ref">
+      <div class="sheetstage">
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="grabber"></div>
+          <div class="heading">Bring your rankings</div>
+          <div class="sheetsub">Pull in a board you keep somewhere else. Ranks only — a numbered
+            list of players is all we need.</div>
+          <div class="srow"><svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M5 2.5h7l3.5 3.5v11.5h-10.5Z"/><path d="M12 2.5V6h3.5"/></svg>
+            <div class="m"><div class="t">Upload a CSV</div>
+            <div class="s">An export from KTC, FantasyCalc, or any spreadsheet</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="srow"><svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 4h14v12H3Z"/><path d="M3 8h14M3 12h14M8 4v12"/></svg>
+            <div class="m"><div class="t">Upload a spreadsheet</div>
+            <div class="s">XLSX from Excel, Numbers, or Google Sheets</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="srow" style="border-bottom:0"><svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M7 3.5h6M6 3.5H5a1 1 0 0 0-1 1V17h12V4.5a1 1 0 0 0-1-1h-1"/><path d="M7 2h6v3H7Z"/></svg>
+            <div class="m"><div class="t">Paste a table</div>
+            <div class="s">Copy rows from any sheet or site and paste them here</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="honesty">
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 5v.5"/></svg>
+            <span>We'll match player names to your league's player pool — you review anything
+              we can't match.</span>
+          </div>
+          <div class="btn ghost" style="margin-top:4px">Cancel</div>
+        </div>
+      </div>
+      </div>
+      <div class="cap">All three variants open this same sheet; the paste-a-table state and the
+        match-review screen behind it are exactly the v2 frames (B1–B3 in
+        <code>rank-method-consolidation-v2.html</code>), including the paste-only v1 scoping.
+        Nothing downstream of the entry point changed in v3.</div>
+    </div>
+  </div>
+
+  <!-- ══════════ RATIONALE ══════════ -->
+  <div class="rationale">
+    <div class="card">
+      <h2>Rationale — v3 deltas &amp; recommendation</h2>
+      <ul>
+        <li><strong>Recommendation: A (text link)</strong> — the tenets say quiet entry and one
+          primary per screen, and a solid ice button to the right of the heading (B) genuinely
+          competes with the three method cards' hierarchy: it's the only ice fill in view, so it
+          out-shouts the recommended Quick set card the screen exists to sell. We agree with
+          that concern, honestly stated on B's frame. A keeps the operator's self-selecting
+          question ("Have rankings already?"), costs zero vertical space (it shares the
+          heading's line), and the ice underline + glyph make it read as tappable without
+          claiming primacy. If usage shows people with existing boards missing it, step up to
+          <strong>C</strong> — outlined ice chip, still no fill — before ever going to B.</li>
+        <li><strong>Fitted right, not stacked (operator's ask):</strong> the v2 entry was a
+          full-width chip between heading and callout — a row of its own. All three v3 variants
+          sit the entry in the heading's right margin: A baseline-aligned (text-to-text), B/C
+          center-aligned (box-to-cap-height). Net −36px of chooser height vs v2.</li>
+        <li><strong>Upload glyph corrected (operator's ask):</strong> arrow now points UP out of
+          the tray (<code>M8 9.5v-7 · M5 5 8 2l3 3</code> over the same tray path) — importing
+          is the user handing rankings to us. The correction applies to every variant and, at
+          build time, to the sheet rows' file icons if we ever add direction arrows there.</li>
+        <li><strong>Wrap rule (shown on A):</strong> when heading + entry can't share 390px —
+          long localized headings or large Dynamic Type — the row wraps and the intact entry
+          right-aligns on its own line below. Never truncate the entry, never shrink the
+          heading. C's one-word label is the most wrap-resistant; A wraps most often but
+          degrades the most gracefully since it's plain text.</li>
+        <li><strong>Unchanged from v2:</strong> the Bring-your-rankings sheet (CSV · XLSX ·
+          paste), honesty line, match-review screen with disabled-until-resolved primary,
+          paste-only v1 scoping, Most control = Tiers board, and the #233 empty-tier CTA.</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
