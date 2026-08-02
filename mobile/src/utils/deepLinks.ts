@@ -146,11 +146,36 @@ const V2_SCREENS = {
 
 const V2_CONFIG = { screens: V2_SCREENS } as any;
 
+// ── Universal-link aliases (FB #239) ──────────────────────────────────────
+// The AASA file claims the web share paths (/s/*) so iOS opens the app
+// instead of Safari/the App Store when it's installed. Those are web-first
+// URLs with no screen of their own, so map them onto existing routes here
+// rather than in V2_SCREENS (a screen can only own one path):
+//   /s/trade/<match_id> → app/matches/<match_id>  (match share landing)
+//   /s/p/<short_id>     → app/trades              (package share landing)
+// Applied in BOTH resolution paths: react-navigation's `linking` config
+// (cold start) via the getStateFromPath override below, and _routePathV2
+// (warm-start url events through handleDeepLink).
+export function rewriteUniversalPath(pathWithQuery: string): string {
+  const qi = pathWithQuery.search(/[?#]/);
+  const rawPath = qi === -1 ? pathWithQuery : pathWithQuery.slice(0, qi);
+  const suffix = qi === -1 ? '' : pathWithQuery.slice(qi);
+  const path = rawPath.replace(/^\/+/, '').replace(/\/+$/, '');
+  const trade = /^s\/trade\/([^/?#]+)$/i.exec(path);
+  if (trade) return `app/matches/${trade[1]}${suffix}`;
+  if (/^s\/p\/[^/?#]+$/i.test(path)) return `app/trades${suffix}`;
+  return pathWithQuery;
+}
+
 /** Full `linking` object for NavigationContainer when the v2 flag is on. */
 export function getLinkingV2() {
   return {
     prefixes: [Linking.createURL('/'), 'https://fantasy-trade-finder.onrender.com'],
     config: V2_CONFIG,
+    // Cold-start universal links arrive here as a path (+query); alias the
+    // web-only share paths before the default resolver sees them.
+    getStateFromPath: (path: string, options?: any) =>
+      getStateFromPath(rewriteUniversalPath(path), options),
   };
 }
 
@@ -158,7 +183,7 @@ export function getLinkingV2() {
  *  navigate action. Returns false when the path matches nothing. */
 function _routePathV2(pathWithQuery: string): boolean {
   try {
-    const state = getStateFromPath(pathWithQuery, V2_CONFIG);
+    const state = getStateFromPath(rewriteUniversalPath(pathWithQuery), V2_CONFIG);
     if (!state) return false;
     const action = getActionFromState(state as any, V2_CONFIG);
     if (!action) return false;

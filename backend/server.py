@@ -6916,8 +6916,10 @@ def apple_app_site_association():
     and no redirect — a direct Flask route satisfies all three.
 
     Declares the shared-surface paths: public profiles (/u/*), share
-    links (/s/*), and referral links (/?ref=*). `components` is the
-    modern matcher (iOS 13+; required for the ?ref query match);
+    links (/s/*), referral links (/?ref=*), and league invite links
+    (/?league=*; FB #239 — mobile's buildInviteUrl omits `ref` when the
+    username is unknown, so `league` must match on its own). `components`
+    is the modern matcher (iOS 13+; required for the query matches);
     `paths` is the legacy fallback for the path-only patterns.
     """
     team_id = os.environ.get("APPLE_TEAM_ID") or _APPLE_TEAM_ID_DEFAULT
@@ -6932,6 +6934,7 @@ def apple_app_site_association():
                     {"/": "/u/*"},
                     {"/": "/s/*"},
                     {"/": "/", "?": {"ref": "?*"}},
+                    {"/": "/", "?": {"league": "?*"}},
                 ],
                 "paths": ["/u/*", "/s/*"],
             }],
