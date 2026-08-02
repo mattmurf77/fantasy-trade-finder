@@ -37,6 +37,7 @@ import {
   getAssetPrefs,
   setAssetPref,
   type Outlook,
+  type LeaguePreferences,
 } from '../api/league';
 import { getLeagueUsers } from '../api/sleeper';
 import { getTradeValues } from '../api/calc';
@@ -56,8 +57,9 @@ import { getTradeValues } from '../api/calc';
 // last name). Collapsed by default: outlook chip + one summary line
 // listing ALL selections + untouchable mini-cards. Edit expands IN PLACE:
 // four outlook cards + Chasing/Shopping multi-select toggle rows (Picks
-// is a fifth toggle) + count/Manage untouchables line; Done persists via
-// the same preferences API OutlookSheet used, then collapses. The hub no
+// is a fifth toggle) + count/Manage untouchables line. #236: every tap
+// in the editor AUTOSAVES via the same preferences API OutlookSheet used
+// (in-flight coalesced, last-write-wins); Done is a pure collapse. The hub no
 // longer mounts OutlookSheet (the sheet survives for TradesScreen's own
 // entry points — see docs/feedback/items/212-trade-dna-redesign/status.md).
 
@@ -202,9 +204,9 @@ export default function TradeFinderHubScreen({ navigation, route }: any) {
   const [untouchablesOpen, setUntouchablesOpen] = useState(false);
 
   // #212 — in-place DNA editor state. Drafts mirror the saved prefs until
-  // the user touches a control (dnaTouched); Done persists only when
-  // something changed, so an idle expand/collapse never invalidates the
-  // backend's cached deck.
+  // the user touches a control (dnaTouched). #236: every tap autosaves
+  // (Done is a pure collapse); an idle expand/collapse still fires no
+  // POST, so a mere look never invalidates the backend's cached deck.
   const [dnaEditing, setDnaEditing] = useState(false);
   const [draftOutlook, setDraftOutlook] = useState<NonNullable<Outlook> | null>(
     null,
@@ -346,6 +348,57 @@ export default function TradeFinderHubScreen({ navigation, route }: any) {
     },
   });
 
+  // #236 — autosave: every editor tap persists immediately (no Done
+  // gate). One POST in flight at a time; taps landing mid-flight coalesce
+  // into a single trailing save of the latest FULL payload, so the last
+  // write wins and requests can't complete out of order.
+  const dnaDesired = useRef<{
+    outlook: NonNullable<Outlook>;
+    acquire: string[];
+    shed: string[];
+  } | null>(null);
+  const dnaInFlight = useRef(false);
+
+  const flushDnaSave = async () => {
+    if (dnaInFlight.current) return;
+    const payload = dnaDesired.current;
+    if (!payload) return;
+    dnaDesired.current = null;
+    dnaInFlight.current = true;
+    try {
+      await saveOutlook.mutateAsync(payload);
+    } catch (e: any) {
+      // Quiet-but-honest failure: drop queued edits, revert the drafts to
+      // the last-saved prefs, and surface the existing inline error line.
+      dnaDesired.current = null;
+      const saved = queryClient.getQueryData<LeaguePreferences>([
+        'league-prefs',
+        leagueId,
+      ]);
+      setDraftOutlook(
+        (saved?.team_outlook as NonNullable<Outlook>) ??
+          (saved?.inferred_outlook as NonNullable<Outlook>) ??
+          null,
+      );
+      setDraftChasing(saved?.acquire_positions ?? []);
+      setDraftShopping(saved?.trade_away_positions ?? []);
+      dnaTouched.current = false;
+      setDnaError(e?.message || 'Could not save preferences');
+    } finally {
+      dnaInFlight.current = false;
+      if (dnaDesired.current) void flushDnaSave();
+    }
+  };
+
+  const queueDnaSave = (payload: {
+    outlook: NonNullable<Outlook>;
+    acquire: string[];
+    shed: string[];
+  }) => {
+    dnaDesired.current = payload;
+    void flushDnaSave();
+  };
+
   const openDnaEdit = () => {
     haptics.selection();
     dnaTouched.current = false;
@@ -355,52 +408,52 @@ export default function TradeFinderHubScreen({ navigation, route }: any) {
 
   const pickOutlook = (key: NonNullable<Outlook>) => {
     haptics.selection();
+    if (draftOutlook === key) return; // re-tapping the pick isn't an edit
     dnaTouched.current = true;
     setDnaError(null);
     setDraftOutlook(key);
+    queueDnaSave({ outlook: key, acquire: draftChasing, shed: draftShopping });
   };
 
   // Multi-select within a row; cross-row mutual exclusion MOVES the
   // position (tapping a position selected on the other row selects it
-  // here and clears it there — never an error).
+  // here and clears it there — never an error). #236: next values are
+  // computed up front so the tap can autosave the exact state it shows.
   const toggleDnaPos = (side: 'chase' | 'shop', pos: string) => {
     haptics.selection();
     dnaTouched.current = true;
     setDnaError(null);
+    let nextChasing: string[];
+    let nextShopping: string[];
     if (side === 'chase') {
-      setDraftChasing((cur) =>
-        cur.includes(pos) ? cur.filter((p) => p !== pos) : [...cur, pos],
-      );
-      setDraftShopping((cur) => cur.filter((p) => p !== pos));
+      nextChasing = draftChasing.includes(pos)
+        ? draftChasing.filter((p) => p !== pos)
+        : [...draftChasing, pos];
+      nextShopping = draftShopping.filter((p) => p !== pos);
     } else {
-      setDraftShopping((cur) =>
-        cur.includes(pos) ? cur.filter((p) => p !== pos) : [...cur, pos],
-      );
-      setDraftChasing((cur) => cur.filter((p) => p !== pos));
+      nextShopping = draftShopping.includes(pos)
+        ? draftShopping.filter((p) => p !== pos)
+        : [...draftShopping, pos];
+      nextChasing = draftChasing.filter((p) => p !== pos);
     }
+    setDraftChasing(nextChasing);
+    setDraftShopping(nextShopping);
+    queueDnaSave({
+      // The backend requires a valid outlook to persist positions;
+      // 'not_sure' is the honest no-choice value (chip: "no bias applied").
+      outlook: draftOutlook ?? 'not_sure',
+      acquire: nextChasing,
+      shed: nextShopping,
+    });
   };
 
-  const handleDnaDone = async () => {
+  // #236 — Done is a pure collapse affordance: every edit already saved
+  // on tap, so collapsing never POSTs.
+  const handleDnaDone = () => {
     haptics.selection();
-    if (!dnaTouched.current) {
-      // Nothing changed — collapse without a POST (a save invalidates the
-      // backend's cached deck; don't pay that for a look).
-      setDnaEditing(false);
-      return;
-    }
-    try {
-      await saveOutlook.mutateAsync({
-        // The backend requires a valid outlook to persist positions;
-        // 'not_sure' is the honest no-choice value (chip: "no bias applied").
-        outlook: draftOutlook ?? 'not_sure',
-        acquire: draftChasing,
-        shed: draftShopping,
-      });
-      dnaTouched.current = false;
-      setDnaEditing(false);
-    } catch (e: any) {
-      setDnaError(e?.message || 'Could not save preferences');
-    }
+    dnaTouched.current = false;
+    setDnaError(null);
+    setDnaEditing(false);
   };
 
   const openMode = (key: ModeCard['key']) => {
@@ -443,31 +496,21 @@ export default function TradeFinderHubScreen({ navigation, route }: any) {
           <View style={styles.dnaTop}>
             <Text style={styles.dnaLabel}>Your Trade DNA</Text>
             {dnaEditing ? (
+              // #236 — pure collapse control (edits autosave per tap), so
+              // it never disables or spins on an in-flight save.
               <Pressable
                 testID="dna.done"
                 accessibilityRole="button"
                 accessibilityLabel="Done editing trade preferences"
-                accessibilityState={{
-                  disabled: saveOutlook.isPending,
-                  busy: saveOutlook.isPending,
-                }}
-                disabled={saveOutlook.isPending}
                 onPress={handleDnaDone}
                 hitSlop={8}
                 style={({ pressed }) => [
                   styles.doneBtn,
                   pressed && { backgroundColor: ice.press },
-                  saveOutlook.isPending && { opacity: 0.45 },
                 ]}
               >
-                {saveOutlook.isPending ? (
-                  <ActivityIndicator size="small" color={ice.on} />
-                ) : (
-                  <>
-                    <Icon name="check" size={13} color={ice.on} />
-                    <Text style={styles.doneText}>Done</Text>
-                  </>
-                )}
+                <Icon name="check" size={13} color={ice.on} />
+                <Text style={styles.doneText}>Done</Text>
               </Pressable>
             ) : (
               <Pressable
