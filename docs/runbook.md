@@ -268,6 +268,10 @@ This repo uses the Expo **bare workflow** — `mobile/ios/` is tracked in git an
 
 - **Pinned failure copy:** the Maestro regression guard (`mobile/.maestro/flows/smoke/11-apple-entitlement.yaml`) asserts on error strings pinned from `expo-apple-authentication@8.0.8` (`ios/AppleAuthenticationExceptions.swift`); `package.json` floats `~8.0.8`, so re-verify those strings whenever that package is upgraded.
 
+## Universal Links AASA is CDN-cached by Apple (feedback #239, 2026-08-02)
+
+Apple fetches `/.well-known/apple-app-site-association` through its own CDN, not from the device, so AASA changes take up to ~24h to reach installed apps and MUST be deployed on Render **before** the next iOS build is installed (install-time is when iOS validates the entitlement against the live file); for immediate on-device testing, set Developer mode's "Associated Domains Development" toggle or use the `?mode=developer` entitlement suffix, and sanity-check the served file with an AASA validator (e.g. Branch's) after deploy.
+
 ## Render cold starts — keep-warm cron (onboarding item 3, 2026-07-17)
 
 Prod runs on Render's **free tier**, which spins the web service down after ~15 min idle; the next request pays a **30–60s cold start**. The onboarding redesign's <60s time-to-first-trade-card budget assumes a warm server, so a scheduled GitHub Actions workflow keeps it warm.
