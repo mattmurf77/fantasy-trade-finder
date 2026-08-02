@@ -25,8 +25,6 @@ import {
 } from '../theme/chalkline';
 import { posColor } from '../theme/colors';
 import { Icon, Button } from '../components/chalkline';
-import LeaguePill from '../components/LeaguePill';
-import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import OutlookSheet from '../components/OutlookSheet';
 import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
@@ -121,7 +119,6 @@ export default function TradeFinderHubScreen({ navigation }: any) {
   const leagueId = league?.league_id || null;
   const userId = user?.user_id || '';
 
-  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [outlookOpen, setOutlookOpen] = useState(false);
   const [teamPickerOpen, setTeamPickerOpen] = useState(false);
   const [untouchablesOpen, setUntouchablesOpen] = useState(false);
@@ -268,18 +265,16 @@ export default function TradeFinderHubScreen({ navigation }: any) {
           await saveOutlook.mutateAsync({ outlook: o, acquire: a, shed: s });
         }}
       />
-      <LeagueSwitcherSheet
-        visible={switcherOpen}
-        onClose={() => setSwitcherOpen(false)}
-      />
-
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.header}>
           <Text style={styles.pageTitle} accessibilityRole="header">
             Find a Trade
           </Text>
         </View>
-        <LeaguePill label="Trading in" onPress={() => setSwitcherOpen(true)} />
+        {/* #223 — the "Trading in" LeaguePill row is gone: the global
+            TopBar now carries the active league + switcher on every tab,
+            and its ~63pt goes back to hub content (feeds the #218
+            fit-to-screen pass). */}
 
         {/* Trade DNA panel — your live targeting preferences at a glance. */}
         <View style={styles.dna}>

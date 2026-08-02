@@ -23,17 +23,26 @@ import { relativeTime } from '../utils/relativeTime';
 // *called* from event handlers, never at module-eval time.
 import { navigationRef } from '../navigation/RootNav';
 import { resolveNotificationTarget, routeNotificationTap } from '../utils/deepLinks';
+import LeagueSwitcherSheet from './LeagueSwitcherSheet';
 
-// Global top bar that sits above the tab navigator. Chalkline TopNav:
-// wordmark (ice tick + condensed caps) on the left, settings + bell icon
-// buttons on the right. The bell shows an unread count when new pushes have
-// arrived since the user last opened the sheet.
+// Global top bar that sits above the tab navigator. Chalkline TopNav,
+// #223/#224 header-league-switcher treatment (approved mock:
+// mockups/polish-lab-2026-08/header-league-switcher.html): the LEFT half
+// carries the ACTIVE league — brand tick, 11px "LEAGUE" micro-label over a
+// truncating league name, ice chevron-down (ice = tappable) — and tapping
+// it opens the shared LeagueSwitcherSheet from ANY tab (this is the one
+// global sheet instance; the per-screen mounts were removed with the pills
+// they served). Sessions with no active league (account-only) fall back to
+// the app wordmark. Bell + settings stay on the right; per the mock the
+// bell sits inboard of the gear so its unread badge is away from the
+// screen edge.
 //
-// Sized at 44pt + the system top inset so it sits flush under the status
-// bar without overlapping screen content. Screens below this should opt
-// out of the top safe-area inset (e.g. SafeAreaView edges={['bottom']})
-// so we don't double-pad.
-export const TOP_BAR_HEIGHT = 44;
+// Sized at 52pt (44pt pre-#223 — grown to fit the two-line label/name
+// stack at the 11px type floor) + the system top inset so it sits flush
+// under the status bar without overlapping screen content. Screens below
+// this should opt out of the top safe-area inset (e.g. SafeAreaView
+// edges={['bottom']}) so we don't double-pad.
+export const TOP_BAR_HEIGHT = 52;
 
 // Backend used to prefix match-notification bodies with an emoji that's
 // already conveyed by the visual icon badge — so it would render twice.
@@ -54,6 +63,13 @@ export default function TopBar() {
   const clearAll    = useNotifications((s) => s.clear);
   const hydrateFromServer = useNotifications((s) => s.hydrateFromServer);
   const userId = useSession((s) => s.user?.user_id ?? null);
+  // #223 — the active league IS the header. Same session slice LeaguePill
+  // read, so the name updates the moment a switch completes; `switching`
+  // dims/disables the affordance while a swap is in flight (sessionInit
+  // can take seconds on Render free tier — no concurrent switches).
+  const league    = useSession((s) => s.league);
+  const switching = useSession((s) => s.switching);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   // S5 PRD-02 (flag `notif.tap_routing_v2`): the bell hydrates from the
   // server inbox on open (the in-memory feed resets on relaunch, so without
   // this the sheet claims "all caught up" over real unread rows), rows are
@@ -109,34 +125,50 @@ export default function TopBar() {
         ]}
       >
         <View style={styles.row}>
-          <View style={styles.wordmark}>
-            <View style={styles.wordmarkTick} />
-            <Text style={styles.wordmarkText}>Trade Finder</Text>
-          </View>
-          <View style={styles.actions}>
+          {league ? (
+            // #223 — active-league affordance: whole left cluster is one
+            // ≥44pt hit target opening the switcher. Ice chevron = "tap to
+            // switch" (ice = action, Chalkline); pressed = ink-3 fill like
+            // the icon buttons. Long names tail-truncate (~200pt).
             <Pressable
-              onPress={() => {
-                if (navigationRef.isReady()) {
-                  navigationRef.navigate('Settings');
-                }
-              }}
-              hitSlop={12}
-              style={({ pressed }) => [
-                styles.iconBtn,
-                { marginRight: space.sm },
-                pressed && styles.iconBtnPressed,
-              ]}
+              testID="topbar.league"
+              onPress={() => setSwitcherOpen(true)}
+              disabled={switching}
               accessibilityRole="button"
-              accessibilityLabel="Settings"
-              testID="topbar.settings"
+              accessibilityLabel={`League: ${league.league_name}`}
+              accessibilityHint="Opens the league switcher"
+              accessibilityState={{ disabled: switching, busy: switching }}
+              style={({ pressed }) => [
+                styles.leagueBtn,
+                pressed && !switching && styles.iconBtnPressed,
+                switching && styles.leagueBtnSwitching,
+              ]}
             >
-              <Icon name="settings" color={chalk.dim} />
+              <View style={styles.leagueTick} />
+              <View style={styles.leagueStack}>
+                <Text style={styles.leagueLabel}>League</Text>
+                <View style={styles.leagueNameRow}>
+                  <Text style={styles.leagueName} numberOfLines={1}>
+                    {league.league_name}
+                  </Text>
+                  <Icon name="chevron-down" size={14} color={ice.base} />
+                </View>
+              </View>
             </Pressable>
+          ) : (
+            // Account-only session (no active league) — wordmark fallback.
+            <View style={styles.wordmark}>
+              <View style={styles.wordmarkTick} />
+              <Text style={styles.wordmarkText}>Trade Finder</Text>
+            </View>
+          )}
+          <View style={styles.actions}>
             <Pressable
               onPress={openSheet}
               hitSlop={12}
               style={({ pressed }) => [
                 styles.iconBtn,
+                { marginRight: space.sm },
                 pressed && styles.iconBtnPressed,
               ]}
               accessibilityRole="button"
@@ -155,9 +187,44 @@ export default function TopBar() {
                 </View>
               )}
             </Pressable>
+            <Pressable
+              onPress={() => {
+                if (navigationRef.isReady()) {
+                  navigationRef.navigate('Settings');
+                }
+              }}
+              hitSlop={12}
+              style={({ pressed }) => [
+                styles.iconBtn,
+                pressed && styles.iconBtnPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Settings"
+              testID="topbar.settings"
+            >
+              <Icon name="settings" color={chalk.dim} />
+            </Pressable>
           </View>
         </View>
       </View>
+
+      {/* #223 — THE league switcher sheet: single global instance, opened
+          from the header on any tab (the former per-screen mounts on
+          Trades/League/hub were removed with their pills). No onSwitched —
+          screens react to the zustand league slice / query keys changing,
+          same as the old Trades mount. #199 add-a-league rides along:
+          close, then route to the root-stack LeaguePicker (link flows in
+          its footer). */}
+      <LeagueSwitcherSheet
+        visible={switcherOpen}
+        onClose={() => setSwitcherOpen(false)}
+        onAddLeague={() => {
+          setSwitcherOpen(false);
+          if (navigationRef.isReady()) {
+            navigationRef.navigate('LeaguePicker');
+          }
+        }}
+      />
 
       <Modal
         visible={open}
@@ -254,6 +321,44 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
+  },
+  // #223 — header league affordance (mock: .lgBtn/.lgStack). Fills the bar
+  // height so the whole cluster is a ≥44pt target; shrinks before the
+  // icon buttons do and truncates the name.
+  leagueBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    alignSelf: 'stretch',
+    marginRight: space.sm,
+    borderRadius: radii.sm,
+    minWidth: 0,
+  },
+  leagueBtnSwitching: { opacity: 0.45 },
+  leagueTick: { width: 3, height: 22, backgroundColor: ice.base },
+  leagueStack: { flexShrink: 1, minWidth: 0 },
+  leagueLabel: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 11,
+    lineHeight: 12,
+    letterSpacing: 0.88,
+    textTransform: 'uppercase',
+    color: chalk.faint,
+  },
+  leagueNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    minWidth: 0,
+  },
+  leagueName: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 15,
+    lineHeight: 19,
+    color: chalk.base,
+    flexShrink: 1,
+    maxWidth: 200,
   },
   wordmarkTick: { width: 3, height: 14, backgroundColor: ice.base },
   wordmarkText: {

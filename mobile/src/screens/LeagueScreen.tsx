@@ -45,7 +45,6 @@ import { initLeagueSession } from '../api/auth';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { useWhatsNew } from '../hooks/useWhatsNew';
-import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import RankChipBadge from '../components/RankChipBadge';
 import LeaderboardsSection from '../components/LeaderboardsSection';
 import ActivityFeed from '../components/ActivityFeed';
@@ -62,11 +61,11 @@ import RookieDraftBoardSheet from '../components/RookieDraftBoardSheet';
 //     the Matches tab's two segments so both surfaces always agree)
 //   • Leaguemate join progress (joined / total) + 1QB/SF unlocked counts
 //   • Ranking-coverage bar (ranked opponents / total)
-//   • "Switch league" → returns to LeaguePicker via session reset
+// League SWITCHING no longer lives here (#223): the global TopBar carries
+// the active-league affordance + the single LeagueSwitcherSheet instance.
 export default function LeagueScreen() {
   const league   = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
-  const [switcherOpen, setSwitcherOpen] = useState(false);
   // FB-38/42 — member-roster overlay, opened from the hero's joined chip.
   const [membersOpen, setMembersOpen] = useState(false);
   // S7 PRD-04 item 2 (flag league.rookie_board_entry) — the previously
@@ -263,23 +262,14 @@ export default function LeagueScreen() {
           />
         ) : null}
 
-        {/* League name + scoring. The whole hero card is now a Pressable
-            that opens the LeagueSwitcherSheet — matching the web feedback
-            ("Let me navigate/update my league directly from the page
-            itself"). The small chevron in the top-right communicates
-            the affordance; the existing "Switch league" button at the
-            bottom remains for users who scroll past the hero. */}
-        <Pressable
-          testID="league.hero"
-          onPress={() => setSwitcherOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Switch league"
-        >
-          {({ pressed }) => (
-            <Card style={pressed ? styles.cardPressed : undefined}>
+        {/* League name + scoring. #223 — the hero is IDENTITY only now:
+            switching lives in the global TopBar's league affordance (one
+            switcher, everywhere), so the hero's Pressable role, chevron
+            cue, and the old bottom "Switch league" button are gone. */}
+        <View testID="league.hero">
+            <Card>
               <View style={styles.heroHead}>
                 <Text style={type.label}>League</Text>
-                <Icon name="chevron-down" size={16} color={chalk.dim} />
               </View>
               <Text style={[type.heading, styles.heroName]} numberOfLines={2}>
                 {summary?.league_name || league?.league_name || 'Loading…'}
@@ -303,10 +293,9 @@ export default function LeagueScreen() {
                       : '— teams'
                   }
                 />
-                {/* FB-38/42 — joined summary lives in the hero; tapping it opens
-                    the member-roster overlay. Inner Pressable so the tap doesn't
-                    bubble to the hero's switch-league handler. The chevron icon
-                    is the clickability cue the feedback asked for. */}
+                {/* FB-38/42 — joined summary lives in the hero; tapping it
+                    opens the member-roster overlay. The chevron icon is the
+                    clickability cue the feedback asked for. */}
                 <Pressable
                   onPress={() => setMembersOpen(true)}
                   hitSlop={12}
@@ -328,8 +317,7 @@ export default function LeagueScreen() {
                 </Text>
               ) : null}
             </Card>
-          )}
-        </Pressable>
+        </View>
 
         {/* Matches roll-up — tiles route to the Matches tab (FB-37), each
             deep-linking into its own segment (FB-91). `at` forces the param
@@ -449,27 +437,11 @@ export default function LeagueScreen() {
           </>
         ) : null}
 
-        {/* Switch league — opens an in-app sheet rather than nuking the
-            session and bouncing back to the LeaguePicker stack. */}
-        <Button
-          label="Switch league"
-          variant="secondary"
-          onPress={() => setSwitcherOpen(true)}
-          style={styles.switchBtn}
-        />
+        {/* #223 — the bottom "Switch league" button and this screen's
+            LeagueSwitcherSheet mount are gone: the global TopBar owns the
+            single switcher entry point (and carries the #199 add-a-league
+            wiring). */}
       </ScrollView>
-
-      <LeagueSwitcherSheet
-        visible={switcherOpen}
-        onClose={() => setSwitcherOpen(false)}
-        // #199 — upfront add-a-league entry: close the sheet and route to
-        // the root-stack LeaguePicker (navigate bubbles up from the tab
-        // stack), whose footer carries the ESPN/MFL/Fleaflicker link flows.
-        onAddLeague={() => {
-          setSwitcherOpen(false);
-          navigation.navigate('LeaguePicker');
-        }}
-      />
 
       {/* league.rookie_board_entry — read-only rookie board (fetches only
           once opened; renders nothing while closed). Mounted regardless of
@@ -628,7 +600,6 @@ const styles = StyleSheet.create({
   scroll: { padding: space.lg, paddingBottom: space.xxl, gap: space.md },
 
   // Pressed state = surface-color change only (no scale/translate).
-  cardPressed: { backgroundColor: ink.ink3 },
 
   // Header row inside the hero card — label on the left, switch chevron
   // on the right. The chevron communicates that the whole card is

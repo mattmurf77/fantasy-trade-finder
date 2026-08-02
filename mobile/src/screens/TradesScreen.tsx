@@ -55,8 +55,6 @@ import HelpSheet, { InfoButton } from '../components/HelpSheet';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 import OutlookSheet from '../components/OutlookSheet';
 import TradeFinderModeBar from '../components/TradeFinderModeBar';
-import LeaguePill from '../components/LeaguePill';
-import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import QueueChip from '../components/QueueChip';
 import SwapPlayerSheet from '../components/SwapPlayerSheet';
 import PlayerPickerModal from '../components/PlayerPickerModal';
@@ -356,7 +354,6 @@ export default function TradesScreen({ navigation, route }: any) {
     action?: { label: string; onPress: () => void };
   } | null>(null);
   const [outlookOpen, setOutlookOpen] = useState(false);
-  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
   const [slowSwitch, setSlowSwitch] = useState(false);
 
@@ -2940,13 +2937,11 @@ export default function TradesScreen({ navigation, route }: any) {
         onSubmit={handleOutlookSubmit}
       />
 
-      <LeagueSwitcherSheet
-        visible={switcherOpen}
-        onClose={() => setSwitcherOpen(false)}
-        // No onSwitched callback — the [leagueId] useEffect above already
-        // resets deck/job state when zustand's league slice changes, and
-        // league-prefs refetches automatically via its query key.
-      />
+      {/* #223 — league switching moved to the global TopBar (single sheet
+          instance there). The [leagueId] useEffect above still resets
+          deck/job state when zustand's league slice changes, and
+          league-prefs refetches automatically via its query key — the
+          switch's origin never mattered. */}
 
       {/* Full-screen overlay while a league swap is in flight. sessionInit
           can take 5–10s on Render's free tier; without this the user can
@@ -3017,6 +3012,17 @@ export default function TradesScreen({ navigation, route }: any) {
           />
         ) : null}
 
+        {/* #224 — classic (flag-off) Trades home page title. With the
+            TopBar carrying the league instead of the wordmark, this screen
+            needs its own identity; matches the hub's in-page heading. The
+            hub-launched TradeDeck mode gets its title from the mode bar,
+            and first-run keeps its deliberately collapsed chrome. */}
+        {!firstRun && !finderMode && (
+          <Text style={styles.pageTitle} accessibilityRole="header">
+            Find a Trade
+          </Text>
+        )}
+
         {/* B3 — Sub-route pills. Trades is the active screen here;
             Portfolio only shows when the user has 2+ connected leagues.
             Calculator (manual trade builder, demo data) is always
@@ -3056,15 +3062,8 @@ export default function TradesScreen({ navigation, route }: any) {
         </View>
         )}
 
-        {/* League selector pill — opens LeagueSwitcherSheet on tap.
-            First-run: chrome-collapsed (LeagueSwitcherSheet stays reachable
-            post-first-run; league choice just happened at the picker). */}
-        {!firstRun && (
-        <LeaguePill
-          label="Trading in"
-          onPress={() => setSwitcherOpen(true)}
-        />
-        )}
+        {/* #223 — the "Trading in" LeaguePill row that sat here is gone:
+            the global TopBar carries the active league + switcher now. */}
 
         {/* FB4-59 — single-format gate. When the league resolves to only the
             OTHER scoring format, show the gate in place of the trade UI;
@@ -4571,6 +4570,8 @@ const styles = StyleSheet.create({
   exploreSub: { color: chalk.dim },
   safe: { flex: 1, backgroundColor: ink.ink0 },
   scroll: { padding: space.lg, gap: space.lg, paddingBottom: 96 },
+  // #224 — classic-home in-page title (same tier as the hub's page title).
+  pageTitle: { ...type.heading },
   // B3 — sub-route pill row (Trades / Portfolio / Calculator).
   // Chalkline chip construction: 1px hairline + label type on ink-1;
   // active = ink-3 well + line-strong border + chalk text.
