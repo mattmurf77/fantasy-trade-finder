@@ -71,6 +71,12 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 //     in full position colors and switches every other bar to muted-gray
 //     segments; the card caption swaps to the team name + "League rank: N/M";
 //     the roster panel renders inline below the chart with per-position group
+//   - #237 mirrored filters (2026-08-02): the drill-in roster panel renders
+//     the SAME filter button set as the chart card — the All/Starters/Bench
+//     segmented control plus the position pills — and both sections share ONE
+//     state (`subset` + `posFilter`); changing a filter in either place
+//     updates both instantly. The panel's formerly-independent `drillPos`
+//     filter is gone.
 //     headers "(count) · positional total · rank/M" (rank chip color-coded by
 //     league tercile: top third pos-green, middle warn-amber, bottom
 //     neg-red) and per-player positional value ranks ("RB2", "NR" for zero
@@ -241,8 +247,9 @@ export default function LeagueSummaryScreen() {
   // Store the selected team's id (not the object) so a basis switch while
   // the drill-in is open re-derives the team from fresh data.
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Drill-in panel's own position filter (independent of the chart filter).
-  const [drillPos, setDrillPos] = useState<Set<FilterKey>>(new Set());
+  // #237 — the drill-in roster panel shares `subset` + `posFilter` with the
+  // chart card (one state, two mirrored button sets). No separate drill
+  // filter.
 
   const query = useQuery({
     queryKey: ['league-power-rankings', leagueId, basis],
@@ -378,19 +385,17 @@ export default function LeagueSummaryScreen() {
       });
     };
 
-  // Switching off All drops the Picks key from both filters — picks are
+  // Switching off All drops the Picks key from the shared filter — picks are
   // neither starters nor bench, so a stale PICKS selection would zero bars.
   const switchSubset = (s: Subset) => {
     setSubset(s);
     if (s !== 'all') {
-      const strip = (prev: Set<FilterKey>) => {
+      setPosFilter((prev) => {
         if (!prev.has('PICKS')) return prev;
         const next = new Set(prev);
         next.delete('PICKS');
         return next;
-      };
-      setPosFilter(strip);
-      setDrillPos(strip);
+      });
     }
   };
 
@@ -535,32 +540,15 @@ export default function LeagueSummaryScreen() {
           ) : null}
 
           {/* 2026-07-26 — league-wide subset. Hidden entirely when the server
-              can't derive the split (never fabricate). */}
+              can't derive the split (never fabricate). #237 — the same
+              control (same shared state) also renders in the drill-in
+              roster panel below. */}
           {startersAvailable ? (
-            <View
-              style={styles.subsetRow}
-              accessibilityRole="tablist"
-              accessibilityLabel="Roster subset filter"
-            >
-              {SUBSETS.map((s) => {
-                const on = subset === s.key;
-                return (
-                  <Pressable
-                    key={s.key}
-                    testID={`league-summary.subset.${s.key}`}
-                    onPress={() => switchSubset(s.key)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Show ${s.label.toLowerCase()} value`}
-                    accessibilityState={{ selected: on }}
-                    style={[styles.subsetSeg, on && styles.subsetSegOn]}
-                  >
-                    <Text style={[styles.subsetSegText, on && styles.subsetSegTextOn]}>
-                      {s.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <SubsetControl
+              idPrefix="league-summary.subset"
+              subset={subset}
+              onSwitch={switchSubset}
+            />
           ) : null}
 
           {/* Position filter — single or multi select; "All" clears. Reorders
@@ -615,10 +603,7 @@ export default function LeagueSummaryScreen() {
                       filter={posFilter}
                       focused={selectedId === r.tc.team.user_id}
                       grayed={!!selectedId && selectedId !== r.tc.team.user_id}
-                      onPress={() => {
-                        setDrillPos(new Set());
-                        setSelectedId(r.tc.team.user_id);
-                      }}
+                      onPress={() => setSelectedId(r.tc.team.user_id)}
                     />
                   ))}
                 </View>
@@ -682,15 +667,25 @@ export default function LeagueSummaryScreen() {
                   : '—'
               }${subset === 'all' ? '' : subset === 'starters' ? ' starter' : ' bench'} value`}
             </Text>
+            {/* #237 — mirrored filter set: the SAME subset control + position
+                pills as the chart card, bound to the SAME state, so the two
+                sections can never disagree. */}
+            {startersAvailable ? (
+              <SubsetControl
+                idPrefix="league-summary.roster-subset"
+                subset={subset}
+                onSwitch={switchSubset}
+              />
+            ) : null}
             <PosFilterPills
               idPrefix="league-summary.roster-posfilter"
-              filter={drillPos}
-              onToggle={togglePos(setDrillPos)}
+              filter={posFilter}
+              onToggle={togglePos(setPosFilter)}
               style={styles.drillFilter}
-              showPicks={subset === 'all' && (selected.tc.team.picks?.items?.length ?? 0) > 0}
+              showPicks={showPicksKey}
             />
             <View style={styles.drillList}>
-              {groupRows(selected.tc.rows, drillPos).map((g) => {
+              {groupRows(selected.tc.rows, posFilter).map((g) => {
                 const isCore = (CORE_POSITIONS as readonly string[]).includes(g.pos);
                 const rank = isCore
                   ? teamPosRank[g.pos as CorePos].get(selected.tc.team.user_id) ?? 0
@@ -743,7 +738,7 @@ export default function LeagueSummaryScreen() {
                   the generic ladder. All subset only (picks are neither
                   starters nor bench); hidden for leagues without pick data. */}
               {subset === 'all' &&
-              (drillPos.size === 0 || drillPos.has('PICKS')) &&
+              (posFilter.size === 0 || posFilter.has('PICKS')) &&
               (selected.tc.team.picks?.items?.length ?? 0) > 0 ? (
                 <View testID="league-summary.roster-picks">
                   <View style={styles.groupHead}>
@@ -772,10 +767,7 @@ export default function LeagueSummaryScreen() {
                 team={r.tc.team}
                 rank={idx + 1}
                 active={r.active}
-                onPress={() => {
-                  setDrillPos(new Set());
-                  setSelectedId(r.tc.team.user_id);
-                }}
+                onPress={() => setSelectedId(r.tc.team.user_id)}
               />
             ))}
           </View>
@@ -845,6 +837,43 @@ function BasisChip({ label, active, onPress, disabled, testID }: {
     >
       <Text style={[type.label, active ? styles.basisChipTextActive : null]}>{label}</Text>
     </Pressable>
+  );
+}
+
+// #237 — the All/Starters/Bench segmented control, rendered by BOTH the
+// chart card (idPrefix league-summary.subset) and the drill-in roster panel
+// (idPrefix league-summary.roster-subset). One shared `subset` state drives
+// both instances, so they always match.
+function SubsetControl({ idPrefix, subset, onSwitch }: {
+  idPrefix: string;
+  subset: Subset;
+  onSwitch: (s: Subset) => void;
+}) {
+  return (
+    <View
+      style={styles.subsetRow}
+      accessibilityRole="tablist"
+      accessibilityLabel="Roster subset filter"
+    >
+      {SUBSETS.map((s) => {
+        const on = subset === s.key;
+        return (
+          <Pressable
+            key={s.key}
+            testID={`${idPrefix}.${s.key}`}
+            onPress={() => onSwitch(s.key)}
+            accessibilityRole="button"
+            accessibilityLabel={`Show ${s.label.toLowerCase()} value`}
+            accessibilityState={{ selected: on }}
+            style={[styles.subsetSeg, on && styles.subsetSegOn]}
+          >
+            <Text style={[styles.subsetSegText, on && styles.subsetSegTextOn]}>
+              {s.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
