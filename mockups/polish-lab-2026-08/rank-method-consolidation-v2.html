@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish lab — Rank method consolidation v2 (#232 · #233)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ─────────
+     Canonical hexes; --line-strong is the 2026-07-19 a11y value #59647A.
+     Tier hexes from docs/cross-client-invariants.md.
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --tier-firsts-4plus:#f87171; --tier-firsts-3:#e879f9; --tier-firsts-2:#fbbf24;
+    --tier-first-1:#2dd4bf; --tier-second:#38bdf8; --tier-third:#f472b6;
+    --tier-fourth:#a3e635; --tier-fa:#7a7f96;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px}
+  .wrap{max-width:880px;margin:0 auto}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:24px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.1;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note p,.note ul{margin:0;font-size:13px;line-height:1.55;color:var(--chalk-dim)}
+  .note ul{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:4px}
+  .note strong{color:var(--chalk);font-weight:600}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:32px 0 12px}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice)}
+
+  .compare{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+  .col{flex:1 1 390px;max-width:420px;display:flex;flex-direction:column;gap:20px}
+  .colcap{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+          color:var(--chalk-dim);margin:0 0 -8px;display:flex;align-items:center;gap:8px}
+  .colcap .dot{width:8px;height:8px;border-radius:2px;background:var(--line-strong)}
+  .colcap.prop .dot{background:var(--ice)}
+  .cap{font:400 12px/1.5 var(--ui);color:var(--chalk-faint)}
+
+  .phone{position:relative;width:390px;background:var(--ink-0);
+         border:1px solid var(--line-strong);border-radius:8px;overflow:hidden}
+  .phone.fixed{height:844px}
+  .statusbar{height:40px;display:flex;align-items:flex-end;justify-content:space-between;
+             padding:0 20px 6px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)}
+  .batt{display:inline-block;width:20px;height:10px;border:1px solid var(--chalk-dim);
+        border-radius:2px;position:relative}
+  .batt::after{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:70%;
+               background:var(--chalk-dim)}
+  .stackhdr{height:44px;display:flex;align-items:center;justify-content:space-between;
+            padding:0 16px;position:relative}
+  .backctl{display:flex;align-items:center;gap:4px;font:600 14px var(--ui);color:var(--chalk);z-index:1}
+  .stackhdr .shtitle{position:absolute;left:0;right:0;text-align:center;font-family:var(--cond);
+           font-weight:600;font-size:18px;letter-spacing:.03em;text-transform:uppercase;
+           pointer-events:none}
+  .moreways{font:600 13px var(--ui);color:var(--chalk-dim);z-index:1}
+  .shtitle.narrow{left:36px !important;right:140px !important;text-align:left !important}
+
+  .scroll{padding:16px 16px 24px;display:flex;flex-direction:column;gap:12px}
+  .lab{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .mono{font:500 13px/18px var(--mono);font-variant-numeric:tabular-nums}
+  .heading{font-family:var(--cond);font-weight:600;font-size:22px;line-height:26px;
+           letter-spacing:.03em;text-transform:uppercase}
+
+  /* RankHome callout + cards */
+  .callout{display:flex;gap:8px;background:var(--ink-2);border:1px solid var(--line-strong);
+           border-radius:4px;padding:12px}
+  .callout .tx{font:400 13px/19px var(--ui);color:var(--chalk-dim);flex:1}
+  .callout .tx b{color:var(--chalk);font-weight:500}
+  .mcard{background:var(--ink-1);border:1px solid var(--line);border-radius:4px;
+         padding:12px;display:flex;flex-direction:column;gap:8px}
+  .mcard.featured{border-color:var(--ice)}
+  .mhead{display:flex;align-items:center;gap:8px}
+  .mtitle{font:600 16px/22px var(--ui);flex:1}
+  .rectag{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--flare)}
+  .mbody{font:400 13px/19px var(--ui);color:var(--chalk-dim)}
+  .roletag{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .subrow{border-top:1px solid var(--line);margin-top:2px;padding-top:8px;
+          font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .subrow b{color:var(--chalk);font-weight:600}
+  .morehdr{display:flex;align-items:center;gap:8px;padding:12px 4px 4px;font:600 14px var(--ui);
+           color:var(--chalk)}
+  .qrow{display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--line)}
+  .qrow .m{flex:1}
+  .qrow .t{font:600 14px/20px var(--ui)}
+  .qrow .s{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .mixnote{font:400 13px/18px var(--ui);color:var(--chalk-faint);text-align:center}
+
+  /* import entry chip */
+  .importrow{display:flex;align-items:center;gap:8px;align-self:flex-start;
+             border:1px solid var(--line-strong);border-radius:4px;background:var(--ink-1);
+             padding:0 12px;min-height:36px;font:600 13px var(--ui);color:var(--chalk-dim)}
+  .importrow b{color:var(--ice);font-weight:600}
+
+  /* sheet */
+  .sheetstage{position:relative;width:390px;height:800px;border:1px solid var(--line-strong);
+              border-radius:8px;overflow:hidden;background:var(--ink-0)}
+  .sheetstage.short{height:620px}
+  .scrim{position:absolute;inset:0;background:rgba(7,9,12,0.78)}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--ink-2);
+         border:1px solid var(--line);border-radius:8px 8px 0 0;padding:16px 16px 32px;
+         display:flex;flex-direction:column;gap:8px;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+  .grabber{align-self:center;width:32px;height:4px;border-radius:2px;background:var(--line-strong);
+           margin-bottom:8px}
+  .srow{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:4px;
+        border-bottom:1px solid var(--line)}
+  .srow .m{flex:1}
+  .srow .t{font:600 16px/22px var(--ui);display:flex;align-items:center;gap:8px}
+  .srow .s{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .sheetsub{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-bottom:8px}
+  .honesty{display:flex;gap:8px;background:var(--ink-3);border-radius:4px;padding:10px 12px;
+           font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:4px}
+
+  /* paste state */
+  .pastebox{background:var(--ink-2);border:1px solid var(--line-strong);border-radius:4px;
+            padding:10px 12px;font:500 12px/19px var(--mono);color:var(--chalk);min-height:170px;
+            white-space:pre}
+  .pastebox .ph{color:var(--chalk-faint)}
+
+  /* match review */
+  .mrow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line)}
+  .mrow .rk{font:500 12px var(--mono);color:var(--chalk-dim);width:22px;text-align:right;flex:none}
+  .mrow .raw{font:400 13px var(--ui);color:var(--chalk-dim);flex:1;white-space:nowrap;
+             overflow:hidden;text-overflow:ellipsis}
+  .mrow .hit{font:600 13px var(--ui);color:var(--chalk);display:flex;align-items:center;gap:6px;
+             white-space:nowrap}
+  .mrow.miss{border-left:3px solid var(--warn);padding-left:9px;background:var(--ink-2);
+             flex-wrap:wrap;row-gap:8px}
+  .misslab{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--warn)}
+  .candwrap{flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;padding-left:32px}
+  .cand{border:1px solid var(--line-strong);border-radius:4px;background:var(--ink-1);
+        min-height:32px;display:flex;align-items:center;gap:6px;padding:0 10px;
+        font:600 12px var(--ui);color:var(--chalk)}
+  .cand .tm{font:600 11px var(--ui);color:var(--chalk-dim);letter-spacing:.5px}
+  .cand.skip{color:var(--chalk-dim)}
+  .counts{display:flex;align-items:center;gap:8px;font:500 13px var(--mono);color:var(--chalk-dim)}
+
+  /* buttons */
+  .btn{height:40px;border-radius:4px;display:flex;align-items:center;justify-content:center;
+       font:600 14px var(--ui);padding:0 16px}
+  .btn.primary{background:var(--ice);color:var(--on-ice)}
+  .btn.secondary{border:1px solid var(--line-strong);color:var(--chalk)}
+  .btn.ghost{color:var(--chalk-dim)}
+  .btn.compact{height:36px;font-size:13px}
+  .btn.dis{opacity:.45}
+
+  /* quick set walk (Section C, unchanged from v1) */
+  .fmt{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--ink-1)}
+  .fmt div{flex:1;min-height:36px;display:flex;align-items:center;justify-content:center;
+           font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .fmt div.on{background:var(--ink-3);color:var(--chalk);border-bottom:2px solid var(--ice)}
+  .postabs{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--ink-1)}
+  .postabs div{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;
+               font:600 11px var(--ui);letter-spacing:.08em;color:var(--chalk-dim);
+               border-bottom:2px solid transparent}
+  .postabs div.on{background:var(--ink-3);color:var(--chalk);border-bottom-color:var(--qb)}
+  .stephead{display:flex;align-items:center;gap:8px}
+  .stephead .tl{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+                color:var(--tier-firsts-4plus);display:flex;align-items:center;gap:8px}
+  .stephead .tl::before{content:"";width:3px;height:14px;background:var(--tier-firsts-4plus)}
+  .stephead .pg{margin-left:auto;font:600 11px var(--ui);letter-spacing:.08em;
+                text-transform:uppercase;color:var(--chalk-dim)}
+  .stephint{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .search{height:40px;background:var(--ink-2);border:1px solid var(--line-strong);border-radius:4px;
+          display:flex;align-items:center;padding:0 12px;font:400 14px var(--ui);color:var(--chalk-faint)}
+  .grid{display:flex;flex-direction:column;gap:4px}
+  .grow{display:flex;gap:4px}
+  .chip{flex:1;min-height:48px;background:var(--ink-1);border:1px solid var(--line);border-radius:4px;
+        padding:6px 8px;display:flex;flex-direction:column;justify-content:center;gap:2px}
+  .chip .nm{font:600 12px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+            display:flex;align-items:center;gap:4px}
+  .chip .meta{display:flex;align-items:center;gap:6px}
+  .chip .tm{font:600 11px var(--ui);letter-spacing:.5px;color:var(--chalk-dim);text-transform:uppercase}
+  .chip .ag{font:500 11px var(--mono);color:var(--chalk-dim)}
+  .chip .tr{font:600 11px var(--ui);letter-spacing:.5px;text-transform:uppercase}
+  .walkfoot{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:8px;
+            padding:12px;background:var(--ink-0);border-top:1px solid var(--line)}
+  .walkfoot .btn.grow1{flex:1}
+
+  svg.i{display:block;flex:none}
+
+  .rationale{margin-top:36px}
+  .rationale .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+                   padding:16px 20px}
+  .rationale h2{font-family:var(--cond);font-weight:600;font-size:18px;letter-spacing:.03em;
+                text-transform:uppercase;margin:0 0 8px;display:flex;align-items:center;gap:8px}
+  .rationale h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .rationale ul{margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .rationale li{margin-bottom:6px}
+  .rationale strong{color:var(--chalk);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <h1>Rank method consolidation — v2 (#232 · #233)</h1>
+    <p>Iteration on operator review of
+       <code style="color:var(--chalk)">rank-method-consolidation.html</code> (v1). Two changes:</p>
+    <ul>
+      <li><strong>Most control = the Tiers board</strong> (drag players between value tiers),
+        not the overall 1-to-N list. The overall list ("Overall ranks", today's ManualRanks)
+        moves into the "More ways to rank" disclosure.</li>
+      <li><strong>Import entry:</strong> a small quiet button at the top of the chooser —
+        <strong>"Have rankings already? Import them"</strong> — opens a "Bring your rankings"
+        sheet (CSV · XLSX · paste a table), with the match-review state shown so the real cost
+        of ingest is visible before we commit to building it.</li>
+    </ul>
+    <p style="margin-top:8px">Section C restates v1's empty-tier CTA fix unchanged, so this page
+       stands alone as the current proposal.</p>
+  </div>
+
+  <!-- ══════════ SECTION A — chooser v2 ══════════ -->
+  <div class="sec">A · The chooser — v1 proposal vs v2</div>
+  <div class="compare">
+
+    <!-- v1 proposed, for reference -->
+    <div class="col">
+      <div class="colcap"><span class="dot"></span>v1 proposed (reference)</div>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="stackhdr">
+          <span class="shtitle">Rank</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll">
+          <div class="heading">Build your board</div>
+
+          <div class="callout">
+            <svg class="i" width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#F0508C" stroke-width="1.75"><path d="M3 7h11l-2.5-2.5M17 13H6l2.5 2.5"/></svg>
+            <div class="tx"><b>Trades are priced off this board.</b> The better it matches you,
+              the better the deals we find.</div>
+          </div>
+
+          <div class="mcard featured">
+            <div class="mhead">
+              <span class="roletag">Fastest</span>
+              <span style="flex:1"></span><span class="rectag">recommended</span>
+            </div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#56D9EC" stroke-width="1.75"><path d="M4 10.5 8.5 15 16 6"/></svg>
+              <span class="mtitle">Quick set</span>
+            </div>
+            <div class="mbody">Tap players into value tiers, one tier at a time. A usable board
+              in a few minutes per position.</div>
+            <div class="subrow"><b>Then, if you want:</b> Quick rank — a follow-on pass that
+              fine-tunes the order inside each tier. Offered when you finish.</div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead"><span class="roletag">Most precise</span></div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 17v-6M10 17V3M17 17v-9"/></svg>
+              <span class="mtitle">Head-to-heads</span>
+            </div>
+            <div class="mbody">Put three players in order at a time — a few seconds each, and
+              your board sharpens with every answer.</div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead"><span class="roletag">Most control</span></div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 14l4-4 3 3 7-7"/><path d="M13 6h4v4"/></svg>
+              <span class="mtitle">Your full board</span>
+            </div>
+            <div class="mbody">Drag every player into your exact order. Nothing inferred,
+              nothing suggested.</div>
+          </div>
+
+          <div class="morehdr">
+            More ways to rank
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 6l5 5 5-5"/></svg>
+          </div>
+          <div style="border:1px solid var(--line);border-radius:4px;padding:0 12px;background:var(--ink-1)">
+            <div class="qrow"><div class="m"><div class="t">Pick Anchors</div>
+              <div class="s">Price players in draft picks, one at a time</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+            <div class="qrow"><div class="m"><div class="t">Tiers board</div>
+              <div class="s">Drag players between tiers on the full board</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+            <div class="qrow" style="border-bottom:0"><div class="m"><div class="t">Trends</div>
+              <div class="s">Your biggest movers vs consensus</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          </div>
+
+          <div class="mixnote">Every method writes to the same board — mix anytime.</div>
+        </div>
+      </div>
+      <div class="cap">v1's "Most control" card is the overall 1-to-N list and the Tiers drag
+        board sits in the disclosure. Operator review: control belongs to the Tiers board — and
+        there's no path at all for someone whose rankings already exist elsewhere.</div>
+    </div>
+
+    <!-- v2 proposed -->
+    <div class="col">
+      <div class="colcap prop"><span class="dot"></span>v2 proposed — Tiers board up, import entry in</div>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="stackhdr">
+          <span class="shtitle">Rank</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll">
+          <div class="heading">Build your board</div>
+
+          <div class="importrow">
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#56D9EC" stroke-width="1.75"><path d="M8 2v7M5 6.5 8 9.5l3-3M3 11v2.5h10V11"/></svg>
+            <span>Have rankings already?&nbsp;<b>Import them</b></span>
+          </div>
+
+          <div class="callout">
+            <svg class="i" width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#F0508C" stroke-width="1.75"><path d="M3 7h11l-2.5-2.5M17 13H6l2.5 2.5"/></svg>
+            <div class="tx"><b>Trades are priced off this board.</b> The better it matches you,
+              the better the deals we find.</div>
+          </div>
+
+          <div class="mcard featured">
+            <div class="mhead">
+              <span class="roletag">Fastest</span>
+              <span style="flex:1"></span><span class="rectag">recommended</span>
+            </div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#56D9EC" stroke-width="1.75"><path d="M4 10.5 8.5 15 16 6"/></svg>
+              <span class="mtitle">Quick set</span>
+            </div>
+            <div class="mbody">Tap players into value tiers, one tier at a time. A usable board
+              in a few minutes per position.</div>
+            <div class="subrow"><b>Then, if you want:</b> Quick rank — a follow-on pass that
+              fine-tunes the order inside each tier. Offered when you finish.</div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead"><span class="roletag">Most precise</span></div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 17v-6M10 17V3M17 17v-9"/></svg>
+              <span class="mtitle">Head-to-heads</span>
+            </div>
+            <div class="mbody">Put three players in order at a time — a few seconds each, and
+              your board sharpens with every answer.</div>
+          </div>
+
+          <div class="mcard">
+            <div class="mhead"><span class="roletag">Most control</span></div>
+            <div class="mhead">
+              <svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 15 4 8l3.5 2.5L10 5l2.5 5.5L16 8l1 7H3Z"/></svg>
+              <span class="mtitle">Tiers board</span>
+            </div>
+            <div class="mbody">Your whole board as drag-and-drop value tiers — every placement
+              is your call, from 4+ 1sts down to FA.</div>
+          </div>
+
+          <div class="morehdr">
+            More ways to rank
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 6l5 5 5-5"/></svg>
+          </div>
+          <div style="border:1px solid var(--line);border-radius:4px;padding:0 12px;background:var(--ink-1)">
+            <div class="qrow"><div class="m"><div class="t">Pick Anchors</div>
+              <div class="s">Price players in draft picks, one at a time</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+            <div class="qrow"><div class="m"><div class="t">Overall ranks</div>
+              <div class="s">Order every player 1-to-N yourself — drag rows or tap a rank number</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+            <div class="qrow" style="border-bottom:0"><div class="m"><div class="t">Trends</div>
+              <div class="s">Your biggest movers vs consensus</div></div>
+              <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          </div>
+
+          <div class="mixnote">Every method writes to the same board — mix anytime.</div>
+        </div>
+      </div>
+      <div class="cap"><b>Most control is now the Tiers board</b> — the drag-players-into-tiers
+        surface (TiersScreen), described in its own terms. The overall 1-to-N list becomes
+        "Overall ranks" in the disclosure. The <b>import entry</b> is one quiet 36px chip under
+        the heading: dim question + ice verb, deliberately a tier below the cards — it's a
+        bypass, not a fourth method. Shown with the disclosure OPEN; it defaults closed.</div>
+    </div>
+  </div>
+
+  <!-- ══════════ SECTION B — import flow ══════════ -->
+  <div class="sec">B · "Import them" — the Bring-your-rankings flow</div>
+  <div class="compare">
+
+    <div class="col">
+      <div class="colcap prop"><span class="dot"></span>B1 — method sheet</div>
+      <div class="sheetstage short">
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="grabber"></div>
+          <div class="heading">Bring your rankings</div>
+          <div class="sheetsub">Pull in a board you keep somewhere else. Ranks only — a numbered
+            list of players is all we need.</div>
+          <div class="srow"><svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M5 2.5h7l3.5 3.5v11.5h-10.5Z"/><path d="M12 2.5V6h3.5"/></svg>
+            <div class="m"><div class="t">Upload a CSV</div>
+            <div class="s">An export from KTC, FantasyCalc, or any spreadsheet</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="srow"><svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M3 4h14v12H3Z"/><path d="M3 8h14M3 12h14M8 4v12"/></svg>
+            <div class="m"><div class="t">Upload a spreadsheet</div>
+            <div class="s">XLSX from Excel, Numbers, or Google Sheets</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="srow" style="border-bottom:0"><svg class="i" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M7 3.5h6M6 3.5H5a1 1 0 0 0-1 1V17h12V4.5a1 1 0 0 0-1-1h-1"/><path d="M7 2h6v3H7Z"/></svg>
+            <div class="m"><div class="t">Paste a table</div>
+            <div class="s">Copy rows from any sheet or site and paste them here</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><path d="M6 3l5 5-5 5"/></svg></div>
+          <div class="honesty">
+            <svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#97A1AE" stroke-width="1.75"><circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 5v.5"/></svg>
+            <span>We'll match player names to your league's player pool — you review anything
+              we can't match.</span>
+          </div>
+          <div class="btn ghost" style="margin-top:4px">Cancel</div>
+        </div>
+      </div>
+      <div class="cap">Opened by the "Import them" chip. Three method rows in the operator's
+        order; the honesty line sets the expectation that a review step follows, so the match
+        screen isn't a surprise. Copy avoids "sync" — this is a one-shot import onto the same
+        board every other method writes to.</div>
+    </div>
+
+    <div class="col">
+      <div class="colcap prop"><span class="dot"></span>B2 — paste-a-table state</div>
+      <div class="sheetstage short">
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="grabber"></div>
+          <div class="heading">Paste a table</div>
+          <div class="sheetsub">Paste rows straight from a spreadsheet or site. A rank column
+            helps but isn't required — row order works too.</div>
+          <div class="pastebox">1&#9;Ja'Marr Chase&#9;WR
+2&#9;Justin Jefferson&#9;WR
+3&#9;Bijan Robinson&#9;RB
+4&#9;Josh Allen&#9;QB
+5&#9;CeeDee Lamb&#9;WR
+6&#9;Jahmyr Gibbs&#9;RB
+7&#9;Malik Nabers&#9;WR
+8&#9;Marvin Harrison&#9;WR
+<span class="ph">…</span></div>
+          <div class="counts"><svg class="i" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#22C55E" stroke-width="1.75"><path d="M3 8.5 6.5 12 13 4.5"/></svg>
+            54 rows detected</div>
+          <div class="btn primary" style="margin-top:4px">Match 54 players</div>
+          <div class="btn ghost">Back</div>
+        </div>
+      </div>
+      <div class="cap">Tab-, comma- or space-separated all parse; extra columns (position, team,
+        values) are ignored. This one state also covers most CSV files — open the file, copy the
+        rows, paste — which is what makes paste-only a viable v1 scope.</div>
+    </div>
+
+    <div class="col">
+      <div class="colcap prop"><span class="dot"></span>B3 — match review (the honest hard part)</div>
+      <div class="phone" style="min-height:620px">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="stackhdr">
+          <span class="shtitle">Review your import</span>
+          <span class="backctl"><svg class="i" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ECEFF4" stroke-width="1.75"><path d="M10 3 5 8l5 5"/></svg>Back</span>
+        </div>
+        <div class="scroll" style="gap:8px">
+          <div class="counts">
+            <svg class="i" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#22C55E" stroke-width="1.75"><path d="M3 8.5 6.5 12 13 4.5"/></svg>
+            <span>53 of 54 matched</span>
+            <span style="color:var(--warn)">· 1 needs you</span>
+          </div>
+          <div style="border:1px solid var(--line);border-radius:4px;background:var(--ink-1)">
+            <div class="mrow"><span class="rk">5</span><span class="raw">CeeDee Lamb</span>
+              <span class="hit">CeeDee Lamb <span class="lab" style="color:var(--chalk-dim)">DAL</span>
+              <svg class="i" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#22C55E" stroke-width="1.75"><path d="M3 8.5 6.5 12 13 4.5"/></svg></span></div>
+            <div class="mrow"><span class="rk">6</span><span class="raw">Jahmyr Gibbs</span>
+              <span class="hit">Jahmyr Gibbs <span class="lab" style="color:var(--chalk-dim)">DET</span>
+              <svg class="i" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#22C55E" stroke-width="1.75"><path d="M3 8.5 6.5 12 13 4.5"/></svg></span></div>
+            <div class="mrow"><span class="rk">7</span><span class="raw">Malik Nabers</span>
+              <span class="hit">Malik Nabers <span class="lab" style="color:var(--chalk-dim)">NYG</span>
+              <svg class="i" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#22C55E" stroke-width="1.75"><path d="M3 8.5 6.5 12 13 4.5"/></svg></span></div>
+            <div class="mrow miss">
+              <span class="rk">8</span><span class="raw" style="color:var(--chalk)">Marvin Harrison</span>
+              <span class="misslab">Which one?</span>
+              <div class="candwrap">
+                <div class="cand">Marvin Harrison Jr. <span class="tm">ARI · WR</span></div>
+                <div class="cand">Marvin Harrison Sr. <span class="tm">retired</span></div>
+                <div class="cand skip">Skip this row</div>
+              </div>
+            </div>
+            <div class="mrow" style="border-bottom:0"><span class="rk">9</span><span class="raw">Kenneth Walker</span>
+              <span class="hit">Kenneth Walker III <span class="lab" style="color:var(--chalk-dim)">SEA</span>
+              <svg class="i" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#22C55E" stroke-width="1.75"><path d="M3 8.5 6.5 12 13 4.5"/></svg></span></div>
+          </div>
+          <div class="stephint">Close matches (suffixes, punctuation, nicknames) are accepted
+            automatically and shown here so you can catch a wrong one. Skipped rows keep their
+            current value on your board.</div>
+        </div>
+        <div class="walkfoot">
+          <div class="btn ghost compact">Cancel</div>
+          <div class="btn primary grow1 dis">Apply 53 ranks — 1 to resolve</div>
+        </div>
+      </div>
+      <div class="cap">The UX cost of ingest, made visible: fuzzy name matching against the
+        league's Sleeper pool auto-resolves suffixes ("Kenneth Walker" → III) but ambiguous or
+        unknown names need a human tap. Primary stays disabled until every row is matched or
+        skipped; applying writes ranks onto the same board, and unlisted players keep their
+        current values.</div>
+    </div>
+  </div>
+
+  <!-- ══════════ SECTION C — empty-tier CTA (unchanged from v1) ══════════ -->
+  <div class="sec">C · Quick set empty-tier CTA — unchanged from v1 (#233)</div>
+  <div class="compare">
+    <div class="col">
+      <div class="colcap prop"><span class="dot"></span>Proposed — action-first, one advance path (as v1)</div>
+      <div class="phone fixed" style="height:700px">
+        <div class="statusbar"><span>9:41</span><span class="batt"></span></div>
+        <div class="stackhdr">
+          <span class="shtitle narrow">Quick Set Tiers</span>
+          <span></span>
+          <span class="moreways">More ways to rank</span>
+        </div>
+        <div class="scroll" style="gap:8px">
+          <div class="fmt"><div class="on">1QB PPR</div><div>SF TEP</div></div>
+          <div class="postabs"><div class="on">QB</div><div>RB</div><div>WR</div><div>TE</div></div>
+          <div class="stephead"><span class="tl">4+ 1sts</span><span class="pg">Tier 1 of 8</span></div>
+          <div class="stephint">Tap every QB who belongs in 4+ 1sts, then save to move on. Each
+            card shows the tier the player is in now.</div>
+          <div class="search">Search QBs…</div>
+          <div class="grid">
+            <div class="grow">
+              <div class="chip"><span class="nm">Josh Allen</span>
+                <span class="meta"><span class="tm">BUF</span><span class="ag">29</span><span class="tr" style="color:var(--tier-firsts-2)">2 1sts</span></span></div>
+              <div class="chip"><span class="nm">Lamar Jackson</span>
+                <span class="meta"><span class="tm">BAL</span><span class="ag">29</span><span class="tr" style="color:var(--tier-first-1)">1st</span></span></div>
+              <div class="chip"><span class="nm">Jayden Daniels</span>
+                <span class="meta"><span class="tm">WAS</span><span class="ag">25</span><span class="tr" style="color:var(--tier-firsts-2)">2 1sts</span></span></div>
+            </div>
+            <div class="grow">
+              <div class="chip"><span class="nm">Patrick Mahomes</span>
+                <span class="meta"><span class="tm">KC</span><span class="ag">30</span><span class="tr" style="color:var(--tier-first-1)">1st</span></span></div>
+              <div class="chip"><span class="nm">Jalen Hurts</span>
+                <span class="meta"><span class="tm">PHI</span><span class="ag">27</span><span class="tr" style="color:var(--tier-first-1)">1st</span></span></div>
+              <div class="chip"><span class="nm">C.J. Stroud</span>
+                <span class="meta"><span class="tm">HOU</span><span class="ag">24</span><span class="tr" style="color:var(--tier-second)">2nd</span></span></div>
+            </div>
+            <div class="grow">
+              <div class="chip"><span class="nm">Joe Burrow</span>
+                <span class="meta"><span class="tm">CIN</span><span class="ag">29</span><span class="tr" style="color:var(--tier-first-1)">1st</span></span></div>
+              <div class="chip"><span class="nm">Caleb Williams</span>
+                <span class="meta"><span class="tm">CHI</span><span class="ag">24</span><span class="tr" style="color:var(--tier-second)">2nd</span></span></div>
+              <div class="chip"><span class="nm">Drake Maye</span>
+                <span class="meta"><span class="tm">NE</span><span class="ag">23</span><span class="tr" style="color:var(--tier-second)">2nd</span></span></div>
+            </div>
+          </div>
+
+          <!-- selected-state inset -->
+          <div style="margin-top:16px;border:1px dashed var(--line-strong);border-radius:8px;padding:10px 12px">
+            <div class="lab" style="margin-bottom:8px">With 1+ selected (unchanged behavior)</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="btn ghost compact dis">Back</div>
+              <div class="btn secondary compact">Skip</div>
+              <div class="btn primary compact" style="flex:1">Save 4+ 1sts (1)</div>
+            </div>
+          </div>
+        </div>
+        <div class="walkfoot">
+          <div class="btn ghost compact dis">Back</div>
+          <div class="btn primary grow1">Continue — no QBs this high</div>
+        </div>
+      </div>
+      <div class="cap"><b>Unchanged from v1</b>, restated so v2 stands alone: at 0 selected the
+        primary reads "Continue — no QBs this high" (last tier: "Continue &amp; finish") and the
+        redundant Skip is hidden; tap a chip and the footer reverts to Back / Skip /
+        "Save 4+ 1sts (1)" (inset).</div>
+    </div>
+  </div>
+
+  <!-- ══════════ RATIONALE ══════════ -->
+  <div class="rationale">
+    <div class="card">
+      <h2>Rationale — v2 deltas</h2>
+      <ul>
+        <li><strong>Most control = Tiers board (operator correction):</strong> "control" to a
+          dynasty player means owning where every player SITS, and the tier board delivers that
+          while staying survey-able — 8 buckets, not 250 ordered slots. The overall 1-to-N list
+          is maximal effort, not maximal usefulness (the engine prices trades off tier-scale
+          values, so slot-level order past the top of the board barely moves suggestions); it
+          stays available as "Overall ranks" in the disclosure for the tinkerers.</li>
+        <li><strong>Import copy — "Have rankings already? Import them":</strong> the operator's
+          sentence ("I already have my rankings stored elsewhere") is the user's thought;
+          compressing it to a dim question + ice verb keeps the thought and makes only the verb
+          look tappable. Runner-up "Import my rankings" was rejected because bare, it reads like
+          a fourth method ("import" as another way to build) — the question form self-selects:
+          only people who HAVE rankings elsewhere engage. Rendered as one 36px bordered chip,
+          a full visual tier below the cards.</li>
+        <li><strong>Sheet before file picker:</strong> "Bring your rankings" shows the three
+          methods AND the honesty line ("we'll match names…you review anything we can't match")
+          before any OS picker opens — the review step is promised up front, so B3 lands as
+          the deal the user accepted, not a failure state.</li>
+        <li><strong>Match review is the real cost (B3):</strong> any import lives or dies on
+          name matching against the league's Sleeper pool. Auto-accept close matches (suffixes,
+          punctuation, "Kenneth Walker" → III) but show them for audit; ambiguous names get
+          candidate chips + Skip; primary disabled until every row is matched or skipped;
+          skipped/unlisted players keep their current board values. This screen exists in EVERY
+          scope — it's the floor cost of the feature, not gold-plating.</li>
+        <li><strong>Defer-if-complex scoping (operator's option):</strong> a v1 scope is
+          <strong>paste-only</strong> — one textarea, one tolerant line parser, plus B3. It
+          covers the CSV case for free (open file → copy → paste) with no file-picker,
+          MIME or encoding work. CSV upload is a small follow-on (same parser behind a
+          document picker); <strong>XLSX is the deferrable chunk</strong> — it needs a real
+          parser dependency (SheetJS or server-side openpyxl) and multi-sheet/column-picking
+          UX. If even paste feels heavy, the whole entry chip can ship later: nothing else on
+          the chooser depends on it.</li>
+        <li><strong>Carried from v1 unchanged:</strong> one chooser rendered on both surfaces
+          (screen + Rank-tab sheet), outcome labels (Fastest / Most precise / Most control),
+          Quick rank as Quick set's follow-on pass rather than a peer, and the #233
+          "Continue — no QBs this high" empty-tier CTA with Skip hidden at 0 selected.</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
