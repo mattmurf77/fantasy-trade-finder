@@ -337,24 +337,30 @@ export default function TradeFinderHubScreen({ navigation }: any) {
             )}
           </View>
 
-          <Text style={styles.dnaGroupLabel}>Chasing</Text>
-          <View style={styles.chipWrap}>
-            {dna.chasing.length === 0 ? (
-              <Text style={styles.dnaEmpty}>Nothing set</Text>
-            ) : null}
-            {dna.chasing.map((c) => (
-              <PosChip key={`chase-${c.pos}`} pos={c.pos} rec={c.rec} tag={c.tag} />
-            ))}
+          {/* #218 — Chasing/Shopping labels sit INLINE beside their chips
+              (fixed label column) instead of stacked above: −2 label rows. */}
+          <View style={styles.dnaGroup}>
+            <Text style={styles.dnaGroupLabel}>Chasing</Text>
+            <View style={styles.chipWrap}>
+              {dna.chasing.length === 0 ? (
+                <Text style={styles.dnaEmpty}>Nothing set</Text>
+              ) : null}
+              {dna.chasing.map((c) => (
+                <PosChip key={`chase-${c.pos}`} pos={c.pos} rec={c.rec} tag={c.tag} />
+              ))}
+            </View>
           </View>
 
-          <Text style={styles.dnaGroupLabel}>Shopping</Text>
-          <View style={styles.chipWrap}>
-            {dna.shopping.length === 0 ? (
-              <Text style={styles.dnaEmpty}>Nothing set</Text>
-            ) : null}
-            {dna.shopping.map((c) => (
-              <PosChip key={`shop-${c.pos}`} pos={c.pos} rec={c.rec} tag={c.tag} />
-            ))}
+          <View style={styles.dnaGroup}>
+            <Text style={styles.dnaGroupLabel}>Shopping</Text>
+            <View style={styles.chipWrap}>
+              {dna.shopping.length === 0 ? (
+                <Text style={styles.dnaEmpty}>Nothing set</Text>
+              ) : null}
+              {dna.shopping.map((c) => (
+                <PosChip key={`shop-${c.pos}`} pos={c.pos} rec={c.rec} tag={c.tag} />
+              ))}
+            </View>
           </View>
         </View>
 
@@ -385,7 +391,7 @@ export default function TradeFinderHubScreen({ navigation }: any) {
               ]}
             >
               <View style={styles.cardIcon}>
-                <Icon name={m.icon} size={22} color={ice.base} />
+                <Icon name={m.icon} size={20} color={ice.base} />
               </View>
               <View style={{ flex: 1 }}>
                 <View style={styles.cardTitleRow}>
@@ -536,7 +542,11 @@ export default function TradeFinderHubScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
-  scroll: { padding: space.lg, gap: space.md },
+  // #218/#219 fit-to-screen density pass (approved mock
+  // mockups/polish-lab-2026-08/hub-fit-to-screen.html): screen padding
+  // lg 16 → md 12, stack gap md 12 → sm 8 — the hub is a launcher, not a
+  // reading surface, so the inter-block air is the cheapest height on the page.
+  scroll: { padding: space.md, gap: space.sm },
   header: { flexDirection: 'row', alignItems: 'center' },
   pageTitle: { ...type.heading },
 
@@ -546,8 +556,10 @@ const styles = StyleSheet.create({
     borderColor: ink.line,
     borderRadius: radii.md,
     backgroundColor: ink.ink1,
-    padding: space.md,
-    gap: space.sm,
+    // #218 — 12 → 10 pad, 8 → 6 inner gap per the mock; 10 and 6 have no
+    // 4-pt-scale token (between sm 8 / md 12 and xs 4 / sm 8), so literals.
+    padding: 10,
+    gap: 6,
   },
   dnaTop: {
     flexDirection: 'row',
@@ -559,9 +571,11 @@ const styles = StyleSheet.create({
   dnaRow: { flexDirection: 'row', gap: space.xl, flexWrap: 'wrap' },
   dnaKV: { ...type.body },
   dnaK: { color: chalk.faint },
-  dnaGroupLabel: { ...type.label, marginTop: space.xs },
+  // #218 — inline label + chips row; 64 label column per the mock (no token).
+  dnaGroup: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  dnaGroupLabel: { ...type.label, width: 64 },
   dnaEmpty: { ...type.bodySm, color: chalk.faint },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  chipWrap: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
 
   posChip: {
     flexDirection: 'row',
@@ -579,7 +593,8 @@ const styles = StyleSheet.create({
   posChipText: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
   posChipTag: { ...type.label, color: flare.base, fontSize: 9, marginLeft: 2 },
 
-  sectionLabel: { ...type.label, marginTop: space.sm },
+  // #218 — extra marginTop dropped (mock: 8 → 0); the stack gap separates it.
+  sectionLabel: { ...type.label },
 
   // Mode launcher cards
   card: {
@@ -590,11 +605,15 @@ const styles = StyleSheet.create({
     borderColor: ink.line,
     borderRadius: radii.md,
     backgroundColor: ink.ink1,
-    padding: space.md,
+    // #218 — vertical pad 12 → 9 (no token; horizontal keeps md 12). Cards
+    // stay ~61pt tall — comfortably over the 44pt tap-target floor.
+    paddingVertical: 9,
+    paddingHorizontal: space.md,
   },
   cardIcon: {
-    width: 40,
-    height: 40,
+    // #218 — icon well 40 → 34 (icon glyph 22 → 20) per the mock.
+    width: 34,
+    height: 34,
     borderRadius: radii.md,
     backgroundColor: ink.ink2,
     alignItems: 'center',
