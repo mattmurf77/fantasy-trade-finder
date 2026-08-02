@@ -36,7 +36,7 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `HelpSheet` | Teardown S4 PRD-01 (flag `ux.help_surface`): lightweight help bottom sheet (2–3 sentences + "Read more" web link); exports `InfoButton` (ⓘ, 44pt effective target) |
 | `SwapSuggestSheet` | Deck swap-suggestions sheet (2026-07-27 player-changer — operator follow-up to the calc eveners): one-tap replacement candidates for ONE asset of the top deck card, from `/api/trade/evaluate` on the trade MINUS that asset (`one_sided_eveners` covers 1-for-1 cards). Honest loading/error/empty states; "Browse full roster" hands off to the classic #86 SwapPlayerSheet. Host (TradesScreen) owns the query + pick-to-reprice wiring |
 | `TradeFinderModeBar` | Trade-Finding Hub (#156, flag `trades.finder_hub`): lateral quick-switch chip row (Guided · Team · Player · Calc) + "‹ Hub" back + mode title/hint, carried atop each focused trade-finder mode in `TradesScreen`. Presentational; host owns nav (guided/team/player switch in place via setParams, calc/hub navigate) |
-| `TopBar` | Screen header |
+| `TopBar` | Global header (#223/#224): the left cluster is the ACTIVE league — brand tick + 11px "LEAGUE" micro-label over a truncating league name + ice chevron — and tapping it opens the app's ONE `LeagueSwitcherSheet` instance (mounted here, works from every tab; carries the #199 add-a-league wiring via navigationRef → root-stack `LeaguePicker`). No-league (account-only) sessions fall back to the "Trade Finder" wordmark. Right side: bell (inboard, so the unread badge sits off the screen edge) + settings gear. Bar is 52pt (`TOP_BAR_HEIGHT`) |
 
 ## testID registry (UI-test harness — docs/plans/mobile-testing/lld.md Appendix A)
 
@@ -188,7 +188,7 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 - SwapSuggestSheet: `trade-card.swap-suggest-sheet` (sheet container) · `trade-card.swap-option.<id>` (one-tap replacement row; `<id>` = player_id, pick_id, or `<a>+<b>` for the 2-piece package) · `trade-card.swap-suggest-empty` (honest no-candidates state)
 
 **League switcher add-league + FAB dedup tranche (2026-07-27, #199/#196):**
-- LeagueSwitcherSheet: `league.switcher.add-league` (#199 — optional "Add a league" row pinned under the league list, rendered only when the host passes `onAddLeague`; wired on LeagueScreen's mount → closes the sheet and navigates to the root-stack `LeaguePicker`, whose footer carries the ESPN/MFL/Fleaflicker link flows)
+- LeagueSwitcherSheet: `league.switcher.add-league` (#199 — optional "Add a league" row pinned under the league list, rendered only when the host passes `onAddLeague`; since #223 the sheet's ONLY mount is TopBar's global instance, whose onAddLeague closes the sheet and navigates to the root-stack `LeaguePicker`, whose footer carries the ESPN/MFL/Fleaflicker link flows)
 - TradeFinderHubScreen no longer mounts its own `feedback.fab` (#196/#197 — TradesHome is a tab-stack screen, RootNav's global mount covers it; the local mount rendered a second flag at a different height)
 
 **League rankings (#14 completion, 2026-07-20):** `RankChipBadge` — "#3 of 12" consensus power-rank chip from the open `GET /api/league/rank-chip` read (60s server cache); silent-fail enrichment (error/old-server/demo → renders nothing); ice text when top-3. Mounted on LeaguePicker rows + the League tab hero chips. testID `league.rank-chip.<league_id>`
@@ -196,3 +196,7 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 **Calculator finder hand-off + trade-card badge reflow tranche (2026-08-01, #213/#226):**
 - TradeCalculatorScreen: `calc.find-a-trade` (#213 — the ONE quiet "Want ideas instead? Find a trade →" text-link row under the mode tabs; covers In-league/live/demo with a single affordance and navigates to the Trades stack home `TradesHome` — the finder hub with `trades.finder_hub` on, the classic deck off)
 - No new IDs for #226, but the trade-card row layout changed: `PlayerCard` gained a `badgeSlot` prop (informational badges rendered INSIDE the wrapping header badge row) and its classic-branch `rightSlot` is now in-flow (reserves width) instead of absolutely positioned; `TradeCard` moved OTB/UNTOUCHABLE badges to `badgeSlot` on BOTH columns and stacks the lock/swap/remove controls vertically in `rightSlot` (`trade-card.remove-asset.<player_id>` etc. unchanged)
+
+**Header league switcher tranche (2026-08-01, #223/#224):**
+- TopBar: `topbar.league` (the tappable active-league cluster — micro-label + truncating name + ice chevron; opens the global LeagueSwitcherSheet; disabled/dimmed while a switch is in flight; NOT rendered in no-league sessions, which show the wordmark instead) · `topbar.settings` unchanged; the bell/gear ORDER swapped (bell inboard, gear at the edge) but both keep their ids/labels and the badge behavior
+- `LeaguePill` was DELETED (its two mounts — Trades home "Trading in" + hub — were removed with #223; the header affordance replaced it). `league.hero` (LeagueScreen) still exists but is a plain identity View now — no press action, no chevron
