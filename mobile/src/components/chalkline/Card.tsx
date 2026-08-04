@@ -8,11 +8,15 @@ interface Props {
   rail?: string;
   /** Volt border (trio winner, active selection). */
   selected?: boolean;
+  /** Body padding override (default space.lg 16) — density passes only,
+   *  e.g. the #243 League-home hero at space.md 12. Rail cards keep their
+   *  own left inset and shouldn't combine with this. */
+  padding?: number;
   style?: ViewStyle;
 }
 
 // Chalkline card: ink-1 surface, hairline border, radius 8, no shadow, no hover lift.
-export default function Card({ children, rail, selected = false, style }: Props) {
+export default function Card({ children, rail, selected = false, padding, style }: Props) {
   return (
     <View
       style={[
@@ -22,7 +26,15 @@ export default function Card({ children, rail, selected = false, style }: Props)
       ]}
     >
       {rail ? <View style={[styles.rail, { backgroundColor: rail }]} /> : null}
-      <View style={[styles.body, rail ? styles.bodyWithRail : null]}>{children}</View>
+      <View
+        style={[
+          styles.body,
+          padding != null && { padding },
+          rail ? styles.bodyWithRail : null,
+        ]}
+      >
+        {children}
+      </View>
     </View>
   );
 }

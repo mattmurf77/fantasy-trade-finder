@@ -13,6 +13,7 @@ HTTP clients only. No React, no state, no side effects beyond fetch.
 | `tradePregen.ts` | Onboarding item 4 pregen: fire-and-forget `maybePregenTrades()` kicked from session-init success paths (LeaguePicker pick, `revalidateSession`) — flag `onboarding.trades_first`, per-launch dedupe; also the single source for the shared fairness-pref constants |
 | `events.ts` | First-party analytics SDK (`POST /api/events`, P1 contract — flag `analytics.client_events`) — `track(type, props?, screen?)` + batched offline queue (`{v:1}` shape, funnel-critical drop-last), per-session `seq`, response-driven purge + backoff. Device id (`dev_`) is minted in `client.ts` (`getDeviceId`) and re-exported here to avoid a flag-store import cycle |
 | `flags.ts` | Feature flags (`/api/flags`) |
+| `market.ts` | Market movers (#243, flag `market.movers`): `getMarketMovers(format)` → `GET /api/market/movers` — top risers/fallers by trailing-window % change of FTF community value. Open read; consumed by `MarketPulseStrip` |
 | `notifications.ts` | Notifications inbox |
 | `calc.ts` | Trade Calculator consensus endpoints (`/api/trade/values`, `/api/trade/evaluate`) — public, no session |
 | `sendInSleeper.ts` | Link Sleeper account + propose trades directly (flagged beta); #180 `validateTradeSend` (`POST /api/trades/validate`) — advisory pre-send checks, never throws |

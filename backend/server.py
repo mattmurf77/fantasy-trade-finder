@@ -15790,6 +15790,93 @@ def league_rank_chip_route():
 
 
 # ---------------------------------------------------------------------------
+# Market movers (#243 — League-home "Market pulse" strip, approved mock
+# risers-fallers-cards.html frame D1). Top risers/fallers by trailing-window
+# % change of FTF community value — player_value_history consensus_value
+# snapshots (daily cron #57), joined latest-vs-oldest-in-window via
+# database.load_value_movers_window. Flag `market.movers` — 404 while off.
+# Deliberately open read: universal-pool consensus data only, no user/board/
+# league content (same class as /api/tier-config).
+# ---------------------------------------------------------------------------
+
+# Junk-filler floor: % change on a tiny baseline is noise ("+60%" on a
+# 50-point stash). A player must have been worth at least this much at the
+# baseline snapshot to qualify as a mover.
+_MOVERS_MIN_BASE_VALUE = 100.0
+_MOVERS_MAX_N = 10
+
+
+@app.route("/api/market/movers")
+def market_movers_route():
+    """GET /api/market/movers?scoring_format=1qb_ppr&window_days=30&top_n=10
+
+    → {risers: [{player_id, name, position, team, pct_30d, value_now}…],
+       fallers: […], as_of, window_days, source: "ftf_community_value"}
+
+    Risers sorted by pct_30d desc, fallers most-negative first; ≤ top_n
+    (hard cap 10) each. `pct_30d` is named for the default window — it
+    reflects whatever `window_days` was requested (echoed in the payload).
+    Empty-safe when history is thin: fewer than two accrued snapshot days
+    returns 200 with empty lists, never an error.
+    """
+    if not is_enabled("market.movers"):
+        return jsonify({"error": "not_found"}), 404
+
+    fmt = request.args.get("scoring_format") or DEFAULT_SCORING
+    if fmt not in SCORING_FORMATS:
+        fmt = DEFAULT_SCORING
+    try:
+        window_days = max(1, int(request.args.get("window_days", 30)))
+    except ValueError:
+        window_days = 30
+    try:
+        top_n = int(request.args.get("top_n", _MOVERS_MAX_N))
+    except ValueError:
+        top_n = _MOVERS_MAX_N
+    top_n = max(1, min(top_n, _MOVERS_MAX_N))
+
+    from .database import load_value_movers_window
+    try:
+        as_of, now_vals, then_vals = load_value_movers_window(fmt, days=window_days)
+    except Exception as e:
+        log.error("market/movers read failed: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+
+    payload = {"risers": [], "fallers": [], "as_of": as_of,
+               "window_days": window_days, "source": "ftf_community_value"}
+    if not as_of or not then_vals:
+        return jsonify(payload)                        # thin history — empty-safe
+
+    players, _seed = _get_universal_pool(fmt)
+    meta = {p.id: p for p in players}
+    movers: list[dict] = []
+    for pid, then_v in then_vals.items():
+        now_v = now_vals.get(pid)
+        p = meta.get(pid)
+        if now_v is None or p is None:                 # dropped from today's
+            continue                                   # snapshot / not in pool
+        if not then_v or then_v < _MOVERS_MIN_BASE_VALUE:
+            continue                                   # junk-value baseline
+        pct = (now_v - then_v) / then_v * 100.0
+        if pct == 0:
+            continue
+        movers.append({
+            "player_id": pid,
+            "name":      p.name,
+            "position":  p.position,
+            "team":      getattr(p, "team", None),
+            "pct_30d":   round(pct, 1),
+            "value_now": round(now_v, 1),
+        })
+    movers.sort(key=lambda m: m["pct_30d"], reverse=True)
+    payload["risers"] = [m for m in movers if m["pct_30d"] > 0][:top_n]
+    fallers = sorted((m for m in movers if m["pct_30d"] < 0),
+                     key=lambda m: m["pct_30d"])
+    payload["fallers"] = fallers[:top_n]
+    return jsonify(payload)
+
+
+# ---------------------------------------------------------------------------
 # League "outlook odds" (#169) — playoff/championship odds. Componentized
 # pipeline in backend/outlook/. Dark behind the `outlook.odds` flag (404 off).
 # ---------------------------------------------------------------------------

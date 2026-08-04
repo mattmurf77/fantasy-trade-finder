@@ -114,6 +114,26 @@ export default function LeagueProgressModule({
   const rankedShown = Math.min(rankedMates + 1, totalTeams);
   const remaining = Math.max(0, MATCH_UNLOCK_MATES - rankedMates);
 
+  // #243 (league-home fold V1, approved mock league-home-fold.html): the
+  // full variant's invite affordance is an inline text link appended to the
+  // unlock sentence (same OS-share handler as the old ghost button — saves
+  // the button row's ~36pt everywhere the full variant mounts). The compact
+  // variant never rendered the invite and keeps its short sentence.
+  const inviteLink =
+    !compact && onInvite ? (
+      <Text
+        testID="league.progress-invite"
+        scale="dense"
+        style={styles.inviteLink}
+        onPress={onInvite}
+        accessibilityRole="link"
+        accessibilityLabel="Invite leaguemates"
+        suppressHighlighting
+      >
+        Invite them
+      </Text>
+    ) : null;
+
   const barBlock = (
     <>
       <View style={styles.statBetween}>
@@ -130,7 +150,7 @@ export default function LeagueProgressModule({
           <Text style={styles.unlockEm}>
             {remaining} more ranked leaguemate{remaining === 1 ? '' : 's'}
           </Text>{' '}
-          unlocks mutual matches{compact ? '.' : ' — trades both sides already like.'}
+          unlocks mutual matches.{inviteLink ? <> {inviteLink}</> : null}
         </Text>
       ) : null}
     </>
@@ -172,14 +192,21 @@ export default function LeagueProgressModule({
           <View style={styles.divider} />
           {barBlock}
 
-          {onInvite ? (
-            <Button
-              label="Invite leaguemates"
-              variant="ghost"
-              compact
+          {/* Matches already unlocked (no sentence to host the link) but
+              other unlocks outstanding — keep the invite affordance as a
+              standalone text link rather than losing it. */}
+          {remaining === 0 && onInvite ? (
+            <Text
+              testID="league.progress-invite"
+              scale="dense"
+              style={styles.inviteLink}
               onPress={onInvite}
-              style={styles.inviteBtn}
-            />
+              accessibilityRole="link"
+              accessibilityLabel="Invite leaguemates"
+              suppressHighlighting
+            >
+              Invite leaguemates
+            </Text>
           ) : null}
 
           {showFoldLine ? (
@@ -231,7 +258,16 @@ const styles = StyleSheet.create({
   unlockLine: { ...type.bodySm, color: chalk.base },
   unlockEm: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
 
-  inviteBtn: { alignSelf: 'flex-start', paddingHorizontal: 0 },
+  // #243 — inline invite text link (replaces the old ghost Button row).
+  // Ice + semibold + underline: the same text-link construction as the
+  // #213 calculator hand-off row. Nested-Text link ⇒ no 44pt target;
+  // documented deviation, matches the approved V1 mock.
+  inviteLink: {
+    ...type.bodySm,
+    color: ice.base,
+    fontFamily: fonts.uiSemi,
+    textDecorationLine: 'underline',
+  },
 
   foldLine: {
     ...type.bodySm,
