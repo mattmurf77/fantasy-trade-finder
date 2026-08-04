@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Trios Three-Up V2: Two-Line Names (#243)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --gold:#F59E0B; --silver:#94A3B8;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+
+.note{max-width:1080px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note code{font-family:var(--f-mono);font-size:12px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+.note ul{margin:4px 0 0 18px} .note li{margin:3px 0}
+.q{border-left:3px solid var(--lineStrong);padding-left:10px;margin:8px 0;font-style:italic}
+.note table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12.5px}
+.note table th,.note table td{border:1px solid var(--line);padding:5px 8px;text-align:left}
+.note table th{color:var(--chalk);background:var(--ink2);font-weight:600}
+.note table td.num{font-family:var(--f-mono);text-align:right}
+
+/* ── global "copy all notes" bar ── */
+.notesbar{max-width:1080px;width:100%;display:flex;gap:14px;align-items:center;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:10px 14px;position:sticky;top:8px;z-index:5}
+.notesbar .txt{flex:1;font-size:12px;color:var(--dim);line-height:1.4}
+.copybtn{background:var(--ice);color:var(--onIce);border:0;border-radius:6px;padding:9px 14px;
+  font-family:var(--f-display);font-size:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;cursor:pointer;flex:0 0 auto}
+.copybtn:hover{filter:brightness(1.08)}
+.notecount{color:var(--faint);font-size:11px;flex:0 0 auto}
+
+.rowlbl{max-width:1080px;width:100%;font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:15px;color:var(--chalk);display:flex;align-items:center;gap:8px;margin-top:4px}
+.rowlbl::before{content:"";width:3px;height:14px;background:var(--ice)}
+.rowlbl .fb{font-family:var(--f-mono);font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0}
+
+.pairwrap{display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}
+.slot{display:flex;flex-direction:column;gap:8px;align-items:center;width:393px}
+.slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--ice);display:flex;align-items:center;gap:7px;align-self:flex-start}
+.slotlbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+.caption{font-size:12px;line-height:1.5;color:var(--dim);text-align:left;align-self:flex-start}
+.caption b{color:var(--chalk)}
+.caption code{font-family:var(--f-mono);font-size:11px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+
+/* ── phone frame: 393×852pt, no scaling — px == pt throughout this file ── */
+.phone{width:393px;height:852px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;
+  box-shadow:0 12px 32px rgba(0,0,0,.55);position:relative;display:flex;flex-direction:column}
+.status{height:59px;flex:0 0 auto;display:flex;align-items:flex-end;justify-content:space-between;padding:0 22px 8px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.topbar{height:52px;flex:0 0 auto;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 16px}
+.tb-league{display:flex;flex-direction:column;gap:1px;min-width:0}
+.tb-lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.tb-nm{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.tb-icons{display:flex;gap:10px;align-items:center;flex:0 0 auto}
+.navhead{height:44px;flex:0 0 auto;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 8px;gap:6px}
+.navhead .navtitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:16px}
+.content{flex:1 1 auto;position:relative;overflow:hidden}
+.tabbar{flex:0 0 auto;height:83px;display:flex;border-top:1px solid var(--line);background:var(--ink0);padding-bottom:22px}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 4px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:20px;height:20px;stroke:var(--faint);stroke-width:1.75;fill:none;stroke-linecap:square}
+.tab.on{color:var(--ice)} .tab.on svg{stroke:var(--ice)}
+svg.i{fill:none;stroke-width:1.75;stroke-linecap:square;stroke-linejoin:miter;stroke:var(--dim)}
+
+/* ── content stack ── */
+.stack{padding:16px;display:flex;flex-direction:column;gap:12px}
+.modehint{height:14px;font-size:13px;color:var(--faint);text-align:center;line-height:14px}
+
+.fmt{height:38px;display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;flex:0 0 auto}
+.fmtbtn{flex:1;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--dim);background:transparent;font-family:var(--f-ui)}
+.fmtbtn.on{background:var(--ink3);color:var(--chalk)}
+
+.switcher4{height:48px;display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;flex:0 0 auto}
+.swbtn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-left:1px solid var(--line);border-bottom:2px solid transparent}
+.swbtn:first-child{border-left:0}
+.swbtn .swlbl{font-size:11px;letter-spacing:.08em;font-weight:600;text-transform:uppercase;color:var(--dim)}
+.swbtn .swcount{font-family:var(--f-mono);font-size:11px;color:var(--dim);margin-top:1px}
+.swbtn.on{background:var(--ink3);border-bottom-color:var(--wr)}
+.swbtn.on .swlbl{color:var(--chalk)}
+
+.progwrap{height:28px;display:flex;flex-direction:column;gap:5px;justify-content:center;flex:0 0 auto}
+.progtrack{height:4px;display:flex;gap:1px;background:var(--line)}
+.progseg{flex:1;height:4px;background:var(--ink3);overflow:hidden}
+.progfill{height:4px}
+.progtext{font-size:13px;color:var(--dim);text-align:center}
+.progtext b{font-family:var(--f-mono);color:var(--chalk);font-weight:500}
+
+.instr{height:37px;display:flex;align-items:center;justify-content:center;font-size:14px;text-align:center;flex:0 0 auto}
+
+.speedtile{height:80px;border:1px solid var(--line);border-radius:8px;background:var(--ink1);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;flex:0 0 auto}
+.speedtitlerow{display:flex;align-items:center;gap:6px}
+.speedtitle{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.speedcap{font-size:13px;color:var(--dim);text-align:center;padding:0 24px}
+
+.actionsrow{height:60px;display:flex;align-items:flex-end;flex:0 0 auto}
+.skipbtn{flex:1;height:44px;border:1px solid var(--lineStrong);border-radius:4px;background:transparent;color:var(--chalk);font-family:var(--f-display);font-weight:600;font-size:14px;text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;justify-content:center}
+
+/* ═══ mini-card base (V3 lineage) — 115×128pt, tap-to-pick + winner state ═══ */
+.mini3{height:128px;display:flex;gap:8px;flex:0 0 auto}
+.mini3--tall{height:136px}
+.minicard{flex:1;min-width:0;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:8px;position:relative;display:flex;flex-direction:column;gap:4px;overflow:hidden}
+.minicard.sel{border-color:var(--ice)}
+.minicard.winner{border-color:var(--ice);background:var(--ink2)}
+.minicard.loser{opacity:.55}
+.minicard .rail{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--wr)}
+.minihead{padding-left:5px;display:flex;gap:4px;flex-wrap:wrap}
+.minipos{display:inline-flex;padding:1px 5px;border:1px solid var(--wr);border-radius:2px;font-family:var(--f-mono);font-size:11px;font-weight:600;color:var(--wr)}
+.minirk{display:inline-flex;padding:1px 4px;border:1px solid var(--flare);border-radius:2px;font-size:9px;font-weight:700;color:var(--flare);letter-spacing:.04em}
+.minimeta{padding-left:5px;font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.minirank{position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:2px;display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:11px;font-weight:600;color:var(--onIce)}
+.minirank.r1{background:var(--gold)}
+.winnertick{position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:2px;display:flex;align-items:center;justify-content:center;background:var(--ice)}
+.winnertick svg{stroke:var(--onIce);stroke-width:2}
+.winnerlbl{position:absolute;bottom:6px;left:6px;right:6px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ice)}
+
+/* ── two-line name box, three sizings — whole-word wrap only (no hyphens,
+   no mid-word break), suffix glued to surname via &nbsp; in the markup,
+   TOP-ALIGNED so a one-line name (Bo Nix) sits flush with the badge row
+   above instead of floating to a vertical center — keeps all 3 cards'
+   internal rhythm identical regardless of name length. ── */
+.mininame2{
+  padding-left:5px;
+  font-size:13px;font-weight:600;line-height:15px;
+  height:30px;                 /* reserves exactly 2 lines, always */
+  overflow:hidden;
+  white-space:normal;          /* allow wrapping at word boundaries */
+  word-break:normal;           /* NEVER split a word mid-character */
+  overflow-wrap:normal;        /* NEVER break an unbreakable word either */
+  hyphens:none;                /* NEVER auto-hyphenate */
+}
+.mininameB{
+  padding-left:5px;
+  font-size:12px;font-weight:600;line-height:14px;   /* 1px above the 11px Chalkline floor */
+  height:28px;
+  overflow:hidden;white-space:normal;word-break:normal;overflow-wrap:normal;hyphens:none;
+}
+.minicardB{padding:9px;gap:5px}
+
+/* ── fold / annotation overlay ── */
+.fold{position:absolute;left:0;right:0;bottom:0;border-top:2px dashed var(--flare);z-index:6}
+.fold .flabel{position:absolute;right:8px;top:-22px;font-family:var(--f-mono);font-size:11px;color:var(--flare);background:rgba(12,14,17,.9);padding:1px 6px;border:1px solid var(--flare);border-radius:2px}
+.ann{position:absolute;z-index:7;font-size:11px;font-family:var(--f-mono);color:var(--ice);background:rgba(12,14,17,.94);border:1px solid var(--ice);border-radius:2px;padding:2px 6px;line-height:1.45;max-width:165px}
+.ann.f{color:var(--flare);border-color:var(--flare)}
+.fit{position:absolute;left:12px;right:12px;bottom:8px;z-index:6;text-align:center;font-family:var(--f-mono);font-size:11px;color:var(--pos);border:1px dashed var(--pos);border-radius:2px;padding:4px}
+.zoneguide{position:absolute;left:6px;right:6px;border-top:1px dashed rgba(86,217,236,.5);z-index:2}
+
+/* ── per-frame note box ── */
+.notewrap{width:100%;display:flex;flex-direction:column;gap:4px}
+.notelbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;color:var(--dim)}
+.notelbl .dot{width:6px;height:6px;border-radius:50%;background:var(--warn);display:none}
+.notewrap.noted .notelbl .dot{display:block}
+.pagenote{width:100%;background:var(--ink1);color:var(--chalk);border:1px solid var(--line);border-radius:6px;
+  padding:8px 10px;font-family:var(--f-ui);font-size:12.5px;min-height:48px;resize:vertical}
+.pagenote::placeholder{color:var(--faint)}
+.pagenote:focus{outline:none;border-color:var(--ice)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Polish Lab · Trios Three-Up V2 — two-line names, no truncation (#243 follow-up)</h1>
+  <p><b>Source:</b> <code>trios-three-up.html</code> (this same folder), reviewed by the operator. V3 — three mini-cards side by side, tap animates a "winner" state, no layout shift — was picked as the base to keep iterating. The one open complaint:</p>
+  <p class="q">"I like V3 best, but don't like the truncation. We should explore some other versions that allow for two lines. I don't want a last name or even a name suffix spilling over into the next line where the word is split into the two lines — so if the word doesn't fit on the line, the whole word should move down."</p>
+  <p>This file replaces V3's single-line ellipsis truncation (<code>"Marvin Harris…"</code>) with two-line name blocks under three hard rules, explored as three variants below:</p>
+  <ul>
+    <li><b>Whole-word wrapping only</b> — never hyphenate, never split a word across lines; if a word doesn't fit on the current line, the entire word moves to line 2 (<code>overflow-wrap:normal; word-break:normal; hyphens:none</code> — the CSS defaults that refuse to break inside a word, deliberately re-asserted here so a future style tweak can't silently reintroduce breaking).</li>
+    <li><b>Suffixes stay glued to the surname</b> — "Harrison Jr." is joined by a non-breaking space in the markup (<code>Harrison&nbsp;Jr.</code>), so it wraps as one unit and "Jr." can never strand alone on line 2.</li>
+    <li><b>Two lines reserved in every card, always</b> — the name box is a fixed-height container (30pt for variants A/C, 28pt for variant B) whether the name needs one line or two, so the three cards in a row never differ in height. Short names are <b>top-aligned</b> in that box (chosen over vertical centering) so they sit flush under the badge row exactly like a two-line name's first line does — the badge-to-name gap never jumps around card to card.</li>
+  </ul>
+  <p>All three variants are stress-tested against the same trio: <b>Marvin Harrison Jr.</b> (long name + suffix), <b>Tetairoa McMillan</b> (long first name + long surname, no suffix), and <b>Bo Nix</b> (short — the one-line case the top-align rule has to look right for).</p>
+</div>
+
+<div class="notesbar">
+  <div class="txt">Leave a note in any frame below — it persists in this browser (localStorage), not the file. Use <b style="color:var(--chalk)">Copy all notes</b> to pull everything into one paste.</div>
+  <button class="copybtn" id="copyall">Copy all notes</button>
+  <div class="notecount" id="notecount"></div>
+</div>
+
+<!-- ═══════════════════════ ROW 1 — VARIANT A ═══════════════════════ -->
+<div class="rowlbl">Variant A — same 115×128pt card, full name at 13px, wraps to 2 lines<span class="fb">recommended</span></div>
+<div class="pairwrap">
+
+  <!-- A1 -->
+  <div class="slot">
+    <div class="slotlbl">A1 — idle, stress trio</div>
+    <div class="phone">
+      <div class="ann" style="top:150px;right:8px">115×128pt card<br>≥44pt tap target ✓</div>
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Tap in order of preference — best first</div>
+          <div class="mini3">
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span><span class="minirk">RK</span></div>
+              <div class="mininame2">Marvin Harrison&nbsp;Jr.</div>
+              <div class="minimeta">ARI · 22</div>
+            </div>
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame2">Tetairoa McMillan</div>
+              <div class="minimeta">CAR · 22</div>
+            </div>
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">QB</span></div>
+              <div class="mininame2">Bo Nix</div>
+              <div class="minimeta">DEN · 26</div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+        <div class="fit">fits — 551 of 747pt, ~63pt spare vs the 614pt budget</div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Exact same 115×128pt card as V3 — the row height didn't need to grow at all, because V3's single-line name box only ever used ~half the card's vertical slack. "Marvin Harrison&nbsp;Jr." wraps as <b>"Marvin" / "Harrison Jr."</b> — never <b>"Marvin Harrison" / "Jr."</b>. "Tetairoa McMillan" wraps as <b>"Tetairoa" / "McMillan"</b>. "Bo Nix" stays one line, top-aligned in the same reserved 2-line box, so its badge-to-meta rhythm matches the wrapped cards exactly. Zero savings given back vs V3's 196pt — full name always visible, no ellipsis, no long-press needed to see "Jr."</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — A1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="A1 — two-line names, same 128pt card, idle" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- A2 -->
+  <div class="slot">
+    <div class="slotlbl">A2 — after tap, winner state (recommended variant)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Good — now tap your 2nd choice</div>
+          <div class="mini3">
+            <div class="minicard winner">
+              <div class="rail"></div>
+              <div class="winnertick"><svg width="12" height="12" viewBox="0 0 20 20"><path d="M4 10l4 4 8-8"/></svg></div>
+              <div class="minihead"><span class="minipos">WR</span><span class="minirk">RK</span></div>
+              <div class="mininame2">Marvin Harrison&nbsp;Jr.</div>
+              <div class="minimeta">ARI · 22</div>
+              <div class="winnerlbl">Ranked 1st</div>
+            </div>
+            <div class="minicard loser">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame2">Tetairoa McMillan</div>
+              <div class="minimeta">CAR · 22</div>
+            </div>
+            <div class="minicard loser">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">QB</span></div>
+              <div class="mininame2">Bo Nix</div>
+              <div class="minimeta">DEN · 26</div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Same winner treatment as V3 (ice border + fill + check tick + "Ranked 1st", other two dim to 55%) — the two-line name box doesn't change the tap animation at all; <code>winnerlbl</code> is still absolutely positioned at <code>bottom:6px</code> and the card has ~45pt of untouched slack below the 2-line name + meta, so it never collides even on the wrapped "Marvin Harrison / Jr." card. <b>No layout shift on tap</b>, exactly like V3.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — A2<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="A2 — two-line names, winner tap state" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ ROW 2 — VARIANT B ═══════════════════════ -->
+<div class="rowlbl">Variant B — 115×136pt card, name stepped down to 12px<span class="fb">more breathing room, not required for fit</span></div>
+<div class="pairwrap">
+
+  <!-- B1 -->
+  <div class="slot">
+    <div class="slotlbl">B1 — idle, stress trio</div>
+    <div class="phone">
+      <div class="ann" style="top:158px;right:8px">115×136pt card<br>+8pt vs A, still ≥44pt ✓</div>
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Tap in order of preference — best first</div>
+          <div class="mini3 mini3--tall">
+            <div class="minicard minicardB">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span><span class="minirk">RK</span></div>
+              <div class="mininameB">Marvin Harrison&nbsp;Jr.</div>
+              <div class="minimeta">ARI · 22</div>
+            </div>
+            <div class="minicard minicardB">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininameB">Tetairoa McMillan</div>
+              <div class="minimeta">CAR · 22</div>
+            </div>
+            <div class="minicard minicardB">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">QB</span></div>
+              <div class="mininameB">Bo Nix</div>
+              <div class="minimeta">DEN · 26</div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+        <div class="fit">fits — 559 of 747pt, ~55pt spare vs the 614pt budget</div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Card grows 128→136pt and the name drops one step, 13px→<b>12px</b> (1px above the 11px Chalkline floor, so this is the last step available before hitting it). Padding/gap also open up slightly (8→9px, 4→5px) for a less cramped feel. Not needed to make the wrap fit — A already had slack — this exists purely as "does more air read better" option. Wrap behavior is identical to A: <b>"Marvin" / "Harrison Jr."</b>, <b>"Tetairoa" / "McMillan"</b>, <b>"Bo Nix"</b> one line, top-aligned.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — B1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="B1 — 12px name, 136pt card, stress trio" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- B2 -->
+  <div class="slot">
+    <div class="slotlbl">B2 — idle, everyday trio (no long names)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Tap in order of preference — best first</div>
+          <div class="mini3 mini3--tall">
+            <div class="minicard minicardB">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininameB">CeeDee Lamb</div>
+              <div class="minimeta">DAL · 25</div>
+            </div>
+            <div class="minicard minicardB">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininameB">Chris Olave</div>
+              <div class="minimeta">NO · 24</div>
+            </div>
+            <div class="minicard minicardB">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininameB">Zay Flowers</div>
+              <div class="minimeta">BAL · 24</div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">The common case — most player names are one line. Shows the top-align choice for the "no wrap needed" majority: all three names sit flush under their badge row at identical height, with the empty 2nd line simply adding quiet space above <code>minimeta</code> rather than pushing the name down to vertically center it. Same 136pt card as B1 — heights never differ between an idle 1-line trio and the 2-line stress trio.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — B2<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="B2 — 12px name, 136pt card, everyday trio" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ ROW 3 — VARIANT C ═══════════════════════ -->
+<div class="rowlbl">Variant C — first initial + surname, 2-line fallback only when needed<span class="fb">same 115×128pt footprint as A</span></div>
+<div class="pairwrap">
+
+  <!-- C1 -->
+  <div class="slot">
+    <div class="slotlbl">C1 — idle, stress trio</div>
+    <div class="phone">
+      <div class="ann" style="top:150px;right:8px">115×128pt card<br>≥44pt tap target ✓</div>
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Tap in order of preference — best first</div>
+          <div class="mini3">
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span><span class="minirk">RK</span></div>
+              <div class="mininame2">M. Harrison&nbsp;Jr.</div>
+              <div class="minimeta">ARI · 22</div>
+            </div>
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame2">T. McMillan</div>
+              <div class="minimeta">CAR · 22</div>
+            </div>
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">QB</span></div>
+              <div class="mininame2">B. Nix</div>
+              <div class="minimeta">DEN · 26</div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+        <div class="fit">fits — 551 of 747pt, ~63pt spare vs the 614pt budget</div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">"<b>M. Harrison Jr.</b>" is still too wide for one line at 115pt, so it falls back to the same 2-line box as A/B: <b>"M." / "Harrison Jr."</b> ("Harrison Jr." stays glued via the same <code>&nbsp;</code>). "T. McMillan" and "B. Nix" both fit on one line — this is the point of the initial: it buys back a line for most real rosters, the fallback only fires on genuinely long surnames. Tradeoff is real, though: the first name disappears from the card entirely, which reads colder than A and loses a bit of personalization.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — C1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="C1 — initial+surname, stress trio" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- C2 -->
+  <div class="slot">
+    <div class="slotlbl">C2 — idle, everyday trio (fallback rarely fires)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Tap in order of preference — best first</div>
+          <div class="mini3">
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame2">C. Lamb</div>
+              <div class="minimeta">DAL · 25</div>
+            </div>
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame2">C. Olave</div>
+              <div class="minimeta">NO · 24</div>
+            </div>
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame2">Z. Flowers</div>
+              <div class="minimeta">BAL · 24</div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Even the initial style leaves the 2nd line reserved and empty on every card here (top-aligned) — the box height must stay fixed at 30pt for row-consistency regardless of whether any card in the row happens to need it this time. Visually the driest of the three variants; reads more like a compact stat table than a player picker.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — C2<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="C2 — initial+surname, everyday trio" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<div class="note">
+  <h2>Pt math summary</h2>
+  <table>
+    <tr><th>Variant</th><th class="num">Card size</th><th class="num">Cards block</th><th class="num">Total content</th><th class="num">vs 614pt budget</th><th class="num">Savings vs current 324pt</th><th>Long name ("Marvin Harrison Jr.")</th></tr>
+    <tr><td>V3 (single-line, prior file)</td><td class="num">115×128pt</td><td class="num">128pt</td><td class="num">551pt</td><td class="num" style="color:var(--pos)">+63pt spare</td><td class="num" style="color:var(--pos)">196pt</td><td>Truncates: "Marvin Harris…" (loses "Jr.")</td></tr>
+    <tr><td><b>A — 2-line, 13px, same card</b></td><td class="num">115×128pt</td><td class="num">128pt</td><td class="num">551pt</td><td class="num" style="color:var(--pos)">+63pt spare</td><td class="num" style="color:var(--pos)">196pt</td><td>Wraps whole-word: "Marvin" / "Harrison Jr." — full name always visible</td></tr>
+    <tr><td>B — 2-line, 12px, taller card</td><td class="num">115×136pt</td><td class="num">136pt</td><td class="num">559pt</td><td class="num" style="color:var(--pos)">+55pt spare</td><td class="num" style="color:var(--pos)">188pt</td><td>Same wrap as A, smaller type, more air</td></tr>
+    <tr><td>C — initial + surname, 2-line fallback</td><td class="num">115×128pt</td><td class="num">128pt</td><td class="num">551pt</td><td class="num" style="color:var(--pos)">+63pt spare</td><td class="num" style="color:var(--pos)">196pt</td><td>"M." / "Harrison Jr." — fallback fires only here</td></tr>
+  </table>
+  <p>All three variants clear the "<b>~180pt+</b>" savings bar the operator set (188–196pt, vs 324pt for today's stacked <code>PlayerCard</code>s) and keep every card well above the <b>44×44pt</b> minimum tap target on both axes (115pt wide × 128–136pt tall). None of them reintroduce the 614pt-budget overflow that today's stacked layout has.</p>
+  <h2>Recommendation</h2>
+  <p><b>Variant A</b> — full name, 13px, unchanged 115×128pt card. It fixes the operator's exact complaint (no truncation, no split words, "Jr." never strands) without giving back any of V3's savings and without touching the font size, padding, or card height that V1/V2/V3 already established as the baseline — the only change is letting <code>mininame</code> wrap into a reserved 2-line box instead of ellipsizing at 1 line, plus one non-breaking space in the data layer between a surname and its suffix. <b>B</b> is a reasonable fallback if 13px reads as too tight in real device testing (drops to 12px, the last legal step before the 11px floor) but gives back 8pt of the savings and adds a size variant to maintain. <b>C</b> is the one genuine structural alternative — it buys the most one-line headroom for typical rosters — but it trades away the player's first name, which cuts against personalization for a marginal, mostly-unneeded gain now that A already fits everything. Ship <b>A</b>; keep C in back pocket only if a future name (e.g. a hyphenated-surname + suffix combo) is found that still doesn't fit A's 2 lines.</p>
+</div>
+
+<script>
+(function(){
+  var KEY = 'ftf-polish-lab-2026-08-243-trios-v2-notes';
+  var notes = {};
+  try { notes = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { notes = {}; }
+
+  var boxes, notecount;
+
+  function refresh(){
+    var n = 0;
+    boxes.forEach(function(b){
+      var has = !!(notes[b.dataset.key] || '').trim();
+      b.closest('.notewrap').classList.toggle('noted', has);
+      if (has) n++;
+    });
+    notecount.textContent = n ? (n + ' of ' + boxes.length + ' noted') : 'no notes yet';
+  }
+
+  function init(){
+    boxes = Array.prototype.slice.call(document.querySelectorAll('.pagenote'));
+    notecount = document.getElementById('notecount');
+    boxes.forEach(function(b){
+      b.value = notes[b.dataset.key] || '';
+      b.addEventListener('input', function(){
+        notes[b.dataset.key] = b.value;
+        try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {}
+        refresh();
+      });
+    });
+    refresh();
+  }
+
+  document.getElementById('copyall').addEventListener('click', async function(){
+    var lines = [];
+    (boxes || []).forEach(function(b){
+      var t = (notes[b.dataset.key] || '').trim();
+      if (t) lines.push('## ' + b.dataset.key + '\n' + t);
+    });
+    var text = lines.length ? lines.join('\n\n') : '(no notes)';
+    var ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand('copy'); } catch (e2) {}
+      ta.remove();
+    }
+    var btn = document.getElementById('copyall');
+    var orig = btn.textContent;
+    btn.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(function(){ btn.textContent = orig; }, 1500);
+  });
+
+  init();
+})();
+</script>
+
+</body>
+</html>
