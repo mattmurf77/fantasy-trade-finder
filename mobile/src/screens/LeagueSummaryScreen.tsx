@@ -77,6 +77,18 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 //     state (`subset` + `posFilter`); changing a filter in either place
 //     updates both instantly. The panel's formerly-independent `drillPos`
 //     filter is gone.
+//   - #243 drill-in filter dedup, V1 (2026-08-03, approved mock
+//     mockups/polish-lab-2026-08/drilldown-filter-dedup.html): WHILE A TEAM
+//     IS FOCUSED the chart card collapses to a slim strip — the card's own
+//     SubsetControl/PosFilterPills do NOT mount (a passive "Filtered by: …"
+//     caption, testID league-summary.filter-caption, takes their place), the
+//     X close control becomes a "‹ All teams" back affordance (keeps testID
+//     league-summary.roster-close; inner label league-summary.back-all-teams),
+//     the hint line tightens, and the tab-root "League home" row hides. The
+//     drill panel's mirrored controls become the single visible set. This is
+//     VISIBILITY ONLY: the #237 shared `subset`/`posFilter` state model and
+//     the unfocused rendering (both control sets, home row, X-restores) are
+//     untouched — unfocusing restores today's layout exactly.
 //     headers "(count) · positional total · rank/M" (rank chip color-coded by
 //     league tercile: top third pos-green, middle warn-amber, bottom
 //     neg-red) and per-player positional value ranks ("RB2", "NR" for zero
@@ -402,6 +414,18 @@ export default function LeagueSummaryScreen() {
   const fmtKey = query.data?.scoring_format ?? '';
   const formatCaption = `Dynasty · ${FORMAT_LABELS[fmtKey] ?? fmtKey.toUpperCase()}`;
 
+  // #243 — passive filter caption for the focused-state slim strip:
+  // "All" / "Starters · WR" / "All · WR + TE + Picks". Positions read in the
+  // canonical QB→RB→WR→TE order (#195), Picks last.
+  const subsetLabel = SUBSETS.find((s) => s.key === subset)?.label ?? 'All';
+  const filterPosLabel = [
+    ...CORE_POSITIONS.filter((p) => posFilter.has(p)),
+    ...(posFilter.has('PICKS') ? ['Picks'] : []),
+  ].join(' + ');
+  const filterCaptionLabel = filterPosLabel
+    ? `${subsetLabel} · ${filterPosLabel}`
+    : subsetLabel;
+
   if (!leagueId) {
     return (
       <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -431,8 +455,10 @@ export default function LeagueSummaryScreen() {
         {/* #181 — the classic league page's entry point, tab-root variant
             only (the root-stack push still exits via its back control).
             LeagueRow construction: hairline list row, title + body-sm
-            chalk-dim meta + chevron. */}
-        {isTabRoot ? (
+            chalk-dim meta + chevron. #243 — hidden while a team is focused
+            (a nav-away affordance is irrelevant mid roster review); returns
+            the moment focus clears. */}
+        {isTabRoot && !selected ? (
           <Pressable
             testID="league-summary.league-home"
             onPress={() => navigation.navigate('LeagueHome')}
@@ -508,15 +534,22 @@ export default function LeagueSummaryScreen() {
               )}
             </View>
             {selected ? (
+              /* #243 slim strip — the close control is a "‹ All teams" back
+                 affordance (approved mock, V1 frame). Same function as the
+                 old X, so it KEEPS testID league-summary.roster-close; the
+                 label carries the new back-affordance id. */
               <Pressable
                 testID="league-summary.roster-close"
                 onPress={() => setSelectedId(null)}
                 hitSlop={12}
                 accessibilityRole="button"
-                accessibilityLabel="Close team focus"
-                style={({ pressed }) => [styles.headBtn, pressed && styles.headBtnPressed]}
+                accessibilityLabel="Back to all teams"
+                style={({ pressed }) => [styles.backLink, pressed && { opacity: 0.6 }]}
               >
-                <Icon name="x" size={20} color={chalk.dim} />
+                <Icon name="chevron-left" size={14} color={ice.base} />
+                <Text testID="league-summary.back-all-teams" style={styles.backLinkText}>
+                  All teams
+                </Text>
               </Pressable>
             ) : (
               <Pressable
@@ -542,8 +575,10 @@ export default function LeagueSummaryScreen() {
           {/* 2026-07-26 — league-wide subset. Hidden entirely when the server
               can't derive the split (never fabricate). #237 — the same
               control (same shared state) also renders in the drill-in
-              roster panel below. */}
-          {startersAvailable ? (
+              roster panel below. #243 — while a team is focused the card's
+              copy does NOT mount (the drill panel's copy is the single
+              visible set; shared state untouched). */}
+          {startersAvailable && !selected ? (
             <SubsetControl
               idPrefix="league-summary.subset"
               subset={subset}
@@ -553,14 +588,27 @@ export default function LeagueSummaryScreen() {
 
           {/* Position filter — single or multi select; "All" clears. Reorders
               + rescales the chart live over the already-returned per-position
-              values (no refetch). */}
-          <PosFilterPills
-            idPrefix="league-summary.posfilter"
-            filter={posFilter}
-            onToggle={togglePos(setPosFilter)}
-            showPicks={showPicksKey}
-          />
-          <Text style={[type.bodySm, styles.hint]}>
+              values (no refetch). #243 — hidden while focused, same dedup as
+              the subset control above. */}
+          {!selected ? (
+            <PosFilterPills
+              idPrefix="league-summary.posfilter"
+              filter={posFilter}
+              onToggle={togglePos(setPosFilter)}
+              showPicks={showPicksKey}
+            />
+          ) : (
+            /* #243 slim strip — passive caption of the active filter in place
+               of the card's interactive controls. */
+            <View style={styles.filterCaption} testID="league-summary.filter-caption">
+              <Text style={[type.bodySm, styles.filterCaptionText]}>
+                {'Filtered by: '}
+                <Text style={styles.filterCaptionValue}>{filterCaptionLabel}</Text>
+                {' — change filters below'}
+              </Text>
+            </View>
+          )}
+          <Text style={[type.bodySm, styles.hint, selected ? styles.hintTight : null]}>
             {`${subset === 'starters' ? 'Best starting lineup only. ' : subset === 'bench' ? 'Bench only. ' : ''}${
               posFilter.size === 0
                 ? basis === 'consensus'
@@ -1238,6 +1286,28 @@ const styles = StyleSheet.create({
   headBtnPressed: { backgroundColor: ink.ink3 },
   updatedAt: { color: chalk.faint, marginTop: space.xs },
 
+  // #243 focused-state slim strip — "‹ All teams" back affordance (replaces
+  // the X while focused; same 32pt control height) + the passive filter
+  // caption that stands in for the card's interactive controls.
+  backLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    minHeight: 32,
+  },
+  backLinkText: { ...type.label, color: ice.base },
+  filterCaption: {
+    marginTop: space.sm,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+  },
+  filterCaptionText: { color: chalk.dim },
+  filterCaptionValue: { color: chalk.base, fontWeight: '600' },
+
   subsetRow: {
     flexDirection: 'row',
     marginTop: space.md,
@@ -1269,6 +1339,8 @@ const styles = StyleSheet.create({
   pillText: { ...type.label, letterSpacing: 0.5 },
 
   hint: { marginTop: space.sm, marginBottom: space.md, color: chalk.dim },
+  // #243 — tighter hint margins in the focused slim strip only (audit fix #3).
+  hintTight: { marginTop: space.xs, marginBottom: space.sm },
 
   // Vertical stacked columns — x-axis = rank 1..N.
   chartWrap: { position: 'relative' },
