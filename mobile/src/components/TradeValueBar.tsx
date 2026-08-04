@@ -1,7 +1,7 @@
-import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import type { DimensionValue } from 'react-native';
-import { Text } from './chalkline';
+import { Icon, Text } from './chalkline';
 import type { CalcGap } from '../api/calc';
 import { chalk, ice, ink, radii, semantic, space, tier as tierColors, type } from '../theme/chalkline';
 
@@ -17,6 +17,14 @@ import { chalk, ice, ink, radii, semantic, space, tier as tierColors, type } fro
 // wires it here (ConsensusVerdictCard) and a later finder-card usage imports
 // the same component. `favors` is authoritative for who-wins; `gap` supplies
 // the magnitude.
+//
+// #243 density pass (V1, mockups/polish-lab-2026-08/tradevaluebar-density.html
+// frame B1): winner line steps heading→title (mid-card element, not a page
+// title), the verdict paragraph collapses by default behind a one-line "Why?"
+// disclosure (AdjustmentsDisclosure grammar; per-instance state, so every
+// mount — deck cards, featured window, calculator verdicts — starts
+// collapsed), verdict-box vertical padding md→sm, and the 9px scale labels
+// move to the 11px Chalkline floor. ~56pt saved per instance collapsed.
 
 // Scale: the bar spans ±1 generic Mid 1st (the "base first"), so the fill
 // position IS gap.firsts — where it lands is literally the pick reading. The
@@ -66,6 +74,7 @@ export default function TradeValueBar({
   youLabel = 'You',
   themLabel = 'They',
 }: TradeValueBarProps) {
+  const [whyOpen, setWhyOpen] = useState(false);
   if (!gap) return null;
 
   const even = favors === 'even' || favors == null;
@@ -102,7 +111,7 @@ export default function TradeValueBar({
       </Text>
 
       {/* WHO WINS headline + margin, spoken in picks */}
-      <Text variant="heading" style={[styles.winner, { color: even ? chalk.base : fillColor }]}>
+      <Text variant="title" style={[styles.winner, { color: even ? chalk.base : fillColor }]}>
         {even ? 'Even' : `${winner} win`}
       </Text>
       {even ? (
@@ -156,8 +165,20 @@ export default function TradeValueBar({
         </Text>
       </View>
 
-      {/* Counteroffer read — the delta as a next move */}
-      {even ? (
+      {/* Counteroffer read — the delta as a next move. Collapsed by default
+          behind a one-line "Why?" disclosure (#243 density V1). */}
+      <Pressable
+        testID="valuebar.why"
+        onPress={() => setWhyOpen((o) => !o)}
+        accessibilityRole="button"
+        accessibilityLabel={whyOpen ? 'Hide verdict explanation' : 'Show verdict explanation'}
+        style={styles.whyToggle}
+        hitSlop={6}
+      >
+        <Text scale="dense" style={styles.whyText}>Why?</Text>
+        <Icon name={whyOpen ? 'chevron-up' : 'chevron-down'} size={14} color={chalk.dim} />
+      </Pressable>
+      {!whyOpen ? null : even ? (
         <View style={[styles.verdict, styles.verdictEven]}>
           <Text style={styles.verdictBody}>
             Straight swap of comparable value — no sweetener needed.
@@ -220,11 +241,11 @@ const styles = StyleSheet.create({
   },
 
   scaleRow: { flexDirection: 'row', alignItems: 'center', marginTop: space.sm },
-  scaleEnd: { ...type.data, fontSize: 9, color: chalk.faint, width: 30 },
+  scaleEnd: { ...type.data, fontSize: 11, color: chalk.faint, width: 30 },
   scaleMid: { flex: 1, height: 12 },
   scaleLbl: { position: 'absolute', width: 44, marginLeft: -22, alignItems: 'center' },
   scaleLblCenter: { left: '50%' },
-  scaleTickLbl: { ...type.data, fontSize: 9, color: chalk.faint },
+  scaleTickLbl: { ...type.data, fontSize: 11, color: chalk.faint },
 
   endRow: {
     flexDirection: 'row',
@@ -233,6 +254,14 @@ const styles = StyleSheet.create({
   },
   endLbl: { ...type.label, color: chalk.dim },
 
+  whyToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 32,
+  },
+  whyText: { ...type.label, color: chalk.dim },
+
   verdict: {
     marginTop: space.sm,
     backgroundColor: ink.ink2,
@@ -240,7 +269,8 @@ const styles = StyleSheet.create({
     borderColor: ink.line,
     borderLeftWidth: 3,
     borderRadius: radii.md,
-    padding: space.md,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
   },
   verdictEven: { borderLeftColor: ice.base },
   verdictBody: { ...type.bodySm, color: chalk.dim },
