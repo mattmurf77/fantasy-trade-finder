@@ -47,6 +47,7 @@
   "trade.block_boost": true,
   "picks.owned_sync": true,
   "market.trade_capture": true,
+  "market.movers": true,
   "trade.picks_in_pool": true,
   "trade.asset_ideas": true,
   "trade.outlook_direction": true,

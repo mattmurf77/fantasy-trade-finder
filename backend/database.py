@@ -7605,6 +7605,59 @@ def load_value_snapshot_baseline(
     return {r.player_id: r.consensus_elo for r in rows}
 
 
+def load_value_movers_window(
+    scoring_format: str = DEFAULT_SCORING,
+    days: int = 30,
+) -> tuple[str | None, dict[str, float], dict[str, float]]:
+    """
+    Market-movers read (#243 "Market pulse" strip): consensus_value at the
+    two ends of the trailing `days` window, for every player with rows.
+
+    Returns (as_of, now_values, then_values):
+      as_of       — the LATEST snapshot_date for the format (None: no history)
+      now_values  — {player_id: consensus_value} at as_of
+      then_values — {player_id: consensus_value} at the OLDEST snapshot_date
+                    within [as_of − days, as_of), strictly before as_of — a
+                    single accrued day yields no baseline (never a fake 0%).
+
+    Thin history is empty-safe: no rows → (None, {}, {}); one distinct day →
+    (as_of, now_values, {}). Mirrors load_value_snapshot_baseline's
+    earliest-in-window semantics so early-life deltas span however much
+    history exists rather than a strict `days`.
+    """
+    with engine.connect() as conn:
+        as_of = conn.execute(
+            select(func.max(player_value_history_table.c.snapshot_date))
+            .where(player_value_history_table.c.scoring_format == scoring_format)
+        ).scalar()
+        if not as_of:
+            return None, {}, {}
+        cutoff = (datetime.strptime(as_of, "%Y-%m-%d")
+                  - timedelta(days=days)).strftime("%Y-%m-%d")
+        baseline_date = conn.execute(
+            select(func.min(player_value_history_table.c.snapshot_date))
+            .where(player_value_history_table.c.scoring_format == scoring_format)
+            .where(player_value_history_table.c.snapshot_date  >= cutoff)
+            .where(player_value_history_table.c.snapshot_date  <  as_of)
+        ).scalar()
+
+        def _values_at(day: str) -> dict[str, float]:
+            rows = conn.execute(
+                select(
+                    player_value_history_table.c.player_id,
+                    player_value_history_table.c.consensus_value,
+                )
+                .where(player_value_history_table.c.scoring_format == scoring_format)
+                .where(player_value_history_table.c.snapshot_date  == day)
+                .where(player_value_history_table.c.consensus_value.isnot(None))
+            ).fetchall()
+            return {r.player_id: r.consensus_value for r in rows}
+
+        now_values  = _values_at(as_of)
+        then_values = _values_at(baseline_date) if baseline_date else {}
+    return as_of, now_values, then_values
+
+
 def load_value_extremes(
     player_id: str,
     scoring_format: str = DEFAULT_SCORING,

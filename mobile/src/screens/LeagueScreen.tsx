@@ -58,6 +58,7 @@ import ContrarianLeaderboard from '../components/ContrarianLeaderboard';
 import CoachMark from '../components/CoachMark';
 import RookieDraftBoardSheet from '../components/RookieDraftBoardSheet';
 import LeagueProgressModule from '../components/LeagueProgressModule';
+import MarketPulseStrip from '../components/MarketPulseStrip';
 import TradeValueBar from '../components/TradeValueBar';
 import { buildInviteUrl } from '../components/InviteLeaguematesBanner';
 
@@ -79,6 +80,12 @@ import { buildInviteUrl } from '../components/InviteLeaguematesBanner';
 // tiles, joined chip, contrarian, coverage, leaderboards) fold into the
 // module and return automatically once their counts are > 0. A fully
 // unlocked league renders exactly the classic populated layout.
+// #243 (2026-08-03, approved mocks league-home-fold.html V1 +
+// risers-fallers-cards.html D1): divider double-margin bug fixed, Explore
+// reflowed to a 3-across tile row, hero padding 16→12, the progress
+// module's invite button became an inline text link — the low-activity
+// state's progress module now ends fully above the 658pt fold — and the
+// Market pulse strip (flag `market.movers`) mounts below Explore.
 export default function LeagueScreen() {
   const league   = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
@@ -366,9 +373,10 @@ export default function LeagueScreen() {
         {/* League name + scoring. #223 — the hero is IDENTITY only now:
             switching lives in the global TopBar's league affordance (one
             switcher, everywhere), so the hero's Pressable role, chevron
-            cue, and the old bottom "Switch league" button are gone. */}
+            cue, and the old bottom "Switch league" button are gone.
+            #243 (league-home fold V1): hero padding 16 → 12. */}
         <View testID="league.hero">
-            <Card>
+            <Card padding={space.md}>
               <View style={styles.heroHead}>
                 <Text style={type.label}>League</Text>
               </View>
@@ -475,35 +483,49 @@ export default function LeagueScreen() {
         )}
 
         {/* #142/#144 (League rankings) + FA finder — league-wide explore
-            rows, LeagueRow construction (hairline list rows, not cards).
-            #181: the rankings row now returns to the League tab's rankings
+            entries. #243 (league-home fold V1, approved mock
+            league-home-fold.html): the three stacked hairline rows (~201pt
+            with league.rookie_board_entry on) reflowed into ONE 3-across
+            tile row (~half the height); the flag adds the 3rd tile.
+            #181: the rankings tile returns to the League tab's rankings
             root (this screen sits above it in the same stack); Free agents
             stays a ROOT-stack route, so navigate() bubbles up. */}
         <TickLabel>Explore</TickLabel>
-        <View>
-          <ExploreRow
+        <View style={styles.exploreTiles}>
+          <ExploreTile
             testID="league.rankings-row"
-            label="League rankings"
-            sub="Every team ranked by total roster value"
+            icon="rank"
+            label="Rankings"
+            sub="Every team ranked"
+            accessibilityLabel="League rankings"
             onPress={() => navigation.navigate('LeagueRankings')}
           />
-          <ExploreRow
+          <ExploreTile
             testID="league.free-agents-row"
+            icon="search"
             label="Free agents"
-            sub="Best available players in this league"
+            sub="Best available"
+            accessibilityLabel="Free agents"
             onPress={() => navigation.navigate('FreeAgents')}
           />
           {/* S7 PRD-04 item 2 (flag league.rookie_board_entry) — mounts the
               rookie board bottom sheet in place (no nav route needed). */}
           {showRookieBoard ? (
-            <ExploreRow
+            <ExploreTile
               testID="league.rookie-board-row"
-              label="Rookie draft board"
-              sub="First-year players and pre-draft prospects"
+              icon="flag"
+              label="Rookie board"
+              sub="Pre-draft prospects"
+              accessibilityLabel="Rookie draft board"
               onPress={() => setRookieOpen(true)}
             />
           ) : null}
         </View>
+
+        {/* #243 — Market pulse strip (movers V3, frame D1; operator
+            placement override: below Explore, not top-of-page). Self-
+            contained: renders null without flag `market.movers` or data. */}
+        <MarketPulseStrip />
 
         {/* Recent activity — flag-gated. Backend already short-circuits to
             an empty list when the flag is off, but we also gate the section
@@ -720,24 +742,30 @@ function fmtScoring(s?: string | null) {
   return map[s] || s.toUpperCase();
 }
 
-// League-wide explore rows (#142/#144 + FA finder) — LeagueRow construction:
-// hairline-separated list row, title + body-sm chalk-dim meta + chevron.
-function ExploreRow({ label, sub, onPress, testID }: {
-  label: string; sub: string; onPress: () => void; testID: string;
+// League-wide explore tiles (#142/#144 + FA finder; #243 fold V1 reflow —
+// approved mock league-home-fold.html): 3-across card tiles (icon + short
+// title + one-line sub) replacing the old stacked hairline rows. testIDs
+// unchanged (`league.rankings-row` etc.); accessibilityLabel keeps the
+// full descriptive name the rows carried.
+function ExploreTile({ label, sub, icon, onPress, testID, accessibilityLabel }: {
+  label: string; sub: string; icon: IconName; onPress: () => void;
+  testID: string; accessibilityLabel?: string;
 }) {
   return (
     <Pressable
       testID={testID}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={label}
-      style={({ pressed }) => [styles.exploreRow, pressed && { backgroundColor: ink.ink3 }]}
+      accessibilityLabel={accessibilityLabel ?? label}
+      style={({ pressed }) => [styles.exploreTile, pressed && { backgroundColor: ink.ink3 }]}
     >
-      <View style={styles.exploreMain}>
-        <Text style={type.title}>{label}</Text>
-        <Text style={[type.bodySm, styles.exploreSub]}>{sub}</Text>
-      </View>
-      <Icon name="chevron-right" size={16} color={chalk.dim} />
+      <Icon name={icon} size={18} color={chalk.dim} />
+      <ChalkText scale="dense" style={styles.exploreTileTitle} numberOfLines={1}>
+        {label}
+      </ChalkText>
+      <ChalkText scale="dense" style={styles.exploreTileSub} numberOfLines={1}>
+        {sub}
+      </ChalkText>
     </Pressable>
   );
 }
@@ -955,17 +983,22 @@ const styles = StyleSheet.create({
   },
   worksNowBtn: { marginTop: space.md },
 
-  // #142/#144 — explore rows (LeagueRow list construction)
-  exploreRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    paddingVertical: space.md,
-    borderBottomWidth: 1,
-    borderBottomColor: ink.line,
+  // #142/#144 + #243 fold V1 — explore tiles (3-across card row; sub floor
+  // raised to 11px vs the mock's 10.5 per the design-system type floor).
+  exploreTiles: { flexDirection: 'row', gap: space.sm },
+  exploreTile: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.md,
+    backgroundColor: ink.ink1,
+    padding: 10,
+    gap: space.xs,
   },
-  exploreMain: { flex: 1, gap: 2 },
-  exploreSub: { color: chalk.dim },
+  exploreTileTitle: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
+  exploreTileSub: { ...type.bodySm, fontSize: 11, lineHeight: 14, color: chalk.dim },
   statFlex: { flex: 1 },
   statCard: { flex: 1 },
   statCardPressed: { flex: 1, backgroundColor: ink.ink3 },
@@ -1005,10 +1038,12 @@ const styles = StyleSheet.create({
   },
   statusChipText: { color: chalk.base },
 
+  // #243 (league-home fold V1): no marginTop — the ScrollView's own
+  // `gap: space.md` already separates siblings; the old marginTop stacked
+  // on top of it, paying 24pt per divider for what should be a 12pt gap.
   divider: {
     height: 1,
     backgroundColor: ink.line,
-    marginTop: space.md,
   },
 
   switchBtn: { marginTop: space.lg },

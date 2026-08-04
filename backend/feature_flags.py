@@ -282,6 +282,12 @@ FLAG_KEYS: tuple[str, ...] = (
     # (backend/sleeper_trades_service.py). Capture ONLY — raw payload
     # retained, no scoring/aggregation/UI. Off ⇒ no fetch, no rows.
     "market.trade_capture",
+    # market.movers: GET /api/market/movers (#243 "Market pulse" strip) —
+    # top risers/fallers by trailing-window % change of FTF community value
+    # (player_value_history consensus_value snapshots, the data #57 /
+    # market.trade_capture already accumulate). Read-only, no new writes.
+    # Off ⇒ the route 404s and the mobile strip renders nothing.
+    "market.movers",
     # trade.picks_in_pool: inject each team's owned picks (capped picks_pool_cap)
     # as priced PICK pseudo-assets into the suggestion candidate pool so a card
     # can send/receive a pick (#170/#171). DATA inclusion only — scoring
