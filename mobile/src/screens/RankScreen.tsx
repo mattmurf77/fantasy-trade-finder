@@ -25,12 +25,19 @@ import {
   space,
   radii,
   type,
+  fonts,
   scrim,
   shadowSheet,
 } from '../theme/chalkline';
-import { Button, Icon } from '../components/chalkline';
+import {
+  Badge,
+  Button,
+  Icon,
+  PositionBadge,
+  RookieBadge,
+  Text as ChalkText,
+} from '../components/chalkline';
 import FormatToggle from '../components/FormatToggle';
-import PlayerCard from '../components/PlayerCard';
 import Toast from '../components/Toast';
 import { InfoButton } from '../components/HelpSheet';
 import {
@@ -507,7 +514,10 @@ export default function RankScreen() {
             : 'All ranked — confirm when ready'}
         </Text>
 
-        {/* Cards */}
+        {/* Cards — #243 3-up: three side-by-side mini-cards (approved mock
+            trios-three-up-v2.html, Variant A) replace the vertical stack of
+            full PlayerCards. The row is one fixed 128pt block (~324pt → 128pt)
+            so the whole screen fits the 614pt Rank-stack budget. */}
         {trioQuery.isLoading || !trio ? (
           // Three skeleton cards keep the page shape stable during the
           // /api/trio round-trip (Mobile #M1). Mirrors the static-fill
@@ -544,9 +554,11 @@ export default function RankScreen() {
                   trio={trio}
                   side={side}
                   rank={rankOf(side)}
+                  anyRanked={selectionOrder.length > 0}
                   onTap={() => rankSide(side)}
                   onLongPress={() => showInfoSheet(side)}
                   disabled={submitMutation.isPending || isRefetchingTrio}
+                  longPressMs={menuOn ? 500 : 400}
                 />
                 {/* S3 PRD-02 (ux.player_context_menu): visible ⓘ twin for
                     the 500ms-hold info sheet — the accelerator is never the
@@ -672,50 +684,134 @@ export default function RankScreen() {
   );
 }
 
-// ── TrioPlayerCard — plain PlayerCard wrapper for the trio arena ────
+// ── TrioPlayerCard — #243 3-up mini-card (mock trios-three-up-v2.html,
+// Variant A + A2 winner state). Purpose-built for the trio arena: 128pt
+// card, badge row, reserved TWO-LINE name box, team · age meta. Replaces
+// the full-width PlayerCard stack; pick/submit semantics are untouched —
+// rankSide() still runs on tap, only the visuals changed.
 // FB-72: the swipe-left-to-skip / swipe-right-to-rank gesture was removed
 // at operator request — it collided with scrolling and caused accidental
 // skips. Tap-to-rank + the Skip button are the only interactions now.
+
+// Suffix glue (#243 hard rule): join a name suffix to the surname with a
+// non-breaking space so "Jr."/"III" can never wrap alone onto line 2 —
+// "Marvin Harrison Jr." wraps "Marvin" / "Harrison Jr.", never
+// "Marvin Harrison" / "Jr.".
+const glueSuffix = (name: string) =>
+  name.replace(/ (Jr\.?|Sr\.?|II|III|IV|V)$/, '\u00A0$1');
+
+const RANK_ORDINAL: Record<1 | 2 | 3, string> = { 1: '1st', 2: '2nd', 3: '3rd' };
+
 interface TrioCardProps {
   trio: Trio;
   side: 'a' | 'b' | 'c';
   rank: 1 | 2 | 3 | null;
+  anyRanked: boolean;          // ≥1 pick made — un-ranked cards dim (A2 "loser" state)
   onTap: () => void;
   onLongPress?: () => void;
   disabled?: boolean;
+  longPressMs: number;
 }
 
 function TrioPlayerCard({
   trio,
   side,
   rank,
+  anyRanked,
   onTap,
   onLongPress,
   disabled,
+  longPressMs,
 }: TrioCardProps) {
   const player = side === 'a' ? trio.player_a : side === 'b' ? trio.player_b : trio.player_c;
+  const ranked = rank != null;
+  const railColor: string | undefined =
+    positionColors[String(player.position).toLowerCase() as keyof typeof positionColors];
+  const isStdPos =
+    player.position === 'QB' ||
+    player.position === 'RB' ||
+    player.position === 'WR' ||
+    player.position === 'TE';
+  // #194 — PICK pseudo-assets ride the Player shape with years_experience 0,
+  // which is "no experience", not "rookie season": never badge a pick RK.
+  const isRookie =
+    player.years_experience === 0 && String(player.position) !== 'PICK';
+  const meta = [player.team || 'FA', player.age != null ? String(player.age) : null]
+    .filter(Boolean)
+    .join(' · ');
   // S8 PRD-01 (inert a11y): the signature interaction reads as one button
   // with its rank state — "Josh Allen, QB, Buffalo — ranked 1 of 3".
   const label = `${player.name}, ${player.position}, ${player.team || 'FA'}${
     rank != null ? ` — ranked ${rank} of 3` : ''
   }`;
   return (
-    <PlayerCard
-      player={player}
+    <Pressable
       testID={`trios.card.${side}`}
-      rank={rank}
-      selected={rank !== null}
       onPress={onTap}
       onLongPress={onLongPress}
       disabled={disabled}
-      showInjury={false}
+      delayLongPress={longPressMs}
+      accessible
+      accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={
         rank != null
           ? 'Removes this rank and any later picks'
           : 'Assigns the next rank to this player'
       }
-    />
+      accessibilityState={{ selected: ranked, disabled: !!disabled }}
+      style={({ pressed }) => [
+        styles.miniCard,
+        ranked && styles.miniCardWinner,
+        !ranked && anyRanked && styles.miniCardDimmed,
+        pressed && !disabled && { backgroundColor: ink.ink3 },
+        disabled && styles.miniCardDisabled,
+      ]}
+    >
+      {/* 3px position-color left rail (Card primitive pattern) */}
+      {railColor ? <View style={[styles.miniRail, { backgroundColor: railColor }]} /> : null}
+
+      {/* A2 winner tick — ice square + check, top-right */}
+      {ranked && (
+        <View style={styles.miniTick}>
+          <Icon name="check" size={12} color={ice.on} />
+        </View>
+      )}
+
+      <View style={styles.miniHead}>
+        {isStdPos ? (
+          <PositionBadge pos={player.position as 'QB' | 'RB' | 'WR' | 'TE'} />
+        ) : (
+          <Badge label={String(player.position)} />
+        )}
+        {isRookie && <RookieBadge />}
+      </View>
+
+      {/* Reserved 2-line name box (#243 hard rules): fixed height whether the
+          name needs 1 or 2 lines, so all three cards keep identical internal
+          rhythm; single-line names TOP-align (RN default in a fixed-height
+          box). Whole-word wrap only — simple break strategy, hyphenation off. */}
+      <ChalkText
+        scale="dense"
+        style={styles.miniName}
+        numberOfLines={2}
+        textBreakStrategy="simple"
+        android_hyphenationFrequency="none"
+      >
+        {glueSuffix(player.name)}
+      </ChalkText>
+
+      <ChalkText scale="dense" style={styles.miniMeta} numberOfLines={1}>
+        {meta}
+      </ChalkText>
+
+      {/* A2 winner label — bottom of the card's reserved slack */}
+      {ranked && (
+        <ChalkText scale="dense" style={styles.miniRankedLbl} numberOfLines={1}>
+          Ranked {RANK_ORDINAL[rank]}
+        </ChalkText>
+      )}
+    </Pressable>
   );
 }
 
@@ -749,7 +845,8 @@ const styles = StyleSheet.create({
   },
   modeHintDim: { color: chalk.dim },
   // S3 PRD-02 — trio card wrapper hosts the absolute ⓘ twin.
-  trioCardWrap: { position: 'relative' },
+  // #243: each wrap is one third of the 3-up row.
+  trioCardWrap: { flex: 1, position: 'relative' },
   trioInfoBtn: {
     position: 'absolute',
     right: space.sm,
@@ -814,40 +911,116 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: space.sm,
   },
-  cards: { gap: space.md },
+  // #243 3-up: the three mini-cards sit side by side in one 128pt row
+  // (mock trios-three-up-v2.html Variant A; was a ~324pt vertical stack).
+  cards: { flexDirection: 'row', gap: space.sm },
   centered: {
     paddingVertical: space.xxl,
     alignItems: 'center',
     gap: space.md,
   },
-  // Skeleton tiles — match the real PlayerCard outer shape (ink1 surface,
-  // hairline border, radii.md, padding) so the layout doesn't shift when
-  // the /api/trio response lands. Static fills, no shimmer (consistent
-  // with MatchesScreen skeleton — see Mobile #M1).
-  skeletonCard: {
+
+  // ── #243 mini-card (Variant A, 115×128pt at 393pt-wide devices) ──────
+  miniCard: {
+    height: 128,
     backgroundColor: ink.ink1,
     borderColor: ink.line,
     borderWidth: 1,
     borderRadius: radii.md,
-    padding: space.lg,
+    padding: space.sm,
+    gap: space.xs,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  // A2 winner state: ice border + surface step; losers dim.
+  miniCardWinner: {
+    borderColor: ice.base,
+    backgroundColor: ink.ink2,
+  },
+  miniCardDimmed: { opacity: 0.55 },
+  miniCardDisabled: { opacity: 0.45 },
+  miniRail: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+  },
+  miniHead: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: space.xs,
+    paddingLeft: 5, // 3px rail + 2px inset (mock .minihead)
+  },
+  // Reserved TWO-LINE name box — type.bodySm metrics (13/18) at uiSemi
+  // weight; height fixes exactly 2 lines so a 1-line name top-aligns and
+  // all three cards stay equal height (#243 hard rule).
+  miniName: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 13,
+    lineHeight: 18,
+    color: chalk.base,
+    height: 36,
+    paddingLeft: 5,
+  },
+  // 11px floor (dense-row precedent: PlayerCard.denseTeam).
+  miniMeta: {
+    fontFamily: fonts.ui,
+    fontSize: 11,
+    lineHeight: 14,
+    color: chalk.dim,
+    paddingLeft: 5,
+  },
+  miniTick: {
+    position: 'absolute',
+    top: space.sm - 2,
+    right: space.sm - 2,
+    width: 20,
+    height: 20,
+    borderRadius: radii.xs,
+    backgroundColor: ice.base,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  miniRankedLbl: {
+    ...type.label,
+    color: ice.base,
+    position: 'absolute',
+    bottom: space.sm - 2,
+    left: space.sm - 2,
+    right: space.sm - 2,
+  },
+
+  // Skeleton tiles — match the real mini-card outer shape (ink1 surface,
+  // hairline border, radii.md, 128pt) so the layout doesn't shift when
+  // the /api/trio response lands. Static fills, no shimmer (consistent
+  // with MatchesScreen skeleton — see Mobile #M1).
+  skeletonCard: {
+    flex: 1,
+    height: 128,
+    backgroundColor: ink.ink1,
+    borderColor: ink.line,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    padding: space.sm,
     gap: space.sm,
-    minHeight: 96,
   },
   skeletonChip: {
-    width: 44,
+    width: 32,
     height: 18,
     borderRadius: radii.xs,
     backgroundColor: ink.ink3,
   },
   skeletonName: {
-    width: 160,
-    height: 18,
+    width: '90%',
+    height: 14,
     borderRadius: radii.xs,
     backgroundColor: ink.ink3,
   },
   skeletonMeta: {
-    width: 120,
-    height: 12,
+    width: '60%',
+    height: 10,
     borderRadius: radii.xs,
     backgroundColor: ink.ink3,
   },
