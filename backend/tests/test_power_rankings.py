@@ -19,7 +19,11 @@ import pytest
 
 import backend.server as server
 from backend.pick_values import pick_pool_value
-from backend.power_rankings import compute_power_rankings, optimal_starters
+from backend.power_rankings import (
+    compute_power_rankings,
+    optimal_starter_slots,
+    optimal_starters,
+)
 from backend.trade_service import elo_to_value
 
 
@@ -295,6 +299,60 @@ def test_compute_derives_starters_from_lineup_slots():
 def test_compute_without_lineup_slots_keeps_starters_none():
     teams = compute_power_rankings(MEMBERS, SEED, PLAYERS)
     assert all(t["starters"] is None for t in teams)
+
+
+# ---------------------------------------------------------------------------
+# #238 — optimal_starter_slots: same greedy fill as optimal_starters, but
+# keeps WHICH slot each starter landed in (template order, unfillable slots
+# carry player None). Additive sibling — optimal_starters is unchanged.
+# ---------------------------------------------------------------------------
+
+def _layout_ids(layout):
+    return [(e["slot"], e["player"]["player_id"] if e["player"] else None)
+            for e in layout]
+
+
+def test_starter_slots_template_order_and_dedicated_fill():
+    roster = [_row("qb_hi", "QB", 900), _row("rb_hi", "RB", 800),
+              _row("rb_mid", "RB", 500), _row("wr_hi", "WR", 700)]
+    layout = optimal_starter_slots(roster, ["QB", "RB", "RB", "WR", "FLEX"])
+    assert _layout_ids(layout) == [
+        ("QB", "qb_hi"), ("RB", "rb_hi"), ("RB", "rb_mid"),
+        ("WR", "wr_hi"), ("FLEX", None)]
+
+
+def test_starter_slots_flex_and_superflex_eligibility():
+    # FLEX (RB/WR/TE) takes the best remaining non-QB; SUPER_FLEX takes the
+    # second QB — a QB must never land in plain FLEX.
+    roster = [_row("qb1", "QB", 900), _row("qb2", "QB", 850),
+              _row("rb1", "RB", 800), _row("rb2", "RB", 400),
+              _row("wr1", "WR", 700), _row("te1", "TE", 200)]
+    layout = optimal_starter_slots(
+        roster, ["QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX"])
+    assert _layout_ids(layout) == [
+        ("QB", "qb1"), ("RB", "rb1"), ("WR", "wr1"), ("TE", "te1"),
+        ("FLEX", "rb2"), ("SUPER_FLEX", "qb2")]
+
+
+def test_starter_slots_narrowest_flex_fills_first_output_stays_template_order():
+    # REC_FLEX (narrower) claims the elite WR even though SUPER_FLEX comes
+    # first in the template; output rows keep the template's order.
+    roster = [_row("qb1", "QB", 900), _row("qb2", "QB", 850),
+              _row("wr1", "WR", 800), _row("te1", "TE", 100)]
+    layout = optimal_starter_slots(roster, ["QB", "SUPER_FLEX", "REC_FLEX"])
+    assert _layout_ids(layout) == [
+        ("QB", "qb1"), ("SUPER_FLEX", "qb2"), ("REC_FLEX", "wr1")]
+
+
+def test_starter_slots_ignore_out_of_pool_slots_and_agree_with_starters():
+    roster = [_row("qb1", "QB", 900), _row("rb1", "RB", 500),
+              _row("wr1", "WR", 450), _row("k1", "K", 0)]
+    slots = ["QB", "RB", "K", "BN", "FLEX"]
+    layout = optimal_starter_slots(roster, slots)
+    # K/BN aren't lineup slots the value pool can fill — no rows for them.
+    assert [e["slot"] for e in layout] == ["QB", "RB", "FLEX"]
+    assert (sorted(e["player"]["player_id"] for e in layout if e["player"])
+            == sorted(optimal_starters(roster, slots)))
 
 
 def test_derived_starters_follow_personal_basis_values():

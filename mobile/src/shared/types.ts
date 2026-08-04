@@ -108,6 +108,27 @@ export interface RankingProgress {
   scoring_format?: ScoringFormat;
 }
 
+// #238 — per-slot starting-lineup breakdown attached to /api/trade/evaluate
+// Mode B's `starter_impact` (additive `slots` field; absent on old servers
+// and when the breakdown build failed server-side). One row per lineup slot
+// in the league's roster_positions template order; `slot` labels number
+// repeated slots (RB → RB1/RB2; single-occurrence slots keep the bare
+// Sleeper name, e.g. QB, FLEX, SUPER_FLEX). before/after = the player the
+// value-optimal fill assigns there — null when the slot is unfillable.
+export interface StarterSlotPlayer {
+  player_id: string;
+  name: string;
+  position: string;
+  value: number;
+}
+export interface StarterImpactSlot {
+  slot: string;
+  before: StarterSlotPlayer | null;
+  after: StarterSlotPlayer | null;
+  /** (after value or 0) − (before value or 0), consensus-priced. */
+  delta: number;
+}
+
 export interface TradeCard {
   trade_id: string;
   league_id: string;

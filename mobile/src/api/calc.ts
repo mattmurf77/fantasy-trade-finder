@@ -4,7 +4,7 @@
 // so calculator numbers always match the finder's.
 
 import { apiRequest } from './client';
-import type { ScoringFormat } from '../shared/types';
+import type { ScoringFormat, StarterImpactSlot } from '../shared/types';
 
 export interface CalcValueRow {
   id: string;
@@ -149,8 +149,15 @@ export interface CalcEvaluationInLeague extends CalcEvaluation {
    *  optimal-lineup value delta before vs after the trade, per side
    *  (positive = that side's STARTING lineup gets stronger; consensus
    *  values, derived value-optimal lineup — no per-week lineup data),
-   *  plus one plain-language caller-centric sentence. */
-  starter_impact?: { your_delta: number; their_delta: number; note: string };
+   *  plus one plain-language caller-centric sentence. #238 adds `slots` —
+   *  the CALLER's per-slot before/after breakdown (template order; absent
+   *  on pre-#238 servers, so the client falls back to the sentence). */
+  starter_impact?: {
+    your_delta: number;
+    their_delta: number;
+    note: string;
+    slots?: StarterImpactSlot[];
+  };
 }
 
 // ── Suggestion confirmation (#78) ────────────────────────────────────────

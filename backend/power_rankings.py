@@ -47,6 +47,55 @@ LINEUP_SLOT_ELIGIBILITY: dict[str, tuple[str, ...]] = {
 }
 
 
+def _fill_starter_slots(
+    roster: list[dict], lineup_slots: list[str],
+) -> tuple[list[str], list[dict | None], list[int]]:
+    """Shared greedy slot fill for optimal_starters / optimal_starter_slots.
+
+    Returns (eligible, assigned, fill_order):
+      eligible:   lineup_slots filtered to LINEUP_SLOT_ELIGIBILITY keys,
+                  template order preserved
+      assigned:   the roster row placed in each eligible slot (parallel to
+                  `eligible`; None = unfillable)
+      fill_order: eligible-slot indices in the order the fill visits them —
+                  dedicated position slots in template order, then flex slots
+                  narrowest-eligibility-first (WRRB/REC → FLEX → SUPER_FLEX)
+    """
+    eligible = [s for s in lineup_slots if s in LINEUP_SLOT_ELIGIBILITY]
+    by_pos: dict[str, list[dict]] = {}
+    for r in roster:
+        if r["position"] in CORE_POSITIONS:
+            by_pos.setdefault(r["position"], []).append(r)
+    for rows in by_pos.values():
+        rows.sort(key=lambda r: (-r["value"], r["player_id"]))
+
+    dedicated = [i for i, s in enumerate(eligible) if s in CORE_POSITIONS]
+    flexes = [i for i, s in enumerate(eligible) if s not in CORE_POSITIONS]
+    flexes.sort(key=lambda i: len(LINEUP_SLOT_ELIGIBILITY[eligible[i]]))
+
+    assigned: list[dict | None] = [None] * len(eligible)
+    taken: set[str] = set()
+    for i in dedicated:
+        for r in by_pos.get(eligible[i], []):
+            if r["player_id"] not in taken:
+                taken.add(r["player_id"])
+                assigned[i] = r
+                break
+    for i in flexes:
+        best = None
+        for pos in LINEUP_SLOT_ELIGIBILITY[eligible[i]]:
+            for r in by_pos.get(pos, []):
+                if r["player_id"] in taken:
+                    continue
+                if best is None or (-r["value"], r["player_id"]) < (-best["value"], best["player_id"]):
+                    best = r
+                break  # rows are value-sorted — only the top untaken matters
+        if best is not None:
+            taken.add(best["player_id"])
+            assigned[i] = best
+    return eligible, assigned, dedicated + flexes
+
+
 def optimal_starters(roster: list[dict], lineup_slots: list[str]) -> list[str]:
     """Derive the VALUE-OPTIMAL starting lineup for one team (2026-07-26).
 
@@ -63,39 +112,23 @@ def optimal_starters(roster: list[dict], lineup_slots: list[str]) -> list[str]:
     keys) from the league's roster_positions. Returns starter player ids;
     unfillable slots are simply left empty (never padded).
     """
-    by_pos: dict[str, list[dict]] = {}
-    for r in roster:
-        if r["position"] in CORE_POSITIONS:
-            by_pos.setdefault(r["position"], []).append(r)
-    for rows in by_pos.values():
-        rows.sort(key=lambda r: (-r["value"], r["player_id"]))
+    _, assigned, fill_order = _fill_starter_slots(roster, lineup_slots)
+    return [assigned[i]["player_id"] for i in fill_order
+            if assigned[i] is not None]
 
-    dedicated = [s for s in lineup_slots if s in CORE_POSITIONS]
-    flexes = [s for s in lineup_slots
-              if s in LINEUP_SLOT_ELIGIBILITY and s not in CORE_POSITIONS]
-    flexes.sort(key=lambda s: len(LINEUP_SLOT_ELIGIBILITY[s]))
 
-    starters: list[str] = []
-    taken: set[str] = set()
-    for slot in dedicated:
-        for r in by_pos.get(slot, []):
-            if r["player_id"] not in taken:
-                taken.add(r["player_id"])
-                starters.append(r["player_id"])
-                break
-    for slot in flexes:
-        best = None
-        for pos in LINEUP_SLOT_ELIGIBILITY[slot]:
-            for r in by_pos.get(pos, []):
-                if r["player_id"] in taken:
-                    continue
-                if best is None or (-r["value"], r["player_id"]) < (-best["value"], best["player_id"]):
-                    best = r
-                break  # rows are value-sorted — only the top untaken matters
-        if best is not None:
-            taken.add(best["player_id"])
-            starters.append(best["player_id"])
-    return starters
+def optimal_starter_slots(
+    roster: list[dict], lineup_slots: list[str],
+) -> list[dict]:
+    """#238 — the same value-optimal fill as optimal_starters, but keeping
+    WHICH slot each starter landed in. Returns one row per fillable template
+    slot, in the template's order: {"slot": <LINEUP_SLOT_ELIGIBILITY key>,
+    "player": <roster row> | None} (None = unfillable, never padded). Slots
+    outside the eligibility map (K/DEF/IDP/BN/…) get no row. Additive
+    sibling — existing optimal_starters callers are unchanged.
+    """
+    eligible, assigned, _ = _fill_starter_slots(roster, lineup_slots)
+    return [{"slot": s, "player": a} for s, a in zip(eligible, assigned)]
 
 
 def compute_power_rankings(

@@ -997,14 +997,22 @@ def _starter_impact(league_id: str, caller_user_id: str,
                     opponent_user_id: str, give: list[str], recv: list[str],
                     pool_players: list, seed_value,
                     give_value: float, receive_value: float) -> dict | None:
-    """{your_delta, their_delta, note} — optimal-lineup value BEFORE vs AFTER
-    the trade for the caller (your_delta) and the opponent (their_delta),
-    positive = that side's starting lineup gets stronger. None when the
-    league has no known slot template or either roster is missing (omit,
-    never fabricate). Picks and out-of-pool assets can't start, so they
-    contribute 0 to lineups by construction.
+    """{your_delta, their_delta, note, slots} — optimal-lineup value BEFORE
+    vs AFTER the trade for the caller (your_delta) and the opponent
+    (their_delta), positive = that side's starting lineup gets stronger.
+    None when the league has no known slot template or either roster is
+    missing (omit, never fabricate). Picks and out-of-pool assets can't
+    start, so they contribute 0 to lineups by construction.
+
+    `slots` (#238, additive): per-slot before/after breakdown of the
+    CALLER's lineup — [{slot, before, after, delta}] in the league's
+    template order, slot labels numbered when the template repeats a slot
+    (RB → RB1/RB2), before/after = {player_id, name, position, value} or
+    None for an unfillable slot. Built via power_rankings.
+    optimal_starter_slots (same fill as the totals above). Omitted — never
+    the whole field — if the breakdown build fails.
     """
-    from .power_rankings import optimal_starters
+    from .power_rankings import optimal_starter_slots, optimal_starters
     slots = _sleeper_lineup_slots(league_id)
     if not slots:
         return None
@@ -1018,10 +1026,13 @@ def _starter_impact(league_id: str, caller_user_id: str,
 
     by_id = {p.id: p for p in pool_players}
 
-    def lineup_total(pids: list[str]) -> float:
-        rows = [{"player_id": pid, "position": by_id[pid].position,
+    def pool_rows(pids: list[str]) -> list[dict]:
+        return [{"player_id": pid, "position": by_id[pid].position,
                  "value": seed_value(pid)}
                 for pid in pids if pid in by_id]
+
+    def lineup_total(pids: list[str]) -> float:
+        rows = pool_rows(pids)
         vals = {r["player_id"]: r["value"] for r in rows}
         return sum(vals[pid] for pid in optimal_starters(rows, slots))
 
@@ -1047,7 +1058,49 @@ def _starter_impact(league_id: str, caller_user_id: str,
         note = "You likely lose immediate lineup value."
     else:
         note = "This mostly trades bench depth — your starting lineup barely moves."
-    return {"your_delta": your_delta, "their_delta": their_delta, "note": note}
+    out = {"your_delta": your_delta, "their_delta": their_delta, "note": note}
+
+    # #238 — additive per-slot breakdown of the CALLER's lineup (before →
+    # after, template order). Null-safe: any failure here drops only the
+    # breakdown, never the summary above.
+    try:
+        def slot_entry(row: dict | None) -> dict | None:
+            if row is None:
+                return None
+            p = by_id.get(row["player_id"])
+            return {
+                "player_id": row["player_id"],
+                "name":      getattr(p, "name", None) or row["player_id"],
+                "position":  row["position"],
+                "value":     round(row["value"], 1),
+            }
+
+        before = optimal_starter_slots(
+            pool_rows(rosters[str(caller_user_id)]), slots)
+        after_ = optimal_starter_slots(
+            pool_rows(after(rosters[str(caller_user_id)], give, recv)), slots)
+        # Label duplicate slots by template position (RB → RB1/RB2) so
+        # clients render distinct rows; a slot the league has once keeps its
+        # bare name.
+        slot_counts: dict[str, int] = {}
+        for e in before:
+            slot_counts[e["slot"]] = slot_counts.get(e["slot"], 0) + 1
+        seen: dict[str, int] = {}
+        slot_rows = []
+        for b, a in zip(before, after_):
+            name = b["slot"]
+            seen[name] = seen.get(name, 0) + 1
+            label = name if slot_counts[name] == 1 else f"{name}{seen[name]}"
+            b_e, a_e = slot_entry(b["player"]), slot_entry(a["player"])
+            delta = round((a_e["value"] if a_e else 0.0)
+                          - (b_e["value"] if b_e else 0.0), 1)
+            slot_rows.append(
+                {"slot": label, "before": b_e, "after": a_e, "delta": delta})
+        out["slots"] = slot_rows
+    except Exception as slot_err:
+        log.warning("evaluate: starter-impact slot breakdown failed "
+                    "(summary kept): %s", slot_err)
+    return out
 
 
 # ── Pick-anchor wizard (POST /api/anchor/save) ─────────────────────────────

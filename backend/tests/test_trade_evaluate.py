@@ -629,6 +629,57 @@ def test_starter_impact_omitted_in_mode_a():
     assert "starter_impact" not in d
 
 
+# ── Starter impact `slots` (#238) — per-slot before/after breakdown ──────
+# Additive on the same Mode B payload: one row per lineup slot in the
+# league's template order, before/after = the player the value-optimal fill
+# assigns there ({player_id, name, position, value} or null), delta = the
+# slot's value move. Summary fields (your_delta/their_delta/note) unchanged.
+
+
+def test_starter_impact_slots_breakdown(monkeypatch):
+    seed = _install_starter_world(monkeypatch)
+    e2v = srv._trade_service_mod.elo_to_value
+    v = lambda pid: e2v(seed[pid])
+    d = _post_authed({
+        "give_player_ids": ["good"], "receive_player_ids": ["stud"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    si = d["starter_impact"]
+    assert {"your_delta", "their_delta", "note"} <= set(si)   # summary intact
+    slots = si["slots"]
+    assert [s["slot"] for s in slots] == ["RB", "WR"]
+    rb, wr = slots
+    # RB: starter good leaves, bench backfills.
+    assert rb["before"]["player_id"] == "good"
+    assert rb["before"]["name"] == "Good Guy"
+    assert rb["before"]["position"] == "RB"
+    assert rb["after"]["player_id"] == "bench"
+    assert rb["delta"] == pytest.approx(v("bench") - v("good"), abs=0.15)
+    # WR: incoming stud outvalues wr_low.
+    assert wr["before"]["player_id"] == "wr_low"
+    assert wr["after"]["player_id"] == "stud"
+    assert wr["delta"] == pytest.approx(v("stud") - v("wr_low"), abs=0.15)
+    # Per-slot deltas reconcile with the summary delta.
+    assert sum(s["delta"] for s in slots) == pytest.approx(
+        si["your_delta"], abs=0.3)
+
+
+def test_starter_impact_slots_numbered_labels_and_null_after(monkeypatch):
+    # Two RB slots → labels RB1/RB2; the trade empties RB2 (after = null).
+    seed = _install_starter_world(monkeypatch, slots=("RB", "RB", "WR"))
+    e2v = srv._trade_service_mod.elo_to_value
+    v = lambda pid: e2v(seed[pid])
+    d = _post_authed({
+        "give_player_ids": ["good"], "receive_player_ids": ["stud"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    slots = d["starter_impact"]["slots"]
+    assert [s["slot"] for s in slots] == ["RB1", "RB2", "WR"]
+    rb2 = slots[1]
+    assert rb2["before"]["player_id"] == "bench" and rb2["after"] is None
+    assert rb2["delta"] == pytest.approx(-v("bench"), abs=0.15)
+
+
 def test_values_endpoint_shape_and_etag():
     with srv.app.test_client() as c:
         r = c.get("/api/trade/values?scoring_format=1qb_ppr")
