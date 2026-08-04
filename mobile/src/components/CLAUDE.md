@@ -11,6 +11,7 @@ Stateless / lightly-stateful reusable UI. No data fetching here — accept props
 | `TierBadge`, `TierBin` | Tier label + drop-zone bin |
 | `PositionChip` | QB/RB/WR/TE chip with color |
 | `StrengthBar` | Horizontal value/strength meter |
+| `TradeValueBar` | The pick-denominated "Dynasty value swing" verdict (#157/#169) — diverging bar centered on even, margin spoken in draft-pick terms; presentation-only over `/api/trade/evaluate` fields (`favors`/`gap`), mounted on every trade surface (deck TradeCards, FeaturedTradeWindow, both calculator verdicts, League "Works right now" example). #243 density V1 (2026-08-03, mock `mockups/polish-lab-2026-08/tradevaluebar-density.html` B1): winner line stepped `type.heading`→`type.title`, verdict paragraph collapsed by default behind a one-line "Why?" disclosure (AdjustmentsDisclosure grammar, per-instance state — applies at every mount by design), verdict-box vertical padding `md`→`sm`, 9px scale labels fixed to the 11px Chalkline floor (~56pt saved/instance collapsed) |
 | `TradeMeter` | Thin TRADE (tradeability) / GET (acquirability) bar, 0–1 score from `/api/rankings` — removed from Tiers tiles in 1.5.4 #100; kept available (payload fields still serialized) |
 | `TradeSide` | Calculator: one side of a hand-built trade (players + add button) |
 | `VerdictPanel` | Calculator: dual-board fairness verdict + gives/gets bars (demo mode) |
@@ -222,3 +223,6 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 - RankMenu sheet (TabNav): `rankmenu.more-toggle` (disclosure header); `rankmenu.quickset|trios|tiers` = the 3 primary rows, `rankmenu.anchors|manual|trends` = disclosure rows. **`rankmenu.quickrank` RETIRED** — Quick rank left both chooser surfaces (it's the Quick set finish-prompt follow-on)
 - RankImportSheet: `rank-import.paste` (textarea) · `rank-import.match` ("Match N players") · `rank-import.row.<n>` (review row, `<n>` = 1-based paste order — a stable domain order, same exception class as the trio slots) · `rank-import.apply` ("Apply N ranks — M to resolve", disabled until every ambiguous row is chosen/skipped)
 - QuickSetTiers (#233, no new IDs): `quick-set.save-btn` copy at 0 selected is now "Continue — no <POS>s this high" / last tier "Continue & finish", and the Skip button does NOT render at 0 selected — flows asserting Skip must select a chip first
+
+**TradeValueBar density tranche (2026-08-03, #243 V1):**
+- TradeValueBar: `valuebar.why` (the collapsed-by-default "Why?" disclosure toggle above the verdict box — chevron flips when open; present at EVERY TradeValueBar mount: deck cards, featured window, calculator verdicts, League example card)
