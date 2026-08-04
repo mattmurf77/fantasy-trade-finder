@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Trios Three-Up Reflow (#243)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --gold:#F59E0B; --silver:#94A3B8;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+
+.note{max-width:1080px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note code{font-family:var(--f-mono);font-size:12px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+.note ul{margin:4px 0 0 18px} .note li{margin:3px 0}
+.q{border-left:3px solid var(--lineStrong);padding-left:10px;margin:8px 0;font-style:italic}
+.note table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12.5px}
+.note table th,.note table td{border:1px solid var(--line);padding:5px 8px;text-align:left}
+.note table th{color:var(--chalk);background:var(--ink2);font-weight:600}
+.note table td.num{font-family:var(--f-mono);text-align:right}
+
+/* ── global "copy all notes" bar ── */
+.notesbar{max-width:1080px;width:100%;display:flex;gap:14px;align-items:center;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:10px 14px;position:sticky;top:8px;z-index:5}
+.notesbar .txt{flex:1;font-size:12px;color:var(--dim);line-height:1.4}
+.copybtn{background:var(--ice);color:var(--onIce);border:0;border-radius:6px;padding:9px 14px;
+  font-family:var(--f-display);font-size:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;cursor:pointer;flex:0 0 auto}
+.copybtn:hover{filter:brightness(1.08)}
+.notecount{color:var(--faint);font-size:11px;flex:0 0 auto}
+
+.rowlbl{max-width:1080px;width:100%;font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:15px;color:var(--chalk);display:flex;align-items:center;gap:8px;margin-top:4px}
+.rowlbl::before{content:"";width:3px;height:14px;background:var(--ice)}
+.rowlbl .fb{font-family:var(--f-mono);font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0}
+
+.pairwrap{display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}
+.slot{display:flex;flex-direction:column;gap:8px;align-items:center;width:393px}
+.slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--ice);display:flex;align-items:center;gap:7px;align-self:flex-start}
+.slotlbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+.caption{font-size:12px;line-height:1.5;color:var(--dim);text-align:left;align-self:flex-start}
+.caption b{color:var(--chalk)}
+.caption code{font-family:var(--f-mono);font-size:11px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+
+/* ── phone frame: 393×852pt, no scaling — px == pt throughout this file ── */
+.phone{width:393px;height:852px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;
+  box-shadow:0 12px 32px rgba(0,0,0,.55);position:relative;display:flex;flex-direction:column}
+.status{height:59px;flex:0 0 auto;display:flex;align-items:flex-end;justify-content:space-between;padding:0 22px 8px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.topbar{height:52px;flex:0 0 auto;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 16px}
+.tb-league{display:flex;flex-direction:column;gap:1px;min-width:0}
+.tb-lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.tb-nm{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.tb-icons{display:flex;gap:10px;align-items:center;flex:0 0 auto}
+.navhead{height:44px;flex:0 0 auto;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 8px;gap:6px}
+.navhead .navtitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:16px}
+.content{flex:1 1 auto;position:relative;overflow:hidden}
+.tabbar{flex:0 0 auto;height:83px;display:flex;border-top:1px solid var(--line);background:var(--ink0);padding-bottom:22px}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 4px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:20px;height:20px;stroke:var(--faint);stroke-width:1.75;fill:none;stroke-linecap:square}
+.tab.on{color:var(--ice)} .tab.on svg{stroke:var(--ice)}
+svg.i{fill:none;stroke-width:1.75;stroke-linecap:square;stroke-linejoin:miter;stroke:var(--dim)}
+
+/* ── content stack (the ScrollView) — heights match the #243 audit's own
+   block table exactly: padding 16 (32 total) + 7×12 gaps (84) +
+   modeHint14 + format38 + switcher50 + progress28 + instruction37 +
+   cards324 + speedTile80 + actions60 = 747pt vs a 614pt budget. ── */
+.stack{padding:16px;display:flex;flex-direction:column;gap:12px}
+.modehint{height:14px;font-size:13px;color:var(--faint);text-align:center;line-height:14px}
+
+.fmt{height:38px;display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;flex:0 0 auto}
+.fmtbtn{flex:1;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--dim);background:transparent;font-family:var(--f-ui)}
+.fmtbtn.on{background:var(--ink3);color:var(--chalk)}
+
+.switcher4{height:48px;display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;flex:0 0 auto}
+.swbtn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-left:1px solid var(--line);border-bottom:2px solid transparent}
+.swbtn:first-child{border-left:0}
+.swbtn .swlbl{font-size:11px;letter-spacing:.08em;font-weight:600;text-transform:uppercase;color:var(--dim)}
+.swbtn .swcount{font-family:var(--f-mono);font-size:11px;color:var(--dim);margin-top:1px}
+.swbtn.on{background:var(--ink3);border-bottom-color:var(--wr)}
+.swbtn.on .swlbl{color:var(--chalk)}
+
+.progwrap{height:28px;display:flex;flex-direction:column;gap:5px;justify-content:center;flex:0 0 auto}
+.progtrack{height:4px;display:flex;gap:1px;background:var(--line)}
+.progseg{flex:1;height:4px;background:var(--ink3);overflow:hidden}
+.progfill{height:4px}
+.progtext{font-size:13px;color:var(--dim);text-align:center}
+.progtext b{font-family:var(--f-mono);color:var(--chalk);font-weight:500}
+
+.instr{height:37px;display:flex;align-items:center;justify-content:center;font-size:14px;text-align:center;flex:0 0 auto}
+
+.speedtile{height:80px;border:1px solid var(--line);border-radius:8px;background:var(--ink1);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;flex:0 0 auto}
+.speedtitlerow{display:flex;align-items:center;gap:6px}
+.speedtitle{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.speedcap{font-size:13px;color:var(--dim);text-align:center;padding:0 24px}
+
+.actionsrow{height:60px;display:flex;align-items:flex-end;flex:0 0 auto}
+.skipbtn{flex:1;height:44px;border:1px solid var(--lineStrong);border-radius:4px;background:transparent;color:var(--chalk);font-family:var(--f-display);font-weight:600;font-size:14px;text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;justify-content:center}
+
+/* ═══ CURRENT — 3 stacked full PlayerCards, 324pt total ═══ */
+.cardstack{height:324px;display:flex;flex-direction:column;gap:12px;flex:0 0 auto}
+.pcard{flex:1;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:center}
+.pcard.pcsel{border-color:var(--ice)}
+.pcard .rail{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--wr)}
+.phead{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;padding-left:7px}
+.posbadge{display:inline-flex;align-items:center;padding:2px 7px;border:1px solid var(--wr);border-radius:2px;font-family:var(--f-mono);font-size:11px;font-weight:600;color:var(--wr);letter-spacing:.03em}
+.rkbadge{display:inline-flex;align-items:center;padding:2px 6px;border:1px solid var(--flare);border-radius:2px;font-size:10px;font-weight:700;color:var(--flare);letter-spacing:.06em;text-transform:uppercase}
+.pname{padding-left:7px;font-size:16px;font-weight:600;line-height:22px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pmeta{padding-left:7px;font-size:13px;line-height:18px;color:var(--dim);display:flex;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pmeta .dot{color:var(--faint)}
+.rankbadge{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:2px;display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:13px;font-weight:600;color:var(--onIce)}
+.rankbadge.r1{background:var(--gold)}
+.rankbadge.r2{background:var(--silver)}
+.rankbadge.r3{background:var(--faint)}
+
+/* ═══ V1 / V3 — three mini cards side by side, one row-height block ═══ */
+.mini3{height:128px;display:flex;gap:8px;flex:0 0 auto}
+.minicard{flex:1;min-width:0;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:8px;position:relative;display:flex;flex-direction:column;gap:4px;overflow:hidden}
+.minicard.sel{border-color:var(--ice)}
+.minicard.winner{border-color:var(--ice);background:var(--ink2)}
+.minicard.loser{opacity:.55}
+.minicard .rail{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--wr)}
+.minihead{padding-left:5px;display:flex;gap:4px;flex-wrap:wrap}
+.minipos{display:inline-flex;padding:1px 5px;border:1px solid var(--wr);border-radius:2px;font-family:var(--f-mono);font-size:11px;font-weight:600;color:var(--wr)}
+.minirk{display:inline-flex;padding:1px 4px;border:1px solid var(--flare);border-radius:2px;font-size:9px;font-weight:700;color:var(--flare);letter-spacing:.04em}
+.mininame{padding-left:5px;font-size:13px;font-weight:600;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.minimeta{padding-left:5px;font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.minival{padding-left:5px;margin-top:auto;font-family:var(--f-mono);font-size:11px;color:var(--faint)}
+.minirank{position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:2px;display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:11px;font-weight:600;color:var(--onIce)}
+.minirank.r1{background:var(--gold)}
+.winnertick{position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:2px;display:flex;align-items:center;justify-content:center;background:var(--ice)}
+.winnertick svg{stroke:var(--onIce);stroke-width:2}
+.winnerlbl{position:absolute;bottom:6px;left:6px;right:6px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ice)}
+
+/* ═══ V2 — three compact one-line rows, 176pt total ═══ */
+.denserows{height:176px;display:flex;flex-direction:column;gap:4px;flex:0 0 auto}
+.denserow{height:56px;background:var(--ink1);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;padding:0 12px;gap:10px;position:relative;overflow:hidden}
+.denserow.sel{border-color:var(--ice)}
+.denserow .rail{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--wr)}
+.drmain{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;padding-left:6px}
+.drline1{display:flex;align-items:baseline;gap:6px}
+.drname{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+.drteam{font-size:11px;color:var(--dim);flex:0 0 auto}
+.drline2{display:flex;align-items:center;gap:6px}
+.drpos{font-family:var(--f-mono);font-size:11px;color:var(--wr);border:1px solid var(--wr);padding:0 5px;border-radius:2px}
+.drrk{font-size:9px;font-weight:700;color:var(--flare);border:1px solid var(--flare);padding:0 4px;border-radius:2px;letter-spacing:.04em}
+.drrank{margin-left:auto;width:24px;height:24px;border-radius:2px;display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:12px;font-weight:600;color:var(--onIce);flex:0 0 auto}
+.drrank.r1{background:var(--gold)}
+
+/* ── fold / spill / annotation overlay (current-frame overflow proof) ── */
+.fold{position:absolute;left:0;right:0;bottom:0;border-top:2px dashed var(--flare);z-index:6}
+.fold .flabel{position:absolute;right:8px;top:-22px;font-family:var(--f-mono);font-size:11px;color:var(--flare);background:rgba(12,14,17,.9);padding:1px 6px;border:1px solid var(--flare);border-radius:2px}
+.spill{width:393px;border:1px dashed var(--flare);border-top:none;border-radius:0 0 12px 12px;opacity:.6;overflow:hidden;position:relative;background:var(--ink0)}
+.spill .slabel{position:absolute;right:8px;top:6px;font-family:var(--f-mono);font-size:11px;color:var(--flare);background:rgba(12,14,17,.92);border:1px solid var(--flare);border-radius:2px;padding:1px 6px;z-index:3}
+.ann{position:absolute;z-index:7;font-size:11px;font-family:var(--f-mono);color:var(--ice);background:rgba(12,14,17,.94);border:1px solid var(--ice);border-radius:2px;padding:2px 6px;line-height:1.45;max-width:150px}
+.ann.f{color:var(--flare);border-color:var(--flare)}
+.fit{position:absolute;left:12px;right:12px;bottom:8px;z-index:6;text-align:center;font-family:var(--f-mono);font-size:11px;color:var(--pos);border:1px dashed var(--pos);border-radius:2px;padding:4px}
+
+/* ── per-frame note box ── */
+.notewrap{width:100%;display:flex;flex-direction:column;gap:4px}
+.notelbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;color:var(--dim)}
+.notelbl .dot{width:6px;height:6px;border-radius:50%;background:var(--warn);display:none}
+.notewrap.noted .notelbl .dot{display:block}
+.pagenote{width:100%;background:var(--ink1);color:var(--chalk);border:1px solid var(--line);border-radius:6px;
+  padding:8px 10px;font-family:var(--f-ui);font-size:12.5px;min-height:48px;resize:vertical}
+.pagenote::placeholder{color:var(--faint)}
+.pagenote:focus{outline:none;border-color:var(--ice)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Polish Lab · Trios Three-Up Reflow — #243 scroll audit, biggest rank-surface lever</h1>
+  <p><b>Source:</b> <code>docs/feedback/items/243-scroll-audit/rank-surfaces.md</code> — <code>RankScreen</code> (Trios / head-to-heads). The audit measured the screen's nominal state (no streak chip, no unlock-payoff copy, no Confirm button pre-selection, no unlocked banner) against the Rank-stack content budget: <code>852 − 59 (top inset) − 52 (global TopBar) − 44 (native stack header) − 49 (tab bar) − 34 (bottom inset) = 614pt</code>.</p>
+  <p class="q">"The three <code>PlayerCard</code>s stacked vertically are <b>43% of total content height</b> and by far the dominant line item… A horizontal 3-up row (each card ~1/3 width) would collapse this block from ~324pt to roughly one card's height (~110-130pt) — <b>potential savings ~180-200pt</b>, the single largest lever in this entire audit. Caveat: this needs a narrower card treatment (name truncation, badge wrapping at ~110pt width) — it's a real design pass, not a pure prop change, and readability at 1/3 width needs a mock before committing."</p>
+  <p>This file <b>is</b> that design pass. Row 1 recreates today's screen faithfully (<code>mobile/src/screens/RankScreen.tsx</code> + <code>mobile/src/components/PlayerCard.tsx</code>, classic branch — position rail, badge row, name, team·age·experience meta) at real token values, proving the audit's 747pt / 133pt-overflow math. Rows 2–4 mock three reflow treatments against the SAME trio (including one long name, <b>Marvin Harrison Jr.</b>, tagged rookie — the audit's own "badge wrapping at ~110pt width" stress case) so truncation and tap-target behavior can be judged directly, not estimated.</p>
+</div>
+
+<div class="notesbar">
+  <div class="txt">Leave a note in any frame below — it persists in this browser (localStorage), not the file. Use <b style="color:var(--chalk)">Copy all notes</b> to pull everything into one paste.</div>
+  <button class="copybtn" id="copyall">Copy all notes</button>
+  <div class="notecount" id="notecount"></div>
+</div>
+
+<!-- ═══════════════════════ ROW 1 — CURRENT ═══════════════════════ -->
+<div class="rowlbl">Current — three stacked full PlayerCards<span class="fb">faithful recreation, nominal state (0 selected)</span></div>
+<div class="pairwrap">
+
+  <!-- CUR -->
+  <div class="slot">
+    <div class="slotlbl">CUR — RankScreen.tsx today</div>
+    <div class="phone">
+      <div class="ann f" style="top:150px;right:8px">324pt · 43% of<br>content height</div>
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Tap in order of preference — best first</div>
+          <div class="cardstack">
+            <div class="pcard">
+              <div class="rail"></div>
+              <div class="phead"><span class="posbadge">WR</span></div>
+              <div class="pname">CeeDee Lamb</div>
+              <div class="pmeta"><span>DAL</span><span class="dot">·</span><span>25 yo</span><span class="dot">·</span><span>5 yrs</span></div>
+            </div>
+            <div class="pcard">
+              <div class="rail"></div>
+              <div class="phead"><span class="posbadge">WR</span><span class="rkbadge">RK</span></div>
+              <div class="pname">Marvin Harrison Jr.</div>
+              <div class="pmeta"><span>ARI</span><span class="dot">·</span><span>22 yo</span></div>
+            </div>
+            <div class="pcard">
+              <div class="rail"></div>
+              <div class="phead"><span class="posbadge">WR</span></div>
+              <div class="pname">Chris Olave</div>
+              <div class="pmeta"><span>NO</span><span class="dot">·</span><span>24 yo</span><span class="dot">·</span><span>3 yrs</span></div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+        <div class="fold"><span class="flabel">614pt budget ends here</span></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="spill">
+      <span class="slabel">the ~133pt you scroll for today</span>
+      <div style="padding:10px 16px 16px;opacity:.85">
+        <div class="speedcap" style="text-align:left;padding:0 0 8px">…then tap Confirm to save. <i>(bottom half of the speed tile)</i></div>
+        <div class="actionsrow" style="height:auto"><div class="skipbtn">Skip</div></div>
+      </div>
+    </div>
+    <div class="caption">Reproduces <code>RankScreen.tsx</code>'s <code>ScrollView</code> (position rail + badge row + name + team·age·experience meta, classic <code>PlayerCard</code> branch, <code>showInjury=false</code>) at real token values: screen padding <code>lg 16</code>, block gap <code>md 12</code>. Content sums to <b>≈747pt</b> against the <b>614pt</b> Rank-stack budget (852 − 59 top inset − 52 TopBar − 44 native header − 49 tab bar − 34 bottom inset) — a <b>133pt overflow</b>, i.e. today's scroll. The 3 cards alone are <b>324pt / 43%</b> of that total.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — CUR<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="CUR — stacked cards, today" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ ROW 2 — V1 ═══════════════════════ -->
+<div class="rowlbl">Proposed V1 — three vertical mini-cards, side by side<span class="fb">tap-to-pick, name/chip/team-age/value stacked</span></div>
+<div class="pairwrap">
+
+  <!-- V1a -->
+  <div class="slot">
+    <div class="slotlbl">V1a — idle (0 selected)</div>
+    <div class="phone">
+      <div class="ann" style="top:150px;right:8px">128pt row<br>(−196pt vs 324)</div>
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Tap in order of preference — best first</div>
+          <div class="mini3">
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame">CeeDee Lamb</div>
+              <div class="minimeta">DAL · 25</div>
+              <div class="minival">5,120</div>
+            </div>
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span><span class="minirk">RK</span></div>
+              <div class="mininame">Marvin Harris…</div>
+              <div class="minimeta">ARI · 22</div>
+              <div class="minival">4,820</div>
+            </div>
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame">Chris Olave</div>
+              <div class="minimeta">NO · 24</div>
+              <div class="minival">3,990</div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+        <div class="fit">fits — 551 of 747pt, ~63pt spare vs the 614pt budget</div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">115×128pt card (≥44pt tap target on both axes ✓). At 99pt of usable text width, <b>"Marvin Harrison Jr." truncates to "Marvin Harris…"</b> — the "Jr." is lost. <code>value</code> is illustrative: <code>PlayerCard</code> already accepts a <code>value</code> prop (dense variant uses it) but Trios doesn't pass one today — trivial to wire if wanted, not required for the reflow itself.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — V1a<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V1a — mini-cards, idle" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- V1b -->
+  <div class="slot">
+    <div class="slotlbl">V1b — after 1st tap (rank 1 = Harrison Jr.)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Good — now tap your 2nd choice</div>
+          <div class="mini3">
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame">CeeDee Lamb</div>
+              <div class="minimeta">DAL · 25</div>
+              <div class="minival">5,120</div>
+            </div>
+            <div class="minicard sel">
+              <div class="rail"></div>
+              <div class="minirank r1">1</div>
+              <div class="minihead"><span class="minipos">WR</span><span class="minirk">RK</span></div>
+              <div class="mininame">Marvin Harris…</div>
+              <div class="minimeta">ARI · 22</div>
+              <div class="minival">4,820</div>
+            </div>
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame">Chris Olave</div>
+              <div class="minimeta">NO · 24</div>
+              <div class="minival">3,990</div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Rank badge (24→20pt) + ice border reuse the exact accent language of today's cards — same medal-gold rank-1 fill, same selected-border color. Tapping again removes the rank (unchanged behavior from <code>rankSide()</code>).</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — V1b<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V1b — mini-cards, rank 1 tapped" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ ROW 3 — V2 ═══════════════════════ -->
+<div class="rowlbl">Proposed V2 — compact stacked rows<span class="fb">least visual change — still stacked, just ~56pt each</span></div>
+<div class="pairwrap">
+
+  <!-- V2a -->
+  <div class="slot">
+    <div class="slotlbl">V2a — idle (0 selected)</div>
+    <div class="phone">
+      <div class="ann" style="top:150px;right:8px">176pt block<br>(−148pt vs 324)</div>
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Tap in order of preference — best first</div>
+          <div class="denserows">
+            <div class="denserow">
+              <div class="rail"></div>
+              <div class="drmain">
+                <div class="drline1"><span class="drname">CeeDee Lamb</span><span class="drteam">DAL · 25 yo</span></div>
+                <div class="drline2"><span class="drpos">WR</span></div>
+              </div>
+            </div>
+            <div class="denserow">
+              <div class="rail"></div>
+              <div class="drmain">
+                <div class="drline1"><span class="drname">Marvin Harrison Jr.</span><span class="drteam">ARI · 22 yo</span></div>
+                <div class="drline2"><span class="drpos">WR</span><span class="drrk">RK</span></div>
+              </div>
+            </div>
+            <div class="denserow">
+              <div class="rail"></div>
+              <div class="drmain">
+                <div class="drline1"><span class="drname">Chris Olave</span><span class="drteam">NO · 24 yo</span></div>
+                <div class="drline2"><span class="drpos">WR</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+        <div class="fit">fits — 599 of 747pt, ~15pt spare vs the 614pt budget</div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">356×56pt row (≥44pt ✓, plenty of margin). Full width means <b>"Marvin Harrison Jr." never truncates</b> — the row has ~280pt of name space vs the mini-card's 99pt. Closest structural relative of today's cards (still one player per row, still stacked), so it reads as the lowest-risk change — but it only fits with ~15pt of margin, the thinnest cushion of the three variants.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — V2a<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V2a — compact rows, idle" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- V2b -->
+  <div class="slot">
+    <div class="slotlbl">V2b — after 1st tap (rank 1 = Harrison Jr.)</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Good — now tap your 2nd choice</div>
+          <div class="denserows">
+            <div class="denserow">
+              <div class="rail"></div>
+              <div class="drmain">
+                <div class="drline1"><span class="drname">CeeDee Lamb</span><span class="drteam">DAL · 25 yo</span></div>
+                <div class="drline2"><span class="drpos">WR</span></div>
+              </div>
+            </div>
+            <div class="denserow sel">
+              <div class="rail"></div>
+              <div class="drmain">
+                <div class="drline1"><span class="drname">Marvin Harrison Jr.</span><span class="drteam">ARI · 22 yo</span></div>
+                <div class="drline2"><span class="drpos">WR</span><span class="drrk">RK</span></div>
+              </div>
+              <div class="drrank r1">1</div>
+            </div>
+            <div class="denserow">
+              <div class="rail"></div>
+              <div class="drmain">
+                <div class="drline1"><span class="drname">Chris Olave</span><span class="drteam">NO · 24 yo</span></div>
+                <div class="drline2"><span class="drpos">WR</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Closest kin is <code>PlayerCard</code>'s existing <code>dense</code> branch (the Tiers board's 60pt row) — but per the audit, <code>dense</code> doesn't render the rank-1/2/3 badge Trios needs, so this is a new sibling layout, not a drop-in prop.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — V2b<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V2b — compact rows, rank 1 tapped" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ ROW 4 — V3 ═══════════════════════ -->
+<div class="rowlbl">Proposed V3 — side-by-side cards, tap animates a "winner" state<span class="fb">static after-tap state rendered below</span></div>
+<div class="pairwrap">
+
+  <!-- V3a -->
+  <div class="slot">
+    <div class="slotlbl">V3a — before tap (neutral)</div>
+    <div class="phone">
+      <div class="ann" style="top:150px;right:8px">128pt block<br>(−196pt vs 324)</div>
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Tap in order of preference — best first</div>
+          <div class="mini3">
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame">CeeDee Lamb</div>
+              <div class="minimeta">DAL · 25</div>
+            </div>
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span><span class="minirk">RK</span></div>
+              <div class="mininame">Marvin Harris…</div>
+              <div class="minimeta">ARI · 22</div>
+            </div>
+            <div class="minicard">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame">Chris Olave</div>
+              <div class="minimeta">NO · 24</div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+        <div class="fit">fits — 551 of 747pt, ~63pt spare vs the 614pt budget</div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">Same 115×128pt footprint as V1 — identical savings math. Difference is purely in the selected-state treatment (right).</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — V3a<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V3a — winner cards, before tap" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- V3b -->
+  <div class="slot">
+    <div class="slotlbl">V3b — after tap, static "winner" state</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="topbar">
+        <div class="tb-league"><span class="tb-lbl">League</span><span class="tb-nm">Dynasty Degens Superflex</span></div>
+        <div class="tb-icons">
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg>
+          <svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M15.7 4.3l-2.1 2.1M6.4 13.6l-2.1 2.1"/></svg>
+        </div>
+      </div>
+      <div class="navhead">
+        <svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>
+        <span class="navtitle">Trios</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="modehint">Trios · tap Rank below for more modes</div>
+          <div class="fmt"><div class="fmtbtn on">1QB PPR</div><div class="fmtbtn">SF TEP</div></div>
+          <div class="switcher4">
+            <div class="swbtn"><span class="swlbl">QB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn"><span class="swlbl">RB</span><span class="swcount">10/10</span></div>
+            <div class="swbtn on"><span class="swlbl">WR</span><span class="swcount">6/10</span></div>
+            <div class="swbtn"><span class="swlbl">TE</span><span class="swcount">2/10</span></div>
+          </div>
+          <div class="progwrap">
+            <div class="progtrack">
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--qb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:100%;background:var(--rb)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:60%;background:var(--wr)"></div></div>
+              <div class="progseg"><div class="progfill" style="width:20%;background:var(--te)"></div></div>
+            </div>
+            <div class="progtext"><b>6</b> of <b>10</b> WRs ranked</div>
+          </div>
+          <div class="instr">Good — now tap your 2nd choice</div>
+          <div class="mini3">
+            <div class="minicard loser">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame">CeeDee Lamb</div>
+              <div class="minimeta">DAL · 25</div>
+            </div>
+            <div class="minicard winner">
+              <div class="rail"></div>
+              <div class="winnertick"><svg width="12" height="12" viewBox="0 0 20 20"><path d="M4 10l4 4 8-8"/></svg></div>
+              <div class="minihead"><span class="minipos">WR</span><span class="minirk">RK</span></div>
+              <div class="mininame">Marvin Harris…</div>
+              <div class="minimeta">ARI · 22</div>
+              <div class="winnerlbl">Ranked 1st</div>
+            </div>
+            <div class="minicard loser">
+              <div class="rail"></div>
+              <div class="minihead"><span class="minipos">WR</span></div>
+              <div class="mininame">Chris Olave</div>
+              <div class="minimeta">NO · 24</div>
+            </div>
+          </div>
+          <div class="speedtile">
+            <div class="speedtitlerow">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" style="stroke:var(--dim)"><path d="M3 11l6-8 1 5h7l-6 8-1-5z"/></svg>
+              <span class="speedtitle">I AM SPEED — OFF</span>
+            </div>
+            <div class="speedcap">Tap all 3, then tap Confirm to save.</div>
+          </div>
+          <div class="actionsrow"><div class="skipbtn">Skip</div></div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+    <div class="caption">The picked card gets an ice border + fill + check tick + "Ranked 1st" caption (a real transform/opacity transition in the live app — <code>Animated.timing</code> on scale + the other two's opacity, ≤180ms per motion tokens); the other two dim to 55% opacity in place. <b>No layout shift on tap</b> — same 128pt footprint before and after, so the surrounding chrome never reflows.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — V3b<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V3b — winner state, after tap" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<div class="note">
+  <h2>Pt math summary</h2>
+  <table>
+    <tr><th>Variant</th><th class="num">Cards block</th><th class="num">Total content</th><th class="num">vs 614pt budget</th><th>Tap target</th><th>Long name ("Marvin Harrison Jr.")</th></tr>
+    <tr><td>Current (stacked)</td><td class="num">324pt</td><td class="num">747pt</td><td class="num" style="color:var(--neg)">−133pt (scrolls)</td><td>393×100pt</td><td>Fits at full width, no truncation</td></tr>
+    <tr><td>V1 — 3-up mini-cards</td><td class="num">128pt</td><td class="num">551pt</td><td class="num" style="color:var(--pos)">+63pt spare</td><td>115×128pt</td><td>Truncates: "Marvin Harris…" (loses "Jr.")</td></tr>
+    <tr><td>V2 — compact rows</td><td class="num">176pt</td><td class="num">599pt</td><td class="num" style="color:var(--pos)">+15pt spare</td><td>356×56pt</td><td>Fits at full width, no truncation</td></tr>
+    <tr><td>V3 — winner cards</td><td class="num">128pt</td><td class="num">551pt</td><td class="num" style="color:var(--pos)">+63pt spare</td><td>115×128pt</td><td>Truncates: same as V1</td></tr>
+  </table>
+  <h2>Recommendation</h2>
+  <p><b>V1 (3-up mini-cards)</b> delivers the audit's full ~196pt lever with the most headroom (63pt spare — enough to absorb Dynamic Type growth or the streak chip/unlock banner the nominal-state audit deliberately excluded) and keeps the badge language (rank-1/2/3 medal fill, ice selected border) identical to today, so it's the lowest-risk path to the full savings. <b>V3</b> is the same footprint with a livelier tapped-state — worth it only if product wants the extra affordance; it's an animation/polish layer on top of V1, not a competing structural choice, and both can ship from the same 115×128pt card. <b>V2</b> is the safest visual delta (still literally "a list of three rows") but its 15pt margin is thin once any of the excluded chrome (streak chip ~52pt, unlock-payoff line, Confirm button) reappears — it would need its own further trim to hold the no-scroll line reliably. <b>Open question for whichever ships:</b> the name-truncation tradeoff is real at 115pt width — either accept it (full name stays available via the composed accessibility label and the existing long-press info sheet) or move the mini-card name to 2 lines instead of 1 (small change, adds ~14pt back to the card, still net a ~180pt win over today).</p>
+</div>
+
+<script>
+(function(){
+  var KEY = 'ftf-polish-lab-2026-08-243-trios-notes';
+  var notes = {};
+  try { notes = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { notes = {}; }
+
+  var boxes, notecount;
+
+  function refresh(){
+    var n = 0;
+    boxes.forEach(function(b){
+      var has = !!(notes[b.dataset.key] || '').trim();
+      b.closest('.notewrap').classList.toggle('noted', has);
+      if (has) n++;
+    });
+    notecount.textContent = n ? (n + ' of ' + boxes.length + ' noted') : 'no notes yet';
+  }
+
+  function init(){
+    boxes = Array.prototype.slice.call(document.querySelectorAll('.pagenote'));
+    notecount = document.getElementById('notecount');
+    boxes.forEach(function(b){
+      b.value = notes[b.dataset.key] || '';
+      b.addEventListener('input', function(){
+        notes[b.dataset.key] = b.value;
+        try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {}
+        refresh();
+      });
+    });
+    refresh();
+  }
+
+  document.getElementById('copyall').addEventListener('click', async function(){
+    var lines = [];
+    (boxes || []).forEach(function(b){
+      var t = (notes[b.dataset.key] || '').trim();
+      if (t) lines.push('## ' + b.dataset.key + '\n' + t);
+    });
+    var text = lines.length ? lines.join('\n\n') : '(no notes)';
+    var ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand('copy'); } catch (e2) {}
+      ta.remove();
+    }
+    var btn = document.getElementById('copyall');
+    var orig = btn.textContent;
+    btn.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(function(){ btn.textContent = orig; }, 1500);
+  });
+
+  init();
+})();
+</script>
+
+</body>
+</html>

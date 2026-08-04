@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — League Home Fold (#243 scroll audit)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --first1:#2dd4bf;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+
+.note{max-width:1200px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note code{font-family:var(--f-mono);font-size:12px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+.note ul{margin:4px 0 0 18px} .note li{margin:3px 0}
+.formula{font-family:var(--f-mono);font-size:12px;color:var(--chalk);background:var(--ink2);border:1px solid var(--line);border-radius:6px;padding:8px 12px;margin:6px 0;display:inline-block}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:11px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend .sw{width:10px;height:10px;border-radius:2px;flex:0 0 auto}
+
+/* ── global "copy all notes" bar ── */
+.notesbar{max-width:1200px;width:100%;display:flex;gap:14px;align-items:center;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:10px 14px;position:sticky;top:8px;z-index:20}
+.notesbar .txt{flex:1;font-size:12px;color:var(--dim);line-height:1.4}
+.copybtn{background:var(--ice);color:var(--onIce);border:0;border-radius:6px;padding:9px 14px;
+  font-family:var(--f-display);font-size:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;cursor:pointer;flex:0 0 auto}
+.copybtn:hover{filter:brightness(1.08)}
+.notecount{color:var(--faint);font-size:11px;flex:0 0 auto}
+
+.rowlbl{max-width:1200px;width:100%;font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:15px;color:var(--chalk);display:flex;align-items:center;gap:8px;margin-top:4px}
+.rowlbl::before{content:"";width:3px;height:14px;background:var(--ice)}
+.rowlbl .fb{font-family:var(--f-mono);font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0}
+
+.lab{max-width:1200px;width:100%;display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}
+.side{display:flex;flex-direction:column;gap:10px;align-items:center;width:393px}
+.tag{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:15px;padding:4px 12px;border-radius:2px;border:1px solid var(--line);color:var(--dim)}
+.tag.pro{color:var(--ice);border-color:var(--ice)}
+.slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim);align-self:flex-start}
+.caption{font-size:12px;line-height:1.55;color:var(--dim);text-align:left;align-self:flex-start}
+.caption b{color:var(--chalk)}
+.caption code{font-family:var(--f-mono);font-size:11px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+
+/* ── iPhone 15/16-class frame: 393×852pt, budget math per #243 ── */
+.phone{position:relative;width:393px;height:852px;display:flex;flex-direction:column;
+  background:var(--ink0);border:1px solid var(--lineStrong);border-radius:22px;overflow:hidden;
+  box-shadow:0 12px 32px rgba(0,0,0,.55)}
+.status{flex:0 0 59px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 24px 8px;font:12px var(--f-mono);color:var(--dim)}
+.topbar{flex:0 0 52px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--line)}
+.wordmark{display:flex;align-items:center;gap:8px}
+.wordmark .tick{width:3px;height:14px;background:var(--ice)}
+.wordmark .txt{font-family:var(--f-display);font-weight:600;font-size:16px;letter-spacing:.03em;text-transform:uppercase}
+svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+.content{flex:0 0 658px;position:relative;overflow:hidden;background:var(--ink0)}
+.scroll{display:flex;flex-direction:column;gap:12px;padding:16px 16px 32px}
+
+.tabbar{flex:0 0 49px;display:flex;border-top:1px solid var(--line);background:var(--ink0)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0 0;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:20px;height:20px}
+.tab.on{color:var(--ice)}
+.bottominset{flex:0 0 34px;display:flex;align-items:center;justify-content:center;background:var(--ink0)}
+.bottominset .bar{width:134px;height:5px;border-radius:3px;background:var(--lineStrong)}
+
+/* ── fold line — static, always at the true 658pt budget edge ── */
+.foldline{position:absolute;left:0;right:0;bottom:0;border-top:2px dashed var(--flare);z-index:9;pointer-events:none}
+.foldline .flabel{position:absolute;right:6px;bottom:3px;font-family:var(--f-mono);font-size:10.5px;color:var(--flare);
+  background:rgba(12,14,17,.94);padding:2px 6px;border:1px solid var(--flare);border-radius:2px;white-space:nowrap}
+.foldline.fits{border-top-color:var(--pos)}
+.foldline.fits .flabel{color:var(--pos);border-color:var(--pos)}
+
+/* ── per-block pt chips, injected by JS ── */
+.blkchip{position:absolute;right:4px;font-family:var(--f-mono);font-size:9.5px;line-height:1.3;
+  background:rgba(12,14,17,.92);border:1px solid var(--ice);color:var(--ice);padding:1px 5px;border-radius:2px;
+  white-space:nowrap;z-index:8;pointer-events:none}
+.blkchip.over{border-color:var(--flare);color:var(--flare)}
+
+/* ── spill preview: the cropped tail that requires a scroll ── */
+.spill{width:393px;border:1px dashed var(--flare);border-top:none;border-radius:0 0 14px 14px;
+  overflow:hidden;position:relative;background:rgba(240,80,140,.05);display:none}
+.spill.show{display:block}
+.spill .slabel{position:absolute;left:0;right:0;top:0;text-align:center;font-family:var(--f-mono);font-size:10.5px;
+  color:var(--flare);background:rgba(12,14,17,.95);border-bottom:1px dashed var(--flare);padding:4px;z-index:5}
+.spill .clonewrap{padding-top:22px;filter:saturate(.55) brightness(.8)}
+
+/* ═══ shared page-content constructions (Chalkline) ═══ */
+.card{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px}
+.card.tight{padding:12px}
+.herohead{display:flex;align-items:center;justify-content:space-between}
+.lbl{font:600 11px var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.heroname{font-family:var(--f-display);font-weight:600;font-size:22px;line-height:26px;letter-spacing:.03em;text-transform:uppercase;margin-top:8px}
+.chips{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
+.badge{display:inline-block;padding:2px 6px;border-radius:2px;font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;border:1px solid var(--lineStrong);color:var(--chalk)}
+.badge.rankchip{border-radius:4px;font-family:var(--f-mono);text-transform:none;letter-spacing:0}
+
+.actionrow{display:flex;gap:8px}
+.btn{flex:1;height:44px;border-radius:4px;display:flex;align-items:center;justify-content:center;font:600 14px var(--f-ui)}
+.btn.primary{background:var(--ice);color:var(--onIce)}
+.btn.secondary{border:1px solid var(--lineStrong);color:var(--chalk)}
+.btn.ghost{color:var(--dim);height:32px;padding:0;justify-content:flex-start;flex:none}
+.btn.compact{height:36px;font-size:13px;padding:0 12px;flex:none}
+
+.tick{font:600 11px var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--dim);display:flex;align-items:center;gap:8px}
+.tick::before{content:"";width:3px;height:14px;background:var(--ice)}
+
+/* explore rows (current/v2) */
+.xrows{display:flex;flex-direction:column}
+.xrow{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.xrow .m{flex:1;display:flex;flex-direction:column;gap:2px}
+.xrow .t{font:600 16px/22px var(--f-ui)}
+.xrow .s{font:400 13px/18px var(--f-ui);color:var(--dim)}
+
+/* explore tiles (v1, 3-across reflow) */
+.xtiles{display:flex;gap:8px}
+.xtile{flex:1;border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:10px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.xtile svg{stroke:var(--dim)}
+.xtile .t{font:600 13px/16px var(--f-ui)}
+.xtile .s{font:400 10.5px/13px var(--f-ui);color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* divider — buggy (marginTop ON TOP of the ScrollView gap) vs fixed */
+.divider{height:1px;background:var(--line);margin-top:12px}
+.divider.fixed{margin-top:0}
+
+/* progress module */
+.module{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:16px;display:flex;flex-direction:column;gap:8px}
+.ringrow{display:flex;gap:16px;align-items:center}
+.ringwrap{width:72px;height:72px;flex:0 0 auto;position:relative}
+.ringwrap svg{position:absolute;inset:0}
+.ringcenter{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:600 16px var(--f-mono)}
+.ringside{flex:1;display:flex;flex-direction:column;gap:8px;align-items:flex-start;min-width:0}
+.mdivider{height:1px;background:var(--line)}
+.statbetween{display:flex;justify-content:space-between;align-items:center;width:100%}
+.mono{font:500 13px var(--f-mono)}
+.segbar{display:flex;gap:2px}
+.seg{flex:1;height:8px;background:var(--ink3)}
+.seg.on{background:var(--ice)}
+.unlockline{font:400 13px/18px var(--f-ui);color:var(--chalk)}
+.unlockline .em{color:var(--ice);font-weight:600}
+.unlockline .inlinelink{color:var(--ice);font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.foldtext{font:400 13px/18px var(--f-ui);color:var(--dim);border-top:1px solid var(--line);padding-top:10px;margin-top:4px}
+
+/* works-now / example trade */
+.extrade{border:1px solid var(--line);border-radius:8px;background:var(--ink0);padding:10px 12px;margin-top:8px}
+.exlabel{font:600 11px var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--flare)}
+.excols{display:flex;margin-top:6px}
+.excol{flex:1;padding:0 10px;display:flex;flex-direction:column;gap:6px}
+.excol:first-child{padding-left:0;border-right:1px solid var(--line)}
+.excol:last-child{padding-right:0}
+.exrow{display:flex;align-items:center;gap:6px}
+.prail{width:3px;height:14px;flex:none}
+.exnm{font:600 12px var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.expos{font:600 9px var(--f-ui);letter-spacing:.05em}
+.exmeter{height:4px;background:var(--ink3);margin-top:10px}
+.exmeter .f{height:4px;background:var(--pos);width:88%}
+.exmeterlab{display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:var(--dim)}
+.exmeterlab .mono{font-size:11px;color:var(--dim)}
+
+/* ── per-frame note box ── */
+.notewrap{width:100%;display:flex;flex-direction:column;gap:4px}
+.notelbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;color:var(--dim)}
+.notelbl .dot{width:6px;height:6px;border-radius:50%;background:var(--warn);display:none}
+.notewrap.noted .notelbl .dot{display:block}
+.pagenote{width:100%;background:var(--ink1);color:var(--chalk);border:1px solid var(--line);border-radius:6px;
+  padding:8px 10px;font-family:var(--f-ui);font-size:12.5px;min-height:48px;resize:vertical}
+.pagenote::placeholder{color:var(--faint)}
+.pagenote:focus{outline:none;border-color:var(--ice)}
+
+.rationale{max-width:1200px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 20px}
+.rationale h2{font-family:var(--f-display);font-weight:600;font-size:18px;letter-spacing:.03em;text-transform:uppercase;margin:0 0 8px;display:flex;align-items:center;gap:8px;color:var(--chalk)}
+.rationale h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+.rationale ul{margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--dim)}
+.rationale li{margin-bottom:6px}
+.rationale strong{color:var(--chalk)}
+.rationale table{width:100%;border-collapse:collapse;margin:10px 0;font-size:12.5px}
+.rationale th,.rationale td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+.rationale th{color:var(--chalk);background:var(--ink2)}
+.rationale td{color:var(--dim)}
+.rationale td b{color:var(--chalk)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>League home — progress-module fold (#243 scroll audit)</h1>
+  <p>The <b>#243 scroll audit</b> (<code>docs/feedback/items/243-scroll-audit/league-misc-surfaces.md</code>, §2)
+     found that on <code>LeagueScreen.tsx</code>'s low-activity state — a quiet/new league (0 matches, ring &lt;4/4,
+     contrarian <code>insufficient_data</code>) — the page's single most important first-run explainer,
+     <code>LeagueProgressModule</code>, starts too low and gets clipped by the tab-bar viewport. Usable-viewport
+     budget for a Main-tab screen (iPhone 15/16-class, 393×852), same method as the #218 hub density pass:</p>
+  <div class="formula">852 − 59 (top safe inset) − 52 (TopBar) − 49 (tab bar) − 34 (bottom inset) = <b>658pt</b></div>
+  <p>Contributing waste: a <b>divider double-margin bug</b> (<code>styles.divider</code> carries its own
+     <code>marginTop: space.md(12)</code> <i>on top of</i> the ScrollView's own <code>gap: space.md(12)</code> —
+     24pt spent for what should be a 12pt gap, ×2 dividers in this state) and <b>three stacked Explore rows</b>
+     at ~67pt each (201pt) that could reflow denser. All three frames below use the same data
+     (positions 0/4 ranked, 1/12 ranked-incl-you, 12 teams — identical to the shipped
+     <code>empty-states-progress-v3</code> mock) so only layout changes, never content.</p>
+  <div class="legend">
+    <span><span class="sw" style="background:var(--flare);border:1px solid var(--flare)"></span>below the 658pt fold / overflow</span>
+    <span><span class="sw" style="background:var(--pos);border:1px solid var(--pos)"></span>fits, spare room to the fold</span>
+    <span><span class="sw" style="background:var(--ice);border:1px solid var(--ice)"></span>per-block height · running total (JS-measured live from this file's own DOM, not hand-typed)</span>
+  </div>
+</div>
+
+<div class="notesbar">
+  <div class="txt">Leave a note in any frame below — it persists in this browser (localStorage), not the file. Use <b style="color:var(--chalk)">Copy all notes</b> to pull everything into one paste.</div>
+  <button class="copybtn" id="copyall">Copy all notes</button>
+  <div class="notecount" id="notecount"></div>
+</div>
+
+<div class="rowlbl">CURRENT vs PROPOSED — low-activity League home<span class="fb">same data, three layouts; fold line + per-block chips are measured live via JS, not hardcoded</span></div>
+
+<div class="lab">
+
+  <!-- ═══════════════════════ CURRENT ═══════════════════════ -->
+  <div class="side">
+    <div class="tag">Current — LeagueScreen.tsx</div>
+    <div class="phone" id="phoneCurrent">
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="wordmark"><div class="tick"></div><div class="txt">Trade Finder</div></div>
+        <svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3a5 5 0 0 1 5 5v3l1.5 2.5H3.5L5 11V8a5 5 0 0 1 5-5Z"/><path d="M8.5 16a1.5 1.5 0 0 0 3 0"/></svg>
+      </div>
+      <div class="content">
+        <div class="scroll">
+
+          <div class="card" data-blk="Hero card">
+            <div class="herohead"><span class="lbl">League</span>
+              <svg class="ic" width="16" height="16" viewBox="0 0 16 16"><path d="M3 6l5 5 5-5"/></svg></div>
+            <div class="heroname">The Gridiron Gang</div>
+            <div class="chips">
+              <span class="badge">1QB PPR</span>
+              <span class="badge rankchip">#7 of 12</span>
+              <span class="badge">12 teams</span>
+            </div>
+          </div>
+
+          <div class="actionrow" data-blk="Action row">
+            <div class="btn secondary">Rank players</div>
+            <div class="btn primary">Find a trade</div>
+          </div>
+
+          <div class="tick" data-blk="Explore label">Explore</div>
+          <div class="xrows" data-blk="Explore rows &times;3">
+            <div class="xrow"><div class="m"><div class="t">League rankings</div><div class="s">Every team ranked by total roster value</div></div>
+              <svg class="ic" width="16" height="16" viewBox="0 0 16 16" style="stroke:var(--dim)"><path d="M6 3l5 5-5 5"/></svg></div>
+            <div class="xrow"><div class="m"><div class="t">Free agents</div><div class="s">Best available players in this league</div></div>
+              <svg class="ic" width="16" height="16" viewBox="0 0 16 16" style="stroke:var(--dim)"><path d="M6 3l5 5-5 5"/></svg></div>
+            <div class="xrow"><div class="m"><div class="t">Rookie draft board</div><div class="s">First-year players and pre-draft prospects</div></div>
+              <svg class="ic" width="16" height="16" viewBox="0 0 16 16" style="stroke:var(--dim)"><path d="M6 3l5 5-5 5"/></svg></div>
+          </div>
+
+          <div class="divider" data-blk="Divider (buggy: +12pt marginTop)"></div>
+
+          <div class="tick" data-blk="Progress label">League progress</div>
+          <div class="module" data-blk="LeagueProgressModule (full)" data-critical="module">
+            <div class="ringrow">
+              <div class="ringwrap">
+                <svg width="72" height="72" viewBox="0 0 72 72" fill="none">
+                  <circle cx="36" cy="36" r="31" stroke="#232833" stroke-width="5"/>
+                  <path d="M36 5 A31 31 0 0 1 38.4 5.1" stroke="#56D9EC" stroke-width="5" stroke-linecap="square"/>
+                </svg>
+                <div class="ringcenter">0/4</div>
+              </div>
+              <div class="ringside">
+                <span class="lbl">Positions ranked</span>
+                <div class="btn primary compact">Rank players</div>
+              </div>
+            </div>
+            <div class="mdivider"></div>
+            <div class="statbetween"><span class="lbl">Leaguemates ranked</span>
+              <span class="mono">1/12 <span style="color:var(--dim)">(you)</span></span></div>
+            <div class="segbar">
+              <span class="seg on"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span>
+            </div>
+            <div class="unlockline"><span class="em">2 more ranked leaguemates</span> unlocks mutual matches — trades both sides already like.</div>
+            <div class="btn ghost">Invite leaguemates</div>
+            <div class="foldtext">Leaderboards and contrarian ranks appear here once 3 leaguemates have ranked.</div>
+          </div>
+
+          <div class="divider" data-blk="Divider (buggy) 2"></div>
+
+          <div class="tick" data-blk="Works-now label">Works right now</div>
+          <div class="card" data-blk="Works-now card">
+            <div style="font:600 16px/22px var(--f-ui)">Find trades today — no leaguemates needed</div>
+            <div style="font:400 13px/18px var(--f-ui);color:var(--dim);margin-top:2px">Suggestions are priced off community consensus until your board takes over.</div>
+            <div class="extrade">
+              <span class="exlabel">Example — not from your league</span>
+              <div class="excols">
+                <div class="excol"><span class="lbl">You send</span>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span><span class="exnm">Breece Hall</span><span class="expos" style="color:var(--rb)">RB</span></div></div>
+                <div class="excol"><span class="lbl">You get</span>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span><span class="exnm">De'Von Achane</span><span class="expos" style="color:var(--rb)">RB</span></div>
+                  <div class="exrow"><span class="prail" style="background:var(--lineStrong)"></span><span class="exnm">2027 2nd</span></div></div>
+              </div>
+              <div class="exmeter"><div class="f"></div></div>
+              <div class="exmeterlab"><span>Fairness</span><span class="mono">88</span></div>
+            </div>
+            <div class="btn primary" style="margin-top:12px;height:44px">Find a trade</div>
+          </div>
+
+        </div>
+        <div class="foldline"><span class="flabel"></span></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+        <div class="tab on"><svg class="ic" viewBox="0 0 22 22"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+      </div>
+      <div class="bottominset"><div class="bar"></div></div>
+    </div>
+    <div class="spill" id="spillCurrent"></div>
+    <div class="caption">Faithful recreation of today's low-activity <code>LeagueScreen.tsx</code>: hero, action row,
+      Explore (3 rows — <code>league.rookie_board_entry</code> on by default), the double-margin divider bug ×2,
+      the full <code>LeagueProgressModule</code>, and the "Works right now" example-trade card, in real render order.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — Current<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="CURRENT — League home, low-activity state" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════ PROPOSED V1 ═══════════════════════ -->
+  <div class="side">
+    <div class="tag pro">Proposed V1 — combined density fix</div>
+    <div class="phone" id="phoneV1">
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="wordmark"><div class="tick"></div><div class="txt">Trade Finder</div></div>
+        <svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3a5 5 0 0 1 5 5v3l1.5 2.5H3.5L5 11V8a5 5 0 0 1 5-5Z"/><path d="M8.5 16a1.5 1.5 0 0 0 3 0"/></svg>
+      </div>
+      <div class="content">
+        <div class="scroll">
+
+          <div class="card tight" data-blk="Hero card (pad 16&#8594;12)">
+            <div class="herohead"><span class="lbl">League</span>
+              <svg class="ic" width="16" height="16" viewBox="0 0 16 16"><path d="M3 6l5 5 5-5"/></svg></div>
+            <div class="heroname">The Gridiron Gang</div>
+            <div class="chips">
+              <span class="badge">1QB PPR</span>
+              <span class="badge rankchip">#7 of 12</span>
+              <span class="badge">12 teams</span>
+            </div>
+          </div>
+
+          <div class="actionrow" data-blk="Action row">
+            <div class="btn secondary">Rank players</div>
+            <div class="btn primary">Find a trade</div>
+          </div>
+
+          <div class="tick" data-blk="Explore label">Explore</div>
+          <div class="xtiles" data-blk="Explore &#8594; 3-across tiles">
+            <div class="xtile"><svg class="ic" width="18" height="18" viewBox="0 0 16 16"><path d="M2 13V7M6 13V3M10 13V9M14 13v-4"/></svg>
+              <span class="t">Rankings</span><span class="s">Every team ranked</span></div>
+            <div class="xtile"><svg class="ic" width="18" height="18" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/></svg>
+              <span class="t">Free agents</span><span class="s">Best available</span></div>
+            <div class="xtile"><svg class="ic" width="18" height="18" viewBox="0 0 16 16"><path d="M2 12h12M4 12V7l4-4 4 4v5"/></svg>
+              <span class="t">Rookie board</span><span class="s">Pre-draft prospects</span></div>
+          </div>
+
+          <div class="divider fixed" data-blk="Divider (fixed: no marginTop)"></div>
+
+          <div class="tick" data-blk="Progress label">League progress</div>
+          <div class="module" data-blk="LeagueProgressModule (inline invite)" data-critical="module">
+            <div class="ringrow">
+              <div class="ringwrap">
+                <svg width="72" height="72" viewBox="0 0 72 72" fill="none">
+                  <circle cx="36" cy="36" r="31" stroke="#232833" stroke-width="5"/>
+                  <path d="M36 5 A31 31 0 0 1 38.4 5.1" stroke="#56D9EC" stroke-width="5" stroke-linecap="square"/>
+                </svg>
+                <div class="ringcenter">0/4</div>
+              </div>
+              <div class="ringside">
+                <span class="lbl">Positions ranked</span>
+                <div class="btn primary compact">Rank players</div>
+              </div>
+            </div>
+            <div class="mdivider"></div>
+            <div class="statbetween"><span class="lbl">Leaguemates ranked</span>
+              <span class="mono">1/12 <span style="color:var(--dim)">(you)</span></span></div>
+            <div class="segbar">
+              <span class="seg on"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span>
+            </div>
+            <div class="unlockline"><span class="em">2 more ranked leaguemates</span> unlocks mutual matches. <span class="inlinelink">Invite them</span></div>
+            <div class="foldtext">Leaderboards and contrarian ranks appear here once 3 leaguemates have ranked.</div>
+          </div>
+
+          <div class="divider fixed" data-blk="Divider (fixed) 2"></div>
+
+          <div class="tick" data-blk="Works-now label">Works right now</div>
+          <div class="card tight" data-blk="Works-now card">
+            <div style="font:600 16px/22px var(--f-ui)">Find trades today — no leaguemates needed</div>
+            <div style="font:400 13px/18px var(--f-ui);color:var(--dim);margin-top:2px">Suggestions are priced off community consensus until your board takes over.</div>
+            <div class="extrade">
+              <span class="exlabel">Example — not from your league</span>
+              <div class="excols">
+                <div class="excol"><span class="lbl">You send</span>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span><span class="exnm">Breece Hall</span><span class="expos" style="color:var(--rb)">RB</span></div></div>
+                <div class="excol"><span class="lbl">You get</span>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span><span class="exnm">De'Von Achane</span><span class="expos" style="color:var(--rb)">RB</span></div>
+                  <div class="exrow"><span class="prail" style="background:var(--lineStrong)"></span><span class="exnm">2027 2nd</span></div></div>
+              </div>
+              <div class="exmeter"><div class="f"></div></div>
+              <div class="exmeterlab"><span>Fairness</span><span class="mono">88</span></div>
+            </div>
+            <div class="btn primary" style="margin-top:12px;height:44px">Find a trade</div>
+          </div>
+
+        </div>
+        <div class="foldline fits"><span class="flabel"></span></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+        <div class="tab on"><svg class="ic" viewBox="0 0 22 22"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+      </div>
+      <div class="bottominset"><div class="bar"></div></div>
+    </div>
+    <div class="spill" id="spillV1"></div>
+    <div class="caption"><b>Same order as today</b>, four fixes per audit item list: (1) divider drops its
+      redundant <code>marginTop</code>, (2) Explore reflows into one 3-across tile row, (3) hero card padding
+      16&#8594;12, (5) the module's "Invite leaguemates" button becomes an inline text link on the unlock
+      sentence. Nothing removed, nothing reordered — the progress module lands fully above the fold.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — V1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V1 — combined density fix (same order)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════ PROPOSED V2 ═══════════════════════ -->
+  <div class="side">
+    <div class="tag pro">Proposed V2 — reorder only</div>
+    <div class="phone" id="phoneV2">
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="wordmark"><div class="tick"></div><div class="txt">Trade Finder</div></div>
+        <svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3a5 5 0 0 1 5 5v3l1.5 2.5H3.5L5 11V8a5 5 0 0 1 5-5Z"/><path d="M8.5 16a1.5 1.5 0 0 0 3 0"/></svg>
+      </div>
+      <div class="content">
+        <div class="scroll">
+
+          <div class="card" data-blk="Hero card">
+            <div class="herohead"><span class="lbl">League</span>
+              <svg class="ic" width="16" height="16" viewBox="0 0 16 16"><path d="M3 6l5 5 5-5"/></svg></div>
+            <div class="heroname">The Gridiron Gang</div>
+            <div class="chips">
+              <span class="badge">1QB PPR</span>
+              <span class="badge rankchip">#7 of 12</span>
+              <span class="badge">12 teams</span>
+            </div>
+          </div>
+
+          <div class="actionrow" data-blk="Action row">
+            <div class="btn secondary">Rank players</div>
+            <div class="btn primary">Find a trade</div>
+          </div>
+
+          <div class="divider" data-blk="Divider (buggy, unchanged)"></div>
+
+          <div class="tick" data-blk="Progress label &#8722; promoted">League progress</div>
+          <div class="module" data-blk="LeagueProgressModule (full, promoted)" data-critical="module">
+            <div class="ringrow">
+              <div class="ringwrap">
+                <svg width="72" height="72" viewBox="0 0 72 72" fill="none">
+                  <circle cx="36" cy="36" r="31" stroke="#232833" stroke-width="5"/>
+                  <path d="M36 5 A31 31 0 0 1 38.4 5.1" stroke="#56D9EC" stroke-width="5" stroke-linecap="square"/>
+                </svg>
+                <div class="ringcenter">0/4</div>
+              </div>
+              <div class="ringside">
+                <span class="lbl">Positions ranked</span>
+                <div class="btn primary compact">Rank players</div>
+              </div>
+            </div>
+            <div class="mdivider"></div>
+            <div class="statbetween"><span class="lbl">Leaguemates ranked</span>
+              <span class="mono">1/12 <span style="color:var(--dim)">(you)</span></span></div>
+            <div class="segbar">
+              <span class="seg on"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span>
+            </div>
+            <div class="unlockline"><span class="em">2 more ranked leaguemates</span> unlocks mutual matches — trades both sides already like.</div>
+            <div class="btn ghost">Invite leaguemates</div>
+            <div class="foldtext">Leaderboards and contrarian ranks appear here once 3 leaguemates have ranked.</div>
+          </div>
+
+          <div class="divider" data-blk="Divider (buggy, unchanged) 2"></div>
+
+          <div class="tick" data-blk="Works-now label">Works right now</div>
+          <div class="card" data-blk="Works-now card">
+            <div style="font:600 16px/22px var(--f-ui)">Find trades today — no leaguemates needed</div>
+            <div style="font:400 13px/18px var(--f-ui);color:var(--dim);margin-top:2px">Suggestions are priced off community consensus until your board takes over.</div>
+            <div class="extrade">
+              <span class="exlabel">Example — not from your league</span>
+              <div class="excols">
+                <div class="excol"><span class="lbl">You send</span>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span><span class="exnm">Breece Hall</span><span class="expos" style="color:var(--rb)">RB</span></div></div>
+                <div class="excol"><span class="lbl">You get</span>
+                  <div class="exrow"><span class="prail" style="background:var(--rb)"></span><span class="exnm">De'Von Achane</span><span class="expos" style="color:var(--rb)">RB</span></div>
+                  <div class="exrow"><span class="prail" style="background:var(--lineStrong)"></span><span class="exnm">2027 2nd</span></div></div>
+              </div>
+              <div class="exmeter"><div class="f"></div></div>
+              <div class="exmeterlab"><span>Fairness</span><span class="mono">88</span></div>
+            </div>
+            <div class="btn primary" style="margin-top:12px;height:44px">Find a trade</div>
+          </div>
+
+          <div class="divider" data-blk="Divider (buggy, unchanged) 3"></div>
+
+          <div class="tick" data-blk="Explore label &#8722; demoted">Explore</div>
+          <div class="xrows" data-blk="Explore rows &times;3 (below fold, intentional)">
+            <div class="xrow"><div class="m"><div class="t">League rankings</div><div class="s">Every team ranked by total roster value</div></div>
+              <svg class="ic" width="16" height="16" viewBox="0 0 16 16" style="stroke:var(--dim)"><path d="M6 3l5 5-5 5"/></svg></div>
+            <div class="xrow"><div class="m"><div class="t">Free agents</div><div class="s">Best available players in this league</div></div>
+              <svg class="ic" width="16" height="16" viewBox="0 0 16 16" style="stroke:var(--dim)"><path d="M6 3l5 5-5 5"/></svg></div>
+            <div class="xrow"><div class="m"><div class="t">Rookie draft board</div><div class="s">First-year players and pre-draft prospects</div></div>
+              <svg class="ic" width="16" height="16" viewBox="0 0 16 16" style="stroke:var(--dim)"><path d="M6 3l5 5-5 5"/></svg></div>
+          </div>
+
+        </div>
+        <div class="foldline"><span class="flabel"></span></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Trades</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+        <div class="tab on"><svg class="ic" viewBox="0 0 22 22"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+      </div>
+      <div class="bottominset"><div class="bar"></div></div>
+    </div>
+    <div class="spill" id="spillV2"></div>
+    <div class="caption"><b>No density changes at all</b> — every padding/margin (including the divider bug)
+      stays exactly as today. Only the order changes: <code>LeagueProgressModule</code> + "Works right now"
+      move directly under the action row, ahead of Explore. Explore is pushed below the fold
+      <b>on purpose</b> — it's the lowest-value section in a day-one league (nothing ranked/explored yet),
+      so trading its visibility for the module's is the point of this variant.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — V2<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V2 — reorder only (module promoted, Explore demoted)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<div class="rationale">
+  <h2>Recommendation</h2>
+  <table>
+    <tr><th></th><th>V1 — combined density fix</th><th>V2 — reorder only</th></tr>
+    <tr><td><b>Effort</b></td><td>Medium — 4 small edits (2 style-only, 1 layout reflow, 1 component change), all localized to <code>LeagueScreen.tsx</code> + <code>LeagueProgressModule.tsx</code></td><td>Low — pure JSX reorder in <code>LeagueScreen.tsx</code>, zero style edits</td></tr>
+    <tr><td><b>Risk</b></td><td>Low-medium — the Explore tile reflow is new layout that needs its own visual QA (icon/label truncation at longer position names, e.g. "Rookie draft board")</td><td>Very low — every element keeps its existing styling; only sibling order changes</td></tr>
+    <tr><td><b>What's traded away</b></td><td>Nothing removed — Explore stays visible, just denser</td><td>Explore (the whole section) drops below the fold every time the module is showing — a returning user who already ranked can't see "Free agents" / "Rookie board" without scrolling</td></tr>
+    <tr><td><b>Net effect</b></td><td>Fixes the actual bug (module clipped) <i>and</i> the underlying cause (bloated spacing) — the gain compounds for every future addition to this screen</td><td>Fixes the symptom for THIS state only — a wide open-ended list still stacks the same way once matches/leaderboards return, and the divider bug ships unfixed everywhere else it appears (audit item 2: up to 60pt project-wide)</td></tr>
+  </table>
+  <ul>
+    <li><strong>Recommend V1.</strong> It resolves the audit's root causes (items 1–3+5, ~108–138pt reclaimed
+      depending on measured render) rather than shuffling the same bytes around, and the divider fix alone is
+      worth landing project-wide regardless of which layout wins — every other divider on this screen (and
+      likely others) pays the same 12pt tax.</li>
+    <li>V2 is the right move only if Explore genuinely has near-zero value in the low-activity state (arguably
+      true — a brand-new user has nothing to rank/explore yet) <i>and</i> the team wants a same-day, zero-visual-risk
+      patch while V1's tile reflow gets proper design review. It's a reasonable stopgap, not a replacement for V1.</li>
+    <li>The two are not mutually exclusive: V1's density fixes (divider, hero padding, inline invite link) can
+      land underneath V2's reorder later if both the "explore is de-prioritized" and "nothing should look
+      bloated" arguments are accepted — but ship V1's fixes first since they carry no downside.</li>
+  </ul>
+</div>
+
+<script>
+(function(){
+  var BUDGET = 658;
+
+  function instrument(phoneId, spillId){
+    var phone = document.getElementById(phoneId);
+    var spill = document.getElementById(spillId);
+    var content = phone.querySelector('.content');
+    var scroll = phone.querySelector('.scroll');
+    var fold = phone.querySelector('.foldline');
+    var flabel = fold.querySelector('.flabel');
+
+    var full = scroll.scrollHeight;
+    var contentTop = content.getBoundingClientRect().top;
+
+    // per-block chips
+    var blocks = scroll.querySelectorAll(':scope > [data-blk]');
+    var criticalBottom = null;
+    blocks.forEach(function(b){
+      var r = b.getBoundingClientRect();
+      var top = r.top - contentTop;
+      var bottom = r.bottom - contentTop;
+      var h = Math.round(r.height);
+      var over = bottom > BUDGET + 0.5;
+      var chip = document.createElement('div');
+      chip.className = 'blkchip' + (over ? ' over' : '');
+      chip.textContent = b.dataset.blk + ' · ' + h + 'pt → ' + Math.round(bottom) + 'pt';
+      chip.style.top = Math.max(2, Math.round(top)) + 'px';
+      content.appendChild(chip);
+      if (b.dataset.critical === 'module') criticalBottom = bottom;
+    });
+
+    // fold label — judged against the CRITICAL block (the progress module),
+    // since the page legitimately continues below it (works-now/explore) in
+    // every variant; that trailing scroll is expected, not the finding.
+    if (criticalBottom != null) {
+      if (criticalBottom > BUDGET + 0.5) {
+        var moduleOver = Math.round(criticalBottom - BUDGET);
+        flabel.textContent = '658pt fold — module CUT OFF, ' + moduleOver + 'pt hidden';
+      } else {
+        var moduleSpare = Math.round(BUDGET - criticalBottom);
+        fold.classList.add('fits');
+        flabel.textContent = '658pt fold — module fits, ' + moduleSpare + 'pt spare (page continues below)';
+      }
+    } else if (full > BUDGET + 0.5) {
+      flabel.textContent = '658pt fold — OVERFLOW +' + Math.round(full - BUDGET) + 'pt';
+    } else {
+      fold.classList.add('fits');
+      flabel.textContent = '658pt fold — fits, ' + Math.round(BUDGET - full) + 'pt spare';
+    }
+
+    // spill preview of the cropped tail
+    if (full > BUDGET + 0.5 && spill) {
+      var overflowAmt = Math.ceil(full - BUDGET);
+      spill.style.height = (overflowAmt + 22) + 'px';
+      spill.classList.add('show');
+      var slabel = document.createElement('div');
+      slabel.className = 'slabel';
+      slabel.textContent = 'below the fold — ' + overflowAmt + 'pt cut off, requires scroll';
+      spill.appendChild(slabel);
+      var wrap = document.createElement('div');
+      wrap.className = 'clonewrap';
+      var clone = scroll.cloneNode(true);
+      clone.style.marginTop = (-BUDGET) + 'px';
+      wrap.appendChild(clone);
+      spill.appendChild(wrap);
+    }
+  }
+
+  instrument('phoneCurrent', 'spillCurrent');
+  instrument('phoneV1', 'spillV1');
+  instrument('phoneV2', 'spillV2');
+
+  // ── notes / localStorage ──
+  var KEY = 'ftf-polish-lab-2026-08-243-league-home-fold-notes';
+  var notes = {};
+  try { notes = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { notes = {}; }
+
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.pagenote'));
+  var notecount = document.getElementById('notecount');
+
+  function refresh(){
+    var n = 0;
+    boxes.forEach(function(b){
+      var has = !!(notes[b.dataset.key] || '').trim();
+      b.closest('.notewrap').classList.toggle('noted', has);
+      if (has) n++;
+    });
+    notecount.textContent = n ? (n + ' of ' + boxes.length + ' noted') : 'no notes yet';
+  }
+
+  boxes.forEach(function(b){
+    b.value = notes[b.dataset.key] || '';
+    b.addEventListener('input', function(){
+      notes[b.dataset.key] = b.value;
+      try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {}
+      refresh();
+    });
+  });
+
+  document.getElementById('copyall').addEventListener('click', async function(){
+    var lines = [];
+    boxes.forEach(function(b){
+      var t = (notes[b.dataset.key] || '').trim();
+      if (t) lines.push('## ' + b.dataset.key + '\n' + t);
+    });
+    var text = lines.length ? lines.join('\n\n') : '(no notes)';
+    var ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand('copy'); } catch (e2) {}
+      ta.remove();
+    }
+    var btn = document.getElementById('copyall');
+    var orig = btn.textContent;
+    btn.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(function(){ btn.textContent = orig; }, 1500);
+  });
+
+  refresh();
+})();
+</script>
+
+</body>
+</html>

@@ -23,3 +23,17 @@ Chalkline tokens throughout; all assets inline. Master viewer: `index.html`
 | [`rank-method-consolidation.html`](rank-method-consolidation.html) | #232/#233 | One chooser: Fastest / Most precise / Most control; Quick rank demoted to a follow-on; the rest behind "More ways to rank"; empty-tier CTA reworded "Continue — no QBs this high" |
 | [`rank-method-consolidation-v2.html`](rank-method-consolidation-v2.html) | #232/#233 (v2) | Operator iteration: Most control = the Tiers drag board (overall list demoted to the disclosure) + small "Have rankings already? Import them" entry opening a "Bring your rankings" sheet (CSV / XLSX / paste a table) with the match-review state shown |
 | [`rank-method-consolidation-v3.html`](rank-method-consolidation-v3.html) | #232/#233 (v3) | Chooser header row only: import entry fitted to the RIGHT of "Build your board" in three variants — (A, recommended) "Have rankings already?" text link with wrap treatment, (B) compact solid-ice "Import Rankings" button, (C) ice-outlined "Import" chip — all with the corrected UPLOAD glyph (v2's pointed down); sheet/match-review unchanged from v2 (reference frame) |
+
+## Round 2 — 2026-08-02 (scroll audit #243 + movers + lineup #238)
+
+Master viewer: `index-round2.html` (one tab per page, srcdoc-embedded).
+
+| Page | Feedback | What it shows |
+|---|---|---|
+| [`pin-mode-collapsed-controls.html`](pin-mode-collapsed-controls.html) | #243 audit #1 | Single-pin mode: full Controls Card (286pt) collapses to "Pinned: X · Edit" one-liner (V1, ~246pt saved, recommended) vs pin context merged into the featured-window header (V2) |
+| [`tradevaluebar-density.html`](tradevaluebar-density.html) | #243 audit | TradeValueBar 248pt → V1 192pt (verdict paragraph behind "Why? ›", heading step-down; recommended) vs V2 174pt composite headline; both fix the fontSize:9 violation |
+| [`league-home-fold.html`](league-home-fold.html) | #243 audit | Low-activity League home: V1 divider-bug fix + Explore 3-across tiles (module fits, 55pt spare; recommended) vs V2 pure reorder (module promoted, 110pt spare, bug unfixed) |
+| [`trios-three-up.html`](trios-three-up.html) | #243 audit | Trios matchup: 3 stacked 108pt cards → V1 side-by-side mini-cards (−196pt, recommended) vs V2 compact rows (−148pt) vs V3 = V1 + winner tap-state; MHJ name-truncation stress case |
+| [`drilldown-filter-dedup.html`](drilldown-filter-dedup.html) | #243 audit (respects #237) | League-summary drill-in: while focused, chart card collapses to slim strip so one control set shows (V1, 171pt recovered, recommended) vs sticky drill controls + hidden home row (V2, 79pt); #237 shared always-match state untouched |
+| [`risers-fallers-cards.html`](risers-fallers-cards.html) | DynastyGM teardown | Movers UI on FTF snapshot history: V1 two-column "Movers this week" card (recommended) + V3 compact Market-pulse strip (near-free) vs V2 swipe cards (hold); honest "FTF community value" labeling + missing-endpoint notes |
+| [`lineup-before-after.html`](lineup-before-after.html) | #238 | Starting-lineup impact on the trade summary: V1 changed-slots delta strip, V2 full 7-slot before/after table (calculator only), V3 collapsed one-liner expanding in place; data notes (slot-level backend work needed, deck cards lack starter data) |

@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — TradeValueBar Density (#243)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --first1:#2dd4bf;
+  --f-display:'Barlow Condensed','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+
+.note{max-width:1040px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note code{font-family:var(--f-mono);font-size:12px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+.note ul{margin:4px 0 0 18px} .note li{margin:3px 0}
+.q{border-left:3px solid var(--lineStrong);padding-left:10px;margin:8px 0;font-style:italic}
+
+.violation{display:inline-flex;align-items:center;gap:6px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);color:var(--warn);font-size:12px;padding:4px 9px;border-radius:4px;font-weight:600;margin-top:6px}
+.violation svg{flex:0 0 auto}
+
+/* ── global "copy all notes" bar ── */
+.notesbar{max-width:1040px;width:100%;display:flex;gap:14px;align-items:center;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:10px 14px;position:sticky;top:8px;z-index:5}
+.notesbar .txt{flex:1;font-size:12px;color:var(--dim);line-height:1.4}
+.copybtn{background:var(--ice);color:var(--onIce);border:0;border-radius:6px;padding:9px 14px;
+  font-family:var(--f-display);font-size:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;cursor:pointer;flex:0 0 auto}
+.copybtn:hover{filter:brightness(1.08)}
+.notecount{color:var(--faint);font-size:11px;flex:0 0 auto}
+
+.rowlbl{max-width:1040px;width:100%;font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:15px;color:var(--chalk);display:flex;align-items:center;gap:8px;margin-top:4px}
+.rowlbl::before{content:"";width:3px;height:14px;background:var(--ice)}
+.rowlbl .fb{font-family:var(--f-mono);font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0}
+
+.pairwrap{display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}
+.slot{display:flex;flex-direction:column;gap:10px;align-items:center;width:393px}
+.slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--ice);display:flex;align-items:center;gap:7px;align-self:flex-start}
+.slotlbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+.caption{font-size:12px;line-height:1.5;color:var(--dim);text-align:left;align-self:flex-start}
+.caption b{color:var(--chalk)}
+.caption code{font-family:var(--f-mono);font-size:11px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+
+.phone{width:393px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+.status{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:12px;color:var(--dim);font-family:var(--f-mono)}
+.scroll{padding:4px 16px 14px;display:flex;flex-direction:column;gap:12px}
+
+svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+.tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink1)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 12px;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:20px;height:20px;stroke:var(--faint);stroke-width:1.75;fill:none;stroke-linecap:square}
+.tab.on{color:var(--ice)} .tab.on svg{stroke:var(--ice)}
+
+/* ═══ mini TradeCard wrapper (TradeCard.tsx / FeaturedTradeWindow.tsx, hideMatchStrength) ═══ */
+.tcard{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.ticklbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.ticklbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+.tcard .opp{font-size:16px;font-weight:600;margin-top:1px}
+.split{display:flex;gap:12px}
+.split .vrule{width:1px;background:var(--line)}
+.side{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.prow{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-left:3px solid var(--rb);border-radius:8px;background:var(--ink2);padding:8px}
+.prow .nm{font-size:13px;font-weight:600;line-height:1.25}
+.prow .meta{font-size:11px;color:var(--dim);font-family:var(--f-mono)}
+
+/* ═══ TradeValueBar — literal token reproduction (mobile/src/components/TradeValueBar.tsx) ═══ */
+.tvb{display:flex;flex-direction:column;gap:8px}                                    /* wrap: {gap: space.sm} L179 */
+.tvb .head{font-family:var(--f-ui);font-weight:600;text-transform:uppercase;letter-spacing:.08em;font-size:11px;color:var(--dim)}  /* type.label, L100/180 */
+.tvb .winner{margin-top:4px;font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.02em;font-size:22px;line-height:26px}  /* type.heading + marginTop:xs, L105/181 */
+.tvb .winner.v1{font-family:var(--f-ui);font-weight:600;text-transform:none;letter-spacing:0;font-size:16px;line-height:22px}  /* V1: type.title */
+.tvb .margin{font-family:var(--f-ui);font-size:13px;line-height:18px;color:var(--dim)}  /* type.bodySm, L182 */
+.tvb .marginData{font-family:var(--f-mono);color:var(--chalk)}  /* type.data, L183 */
+.tvb .marginPick{font-family:var(--f-ui);font-weight:600;color:var(--first1)}  /* fontFamily:type.title.fontFamily = Archivo Semi, not display — L184 */
+
+.tvb .track{position:relative;height:16px;margin-top:8px}  /* L186-191 */
+.tvb .rail{position:absolute;left:0;right:0;top:1px;height:14px;background:var(--ink3);border-radius:2px}  /* L192-199 */
+.tvb .fill{position:absolute;top:1px;height:14px;border-radius:2px}  /* L200-204 */
+.tvb .tick{position:absolute;top:-4px;height:24px;width:1px;background:var(--line)}  /* L205-211 */
+.tvb .center{position:absolute;left:50%;margin-left:-1px;top:-4px;height:24px;width:1px;background:var(--lineStrong)}  /* L212-220 */
+
+.tvb .scalerow{display:flex;align-items:center;margin-top:8px;position:relative}  /* L222 */
+.tvb .scaleend{font-family:var(--f-mono);font-size:9px;color:var(--faint);width:30px}  /* L223 — VIOLATION, floor is 11px */
+.tvb .scaleend.fixed{font-size:11px}  /* V1/V2 fix */
+.tvb .scalemid{flex:1;height:12px;position:relative}  /* L224 */
+.tvb .scalelbl{position:absolute;width:44px;margin-left:-22px;text-align:center}  /* L225 */
+.tvb .scalelbl.c{left:50%}  /* L226 */
+.tvb .scaleticklbl{font-family:var(--f-mono);font-size:9px;color:var(--faint)}  /* L227 — VIOLATION */
+.tvb .scaleticklbl.fixed{font-size:11px}
+
+.tvb .endrow{display:flex;justify-content:space-between;margin-top:4px}  /* L229-233 */
+.tvb .endlbl{font-family:var(--f-ui);font-weight:600;text-transform:uppercase;letter-spacing:.08em;font-size:11px;color:var(--dim)}  /* type.label, L234 */
+
+.tvb .verdict{margin-top:8px;background:var(--ink2);border:1px solid var(--line);border-left:3px solid;border-radius:8px;padding:12px}  /* radii.md=8, padding:space.md=12, L236-244 */
+.tvb .verdict.tight{padding:8px}  /* V1/V2: padding:space.sm=8 */
+.tvb .verdictbody{font-family:var(--f-ui);font-size:13px;line-height:18px;color:var(--dim)}  /* type.bodySm, L246 */
+.tvb .verdictstrong{color:var(--chalk);font-weight:600}  /* fontFamily:type.title.fontFamily, L247 */
+
+.tvb .headline{margin-top:4px;font-family:var(--f-ui);font-weight:600;font-size:16px;line-height:22px}  /* V2: type.title, bold */
+.tvb .mergedline{margin-top:8px;font-family:var(--f-ui);font-size:13px;line-height:18px;color:var(--dim)}  /* V2: type.bodySm */
+
+.disclosure{display:flex;align-items:center;gap:6px;margin-top:4px;background:none;border:0;padding:0;
+  font-family:var(--f-ui);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--ice);cursor:pointer}
+.disclosure svg{width:11px;height:11px;transition:transform .15s ease}
+.disclosure[aria-expanded="true"] svg{transform:rotate(90deg)}
+
+.scalerow-wrap{position:relative}
+.vflag{position:absolute;top:-9px;right:0;background:var(--ink0);padding:0 4px;font-family:var(--f-mono);font-size:9px;color:var(--warn);border:1px solid var(--warn);border-radius:2px;line-height:14px}
+
+/* ═══ pt-math annotation box ═══ */
+.ptbox{width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:12px;align-self:flex-start}
+.ptbox .pttitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:12px;color:var(--dim);margin-bottom:6px}
+.ptrow{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px dashed var(--line)}
+.ptrow:last-of-type{border-bottom:0}
+.ptrow .k{color:var(--dim);flex:1}
+.ptrow .k small{display:block;color:var(--faint);font-size:10.5px;margin-top:1px}
+.ptrow .v{font-family:var(--f-mono);color:var(--chalk);flex:0 0 auto;white-space:nowrap}
+.ptrow.cut .v{color:var(--faint);text-decoration:line-through}
+.ptrow.new .v{color:var(--ice)}
+.pttotal{display:flex;justify-content:space-between;gap:10px;padding-top:7px;margin-top:5px;border-top:1px solid var(--lineStrong);font-weight:700}
+.pttotal .v{font-family:var(--f-mono);color:var(--ice)}
+.ptdelta{font-size:11px;color:var(--pos);font-weight:600;margin-top:2px;text-align:right}
+.ptfoot{font-size:10.5px;color:var(--faint);line-height:1.4;margin-top:8px}
+
+/* ═══ height-comparison bar chart ═══ */
+.barchart{max-width:1040px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.barrow{display:flex;align-items:center;gap:12px}
+.barrow .blbl{width:230px;flex:0 0 auto;font-size:12.5px;color:var(--dim)}
+.barrow .blbl b{color:var(--chalk);display:block;font-size:13px}
+.barrow .btrack{flex:1;position:relative;height:22px}
+.barrow .bfill{height:22px;border-radius:4px;display:flex;align-items:center;padding-left:9px;font-family:var(--f-mono);font-size:11.5px;font-weight:700}
+.barrow.current .bfill{background:var(--lineStrong);color:var(--chalk)}
+.barrow.v1 .bfill{background:var(--ice);color:var(--onIce)}
+.barrow.v1x .bfill{background:rgba(86,217,236,.35);color:var(--chalk)}
+.barrow.v2 .bfill{background:var(--flare);color:var(--onIce)}
+
+/* ── per-frame note box ── */
+.notewrap{width:100%;display:flex;flex-direction:column;gap:4px}
+.notelbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;color:var(--dim)}
+.notelbl .dot{width:6px;height:6px;border-radius:50%;background:var(--warn);display:none}
+.notewrap.noted .notelbl .dot{display:block}
+.pagenote{width:100%;background:var(--ink1);color:var(--chalk);border:1px solid var(--line);border-radius:6px;
+  padding:8px 10px;font-family:var(--f-ui);font-size:12.5px;min-height:48px;resize:vertical}
+.pagenote::placeholder{color:var(--faint)}
+.pagenote:focus{outline:none;border-color:var(--ice)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Polish Lab · TradeValueBar Density — #243 Scroll Audit</h1>
+  <p><b>Audit finding (verbatim, <code>docs/feedback/items/243-scroll-audit/trades-surfaces.md</code>):</b></p>
+  <p class="q">"<code>TradeValueBar</code> is the single most expensive shared widget on every trade surface (label + heading + margin sentence + track + scale + end labels + a bordered verdict paragraph), and it appears <b>twice</b> in single-pin mode." — nominal height <b>≈240–248pt</b>, cited against <code>TradeValueBar.tsx:178-248</code>.</p>
+  <p>Top-10 list items #4 and #6 both target this component: <i>"collapse verdict paragraph behind a disclosure (~68pt × every instance, app-wide)"</i> and <i>"fontSize:9 → 11px floor fix (violation, trivial)"</i>. This page mocks both fixes plus a more aggressive third option, rendered in situ inside a faithful mini <code>TradeCard</code> wrapper (give/receive rows above the bar, no <code>StrengthBar</code> — matching how <code>FeaturedTradeWindow.tsx</code> mounts it in single-pin mode) so relative card height is directly visible.</p>
+  <div class="violation">
+    <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><path d="M10 4l8 13H2z"/><path d="M10 8v4M10 14v.01"/></svg>
+    Chalkline violation: <code>TradeValueBar.tsx:223,227</code> hardcode <code>fontSize: 9</code> on the scale labels — below the documented 11px floor. Fixed to 11px in every proposed variant below.
+  </div>
+  <p style="margin-top:10px">All pt math below uses the component's real token values (<code>mobile/src/theme/chalkline.ts</code>: <code>space.xs=4 / sm=8 / md=12</code>, <code>type.label</code> 11/14, <code>type.heading</code> 22/26, <code>type.title</code> 16/22, <code>type.bodySm</code> 13/18) and React Native's gap-plus-margin compounding (a parent <code>gap</code> and a child's own <code>marginTop</code> both apply and stack — not one-or-the-other). Assumes the verdict sentence wraps to 2 lines at 393pt width and the margin sentence stays on 1 line, both verified visually in the CURRENT frame below.</p>
+</div>
+
+<div class="notesbar">
+  <div class="txt">Leave a note in any frame below — it persists in this browser (localStorage), not the file. Use <b style="color:var(--chalk)">Copy all notes</b> to pull everything into one paste.</div>
+  <button class="copybtn" id="copyall">Copy all notes</button>
+  <div class="notecount" id="notecount"></div>
+</div>
+
+<!-- ═══════════════════════ ROW A — CURRENT ═══════════════════════ -->
+<div class="rowlbl">Current — faithful reproduction<span class="fb">TradeValueBar.tsx, unmodified</span></div>
+<div class="pairwrap">
+
+  <!-- A1 -->
+  <div class="slot">
+    <div class="slotlbl">A1 — as shipped</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="tcard">
+          <div class="ticklbl">Featured trade</div>
+          <div class="opp">@rebuild_randy</div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">You send</div>
+              <div class="prow" style="border-left-color:var(--rb)"><div><div class="nm">Breece Hall</div><div class="meta">RB · NYJ</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">You get</div>
+              <div class="prow"><div><div class="nm">Marvin Harrison Jr.</div><div class="meta">WR · ARI</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2027 2nd (mid)</div><div class="meta">PICK</div></div></div>
+            </div>
+          </div>
+
+          <div class="tvb" id="tvb-current">
+            <span class="head">Dynasty value swing</span>
+            <span class="winner" style="color:var(--pos)">You win</span>
+            <span class="margin">by <span class="marginData" style="color:var(--pos)">+380</span>&nbsp;&nbsp;·&nbsp;&nbsp;<span class="marginPick">a Mid 3rd</span> (≈ 0.2 firsts)</span>
+            <div class="track">
+              <div class="rail"></div>
+              <div class="fill" style="left:50%;width:10%;background:var(--pos)"></div>
+              <div class="tick" style="left:21.5%"></div>
+              <div class="tick" style="left:78.5%"></div>
+              <div class="center"></div>
+            </div>
+            <div class="scalerow-wrap">
+              <span class="vflag">9px</span>
+              <div class="scalerow">
+                <span class="scaleend">−1st</span>
+                <div class="scalemid">
+                  <span class="scalelbl" style="left:21.5%"><span class="scaleticklbl">−2nd</span></span>
+                  <span class="scalelbl c"><span class="scaleticklbl">Even</span></span>
+                  <span class="scalelbl" style="left:78.5%"><span class="scaleticklbl">+2nd</span></span>
+                </div>
+                <span class="scaleend">+1st</span>
+              </div>
+            </div>
+            <div class="endrow">
+              <span class="endlbl">They win</span>
+              <span class="endlbl" style="color:var(--pos)">You win</span>
+            </div>
+            <div class="verdict" style="border-left-color:var(--pos)">
+              <span class="verdictbody"><span class="verdictstrong">You win</span> the equivalent of <span class="marginPick">a Mid 3rd</span> in dynasty value. Accept as-is, or offer a small give-back.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+
+    <div class="ptbox">
+      <div class="pttitle">pt breakdown — CURRENT</div>
+      <div class="ptrow"><span class="k">Label <small>type.label, L180</small></span><span class="v">14pt</span></div>
+      <div class="ptrow"><span class="k">Winner heading <small>gap 8 + marginTop 4 + type.heading 26, L181</small></span><span class="v">38pt</span></div>
+      <div class="ptrow"><span class="k">Margin sentence <small>gap 8 + type.bodySm 18 (1 line), L182</small></span><span class="v">26pt</span></div>
+      <div class="ptrow"><span class="k">Track <small>gap 8 + marginTop 8 + height 16, L186</small></span><span class="v">32pt</span></div>
+      <div class="ptrow"><span class="k">Scale row <small>gap 8 + marginTop 8 + 18 (9px labels), L222</small></span><span class="v">34pt</span></div>
+      <div class="ptrow"><span class="k">End labels <small>gap 8 + marginTop 4 + type.label 14, L229</small></span><span class="v">26pt</span></div>
+      <div class="ptrow"><span class="k">Verdict box <small>gap 8 + marginTop 8 + pad 24 + border 2 + 2×18 text, L236</small></span><span class="v">78pt</span></div>
+      <div class="pttotal"><span>Total</span><span class="v">248pt</span></div>
+      <div class="ptfoot">Matches the audit's own cite of ≈240–248pt for this component. This is ONE instance — single-pin mode mounts it twice (the featured card + the calculator handoff), so the real cost on that screen is ≈496pt before anything else on the card.</div>
+    </div>
+
+    <div class="caption">Line-for-line reproduction of <code>TradeValueBar.tsx</code>: label (L180) → winner heading (L181, <code>type.heading</code> = 22px Barlow Condensed) → margin sentence (L182-119) → diverging track (L186-220) → scale row with the <b>9px violation</b> (L222-227) → who-wins end labels (L229-234) → the bordered verdict paragraph (L236-247, <code>padding: space.md</code> = 12pt all sides). Every element renders unconditionally — there's no way to see less of this bar today.</div>
+
+    <div class="notewrap">
+      <div class="notelbl">Notes — A1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="A1 — CURRENT (faithful)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ ROW B — V1 ═══════════════════════ -->
+<div class="rowlbl">Proposed V1 — audit's suggestions applied<span class="fb">live demo — tap "Why? ›"</span></div>
+<div class="pairwrap">
+
+  <!-- B1 -->
+  <div class="slot">
+    <div class="slotlbl">B1 — winner stepped, verdict behind disclosure, 11px labels</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="tcard">
+          <div class="ticklbl">Featured trade</div>
+          <div class="opp">@rebuild_randy</div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">You send</div>
+              <div class="prow" style="border-left-color:var(--rb)"><div><div class="nm">Breece Hall</div><div class="meta">RB · NYJ</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">You get</div>
+              <div class="prow"><div><div class="nm">Marvin Harrison Jr.</div><div class="meta">WR · ARI</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2027 2nd (mid)</div><div class="meta">PICK</div></div></div>
+            </div>
+          </div>
+
+          <div class="tvb" id="tvb-v1">
+            <span class="head">Dynasty value swing</span>
+            <span class="winner v1" style="color:var(--pos)">You win</span>
+            <span class="margin">by <span class="marginData" style="color:var(--pos)">+380</span>&nbsp;&nbsp;·&nbsp;&nbsp;<span class="marginPick">a Mid 3rd</span> (≈ 0.2 firsts)</span>
+            <div class="track">
+              <div class="rail"></div>
+              <div class="fill" style="left:50%;width:10%;background:var(--pos)"></div>
+              <div class="tick" style="left:21.5%"></div>
+              <div class="tick" style="left:78.5%"></div>
+              <div class="center"></div>
+            </div>
+            <div class="scalerow">
+              <span class="scaleend fixed">−1st</span>
+              <div class="scalemid">
+                <span class="scalelbl" style="left:21.5%"><span class="scaleticklbl fixed">−2nd</span></span>
+                <span class="scalelbl c"><span class="scaleticklbl fixed">Even</span></span>
+                <span class="scalelbl" style="left:78.5%"><span class="scaleticklbl fixed">+2nd</span></span>
+              </div>
+              <span class="scaleend fixed">+1st</span>
+            </div>
+            <div class="endrow">
+              <span class="endlbl">They win</span>
+              <span class="endlbl" style="color:var(--pos)">You win</span>
+            </div>
+            <button class="tvb-toggle disclosure" data-collapsed="Why? ›" data-expanded="Hide ‹" aria-expanded="false">
+              <span class="dtxt">Why? ›</span>
+            </button>
+            <div class="verdict tight" style="border-left-color:var(--pos)" hidden>
+              <span class="verdictbody"><span class="verdictstrong">You win</span> the equivalent of <span class="marginPick">a Mid 3rd</span> in dynasty value. Accept as-is, or offer a small give-back.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+
+    <div class="ptbox">
+      <div class="pttitle">pt breakdown — V1 (tap the frame above to see both states)</div>
+      <div class="ptrow"><span class="k">Label</span><span class="v">14pt</span></div>
+      <div class="ptrow"><span class="k">Winner heading <small>stepped type.heading→type.title (22/26 → 16/22)</small></span><span class="v">34pt</span></div>
+      <div class="ptrow"><span class="k">Margin sentence</span><span class="v">26pt</span></div>
+      <div class="ptrow"><span class="k">Track</span><span class="v">32pt</span></div>
+      <div class="ptrow"><span class="k">Scale row <small>fontSize 9→11 — no height change, compliance only</small></span><span class="v">34pt</span></div>
+      <div class="ptrow"><span class="k">End labels</span><span class="v">26pt</span></div>
+      <div class="ptrow"><span class="k">"Why? ›" disclosure <small>replaces the verdict box — collapsed default</small></span><span class="v">26pt</span></div>
+      <div class="pttotal"><span>Total — collapsed (default)</span><span class="v">192pt</span></div>
+      <div class="ptdelta">↓ 56pt vs CURRENT (−23%)</div>
+      <div class="ptrow" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)"><span class="k">Verdict box, tap-expanded <small>padding tightened space.md→sm (12→8), replaces the disclosure row</small></span><span class="v">70pt</span></div>
+      <div class="pttotal"><span>Total — expanded</span><span class="v">236pt</span></div>
+      <div class="ptdelta">↓ 12pt vs CURRENT (−5%)</div>
+      <div class="ptfoot">Every user sees the 56pt saving by default; only someone who taps "Why? ›" pays the (smaller, padding-tightened) 236pt cost — down from 248pt even then.</div>
+    </div>
+
+    <div class="caption">Exactly the audit's own item list: winner line stepped <code>type.heading</code>→<code>type.title</code> (#243 top-10 item, ~4pt), verdict paragraph collapsed behind a one-line disclosure (item #4, ~68pt-class saving), verdict-box <code>padding</code> tightened <code>md</code>→<code>sm</code> when it IS opened, and the 9px scale labels fixed to 11px (item #6, the one outright violation). Structurally closest to shipped — same element order, same who-wins end row, nothing removed except one paragraph's default visibility.</div>
+
+    <div class="notewrap">
+      <div class="notelbl">Notes — B1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="B1 — V1 (audit fixes, interactive)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ ROW C — V2 ═══════════════════════ -->
+<div class="rowlbl">Proposed V2 — aggressive composite headline<span class="fb">live demo — tap "Full explanation ›"</span></div>
+<div class="pairwrap">
+
+  <!-- C1 -->
+  <div class="slot">
+    <div class="slotlbl">C1 — one headline row, merged verdict line, end labels dropped</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>100%</span></div>
+      <div class="scroll">
+        <div class="tcard">
+          <div class="ticklbl">Featured trade</div>
+          <div class="opp">@rebuild_randy</div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklbl">You send</div>
+              <div class="prow" style="border-left-color:var(--rb)"><div><div class="nm">Breece Hall</div><div class="meta">RB · NYJ</div></div></div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklbl">You get</div>
+              <div class="prow"><div><div class="nm">Marvin Harrison Jr.</div><div class="meta">WR · ARI</div></div></div>
+              <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2027 2nd (mid)</div><div class="meta">PICK</div></div></div>
+            </div>
+          </div>
+
+          <div class="tvb" id="tvb-v2">
+            <span class="head">Dynasty value swing</span>
+            <span class="headline" style="color:var(--pos)">You win by a Mid 3rd</span>
+            <div class="track">
+              <div class="rail"></div>
+              <div class="fill" style="left:50%;width:10%;background:var(--pos)"></div>
+              <div class="tick" style="left:21.5%"></div>
+              <div class="tick" style="left:78.5%"></div>
+              <div class="center"></div>
+            </div>
+            <div class="scalerow">
+              <span class="scaleend fixed">−1st</span>
+              <div class="scalemid">
+                <span class="scalelbl" style="left:21.5%"><span class="scaleticklbl fixed">−2nd</span></span>
+                <span class="scalelbl c"><span class="scaleticklbl fixed">Even</span></span>
+                <span class="scalelbl" style="left:78.5%"><span class="scaleticklbl fixed">+2nd</span></span>
+              </div>
+              <span class="scaleend fixed">+1st</span>
+            </div>
+            <span class="mergedline">+380 vs even (≈ 0.2 firsts) — accept as-is, or offer a small give-back.</span>
+            <button class="tvb-toggle disclosure" data-collapsed="Full explanation ›" data-expanded="Hide ‹" aria-expanded="false">
+              <span class="dtxt">Full explanation ›</span>
+            </button>
+            <div class="verdict tight" style="border-left-color:var(--pos)" hidden>
+              <span class="verdictbody"><span class="verdictstrong">You win</span> the equivalent of <span class="marginPick">a Mid 3rd</span> in dynasty value. Accept as-is, or offer a small give-back.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M3 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+        <div class="tab on"><svg viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+        <div class="tab"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+      </div>
+    </div>
+
+    <div class="ptbox">
+      <div class="pttitle">pt breakdown — V2 (tap the frame above to see both states)</div>
+      <div class="ptrow"><span class="k">Label</span><span class="v">14pt</span></div>
+      <div class="ptrow"><span class="k">Composite headline <small>"You win by a Mid 3rd" — replaces winner + margin, type.title bold</small></span><span class="v">34pt</span></div>
+      <div class="ptrow"><span class="k">Track</span><span class="v">32pt</span></div>
+      <div class="ptrow"><span class="k">Scale row <small>11px fixed</small></span><span class="v">34pt</span></div>
+      <div class="ptrow"><span class="k">Merged line <small>margin + verdict collapsed into one bodySm line</small></span><span class="v">34pt</span></div>
+      <div class="ptrow cut"><span class="k">End labels ("They win" / "You win") <small>DROPPED — redundant with the headline</small></span><span class="v">0pt</span></div>
+      <div class="ptrow"><span class="k">"Full explanation ›" disclosure</span><span class="v">26pt</span></div>
+      <div class="pttotal"><span>Total — collapsed (default)</span><span class="v">174pt</span></div>
+      <div class="ptdelta">↓ 74pt vs CURRENT (−30%)</div>
+      <div class="ptrow" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)"><span class="k">Verdict box, tap-expanded <small>replaces the merged line + disclosure</small></span><span class="v">70pt</span></div>
+      <div class="pttotal"><span>Total — expanded</span><span class="v">184pt</span></div>
+      <div class="ptdelta">↓ 64pt vs CURRENT (−26%)</div>
+      <div class="ptfoot">Biggest lever of the three: cutting a whole row (end labels) rather than just re-scaling or hiding one. Costs the most structurally — see caption.</div>
+    </div>
+
+    <div class="caption">Goes beyond the audit's own list: one <b>composite headline</b> ("You win by a Mid 3rd") replaces both the winner line and the margin sentence, the <b>who-wins end labels are dropped</b> (the headline already says who wins — keeping both is the kind of duplication #205's tenets call out), and margin + verdict collapse into a single merged line with its own "Full explanation ›" disclosure. Track and scale (with the 11px fix) are untouched — the actual value visualization survives; only the surrounding text is compressed. Best fit for the deck/featured card specifically named in #243 (a swipe surface, scanned fast); the calculator's more deliberate verdict screen may prefer V1's fuller reading.</div>
+
+    <div class="notewrap">
+      <div class="notelbl">Notes — C1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="C1 — V2 (aggressive, interactive)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ Height comparison ═══════════════════════ -->
+<div class="barchart">
+  <div class="pttitle" style="font-size:13px;margin-bottom:2px">Total component height, per variant &amp; state (1.4px per pt)</div>
+  <div class="barrow current">
+    <div class="blbl"><b>Current</b>as shipped</div>
+    <div class="btrack"><div class="bfill" style="width:347px">248pt</div></div>
+  </div>
+  <div class="barrow v1">
+    <div class="blbl"><b>V1 collapsed</b>default state</div>
+    <div class="btrack"><div class="bfill" style="width:269px">192pt</div></div>
+  </div>
+  <div class="barrow v1x">
+    <div class="blbl"><b>V1 expanded</b>"Why? ›" tapped</div>
+    <div class="btrack"><div class="bfill" style="width:330px">236pt</div></div>
+  </div>
+  <div class="barrow v2">
+    <div class="blbl"><b>V2 collapsed</b>default state</div>
+    <div class="btrack"><div class="bfill" style="width:244px">174pt</div></div>
+  </div>
+  <div class="barrow v1x" style="opacity:.7">
+    <div class="blbl"><b>V2 expanded</b>"Full explanation ›" tapped</div>
+    <div class="btrack"><div class="bfill" style="width:258px;background:rgba(240,80,140,.35);color:var(--chalk)">184pt</div></div>
+  </div>
+</div>
+
+<div class="note">
+  <h2>Recommendation</h2>
+  <ul>
+    <li><b>Ship V1 first.</b> It's exactly what the #243 audit already itemized (winner-line step, verdict disclosure, tightened padding, the 11px floor fix), touches nothing about what information exists or in what order, and saves 56pt (23%) by default with zero information loss — the full verdict sentence is one tap away, same content as today.</li>
+    <li><b>V2 is the stronger structural lever (74pt / 30%)</b> but it's a real content decision, not just a density pass: dropping the who-wins end row and merging margin+verdict changes what a user sees without tapping anything. Worth prototyping specifically for the single-pin featured card (#216/#209), where #243 notes the bar renders <b>twice</b> per screen — V2's extra ~18pt/instance saving over V1 compounds to ~36pt across both mounts.</li>
+    <li><b>The 11px scale-label fix costs nothing structurally</b> (0pt height delta, confirmed in both pt tables above) — it should land regardless of which density variant ships, and could ship on its own today as the "trivial" item #6 the audit already flagged.</li>
+    <li><b>Not addressed here:</b> the #243 top-10's #1 item (collapsing the single-pin Controls Card, ~240-250pt) and #2 (conditional <code>deckWrap</code> minHeight, ~240pt) are the two largest single-pin levers in the full audit — this page is scoped to the TradeValueBar component only, per the task.</li>
+  </ul>
+</div>
+
+<script>
+(function(){
+  var KEY = 'ftf-polish-lab-2026-08-243-tvb-density-notes';
+  var notes = {};
+  try { notes = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { notes = {}; }
+
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.pagenote'));
+  var notecount = document.getElementById('notecount');
+
+  function refresh(){
+    var n = 0;
+    boxes.forEach(function(b){
+      var has = !!(notes[b.dataset.key] || '').trim();
+      b.closest('.notewrap').classList.toggle('noted', has);
+      if (has) n++;
+    });
+    notecount.textContent = n ? (n + ' of ' + boxes.length + ' noted') : 'no notes yet';
+  }
+
+  boxes.forEach(function(b){
+    b.value = notes[b.dataset.key] || '';
+    b.addEventListener('input', function(){
+      notes[b.dataset.key] = b.value;
+      try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {}
+      refresh();
+    });
+  });
+
+  document.getElementById('copyall').addEventListener('click', async function(){
+    var lines = [];
+    boxes.forEach(function(b){
+      var t = (notes[b.dataset.key] || '').trim();
+      if (t) lines.push('## ' + b.dataset.key + '\n' + t);
+    });
+    var text = lines.length ? lines.join('\n\n') : '(no notes)';
+    var ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand('copy'); } catch (e2) {}
+      ta.remove();
+    }
+    var btn = document.getElementById('copyall');
+    var orig = btn.textContent;
+    btn.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(function(){ btn.textContent = orig; }, 1500);
+  });
+
+  refresh();
+
+  // V1 / V2 disclosure toggle demo
+  document.querySelectorAll('.tvb-toggle').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var verdict = btn.nextElementSibling;
+      var open = verdict.hasAttribute('hidden');
+      if (open) { verdict.removeAttribute('hidden'); } else { verdict.setAttribute('hidden', ''); }
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      btn.querySelector('.dtxt').textContent = open ? btn.dataset.expanded : btn.dataset.collapsed;
+    });
+  });
+})();
+</script>
+
+</body>
+</html>
