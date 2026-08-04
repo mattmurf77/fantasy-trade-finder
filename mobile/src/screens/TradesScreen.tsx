@@ -849,6 +849,18 @@ export default function TradesScreen({ navigation, route }: any) {
     setIdeaHistory([]);
   }, [pinKey, ideasUpdatedAt]);
 
+  // #243 — pin-mode collapsed controls (V1, approved mock
+  // mockups/polish-lab-2026-08/pin-mode-collapsed-controls.html B1/B2).
+  // In single-pin featured mode the full Controls Card (~286pt) collapses
+  // by default to a one-line "Pinned: <name> · Edit" row (~44pt); Edit
+  // expands the exact existing card in place, Done collapses it again.
+  // Entering the mode (or re-pinning) always starts collapsed — keyed on
+  // pinKey, same reset trigger as the featured-window state above.
+  const [pinEditOpen, setPinEditOpen] = useState(false);
+  useEffect(() => {
+    setPinEditOpen(false);
+  }, [pinKey]);
+
   // Default featured trade = the idea with the best signed difference for
   // the user across all groups (the mock's "best" seed).
   const bestIdea = useMemo(() => {
@@ -3148,8 +3160,63 @@ export default function TradesScreen({ navigation, route }: any) {
             to ONE control row — just Find a Trade + the progress strip.
             Outlook editing stays reachable via the inferred-outlook banner;
             everything else returns on the next mount after the first swipe. */}
+        {/* #243 — single-pin featured mode: the Controls Card collapses to
+            a one-line pin summary by default (the card's primary action is
+            gone in this mode per #241 — only the editable chrome remained).
+            Edit expands the exact full card below in place; every other
+            mode renders the full card unconditionally, exactly as before. */}
+        {!firstRun && singlePin && !pinEditOpen ? (
+          <View style={styles.pinSummaryCard} testID="trades.pin-summary">
+            <View
+              style={[
+                styles.boardPosDot,
+                {
+                  backgroundColor: singlePin.player.position
+                    ? posColor(singlePin.player.position as any)
+                    : ink.lineStrong,
+                },
+              ]}
+            />
+            <Text style={styles.pinSummaryText} numberOfLines={1}>
+              {'Pinned: '}
+              <Text style={styles.pinSummaryName}>
+                {singlePin.player.name}
+              </Text>
+            </Text>
+            <Pressable
+              testID="trades.pin-summary.edit"
+              accessibilityRole="button"
+              accessibilityLabel="Edit pin and trade controls"
+              onPress={() => setPinEditOpen(true)}
+              hitSlop={8}
+              style={styles.pinSummaryEditTap}
+            >
+              <Text style={styles.pinSummaryEdit}>Edit</Text>
+            </Pressable>
+          </View>
+        ) : (
         <Card>
           <View style={styles.controlInner}>
+          {/* #243 — expanded-state header: collapse affordance back to the
+              one-liner. Only exists in single-pin mode (no such affordance
+              elsewhere — the card is permanent there). */}
+          {!firstRun && singlePin ? (
+            <View style={styles.controlRow}>
+              <View style={{ flex: 1 }}>
+                <TickLabel>Editing pin</TickLabel>
+              </View>
+              <Pressable
+                testID="trades.pin-summary.done"
+                accessibilityRole="button"
+                accessibilityLabel="Done editing pin"
+                onPress={() => setPinEditOpen(false)}
+                hitSlop={8}
+                style={styles.pinSummaryEditTap}
+              >
+                <Text style={styles.pinSummaryEdit}>Done</Text>
+              </Pressable>
+            </View>
+          ) : null}
           {!firstRun && (
           <View style={styles.controlRow}>
             <View style={{ flex: 1 }}>
@@ -3544,6 +3611,7 @@ export default function TradesScreen({ navigation, route }: any) {
           )}
           </View>
         </Card>
+        )}
 
         {/* #216/#209 (flag trade.asset_ideas) — single-pin find-a-trade:
             the FEATURED TRADE window leads (best idea as a full trade card
@@ -4854,6 +4922,26 @@ const styles = StyleSheet.create({
   },
   boardMiniText: { ...type.bodySm, color: chalk.base, flex: 1 },
   boardPosDot: { width: 7, height: 7, borderRadius: radii.xs },
+  // #243 — single-pin collapsed controls: one-line pin summary in a thin
+  // card shell (the chalkline Card's fixed space.lg body padding would
+  // defeat the collapse — this reuses its surface/border/radius tokens
+  // with a 44pt row, matching the approved mock's pinRowCard).
+  pinSummaryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    minHeight: 44,
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs,
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.md,
+  },
+  pinSummaryText: { ...type.bodySm, color: chalk.base, flex: 1 },
+  pinSummaryName: { fontFamily: fonts.uiSemi },
+  pinSummaryEditTap: { minHeight: 44, justifyContent: 'center' },
+  pinSummaryEdit: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
   boardAddBtn: {
     minHeight: 40,
     alignItems: 'center',
