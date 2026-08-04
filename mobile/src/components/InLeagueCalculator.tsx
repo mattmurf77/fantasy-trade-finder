@@ -27,13 +27,13 @@ import EvenerRows from './EvenerRows';
 import AdjustmentsDisclosure from './AdjustmentsDisclosure';
 import SendInSleeperButton from './SendInSleeperButton';
 import ShareTradeImage, { type ShareAsset } from './ShareTradeImage';
-import { Badge, Button, Card, Icon, TickLabel } from './chalkline';
+import { Badge, Button, Card, Icon, Text as ChalkText, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
 import { useSession } from '../state/useSession';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { posColor, type Position } from '../theme/colors';
 import type { CalcPlayer, CalcPos } from '../data/tradeCalcMock';
-import type { ScoringFormat } from '../shared/types';
+import type { ScoringFormat, StarterImpactSlot } from '../shared/types';
 
 // In-league calculator (Mode B, docs/plans/manual-trade-calculator-plan.md).
 // The FTF differentiator applied to a hand-built trade: pick a real opponent,
@@ -870,11 +870,17 @@ function LeagueVerdict({
           {Math.round(ev.give_value).toLocaleString()} vs {Math.round(ev.receive_value).toLocaleString()}
         </Text>
       </View>
-      {/* Starter impact (DTF teardown 2026-07-27) — how the trade moves the
-          IMMEDIATE optimal lineup, not just raw value. Server-derived; the
-          field is absent without a lineup-slot template (old servers,
-          non-Sleeper leagues) and the line simply doesn't render. */}
-      {ev.starter_impact ? (
+      {/* Starter impact (DTF teardown 2026-07-27; #238 V2 table) — how the
+          trade moves the IMMEDIATE optimal lineup, not just raw value.
+          Server-derived; the field is absent without a lineup-slot template
+          (old servers, non-Sleeper leagues) and nothing renders. When the
+          #238 per-slot breakdown is present the full before/after lineup
+          table replaces the one-line sentence (approved mock: polish-lab
+          lineup-before-after.html frame C1); pre-#238 servers still get
+          the sentence. */}
+      {ev.starter_impact?.slots && ev.starter_impact.slots.length > 0 ? (
+        <LineupImpactTable note={ev.starter_impact.note} slots={ev.starter_impact.slots} />
+      ) : ev.starter_impact ? (
         <Text testID="calc.starter-impact" style={styles.starterImpact}>
           {ev.starter_impact.note}
         </Text>
@@ -892,6 +898,92 @@ function LeagueVerdict({
         </View>
       ) : null}
     </Card>
+  );
+}
+
+// #238 — full before/after starting-lineup table (approved mock frame C1 of
+// mockups/polish-lab-2026-08/lineup-before-after.html). One row per lineup
+// slot in the league's template order: slot label · before player · arrow ·
+// after player · signed delta chip. Unchanged rows are dimmed with a flat
+// "—" chip; the net line totals the whole lineup. The container is a single
+// accessibility element voicing the server's one-sentence `note`, so screen
+// readers hear one clean read instead of a cell-by-cell table.
+const SLOT_SHORT: [string, string][] = [
+  ['SUPER_FLEX', 'SF'],
+  ['WRRB_FLEX', 'W/R'],
+  ['REC_FLEX', 'W/T'],
+];
+function slotShortLabel(slot: string): string {
+  // Numbered variants shorten too: SUPER_FLEX2 → SF2.
+  for (const [long, short] of SLOT_SHORT) {
+    if (slot.startsWith(long)) return short + slot.slice(long.length);
+  }
+  return slot;
+}
+
+function LineupImpactTable({ note, slots }: { note: string; slots: StarterImpactSlot[] }) {
+  const beforeTotal = slots.reduce((t, s) => t + (s.before?.value ?? 0), 0);
+  const afterTotal = slots.reduce((t, s) => t + (s.after?.value ?? 0), 0);
+  const net = afterTotal - beforeTotal;
+  const fmt = (n: number) => Math.round(n).toLocaleString();
+  const signed = (n: number) => (n > 0 ? `+${fmt(n)}` : fmt(n));
+  const netColor = net > 0 ? semantic.pos : net < 0 ? semantic.neg : chalk.dim;
+  return (
+    <View
+      testID="calc.lineup-impact"
+      style={styles.lineupMod}
+      accessible
+      accessibilityLabel={note}
+    >
+      <TickLabel>Your lineup — before → after</TickLabel>
+      <View style={styles.lineupHead}>
+        <Text style={[styles.lineupHeadText, styles.lineupSlotCol]}>SLOT</Text>
+        <Text style={[styles.lineupHeadText, styles.lineupNameCol]}>BEFORE</Text>
+        <View style={styles.lineupArrowCol} />
+        <Text style={[styles.lineupHeadText, styles.lineupNameCol]}>AFTER</Text>
+        <View style={styles.lineupDeltaCol} />
+      </View>
+      {slots.map((s) => {
+        const changed = (s.before?.player_id ?? null) !== (s.after?.player_id ?? null);
+        return (
+          <View key={s.slot} style={[styles.lineupRow, !changed && styles.lineupRowDim]}>
+            <ChalkText scale="dense" style={[styles.lineupSlotCol, styles.lineupSlotText]}>
+              {slotShortLabel(s.slot)}
+            </ChalkText>
+            <ChalkText scale="dense" style={[styles.lineupNameCol, styles.lineupName]} numberOfLines={1}>
+              {s.before?.name ?? '—'}
+            </ChalkText>
+            <View style={styles.lineupArrowCol}>
+              {changed ? <Icon name="chevron-right" size={12} color={chalk.faint} /> : null}
+            </View>
+            <ChalkText scale="dense" style={[styles.lineupNameCol, styles.lineupName]} numberOfLines={1}>
+              {s.after?.name ?? '—'}
+            </ChalkText>
+            <View style={styles.lineupDeltaCol}>
+              {changed ? (
+                <ChalkText
+                  scale="dense"
+                  style={[
+                    styles.lineupDeltaChip,
+                    s.delta >= 0 ? styles.lineupDeltaPos : styles.lineupDeltaNeg,
+                  ]}
+                >
+                  {signed(s.delta)}
+                </ChalkText>
+              ) : (
+                <ChalkText scale="dense" style={styles.lineupDeltaFlat}>—</ChalkText>
+              )}
+            </View>
+          </View>
+        );
+      })}
+      <View style={styles.lineupNet}>
+        <Text style={[type.bodySm, { color: chalk.dim }]}>Starting lineup total</Text>
+        <ChalkText scale="dense" style={[styles.lineupNetVal, { color: netColor }]}>
+          {fmt(beforeTotal)} → {fmt(afterTotal)} ({signed(net)})
+        </ChalkText>
+      </View>
+    </View>
   );
 }
 
@@ -958,4 +1050,63 @@ const styles = StyleSheet.create({
   boardRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   starterImpact: { ...type.bodySm, color: chalk.dim, marginTop: space.xs },
   adjustments: { marginTop: space.sm },
+  // #238 lineup before/after table.
+  lineupMod: {
+    marginTop: space.sm,
+    paddingTop: space.sm,
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
+    gap: space.xs,
+  },
+  lineupHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  lineupHeadText: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 10,
+    lineHeight: 13,
+    letterSpacing: 0.6,
+    color: chalk.faint,
+  },
+  lineupRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 24 },
+  lineupRowDim: { opacity: 0.5 },
+  lineupSlotCol: { width: 40, flexShrink: 0 },
+  lineupSlotText: {
+    fontFamily: fonts.data,
+    fontSize: 11,
+    lineHeight: 14,
+    color: chalk.dim,
+  },
+  lineupNameCol: { flex: 1, minWidth: 0 },
+  lineupName: { fontFamily: fonts.ui, fontSize: 12, lineHeight: 16, color: chalk.base },
+  lineupArrowCol: { width: 14, flexShrink: 0, alignItems: 'center' },
+  lineupDeltaCol: { width: 56, flexShrink: 0, alignItems: 'flex-end' },
+  lineupDeltaChip: {
+    fontFamily: fonts.data,
+    fontSize: 11,
+    lineHeight: 14,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderWidth: 1,
+    borderRadius: radii.xs,
+    overflow: 'hidden',
+  },
+  lineupDeltaPos: { color: semantic.pos, borderColor: `${semantic.pos}66` },
+  lineupDeltaNeg: { color: semantic.neg, borderColor: `${semantic.neg}66` },
+  lineupDeltaFlat: {
+    fontFamily: fonts.data,
+    fontSize: 11,
+    lineHeight: 14,
+    color: chalk.faint,
+    paddingHorizontal: 6,
+  },
+  lineupNet: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginTop: space.xs,
+    paddingTop: space.sm,
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
+    borderStyle: 'dashed',
+  },
+  lineupNetVal: { fontFamily: fonts.dataSemi, fontSize: 14, lineHeight: 18 },
 });
