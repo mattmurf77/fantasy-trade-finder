@@ -56,6 +56,7 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 import OutlookSheet from '../components/OutlookSheet';
 import TradeFinderModeBar from '../components/TradeFinderModeBar';
 import OutlookBiasReceipt from '../components/OutlookBiasReceipt';
+import TradeDnaSheet from '../components/TradeDnaSheet';
 import QueueChip from '../components/QueueChip';
 import SwapPlayerSheet from '../components/SwapPlayerSheet';
 import PlayerPickerModal from '../components/PlayerPickerModal';
@@ -423,12 +424,13 @@ export default function TradesScreen({ navigation, route }: any) {
   const helpOn = useFlag('ux.help_surface');              // S4 PRD-01
   const shareLandingOn = useFlag('growth.share_landing'); // S7 PRD-01
 
-  // ── FB #156 — Trade-Finding Hub (flag `trades.finder_hub`) ────────────
-  // Launched from the launcher hub as the `TradeDeck` route, route.params
-  // carries which mode opened us and (team mode) the scoped league-mate.
-  // Flag off or no params ⇒ every value here is undefined and this screen
-  // behaves exactly as the standalone Trades home. The lateral quick-switch
-  // bar (TradeFinderModeBar) + the opponent scope are the only additions.
+  // ── FB #156/#246 — finder modes (flag `trades.finder_hub`) ────────────
+  // route.params carries which mode this screen is in and (team mode) the
+  // scoped league-mate. #246 (guided-first landing): `TradesHome` itself
+  // mounts this screen with initialParams {mode:'guided'} — the launcher
+  // hub is unrouted, and the mode strip (TradeFinderModeBar) is the
+  // switching home. Flag off ⇒ every value here is undefined and this
+  // screen behaves exactly as the classic standalone Trades home.
   const finderHubOn = useFlag('trades.finder_hub');
   const finderMode: 'guided' | 'team' | 'player' | undefined = finderHubOn
     ? route?.params?.mode
@@ -441,9 +443,23 @@ export default function TradesScreen({ navigation, route }: any) {
   // Lateral switch handlers. All three deck modes switch IN PLACE
   // (setParams keeps this instance mounted, so pinned targets persist);
   // the Team chip opens an in-screen manager picker — both to enter team
-  // mode and to change the scoped team without bouncing back to the hub
-  // (#156 finish item 4). Calculator and Hub are separate destinations.
+  // mode and to change the scoped team (#156 finish item 4). Calculator
+  // and Free Agents (#246) are separate pushed destinations.
   const [teamPickerOpen, setTeamPickerOpen] = useState(false);
+
+  // #246 — Trade DNA sheet over the deck (guided-first landing, mock B3):
+  // the receipt's "Change" link opens the hub's DNA editor as a bottom
+  // sheet here instead of navigating to the (now unrouted) hub. The
+  // legacy `editDna:true` route param — old deep links / stored routes
+  // that used to auto-expand the hub's panel — opens the same sheet.
+  const [dnaSheetOpen, setDnaSheetOpen] = useState(false);
+  useEffect(() => {
+    if (route?.params?.editDna) {
+      if (finderHubOn) setDnaSheetOpen(true);
+      navigation?.setParams?.({ editDna: undefined });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params?.editDna]);
   const switchFinderMode = useCallback(
     (m: 'guided' | 'team' | 'player') => {
       if (m === 'team') {
@@ -2354,13 +2370,10 @@ export default function TradesScreen({ navigation, route }: any) {
 
   function handleSummaryDone() {
     haptics.selection();
-    if (finderMode) {
-      // Hub-launched deck → back to the launcher hub.
-      navigation.navigate('TradesHome');
-    } else {
-      // Standalone home: settle into the regular exhausted state.
-      setSummaryDismissed(true);
-    }
+    // #246 — the deck IS the landing now (the launcher hub is unrouted),
+    // so "Done" settles into the regular exhausted state in every mode;
+    // the pre-#246 finder-mode branch navigated back to the hub.
+    setSummaryDismissed(true);
   }
 
   // ── Onboarding item 8: save-moment Apple ask (ADR-006 policy) ────────
@@ -3021,6 +3034,15 @@ export default function TradesScreen({ navigation, route }: any) {
         onSubmit={handleOutlookSubmit}
       />
 
+      {/* #246 — the hub's Trade DNA editor as a sheet over the deck
+          (receipt "Change" / legacy editDna param). #236 autosave means
+          Done is a pure dismiss; the #173 untouchables management sheet
+          stays reachable inside it via Manage. */}
+      <TradeDnaSheet
+        visible={dnaSheetOpen}
+        onClose={() => setDnaSheetOpen(false)}
+      />
+
       {/* #223 — league switching moved to the global TopBar (single sheet
           instance there). The [leagueId] useEffect above still resets
           deck/job state when zustand's league slice changes, and
@@ -3047,20 +3069,29 @@ export default function TradesScreen({ navigation, route }: any) {
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!topCard || !generateMutation.isPending}
       >
-        {/* FB #156 — lateral quick-switch bar (only when opened from the
-            hub as a focused mode). Replaces the Trades/Portfolio/Calculator
-            subnav below for these launches. */}
+        {/* FB #156/#246 — the persistent mode chip strip. Since the
+            guided-first landing (#246) this renders on the tab's landing
+            itself (TradesHome mounts with mode:'guided') and is the
+            mode-switching home: Guided/Team/Player switch in place, Calc
+            and Free agents push their screens. Replaces the Trades/
+            Portfolio/Calculator subnav below for finder launches. The
+            hint line renders only in the cold start (no deck yet, mock
+            B2) — dropped once a deck exists. */}
         {finderMode ? (
           <TradeFinderModeBar
             mode={finderMode}
             teamName={scopedOpponentName}
             onSwitch={switchFinderMode}
             onCalculator={() => navigation?.navigate?.('TradeCalculator')}
-            onHub={() => navigation?.navigate?.('TradesHome')}
+            onFreeAgents={() => navigation?.navigate?.('FreeAgents')}
+            showHint={deck.length === 0}
           />
         ) : null}
-        {/* #231 — outlook bias receipt (self-contained; single-line mount). */}
-        {finderMode ? <OutlookBiasReceipt navigation={navigation} /> : null}
+        {/* #231 — outlook bias receipt (self-contained; single-line mount).
+            #246: Change opens the DNA sheet over the deck. */}
+        {finderMode ? (
+          <OutlookBiasReceipt onChange={() => setDnaSheetOpen(true)} />
+        ) : null}
 
         {/* Onboarding item 4 (F5) — first-run identity confirm. A valid-
             but-wrong username silently loads a stranger's team; this is

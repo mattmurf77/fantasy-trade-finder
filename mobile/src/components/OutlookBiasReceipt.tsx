@@ -9,13 +9,15 @@ import { getLeaguePreferences } from '../api/league';
 // #231 — deck bias receipt (approved mock mockups/polish-lab-2026-08/
 // trade-dna-outlook-v3.html, row 2): one quiet line above the finder deck
 // connecting its shape to the user's outlook, with an ice "Change" link
-// back to the hub's Trade DNA panel (navigates to TradesHome with
-// `editDna: true`, which auto-expands the in-place editor).
+// into the Trade DNA editor. #246 (guided-first landing): with the hub
+// unrouted, Change no longer navigates to TradesHome {editDna:true} — the
+// host passes `onChange`, which opens the DNA editor as a bottom sheet
+// OVER the deck (TradeDnaSheet), so the user watches their bias change
+// the trades behind it.
 //
-// Deliberately self-contained (own session read, own prefs query on the
-// shared ['league-prefs', leagueId] cache key, own flag read) so
-// TradesScreen — owned by another agent this round — mounts it with a
-// single line and nothing else.
+// Deliberately self-contained otherwise (own session read, own prefs
+// query on the shared ['league-prefs', leagueId] cache key, own flag
+// read) so TradesScreen mounts it with a single line and nothing else.
 //
 // Renders null unless flag `trade.outlook_direction` is live AND the
 // resolved outlook is directional. Resolution mirrors the engine's
@@ -33,7 +35,7 @@ const LEAN: Record<string, { lean: string; name: string }> = {
   contender: { lean: 'balanced', name: 'Contending' },
 };
 
-export default function OutlookBiasReceipt({ navigation }: { navigation: any }) {
+export default function OutlookBiasReceipt({ onChange }: { onChange: () => void }) {
   const league = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
   const directionOn = useFlag('trade.outlook_direction');
@@ -64,7 +66,7 @@ export default function OutlookBiasReceipt({ navigation }: { navigation: any }) 
         accessibilityRole="button"
         accessibilityLabel="Change outlook"
         hitSlop={8}
-        onPress={() => navigation?.navigate?.('TradesHome', { editDna: true })}
+        onPress={onChange}
       >
         {({ pressed }) => (
           <Text style={[styles.change, pressed && { color: ice.press }]}>
