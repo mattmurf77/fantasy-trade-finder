@@ -69,6 +69,11 @@ interface Props {
   // score (consensus sweep, not the divergence engine), so the window
   // hides the bar instead of rendering an honest-looking 0%.
   hideMatchStrength?: boolean;
+  // #249 — MatchesScreen: the untouchable lock "visible twin" isn't wanted
+  // on the matches inbox (operator call). Hides ONLY the button UI — the
+  // long-press context menu, the a11y custom action and the UNTOUCHABLE
+  // badge all still work, so the mechanism stays reachable on-screen.
+  hideLockButton?: boolean;
 }
 
 // FB-47 — partner-fit line copy. `partner_fit` is a 0–1 scalar; the exact
@@ -112,6 +117,7 @@ function TradeCardComp({
   onEditInCalculator,
   onRemoveAsset,
   hideMatchStrength = false,
+  hideLockButton = false,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
   // The pick-denominated TradeValueBar (feedback #157) is the universal
@@ -199,8 +205,10 @@ function TradeCardComp({
   // Untouchable visible twin (S3 PRD-02, menu flag on): a lock toggle in
   // the give-side rightSlot so the long-press accelerator is never the
   // sole path. Marked = ice-bordered closed lock; unmarked = dim open lock.
+  // #249: hosts can hide the button (MatchesScreen) — the context menu +
+  // a11y action remain the untouchable path there.
   const lockSlot = (p: Player) =>
-    onPlayerMenu && onToggleUntouchable ? (
+    !hideLockButton && onPlayerMenu && onToggleUntouchable ? (
       (() => {
         const marked = untouchableIds?.has(p.id) ?? false;
         return (
@@ -450,7 +458,7 @@ function TradeCardComp({
                 rightSlot={
                   onSwapPlayer ||
                   (variant === 'swipe' && onRemoveAsset) ||
-                  (onPlayerMenu && onToggleUntouchable) ? (
+                  (!hideLockButton && onPlayerMenu && onToggleUntouchable) ? (
                     <View style={styles.rightSlotStack}>
                       {lockSlot(p)}
                       {swapSlot(p, 'give')}

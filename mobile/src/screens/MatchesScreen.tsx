@@ -619,6 +619,9 @@ export default function MatchesScreen() {
                   onDismiss={() => handleDismiss(item)}
                   acting={dismissMutation.isPending}
                   showSend
+                  // #249 — no lock button on this screen (operator call);
+                  // untouchables stay reachable via long-press menu.
+                  hideLockButton
                   untouchableIds={
                     untouchablesEnabled
                       ? untouchablesByLeague.get(item.league_id)
@@ -704,6 +707,9 @@ export default function MatchesScreen() {
                   variant="swipe"
                   data={awaitingToTradeCardShape(item, activeLeague?.league_id)}
                   showSend
+                  // #249 — same call as the mutual list: no lock button
+                  // anywhere on the Matches screen.
+                  hideLockButton
                   untouchableIds={
                     untouchablesEnabled
                       ? untouchablesByLeague.get(item.league_id)
