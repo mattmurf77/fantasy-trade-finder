@@ -651,8 +651,8 @@ export default function RankScreen() {
                   generate pre-threshold on consensus values. The honest
                   payoff is board-priced trades. */}
               {unlockCopyOn
-                ? 'Your board now prices your trades — see the Trades tab'
-                : 'Trade Finder unlocked — check the Trades tab'}
+                ? 'Your board now prices your trades — see the Acquire tab'
+                : 'Trade Finder unlocked — check the Acquire tab'}
             </Text>
           </View>
         )}

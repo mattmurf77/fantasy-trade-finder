@@ -657,7 +657,7 @@ export default function MatchesScreen() {
           <View style={styles.centered}>
             <Text style={styles.emptyTitle}>No pending trades.</Text>
             <Text style={styles.emptyBody}>
-              Swipe more in the Trades tab.
+              Swipe more in the Acquire tab.
             </Text>
             {/* S4 PRD-05 — same rule as the mutual empty state. */}
             {emptyCtasOn ? (
