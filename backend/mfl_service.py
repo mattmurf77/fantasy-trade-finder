@@ -334,6 +334,33 @@ def fetch_league_bundle(league_id: str, year: int, host: str,
     return out
 
 
+def fetch_draft_results(league_id: str, year: int, host: str,
+                        cookie: str | None = None, timeout: int = 15,
+                        _opener=None) -> dict:
+    """Fetch the `draftResults` export — MFL's authoritative draft-completion
+    signal (#207).
+
+    Verified zero-auth on public 2026 dynasty leagues (the api_info page's
+    "league owners" note describes the IMPORT direction). MFL pre-populates
+    the whole pick grid before the draft, so unmade picks come back with
+    `player: ""` — completion is `count(player != "") == len(draftPick)`.
+    `draftUnit` is a LIST when a league drafts by division/conference;
+    `draft_status.mfl_verdict` aggregates across units.
+
+    Best-effort like `players`/`rules` in the bundle: any MFL error degrades
+    to `{}` (the detector then falls back to the roster heuristic) rather
+    than raising into a background refresh.
+    """
+    if not str(league_id).strip().isdigit():
+        return {}
+    try:
+        out = _fetch_one(host, year, "draftResults", league_id, cookie,
+                         timeout, _opener)
+    except MflError:
+        return {}
+    return out if isinstance(out, dict) else {}
+
+
 def fetch_scoring_inputs(league_id: str, year: int, host: str,
                          cookie: str | None = None, timeout: int = 15,
                          _opener=None) -> dict:

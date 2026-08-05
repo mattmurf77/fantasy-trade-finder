@@ -140,6 +140,38 @@ def test_fetch_bundle_players_degrades_gracefully():
     assert raw["league"]
 
 
+# ── draftResults (#207 — MFL's authoritative draft-completion signal) ───────
+
+def test_fetch_draft_results_requests_the_right_export():
+    captured = {}
+    payload = {"draftResults": {"draftUnit": {"unit": "LEAGUE", "draftPick": [
+        {"round": "01", "pick": "01", "franchise": "0007",
+         "player": "17472", "timestamp": "1785589226"},
+    ]}}}
+
+    def _opener(request, timeout=None):
+        captured["url"] = request.full_url
+        return _FakeResp(json.dumps(payload))
+
+    got = mfl.fetch_draft_results("10005", 2026, "www48.myfantasyleague.com",
+                                  _opener=_opener)
+    assert "TYPE=draftResults" in captured["url"]
+    assert "L=10005" in captured["url"] and "JSON=1" in captured["url"]
+    assert got == payload
+
+
+@pytest.mark.parametrize("code", [401, 404, 500])
+def test_fetch_draft_results_degrades_to_empty(code):
+    """Best-effort: this runs on a background refresh, never a request path."""
+    assert mfl.fetch_draft_results("10005", 2026, "www48.myfantasyleague.com",
+                                   _opener=_opener_http_error(code)) == {}
+
+
+def test_fetch_draft_results_rejects_a_non_numeric_league_id():
+    assert mfl.fetch_draft_results("abc", 2026, "www48.myfantasyleague.com",
+                                   _opener=_opener_http_error(500)) == {}
+
+
 # ── parse ───────────────────────────────────────────────────────────────────
 
 def test_parse_bundle_shape():

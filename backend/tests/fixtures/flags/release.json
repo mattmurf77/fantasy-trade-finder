@@ -46,6 +46,7 @@
   "sleeper.trade_block": true,
   "trade.block_boost": true,
   "picks.owned_sync": true,
+  "picks.rank_year_labels": true,
   "market.trade_capture": true,
   "market.movers": true,
   "trade.picks_in_pool": true,

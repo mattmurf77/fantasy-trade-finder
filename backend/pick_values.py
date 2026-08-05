@@ -49,6 +49,58 @@ def generic_pick_label(rnd: int, tier: str) -> str:
     return f"{tier} {_PICK_ORDINALS.get(rnd, str(rnd))} Round Pick"
 
 
+# ── #207: year-explicit rung labels ────────────────────────────────────────
+# The 12 rungs keep their stable, league-agnostic ids forever (see
+# docs/feedback/items/207-rookie-draft-detection/plan.md, "Option A"); only
+# the SERVED label and pick_value become year-explicit, per the active
+# league's detected rookie-draft status. Which year "an early 1st" maps to
+# depends on the league you are looking through, so the mapping lives at
+# serialization time, never in the pool builder.
+
+GENERIC_PICK_ID_PREFIX = "generic_pick_"
+
+
+def parse_generic_pick_id(pick_id: str) -> tuple[int, str] | None:
+    """`generic_pick_1_early` → `(1, "Early")`. None for anything else."""
+    if not isinstance(pick_id, str) or not pick_id.startswith(GENERIC_PICK_ID_PREFIX):
+        return None
+    parts = pick_id[len(GENERIC_PICK_ID_PREFIX):].split("_")
+    if len(parts) != 2 or not parts[0].isdigit():
+        return None
+    rnd, tier = int(parts[0]), parts[1].capitalize()
+    if (rnd, tier) not in GENERIC_PICK_SEEDS:
+        return None
+    return rnd, tier
+
+
+def year_pick_label(year: int, rnd: int, tier: str) -> str:
+    """Year-explicit rung label — e.g. `year_pick_label(2026, 1, "Early")`
+    → "2026 Early 1st". Shorter than the year-less form it replaces
+    ("Early 1st Round Pick"), so no client name box gets tighter."""
+    return f"{int(year)} {tier} {_PICK_ORDINALS.get(rnd, str(rnd))}"
+
+
+def discount_pick_value(pick_value: float, years_out: int) -> float:
+    """Apply the year discount to a rung's `pick_value` in VALUE space.
+
+    `pick_value` is the universal pool's engine bridge — the pool builder
+    sets it to `(seed_elo - 1200) / 6` and `dynasty_value` inverts it as
+    `1200 + 6 * pick_value` (#185). Discounting has to happen on the value
+    side of that bridge (the same round-trip `_owned_pick_assets` does), not
+    on the linear pick_value scale, so a relabelled 2027 rung prices exactly
+    like the owned 2027 pick of the same round: `pick_pool_value(r, 1)`.
+
+    `years_out=0` is an exact no-op, which is what keeps a not-drafted
+    league byte-identical to today's payload.
+    """
+    if years_out <= 0:
+        return pick_value
+    from .trade_service import elo_to_value as _e2v, value_to_elo as _v2e
+    elo = 1200.0 + 6.0 * max(0.0, float(pick_value))
+    discounted = _e2v(elo) * (YEAR_DISCOUNT ** int(years_out))
+    return round(max(0.0, (_v2e(discounted) - 1200.0) / 6.0), 1)
+
+
 def pick_pool_value(round_: int, years_out: int,
                     scoring_format: str = "1qb_ppr") -> float:
     """Generic-ladder Mid-tier value of a round, year-discounted in VALUE space.

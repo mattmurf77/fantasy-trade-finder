@@ -275,6 +275,13 @@ FLAG_KEYS: tuple[str, ...] = (
     # In-league calculator's owned-pick rows. Off ⇒ no owned-pick rows written
     # or shown (byte-identical today).
     "picks.owned_sync",
+    # #207 — picks.rank_year_labels: serve the 12 generic pick rungs with a
+    # YEAR-EXPLICIT label ("2026 Early 1st" pre-draft, "2027 Early 1st" once
+    # the active league's rookie draft is detected as complete) and a
+    # years_out-discounted pick_value, on /api/rankings + /api/trio only.
+    # Rung ids, pool membership and board Elo are untouched. Off ⇒ today's
+    # year-less "Early 1st Round Pick" labels, byte-identical.
+    "picks.rank_year_labels",
     # ── Market-data readiness (PRD #43 Phase-1 data foundation / #26) ────
     # market.trade_capture: capture executed Sleeper league trades (public
     # v1 /league/<id>/transactions/<week>, type=trade + complete) into the

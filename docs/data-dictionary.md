@@ -70,6 +70,9 @@ per-`(league, user)` roster.
 | `platform_auth` | str | `'public'` / `'cookie'` for MFL/Fleaflicker (Phase 1 is public-only → always `'public'`) |
 | `platform_my_team` | str | The linking user's franchise/team key (MFL franchise id `"0001"`, Fleaflicker team id) — binds their `league_members` row across re-syncs (generic analog of `espn_my_team_id`; **string**, since these ids aren't numeric integers) |
 | `platform_future_picks` | text (JSON) | MFL/Fleaflicker `futureDraftPicks` stored **raw** at import (`[{franchise_id,year,round,original_owner}]`) for the pick-inclusive-trades follow-up. **Not read by the trade engine today** — additive storage only |
+| `draft_status` | str | #207 rookie-draft verdict for the league's CURRENT season: `'drafted'` / `'not_drafted'` / `'unknown'`. NULL = never checked. Written by `server._refresh_league_draft_status` (`backend/draft_status.py` decides); read by `/api/rankings` + `/api/trio` to year-tag the generic pick rungs. **Fail-safe: anything but `'drafted'` shows current-year picks** |
+| `draft_status_confidence` | str | `'high'` (platform-authoritative: Sleeper `complete`+`last_picked`, MFL `made==total`) / `'medium'` (roster heuristic, or a platform/roster conflict) / `'low'` (abstained). Recorded for diagnosis; the serialization path gates on the verdict only |
+| `draft_status_checked_at` | str | ISO UTC of the last check — stamped even for `'unknown'` so a persistently flaking league backs off. Drives the asymmetric cheap-skip TTLs in `server._DRAFT_STATUS_TTL_SECONDS` (drafted 12 h, not_drafted 3 h, unknown 1 h) |
 | `created_at`, `updated_at` | str | |
 
 ---
@@ -372,7 +375,8 @@ Canonical player reference, synced from Sleeper bulk payload (skill positions, A
 | `position` | str | QB / RB / WR / TE |
 | `team` | str | abbr or null (FA) |
 | `age`, `birth_date` | int / str | |
-| `years_exp` | int | 0=rookie, null=prospect |
+| `years_exp` | int | 0=rookie, null=prospect. Counts **accrued** NFL seasons, so it is NOT a draft-class field (a 2023 UDFA who spent two years on practice squads reads 1) |
+| `rookie_year` | str | `"YYYY"` draft class from Sleeper's `metadata.rookie_year` (#207) — the exact class field `years_exp` isn't. NULL when Sleeper omits it (camp bodies / UDFAs) or serves the bogus `"0"`; readers then fall back to `years_exp == 0 AND team IS NOT NULL`. Read by `load_rookie_player_ids` for the rookie-draft roster heuristic (`backend/draft_status.py`) |
 | `depth_chart_position`, `depth_chart_order` | str / int | |
 | `status`, `injury_status`, `injury_body_part` | str | |
 | `height`, `weight`, `college` | str | |

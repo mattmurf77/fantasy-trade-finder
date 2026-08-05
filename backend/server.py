@@ -110,6 +110,10 @@ from .database import (
     sync_players, needs_player_sync,
     load_players, load_player, load_players_by_ids,
     load_rookies,
+    # #207 — rookie-draft detection inputs + the per-league verdict cache
+    load_rookie_player_ids, count_known_player_ids,
+    set_league_draft_status, get_league_draft_context,
+    load_league_ids_for_draft_status_refresh,
     sync_draft_picks, load_draft_picks, replace_draft_picks, compute_pick_value,
     create_notification, get_notifications, mark_notifications_read,
     # M5 Push additions — device tokens
@@ -753,6 +757,7 @@ g_universal_seed: dict[str, float] = {}
 # `server.GENERIC_PICK_SEEDS` in tests) resolves unchanged.
 from .pick_values import (
     GENERIC_PICK_SEEDS, _PICK_ORDINALS, generic_pick_label, pick_pool_value,
+    discount_pick_value, parse_generic_pick_id, year_pick_label,
 )
 
 
@@ -4743,6 +4748,94 @@ def ranked_player_to_dict(rp) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# #207 — year-explicit generic pick rungs (flag `picks.rank_year_labels`)
+#
+# The 12 Early/Mid/Late rungs live in the process-global, league-AGNOSTIC
+# universal pool, while draft status is per-league — so the year mapping can
+# only happen where both the pool and the session's league are in scope, i.e.
+# at serialization. Rung ids, pool membership and the user's board Elo are
+# deliberately untouched: a shared board values "an early 1st", and WHICH
+# year that maps to depends on the league you are looking through. Only the
+# served `name` and `pick_value` change.
+#
+#   league not drafted → "2026 Early 1st", years_out=0 (exact no-op on value)
+#   league drafted     → "2027 Early 1st", years_out=1 (existing 0.85 discount)
+#   unknown / no league / flag off → today's "Early 1st Round Pick", unchanged
+# ---------------------------------------------------------------------------
+
+_DRAFT_CONTEXT_CACHE: dict[str, tuple[float, dict | None]] = {}
+_DRAFT_CONTEXT_TTL_SECONDS = 300
+
+
+def _invalidate_draft_context_cache(league_id: str | None = None) -> None:
+    if league_id is None:
+        _DRAFT_CONTEXT_CACHE.clear()
+    else:
+        _DRAFT_CONTEXT_CACHE.pop(str(league_id), None)
+
+
+def _cached_draft_context(league_id: str) -> dict | None:
+    """League season + cached draft verdict, TTL-cached (this read is on the
+    hot /api/trio path). Mirrors _LEAGUE_MEMBERS_CACHE's shape."""
+    key = str(league_id)
+    hit = _DRAFT_CONTEXT_CACHE.get(key)
+    now = time.time()
+    if hit and (now - hit[0]) < _DRAFT_CONTEXT_TTL_SECONDS:
+        return hit[1]
+    try:
+        ctx = get_league_draft_context(key)
+    except Exception:
+        log.warning("draft-context read failed for %s", key, exc_info=True)
+        ctx = None
+    _DRAFT_CONTEXT_CACHE[key] = (now, ctx)
+    return ctx
+
+
+def _pick_rung_year_context(sess) -> tuple[int, int] | None:
+    """`(pick_season, years_out)` for the session's active league.
+
+    None whenever we must not relabel: flag off, no league, demo league, no
+    season on the row, or a DB read failure. The fail-safe (unknown ⇒ show
+    current-year picks) lives in draft_status.current_year_picks_visible.
+    """
+    if not is_enabled("picks.rank_year_labels"):
+        return None
+    league = sess.get("league") if isinstance(sess, dict) else None
+    league_id = getattr(league, "league_id", None)
+    if not league_id or league_id == "league_demo":
+        return None
+    ctx = _cached_draft_context(league_id)
+    if not ctx or not ctx.get("season"):
+        return None
+    from . import draft_status as _ds
+    # The fail-safe: only a positive `drafted` verdict rolls the rungs to
+    # next season. NULL (never checked), `unknown` and `not_drafted` all keep
+    # the current-year meaning.
+    show_current = _ds.current_year_picks_visible(
+        _ds.DraftStatus(ctx.get("status") or _ds.UNKNOWN))
+    years_out = 0 if show_current else 1
+    return int(ctx["season"]) + years_out, years_out
+
+
+def _apply_pick_rung_year_labels(dicts: list[dict], sess) -> None:
+    """Rewrite generic pick-rung `name`/`pick_value` in place. No-op when
+    `_pick_rung_year_context` abstains, so flag-off output is byte-identical.
+    """
+    ctx = _pick_rung_year_context(sess)
+    if ctx is None:
+        return
+    year, years_out = ctx
+    for d in dicts:
+        parsed = parse_generic_pick_id(d.get("id"))
+        if parsed is None:
+            continue
+        rnd, tier = parsed
+        d["name"] = year_pick_label(year, rnd, tier)
+        if years_out and d.get("pick_value") is not None:
+            d["pick_value"] = discount_pick_value(d["pick_value"], years_out)
+
+
+# ---------------------------------------------------------------------------
 # Ranking API Routes
 # ---------------------------------------------------------------------------
 
@@ -4813,6 +4906,10 @@ def get_trio():
             "reasoning": trio.reasoning,
             "tier_info": service._tier_info(position),
         }
+        # #207 — same year-explicit relabel the rankings payload gets, so a
+        # rung reads identically whether you meet it in a matchup or on a board.
+        _apply_pick_rung_year_labels(
+            [resp["player_a"], resp["player_b"], resp["player_c"]], sess)
 
         # Agent A1 — swipe.community_compare: attach community-consensus
         # signal so the frontend can show "X% agreed with your #1" toast.
@@ -5135,6 +5232,8 @@ def get_rankings():
     try:
         rank_set = service.get_rankings(position=position)
         rankings = [ranked_player_to_dict(rp) for rp in rank_set.rankings]
+        # #207 — year-explicit generic pick rungs for the active league.
+        _apply_pick_rung_year_labels(rankings, sess)
         # FB4-61 tile stats — attach the market side: consensus positional
         # rank + its 30d delta. Additive & best-effort: an enrichment failure
         # must never break the rankings read, and both fields follow
@@ -9065,6 +9164,174 @@ def _fetch_sleeper_drafts(league_id: str) -> list[dict]:
     return ds if isinstance(ds, list) else []
 
 
+# ---------------------------------------------------------------------------
+# #207 — per-league rookie-draft status refresh
+#
+# backend/draft_status.py owns the decision; this owns the fetching and the
+# cache lifecycle. Detection costs at most two platform reads plus one roster
+# scan, so the verdict is persisted on the league row and refreshed on the
+# league-sync path (session_init's background daemon) and the hourly tick.
+#
+# Cheap-skip TTLs are asymmetric on purpose: a league that has drafted never
+# un-drafts inside a season, so a `drafted` verdict is near-permanent; a
+# `not_drafted` league flips exactly once and we want to notice promptly;
+# `unknown` means a read flaked, so back off enough that a persistently
+# broken league doesn't get re-probed every tick.
+# ---------------------------------------------------------------------------
+
+_DRAFT_STATUS_TTL_SECONDS = {
+    "drafted":     12 * 3600,
+    "not_drafted":  3 * 3600,
+    "unknown":      1 * 3600,
+}
+_DRAFT_STATUS_DEFAULT_TTL = 1 * 3600
+# Per-tick refresh budget for the hourly sweep. Each refresh costs up to
+# three serial platform reads, so an unbounded sweep would turn a cron
+# request into a multi-minute job as the league count grows. The queue is
+# ordered never-checked-first then stalest-first, so a budget is a fair
+# rotation, not starvation.
+_DRAFT_STATUS_SWEEP_BUDGET = 50
+
+
+def _draft_status_is_fresh(ctx: dict | None, now: datetime | None = None) -> bool:
+    """True when the cached verdict is young enough to skip a re-check."""
+    if not ctx or not ctx.get("checked_at") or not ctx.get("status"):
+        return False
+    ttl = _DRAFT_STATUS_TTL_SECONDS.get(ctx.get("status"),
+                                        _DRAFT_STATUS_DEFAULT_TTL)
+    try:
+        checked = datetime.fromisoformat(ctx["checked_at"])
+    except (TypeError, ValueError):
+        return False
+    if checked.tzinfo is None:
+        checked = checked.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return (now - checked).total_seconds() < ttl
+
+
+def _rosters_rookie_verdict(rosters_player_ids: list[list[str]],
+                            season: int, league_size: int):
+    """Run the rookies-on-rosters heuristic over per-team roster arrays.
+
+    Uses the FULL roster array (taxi + IR included — Sleeper's `players`
+    field carries them, `starters` does not). Returns None when no rosters
+    are available so the detector abstains rather than guessing.
+    """
+    from . import draft_status as _ds
+    teams = [[str(p) for p in (r or []) if p] for r in (rosters_player_ids or [])]
+    if not teams:
+        return None
+    try:
+        rookie_ids = load_rookie_player_ids(season)
+    except Exception as e:
+        log.warning("  draft-status: rookie-class lookup failed: %s", e)
+        return None
+    rostered, teams_with = set(), 0
+    all_ids: set[str] = set()
+    for roster in teams:
+        all_ids.update(roster)
+        hits = [p for p in roster if p in rookie_ids]
+        if hits:
+            teams_with += 1
+            rostered.update(hits)
+    try:
+        unclassifiable = len(all_ids) - count_known_player_ids(all_ids)
+    except Exception:
+        unclassifiable = 0
+    return _ds.rosters_verdict(len(rostered), teams_with,
+                               league_size or len(teams), unclassifiable)
+
+
+def _detect_league_draft_status(league_id: str, ctx: dict):
+    """Fetch this league's signals and resolve a verdict (no persistence)."""
+    from . import draft_status as _ds
+    platform = (ctx.get("platform") or "sleeper").lower()
+    season = ctx.get("season")
+    league_size = ctx.get("total_rosters") or 0
+
+    sleeper_drafts = None
+    mfl_results = None
+    roster_arrays: list[list[str]] = []
+
+    if platform == "sleeper" and str(league_id).isdigit():
+        meta = _fetch_sleeper_league_meta(league_id)
+        if meta:
+            try:
+                season = int(meta.get("season") or season or 0) or season
+            except (TypeError, ValueError):
+                pass
+            try:
+                league_size = int(meta.get("total_rosters") or league_size or 0)
+            except (TypeError, ValueError):
+                pass
+        # `_fetch_sleeper_drafts` collapses a flake and a genuinely empty
+        # list to [] (#228). Both land on "ambiguous" in the detector, which
+        # is the honest reading — neither says "not drafted" on its own.
+        sleeper_drafts = _fetch_sleeper_drafts(league_id)
+        rosters = _fetch_league_rosters(league_id) or []
+        roster_arrays = [r.get("players") or [] for r in rosters
+                         if isinstance(r, dict)]
+    else:
+        # ESPN / MFL / Fleaflicker: rosters live in league_members, already
+        # crosswalked into Sleeper player-id space, but only as fresh as the
+        # last import (research §3.4 — a stale link yields a stale answer).
+        try:
+            members = load_league_members(league_id)
+        except Exception:
+            members = []
+        roster_arrays = [m.get("player_ids") or [] for m in members]
+        if not league_size:
+            league_size = len(roster_arrays)
+        if platform == "mfl":
+            from .database import get_platform_league
+            row = get_platform_league(league_id, "mfl") or {}
+            host = row.get("platform_host")
+            year = row.get("platform_season") or season
+            if host and year:
+                try:
+                    from . import mfl_service as _mfl
+                    mfl_results = _mfl.fetch_draft_results(
+                        league_id, int(year), host)
+                except Exception as e:
+                    log.warning("  draft-status: MFL draftResults failed "
+                                "for %s: %s", league_id, e)
+
+    if not season:
+        return _ds.DraftStatus(_ds.UNKNOWN, _ds.LOW, _ds.SRC_NONE,
+                               {"reason": "no_season"})
+    rosters_verdict = _rosters_rookie_verdict(roster_arrays, season, league_size)
+    return _ds.detect(platform, season, league_size,
+                      sleeper_drafts=sleeper_drafts,
+                      mfl_draft_results=mfl_results,
+                      rosters=rosters_verdict)
+
+
+def _refresh_league_draft_status(league_id: str, force: bool = False):
+    """Detect + persist one league's rookie-draft status (best-effort).
+
+    Returns the DraftStatus written, or None when the check was skipped
+    (fresh cache) or the league row is unknown. Never raises — every caller
+    is a background write path.
+    """
+    try:
+        ctx = get_league_draft_context(league_id)
+        if not ctx:
+            return None
+        if not force and _draft_status_is_fresh(ctx):
+            return None
+        verdict = _detect_league_draft_status(league_id, ctx)
+        set_league_draft_status(league_id, verdict.status, verdict.confidence)
+        _invalidate_draft_context_cache(league_id)
+        log.info("  ✅ draft status for %s: %s (%s via %s) %s", league_id,
+                 verdict.status, verdict.confidence, verdict.source,
+                 verdict.evidence)
+        return verdict
+    except Exception as e:
+        log.warning("  draft-status refresh failed for %s (continuing): %s",
+                    league_id, e)
+        return None
+
+
 def _roster_id_for_owner(rosters, owner_id) -> int | None:
     """Server-authoritative roster resolution: the roster_id owned by owner_id
     (a Sleeper user_id). Clients never assert roster_ids directly."""
@@ -11805,6 +12072,15 @@ def session_init():
             except Exception as pk_err:
                 log.warning("  owned-pick sync failed (continuing): %s", pk_err)
 
+            # ── #207: refresh the league's rookie-draft status ────────
+            # Runs on every platform (Sleeper/MFL authoritative, ESPN and
+            # Fleaflicker heuristic-only) and for every league — the verdict
+            # is what /api/rankings + /api/trio relabel the generic pick
+            # rungs from. Cheap-skipped against the cached checked_at, and
+            # self-contained failure handling inside the helper, so it can
+            # never affect the syncs above.
+            _refresh_league_draft_status(league_id)
+
             # ── Market-data readiness: capture executed league trades ──
             # Raw Sleeper trade transactions → sleeper_trades (PRD #43
             # Phase-1 data foundation / backlog #26). Capture only — no
@@ -12792,6 +13068,25 @@ def cron_hourly_tick():
     except Exception as e:
         log.warning("hourly-tick: value-snapshot fallback failed (continuing): %s", e)
 
+    # ── 0b. #207 rookie-draft status sweep ──
+    # Session init only refreshes the league the user just synced, so a
+    # draft that completes between sessions would otherwise go unnoticed.
+    # The per-status TTLs (_DRAFT_STATUS_TTL_SECONDS) do the real filtering:
+    # `not_drafted` leagues — the ones that can still flip — are re-probed
+    # every 3 h, `drafted` ones (which never un-draft inside a season) every
+    # 12 h. Bounded by _DRAFT_STATUS_SWEEP_BUDGET per tick (the queue is
+    # stalest-first, so this rotates rather than starves). Failure-isolated
+    # like the snapshot guard above.
+    draft_status_checked = 0
+    try:
+        for _lid in load_league_ids_for_draft_status_refresh():
+            if draft_status_checked >= _DRAFT_STATUS_SWEEP_BUDGET:
+                break
+            if _refresh_league_draft_status(_lid) is not None:
+                draft_status_checked += 1
+    except Exception as e:
+        log.warning("hourly-tick: draft-status sweep failed (continuing): %s", e)
+
     # ── 1. Drain the quiet-hours queue and bundle per-user ──
     drained = drain_due_queued_notifications(now_iso)
     bundled_users = 0
@@ -12876,10 +13171,11 @@ def cron_hourly_tick():
                 )
                 review_sent += 1
 
-    log.info("hourly-tick: bundled=%d digest=%d review=%d",
-             bundled_users, digest_sent, review_sent)
+    log.info("hourly-tick: bundled=%d digest=%d review=%d draft_status=%d",
+             bundled_users, digest_sent, review_sent, draft_status_checked)
     body = {"ok": True, "bundled_users": bundled_users,
-            "digest_sent": digest_sent, "review_sent": review_sent}
+            "digest_sent": digest_sent, "review_sent": review_sent,
+            "draft_status_checked": draft_status_checked}
     if value_snapshot is not None:
         body["value_snapshot"] = value_snapshot
     return jsonify(body)

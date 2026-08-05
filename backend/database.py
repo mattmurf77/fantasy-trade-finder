@@ -257,6 +257,14 @@ leagues_table = Table("leagues", metadata,
     Column("platform_future_picks", Text),# MFL/Fleaflicker futureDraftPicks stored raw
                                            # (JSON list) — NOT wired into the engine yet
                                            # (pick-inclusive trades = +M follow-up)
+    # ── #207 rookie-draft status cache (backend/draft_status.py) ──────────
+    # Detection costs 1–2 platform reads + a roster scan, so the verdict is
+    # cached on the league row and refreshed on the league-sync path + the
+    # hourly tick (see server._refresh_league_draft_status). NULL status =
+    # never checked, which the fail-safe reads as "show current-year picks".
+    Column("draft_status",            String),  # 'drafted'|'not_drafted'|'unknown'
+    Column("draft_status_confidence", String),  # 'high'|'medium'|'low'
+    Column("draft_status_checked_at", String),  # ISO UTC of the last check
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -626,6 +634,13 @@ players_table = Table("players", metadata,
     Column("age",                   Integer),
     Column("birth_date",            String),   # "YYYY-MM-DD"
     Column("years_exp",             Integer),  # 0 = rookie; None = prospect
+    # #207 — Sleeper's `metadata.rookie_year` ("2026"), the exact "class of
+    # YYYY" field. `years_exp` counts ACCRUED seasons, so a 2023 UDFA who
+    # spent two years on a practice squad reads years_exp=1 — it is not a
+    # class field. NULL when Sleeper carries no class year (camp bodies /
+    # UDFAs) or when it serves the bogus "0"; consumers fall back to
+    # years_exp==0 AND team IS NOT NULL. Read by draft_status detection.
+    Column("rookie_year",           String),   # "YYYY" | None
     Column("depth_chart_position",  String),   # Same as position; confirms starter
     Column("depth_chart_order",     Integer),  # 1=starter, 2=backup, etc.
     Column("status",                String),   # Active | Inactive | IR | etc.
@@ -1792,6 +1807,12 @@ def _migrate_db() -> None:
         # #158 — owned draft picks: engine-scale value + platform provenance.
         ("draft_picks",        "pool_value",            "FLOAT"),
         ("draft_picks",        "platform",              "TEXT"),
+        # #207 — rookie class year from Sleeper's metadata.rookie_year, and
+        # the per-league rookie-draft verdict cache (backend/draft_status.py).
+        ("players",            "rookie_year",           "VARCHAR"),
+        ("leagues",            "draft_status",          "VARCHAR"),
+        ("leagues",            "draft_status_confidence", "VARCHAR"),
+        ("leagues",            "draft_status_checked_at", "VARCHAR"),
         # Tracking plan v2 §S1 envelope columns (all nullable — v1 rows and
         # v1 record_event() call sites are untouched).
         ("user_events",        "event_id",              "VARCHAR"),
@@ -6744,6 +6765,17 @@ def sync_players(player_db: dict, adp_map: dict | None = None) -> int:
         except (TypeError, ValueError):
             sr = None
 
+        # #207 — keep Sleeper's rookie class year. Only a plausible 4-digit
+        # year survives: the dump serves "0" for ~5 % of years_exp==0 players
+        # and omits the field entirely for camp bodies / UDFAs. NULL falls
+        # back to the years_exp proxy at read time (draft_status.is_rookie_row).
+        rookie_year = (p.get("metadata") or {}).get("rookie_year") \
+            if isinstance(p.get("metadata"), dict) else None
+        rookie_year = str(rookie_year).strip() if rookie_year is not None else ""
+        if not (len(rookie_year) == 4 and rookie_year.isdigit()
+                and rookie_year != "0000"):
+            rookie_year = None
+
         adp_val = None
         if adp_map:
             raw_adp = adp_map.get(str(pid))
@@ -6763,6 +6795,7 @@ def sync_players(player_db: dict, adp_map: dict | None = None) -> int:
             "age":                  age,
             "birth_date":           p.get("birth_date"),
             "years_exp":            yr,
+            "rookie_year":          rookie_year,
             "depth_chart_position": p.get("depth_chart_position"),
             "depth_chart_order":    dc_order,
             "status":               status or None,
@@ -6877,6 +6910,127 @@ def load_rookies() -> list[dict]:
             )
         ).fetchall()
     return [dict(r._mapping) for r in rows]
+
+
+def load_rookie_player_ids(season: int) -> set[str]:
+    """#207 — player_ids belonging to `season`'s rookie class.
+
+    Exact test first (`rookie_year == season`), then the proxy for rows whose
+    class year Sleeper never carried (`years_exp == 0 AND team IS NOT NULL` —
+    the team requirement drops the teamless pre-NFL-draft prospect tail).
+    Mirrors draft_status.is_rookie_row; kept as SQL so the roster heuristic
+    costs one indexed scan instead of loading the whole player table.
+    """
+    yr = str(int(season))
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(players_table.c.player_id).where(
+                or_(
+                    players_table.c.rookie_year == yr,
+                    and_(
+                        players_table.c.rookie_year.is_(None),
+                        players_table.c.years_exp == 0,
+                        players_table.c.team.isnot(None),
+                        players_table.c.team != "",
+                    ),
+                )
+            )
+        ).fetchall()
+    return {str(r.player_id) for r in rows}
+
+
+def count_known_player_ids(player_ids) -> int:
+    """How many of `player_ids` exist in our players table (#207 staleness
+    guard — a big unknown tail means the snapshot is stale, not that the
+    league has no rookies)."""
+    ids = [str(p) for p in player_ids if p]
+    if not ids:
+        return 0
+    found = 0
+    with engine.connect() as conn:
+        for i in range(0, len(ids), 500):   # SQLite variable limit
+            chunk = ids[i: i + 500]
+            found += len(conn.execute(
+                select(players_table.c.player_id)
+                .where(players_table.c.player_id.in_(chunk))
+            ).fetchall())
+    return found
+
+
+# ---------------------------------------------------------------------------
+# #207 — per-league rookie-draft status cache
+# ---------------------------------------------------------------------------
+
+def set_league_draft_status(league_id: str, status: str,
+                            confidence: str | None) -> None:
+    """Persist a league's rookie-draft verdict + the check timestamp.
+
+    Always stamps `draft_status_checked_at`, including for `unknown`, so the
+    cheap-skip in server._refresh_league_draft_status can back off a league
+    whose platform read keeps flaking instead of retrying every tick.
+    """
+    if not league_id:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            update(leagues_table)
+            .where(leagues_table.c.sleeper_league_id == str(league_id))
+            .values(draft_status=status,
+                    draft_status_confidence=confidence,
+                    draft_status_checked_at=_now())
+        )
+
+
+def get_league_draft_context(league_id: str) -> dict | None:
+    """Season + cached draft verdict for one league, or None when unknown.
+
+    Returns {season:int|None, platform:str, total_rosters:int|None,
+             status:str|None, confidence:str|None, checked_at:str|None}.
+    """
+    if not league_id:
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(leagues_table.c.season,
+                   leagues_table.c.platform,
+                   leagues_table.c.total_rosters,
+                   leagues_table.c.draft_status,
+                   leagues_table.c.draft_status_confidence,
+                   leagues_table.c.draft_status_checked_at)
+            .where(leagues_table.c.sleeper_league_id == str(league_id))
+            .limit(1)
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        season = int(row.season) if row.season else None
+    except (TypeError, ValueError):
+        season = None
+    return {
+        "season":        season,
+        "platform":      row.platform or "sleeper",
+        "total_rosters": row.total_rosters,
+        "status":        row.draft_status,
+        "confidence":    row.draft_status_confidence,
+        "checked_at":    row.draft_status_checked_at,
+    }
+
+
+def load_league_ids_for_draft_status_refresh(limit: int = 500) -> list[str]:
+    """Leagues the hourly tick should re-check, freshest-last.
+
+    Ordered so never-checked leagues come first, then the stalest — the tick
+    applies its own per-status TTL (see server._draft_status_is_fresh), this
+    just bounds the scan.
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(leagues_table.c.sleeper_league_id)
+            .order_by(leagues_table.c.draft_status_checked_at.is_(None).desc(),
+                      leagues_table.c.draft_status_checked_at)
+            .limit(int(limit))
+        ).fetchall()
+    return [str(r.sleeper_league_id) for r in rows]
 
 
 # ---------------------------------------------------------------------------
