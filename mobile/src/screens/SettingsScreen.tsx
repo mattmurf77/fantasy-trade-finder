@@ -20,7 +20,7 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Notifications from 'expo-notifications';
 import * as FileSystem from 'expo-file-system/legacy';
 
-import { ink, chalk, ice, semantic, space, radii, type } from '../theme/chalkline';
+import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
@@ -31,8 +31,11 @@ import { getSleeperLinkStatus, unlinkSleeper } from '../api/sendInSleeper';
 import {
   exportAccountData,
   getProfileVisibility,
+  getStudTaxMode,
   setProfileVisibility,
+  setStudTaxMode,
 } from '../api/accountPrefs';
+import type { StudTaxMode } from '../api/calc';
 import { track } from '../api/events';
 import SteerSlider from '../components/SteerSlider';
 import { useSession, type RankMethodPref } from '../state/useSession';
@@ -100,6 +103,43 @@ export default function SettingsScreen({ navigation }: any) {
   // (the same permanent opt-out as the bubble's "Skip the tour" link).
   const guidedAvatarOn = useOnboardingFeature('onboarding.guided_avatar');
   const guideDismissed = useOnboardingState((s) => s.ob.guideDismissed);
+
+  // ── #214/#215 — stud-tax mode ─────────────────────────────────────────
+  // 'market' (retuned default) | 'heavy' (legacy math) | 'off'. Optimistic
+  // like the notification switches: flip locally, PUT, revert on error.
+  const [studTax, setStudTax] = useState<StudTaxMode>('market');
+  const [studTaxBusy, setStudTaxBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    getStudTaxMode()
+      .then((r) => {
+        if (alive && (r.mode === 'market' || r.mode === 'heavy' || r.mode === 'off')) {
+          setStudTax(r.mode);
+        }
+      })
+      .catch(() => {
+        /* stay on the market default — read failure is non-fatal */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function onStudTaxChange(mode: StudTaxMode) {
+    if (mode === studTax || studTaxBusy) return;
+    const prev = studTax;
+    setStudTax(mode);
+    setStudTaxBusy(true);
+    try {
+      await setStudTaxMode(mode);
+      track('stud_tax_mode_changed', { mode }, 'Settings');
+    } catch {
+      setStudTax(prev);
+      setToast({ msg: 'Could not save the stud tax setting', tone: 'warn' });
+    } finally {
+      setStudTaxBusy(false);
+    }
+  }
 
   function rerouteRankStack(m: RankMethodPref) {
     // Reset the nested Rank stack to the chosen flow WITHOUT changing tab
@@ -755,6 +795,51 @@ export default function SettingsScreen({ navigation }: any) {
     </>
   );
 
+  // #214/#215 — how the trade engine values studs vs multi-piece packages.
+  // Three-option segmented control (Chalkline pills, ice = selected);
+  // plain-words sub copy describes the ACTIVE choice.
+  const STUD_TAX_OPTIONS: Array<{ key: StudTaxMode; label: string; desc: string }> = [
+    { key: 'market', label: 'Market',
+      desc: 'Market — matches market consensus (recommended).' },
+    { key: 'heavy', label: 'Heavy',
+      desc: 'Heavy — favors the single-stud side, like before.' },
+    { key: 'off', label: 'Off',
+      desc: 'Off — no value adjustments; totals are the plain sum of each side.' },
+  ];
+  const studTaxSection = (
+    <>
+      <View style={styles.section}>
+        <TickLabel>Trade values</TickLabel>
+      </View>
+      <View style={styles.studTaxBlock}>
+        <Text style={styles.rowKey}>Stud tax</Text>
+        <View style={styles.segRow}>
+          {STUD_TAX_OPTIONS.map((o) => {
+            const on = o.key === studTax;
+            return (
+              <Pressable
+                key={o.key}
+                testID={`settings.stud-tax.${o.key}`}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on, disabled: studTaxBusy }}
+                accessibilityLabel={o.desc}
+                disabled={studTaxBusy}
+                onPress={() => onStudTaxChange(o.key)}
+                style={[styles.seg, on && styles.segOn, studTaxBusy && styles.segBusy]}
+              >
+                <Text style={[styles.segText, on && styles.segTextOn]}>{o.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={styles.rowSub}>
+          {STUD_TAX_OPTIONS.find((o) => o.key === studTax)?.desc} Applies to the
+          calculator and trade suggestions.
+        </Text>
+      </View>
+    </>
+  );
+
   // #187 — dismiss/disable The Analyst from Settings, both directions.
   // Off: same path as the bubble's "Skip the tour" (dismissTour — clears any
   // active bubble + tracks guide_tour_dismissed). On: enableTour, which
@@ -1201,6 +1286,7 @@ export default function SettingsScreen({ navigation }: any) {
             {platformLinkRows}
 
             {rankingSection}
+            {studTaxSection}
             {guideSection}
 
             <View style={styles.section}>
@@ -1236,6 +1322,7 @@ export default function SettingsScreen({ navigation }: any) {
             {platformLinkRows}
 
             {rankingSection}
+            {studTaxSection}
             {guideSection}
 
             <View style={styles.section}>
@@ -1312,6 +1399,27 @@ const styles = StyleSheet.create({
     ...type.bodySm,
     marginTop: space.xs,
   },
+  // #214/#215 — stud-tax segmented row (TestStages Segmented pattern:
+  // Chalkline pills, ice = selected).
+  studTaxBlock: {
+    paddingVertical: space.md,
+    gap: space.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ink.line,
+  },
+  segRow: { flexDirection: 'row', gap: space.sm },
+  seg: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    paddingVertical: space.sm,
+    alignItems: 'center',
+  },
+  segOn: { borderColor: ice.base, backgroundColor: ink.ink3 },
+  segBusy: { opacity: 0.6 },
+  segText: { ...type.bodySm, color: chalk.dim },
+  segTextOn: { color: ice.base, fontFamily: fonts.uiSemi },
   kvRow: {
     flexDirection: 'row',
     alignItems: 'center',

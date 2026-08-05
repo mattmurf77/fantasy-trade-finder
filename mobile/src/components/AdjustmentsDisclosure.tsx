@@ -10,6 +10,9 @@ interface Props {
   /** Displayed (adjusted) side totals — the verdict's give/receive values. */
   giveTotal: number;
   receiveTotal: number;
+  /** #215 — evaluate's stud_tax_mode. 'off' renders a one-line "Value
+   *  adjustments off" note instead of the (empty) disclosure. */
+  studTaxMode?: string;
 }
 
 // "Value adjustments" disclosure (DynastyDealer teardown 2026-07-26): a
@@ -25,11 +28,23 @@ export default function AdjustmentsDisclosure({
   naiveTotals,
   giveTotal,
   receiveTotal,
+  studTaxMode,
 }: Props) {
   const [open, setOpen] = useState(false);
   const sides = (['give', 'receive'] as const).filter(
     (s) => (adjustments?.[s] ?? []).length > 0,
   );
+  // #215 — the user turned the stud tax off: totals ARE the sums of parts,
+  // so there is nothing to itemize. Say so instead of vanishing.
+  if (studTaxMode === 'off') {
+    return (
+      <View style={styles.wrap}>
+        <Text testID="calc.adjustments.off" style={[type.bodySm, styles.offNote]}>
+          Value adjustments off
+        </Text>
+      </View>
+    );
+  }
   if (!adjustments || sides.length === 0) return null;
 
   const totals = { give: giveTotal, receive: receiveTotal };
@@ -115,4 +130,5 @@ const styles = StyleSheet.create({
   row: { gap: 2 },
   rowLabel: { color: chalk.base },
   why: { ...type.bodySm, color: chalk.dim },
+  offNote: { color: chalk.dim },
 });

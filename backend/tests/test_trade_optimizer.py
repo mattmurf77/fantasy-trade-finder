@@ -62,7 +62,13 @@ def _isolate_flags_and_cfg():
     ts._cfg.clear()
     ts._cfg.update(ts._DEFAULT_CFG)                   # pristine config
     try:
-        yield
+        # #214/#215 — these tests were authored against (and pin) the
+        # PRE-#214 engine math, which is now the reachable 'heavy'
+        # stud-tax mode ('market' is the retuned default). Pinning the
+        # mode here keeps them as the heavy-path byte-identity guard;
+        # market-mode shapes are covered by test_stud_tax_modes.py.
+        with ts.stud_tax_override("heavy"):
+            yield
     finally:
         ff._flags_cache = old_flags
         ts._cfg.clear()

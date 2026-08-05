@@ -217,6 +217,12 @@ users_table = Table("users", metadata,
     # profiles.public_pages flag, so flipping the global flag can never
     # publish a user who didn't opt in.
     Column("profile_public",        Integer),
+    # ── #214/#215 stud-tax mode ───────────────────────────────────────────
+    # 'market' (default/NULL — retuned shapes) | 'heavy' (pre-#214 legacy
+    # math) | 'off' (naive sums, no crown/depth adjustments). Read by
+    # trade_service.stud_tax_mode_for_user for /api/trade/evaluate and
+    # deck generation.
+    Column("stud_tax_mode",         String),
 )
 
 leagues_table = Table("leagues", metadata,
@@ -1642,6 +1648,12 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── Interview 2026-07-17 — trade-logic recalibration ─────────────────
     ("asset_floor_abs",        450.0,   "interview: absolute value floor for non-headliner pieces (max-of-boards); 0 disables"),
     ("crown_elite_value",     6000.0,   "interview: crown-asset value earning the full crown_rate; premium scales linearly below it; <=0 disables scaling"),
+    # ── #214 stud-tax retune — 'market' mode shapes (default stud_tax_mode) ──
+    ("skew_phaseout",            0.5,   "#214: naive-skew at which the market-mode crown credit phases to zero (scale = max(0, 1 - |skew|/this)); <=0 disables the phase-out"),
+    ("crown_rate_market",        0.08,  "#214: market-mode crown credit per elite asset (value >= crown_elite_value), BOTH sides, count-independent"),
+    ("package_floor_market",     0.70,  "#214: market-mode depth-discount contribution floor (piece contributes at least this fraction of face value)"),
+    ("package_adj_gamma_market", 0.5,   "#214: market-mode depth-discount exponent, benchmarked against the package's OWN best asset"),
+    ("package_discount_cap",     0.35,  "#214: cap on a side's total market-mode depth discount as a fraction of its naive sum"),
     ("fairness_floor_divergence", 0.55, "interview: consensus fairness gate for divergence cards = min(fairness_threshold, this) — extreme-case veto only"),
     # ── #189 — relaxed fallback for empty targeted sweeps ────────────────
     ("relaxed_fairness_threshold", 0.55, "#189: stage-1 fairness bar for the relaxed fallback pass on empty targeted jobs (never tightens below the caller's threshold)"),
@@ -1761,6 +1773,8 @@ def _migrate_db() -> None:
         ("users",              "verified_via",          "VARCHAR"),
         # Public-profile opt-in (teardown 06-04, flag profiles.user_toggle)
         ("users",              "profile_public",        "INTEGER"),
+        # #214/#215 — per-user stud-tax mode ('market'|'heavy'|'off')
+        ("users",              "stud_tax_mode",         "VARCHAR"),
         # ESPN league linking Phase 1 (flag `espn.link`; plan
         # docs/plans/espn-league-linking-plan-2026-07-11.md) — see
         # leagues_table column comments.
@@ -3110,6 +3124,42 @@ def set_profile_public(user_id: str, public: bool) -> None:
             conn.execute(insert(users_table).values(
                 sleeper_user_id=user_id,
                 profile_public=val,
+                created_at=_now(),
+            ))
+
+
+STUD_TAX_MODES = ("market", "heavy", "off")
+
+
+def get_stud_tax_mode(user_id: str) -> str:
+    """#215 — the user's stored stud-tax mode. Missing row / NULL / unknown
+    value = 'market' (the #214 retuned default)."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.stud_tax_mode).where(
+                users_table.c.sleeper_user_id == user_id
+            )
+        ).fetchone()
+    mode = row.stud_tax_mode if row else None
+    return mode if mode in STUD_TAX_MODES else "market"
+
+
+def set_stud_tax_mode(user_id: str, mode: str) -> None:
+    """#215 — persist the user's stud-tax mode. Validates against
+    STUD_TAX_MODES; creates the users row if the setting write beats
+    session_init's background upsert (same race guard as profile_public)."""
+    if mode not in STUD_TAX_MODES:
+        raise ValueError(f"invalid stud_tax_mode: {mode!r}")
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(users_table)
+            .where(users_table.c.sleeper_user_id == user_id)
+            .values(stud_tax_mode=mode)
+        )
+        if res.rowcount == 0:
+            conn.execute(insert(users_table).values(
+                sleeper_user_id=user_id,
+                stud_tax_mode=mode,
                 created_at=_now(),
             ))
 
