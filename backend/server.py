@@ -8275,6 +8275,10 @@ def asset_trade_ideas():
                                     it — ideas are what they'd GIVE)
       league_id?: str           (default: active session league)
       fairness_threshold?: float  (default 0.50, the pinned-job wide net)
+      opponent_user_id?: str    (#250 Specific Team mode: scope the sweep to
+                                 this one league-mate — every idea's
+                                 counterparty is that member; a receive pin
+                                 owned by anyone else returns empty groups)
     }
 
     Response: {
@@ -8304,6 +8308,8 @@ def asset_trade_ideas():
     asset_id  = str(body.get("asset_id") or "")
     direction = body.get("direction") or "give"
     league_id = body.get("league_id") or g_league.league_id
+    # #250 — Specific Team mode scopes the sweep to one league-mate.
+    opponent_user_id = str(body.get("opponent_user_id") or "").strip() or None
     if not asset_id:
         return jsonify({"error": "asset_id required"}), 400
     if direction not in ("give", "receive"):
@@ -8375,6 +8381,7 @@ def asset_trade_ideas():
         raw_user_elo       = raw_user_elo,
         untouchable_ids    = untouchable_ids or None,
         not_interested_ids = not_interested_ids or None,
+        opponent_user_id   = opponent_user_id,
     )
 
     def _idea_row(idea: dict) -> dict:

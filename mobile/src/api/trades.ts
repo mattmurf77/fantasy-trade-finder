@@ -349,6 +349,9 @@ export async function fetchAssetIdeas(body: {
   asset_id: string;
   direction: 'give' | 'receive';
   fairness_threshold?: number;
+  // #250 — Specific Team mode: scope the sweep to this league-mate so every
+  // idea's counterparty (and its acquire side) is that team.
+  opponent_user_id?: string;
 }): Promise<AssetIdeasResponse> {
   const res = await api.post<any>('/api/trades/asset-ideas', body);
   const g = res?.groups ?? {};

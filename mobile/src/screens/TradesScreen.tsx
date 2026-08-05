@@ -806,6 +806,8 @@ export default function TradesScreen({ navigation, route }: any) {
       singlePin?.player.id,
       singlePin?.direction,
       effectiveFairness,
+      // #250 — team mode scopes the sweep to the picked league-mate.
+      scopedOpponent ?? null,
     ],
     queryFn: () =>
       fetchAssetIdeas({
@@ -813,6 +815,7 @@ export default function TradesScreen({ navigation, route }: any) {
         asset_id: singlePin!.player.id,
         direction: singlePin!.direction,
         fairness_threshold: effectiveFairness,
+        ...(scopedOpponent ? { opponent_user_id: scopedOpponent } : {}),
       }),
     enabled: !!leagueId && !!singlePin && !switching,
     staleTime: 60_000,
@@ -1592,10 +1595,15 @@ export default function TradesScreen({ navigation, route }: any) {
   }, [leagueUsersQuery.data]);
   const targetPickerPool = useMemo<CalcPlayer[]>(() => {
     if (!targetPickerOpen) return [];
+    // #250 — Specific Team mode: acquire options come ONLY from the scoped
+    // opponent's roster. Trade-away (the user's own players) is unaffected,
+    // and every other mode keeps the full leaguemate pool.
     const ids =
       targetDirection === 'trade_away'
         ? rosterByOwner.get(userId) ?? []
-        : [...ownerByPlayerId.keys()];
+        : scopedOpponent
+          ? rosterByOwner.get(scopedOpponent) ?? []
+          : [...ownerByPlayerId.keys()];
     return ids
       .map((id) => valueById.get(id))
       .filter((r): r is CalcValueRow => !!r)
@@ -1607,7 +1615,7 @@ export default function TradesScreen({ navigation, route }: any) {
         age: r.age ?? 0,
         base: r.value,
       }));
-  }, [targetPickerOpen, targetDirection, rosterByOwner, ownerByPlayerId, valueById, userId]);
+  }, [targetPickerOpen, targetDirection, rosterByOwner, ownerByPlayerId, valueById, userId, scopedOpponent]);
 
   // Any target change invalidates the current deck — the next "Find a
   // Trade" tap regenerates through the normal job flow (pinned jobs bypass

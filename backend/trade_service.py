@@ -2153,6 +2153,8 @@ class TradeService:
         raw_user_elo: dict[str, float] | None = None,
         untouchable_ids: set | None = None,
         not_interested_ids: set | None = None,
+        opponent_user_id: str | None = None,  # #250 Specific Team: scope the
+                                              # sweep to this one league-mate
     ) -> dict[str, list[dict]]:
         """Grouped trade ideas for ONE pinned asset (player or pick), the
         Dynasty-Trade-Factory "Smart Trade Finder" presentation: sweep every
@@ -2333,6 +2335,11 @@ class TradeService:
             opponents = sorted(
                 (m for m in league.members if m.user_id != user_id and m.roster),
                 key=lambda m: m.user_id)
+            # #250 Specific Team — only the targeted league-mate's roster
+            # may supply the return side.
+            if opponent_user_id:
+                opponents = [m for m in opponents
+                             if m.user_id == opponent_user_id]
             for member in opponents:
                 pool = _asset_sort(
                     p for p in set(member.roster)
@@ -2393,6 +2400,10 @@ class TradeService:
                  if m.user_id != user_id and asset_id in (m.roster or [])),
                 None)
             if owner is None:
+                return empty
+            # #250 Specific Team — a pin owned by anyone other than the
+            # targeted league-mate has no on-team acquire ideas.
+            if opponent_user_id and owner.user_id != opponent_user_id:
                 return empty
             give_pool = _asset_sort(
                 p for p in set(user_roster)
