@@ -9,6 +9,7 @@ import { Icon, Button, type IconName } from '../components/chalkline';
 import { getNextTrio, getRankings, getTiersStatus } from '../api/rankings';
 import { getLikedTrades, getAllMatches } from '../api/trades';
 import { useSession } from '../state/useSession';
+import { nextQuicksetPosition } from '../state/quicksetProgress';
 import { onboardingEnabled, useFlag } from '../state/useFeatureFlags';
 import { requestScrollToTop } from './scrollToTop';
 import { getOnboardingState } from '../state/useOnboardingState';
@@ -199,7 +200,29 @@ function RankStackNav() {
   // onboarding.rank_routing; item 9's Q1 ruling made the chooser
   // never-a-default, #122 ships it unconditionally). A stored pref always
   // wins — existing users' routing is untouched.
-  const initial: RankRoute = (pref && PREF_ROUTE[pref]) || 'QuickSetTiers';
+  //
+  // #244 — the no-pref default is now completion-aware: with all four
+  // positions quick-tiers complete (union of the persisted walk record +
+  // the cached /api/tiers/status snapshot, both hydrated pre-mount — see
+  // state/quicksetProgress.ts) the default lands on Trios instead; with
+  // partial progress, Quick Set opens AT the next unset position in ladder
+  // order (via initialParams below — every launch-routed or param-less
+  // entry inherits it; explicit `position` params from the Tiers header /
+  // guide prompts still win). Computed once at first mount, same contract
+  // as the pref itself: initialRouteName/initialParams are only honored
+  // then, so mid-session completion applies next launch — no reroute
+  // flash. An explicit pref (incl. 'quickset') keeps its surface.
+  const [launch] = useState(() => {
+    const next = nextQuicksetPosition();
+    const initialRoute: RankRoute =
+      pref && PREF_ROUTE[pref]
+        ? PREF_ROUTE[pref]
+        : next == null
+          ? 'Trios'
+          : 'QuickSetTiers';
+    return { initialRoute, quicksetStart: next ?? 'QB' };
+  });
+  const initial = launch.initialRoute;
   // PRD 01-02: with the flag on, every rank surface gets the "More ways to
   // rank" header control (opens the RankMenu sheet). Flag off keeps today's
   // options exactly (QuickSetTiers' RankHome link included).
@@ -263,6 +286,12 @@ function RankStackNav() {
       <RankStack.Screen
         name="QuickSetTiers"
         component={QuickSetTiersScreen}
+        // #244 — start the walk at the next unset position (ladder order).
+        // initialParams only fill MISSING keys: entries that pass an
+        // explicit `position` (Tiers header, guide next-position prompt)
+        // are untouched; launch routing and param-less entries (Rank menu,
+        // chooser) inherit it.
+        initialParams={{ position: launch.quicksetStart }}
         // Flag on (PRD 01-02): the shared More-ways control opens the
         // RankMenu sheet like every other rank surface (RankHome stays
         // reachable — the menu's rows and this header's back-fallbacks

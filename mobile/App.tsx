@@ -33,6 +33,10 @@ import {
   patchOnboardingState,
 } from './src/state/useOnboardingState';
 import { useFeedback } from './src/state/useFeedback';
+import {
+  hydrateQuicksetProgress,
+  refreshQuicksetProgress,
+} from './src/state/quicksetProgress';
 import { queryClient } from './src/state/queryClient';
 import { initSentry, wrap as sentryWrap } from './src/observability/sentry';
 import { getTierConfig } from './src/api/rankings';
@@ -89,6 +93,11 @@ function App() {
       bootstrap(),
       loadCachedFlags(),
       useOnboardingState.getState().hydrateOnboarding(),
+      // #244 — cached tiers-status snapshot (local AsyncStorage read,
+      // ms-fast like the other legs): the Rank stack's launch routing
+      // reads per-position quick-tiers completion at mount and must not
+      // race hydration.
+      hydrateQuicksetProgress(),
     ])
       .catch(() => { /* all legs are best-effort */ })
       .finally(() => {
@@ -97,7 +106,14 @@ function App() {
         // user+league. Server sessions are in-memory and die on every
         // deploy; without this, a restored token 401s on all calls and
         // the app looks broken until a fresh sign-in.
-        void useSession.getState().revalidateSession();
+        // #244 ride-along: once the session is live, refresh the cached
+        // tiers-status snapshot so the NEXT launch's Rank routing sees
+        // server truth (never a mid-session reroute). revalidateSession
+        // never throws; refresh is silently skipped without a session.
+        void useSession
+          .getState()
+          .revalidateSession()
+          .then(() => refreshQuicksetProgress());
         // Analytics (tracking plan v2): restore the offline event queue,
         // then record the cold open. Fired AFTER loadCachedFlags so the
         // analytics.client_events gate reads the hydrated flag map.
