@@ -1,0 +1,994 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Combined Rank Bars (#248)</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ──────────
+     Fonts fall back to Arial Narrow / Helvetica / Menlo — no external requests. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 64px;
+       display:flex;flex-direction:column;align-items:center;gap:20px}
+  .wrap{max-width:1320px;width:100%}
+
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:4px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:24px;line-height:1.15;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note h2{font-family:var(--cond);font-weight:600;font-size:16px;letter-spacing:.03em;
+           text-transform:uppercase;margin:0 0 8px;display:flex;align-items:center;gap:8px}
+  .note h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .note p,.note ul{margin:0 0 10px;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note p:last-child,.note ul:last-child{margin-bottom:0}
+  .note ul{padding-left:18px}
+  .note li{margin-bottom:5px}
+  .note strong{color:var(--chalk);font-weight:600}
+  .note code{font-family:var(--mono);font-size:12px;color:var(--chalk);background:var(--ink-2);
+             padding:1px 4px;border-radius:2px}
+
+  .warnbox{border:1px dashed var(--warn);background:rgba(245,158,11,.06);border-radius:8px;
+    padding:14px 18px;margin-top:4px}
+  .warnbox .lbl{display:flex;align-items:center;gap:7px;font:700 11px var(--ui);letter-spacing:.06em;
+    text-transform:uppercase;color:var(--warn);margin-bottom:6px}
+  .warnbox p{margin:0;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .warnbox strong{color:var(--chalk)}
+
+  /* ── global "copy all notes" bar ── */
+  .notesbar{display:flex;gap:14px;align-items:center;background:var(--ink-1);
+    border:1px solid var(--line);border-radius:8px;padding:10px 14px;
+    position:sticky;top:8px;z-index:5;width:100%}
+  .notesbar .txt{flex:1;font-size:12px;color:var(--chalk-dim);line-height:1.4}
+  .copybtn{background:var(--ice);color:var(--on-ice);border:0;border-radius:6px;padding:9px 14px;
+    font-family:var(--cond);font-size:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;
+    cursor:pointer;flex:0 0 auto}
+  .copybtn:hover{filter:brightness(1.08)}
+  .notecount{color:var(--chalk-faint);font-size:11px;flex:0 0 auto}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:28px 0 4px;width:100%}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .sec .fb{font-family:var(--mono);font-size:11px;color:var(--chalk-faint);text-transform:none;letter-spacing:0}
+
+  .row2{display:flex;flex-wrap:wrap;gap:22px;justify-content:center;align-items:flex-start;width:100%}
+  .slot{display:flex;flex-direction:column;gap:8px;align-items:stretch;width:393px}
+  .slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;
+    color:var(--ice);display:flex;align-items:center;gap:7px}
+  .slotlbl::before{content:"";width:3px;height:12px;background:var(--ice)}
+  .caption{font-size:12px;line-height:1.55;color:var(--chalk-dim)}
+  .caption b{color:var(--chalk)}
+
+  .hchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--chalk-dim);border:1px dashed var(--line-strong);border-radius:4px;padding:3px 9px;
+    align-self:flex-start}
+  .hchip.hl{color:var(--ice);border-color:var(--ice);background:rgba(86,217,236,.06)}
+  .hchip b{font-weight:700}
+
+  /* ── iPhone frame (393pt, 852-class device) ── */
+  .phone{width:393px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:22px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+  .status{height:32px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 18px;font-size:12px;color:var(--chalk-dim);font-family:var(--mono)}
+  .topbar{height:52px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 16px;border-bottom:1px solid var(--line)}
+  .wordmark{display:flex;align-items:center;gap:8px;font-family:var(--cond);font-weight:600;
+            font-size:17px;letter-spacing:.06em;text-transform:uppercase}
+  .wordmark::before{content:"";width:3px;height:14px;background:var(--ice)}
+
+  .scroll{position:relative;height:658px;overflow:hidden;padding:16px 16px 0}
+  .scroll::after{content:"";position:absolute;left:0;right:0;bottom:0;height:56px;
+    background:linear-gradient(transparent,var(--ink-0) 78%);pointer-events:none}
+
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--ink-1)}
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 10px;
+      color:var(--chalk-dim);font:600 10px var(--ui);text-transform:uppercase;letter-spacing:.04em}
+  .tb.on{color:var(--ice)}
+  svg.i{display:block;stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+
+  /* ── Basis / primary chip row (44pt) ── */
+  .basisrow{height:44px;display:flex;align-items:center;gap:8px;margin-bottom:12px}
+  .basischip{display:inline-flex;align-items:center;padding:0 12px;height:30px;border-radius:4px;
+    border:1px solid var(--line);font:600 12px var(--ui);color:var(--chalk-dim)}
+  .basischip.on{background:var(--ink-3);border-color:var(--line-strong);color:var(--chalk)}
+  .basischip.off{opacity:.45}
+
+  /* ── Chart card ── */
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px;display:flex;flex-direction:column;margin-bottom:12px}
+  .cardhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+  .cardhead .t{font:600 16px var(--ui)}
+  .cardhead .c{font:400 13px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .backlink{display:flex;align-items:center;gap:3px;font:600 13px var(--ui);color:var(--ice);
+    flex:0 0 auto;white-space:nowrap}
+  .headbtn{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+    color:var(--chalk-dim);flex:0 0 auto}
+  .updatedat{font:500 11px var(--mono);color:var(--chalk-faint);margin-top:4px}
+
+  .subsetrow{display:flex;margin-top:12px;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .subsetseg{flex:1;text-align:center;padding:8px 0;font:600 12px var(--ui);color:var(--chalk-dim);
+    min-height:34px;display:flex;align-items:center;justify-content:center}
+  .subsetseg.on{background:var(--ink-3);color:var(--chalk)}
+
+  .posfilter{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .pill{display:inline-flex;align-items:center;padding:6px 12px;border-radius:999px;border:1px solid;
+    font:600 12px var(--ui);letter-spacing:.02em}
+  .pill.all{border-color:var(--ice);color:var(--ice)}
+  .pill.all.on{background:var(--ice);color:var(--on-ice)}
+  .pill.qb{border-color:var(--qb);color:var(--qb)} .pill.qb.on{background:var(--qb);color:var(--ink-0)}
+  .pill.rb{border-color:var(--rb);color:var(--rb)} .pill.rb.on{background:var(--rb);color:var(--ink-0)}
+  .pill.wr{border-color:var(--wr);color:var(--wr)} .pill.wr.on{background:var(--wr);color:#04070C}
+  .pill.te{border-color:var(--te);color:var(--te)} .pill.te.on{background:var(--te);color:var(--ink-0)}
+
+  .hint{font:400 12px/1.4 var(--ui);color:var(--chalk-dim);margin-top:12px;margin-bottom:12px}
+  .hint.tight{margin-top:6px;margin-bottom:8px}
+  .filtercaption{display:flex;align-items:center;gap:8px;margin-top:10px;margin-bottom:10px;
+    padding:8px 10px;background:var(--ink-2);border:1px solid var(--line);border-radius:4px;
+    font:400 12px var(--ui);color:var(--chalk-dim)}
+  .filtercaption b{color:var(--chalk);font-weight:600}
+  .filtercaption svg{color:var(--chalk-faint);flex:0 0 auto}
+
+  /* ── V1: paired bars ── */
+  .chart{display:flex;align-items:flex-end;gap:5px;height:160px}
+  .col{flex:1;display:flex;flex-direction:column;align-items:stretch;height:100%;justify-content:flex-end}
+  .colwell{position:relative;height:160px;display:flex;flex-direction:column;justify-content:flex-end}
+  .colbar{width:100%;border-radius:3px 3px 0 0;overflow:hidden}
+  .colrank{align-self:center;margin-top:5px;min-width:18px;text-align:center;font:600 10px var(--mono);
+    color:var(--chalk-dim);border-radius:999px;padding:1px 4px}
+  .colrank.you{background:var(--ice);color:var(--on-ice)}
+  .colrank.focus{background:var(--chalk);color:var(--ink-0)}
+
+  .chart.paired{gap:6px}
+  .pairgroup{flex:1;display:flex;flex-direction:column;height:100%}
+  .pairbars{flex:1;display:flex;gap:2px;align-items:flex-end;min-height:0}
+  .subcol{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end}
+  .subbar{width:100%;border-radius:2px 2px 0 0;overflow:hidden}
+
+  /* ── V2: ghost tick + delta chips ── */
+  .constick{position:absolute;left:-2px;right:-2px;height:0;border-top:2px dashed var(--ice);z-index:2}
+  .constick::after{content:"";position:absolute;right:-1px;top:-3px;width:5px;height:5px;
+    border-radius:50%;background:var(--ice)}
+  .deltawrap{height:15px;display:flex;align-items:flex-end;justify-content:center;margin-bottom:3px}
+
+  /* ── shared: delta chips (both V2 + V3) ── */
+  .dchip{font:700 9px var(--mono);padding:1px 4px;border-radius:3px;display:inline-flex;
+    align-items:center;line-height:1.3;white-space:nowrap}
+  .dchip.up{color:var(--pos);background:rgba(34,197,94,.14)}
+  .dchip.down{color:var(--neg);background:rgba(239,68,68,.14)}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px}
+  .legend .li{display:flex;align-items:center;gap:5px;font:400 12px var(--ui);color:var(--chalk-dim)}
+  .legend .sw{width:9px;height:9px;border-radius:2px}
+  .legend .sw.muted{background:var(--line-strong);position:relative}
+  .legend .sw.tick{width:14px;height:2px;border-top:2px dashed var(--ice);background:none;border-radius:0}
+
+  /* ── Drill-in panel ── */
+  .drillsub{height:18px;font:500 12px var(--mono);color:var(--chalk-dim);margin-bottom:0}
+  .drillblock{margin-bottom:12px}
+
+  .grouphead{display:flex;align-items:center;justify-content:space-between;padding:8px 0;
+    min-height:38px}
+  .grouplabel{font:700 12px var(--ui);letter-spacing:.06em}
+  .groupmeta{font:500 11px var(--mono);color:var(--chalk-dim)}
+  .rankchip{border:1px solid;border-radius:3px;padding:1px 5px;font:600 10px var(--mono);margin-left:8px}
+  .rosterrow{display:flex;align-items:center;gap:8px;padding:8px 0;border-radius:4px}
+  .rosterrow .dot{width:3px;align-self:stretch;border-radius:2px;flex:0 0 auto}
+  .rosterrow .nm{font:600 13px var(--ui)}
+  .rosterrow .meta{font:400 11px var(--ui);color:var(--chalk-dim)}
+  .rosterrow .val{margin-left:auto;font:500 13px var(--mono);color:var(--chalk)}
+  .fadedstub{opacity:.4}
+
+  /* ── team-color option-toggle demo (V3) ── */
+  .tcpanel{background:var(--ink-2);border:1px dashed var(--warn);border-radius:6px;padding:12px}
+  .tclbl{display:flex;align-items:center;gap:7px;font:700 10px var(--ui);letter-spacing:.06em;
+    text-transform:uppercase;color:var(--warn);margin-bottom:8px}
+  .tcchart{display:flex;align-items:flex-end;gap:5px;height:110px}
+  .tccol{flex:1;display:flex;flex-direction:column;align-items:stretch;height:100%;justify-content:flex-end}
+  .tcbar{width:100%;border-radius:3px 3px 0 0}
+  .tcrank{align-self:center;margin-top:4px;font:600 9px var(--mono);color:var(--chalk-dim)}
+
+  /* ── reference-only compact charts ("today") ── */
+  .refwrap{display:flex;gap:20px;flex-wrap:wrap;justify-content:center;width:100%}
+  .refcard{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:14px 16px;
+    width:300px}
+  .refcard .rt{font:600 12px var(--ui);color:var(--chalk-dim);margin-bottom:2px}
+  .refcard .rc{font:400 11px var(--ui);color:var(--chalk-faint);margin-bottom:10px}
+  .refchart{display:flex;align-items:flex-end;gap:4px;height:80px}
+  .refcol{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%}
+  .refbar{width:100%;border-radius:2px 2px 0 0;overflow:hidden}
+  .refarrow{display:flex;align-items:center;justify-content:center;color:var(--chalk-faint);
+    flex:0 0 auto}
+
+  /* ── per-frame note box ── */
+  .notewrap{display:flex;flex-direction:column;gap:4px}
+  .notelbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;
+    letter-spacing:.06em;font-weight:600;color:var(--chalk-dim)}
+  .notelbl .dot{width:6px;height:6px;border-radius:50%;background:var(--warn);display:none}
+  .notewrap.noted .notelbl .dot{display:block}
+  .pagenote{width:100%;background:var(--ink-1);color:var(--chalk);border:1px solid var(--line);
+    border-radius:6px;padding:8px 10px;font-family:var(--ui);font-size:12.5px;min-height:48px;resize:vertical}
+  .pagenote::placeholder{color:var(--chalk-faint)}
+  .pagenote:focus{outline:none;border-color:var(--ice)}
+
+  .verdicttable{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  .verdicttable th{text-align:left;font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase;
+    color:var(--chalk-dim);padding:6px 8px;border-bottom:1px solid var(--line-strong)}
+  .verdicttable td{padding:8px 8px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top}
+  .verdicttable td:first-child{color:var(--chalk);font-weight:600;white-space:nowrap}
+  .verdicttable tr.rec td{background:rgba(86,217,236,.06)}
+  .verdicttable tr.rec td:first-child{color:var(--ice)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <h1>Combined rank bars — merge consensus + my board into one chart (#248)</h1>
+    <p><strong>Operator ask (LeagueRankings):</strong> <em>"Want to explore if there's a good way to just
+      display consensus and my board in one bar graph rather than two. Maybe a color per team."</em></p>
+    <p><strong>What's actually on screen today</strong> (verified against
+      <code>mobile/src/screens/LeagueSummaryScreen.tsx</code>): there aren't literally two charts side by
+      side. There's <strong>one</strong> vertical stacked-bar chart and a Consensus / My board <em>toggle</em>
+      (<code>basisRow</code>) above it. Picking a basis re-fires the query
+      (<code>queryKey: ['league-power-rankings', leagueId, basis]</code>) and the whole chart re-renders —
+      bars re-height, teams re-sort, the drill-in panel re-derives. So "two bar graphs" is really "one bar
+      graph you have to flip back and forth to compare" — the real ask is <strong>seeing both without
+      toggling</strong>. Every variant below assumes the frontend gains access to both bases in the same
+      payload (today's per-basis fetch would need to become a combined fetch or two parallel queries —
+      an engineering dependency, not solved here, flagged honestly rather than hand-waved).</p>
+    <p><strong>Position hexes are a data encoding, not a style choice</strong>
+      (<code>docs/cross-client-invariants.md</code> — QB orange/RB green/WR blue/TE purple, shared across
+      web/mobile/extension). "A color per team" as literally proposed would replace that encoding with an
+      arbitrary 12-hue team palette — losing the roster-shape read (how much of this team is QB vs WR) and
+      risking collisions with the position/tier palettes the design system explicitly forbids
+      (<code>docs/design/design-system.md</code> rule 9, "no new hues"). Three variants below keep the
+      position encoding and solve "one graph" a different way; V3 also shows the team-color idea rendered
+      out honestly as an explored-and-rejected option, not a recommendation.</p>
+    <p>All three reuse the app's own established "de-emphasize the other board" vocabulary — the exact
+      muted-gray palette (<code>GRAY_SEGMENT</code>: QB→<code>chalk.dim</code>, RB→<code>ink.lineStrong</code>,
+      WR→<code>chalk.faint</code>, TE→<code>ink.line</code>) the drill-in focus state already uses for
+      non-selected teams — instead of inventing a second hue system for "the other board."</p>
+  </div>
+
+  <div class="notesbar">
+    <div class="txt">Leave a note in any frame below — it persists in this browser (localStorage), not
+      the file. Use <b style="color:var(--chalk)">Copy all notes</b> to pull everything into one paste.</div>
+    <button class="copybtn" id="copyall">Copy all notes</button>
+    <div class="notecount" id="notecount"></div>
+  </div>
+
+  <!-- ═══════════════════════ TODAY, FOR REFERENCE ═══════════════════════ -->
+  <div class="sec">Today, for reference<span class="fb">basis TOGGLE — one chart, re-fetched per tap, not shown at once</span></div>
+  <div class="refwrap">
+    <div class="refcard">
+      <div class="rt">Toggle: Consensus</div>
+      <div class="rc">community values · sorted by consensus total</div>
+      <div class="refchart">
+        <div class="refcol"><div class="refbar" style="height:96%"><div style="height:22%;background:var(--qb)"></div><div style="height:30%;background:var(--rb)"></div><div style="height:28%;background:var(--wr)"></div><div style="height:20%;background:var(--te)"></div></div></div>
+        <div class="refcol"><div class="refbar" style="height:90%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div>
+        <div class="refcol"><div class="refbar" style="height:84%"><div style="height:15%;background:var(--qb)"></div><div style="height:28%;background:var(--rb)"></div><div style="height:40%;background:var(--wr)"></div><div style="height:17%;background:var(--te)"></div></div></div>
+        <div class="refcol"><div class="refbar" style="height:78%"><div style="height:30%;background:var(--qb)"></div><div style="height:20%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div>
+        <div class="refcol"><div class="refbar" style="height:74%"><div style="height:25%;background:var(--qb)"></div><div style="height:25%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div>
+        <div class="refcol"><div class="refbar" style="height:71%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div>
+      </div>
+    </div>
+    <div class="refarrow"><svg class="i" width="22" height="22" viewBox="0 0 20 20"><path d="M4 10h12M11 5l5 5-5 5"/></svg></div>
+    <div class="refcard">
+      <div class="rt">Toggle: My board</div>
+      <div class="rc">your values, consensus fallback · re-sorted</div>
+      <div class="refchart">
+        <div class="refcol"><div class="refbar" style="height:93%"><div style="height:30%;background:var(--qb)"></div><div style="height:20%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div>
+        <div class="refcol"><div class="refbar" style="height:89%"><div style="height:22%;background:var(--qb)"></div><div style="height:30%;background:var(--rb)"></div><div style="height:28%;background:var(--wr)"></div><div style="height:20%;background:var(--te)"></div></div></div>
+        <div class="refcol"><div class="refbar" style="height:80%"><div style="height:15%;background:var(--qb)"></div><div style="height:28%;background:var(--rb)"></div><div style="height:40%;background:var(--wr)"></div><div style="height:17%;background:var(--te)"></div></div></div>
+        <div class="refcol"><div class="refbar" style="height:77%"><div style="height:25%;background:var(--qb)"></div><div style="height:25%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div>
+        <div class="refcol"><div class="refbar" style="height:74%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div>
+        <div class="refcol"><div class="refbar" style="height:72%"><div style="height:15%;background:var(--qb)"></div><div style="height:28%;background:var(--rb)"></div><div style="height:40%;background:var(--wr)"></div><div style="height:17%;background:var(--te)"></div></div></div>
+      </div>
+    </div>
+  </div>
+  <p class="caption" style="text-align:center;max-width:760px">Same league, two full re-renders — different
+    bar heights AND a different team order (rebuild_randy — bar 2 on Consensus — drops to bar 6 on My
+    board). To compare "where does consensus put this team vs where do I put them" today, you toggle,
+    memorize a rank, toggle back. Not to scale — illustrative only.</p>
+
+  <!-- ═══════════════════════ V1 — PAIRED BARS ═══════════════════════ -->
+  <div class="sec">V1 — paired bars per team<span class="fb">solid = my board · muted-gray = consensus, GRAY_SEGMENT reused</span></div>
+  <div class="row2">
+
+    <!-- V1 Nominal -->
+    <div class="slot">
+      <div class="slotlbl">Nominal — 12 teams, sorted by My board</div>
+      <div class="hchip">Direct side-by-side per team · reuses today's exact filter row</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>100%</span></div>
+        <div class="topbar"><span class="wordmark">Trade Finder</span></div>
+        <div class="scroll">
+          <div class="basisrow">
+            <span class="basischip on">My board sorts</span>
+            <span class="basischip">Consensus sorts</span>
+            <span class="basischip off">Redraft (soon)</span>
+          </div>
+          <div class="card">
+            <div class="cardhead">
+              <div><div class="t">Dynasty Degenerates</div><div class="c">Dynasty · 1QB PPR — both boards</div></div>
+              <div class="headbtn"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M6 4l3 3-3 3M14 16l-3-3 3-3"/><path d="M4 7h9M16 13H7"/></svg></div>
+            </div>
+            <div class="updatedat">Updated 4m ago · pull to refresh</div>
+            <div class="subsetrow">
+              <span class="subsetseg on">All</span><span class="subsetseg">Starters</span><span class="subsetseg">Bench</span>
+            </div>
+            <div class="posfilter">
+              <span class="pill all on">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+              <span class="pill wr">WR</span><span class="pill te">TE</span>
+            </div>
+            <div class="hint">Left bar = your board (consensus fallback for unranked). Right bar = league
+              consensus. Sorted by whichever is toggled to "sorts" above.</div>
+            <div class="chart paired">
+              <!-- 1 you: pers93 profileC(30/20/25/25), cons78 same profile -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:93%"><div style="height:30%;background:var(--qb)"></div><div style="height:20%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:78%"><div style="height:30%;background:var(--chalk-dim)"></div><div style="height:20%;background:var(--line-strong)"></div><div style="height:25%;background:var(--chalk-faint)"></div><div style="height:25%;background:var(--line)"></div></div></div>
+              </div><div class="colrank you">1</div></div>
+              <!-- 2 dynasty_dan: pers89 profileA, cons96 -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:89%"><div style="height:22%;background:var(--qb)"></div><div style="height:30%;background:var(--rb)"></div><div style="height:28%;background:var(--wr)"></div><div style="height:20%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:96%"><div style="height:22%;background:var(--chalk-dim)"></div><div style="height:30%;background:var(--line-strong)"></div><div style="height:28%;background:var(--chalk-faint)"></div><div style="height:20%;background:var(--line)"></div></div></div>
+              </div><div class="colrank">2</div></div>
+              <!-- 3 win_now_wendy: pers80 profileD, cons84 -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:80%"><div style="height:15%;background:var(--qb)"></div><div style="height:28%;background:var(--rb)"></div><div style="height:40%;background:var(--wr)"></div><div style="height:17%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:84%"><div style="height:15%;background:var(--chalk-dim)"></div><div style="height:28%;background:var(--line-strong)"></div><div style="height:40%;background:var(--chalk-faint)"></div><div style="height:17%;background:var(--line)"></div></div></div>
+              </div><div class="colrank">3</div></div>
+              <!-- 4 keeper_kyle: pers77 profileE, cons74 -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:77%"><div style="height:25%;background:var(--qb)"></div><div style="height:25%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:74%"><div style="height:25%;background:var(--chalk-dim)"></div><div style="height:25%;background:var(--line-strong)"></div><div style="height:25%;background:var(--chalk-faint)"></div><div style="height:25%;background:var(--line)"></div></div></div>
+              </div><div class="colrank">4</div></div>
+              <!-- 5 sf_stacker: pers74 profileB, cons71 -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:74%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:71%"><div style="height:18%;background:var(--chalk-dim)"></div><div style="height:35%;background:var(--line-strong)"></div><div style="height:32%;background:var(--chalk-faint)"></div><div style="height:15%;background:var(--line)"></div></div></div>
+              </div><div class="colrank">5</div></div>
+              <!-- 6 hoard_the_picks: pers72 profileD, cons58 -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:72%"><div style="height:15%;background:var(--qb)"></div><div style="height:28%;background:var(--rb)"></div><div style="height:40%;background:var(--wr)"></div><div style="height:17%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:58%"><div style="height:15%;background:var(--chalk-dim)"></div><div style="height:28%;background:var(--line-strong)"></div><div style="height:40%;background:var(--chalk-faint)"></div><div style="height:17%;background:var(--line)"></div></div></div>
+              </div><div class="colrank">6</div></div>
+              <!-- 7 rebuild_randy FOCUS TEAM: pers71 profileB, cons90 -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:71%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:90%"><div style="height:18%;background:var(--chalk-dim)"></div><div style="height:35%;background:var(--line-strong)"></div><div style="height:32%;background:var(--chalk-faint)"></div><div style="height:15%;background:var(--line)"></div></div></div>
+              </div><div class="colrank">7</div></div>
+              <!-- 8 late_round_larry: pers65 profileC, cons63 -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:65%"><div style="height:30%;background:var(--qb)"></div><div style="height:20%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:63%"><div style="height:30%;background:var(--chalk-dim)"></div><div style="height:20%;background:var(--line-strong)"></div><div style="height:25%;background:var(--chalk-faint)"></div><div style="height:25%;background:var(--line)"></div></div></div>
+              </div><div class="colrank">8</div></div>
+              <!-- 9 rookie_zealot: pers61 profileA, cons49 -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:61%"><div style="height:22%;background:var(--qb)"></div><div style="height:30%;background:var(--rb)"></div><div style="height:28%;background:var(--wr)"></div><div style="height:20%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:49%"><div style="height:22%;background:var(--chalk-dim)"></div><div style="height:30%;background:var(--line-strong)"></div><div style="height:28%;background:var(--chalk-faint)"></div><div style="height:20%;background:var(--line)"></div></div></div>
+              </div><div class="colrank">9</div></div>
+              <!-- 10 tank_commander: pers46 profileA, cons68 -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:46%"><div style="height:22%;background:var(--qb)"></div><div style="height:30%;background:var(--rb)"></div><div style="height:28%;background:var(--wr)"></div><div style="height:20%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:68%"><div style="height:22%;background:var(--chalk-dim)"></div><div style="height:30%;background:var(--line-strong)"></div><div style="height:28%;background:var(--chalk-faint)"></div><div style="height:20%;background:var(--line)"></div></div></div>
+              </div><div class="colrank">10</div></div>
+              <!-- 11 vet_value_val: pers41 profileE, cons55 -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:41%"><div style="height:25%;background:var(--qb)"></div><div style="height:25%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:55%"><div style="height:25%;background:var(--chalk-dim)"></div><div style="height:25%;background:var(--line-strong)"></div><div style="height:25%;background:var(--chalk-faint)"></div><div style="height:25%;background:var(--line)"></div></div></div>
+              </div><div class="colrank">11</div></div>
+              <!-- 12 bench_warmer_bri: pers35 profileB, cons40 -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:35%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:40%"><div style="height:18%;background:var(--chalk-dim)"></div><div style="height:35%;background:var(--line-strong)"></div><div style="height:32%;background:var(--chalk-faint)"></div><div style="height:15%;background:var(--line)"></div></div></div>
+              </div><div class="colrank">12</div></div>
+            </div>
+            <div class="legend">
+              <span class="li"><span class="sw" style="background:var(--qb)"></span>QB</span>
+              <span class="li"><span class="sw" style="background:var(--rb)"></span>RB</span>
+              <span class="li"><span class="sw" style="background:var(--wr)"></span>WR</span>
+              <span class="li"><span class="sw" style="background:var(--te)"></span>TE</span>
+              <span class="li"><span class="sw" style="background:var(--chalk-dim)"></span>consensus (muted)</span>
+            </div>
+          </div>
+          <div class="drillsub">Tap any pair to drill in ↓</div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">24 sub-bars in a 361pt-wide card — each ~11px. The story is legible (you can see
+        <b>rebuild_randy</b>'s consensus bar towering over its my-board bar — a big consensus/personal gap)
+        but individual segment colors inside an 11px-wide bar are close to unreadable; this variant answers
+        "compare exact heights" better than "read the position makeup of either board."</div>
+      <div class="notewrap">
+        <div class="notelbl">Notes — V1 nominal<span class="dot"></span></div>
+        <textarea class="pagenote" data-key="V1 nominal — paired bars, 12 teams" placeholder="Notes on this frame…"></textarea>
+      </div>
+    </div>
+
+    <!-- V1 Focused -->
+    <div class="slot">
+      <div class="slotlbl">Focused — rebuild_randy drilled in</div>
+      <div class="hchip hl">#237/#243 pattern reused: controls collapse to a caption, chart stays visible</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>100%</span></div>
+        <div class="topbar"><span class="wordmark">Trade Finder</span></div>
+        <div class="scroll">
+          <div class="basisrow">
+            <span class="basischip on">My board sorts</span>
+            <span class="basischip">Consensus sorts</span>
+            <span class="basischip off">Redraft (soon)</span>
+          </div>
+          <div class="card">
+            <div class="cardhead">
+              <div><div class="t">rebuild_randy</div><div class="c">My board rank 7/12 · Consensus rank 2/12</div></div>
+              <div class="backlink"><svg class="i" width="13" height="13" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>All teams</div>
+            </div>
+            <div class="filtercaption">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M3 5h14M6 10h8M9 15h2"/></svg>
+              Filtered by <b>All</b> — change filters below
+            </div>
+            <div class="hint tight">Left = your board. Right = consensus. Every non-focused team is grayed
+              on both bars.</div>
+            <div class="chart paired">
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:93%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:78%"><div style="height:100%;background:var(--line-strong)"></div></div></div>
+              </div><div class="colrank">1</div></div>
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:89%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:96%"><div style="height:100%;background:var(--line-strong)"></div></div></div>
+              </div><div class="colrank">2</div></div>
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:80%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:84%"><div style="height:100%;background:var(--line-strong)"></div></div></div>
+              </div><div class="colrank">3</div></div>
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:77%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:74%"><div style="height:100%;background:var(--line-strong)"></div></div></div>
+              </div><div class="colrank">4</div></div>
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:74%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:71%"><div style="height:100%;background:var(--line-strong)"></div></div></div>
+              </div><div class="colrank">5</div></div>
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:72%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:58%"><div style="height:100%;background:var(--line-strong)"></div></div></div>
+              </div><div class="colrank">6</div></div>
+              <!-- FOCUSED: rebuild_randy keeps full color treatment (same as nominal) -->
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:71%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:90%"><div style="height:18%;background:var(--chalk-dim)"></div><div style="height:35%;background:var(--line-strong)"></div><div style="height:32%;background:var(--chalk-faint)"></div><div style="height:15%;background:var(--line)"></div></div></div>
+              </div><div class="colrank focus">7</div></div>
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:65%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:63%"><div style="height:100%;background:var(--line-strong)"></div></div></div>
+              </div><div class="colrank">8</div></div>
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:61%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:49%"><div style="height:100%;background:var(--line-strong)"></div></div></div>
+              </div><div class="colrank">9</div></div>
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:46%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:68%"><div style="height:100%;background:var(--line-strong)"></div></div></div>
+              </div><div class="colrank">10</div></div>
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:41%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:55%"><div style="height:100%;background:var(--line-strong)"></div></div></div>
+              </div><div class="colrank">11</div></div>
+              <div class="pairgroup"><div class="pairbars">
+                <div class="subcol"><div class="subbar" style="height:35%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div>
+                <div class="subcol"><div class="subbar" style="height:40%"><div style="height:100%;background:var(--line-strong)"></div></div></div>
+              </div><div class="colrank">12</div></div>
+            </div>
+          </div>
+          <div class="drillsub">#7 of 12 (my board) · #2 of 12 (consensus) · 2,470 value</div>
+          <div class="drillblock" style="margin-top:8px">
+            <div class="subsetrow">
+              <span class="subsetseg on">All</span><span class="subsetseg">Starters</span><span class="subsetseg">Bench</span>
+            </div>
+            <div class="posfilter">
+              <span class="pill all on">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+              <span class="pill wr">WR</span><span class="pill te">TE</span>
+            </div>
+          </div>
+          <div class="grouphead">
+            <span class="grouplabel" style="color:var(--rb)">RB</span>
+            <span class="groupmeta">3 · 910 <span class="rankchip" style="border-color:var(--pos);color:var(--pos)">2/12</span></span>
+          </div>
+          <div class="rosterrow">
+            <span class="dot" style="background:var(--rb)"></span>
+            <div><div class="nm">Bijan Robinson</div><div class="meta">RB · ATL · 23 yrs</div></div>
+            <span class="val">640</span>
+          </div>
+          <div class="grouphead fadedstub">
+            <span class="grouplabel" style="color:var(--wr)">WR</span>
+            <span class="groupmeta">5 · 820</span>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Focus rule extends cleanly from today's drill-in: every non-selected team's
+        <i>both</i> bars go to the same muted-gray fill already used for unfocused teams; the focused
+        team's consensus bar was <i>already</i> muted in the nominal state, so nothing new is needed there
+        — only its "my board" bar needs to flip from muted back to full color. Card head now states both
+        ranks (7th on my board, 2nd on consensus) instead of one.</div>
+      <div class="notewrap">
+        <div class="notelbl">Notes — V1 focused<span class="dot"></span></div>
+        <textarea class="pagenote" data-key="V1 focused — paired bars drill-in" placeholder="Notes on this frame…"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════ V2 — GHOST TICK + DELTA ARROWS ═══════════════════════ -->
+  <div class="sec">V2 — my-board bar + consensus ghost-tick + delta arrows<span class="fb">one true bar per team; ice tick reuses the "ice tick" vocabulary from docs/design/design-system.md</span></div>
+  <div class="row2">
+
+    <!-- V2 Nominal -->
+    <div class="slot">
+      <div class="slotlbl">Nominal — 12 teams, sorted by My board</div>
+      <div class="hchip">One bar per team · dashed ice line = where consensus puts them</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>100%</span></div>
+        <div class="topbar"><span class="wordmark">Trade Finder</span></div>
+        <div class="scroll">
+          <div class="basisrow">
+            <span class="basischip on">My board sorts</span>
+            <span class="basischip">Consensus sorts</span>
+            <span class="basischip off">Redraft (soon)</span>
+          </div>
+          <div class="card">
+            <div class="cardhead">
+              <div><div class="t">Dynasty Degenerates</div><div class="c">Dynasty · 1QB PPR — both boards</div></div>
+              <div class="headbtn"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M6 4l3 3-3 3M14 16l-3-3 3-3"/><path d="M4 7h9M16 13H7"/></svg></div>
+            </div>
+            <div class="updatedat">Updated 4m ago · pull to refresh</div>
+            <div class="subsetrow">
+              <span class="subsetseg on">All</span><span class="subsetseg">Starters</span><span class="subsetseg">Bench</span>
+            </div>
+            <div class="posfilter">
+              <span class="pill all on">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+              <span class="pill wr">WR</span><span class="pill te">TE</span>
+            </div>
+            <div class="hint">Bar height = your board. Dashed line = consensus. Arrows mark a 2+ rank swing.</div>
+            <div class="chart">
+              <!-- 1 you: pers93, cons78→rank4, delta+3 -->
+              <div class="col"><div class="deltawrap"><span class="dchip up">▲3</span></div><div class="colwell"><div class="constick" style="bottom:78%"></div><div class="colbar" style="height:93%"><div style="height:30%;background:var(--qb)"></div><div style="height:20%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div><div class="colrank you">1</div></div>
+              <!-- 2 dynasty_dan: pers89, cons96, delta-1 no chip -->
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="constick" style="bottom:96%"></div><div class="colbar" style="height:89%"><div style="height:22%;background:var(--qb)"></div><div style="height:30%;background:var(--rb)"></div><div style="height:28%;background:var(--wr)"></div><div style="height:20%;background:var(--te)"></div></div></div><div class="colrank">2</div></div>
+              <!-- 3 win_now_wendy: pers80, cons84, delta0 -->
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="constick" style="bottom:84%"></div><div class="colbar" style="height:80%"><div style="height:15%;background:var(--qb)"></div><div style="height:28%;background:var(--rb)"></div><div style="height:40%;background:var(--wr)"></div><div style="height:17%;background:var(--te)"></div></div></div><div class="colrank">3</div></div>
+              <!-- 4 keeper_kyle: pers77, cons74, delta+1 -->
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="constick" style="bottom:74%"></div><div class="colbar" style="height:77%"><div style="height:25%;background:var(--qb)"></div><div style="height:25%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div><div class="colrank">4</div></div>
+              <!-- 5 sf_stacker: pers74, cons71, delta+1 -->
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="constick" style="bottom:71%"></div><div class="colbar" style="height:74%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div><div class="colrank">5</div></div>
+              <!-- 6 hoard_the_picks: pers72, cons58, delta+3 -->
+              <div class="col"><div class="deltawrap"><span class="dchip up">▲3</span></div><div class="colwell"><div class="constick" style="bottom:58%"></div><div class="colbar" style="height:72%"><div style="height:15%;background:var(--qb)"></div><div style="height:28%;background:var(--rb)"></div><div style="height:40%;background:var(--wr)"></div><div style="height:17%;background:var(--te)"></div></div></div><div class="colrank">6</div></div>
+              <!-- 7 rebuild_randy FOCUS: pers71, cons90, delta-5 -->
+              <div class="col"><div class="deltawrap"><span class="dchip down">▼5</span></div><div class="colwell"><div class="constick" style="bottom:90%"></div><div class="colbar" style="height:71%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div><div class="colrank">7</div></div>
+              <!-- 8 late_round_larry: pers65, cons63, delta0 -->
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="constick" style="bottom:63%"></div><div class="colbar" style="height:65%"><div style="height:30%;background:var(--qb)"></div><div style="height:20%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div><div class="colrank">8</div></div>
+              <!-- 9 rookie_zealot: pers61, cons49, delta+2 -->
+              <div class="col"><div class="deltawrap"><span class="dchip up">▲2</span></div><div class="colwell"><div class="constick" style="bottom:49%"></div><div class="colbar" style="height:61%"><div style="height:22%;background:var(--qb)"></div><div style="height:30%;background:var(--rb)"></div><div style="height:28%;background:var(--wr)"></div><div style="height:20%;background:var(--te)"></div></div></div><div class="colrank">9</div></div>
+              <!-- 10 tank_commander: pers46, cons68, delta-3 -->
+              <div class="col"><div class="deltawrap"><span class="dchip down">▼3</span></div><div class="colwell"><div class="constick" style="bottom:68%"></div><div class="colbar" style="height:46%"><div style="height:22%;background:var(--qb)"></div><div style="height:30%;background:var(--rb)"></div><div style="height:28%;background:var(--wr)"></div><div style="height:20%;background:var(--te)"></div></div></div><div class="colrank">10</div></div>
+              <!-- 11 vet_value_val: pers41, cons55, delta-1 -->
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="constick" style="bottom:55%"></div><div class="colbar" style="height:41%"><div style="height:25%;background:var(--qb)"></div><div style="height:25%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div><div class="colrank">11</div></div>
+              <!-- 12 bench_warmer_bri: pers35, cons40, delta0 -->
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="constick" style="bottom:40%"></div><div class="colbar" style="height:35%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div><div class="colrank">12</div></div>
+            </div>
+            <div class="legend">
+              <span class="li"><span class="sw" style="background:var(--qb)"></span>QB</span>
+              <span class="li"><span class="sw" style="background:var(--rb)"></span>RB</span>
+              <span class="li"><span class="sw" style="background:var(--wr)"></span>WR</span>
+              <span class="li"><span class="sw" style="background:var(--te)"></span>TE</span>
+              <span class="li"><span class="sw tick"></span>consensus rank</span>
+            </div>
+          </div>
+          <div class="drillsub">Tap any bar to drill in ↓</div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Full-width bars (same 25px columns as today), position segments fully legible.
+        The tick needs BOTH bases sharing one max scale so a team whose consensus value is much higher than
+        their my-board value doesn't push the tick off the top of the chart — <b>rebuild_randy</b> (tick at
+        90%, bar at 71%) is the edge case shown here and it still reads fine. Delta chips only render for
+        |Δrank| ≥ 2 to avoid 12 chips of noise.</div>
+      <div class="notewrap">
+        <div class="notelbl">Notes — V2 nominal<span class="dot"></span></div>
+        <textarea class="pagenote" data-key="V2 nominal — ghost tick, 12 teams" placeholder="Notes on this frame…"></textarea>
+      </div>
+    </div>
+
+    <!-- V2 Focused -->
+    <div class="slot">
+      <div class="slotlbl">Focused — rebuild_randy drilled in</div>
+      <div class="hchip hl">Non-focused ticks + chips hide — only the focused team keeps its overlay</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>100%</span></div>
+        <div class="topbar"><span class="wordmark">Trade Finder</span></div>
+        <div class="scroll">
+          <div class="basisrow">
+            <span class="basischip on">My board sorts</span>
+            <span class="basischip">Consensus sorts</span>
+            <span class="basischip off">Redraft (soon)</span>
+          </div>
+          <div class="card">
+            <div class="cardhead">
+              <div><div class="t">rebuild_randy</div><div class="c">My board rank 7/12 · Consensus rank 2/12</div></div>
+              <div class="backlink"><svg class="i" width="13" height="13" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>All teams</div>
+            </div>
+            <div class="filtercaption">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M3 5h14M6 10h8M9 15h2"/></svg>
+              Filtered by <b>All</b> — change filters below
+            </div>
+            <div class="hint tight">▼5 vs consensus — the dashed line shows where the league has this
+              roster, well above its my-board bar.</div>
+            <div class="chart">
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:93%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">1</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:89%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">2</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:80%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">3</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:77%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">4</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:74%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">5</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:72%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">6</div></div>
+              <!-- FOCUSED -->
+              <div class="col"><div class="deltawrap"><span class="dchip down">▼5</span></div><div class="colwell"><div class="constick" style="bottom:90%"></div><div class="colbar" style="height:71%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div><div class="colrank focus">7</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:65%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">8</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:61%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">9</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:46%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">10</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:41%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">11</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:35%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">12</div></div>
+            </div>
+          </div>
+          <div class="drillsub">#7 of 12 (my board) · #2 of 12 (consensus) · 2,470 value</div>
+          <div class="drillblock" style="margin-top:8px">
+            <div class="subsetrow">
+              <span class="subsetseg on">All</span><span class="subsetseg">Starters</span><span class="subsetseg">Bench</span>
+            </div>
+            <div class="posfilter">
+              <span class="pill all on">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+              <span class="pill wr">WR</span><span class="pill te">TE</span>
+            </div>
+          </div>
+          <div class="grouphead">
+            <span class="grouplabel" style="color:var(--rb)">RB</span>
+            <span class="groupmeta">3 · 910 <span class="rankchip" style="border-color:var(--pos);color:var(--pos)">2/12</span></span>
+          </div>
+          <div class="rosterrow">
+            <span class="dot" style="background:var(--rb)"></span>
+            <div><div class="nm">Bijan Robinson</div><div class="meta">RB · ATL · 23 yrs</div></div>
+            <span class="val">640</span>
+          </div>
+          <div class="grouphead fadedstub">
+            <span class="grouplabel" style="color:var(--wr)">WR</span>
+            <span class="groupmeta">5 · 820</span>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Decluttered on focus: every non-selected tick/chip disappears along with its
+        segment colors (matches today's drill-in gray rule), so the one remaining tick + chip pair reads
+        immediately as "this team, this gap" instead of competing with 11 other dashed lines.</div>
+      <div class="notewrap">
+        <div class="notelbl">Notes — V2 focused<span class="dot"></span></div>
+        <textarea class="pagenote" data-key="V2 focused — ghost tick drill-in" placeholder="Notes on this frame…"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════ V3 — DELTA CHIP + TEAM-COLOR OPTION ═══════════════════════ -->
+  <div class="sec">V3 — today's bar + signed delta chip<span class="fb">smallest diff from today's chart · "color per team" shown as an explicit, rejected option below</span></div>
+  <div class="row2">
+
+    <!-- V3 Nominal -->
+    <div class="slot">
+      <div class="slotlbl">Nominal — 12 teams, position segments unchanged</div>
+      <div class="hchip">Cheapest build: one small chip, no new geometry</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>100%</span></div>
+        <div class="topbar"><span class="wordmark">Trade Finder</span></div>
+        <div class="scroll">
+          <div class="basisrow">
+            <span class="basischip on">My board sorts</span>
+            <span class="basischip">Consensus sorts</span>
+            <span class="basischip off">Redraft (soon)</span>
+          </div>
+          <div class="card">
+            <div class="cardhead">
+              <div><div class="t">Dynasty Degenerates</div><div class="c">Dynasty · 1QB PPR — both boards</div></div>
+              <div class="headbtn"><svg class="i" width="18" height="18" viewBox="0 0 20 20"><path d="M6 4l3 3-3 3M14 16l-3-3 3-3"/><path d="M4 7h9M16 13H7"/></svg></div>
+            </div>
+            <div class="updatedat">Updated 4m ago · pull to refresh</div>
+            <div class="subsetrow">
+              <span class="subsetseg on">All</span><span class="subsetseg">Starters</span><span class="subsetseg">Bench</span>
+            </div>
+            <div class="posfilter">
+              <span class="pill all on">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+              <span class="pill wr">WR</span><span class="pill te">TE</span>
+            </div>
+            <div class="hint">Chart is exactly today's — bar height + segments unchanged. Chips mark a 2+
+              rank swing vs consensus (no direction/size beyond the chip itself).</div>
+            <div class="chart">
+              <div class="col"><div class="deltawrap"><span class="dchip up">▲3</span></div><div class="colwell"><div class="colbar" style="height:93%"><div style="height:30%;background:var(--qb)"></div><div style="height:20%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div><div class="colrank you">1</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:89%"><div style="height:22%;background:var(--qb)"></div><div style="height:30%;background:var(--rb)"></div><div style="height:28%;background:var(--wr)"></div><div style="height:20%;background:var(--te)"></div></div></div><div class="colrank">2</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:80%"><div style="height:15%;background:var(--qb)"></div><div style="height:28%;background:var(--rb)"></div><div style="height:40%;background:var(--wr)"></div><div style="height:17%;background:var(--te)"></div></div></div><div class="colrank">3</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:77%"><div style="height:25%;background:var(--qb)"></div><div style="height:25%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div><div class="colrank">4</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:74%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div><div class="colrank">5</div></div>
+              <div class="col"><div class="deltawrap"><span class="dchip up">▲3</span></div><div class="colwell"><div class="colbar" style="height:72%"><div style="height:15%;background:var(--qb)"></div><div style="height:28%;background:var(--rb)"></div><div style="height:40%;background:var(--wr)"></div><div style="height:17%;background:var(--te)"></div></div></div><div class="colrank">6</div></div>
+              <div class="col"><div class="deltawrap"><span class="dchip down">▼5</span></div><div class="colwell"><div class="colbar" style="height:71%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div><div class="colrank">7</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:65%"><div style="height:30%;background:var(--qb)"></div><div style="height:20%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div><div class="colrank">8</div></div>
+              <div class="col"><div class="deltawrap"><span class="dchip up">▲2</span></div><div class="colwell"><div class="colbar" style="height:61%"><div style="height:22%;background:var(--qb)"></div><div style="height:30%;background:var(--rb)"></div><div style="height:28%;background:var(--wr)"></div><div style="height:20%;background:var(--te)"></div></div></div><div class="colrank">9</div></div>
+              <div class="col"><div class="deltawrap"><span class="dchip down">▼3</span></div><div class="colwell"><div class="colbar" style="height:46%"><div style="height:22%;background:var(--qb)"></div><div style="height:30%;background:var(--rb)"></div><div style="height:28%;background:var(--wr)"></div><div style="height:20%;background:var(--te)"></div></div></div><div class="colrank">10</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:41%"><div style="height:25%;background:var(--qb)"></div><div style="height:25%;background:var(--rb)"></div><div style="height:25%;background:var(--wr)"></div><div style="height:25%;background:var(--te)"></div></div></div><div class="colrank">11</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:35%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div><div class="colrank">12</div></div>
+            </div>
+            <div class="legend">
+              <span class="li"><span class="sw" style="background:var(--qb)"></span>QB</span>
+              <span class="li"><span class="sw" style="background:var(--rb)"></span>RB</span>
+              <span class="li"><span class="sw" style="background:var(--wr)"></span>WR</span>
+              <span class="li"><span class="sw" style="background:var(--te)"></span>TE</span>
+              <span class="li"><span class="dchip up" style="margin-right:0">▲N</span>vs consensus (2+ ranks)</span>
+            </div>
+          </div>
+          <div class="drillsub">Tap any bar to drill in ↓</div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Zero change to the chart's geometry — this is <code>BarColumn</code> as it ships
+        today plus one <code>Text</code> chip. Cheapest of the three to build. Trade-off: you learn <i>that</i>
+        rebuild_randy dropped 5 ranks, not <i>where</i> consensus would have placed the bar — no visual
+        anchor for "how far," only a number.</div>
+      <div class="notewrap">
+        <div class="notelbl">Notes — V3 nominal<span class="dot"></span></div>
+        <textarea class="pagenote" data-key="V3 nominal — delta chip, 12 teams" placeholder="Notes on this frame…"></textarea>
+      </div>
+    </div>
+
+    <!-- V3 Focused -->
+    <div class="slot">
+      <div class="slotlbl">Focused — rebuild_randy drilled in</div>
+      <div class="hchip hl">Same #237/#243 collapse; only the focused chip survives</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>100%</span></div>
+        <div class="topbar"><span class="wordmark">Trade Finder</span></div>
+        <div class="scroll">
+          <div class="basisrow">
+            <span class="basischip on">My board sorts</span>
+            <span class="basischip">Consensus sorts</span>
+            <span class="basischip off">Redraft (soon)</span>
+          </div>
+          <div class="card">
+            <div class="cardhead">
+              <div><div class="t">rebuild_randy</div><div class="c">My board rank 7/12 · Consensus rank 2/12</div></div>
+              <div class="backlink"><svg class="i" width="13" height="13" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg>All teams</div>
+            </div>
+            <div class="filtercaption">
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M3 5h14M6 10h8M9 15h2"/></svg>
+              Filtered by <b>All</b> — change filters below
+            </div>
+            <div class="hint tight">▼5 ranks vs consensus — biggest mover in the league this view.</div>
+            <div class="chart">
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:93%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">1</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:89%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">2</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:80%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">3</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:77%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">4</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:74%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">5</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:72%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">6</div></div>
+              <div class="col"><div class="deltawrap"><span class="dchip down">▼5</span></div><div class="colwell"><div class="colbar" style="height:71%"><div style="height:18%;background:var(--qb)"></div><div style="height:35%;background:var(--rb)"></div><div style="height:32%;background:var(--wr)"></div><div style="height:15%;background:var(--te)"></div></div></div><div class="colrank focus">7</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:65%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">8</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:61%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">9</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:46%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">10</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:41%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">11</div></div>
+              <div class="col"><div class="deltawrap"></div><div class="colwell"><div class="colbar" style="height:35%"><div style="height:100%;background:var(--chalk-dim)"></div></div></div><div class="colrank">12</div></div>
+            </div>
+          </div>
+          <div class="drillsub">#7 of 12 (my board) · #2 of 12 (consensus) · 2,470 value</div>
+          <div class="drillblock" style="margin-top:8px">
+            <div class="subsetrow">
+              <span class="subsetseg on">All</span><span class="subsetseg">Starters</span><span class="subsetseg">Bench</span>
+            </div>
+            <div class="posfilter">
+              <span class="pill all on">All</span><span class="pill qb">QB</span><span class="pill rb">RB</span>
+              <span class="pill wr">WR</span><span class="pill te">TE</span>
+            </div>
+          </div>
+          <div class="grouphead">
+            <span class="grouplabel" style="color:var(--rb)">RB</span>
+            <span class="groupmeta">3 · 910 <span class="rankchip" style="border-color:var(--pos);color:var(--pos)">2/12</span></span>
+          </div>
+          <div class="rosterrow">
+            <span class="dot" style="background:var(--rb)"></span>
+            <div><div class="nm">Bijan Robinson</div><div class="meta">RB · ATL · 23 yrs</div></div>
+            <span class="val">640</span>
+          </div>
+          <div class="grouphead fadedstub">
+            <span class="grouplabel" style="color:var(--wr)">WR</span>
+            <span class="groupmeta">5 · 820</span>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 16v-5h3v5zM8.5 16V7h3v9zM14 16v-7h3v7z"/></svg>Rank</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M4 6h9m0 0-3-3m3 3-3 3M16 14H7m0 0 3-3m-3 3 3 3"/></svg>Trades</div>
+          <div class="tb"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M7 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M13 7a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg>Matches</div>
+          <div class="tb on"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c3 3 3 11 0 14"/></svg>League</div>
+        </div>
+      </div>
+      <div class="caption">Identical decluttering rule as V2: unfocused chips hide, focused chip stays.
+        Because the chart itself never changed shape, this focused state is byte-for-byte what
+        <code>LeagueSummaryScreen.tsx</code> already renders today, plus the one chip.</div>
+      <div class="notewrap">
+        <div class="notelbl">Notes — V3 focused<span class="dot"></span></div>
+        <textarea class="pagenote" data-key="V3 focused — delta chip drill-in" placeholder="Notes on this frame…"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════ V3 OPTION TOGGLE — TEAM COLOR ═══════════════════════ -->
+  <div class="sec">V3 option toggle — "a color per team," rendered honestly<span class="fb">explored per the operator's literal suggestion — NOT a recommendation</span></div>
+  <div class="row2" style="justify-content:flex-start">
+    <div class="slot" style="width:100%;max-width:820px">
+      <div class="tcpanel">
+        <div class="tclbl"><svg class="i" width="13" height="13" viewBox="0 0 20 20"><path d="M10 2l1.8 5.6H18l-4.6 3.4L15 17l-5-3.6L5 17l1.6-6L2 7.6h6.2z"/></svg>Illustrative only — not a sanctioned palette</div>
+        <div class="tcchart">
+          <div class="tccol"><div class="tcbar" style="height:93%;background:#5EC8F2"></div><div class="tcrank">1</div></div>
+          <div class="tccol"><div class="tcbar" style="height:89%;background:#F2A65E"></div><div class="tcrank">2</div></div>
+          <div class="tccol"><div class="tcbar" style="height:80%;background:#8CE05E"></div><div class="tcrank">3</div></div>
+          <div class="tccol"><div class="tcbar" style="height:77%;background:#E05E9E"></div><div class="tcrank">4</div></div>
+          <div class="tccol"><div class="tcbar" style="height:74%;background:#C6A15E"></div><div class="tcrank">5</div></div>
+          <div class="tccol"><div class="tcbar" style="height:72%;background:#5EE0C6"></div><div class="tcrank">6</div></div>
+          <div class="tccol"><div class="tcbar" style="height:71%;background:#B15EE0"></div><div class="tcrank">7</div></div>
+          <div class="tccol"><div class="tcbar" style="height:65%;background:#E0D65E"></div><div class="tcrank">8</div></div>
+          <div class="tccol"><div class="tcbar" style="height:61%;background:#5E7CE0"></div><div class="tcrank">9</div></div>
+          <div class="tccol"><div class="tcbar" style="height:46%;background:#E0785E"></div><div class="tcrank">10</div></div>
+          <div class="tccol"><div class="tcbar" style="height:41%;background:#7AE05E"></div><div class="tcrank">11</div></div>
+          <div class="tccol"><div class="tcbar" style="height:35%;background:#D65EE0"></div><div class="tcrank">12</div></div>
+        </div>
+      </div>
+      <div class="warnbox" style="margin-top:10px">
+        <div class="lbl"><svg class="i" width="13" height="13" viewBox="0 0 20 20"><path d="M10 3 2 17h16L10 3z"/><path d="M10 8v4M10 14.5v.1"/></svg>Why this isn't the recommendation</div>
+        <p>Solid team-hue bars are what the operator literally described, so it's rendered here rather than
+          argued away in the abstract. Three problems surface immediately once it's actually drawn: (1) it
+          needs <strong>12 brand-new hues</strong> for a 12-team league (more for larger leagues) — the
+          design system's rule 9 is "no new hues," and <code>docs/cross-client-invariants.md</code> only
+          reserves four position hues + eight tier hues, nothing for teams; (2) at 12 teams several of these
+          arbitrary hues sit close enough in hue/lightness to be confused at a glance (bar 3 green vs bar 11
+          green above), which is exactly the kind of ambiguity the tier-vs-position "bright vs deep" hue
+          rule exists to prevent; (3) it <strong>throws away the roster-shape read</strong> — you can no
+          longer see that a team is QB-heavy or WR-thin from the bar alone, which is information every other
+          variant keeps. If distinguishing "your" bar from the field is the actual goal, the ice-accent
+          "you" ring already shipped on every variant above does that with zero new hues.</p>
+      </div>
+      <div class="notewrap" style="margin-top:10px">
+        <div class="notelbl">Notes — team-color option<span class="dot"></span></div>
+        <textarea class="pagenote" data-key="V3 option — team color toggle" placeholder="Notes on this frame…"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════ RECOMMENDATION ═══════════════════════ -->
+  <div class="sec">Recommendation</div>
+  <div class="note" style="width:100%">
+    <h2>V2 (my-board bar + consensus ghost-tick + delta arrows)</h2>
+    <p>V2 is the one variant that's actually a single bar per team — the literal "one bar graph" the
+      operator asked for — while keeping both signals on screen at once: the bar answers "how good is this
+      roster on my board," the tick answers "where would consensus put it," and the chip answers "is that
+      gap worth noticing." It's also the only variant that fully preserves the position-color encoding
+      <i>and</i> adds new information without adding new hues (the tick reuses the "ice tick" vocabulary
+      already blessed for progress fills and focus rings in <code>docs/design/design-system.md</code>).</p>
+    <p>V3 (delta chip only) is the pragmatic fallback: if the tick-overlay math (sharing one max scale
+      across both bases, positioning an absolute line per column) is judged too much for a first pass, ship
+      V3 first — it's the same chart that exists today plus one small chip, near-zero geometry risk, and
+      upgradeable to V2 later without touching anything else. V1 (paired bars) is the most literal "both
+      boards, side by side" reading and is worth keeping in the back pocket as an opt-in "compare mode,"
+      but shouldn't be the default: 24 sub-bars in a 393pt-wide card is legibly a stretch at 12 teams (it
+      gets worse in 14-16 team leagues, which this league format supports) and reading the position makeup
+      of an 11px-wide segment stack is a real ask of the user's eyes.</p>
+    <p>The team-per-color toggle explored above is explicitly <strong>not</strong> recommended: it answers
+      "which bar is which team" (something the numeral + roster-panel tap already answer) at the cost of
+      "what does this roster look like" (position makeup) and a new, currently-nonexistent 12+-hue palette
+      that <code>docs/cross-client-invariants.md</code> doesn't reserve for this and
+      <code>docs/design/design-system.md</code> rule 9 forbids introducing without a documented addition.</p>
+    <table class="verdicttable">
+      <tr><th>Variant</th><th>Readability at 12 teams</th><th>Filter-row interaction</th><th>Position-color invariant</th></tr>
+      <tr class="rec"><td>V2 — ghost tick + arrows</td><td>Best — one full-width bar per team, segments stay legible; tick needs a shared max scale to avoid clipping</td><td>Unchanged — subset/pills apply to both bases together, same as today's shared filter state</td><td>Fully preserved — bar segments untouched; tick is a new ice-accent overlay, not a new hue</td></tr>
+      <tr><td>V1 — paired bars</td><td>Weakest — 24 ~11px sub-bars; exact-value comparison is easy, position makeup inside either bar is not</td><td>Unchanged — one filter row governs both boards' values</td><td>Preserved on the primary bar; consensus bar reuses the existing GRAY_SEGMENT palette, not new hues</td><td></td></tr>
+      <tr><td>V3 — delta chip</td><td>Good — identical to today's chart, chip adds one more label to read per bar</td><td>Unchanged</td><td>Fully preserved — zero change to bar rendering</td></tr>
+      <tr><td>V3 option — team color</td><td>Worst at scale — several hues read as near-duplicates by 12 teams; loses roster-shape entirely</td><td>Unchanged</td><td><strong>Broken</strong> — replaces the position encoding with an unreserved, unsanctioned per-team palette</td></tr>
+    </table>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  var KEY = 'ftf-polish-lab-2026-08-248-combined-rank-bars-notes';
+  var notes = {};
+  try { notes = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { notes = {}; }
+
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.pagenote'));
+  var notecount = document.getElementById('notecount');
+
+  function refresh(){
+    var n = 0;
+    boxes.forEach(function(b){
+      var has = !!(notes[b.dataset.key] || '').trim();
+      b.closest('.notewrap').classList.toggle('noted', has);
+      if (has) n++;
+    });
+    notecount.textContent = n ? (n + ' of ' + boxes.length + ' noted') : 'no notes yet';
+  }
+
+  boxes.forEach(function(b){
+    b.value = notes[b.dataset.key] || '';
+    b.addEventListener('input', function(){
+      notes[b.dataset.key] = b.value;
+      try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {}
+      refresh();
+    });
+  });
+
+  document.getElementById('copyall').addEventListener('click', async function(){
+    var lines = [];
+    boxes.forEach(function(b){
+      var t = (notes[b.dataset.key] || '').trim();
+      if (t) lines.push('## ' + b.dataset.key + '\n' + t);
+    });
+    var text = lines.length ? lines.join('\n\n') : '(no notes)';
+    var ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand('copy'); } catch (e2) {}
+      ta.remove();
+    }
+    var btn = document.getElementById('copyall');
+    var orig = btn.textContent;
+    btn.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(function(){ btn.textContent = orig; }, 1500);
+  });
+
+  refresh();
+})();
+</script>
+
+</body>
+</html>

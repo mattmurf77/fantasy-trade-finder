@@ -1,0 +1,1326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Acquire Landing: Guided-First? (#246)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --first1:#2dd4bf;
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--f-ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 64px;gap:20px;min-height:100vh}
+
+.note{max-width:1240px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13px;line-height:1.55;color:var(--dim)}
+.note h1{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.02em;font-size:22px;color:var(--chalk);margin-bottom:4px}
+.note h2{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:13px;color:var(--ice);margin:12px 0 4px}
+.note b{color:var(--chalk)}
+.note code{font-family:var(--f-mono);font-size:12px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+.note ul{margin:4px 0 0 18px} .note li{margin:3px 0}
+.q{border-left:3px solid var(--flare);padding-left:10px;margin:8px 0;font-style:italic;color:var(--chalk)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:11px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend .sw{width:10px;height:10px;border-radius:2px;flex:0 0 auto}
+
+/* ── global "copy all notes" bar ── */
+.notesbar{max-width:1240px;width:100%;display:flex;gap:14px;align-items:center;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:10px 14px;position:sticky;top:8px;z-index:20}
+.notesbar .txt{flex:1;font-size:12px;color:var(--dim);line-height:1.4}
+.copybtn{background:var(--ice);color:var(--onIce);border:0;border-radius:6px;padding:9px 14px;
+  font-family:var(--f-display);font-size:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;cursor:pointer;flex:0 0 auto}
+.copybtn:hover{filter:brightness(1.08)}
+.notecount{color:var(--faint);font-size:11px;flex:0 0 auto}
+
+.rowlbl{max-width:1240px;width:100%;font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:16px;color:var(--chalk);display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap}
+.rowlbl::before{content:"";width:3px;height:15px;background:var(--ice)}
+.rowlbl .fb{font-family:var(--f-mono);font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0}
+
+.lab{max-width:1240px;width:100%;display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}
+.side{display:flex;flex-direction:column;gap:10px;align-items:center;width:393px}
+.slotlbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--ice);display:flex;align-items:center;gap:7px;align-self:flex-start;line-height:1.4}
+.slotlbl::before{content:"";width:3px;height:12px;background:var(--ice);flex:0 0 auto}
+.slotlbl.cur{color:var(--dim)}
+.slotlbl.cur::before{background:var(--lineStrong)}
+.caption{font-size:12px;line-height:1.55;color:var(--dim);text-align:left;align-self:flex-start}
+.caption b{color:var(--chalk)}
+.caption code{font-family:var(--f-mono);font-size:11px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+
+/* taps-to-value meter */
+.taps{width:100%;display:flex;align-items:center;gap:8px;background:var(--ink2);border:1px solid var(--line);border-radius:6px;padding:7px 10px;font-family:var(--f-mono);font-size:11px;color:var(--dim)}
+.taps .k{color:var(--faint);text-transform:uppercase;letter-spacing:.06em;font-size:9.5px}
+.taps .v{margin-left:auto;color:var(--warn);font-weight:600}
+.taps.good .v{color:var(--pos)}
+.taps.bad .v{color:var(--flare)}
+
+/* ── iPhone 15/16-class frame: 393×852pt ── */
+.phone{position:relative;width:393px;height:852px;display:flex;flex-direction:column;
+  background:var(--ink0);border:1px solid var(--lineStrong);border-radius:22px;overflow:hidden;
+  box-shadow:0 12px 32px rgba(0,0,0,.55)}
+.status{flex:0 0 59px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 24px 8px;font:12px var(--f-mono);color:var(--dim)}
+.topbar{flex:0 0 52px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--line)}
+.tbLeague{display:flex;flex-direction:column;gap:1px;min-width:0}
+.tbLeague .lbl{font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);font-weight:600}
+.tbLeague .nm{display:flex;align-items:center;gap:5px;font-size:14px;font-weight:600;white-space:nowrap}
+.tbIcons{display:flex;gap:10px;flex:0 0 auto}
+svg.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square;stroke-linejoin:miter}
+
+.content{flex:0 0 658px;position:relative;overflow:hidden;background:var(--ink0)}
+.scroll{display:flex;flex-direction:column;gap:8px;padding:12px 12px 24px}
+
+.tabbar{flex:0 0 49px;display:flex;border-top:1px solid var(--line);background:var(--ink0)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0 0;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.tab svg{width:20px;height:20px}
+.tab.on{color:var(--ice)}
+.bottominset{flex:0 0 34px;display:flex;align-items:center;justify-content:center;background:var(--ink0)}
+.bottominset .bar{width:134px;height:5px;border-radius:3px;background:var(--lineStrong)}
+
+/* ── fold line at the true 658pt budget edge ── */
+.foldline{position:absolute;left:0;right:0;bottom:0;border-top:2px dashed var(--flare);z-index:9;pointer-events:none}
+.foldline .flabel{position:absolute;right:6px;bottom:3px;font-family:var(--f-mono);font-size:10.5px;color:var(--flare);
+  background:rgba(12,14,17,.94);padding:2px 6px;border:1px solid var(--flare);border-radius:2px;white-space:nowrap}
+.foldline.fits{border-top-color:var(--pos)}
+.foldline.fits .flabel{color:var(--pos);border-color:var(--pos)}
+
+/* per-block chips, injected by JS */
+.blkchip{position:absolute;right:4px;font-family:var(--f-mono);font-size:9.5px;line-height:1.3;
+  background:rgba(12,14,17,.92);border:1px solid var(--ice);color:var(--ice);padding:1px 5px;border-radius:2px;
+  white-space:nowrap;z-index:8;pointer-events:none}
+.blkchip.over{border-color:var(--flare);color:var(--flare)}
+.blkchip.hero{border-color:var(--pos);color:var(--pos)}
+
+/* static callout pins */
+.ann{position:absolute;z-index:10;font-family:var(--f-mono);font-size:10px;line-height:1.45;
+  background:rgba(12,14,17,.95);border:1px solid var(--ice);color:var(--ice);border-radius:2px;padding:2px 6px;max-width:196px}
+.ann.f{border-color:var(--flare);color:var(--flare)}
+.ann.w{border-color:var(--warn);color:var(--warn)}
+
+/* ═══ Chalkline page constructions ═══ */
+.pageTitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:22px;line-height:26px}
+.ticklbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.ticklbl::before{content:"";width:3px;height:12px;background:var(--ice);flex:0 0 auto}
+.ticklbl .sub{font-family:var(--f-ui);text-transform:none;letter-spacing:0;font-weight:400;color:var(--faint);font-size:11px}
+
+/* Trade DNA collapsed panel (#212 v3 + #218 density) */
+.dna{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:10px;display:flex;flex-direction:column;gap:6px}
+.dnaTop{display:flex;align-items:center;justify-content:space-between}
+.dnaTop .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.editBtn{font-family:var(--f-display);font-size:12px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;
+  border-radius:6px;padding:5px 11px;border:1px solid var(--lineStrong);color:var(--chalk);background:var(--ink2)}
+.outChip{display:flex;align-items:center;gap:6px;font-size:13px}
+.outChip .tk{width:3px;height:12px;background:var(--flare);flex:0 0 auto}
+.outChip .t{font-weight:600}
+.outChip .b{color:var(--dim)}
+.sumLine{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px}
+.sumKey{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--faint)}
+.sumMini{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:4px;background:var(--ink2);padding:2px 6px}
+.sumDot{width:6px;height:6px;border-radius:2px;flex:0 0 auto}
+.sumMiniText{font-size:12px;font-weight:600}
+.sumSep{color:var(--faint)}
+.untChip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:4px;background:var(--ink2);padding:2px 6px;font-size:11.5px}
+
+/* mode launcher cards (hub) */
+.card{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:9px 12px}
+.cardIcon{width:34px;height:34px;border-radius:8px;background:var(--ink2);display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:var(--ice)}
+.cardTitleRow{display:flex;align-items:center;gap:8px}
+.cardTitle{font-size:16px;font-weight:600;line-height:22px}
+.recTag{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--flare)}
+.cardBody{font-size:13px;line-height:18px;color:var(--dim);margin-top:1px}
+.card>.arr{margin-left:auto;color:var(--faint);flex:0 0 auto}
+
+/* explore/FA row */
+.xrow{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+.xrow .m{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.xrow .t{font:600 16px/22px var(--f-ui)}
+.xrow .s{font:400 13px/18px var(--f-ui);color:var(--dim)}
+
+/* mode strip (V1/V3) — TradeFinderModeBar, restyled */
+.modestrip{display:flex;flex-direction:column;gap:6px}
+.chiprow{display:flex;gap:8px;align-items:center}
+.chip{padding:7px 13px;border-radius:999px;border:1px solid var(--line);background:var(--ink1);
+  font-size:12.5px;font-weight:600;color:var(--dim);min-height:34px;display:flex;align-items:center}
+.chip.on{border-color:var(--ice);background:var(--ink2);color:var(--chalk)}
+.chip.more{color:var(--dim);border-style:dashed}
+.modeTitleRow{display:flex;align-items:baseline;gap:8px}
+.modeTitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:19px;line-height:22px}
+.modeHint{font-size:12px;color:var(--dim);line-height:16px}
+.moreways{margin-left:auto;font-size:12.5px;font-weight:600;color:var(--ice);flex:0 0 auto}
+
+/* bias receipt */
+.receipt{display:flex;align-items:center;gap:8px;background:var(--ink2);border:1px solid var(--line);border-radius:6px;padding:9px 10px}
+.receipt .tk{width:3px;height:12px;background:var(--flare);flex:0 0 auto}
+.receipt .txt{flex:1;font-size:12px;color:var(--dim)}
+.receipt .txt b{color:var(--chalk);font-weight:600}
+.receipt .chg{font-size:12px;font-weight:600;color:var(--ice)}
+
+/* pin summary one-liner (#243 V1) */
+.pinRowCard{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:2px 12px}
+.pinSummary{display:flex;align-items:center;gap:8px;min-height:44px}
+.pinSummary .dot{width:8px;height:8px;border-radius:2px;background:var(--wr);flex:0 0 auto}
+.pinSummary .txt{flex:1;font-size:13px;color:var(--chalk)}
+.pinSummary .txt b{font-weight:600}
+.pinSummary .edit{font-size:13px;font-weight:600;color:var(--ice)}
+
+/* controls card (guided mode, non-pin) */
+.ctlcard{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:12px;display:flex;flex-direction:column;gap:12px}
+.ctlrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ctlval{font-size:15px;font-weight:600;margin-top:2px}
+.ctlhint{font-size:12px;color:var(--dim);margin-top:2px}
+.fairTrack{width:36px;height:4px;border-radius:2px;background:var(--ink3);position:relative;flex:0 0 auto}
+.fairThumb{position:absolute;top:-6px;left:20px;width:16px;height:16px;border-radius:2px;background:var(--ice)}
+.btnPrimary{height:44px;border-radius:4px;background:var(--ice);color:var(--onIce);display:flex;align-items:center;justify-content:center;font:600 14px var(--f-ui)}
+.btnGhost{height:40px;border-radius:4px;border:1px solid var(--lineStrong);color:var(--chalk);display:flex;align-items:center;justify-content:center;font:600 13px var(--f-ui)}
+
+/* trade card / featured window */
+.tcardWrap{display:flex;flex-direction:column;gap:6px}
+.tcard{background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.tcardHead{font-size:15px;font-weight:600}
+.split{display:flex;gap:10px}
+.split .vrule{width:1px;background:var(--line)}
+.tside{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.prow{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-left:3px solid var(--rb);border-radius:8px;background:var(--ink2);padding:7px 8px}
+.prow .nm{font-size:13px;font-weight:600;line-height:1.25}
+.prow .meta{font-size:11px;color:var(--dim);font-family:var(--f-mono)}
+.vbar{display:flex;flex-direction:column;gap:5px}
+.vbar .who{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:17px;color:var(--pos)}
+.vbar .why{font-size:12px;color:var(--ice);font-weight:600}
+.dtrack{position:relative;height:12px;background:var(--ink3);border-radius:2px;margin-top:2px}
+.dtrack .cen{position:absolute;left:50%;top:-4px;width:1px;height:20px;background:var(--lineStrong)}
+.dtrack .fillr{position:absolute;height:12px;background:var(--pos);border-radius:2px;left:50%;width:14%}
+.scalerow{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:11px;color:var(--faint)}
+.swipeRow{display:flex;gap:10px;justify-content:center;margin-top:2px}
+.swipeBtn{width:52px;height:44px;border-radius:6px;border:1px solid var(--lineStrong);display:flex;align-items:center;justify-content:center}
+.swipeBtn.no{color:var(--neg)} .swipeBtn.yes{color:var(--pos)}
+
+/* idea list rows */
+.ideasPanel{border:1px solid var(--line);border-radius:8px;background:var(--ink1);padding:12px;display:flex;flex-direction:column;gap:8px}
+.ideaRow{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:6px;padding:8px 10px;background:var(--ink2)}
+.ideaRow.inwin{border-color:var(--ice);opacity:.6}
+.ideaRow .nm{flex:1;font-size:12.5px;min-width:0}
+.ideaRow .nm .give{color:var(--dim)}
+.ideaRow .nm .arrow{color:var(--faint);margin:0 3px}
+.ideaRow .diff{font-family:var(--f-mono);font-size:11px;color:var(--pos);flex:0 0 auto}
+.ideaRow .tag{font-size:9px;color:var(--ice);border:1px solid var(--ice);border-radius:2px;padding:1px 4px;flex:0 0 auto}
+
+/* bottom sheet overlay inside a phone frame */
+.scrim{position:absolute;inset:0;background:rgba(7,9,12,.66);z-index:6}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:7;background:var(--ink1);border-top:1px solid var(--lineStrong);
+  border-radius:8px 8px 0 0;padding:14px 14px 20px;display:flex;flex-direction:column;gap:10px;
+  box-shadow:0 -12px 30px rgba(0,0,0,.55)}
+.sheetGrab{width:36px;height:4px;border-radius:2px;background:var(--lineStrong);align-self:center;margin-bottom:2px}
+.sheetTitle{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:18px}
+.sheetRow{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
+.sheetRow:last-of-type{border-bottom:0}
+.sheetRow .m{flex:1;min-width:0}
+.sheetRow .t{font:600 15px/20px var(--f-ui)}
+.sheetRow .s{font:400 12px/16px var(--f-ui);color:var(--dim);margin-top:1px}
+.sheetIcon{width:30px;height:30px;border-radius:6px;background:var(--ink2);display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:var(--ice)}
+
+/* DNA editor bits (sheet form) */
+.outGrid{display:flex;gap:8px;flex-wrap:wrap}
+.outCard{flex:1 1 46%;border:1px solid var(--line);border-radius:6px;background:var(--ink2);padding:8px 10px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.outCard.sel{border-color:var(--ice);background:var(--ink3)}
+.outCardTitle{font-size:13.5px;font-weight:600}
+.outCardBias{font-size:11px;color:var(--dim)}
+.toggleRow{display:flex;gap:6px}
+.tg{flex:1;border:1px solid var(--lineStrong);border-radius:6px;padding:7px 0;text-align:center;font-size:12.5px;font-weight:600;color:var(--chalk);background:var(--ink2)}
+.tg .tdot{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:4px;vertical-align:middle}
+.tg.on{color:var(--onIce);border-color:transparent}
+.dnaGroupHdr{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--dim)}
+.dnaGroupHdr .ms{text-transform:none;letter-spacing:0;color:var(--faint);font-weight:400}
+
+/* state-requirements box (V3) */
+.statebox{width:393px;background:var(--ink1);border:1px solid var(--warn);border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.6;color:var(--dim)}
+.statebox h3{font-family:var(--f-display);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:14px;color:var(--warn);margin-bottom:6px}
+.statebox code{font-family:var(--f-mono);font-size:11px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+.statebox ul{margin:4px 0 0 16px}
+.statebox li{margin:4px 0}
+
+/* per-frame note box */
+.notewrap{width:100%;display:flex;flex-direction:column;gap:4px}
+.notelbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;color:var(--dim)}
+.notelbl .dot{width:6px;height:6px;border-radius:50%;background:var(--warn);display:none}
+.notewrap.noted .notelbl .dot{display:block}
+.pagenote{width:100%;background:var(--ink1);color:var(--chalk);border:1px solid var(--line);border-radius:6px;
+  padding:8px 10px;font-family:var(--f-ui);font-size:12.5px;min-height:48px;resize:vertical}
+.pagenote::placeholder{color:var(--faint)}
+.pagenote:focus{outline:none;border-color:var(--ice)}
+
+.rationale{max-width:1240px;width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 20px}
+.rationale h2{font-family:var(--f-display);font-weight:600;font-size:18px;letter-spacing:.03em;text-transform:uppercase;margin:0 0 8px;display:flex;align-items:center;gap:8px;color:var(--chalk)}
+.rationale h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+.rationale h3{font-family:var(--f-display);font-weight:600;font-size:14px;letter-spacing:.03em;text-transform:uppercase;margin:14px 0 4px;color:var(--ice)}
+.rationale ul{margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--dim)}
+.rationale li{margin-bottom:6px}
+.rationale p{font-size:13px;line-height:1.65;color:var(--dim);margin:6px 0}
+.rationale strong{color:var(--chalk)}
+.rationale code{font-family:var(--f-mono);font-size:12px;color:var(--chalk);background:var(--ink2);padding:1px 4px;border-radius:2px}
+.rationale table{width:100%;border-collapse:collapse;margin:10px 0;font-size:12.5px}
+.rationale th,.rationale td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+.rationale th{color:var(--chalk);background:var(--ink2);font-family:var(--f-display);text-transform:uppercase;letter-spacing:.03em;font-size:13px}
+.rationale td{color:var(--dim)}
+.rationale td b{color:var(--chalk)}
+.pick{border-color:var(--pos) !important}
+.rationale .verdict{background:var(--ink2);border:1px solid var(--pos);border-radius:6px;padding:12px 14px;margin:10px 0;font-size:13px;line-height:1.65;color:var(--chalk)}
+.rationale .verdict b{color:var(--pos)}
+</style>
+</head>
+<body>
+
+<div class="note">
+  <h1>Acquire landing — does the hub page earn its place? (#246)</h1>
+  <p><b>Operator question, verbatim:</b></p>
+  <p class="q">"I'm wondering whether this page even makes sense or whether we should just land the user in the guided flow by default with ways to navigate to the other trade (and FA) pages."</p>
+
+  <h2>What this lab is designed against</h2>
+  <p>Not today's <code>TradeFinderHubScreen</code> in isolation — against the <b>#245 future</b>, where the tab is renamed
+     <b>Acquire</b> and the hub grows a <b>TRADE</b> section (the four mode cards) plus a <b>FREE AGENCY</b> section
+     (one row, <code>finder-hub.card.free-agents</code> → root-stack <code>FreeAgents</code>; the same destination the
+     League tab's Explore tile and the deck's own <code>trades.explore.free-agents</code> row already reach). #245 is a
+     presentation-level rename — <code>tab.trades</code> and the route name <code>Trades</code> are unchanged, only the
+     label and the hub's in-page title ("Find a Trade" → "Acquire"). Frame A1 is that page, as shipped.</p>
+  <p>Two related operator signals inform the read: <b>#211</b> — "the specific player trade page is better than the current
+     find a trade page" (a vote for the focused surfaces over the launcher) — and the whole <b>#243</b> scroll audit, whose
+     top lever was making the newest focused surface (single-pin) start showing its trade above the fold. Both point the
+     same way: value lives on the mode surfaces, not on the chooser.</p>
+
+  <h2>Method</h2>
+  <p>Real 393×852pt frames; usable content viewport <b>658pt</b> (852 − 59 top inset − 52 TopBar − 49 tab bar − 34 bottom
+     inset), same arithmetic as the #218 hub pass and the #243 audit. Fold lines and per-block pt chips are
+     <b>measured live by JS from this file's own DOM</b>, not hand-typed. Each frame also carries a hand-derived
+     <b>taps-to-first-trade</b> meter — the metric this question actually turns on. The green-bordered chip marks the
+     first block on the screen that contains an <i>actual trade</i>; the hub has none, which is the whole argument.</p>
+  <div class="legend">
+    <span><span class="sw" style="background:var(--pos);border:1px solid var(--pos)"></span>first real trade content on the screen</span>
+    <span><span class="sw" style="background:var(--ice);border:1px solid var(--ice)"></span>block height · running total from the top of the content area</span>
+    <span><span class="sw" style="background:var(--flare);border:1px solid var(--flare)"></span>below the 658pt fold / cost callout</span>
+    <span><span class="sw" style="background:var(--warn);border:1px solid var(--warn)"></span>new state or new behavior this variant requires</span>
+  </div>
+</div>
+
+<div class="notesbar">
+  <div class="txt">Leave a note in any frame below — it persists in this browser (localStorage), not the file. Use <b style="color:var(--chalk)">Copy all notes</b> to pull everything into one paste.</div>
+  <button class="copybtn" id="copyall">Copy all notes</button>
+  <div class="notecount" id="notecount"></div>
+</div>
+
+<!-- ═══════════════════════════ ROW A — CURRENT (#245 future) ═══════════════════════════ -->
+<div class="rowlbl">Current, as #245 will ship it — tab lands on the hub<span class="fb">A1 = what you see; A2 = what one more tap gets you</span></div>
+<div class="lab">
+
+  <!-- A1 -->
+  <div class="side">
+    <div class="slotlbl cur">A1 — Acquire hub (TRADE + FREE AGENCY sections)</div>
+    <div class="phone" id="phoneA1">
+      <div class="ann f" style="top:120px;left:8px;max-width:150px">nothing on this<br>screen is a trade</div>
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens SF <svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content">
+        <div class="scroll">
+
+          <div class="pageTitle" data-blk="Page title">Acquire</div>
+
+          <div class="dna" data-blk="Trade DNA panel (collapsed, #212 v3)">
+            <div class="dnaTop"><span class="lbl">Your Trade DNA</span><span class="editBtn">Edit</span></div>
+            <div class="outChip"><span class="tk"></span><span class="t">Contending</span><span class="b">&nbsp;· balanced moves</span></div>
+            <div class="sumLine">
+              <span class="sumKey">Chasing</span>
+              <span class="sumMini"><span class="sumDot" style="background:var(--wr)"></span><span class="sumMiniText">WR</span></span>
+              <span class="sumMini"><span class="sumDot" style="background:var(--te)"></span><span class="sumMiniText">TE</span></span>
+              <span class="sumSep">—</span>
+              <span class="sumKey">Shopping</span>
+              <span class="sumMini"><span class="sumDot" style="background:var(--qb)"></span><span class="sumMiniText">QB</span></span>
+            </div>
+            <div class="sumLine">
+              <span class="sumKey">Untouchables</span>
+              <span class="untChip"><span class="sumDot" style="background:var(--rb)"></span>A Jeanty</span>
+              <span class="untChip"><span class="sumDot" style="background:var(--wr)"></span>J Chase</span>
+            </div>
+          </div>
+
+          <div class="ticklbl" data-blk="TRADE section label (#245)">Trade</div>
+
+          <div class="card" data-blk="Mode card — Fully Guided">
+            <div class="cardIcon"><svg class="ic" width="20" height="20" viewBox="0 0 22 22"><path d="M3 16l2-9 4 4 2-7 2 7 4-4 2 9zM3 16h16v2H3z"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Fully Guided</span><span class="recTag">recommended</span></div>
+              <div class="cardBody">We read your roster &amp; league and walk you to the best deals.</div>
+            </div>
+            <svg class="ic arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+          </div>
+
+          <div class="card" data-blk="Mode card — Specific Team">
+            <div class="cardIcon"><svg class="ic" width="20" height="20" viewBox="0 0 22 22"><path d="M8 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M14 9a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Specific Team</span></div>
+              <div class="cardBody">Target one league-mate and see only mutual-gain deals.</div>
+            </div>
+            <svg class="ic arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+          </div>
+
+          <div class="card" data-blk="Mode card — Specific Player">
+            <div class="cardIcon"><svg class="ic" width="20" height="20" viewBox="0 0 22 22"><path d="M14 4h4v4M18 4l-6 6M8 18H4v-4M4 18l6-6"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Specific Player</span></div>
+              <div class="cardBody">1 to trade for · 0 to trade away</div>
+            </div>
+            <svg class="ic arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+          </div>
+
+          <div class="card" data-blk="Mode card — Manual Calculator">
+            <div class="cardIcon"><svg class="ic" width="20" height="20" viewBox="0 0 22 22"><path d="M4 8h12M13 5l3 3-3 3M18 15H6M9 12l-3 3 3 3"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Manual Calculator</span></div>
+              <div class="cardBody">Hand-build any trade, get the dual-board fairness verdict.</div>
+            </div>
+            <svg class="ic arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+          </div>
+
+          <div class="ticklbl" data-blk="FREE AGENCY section label (#245)">Free Agency</div>
+          <div class="xrow" data-blk="FA finder row (#245)">
+            <div class="m"><div class="t">Free agents</div><div class="s">Best available players in this league</div></div>
+            <svg class="ic" width="16" height="16" viewBox="0 0 16 16" style="stroke:var(--dim)"><path d="M6 3l5 5-5 5"/></svg>
+          </div>
+
+        </div>
+        <div class="foldline"><span class="flabel"></span></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+        <div class="tab on"><svg class="ic" viewBox="0 0 22 22"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Acquire</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+      </div>
+      <div class="bottominset"><div class="bar"></div></div>
+    </div>
+    <div class="taps bad"><span class="k">Tab tap → first trade visible</span><span class="v">2 taps · 2 screens</span></div>
+    <div class="caption">The page still <b>fits</b>, but only just — the measured chips say ~638pt against the 658pt
+      budget, <b>20pt spare</b>. (#218's status doc quotes 491pt; that figure assumes one-line card bodies, and at real
+      393pt width three of the four wrap to two lines, so a real device is tighter than the nominal math — then #245's
+      FA section spends most of what's left.) Fit isn't the interesting part though. The problem is that a whole screen
+      of the app's primary tab contains <b>zero trades</b>: a preferences summary the user rarely edits, four
+      descriptions of things they could do, and one link. Every visit pays a screen to re-choose what they chose last time.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — A1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="A1 — Current Acquire hub (#245 future)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- A2 -->
+  <div class="side">
+    <div class="slotlbl cur">A2 — what tap #2 gets you (guided deck, returning user)</div>
+    <div class="phone" id="phoneA2">
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens SF <svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content">
+        <div class="scroll">
+
+          <div class="modestrip" data-blk="TradeFinderModeBar (chevron + chips + title + hint)">
+            <span style="font-size:12px;font-weight:600;color:var(--ice)">&lsaquo; Hub</span>
+            <div class="chiprow">
+              <span class="chip on">Guided</span><span class="chip">Team</span><span class="chip">Player</span><span class="chip">Calc</span>
+            </div>
+            <div class="modeTitle">Fully Guided</div>
+            <div class="modeHint">We read your roster &amp; league and walk you to the best deals.</div>
+          </div>
+
+          <div class="receipt" data-blk="OutlookBiasReceipt (#231)">
+            <span class="tk"></span>
+            <span class="txt">Leaning <b>balanced</b> — you're <b>Contending</b>.</span>
+            <span class="chg">Change</span>
+          </div>
+
+          <div class="ctlcard" data-blk="Controls Card (guided mode — full)">
+            <div class="ctlrow">
+              <div style="flex:1"><div class="ticklbl">Outlook</div><div class="ctlval">Contend</div></div>
+              <div class="editBtn">Edit</div>
+            </div>
+            <div class="ctlrow">
+              <div style="flex:1"><div class="ticklbl">Trade fairness</div><div class="ctlhint">Recommend balanced trades</div></div>
+              <div class="fairTrack"><div class="fairThumb"></div></div>
+            </div>
+          </div>
+
+          <div class="btnPrimary" data-blk="Find a Trade button">Find more trades</div>
+
+          <div class="tcardWrap" data-blk="Top deck TradeCard" data-hero="1">
+            <div class="tcard">
+              <div class="tcardHead">@dynastydan</div>
+              <div class="split">
+                <div class="tside">
+                  <div class="ticklbl">You send</div>
+                  <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div></div>
+                  <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 2nd (early)</div><div class="meta">PICK</div></div></div>
+                </div>
+                <div class="vrule"></div>
+                <div class="tside">
+                  <div class="ticklbl">You get</div>
+                  <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div></div>
+                </div>
+              </div>
+              <div class="vbar">
+                <span class="ticklbl">Dynasty value swing</span>
+                <div class="who">You win by a Late 2nd</div>
+                <div class="why">Why? &rsaquo;</div>
+                <div class="dtrack"><div class="fillr"></div><div class="cen"></div></div>
+                <div class="scalerow"><span>−1st</span><span>Even</span><span>+1st</span></div>
+              </div>
+              <div class="swipeRow">
+                <div class="swipeBtn no"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+                <div class="swipeBtn yes"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M4 10l4 4 8-9"/></svg></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <div class="foldline"><span class="flabel"></span></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+        <div class="tab on"><svg class="ic" viewBox="0 0 22 22"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Acquire</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+      </div>
+      <div class="bottominset"><div class="bar"></div></div>
+    </div>
+    <div class="taps"><span class="k">Reached after</span><span class="v">1 hub tap</span></div>
+    <div class="caption">The mode bar already carries a <b>Guided · Team · Player · Calc</b> chip row — the hub's own
+      #156 design admits the launcher is skippable ("the one-extra-tap cost of the launcher hub disappears in practice").
+      If the chips can carry mode switching <i>after</i> you arrive, they can carry it <i>on</i> arrival. Note also how
+      little slack there is: the trade card doesn't start until <b>329pt down</b> and its bottom edge lands
+      <b>exactly on the fold</b> (0pt spare) — one wrapped player name or a Dynamic-Type bump and the verdict bar is
+      below the fold. The mode bar is the biggest removable chunk above it (the #243 audit costs it at 142pt in situ).</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — A2<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="A2 — Guided deck behind the second tap" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════ ROW B — V1 GUIDED-FIRST ═══════════════════════════ -->
+<div class="rowlbl">V1 — Guided-first: the tab IS the guided deck, hub page deleted<span class="fb">mode switching moves to a slim persistent chip strip; FA becomes a section, not a chip</span></div>
+<div class="lab">
+
+  <!-- B1 -->
+  <div class="side">
+    <div class="slotlbl">B1 — landing (returning user, deck already generated)</div>
+    <div class="phone" id="phoneB1">
+      <div class="ann" style="top:118px;right:8px;max-width:172px">mode strip = today's<br>ModeBar minus "&lsaquo; Hub"<br>and minus the hint line<br>&rarr; 62pt measured</div>
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens SF <svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content">
+        <div class="scroll">
+
+          <div class="modestrip" data-blk="Mode strip (chips + title, no back chevron)">
+            <div class="chiprow">
+              <span class="chip on">Guided</span><span class="chip">Team</span><span class="chip">Player</span><span class="chip">Calc</span>
+            </div>
+            <div class="modeTitleRow"><span class="modeTitle">Fully Guided</span></div>
+          </div>
+
+          <div class="receipt" data-blk="OutlookBiasReceipt — Change opens the DNA sheet (B3)">
+            <span class="tk"></span>
+            <span class="txt">Leaning <b>balanced</b> — you're <b>Contending</b>.</span>
+            <span class="chg">Change</span>
+          </div>
+
+          <div class="ctlcard" data-blk="Controls Card (unchanged from today)">
+            <div class="ctlrow">
+              <div style="flex:1"><div class="ticklbl">Outlook</div><div class="ctlval">Contend</div></div>
+              <div class="editBtn">Edit</div>
+            </div>
+            <div class="ctlrow">
+              <div style="flex:1"><div class="ticklbl">Trade fairness</div><div class="ctlhint">Recommend balanced trades</div></div>
+              <div class="fairTrack"><div class="fairThumb"></div></div>
+            </div>
+          </div>
+
+          <div class="btnPrimary" data-blk="Find a Trade button">Find more trades</div>
+
+          <div class="tcardWrap" data-blk="Top deck TradeCard" data-hero="1">
+            <div class="tcard">
+              <div class="tcardHead">@dynastydan</div>
+              <div class="split">
+                <div class="tside">
+                  <div class="ticklbl">You send</div>
+                  <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div></div>
+                  <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 2nd (early)</div><div class="meta">PICK</div></div></div>
+                </div>
+                <div class="vrule"></div>
+                <div class="tside">
+                  <div class="ticklbl">You get</div>
+                  <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div></div>
+                </div>
+              </div>
+              <div class="vbar">
+                <span class="ticklbl">Dynasty value swing</span>
+                <div class="who">You win by a Late 2nd</div>
+                <div class="why">Why? &rsaquo;</div>
+                <div class="dtrack"><div class="fillr"></div><div class="cen"></div></div>
+                <div class="scalerow"><span>−1st</span><span>Even</span><span>+1st</span></div>
+              </div>
+              <div class="swipeRow">
+                <div class="swipeBtn no"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+                <div class="swipeBtn yes"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M4 10l4 4 8-9"/></svg></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ticklbl" data-blk="FREE AGENCY section (#245) — page tail">Free Agency</div>
+          <div class="xrow" data-blk="FA finder row">
+            <div class="m"><div class="t">Free agents</div><div class="s">Best available players in this league</div></div>
+            <svg class="ic" width="16" height="16" viewBox="0 0 16 16" style="stroke:var(--dim)"><path d="M6 3l5 5-5 5"/></svg>
+          </div>
+
+        </div>
+        <div class="foldline"><span class="flabel"></span></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+        <div class="tab on"><svg class="ic" viewBox="0 0 22 22"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Acquire</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+      </div>
+      <div class="bottominset"><div class="bar"></div></div>
+    </div>
+    <div class="taps good"><span class="k">Tab tap → first trade visible</span><span class="v">1 tap · 1 screen</span></div>
+    <div class="caption"><b>The change is a route swap, not a rewrite.</b> <code>TradesHome</code> stops rendering
+      <code>TradeFinderHubScreen</code> and starts rendering <code>TradesScreen</code> with a default
+      <code>mode:'guided'</code>; every existing <code>navigate('TradesHome')</code> call site (League's
+      <code>league.action.find</code>, Matches' <code>matches.go-to-trades</code>, the calculator's #213
+      <code>calc.find-a-trade</code>, the deep-link base path) keeps working and now lands on a trade.
+      <b>FA is a section at the tail, not a fifth chip</b> — the chips are modes of <i>this screen</i>; FA is a different
+      screen and a different job, exactly the distinction #245 draws with its two section headers.
+      <b>Named honestly:</b> the measured chips put the FA row at 711pt, i.e. <b>below the fold</b> — reaching free
+      agency costs a short scroll it doesn't cost today. That's the one thing V1 makes worse, and it's the trade I'd
+      still take (FA is a secondary job that already has two other entry points: the League tab's Explore tile and the
+      deck's own row). If it proves too buried, the fix is a fifth chip, not a return to the hub.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — B1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V1/B1 — Guided-first landing (returning user)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- B2 -->
+  <div class="side">
+    <div class="slotlbl">B2 — cold start (no deck yet: the guided first-run IS the landing)</div>
+    <div class="phone" id="phoneB2">
+      <div class="ann w" style="top:250px;right:8px;max-width:180px">cold start needs NO new<br>design — TradesScreen's<br>first-run already owns it</div>
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens SF <svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content">
+        <div class="scroll">
+
+          <div class="modestrip" data-blk="Mode strip">
+            <div class="chiprow">
+              <span class="chip on">Guided</span><span class="chip">Team</span><span class="chip">Player</span><span class="chip">Calc</span>
+            </div>
+            <div class="modeTitleRow"><span class="modeTitle">Fully Guided</span></div>
+            <div class="modeHint">We read your roster &amp; league and walk you to the best deals.</div>
+          </div>
+
+          <div class="ctlcard" data-blk="Empty state card" data-hero="1">
+            <div style="font:600 16px/22px var(--f-ui)">Hit &ldquo;Find a Trade&rdquo; to start</div>
+            <div style="font:400 13px/18px var(--f-ui);color:var(--dim);margin-top:-6px">
+              We'll pull trade ideas from your league and show them one at a time.</div>
+            <div class="btnPrimary">Find a Trade</div>
+          </div>
+
+          <div class="ctlcard" data-blk="Provenance + progress strip">
+            <div class="ticklbl" style="color:var(--flare)"><span style="color:var(--flare)">Consensus values</span></div>
+            <div style="font:400 13px/18px var(--f-ui);color:var(--dim);margin-top:-6px">
+              Suggestions are priced off community consensus until your board takes over.</div>
+            <div class="btnGhost">Rank players &rarr;</div>
+          </div>
+
+          <div class="ticklbl" data-blk="FREE AGENCY section">Free Agency</div>
+          <div class="xrow" data-blk="FA finder row">
+            <div class="m"><div class="t">Free agents</div><div class="s">Best available players in this league</div></div>
+            <svg class="ic" width="16" height="16" viewBox="0 0 16 16" style="stroke:var(--dim)"><path d="M6 3l5 5-5 5"/></svg>
+          </div>
+
+        </div>
+        <div class="foldline"><span class="flabel"></span></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+        <div class="tab on"><svg class="ic" viewBox="0 0 22 22"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Acquire</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+      </div>
+      <div class="bottominset"><div class="bar"></div></div>
+    </div>
+    <div class="taps good"><span class="k">Tab tap → first trade visible</span><span class="v">2 taps · 1 screen (Find a Trade)</span></div>
+    <div class="caption"><b>Cold start is the strongest argument for V1, not the weakest.</b> A brand-new user on the
+      hub reads four abstract descriptions and must pick one before seeing anything. Here they land on a single
+      concrete promise with one button, and the guided mode is the <i>only</i> mode that needs zero input to produce a
+      trade — Team needs an opponent, Player needs a pin, Calc needs a whole package. The mode hint line is kept in
+      this state (there's room) and dropped once a deck exists, which is the one place V1 spends a conditional.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — B2<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V1/B2 — Cold start landing (no deck)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- B3 -->
+  <div class="side">
+    <div class="slotlbl">B3 — where Trade DNA goes: the receipt's "Change" opens it as a sheet</div>
+    <div class="phone" id="phoneB3">
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens SF <svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content">
+        <div class="scroll" style="opacity:.5">
+          <div class="modestrip">
+            <div class="chiprow">
+              <span class="chip on">Guided</span><span class="chip">Team</span><span class="chip">Player</span><span class="chip">Calc</span>
+            </div>
+            <div class="modeTitleRow"><span class="modeTitle">Fully Guided</span></div>
+          </div>
+          <div class="receipt">
+            <span class="tk"></span>
+            <span class="txt">Leaning <b>balanced</b> — you're <b>Contending</b>.</span>
+            <span class="chg">Change</span>
+          </div>
+          <div class="ctlcard">
+            <div class="ctlrow">
+              <div style="flex:1"><div class="ticklbl">Outlook</div><div class="ctlval">Contend</div></div>
+              <div class="editBtn">Edit</div>
+            </div>
+          </div>
+        </div>
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="sheetGrab"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <span class="sheetTitle">Your Trade DNA</span>
+            <span style="font-size:13px;font-weight:600;color:var(--ice)">Done</span>
+          </div>
+
+          <div class="dnaGroupHdr">My team is…</div>
+          <div class="outGrid">
+            <div class="outCard"><span class="outCardTitle">Rebuilding</span><span class="outCardBias">Leans young + picks</span></div>
+            <div class="outCard sel"><span class="outCardTitle">Contending</span><span class="outCardBias" style="color:var(--chalk)">Balanced moves</span></div>
+            <div class="outCard"><span class="outCardTitle">All-in</span><span class="outCardBias">Win now, spend picks</span></div>
+            <div class="outCard"><span class="outCardTitle">Tanking</span><span class="outCardBias">Max youth, high picks</span></div>
+          </div>
+
+          <div class="dnaGroupHdr">Chasing — tap all that apply <span class="ms">· multi-select</span></div>
+          <div class="toggleRow">
+            <div class="tg"><span class="tdot" style="background:var(--qb)"></span>QB</div>
+            <div class="tg"><span class="tdot" style="background:var(--rb)"></span>RB</div>
+            <div class="tg on" style="background:var(--wr)">&#10003; WR</div>
+            <div class="tg on" style="background:var(--te)">&#10003; TE</div>
+            <div class="tg"><span class="tdot" style="background:var(--first1)"></span>Picks</div>
+          </div>
+
+          <div class="dnaGroupHdr">Shopping — tap all that apply <span class="ms">· multi-select</span></div>
+          <div class="toggleRow">
+            <div class="tg on" style="background:var(--qb)">&#10003; QB</div>
+            <div class="tg"><span class="tdot" style="background:var(--rb)"></span>RB</div>
+            <div class="tg"><span class="tdot" style="background:var(--wr)"></span>WR</div>
+            <div class="tg"><span class="tdot" style="background:var(--te)"></span>TE</div>
+            <div class="tg"><span class="tdot" style="background:var(--first1)"></span>Picks</div>
+          </div>
+
+          <div class="sumLine" style="border-top:1px solid var(--line);padding-top:10px">
+            <span class="sumKey">Untouchables</span>
+            <span style="font-size:13px;font-weight:600">2</span>
+            <span style="font-size:12px;color:var(--dim)">protected</span>
+            <span style="margin-left:auto;font-size:13px;font-weight:600;color:var(--ice)">Manage</span>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+        <div class="tab on"><svg class="ic" viewBox="0 0 22 22"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Acquire</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+      </div>
+      <div class="bottominset"><div class="bar"></div></div>
+    </div>
+    <div class="taps"><span class="k">DNA edit reachable in</span><span class="v">1 tap from every mode</span></div>
+    <div class="caption"><b>This is the piece that must move, and it moves into a better place.</b> Today the receipt's
+      Change link navigates to <code>TradesHome {editDna:true}</code> — i.e. it leaves the deck, opens the hub, and
+      auto-expands the panel there. With the hub gone, the same panel body (<code>dna.outlook.*</code>,
+      <code>dna.chase.*</code>, <code>dna.shop.*</code>, <code>finder-hub.dna.untouchables</code>) is lifted verbatim
+      into a bottom sheet hosted by the deck. #236 already made every tap autosave, so the sheet needs no Save button —
+      Done is a pure dismiss. Net: DNA editing goes from "a screen you navigate to" to "a sheet over the trades you're
+      looking at", and the user can see the deck change behind it. The old <code>OutlookSheet</code> mounts stay as-is.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — B3<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V1/B3 — Trade DNA as a sheet over the deck" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════ ROW C — V2 HUB AS SHEET ═══════════════════════════ -->
+<div class="rowlbl">V2 — Hub as sheet: land in guided, "More ways &rsaquo;" opens the compressed hub<span class="fb">keeps every word of the hub's explanatory copy; costs one line of chrome instead of a chip row</span></div>
+<div class="lab">
+
+  <!-- C1 -->
+  <div class="side">
+    <div class="slotlbl">C1 — landing (identical deck, one affordance instead of a chip row)</div>
+    <div class="phone" id="phoneC1">
+      <div class="ann" style="top:112px;right:8px;max-width:168px">one line of chrome<br>(22pt measured) vs<br>V1's chip strip (62pt)</div>
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens SF <svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content">
+        <div class="scroll">
+
+          <div class="modeTitleRow" data-blk="Header row: mode title + More ways link">
+            <span class="modeTitle">Fully Guided</span>
+            <span class="moreways">More ways &rsaquo;</span>
+          </div>
+
+          <div class="receipt" data-blk="OutlookBiasReceipt">
+            <span class="tk"></span>
+            <span class="txt">Leaning <b>balanced</b> — you're <b>Contending</b>.</span>
+            <span class="chg">Change</span>
+          </div>
+
+          <div class="ctlcard" data-blk="Controls Card">
+            <div class="ctlrow">
+              <div style="flex:1"><div class="ticklbl">Outlook</div><div class="ctlval">Contend</div></div>
+              <div class="editBtn">Edit</div>
+            </div>
+            <div class="ctlrow">
+              <div style="flex:1"><div class="ticklbl">Trade fairness</div><div class="ctlhint">Recommend balanced trades</div></div>
+              <div class="fairTrack"><div class="fairThumb"></div></div>
+            </div>
+          </div>
+
+          <div class="btnPrimary" data-blk="Find a Trade button">Find more trades</div>
+
+          <div class="tcardWrap" data-blk="Top deck TradeCard" data-hero="1">
+            <div class="tcard">
+              <div class="tcardHead">@dynastydan</div>
+              <div class="split">
+                <div class="tside">
+                  <div class="ticklbl">You send</div>
+                  <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div></div>
+                  <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 2nd (early)</div><div class="meta">PICK</div></div></div>
+                </div>
+                <div class="vrule"></div>
+                <div class="tside">
+                  <div class="ticklbl">You get</div>
+                  <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div></div>
+                </div>
+              </div>
+              <div class="vbar">
+                <span class="ticklbl">Dynasty value swing</span>
+                <div class="who">You win by a Late 2nd</div>
+                <div class="why">Why? &rsaquo;</div>
+                <div class="dtrack"><div class="fillr"></div><div class="cen"></div></div>
+                <div class="scalerow"><span>−1st</span><span>Even</span><span>+1st</span></div>
+              </div>
+              <div class="swipeRow">
+                <div class="swipeBtn no"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+                <div class="swipeBtn yes"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M4 10l4 4 8-9"/></svg></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ticklbl" data-blk="(FA lives in the sheet — nothing here)"><span class="sub">Free agency now lives in the More-ways sheet</span></div>
+
+        </div>
+        <div class="foldline"><span class="flabel"></span></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+        <div class="tab on"><svg class="ic" viewBox="0 0 22 22"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Acquire</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+      </div>
+      <div class="bottominset"><div class="bar"></div></div>
+    </div>
+    <div class="taps good"><span class="k">Tab tap → first trade visible</span><span class="v">1 tap · 1 screen</span></div>
+    <div class="caption">Same landing win as V1, ~36pt cheaper in chrome, and the trade card clears the fold by more.
+      The cost is paid on <b>switching</b>: every other mode is now 2 taps (More ways &rarr; row), exactly what the hub
+      costs today. V2 fixes the entry problem and leaves the switching problem alone. Whether that matters depends on how
+      often a session uses more than one mode — which is measurable and currently unmeasured.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — C1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V2/C1 — Landing with More-ways affordance" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- C2 -->
+  <div class="side">
+    <div class="slotlbl">C2 — the sheet: the hub, compressed (TRADE + FREE AGENCY + DNA row)</div>
+    <div class="phone" id="phoneC2">
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens SF <svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content">
+        <div class="scroll" style="opacity:.45">
+          <div class="modeTitleRow"><span class="modeTitle">Fully Guided</span><span class="moreways">More ways &rsaquo;</span></div>
+          <div class="receipt"><span class="tk"></span><span class="txt">Leaning <b>balanced</b> — you're <b>Contending</b>.</span><span class="chg">Change</span></div>
+          <div class="ctlcard"><div class="ctlrow"><div style="flex:1"><div class="ticklbl">Outlook</div><div class="ctlval">Contend</div></div><div class="editBtn">Edit</div></div></div>
+        </div>
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="sheetGrab"></div>
+          <div class="ticklbl">Trade</div>
+          <div class="sheetRow">
+            <div class="sheetIcon"><svg class="ic" width="17" height="17" viewBox="0 0 22 22"><path d="M3 16l2-9 4 4 2-7 2 7 4-4 2 9zM3 16h16v2H3z"/></svg></div>
+            <div class="m"><div class="t">Fully Guided <span class="recTag">current</span></div><div class="s">We read your roster &amp; league and walk you to the best deals.</div></div>
+          </div>
+          <div class="sheetRow">
+            <div class="sheetIcon"><svg class="ic" width="17" height="17" viewBox="0 0 22 22"><path d="M8 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M14 9a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg></div>
+            <div class="m"><div class="t">Specific Team</div><div class="s">Target one league-mate and see only mutual-gain deals.</div></div>
+            <svg class="ic" width="15" height="15" viewBox="0 0 16 16" style="stroke:var(--faint)"><path d="M6 3l5 5-5 5"/></svg>
+          </div>
+          <div class="sheetRow">
+            <div class="sheetIcon"><svg class="ic" width="17" height="17" viewBox="0 0 22 22"><path d="M14 4h4v4M18 4l-6 6M8 18H4v-4M4 18l6-6"/></svg></div>
+            <div class="m"><div class="t">Specific Player</div><div class="s">1 to trade for · 0 to trade away</div></div>
+            <svg class="ic" width="15" height="15" viewBox="0 0 16 16" style="stroke:var(--faint)"><path d="M6 3l5 5-5 5"/></svg>
+          </div>
+          <div class="sheetRow">
+            <div class="sheetIcon"><svg class="ic" width="17" height="17" viewBox="0 0 22 22"><path d="M4 8h12M13 5l3 3-3 3M18 15H6M9 12l-3 3 3 3"/></svg></div>
+            <div class="m"><div class="t">Manual Calculator</div><div class="s">Hand-build any trade, get the dual-board fairness verdict.</div></div>
+            <svg class="ic" width="15" height="15" viewBox="0 0 16 16" style="stroke:var(--faint)"><path d="M6 3l5 5-5 5"/></svg>
+          </div>
+
+          <div class="ticklbl" style="margin-top:4px">Free Agency</div>
+          <div class="sheetRow">
+            <div class="sheetIcon"><svg class="ic" width="17" height="17" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/></svg></div>
+            <div class="m"><div class="t">Free agents</div><div class="s">Best available players in this league</div></div>
+            <svg class="ic" width="15" height="15" viewBox="0 0 16 16" style="stroke:var(--faint)"><path d="M6 3l5 5-5 5"/></svg>
+          </div>
+
+          <div class="sheetRow" style="border-top:1px solid var(--line);border-bottom:0;margin-top:2px">
+            <div class="m">
+              <div class="t" style="font-size:13.5px">Your Trade DNA</div>
+              <div class="s">Contending · Chasing WR·TE — Shopping QB · 2 untouchables</div>
+            </div>
+            <span style="font-size:13px;font-weight:600;color:var(--ice)">Edit</span>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+        <div class="tab on"><svg class="ic" viewBox="0 0 22 22"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Acquire</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+      </div>
+      <div class="bottominset"><div class="bar"></div></div>
+    </div>
+    <div class="taps"><span class="k">Any other mode / FA</span><span class="v">2 taps (same as today's hub)</span></div>
+    <div class="caption"><b>Everything the hub page says, the sheet still says</b> — that's V2's real advantage over V1.
+      The four descriptions survive, #245's two-section structure survives verbatim, FA gets a proper home under its own
+      header, and the DNA summary becomes a one-line row with an Edit link (opening B3's editor). <b>The honest risk:</b>
+      the modes are now behind a text link with no persistent visual reminder that Team/Player/Calc exist — and #211
+      says the operator likes the Player surface, which this variant hides one level deeper than a chip. Also worth
+      naming: two stacked sheets (More ways &rarr; DNA Edit) is a pattern the app doesn't use anywhere else; the DNA row
+      should dismiss this sheet before opening the editor, not stack on top of it.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — C2<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V2/C2 — More-ways sheet (compressed hub)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════ ROW D — V3 SMART LANDING ═══════════════════════════ -->
+<div class="rowlbl">V3 — Smart landing: hub once, then last-used mode forever<span class="fb">the variant that reads best on paper and costs the most in reality</span></div>
+<div class="lab">
+
+  <!-- D1 -->
+  <div class="side">
+    <div class="slotlbl">D1 — first-ever visit: the hub, now with an honesty line</div>
+    <div class="phone" id="phoneD1">
+      <div class="ann w" style="top:118px;left:8px;max-width:158px">seen exactly ONCE<br>per account, then never</div>
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens SF <svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content">
+        <div class="scroll">
+
+          <div class="pageTitle" data-blk="Page title">Acquire</div>
+          <div style="font-size:12.5px;line-height:17px;color:var(--dim)" data-blk="Honesty line (new copy)">
+            Pick how you want to find trades. <b style="color:var(--chalk)">Next time we'll take you straight to whichever
+            you used last</b> — switch any time from the row at the top.</div>
+
+          <div class="ticklbl" data-blk="TRADE section label">Trade</div>
+
+          <div class="card" data-blk="Mode card — Fully Guided">
+            <div class="cardIcon"><svg class="ic" width="20" height="20" viewBox="0 0 22 22"><path d="M3 16l2-9 4 4 2-7 2 7 4-4 2 9zM3 16h16v2H3z"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Fully Guided</span><span class="recTag">recommended</span></div>
+              <div class="cardBody">We read your roster &amp; league and walk you to the best deals.</div>
+            </div>
+            <svg class="ic arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+          </div>
+          <div class="card" data-blk="Mode card — Specific Team">
+            <div class="cardIcon"><svg class="ic" width="20" height="20" viewBox="0 0 22 22"><path d="M8 13a4 4 0 0 1 0-6l2-2a4 4 0 0 1 6 6l-1 1M14 9a4 4 0 0 1 0 6l-2 2a4 4 0 0 1-6-6l1-1"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Specific Team</span></div>
+              <div class="cardBody">Target one league-mate and see only mutual-gain deals.</div>
+            </div>
+            <svg class="ic arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+          </div>
+          <div class="card" data-blk="Mode card — Specific Player">
+            <div class="cardIcon"><svg class="ic" width="20" height="20" viewBox="0 0 22 22"><path d="M14 4h4v4M18 4l-6 6M8 18H4v-4M4 18l6-6"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Specific Player</span></div>
+              <div class="cardBody">Trade for someone, away someone, or both — engine fills the rest.</div>
+            </div>
+            <svg class="ic arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+          </div>
+          <div class="card" data-blk="Mode card — Manual Calculator">
+            <div class="cardIcon"><svg class="ic" width="20" height="20" viewBox="0 0 22 22"><path d="M4 8h12M13 5l3 3-3 3M18 15H6M9 12l-3 3 3 3"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="cardTitleRow"><span class="cardTitle">Manual Calculator</span></div>
+              <div class="cardBody">Hand-build any trade, get the dual-board fairness verdict.</div>
+            </div>
+            <svg class="ic arr" width="18" height="18" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+          </div>
+
+          <div class="ticklbl" data-blk="FREE AGENCY section label">Free Agency</div>
+          <div class="xrow" data-blk="FA finder row">
+            <div class="m"><div class="t">Free agents</div><div class="s">Best available players in this league</div></div>
+            <svg class="ic" width="16" height="16" viewBox="0 0 16 16" style="stroke:var(--dim)"><path d="M6 3l5 5-5 5"/></svg>
+          </div>
+
+        </div>
+        <div class="foldline"><span class="flabel"></span></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+        <div class="tab on"><svg class="ic" viewBox="0 0 22 22"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Acquire</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+      </div>
+      <div class="bottominset"><div class="bar"></div></div>
+    </div>
+    <div class="taps bad"><span class="k">Tab tap → first trade visible (visit 1)</span><span class="v">2 taps · 2 screens</span></div>
+    <div class="caption">The DNA panel is <b>removed from the hub</b> here — a first-ever visitor has no DNA worth
+      summarizing (it's inferred at best), and if the hub is seen once, DNA cannot live on it. So V3 needs B3's sheet
+      <i>anyway</i>. The new honesty line is required: a page that silently stops appearing feels like a bug, and
+      "where did that screen go?" is the classic complaint about remembered landings.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — D1<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V3/D1 — First-ever visit (hub, educates once)" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- D2 -->
+  <div class="side">
+    <div class="slotlbl">D2 — every visit after: last-used mode (Player shown, per #211)</div>
+    <div class="phone" id="phoneD2">
+      <div class="ann w" style="top:112px;right:8px;max-width:176px">restoring Player mode<br>needs pins that survive<br>a league switch — today<br>they don't</div>
+      <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+      <div class="topbar">
+        <div class="tbLeague"><span class="lbl">League</span><span class="nm">Dynasty Degens SF <svg class="ic" width="12" height="12" viewBox="0 0 20 20"><path d="M5 8l5 5 5-5"/></svg></span></div>
+        <div class="tbIcons"><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><path d="M4 14h12l-1.5-2.5V8a4.5 4.5 0 0 0-9 0v3.5L4 14z"/><path d="M8.5 16.5a1.5 1.5 0 0 0 3 0"/></svg><svg class="ic" width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg></div>
+      </div>
+      <div class="content">
+        <div class="scroll">
+
+          <div class="modestrip" data-blk="Persistent mode-switcher row">
+            <div class="chiprow">
+              <span class="chip">Guided</span><span class="chip">Team</span><span class="chip on">Player</span><span class="chip">Calc</span>
+            </div>
+            <div class="modeTitleRow"><span class="modeTitle">Specific Player</span></div>
+          </div>
+
+          <div class="receipt" data-blk="OutlookBiasReceipt">
+            <span class="tk"></span>
+            <span class="txt">Leaning <b>balanced</b> — you're <b>Contending</b>.</span>
+            <span class="chg">Change</span>
+          </div>
+
+          <div class="pinRowCard" data-blk="Pin summary one-liner (#243 V1)">
+            <div class="pinSummary">
+              <span class="dot"></span>
+              <span class="txt">Pinned: <b>Ja'Marr Chase</b></span>
+              <span class="edit">Edit</span>
+            </div>
+          </div>
+
+          <div class="tcardWrap" data-blk="FeaturedTradeWindow" data-hero="1">
+            <div class="ticklbl">Featured trade</div>
+            <div class="tcard">
+              <div class="tcardHead">@dynastydan</div>
+              <div class="split">
+                <div class="tside">
+                  <div class="ticklbl">You send</div>
+                  <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">DeVonta Smith</div><div class="meta">WR · PHI</div></div></div>
+                  <div class="prow" style="border-left-color:var(--first1)"><div><div class="nm">2026 2nd (early)</div><div class="meta">PICK</div></div></div>
+                </div>
+                <div class="vrule"></div>
+                <div class="tside">
+                  <div class="ticklbl">You get</div>
+                  <div class="prow" style="border-left-color:var(--wr)"><div><div class="nm">Ja'Marr Chase</div><div class="meta">WR · CIN</div></div></div>
+                </div>
+              </div>
+              <div class="vbar">
+                <span class="ticklbl">Dynasty value swing</span>
+                <div class="who">You win by a Late 2nd</div>
+                <div class="why">Why? &rsaquo;</div>
+                <div class="dtrack"><div class="fillr"></div><div class="cen"></div></div>
+                <div class="scalerow"><span>−1st</span><span>Even</span><span>+1st</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ideasPanel" data-blk="More trades list">
+            <div class="ticklbl">More trades for Ja'Marr Chase</div>
+            <div class="ideaRow inwin"><span class="nm"><span class="give">DeVonta Smith + 2nd</span><span class="arrow">&rarr;</span>Ja'Marr Chase</span><span class="diff">+410</span><span class="tag">IN WINDOW</span></div>
+            <div class="ideaRow"><span class="nm"><span class="give">Tee Higgins</span><span class="arrow">&rarr;</span>Ja'Marr Chase</span><span class="diff">+85</span></div>
+          </div>
+
+        </div>
+        <div class="foldline"><span class="flabel"></span></div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 18V10M11 18V4M18 18v-6"/></svg>Rank</div>
+        <div class="tab on"><svg class="ic" viewBox="0 0 22 22"><path d="M4 8h12l-3-3M18 14H6l3 3"/></svg>Acquire</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M9 13 13 9M8 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 0M14 8a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4 0"/></svg>Matches</div>
+        <div class="tab"><svg class="ic" viewBox="0 0 22 22"><path d="M4 16 5 8l4 3 2-6 2 6 4-3 1 8H4Z"/></svg>League</div>
+      </div>
+      <div class="bottominset"><div class="bar"></div></div>
+    </div>
+    <div class="taps good"><span class="k">Tab tap → first trade visible (visit 2+)</span><span class="v">1 tap · 1 screen</span></div>
+    <div class="caption">When the restore works it is the best frame in this lab — the user lands on the exact surface
+      they were using, pin intact, featured trade above the fold. <b>The switcher row is V1's chip strip</b>, so V3 is
+      V1 plus memory plus a surviving hub. Everything to the right of "when the restore works" is the problem — see the
+      state box below.</div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — D2<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V3/D2 — Return visit, last-used mode restored" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+  <!-- D3 — state requirements -->
+  <div class="side">
+    <div class="slotlbl">D3 — what V3 actually needs to exist</div>
+    <div class="statebox">
+      <h3>New persisted state</h3>
+      <ul>
+        <li><code>acquire.hub_seen</code> — bool, per <b>account</b> (acct_ key), not per device: otherwise a second
+          device re-educates and a reinstall re-educates. AsyncStorage alone is wrong here; this wants the same
+          server-side prefs row the DNA uses, or it silently misbehaves across devices.</li>
+        <li><code>acquire.last_mode</code> — must be scoped <b>per league</b>, not global. "Specific Team" restores a
+          scope (<code>opponentUserId</code>) that doesn't exist in another league; a global key lands a league switch
+          on a mode pointed at a stranger.</li>
+        <li><b>Player mode has nothing to restore.</b> Pins live in <code>useFinderTargets</code>, session-local and
+          <b>cleared on league switch</b> by design. Restoring "Player" after a switch = landing on an empty pin board,
+          which is a worse landing than the hub. Either pins become persisted state (new work, new invalidation rules)
+          or Player silently degrades to Guided — and a landing that silently isn't what you asked for is the exact
+          failure mode remembered landings are notorious for.</li>
+        <li><b>Calc can't be a restore target</b> at all: <code>TradeCalculator</code> is a separate pushed route, not a
+          <code>TradeDeck</code> mode. Restoring it means the tab opens on a pushed screen — back-gesture semantics get
+          weird and <code>calc.find-a-trade</code> (#213) would point back at itself.</li>
+      </ul>
+      <h3>New failure surface</h3>
+      <ul>
+        <li>Three landing states (first-ever / restored / degraded-fallback) &times; 4 modes &times; league-switch and
+          cold-start crossings. Today's answer is one state. QA can't see state 1 without clearing storage, so it
+          regresses invisibly.</li>
+        <li>The hub page survives — with all its code, its testIDs, its density budget and its future maintenance — for a
+          screen each user sees <b>once</b>. That is the worst cost/benefit ratio of any option here.</li>
+      </ul>
+      <h3>What it would take to justify</h3>
+      <ul>
+        <li>Evidence that mode choice is stable per user and varies <i>between</i> users. That's a
+          <code>user_events</code> question (mode-open counts per account) and it is currently <b>unmeasured</b>. If
+          80% of sessions are Guided, V3 is elaborate machinery for a constant.</li>
+      </ul>
+    </div>
+    <div class="notewrap">
+      <div class="notelbl">Notes — D3 (state requirements)<span class="dot"></span></div>
+      <textarea class="pagenote" data-key="V3/D3 — State requirements + failure surface" placeholder="Notes on this frame…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════ COMPARISON + RECOMMENDATION ═══════════════════════════ -->
+<div class="rationale">
+  <h2>Side by side</h2>
+  <table>
+    <tr>
+      <th></th>
+      <th>Current (#245 hub)</th>
+      <th class="pick">V1 — Guided-first</th>
+      <th>V2 — Hub as sheet</th>
+      <th>V3 — Smart landing</th>
+    </tr>
+    <tr><td><b>Taps to first trade (returning)</b></td><td>2 taps, 2 screens</td><td><b>1 tap, 1 screen</b></td><td><b>1 tap, 1 screen</b></td><td>1 tap, 1 screen (visit 2+)</td></tr>
+    <tr><td><b>Taps to switch mode</b></td><td>2 (back to hub, then card)</td><td><b>1 (chip)</b></td><td>2 (More ways, then row)</td><td>1 (chip)</td></tr>
+    <tr><td><b>Cold start</b></td><td>Four abstract choices before anything</td><td><b>Guided first-run — one promise, one button</b></td><td>Same as V1</td><td>The hub, once</td></tr>
+    <tr><td><b>Chrome above the trade</b></td><td>n/a — no trade on the page</td><td>62pt chip strip + title</td><td><b>22pt header line</b></td><td>~62pt (same as V1)</td></tr>
+    <tr><td><b>Trade DNA lives…</b></td><td>On the hub (collapsed panel, edits in place)</td><td colspan="2"><b>In a sheet over the deck</b>, opened by the receipt's existing "Change" link + an Edit row; #236 autosave means no Save button</td><td>Same sheet — the hub can't host it if the hub is seen once</td></tr>
+    <tr><td><b>Free agency lands…</b></td><td>Its own #245 section on the hub</td><td><b>Its own section at the deck's tail</b> (the shipped <code>trades.explore.free-agents</code> row, promoted to a titled section) — measured at 711pt, so <b>below the fold</b>: costs a short scroll</td><td>Its own section in the sheet</td><td>On the once-seen hub — i.e. effectively nowhere; needs V1's tail section too</td></tr>
+    <tr><td><b>Mode descriptions</b></td><td>All four, always</td><td>Active mode's title (+ hint in cold start); the other three lose their sentence</td><td><b>All four preserved verbatim</b></td><td>All four, once</td></tr>
+    <tr><td><b>Code shape</b></td><td>—</td><td><b>Route swap</b>: <code>TradesHome</code> renders <code>TradesScreen</code> w/ default <code>mode:'guided'</code>; delete <code>TradeFinderHubScreen</code>; lift the DNA panel body into a sheet</td><td>Route swap + a new sheet that re-implements the hub's list; hub screen still deleted</td><td>Route swap + sheet + <b>keep the hub</b> + new persisted state + a fallback matrix</td></tr>
+    <tr><td><b>Migration cost</b></td><td>—</td><td colspan="2">Every <code>navigate('TradesHome')</code> call site keeps working unchanged (<code>LeagueScreen:328</code>, <code>MatchesScreen:547</code>, <code>TradeCalculatorScreen:577</code>, <code>deepLinks.ts</code> base path). Only three things need re-pointing: <code>OutlookBiasReceipt</code>'s <code>{editDna:true}</code> (→ open the sheet), the mode bar's <code>onHub</code>/"‹ Hub" chevron (→ deleted), and <code>TradesScreen:2351</code>. testIDs <code>finder-hub.card.{guided,team,player,calc}</code> retire; #245's <code>finder-hub.card.free-agents</code> moves to the tail section and keeps its id; <code>dna.*</code> + <code>finder-hub.dna.untouchables</code> change host and keep theirs</td><td>All of V2's, plus the hub's testIDs and Maestro coverage stay alive for a screen almost nobody reaches</td></tr>
+    <tr><td><b>Biggest risk</b></td><td>A whole screen of the primary tab holds no product value</td><td>Chips are terse: a first-timer doesn't learn what Team/Player/Calc <i>do</i></td><td>Hidden nav — no persistent reminder the other modes exist</td><td>Three landing states, one of which (Player after a league switch) is a dead end today</td></tr>
+  </table>
+
+  <h2>Recommendation — ship V1, borrow one thing from V2</h2>
+  <div class="verdict">
+    <b>Yes: delete the hub and land the tab in the guided deck (V1)</b>, with the mode chips as a persistent strip and
+    Free Agency as a titled section at the tail of the page. Add <b>one</b> V2 idea: make the mode strip's
+    <b>overflow</b> — a "What are these?" affordance, or simply the first-run state keeping the hint line — carry the
+    explanatory copy the chips can't, so nothing that was educational about the hub is actually lost. Do <b>not</b> build
+    V3 yet.
+  </div>
+  <p><strong>Why.</strong> The hub isn't badly designed — #218 made it fit, #212 made its DNA panel sharp — it's
+    <em>structurally</em> unearned: it is a full screen of the app's primary tab that contains no trades, and its own
+    #156 design notes already concede the point by shipping a mode-chip row on every destination "so the one-extra-tap
+    cost of the launcher hub disappears in practice." If the chips are good enough to carry mode switching everywhere
+    else, they're good enough to carry it on arrival, and then the launcher has no remaining job. The three things the
+    hub genuinely owns all have better homes: <b>mode switching</b> → the chip strip that already exists and works;
+    <b>Trade DNA</b> → a sheet over the deck, reached by the "Change" link the deck already renders, where #236's
+    autosave lets the user watch their bias change the trades behind the sheet instead of tabbing back and forth;
+    <b>free agency</b> → a titled section at the page tail, which is both #245's own structure and the shipped
+    <code>trades.explore.free-agents</code> row with a header on it. Guided is the right default because it is the only
+    mode that produces a trade from zero input — Team needs an opponent, Player needs a pin, Calc needs a package — so
+    it is also the only mode that makes cold start better rather than worse; and #211's preference for the Player
+    surface is served by making it one chip away rather than one screen and one card away. I'd hold V3 not because
+    remembered landings are wrong but because this one is unaffordable right now: it keeps the hub alive for a screen
+    seen once, needs account-scoped and league-scoped new state, and its most attractive case (restore Player mode)
+    lands on an empty pin board after any league switch, because pins are deliberately session-local. If mode-open
+    events later show real per-user variance, V3 is a small addition <em>on top of</em> V1 — the chip strip is already
+    the switcher it needs — which is another reason to build V1 first and let the data decide the rest.
+  </p>
+</div>
+
+<script>
+(function(){
+  var BUDGET = 658;
+
+  function instrument(phoneId){
+    var phone = document.getElementById(phoneId);
+    if (!phone) return;
+    var content = phone.querySelector('.content');
+    var scroll = phone.querySelector('.scroll');
+    var fold = phone.querySelector('.foldline');
+    if (!fold) return;
+    var flabel = fold.querySelector('.flabel');
+
+    var full = scroll.scrollHeight;
+    var contentTop = content.getBoundingClientRect().top;
+
+    var blocks = scroll.querySelectorAll(':scope > [data-blk]');
+    var heroBottom = null;
+    blocks.forEach(function(b){
+      var r = b.getBoundingClientRect();
+      var top = r.top - contentTop;
+      var bottom = r.bottom - contentTop;
+      var h = Math.round(r.height);
+      var over = bottom > BUDGET + 0.5;
+      var hero = b.dataset.hero === '1';
+      var chip = document.createElement('div');
+      chip.className = 'blkchip' + (over ? ' over' : (hero ? ' hero' : ''));
+      chip.textContent = b.dataset.blk + ' · ' + h + 'pt → ' + Math.round(bottom) + 'pt';
+      chip.style.top = Math.max(2, Math.round(top)) + 'px';
+      content.appendChild(chip);
+      if (hero) heroBottom = bottom;
+    });
+
+    // The fold verdict is judged against the HERO block (the first real trade
+    // content). Screens with no hero block are the point being made.
+    if (heroBottom != null) {
+      if (heroBottom > BUDGET + 0.5) {
+        flabel.textContent = '658pt fold — trade card cut off, ' + Math.round(heroBottom - BUDGET) + 'pt hidden';
+      } else {
+        fold.classList.add('fits');
+        flabel.textContent = '658pt fold — trade fully visible, ' + Math.round(BUDGET - heroBottom) + 'pt spare';
+      }
+    } else if (full > BUDGET + 0.5) {
+      flabel.textContent = '658pt fold — NO trade on this screen · content overflows +' + Math.round(full - BUDGET) + 'pt';
+    } else {
+      flabel.textContent = '658pt fold — fits, ' + Math.round(BUDGET - full) + 'pt spare · but NO trade on this screen';
+    }
+  }
+
+  ['phoneA1','phoneA2','phoneB1','phoneB2','phoneC1','phoneD1','phoneD2'].forEach(instrument);
+
+  // ── notes / localStorage ──
+  var KEY = 'ftf-polish-lab-2026-08-246-acquire-landing-notes';
+  var notes = {};
+  try { notes = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { notes = {}; }
+
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.pagenote'));
+  var notecount = document.getElementById('notecount');
+
+  function refresh(){
+    var n = 0;
+    boxes.forEach(function(b){
+      var has = !!(notes[b.dataset.key] || '').trim();
+      b.closest('.notewrap').classList.toggle('noted', has);
+      if (has) n++;
+    });
+    notecount.textContent = n ? (n + ' of ' + boxes.length + ' noted') : 'no notes yet';
+  }
+
+  boxes.forEach(function(b){
+    b.value = notes[b.dataset.key] || '';
+    b.addEventListener('input', function(){
+      notes[b.dataset.key] = b.value;
+      try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {}
+      refresh();
+    });
+  });
+
+  document.getElementById('copyall').addEventListener('click', async function(){
+    var lines = [];
+    boxes.forEach(function(b){
+      var t = (notes[b.dataset.key] || '').trim();
+      if (t) lines.push('## ' + b.dataset.key + '\n' + t);
+    });
+    var text = lines.length ? lines.join('\n\n') : '(no notes)';
+    var ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand('copy'); } catch (e2) {}
+      ta.remove();
+    }
+    var btn = document.getElementById('copyall');
+    var orig = btn.textContent;
+    btn.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(function(){ btn.textContent = orig; }, 1500);
+  });
+
+  refresh();
+})();
+</script>
+
+</body>
+</html>
