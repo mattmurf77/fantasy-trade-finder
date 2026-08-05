@@ -184,6 +184,8 @@ Canonical set: `window`, `value` — the optional `lane` field on trade cards (f
 
 **Locations:** `mobile/src/theme/colors.ts` (`colors.position`), `mobile/src/components/PositionChip.tsx` (rgba tint bases), `web/profile.html` (`--qb`…`--te`), plus any progress-bar component. Tier colors must not reuse these hues (see Tier color tokens above).
 
+**Dashed-ice tick = other-board marker (#248, 2026-08-05):** in any chart that draws bars from one value basis, a *dashed ice hairline* (ice `#56D9EC`, dashed, with an end-cap dot) overlaid on a bar marks where the **other** basis (consensus vs. the caller's board) places that entity on the *same* scale as the bars. It is a data encoding, not a decoration — do not reuse a dashed ice line over bars for anything else, and don't render the other-board marker in any other style. (The league-average line stays a dashed *chalk-dim* hairline — a different encoding, deliberately a different color.) First consumer: `mobile/src/screens/LeagueSummaryScreen.tsx` (`consTick`).
+
 ---
 
 ## Progress gating thresholds
