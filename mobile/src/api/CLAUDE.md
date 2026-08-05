@@ -7,6 +7,7 @@ HTTP clients only. No React, no state, no side effects beyond fetch.
 | `client.ts` | Base fetch wrapper (URL, auth headers, JSON) |
 | `auth.ts` | Sign in / session endpoints + account auth (`/api/auth/apple`, GET/DELETE `/api/account`, POST `/api/account/link-sleeper`) |
 | `sleeper.ts` | Sleeper public API |
+| `accountPrefs.ts` | Account preference + data-rights endpoints: profile visibility (GET/PUT `/api/profile/visibility`), data export (`/api/account/export`), and #215 stud-tax mode (`getStudTaxMode`/`setStudTaxMode` → GET/PUT `/api/settings/stud-tax`) |
 | `league.ts` | League data + members |
 | `rankings.ts` | Submit/fetch personal rankings |
 | `trades.ts` | Trade card fetch + decisions |
@@ -15,7 +16,7 @@ HTTP clients only. No React, no state, no side effects beyond fetch.
 | `flags.ts` | Feature flags (`/api/flags`) |
 | `market.ts` | Market movers (#243, flag `market.movers`): `getMarketMovers(format)` → `GET /api/market/movers` — top risers/fallers by trailing-window % change of FTF community value. Open read; consumed by `MarketPulseStrip` |
 | `notifications.ts` | Notifications inbox |
-| `calc.ts` | Trade Calculator consensus endpoints (`/api/trade/values`, `/api/trade/evaluate`) — public, no session |
+| `calc.ts` | Trade Calculator consensus endpoints (`/api/trade/values`, `/api/trade/evaluate`) — public; #215: `evaluateTrade` attaches the session token when present (endpoint stays public) so the server applies the caller's stored `stud_tax_mode`, echoed on `CalcEvaluation.stud_tax_mode`; exports the `StudTaxMode` union |
 | `sendInSleeper.ts` | Link Sleeper account + propose trades directly (flagged beta); #180 `validateTradeSend` (`POST /api/trades/validate`) — advisory pre-send checks, never throws |
 | `espn.ts` | ESPN league linking (flag `espn.link`): `/api/espn/link|leagues|import` + `buildEspnSessionInitBody` (ESPN leagues source session-init rosters from the backend snapshot, never Sleeper proxies) + `isEspnLeague` (platform check against the cached league list, used by auth.ts's builders) |
 | `platformLink.ts` | Zero-auth multi-platform linking — MFL (`mfl.link`) + Fleaflicker (`fleaflicker.link`): generic `/api/{platform}/link|leagues|import` (+ Fleaflicker `/discover` by email) + `buildPlatformSessionInitBody` (backend snapshot, never Sleeper proxies) + `isMflLeague`/`isFleaflickerLeague` (used by auth.ts's builders) + `parseMflLeagueInput`/`parseFleaflickerLeagueInput`. ESPN keeps its own `espn.ts` (private-league cookie flow). #177 (flag `mfl.auth_link`): `mflAuthLink` (`POST /api/mfl/auth-link` — password transient, never logged) + `mflAuthImport` (`POST /api/mfl/auth-import`, default ALL leagues, franchise auto-bound) |

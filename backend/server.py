@@ -853,11 +853,14 @@ def _evaluate_adjustments(give: list[str], recv: list[str],
 
     rows: dict[str, list[dict]] = {}
     naive_totals: dict[str, float] = {}
-    for side, vals, n_other in (("give", gvals, len(recv)),
-                                ("receive", rvals, len(give))):
+    # #214: other_values feeds the market-mode crown credit (both-sides
+    # elite eligibility + naive-skew phase-out); heavy mode ignores it.
+    for side, vals, other, n_other in (("give", gvals, rvals, len(recv)),
+                                       ("receive", rvals, gvals, len(give))):
         naive = round(sum(vals), 1)
         base = pkg(vals, v_max)                      # depth weighting only
-        full = pkg(vals, v_max, n_other=n_other)     # + crown premium, if any
+        full = pkg(vals, v_max, n_other=n_other,     # + crown premium, if any
+                   other_values=other)
         depth = round(base - naive, 1)
         crown = round(full - base, 1)
         side_rows = []
@@ -2169,7 +2172,19 @@ def _fuzzy_match_tau() -> float:
 _LIKES_YOU_CAP = 3   # max likes-you injections per generated deck
 
 
-def _inject_likes_you_cards(
+def _inject_likes_you_cards(cards: list, trade_service, user_id: str,
+                            *args, **kwargs) -> list:
+    """#215 — pin the deck owner's stud-tax mode for the injector's
+    consensus package math (it runs after generate_trades' own context has
+    exited), then delegate. An already-pinned mode (tests) wins."""
+    _mode = (_trade_service_mod.pinned_stud_tax_mode()
+             or _trade_service_mod.stud_tax_mode_for_user(user_id))
+    with _trade_service_mod.stud_tax_override(_mode):
+        return _inject_likes_you_cards_impl(cards, trade_service, user_id,
+                                            *args, **kwargs)
+
+
+def _inject_likes_you_cards_impl(
     cards: list,
     trade_service,
     user_id: str,
@@ -5414,6 +5429,50 @@ def set_ranking_method_route():
         return jsonify({"error": "internal_error"}), 500
 
 
+@app.route("/api/settings/stud-tax", methods=["GET", "PUT"])
+def stud_tax_setting_route():
+    """GET/PUT /api/settings/stud-tax — #215 per-user stud-tax mode.
+
+    GET → {"mode": "market"|"heavy"|"off"} (stored setting; 'market'
+    default). PUT {"mode": ...} persists it. Session-authed; consumed by
+    /api/trade/evaluate and deck generation (trade_service
+    stud_tax_mode_for_user). Write side mirrors /api/ranking-method's
+    unverified-write gating.
+    """
+    from .database import get_stud_tax_mode, set_stud_tax_mode, STUD_TAX_MODES
+    sess = _require_session()
+    g_user_id = sess["user_id"]
+    if request.method == "GET":
+        try:
+            return jsonify({"mode": get_stud_tax_mode(g_user_id)})
+        except Exception as e:
+            log.error("stud-tax read failed for %s: %s", g_user_id, e)
+            return jsonify({"error": "internal_error"}), 500
+    denial = _verified_write_denial(sess)
+    if denial is not None:
+        return denial
+    body = request.get_json(silent=True) or {}
+    mode = body.get("mode", "")
+    if mode not in STUD_TAX_MODES:
+        return jsonify({"error": f"Invalid mode: {mode!r}"}), 400
+    try:
+        set_stud_tax_mode(g_user_id, mode)
+        log.info("stud-tax mode set for %s: %s", g_user_id, mode)
+        try:
+            record_event(
+                g_user_id, "stud_tax_mode_changed",
+                league_id=getattr(sess.get("league"), "league_id", None),
+                source="api", props={"mode": mode},
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as ev_err:
+            log.warning("record_event(stud_tax_mode_changed) failed: %s", ev_err)
+        return jsonify({"ok": True, "mode": mode})
+    except Exception as e:
+        log.error("stud-tax write failed for %s: %s", g_user_id, e)
+        return jsonify({"error": "internal_error"}), 500
+
+
 @app.route("/api/scoring/switch", methods=["POST"])
 @_gate_unverified_write
 def switch_scoring_format():
@@ -7149,7 +7208,26 @@ def trade_evaluate_route():
     `mutual_gain` + `basis` ('divergence', or 'consensus' when the opponent
     hasn't ranked). This is the finder's mutual-gain math applied to one fixed
     package — a directed, manual counterpart to trade generation.
+
+    #215 — the caller's stored `stud_tax_mode` ('market' default | 'heavy' |
+    'off') is resolved up front (session optional: Mode A stays public;
+    anonymous callers get the market default) and pinned for every
+    package_value_v2 call this evaluation makes. Echoed as `stud_tax_mode`
+    in the response so clients can label the read (e.g. the mobile
+    "Value adjustments off" note).
     """
+    _mode = _trade_service_mod.pinned_stud_tax_mode()
+    if _mode is None:
+        _sess_for_mode = _get_session(request.headers.get("X-Session-Token", ""))
+        _mode = (_trade_service_mod.stud_tax_mode_for_user(_sess_for_mode.get("user_id"))
+                 if _sess_for_mode else _trade_service_mod.STUD_TAX_DEFAULT)
+    with _trade_service_mod.stud_tax_override(_mode):
+        return _trade_evaluate_impl(_mode)
+
+
+def _trade_evaluate_impl(stud_tax_mode: str):
+    """The /api/trade/evaluate body — runs inside the caller's stud-tax
+    mode context (see trade_evaluate_route)."""
     from .trade_optimizer import _consensus_packages, _fairness_v3
 
     body = request.get_json(silent=True) or {}
@@ -7252,6 +7330,8 @@ def trade_evaluate_route():
             "per_player":         per_player,
             "dropped_player_ids": dropped,
             "basis":              "consensus",
+            # #215 — which stud-tax mode priced this read.
+            "stud_tax_mode":      stud_tax_mode,
         }
 
         # Itemized value adjustments (DynastyDealer teardown 2026-07-26) —

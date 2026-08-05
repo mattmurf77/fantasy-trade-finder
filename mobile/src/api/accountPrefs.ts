@@ -9,6 +9,7 @@
 //   up (callers route that into SleeperConnect).
 
 import { api } from './client';
+import type { StudTaxMode } from './calc';
 
 export interface ProfileVisibility {
   public: boolean;
@@ -33,4 +34,18 @@ export async function setProfileVisibility(
 // JSON to serialize into a shareable file.
 export async function exportAccountData(): Promise<Record<string, unknown>> {
   return api.get<Record<string, unknown>>('/api/account/export');
+}
+
+// ── #215 — stud-tax mode ('market' retuned default | 'heavy' legacy |
+// 'off'). Consumed by /api/trade/evaluate and deck generation server-side.
+export async function getStudTaxMode(): Promise<{ mode: StudTaxMode }> {
+  return api.get<{ mode: StudTaxMode }>('/api/settings/stud-tax');
+}
+
+export async function setStudTaxMode(
+  mode: StudTaxMode,
+): Promise<{ ok: boolean; mode: StudTaxMode }> {
+  return api.put<{ ok: boolean; mode: StudTaxMode }>('/api/settings/stud-tax', {
+    mode,
+  });
 }

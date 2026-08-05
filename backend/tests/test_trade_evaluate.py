@@ -31,10 +31,18 @@ _POOL_PLAYERS = [
     _P("good",  "Good Guy",    "RB", "DET", 24),
     _P("mid",   "Mid Player",  "TE", "SF",  27),
     _P("bench", "Bench Body",  "RB", "NYJ", 28),
+    # #214 — market-mode crown credit requires a piece at/above
+    # crown_elite_value (6000); elite (Elo 1900 → 7389.1) qualifies, and
+    # good2 (1780 → 4055.2) keeps the 1-for-2 naive skew inside the
+    # skew_phaseout window so the credit is visible.
+    _P("elite", "Elite Ace",   "WR", "MIN", 25),
+    _P("good2", "Good Deuce",  "RB", "ATL", 23),
 ]
 
-# Seed Elos chosen so values are clearly ordered: stud >> good > mid > bench.
-_SEED = {"stud": 1800.0, "good": 1650.0, "mid": 1500.0, "bench": 1350.0}
+# Seed Elos chosen so values are clearly ordered: elite > stud >> good2 >
+# good > mid > bench.
+_SEED = {"stud": 1800.0, "good": 1650.0, "mid": 1500.0, "bench": 1350.0,
+         "elite": 1900.0, "good2": 1780.0}
 
 
 @pytest.fixture(autouse=True)
@@ -114,10 +122,13 @@ def test_gap_names_nearest_pick_and_lighter_side():
         abs(d["give_value"] - d["receive_value"]), abs=0.11)
     assert gap["add_to"] == "receive"          # receive side is lighter
     assert gap["firsts"] > 0
-    # 1800-vs-1650 seeds with package shrink on the lighter side ≈ a
-    # ~3580-value gap → nearest generic pick = Early 1st.
-    assert gap["pick_equivalent"]["pick_id"] == "generic_pick_1_early"
-    assert gap["pick_equivalent"]["label"] == "Early 1st Round Pick"
+    # #214 deliberate update: under the default 'market' mode a 1-for-1
+    # side is benchmarked against its OWN best asset, so the lighter side
+    # is no longer shrunk — the gap is the raw 4481.7 − 2117.0 = 2364.7
+    # (was ~3580 under the legacy math) → nearest generic pick = Mid 1st
+    # (was Early 1st).
+    assert gap["pick_equivalent"]["pick_id"] == "generic_pick_1_mid"
+    assert gap["pick_equivalent"]["label"] == "Mid 1st Round Pick"
 
 
 def test_gap_zero_on_symmetric_trade():
@@ -417,15 +428,16 @@ def test_mode_a_one_sided_eveners_param_is_mode_b_only():
 
 
 def test_mode_a_evener_is_the_gap_generic_pick():
-    # stud vs good — the gap names Early 1st (see the gap tests above); the
-    # rosterless calculator recommends exactly that pick, calculator-addable.
+    # stud vs good — the gap names Mid 1st (see the gap tests above; #214:
+    # was Early 1st under the legacy math); the rosterless calculator
+    # recommends exactly that pick, calculator-addable.
     d = _post({"give_player_ids": ["stud"], "receive_player_ids": ["good"]}).get_json()
     pe = d["gap"]["pick_equivalent"]
     assert d["eveners"] == [{
         "id": pe["pick_id"], "name": pe["label"], "position": "PICK",
         "team": None, "value": pe["value"], "is_pick": True,
     }]
-    assert d["eveners"][0]["id"] == "generic_pick_1_early"
+    assert d["eveners"][0]["id"] == "generic_pick_1_mid"
 
 
 def test_mode_a_eveners_empty_when_gap_beyond_pick_ladder():
@@ -453,8 +465,25 @@ def _side_rows(d, side):
     return {r["key"]: r for r in d.get("adjustments", {}).get(side, [])}
 
 
-def test_adjustments_1for1_depth_on_weaker_side_only():
+def test_adjustments_1for1_no_rows_under_market_default():
+    # #214 deliberate update (was test_adjustments_1for1_depth_on_weaker_
+    # side_only): under the default 'market' mode each side benchmarks its
+    # OWN best asset, so a 1-for-1 has no depth discount on either side —
+    # and with neither piece at crown_elite_value, no consolidation either.
+    # No adjustments moved a value → the key is absent entirely.
     d = _post({"give_player_ids": ["stud"], "receive_player_ids": ["good"]}).get_json()
+    assert "adjustments" not in d
+    assert d["give_value"] == pytest.approx(4481.7, abs=0.11)
+    assert d["receive_value"] == pytest.approx(2117.0, abs=0.11)
+
+
+def test_adjustments_1for1_depth_on_weaker_side_only_heavy_mode():
+    # The pre-#214 legacy behavior, preserved verbatim as the reachable
+    # 'heavy' mode: the weaker 1-for-1 side is shaved against the trade's
+    # best asset.
+    import backend.trade_service as ts
+    with ts.stud_tax_override("heavy"):
+        d = _post({"give_player_ids": ["stud"], "receive_player_ids": ["good"]}).get_json()
     # stud IS the trade's best asset → contributes 100%, no rows on give.
     assert d["adjustments"]["give"] == []
     give_naive = d["naive_totals"]["give"]
@@ -472,17 +501,20 @@ def test_adjustments_1for1_depth_on_weaker_side_only():
 
 
 def test_adjustments_2for1_depth_and_consolidation():
-    # give 2 (good+mid), receive 1 (stud): the give side is depth-discounted;
-    # the single-asset receive side earns the crown consolidation premium
-    # (flag trade.crown_asset is ON in config/features.json).
-    d = _post({"give_player_ids": ["good", "mid"],
-               "receive_player_ids": ["stud"]}).get_json()
+    # #214 deliberate update: under 'market' the crown credit needs an
+    # elite piece (value ≥ crown_elite_value 6000) and a naive gap inside
+    # the skew_phaseout window — good+mid → stud (4481.7) no longer earns
+    # it. good2+good (6172.2) → elite (7389.1) does: skew 19.7% → phase
+    # 0.61 → credit ≈ +358 on the receive side; the give side is
+    # depth-discounted against its OWN best (good shaved vs good2, ≈ −176).
+    d = _post({"give_player_ids": ["good2", "good"],
+               "receive_player_ids": ["elite"]}).get_json()
     grows = _side_rows(d, "give")
     assert "package_depth" in grows and grows["package_depth"]["amount"] < 0
-    assert "consolidation" not in grows          # give is the BIGGER side
+    assert "consolidation" not in grows          # no elite piece on give
     rrows = _side_rows(d, "receive")
     assert "consolidation" in rrows and rrows["consolidation"]["amount"] > 0
-    assert "package_depth" not in rrows          # stud == v_max → no discount
+    assert "package_depth" not in rrows          # single asset → own best
     # Attribution identity per side: naive + Σamounts == displayed value.
     for side, total in (("give", d["give_value"]), ("receive", d["receive_value"])):
         amounts = sum(r["amount"] for r in d["adjustments"][side])
@@ -686,7 +718,9 @@ def test_values_endpoint_shape_and_etag():
         assert r.status_code == 200
         d = r.get_json()
         rows = d["players"]
-        assert [p["id"] for p in rows[:2]] == ["stud", "good"]   # value-desc
+        # value-desc (#214: pool gained 'elite' 7389.1 > 'stud' 4481.7 >
+        # 'good2' 4055.2 > 'good')
+        assert [p["id"] for p in rows[:4]] == ["elite", "stud", "good2", "good"]
         assert set(rows[0]) == {"id", "name", "position", "team", "age", "value"}
         etag = r.headers["ETag"]
         r2 = c.get("/api/trade/values?scoring_format=1qb_ppr",

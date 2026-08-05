@@ -97,8 +97,10 @@ def _consensus_packages(give_ids, recv_ids, seed_value):
     gvals = [seed_value(p) for p in give_ids]
     rvals = [seed_value(p) for p in recv_ids]
     v_max = max(gvals + rvals)
-    return (package_value_v2(gvals, v_max, n_other=len(recv_ids)),
-            package_value_v2(rvals, v_max, n_other=len(give_ids)))
+    return (package_value_v2(gvals, v_max, n_other=len(recv_ids),
+                             other_values=rvals),
+            package_value_v2(rvals, v_max, n_other=len(give_ids),
+                             other_values=gvals))
 
 
 def _fairness_v3(give_ids, recv_ids, seed_value, confidence,
@@ -117,8 +119,10 @@ def _fairness_v3(give_ids, recv_ids, seed_value, confidence,
     gvals = [seed_value(p) for p in give_ids]
     rvals = [seed_value(p) for p in recv_ids]
     v_max = max(gvals + rvals)
-    gv = package_value_v2(gvals, v_max, n_other=len(recv_ids))
-    rv = package_value_v2(rvals, v_max, n_other=len(give_ids))
+    gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
+                          other_values=rvals)
+    rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
+                          other_values=gvals)
     if gv <= 0 or rv <= 0:
         return 1.0, 1.0, gv, rv
     ratio = min(gv, rv) / max(gv, rv)
@@ -410,14 +414,18 @@ def generate_pair_trades_v3(
         uvals_give = [_user_val(p) for p in give_ids]
         uvals_recv = [_user_val(p) for p in recv_ids]
         u_max = max(uvals_give + uvals_recv)
-        give_val_user = package_value_v2(uvals_give, u_max, n_other=len(recv_ids))
-        recv_val_user = package_value_v2(uvals_recv, u_max, n_other=len(give_ids))
+        give_val_user = package_value_v2(uvals_give, u_max, n_other=len(recv_ids),
+                                         other_values=uvals_recv)
+        recv_val_user = package_value_v2(uvals_recv, u_max, n_other=len(give_ids),
+                                         other_values=uvals_give)
 
         ovals_give = [_opp_val(p) for p in give_ids]
         ovals_recv = [_opp_val(p) for p in recv_ids]
         o_max = max(ovals_give + ovals_recv)
-        give_val_opp = package_value_v2(ovals_give, o_max, n_other=len(recv_ids))   # opp receives
-        recv_val_opp = package_value_v2(ovals_recv, o_max, n_other=len(give_ids))   # opp gives
+        give_val_opp = package_value_v2(ovals_give, o_max, n_other=len(recv_ids),
+                                        other_values=ovals_recv)   # opp receives
+        recv_val_opp = package_value_v2(ovals_recv, o_max, n_other=len(give_ids),
+                                        other_values=ovals_give)   # opp gives
 
         # Waiver-slot cost (A3) on the side receiving MORE players.
         extra = len(recv_ids) - len(give_ids)

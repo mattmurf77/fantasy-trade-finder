@@ -69,12 +69,14 @@ export default function ConsensusVerdictCard({
         </View>
 
         {/* Why the totals differ from the naive sum of parts — collapsed by
-            default, renders only when the server itemized adjustments. */}
+            default, renders only when the server itemized adjustments
+            (#215: mode 'off' shows a one-line "Value adjustments off"). */}
         <AdjustmentsDisclosure
           adjustments={evaluation.adjustments}
           naiveTotals={evaluation.naive_totals}
           giveTotal={evaluation.give_value}
           receiveTotal={evaluation.receive_value}
+          studTaxMode={evaluation.stud_tax_mode}
         />
 
         {onAddEvener && evaluation.eveners && evaluation.eveners.length > 0 && evaluation.gap?.add_to ? (

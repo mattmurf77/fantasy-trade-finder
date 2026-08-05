@@ -70,6 +70,28 @@ _DEFAULT_CFG: dict[str, float] = {
     # headliner earns proportionally less. <= 0 disables the scaling
     # (flat crown_rate for any crown asset).
     "crown_elite_value":  6000.0,
+    # ------------------------------------------------------------------
+    # #214 stud-tax retune — "market" mode shapes (default mode; the
+    # pre-#214 constants above still drive the "heavy" legacy mode via the
+    # #215 stud_tax_mode user setting). Fit against the T1–T6 competitor
+    # matrix (docs/feedback/items/214-stud-tax/build-status.md).
+    # ------------------------------------------------------------------
+    # Crown premium phases out as the naive gap widens: scale by
+    # max(0, 1 − |naive_skew| / skew_phaseout). <= 0 disables the
+    # phase-out (full premium at any skew).
+    "skew_phaseout":             0.5,
+    # Per-elite-piece crown rate (BOTH sides, count-independent) — lower
+    # than the single-crown heavy rate because every qualifying piece earns.
+    "crown_rate_market":         0.08,
+    # Market-mode depth discount: contribution floor + exponent, applied
+    # against the package's OWN best asset (not the whole trade's), with
+    # the side's total discount capped at package_discount_cap × naive sum.
+    # Fit 2026-08-05 (build-status.md): floor 0.70 / γ 0.5 landed 4/6
+    # matrix trades within ±15pp of the competitor median (T1/T4 misses
+    # are naive-value-curve gaps no adjustment retune can close).
+    "package_floor_market":      0.70,
+    "package_adj_gamma_market":  0.5,
+    "package_discount_cap":      0.35,
     # Positional preference multipliers
     "pos_acquire_bonus":     0.20,
     "pos_tradeaway_bonus":   0.15,
@@ -472,6 +494,65 @@ def _c(key: str) -> float:
 
 
 # ---------------------------------------------------------------------------
+# #214/#215 — stud-tax mode (per-user setting `stud_tax_mode`)
+# ---------------------------------------------------------------------------
+# 'market' (default) — the #214 retuned shapes: depth discount vs the
+#     package's OWN best asset (capped), crown credit per elite asset on
+#     EITHER side, phased out as the naive gap widens.
+# 'heavy'  — the pre-#214 legacy math, byte-identical (trade-wide v_max
+#     benchmark, uncapped gamma discount, single-crown outnumbered-side
+#     premium at crown_rate).
+# 'off'    — no crown premium, no depth discount: naive sums stand.
+#
+# The mode rides a thread-local (same pattern as the #189 _cfg_override):
+# entry points that know the user (generate_trades, generate_asset_ideas,
+# /api/trade/evaluate, the likes-you injector) pin it for the duration of
+# their math; everything package_value_v2 touches inherits it.
+
+STUD_TAX_MODES = ("market", "heavy", "off")
+STUD_TAX_DEFAULT = "market"
+
+_stud_tax_local = threading.local()
+
+
+def current_stud_tax_mode() -> str:
+    m = getattr(_stud_tax_local, "mode", None)
+    return m if m in STUD_TAX_MODES else STUD_TAX_DEFAULT
+
+
+def pinned_stud_tax_mode() -> str | None:
+    """The explicitly pinned thread-local mode, or None when nothing is
+    pinned. Entry points (generate_trades, /api/trade/evaluate, …) keep an
+    already-active outer pin instead of re-resolving the user's stored
+    setting — production never nests entry points, and it lets tests pin a
+    mode around a whole route/service call."""
+    m = getattr(_stud_tax_local, "mode", None)
+    return m if m in STUD_TAX_MODES else None
+
+
+@contextmanager
+def stud_tax_override(mode: str | None):
+    """Pin the stud-tax mode for package_value_v2 calls on this thread."""
+    prev = getattr(_stud_tax_local, "mode", None)
+    _stud_tax_local.mode = mode if mode in STUD_TAX_MODES else STUD_TAX_DEFAULT
+    try:
+        yield
+    finally:
+        _stud_tax_local.mode = prev
+
+
+def stud_tax_mode_for_user(user_id: str | None) -> str:
+    """The stored per-user mode ('market' default; DB-unavailable safe)."""
+    if not user_id:
+        return STUD_TAX_DEFAULT
+    try:
+        from .database import get_stud_tax_mode
+        return get_stud_tax_mode(user_id)
+    except Exception:
+        return STUD_TAX_DEFAULT
+
+
+# ---------------------------------------------------------------------------
 # KTC-style Dynasty Value
 # ---------------------------------------------------------------------------
 # Exponential decay: rank 1 ≈ 9875, rank 200 ≈ 806, rank 500 ≈ ~66
@@ -588,9 +669,25 @@ def value_to_elo(value: float) -> float:
 
 
 def package_value_v2(values: list[float], v_max: float,
-                     n_other: int | None = None) -> float:
+                     n_other: int | None = None,
+                     other_values: list[float] | None = None) -> float:
     """
     KTC-style package value for the v2 engine (amendment A2).
+
+    #214/#215: behavior branches on the thread-local stud-tax mode (see
+    stud_tax_override / current_stud_tax_mode above):
+
+    'off' — no adjustments; returns the naive sum of `values`.
+
+    'market' (default) — the #214 retuned shapes; see
+    _package_value_market. ``other_values`` (the OTHER side's raw values,
+    same value space) enables the both-sides elite crown credit + the
+    naive-skew phase-out; callers that omit it get the depth math only.
+    ``v_max``/``n_other`` are ignored in this mode (kept for signature
+    compatibility — the depth benchmark is the package's OWN best asset,
+    and crown eligibility is count-independent).
+
+    'heavy' — the pre-#214 legacy math, byte-identical:
 
     Inspired by KeepTradeCut's reverse-engineered "raw adjustment": each
     asset in a trade contributes only a fraction of its raw value, and the
@@ -619,6 +716,13 @@ def package_value_v2(values: list[float], v_max: float,
     """
     if not values:
         return 0.0
+    mode = current_stud_tax_mode()
+    if mode == "off":
+        return round(sum(values), 1)
+    if mode == "market":
+        return _package_value_market(values, other_values)
+
+    # ── 'heavy' — pre-#214 legacy math, byte-identical ──────────────────
     v_max = max(v_max, 1e-9)
     gamma = _c("package_adj_gamma")
     total = sum(v * (0.15 + 0.85 * (v / v_max) ** gamma) for v in values)
@@ -641,6 +745,52 @@ def package_value_v2(values: list[float], v_max: float,
                     premium *= min(1.0, v_top / elite_ref)
                 top_contrib = v_top * (0.15 + 0.85 * (v_top / v_max) ** gamma)
                 total += premium * top_contrib
+    return round(total, 1)
+
+
+def _package_value_market(values: list[float],
+                          other_values: list[float] | None) -> float:
+    """#214 'market' stud-tax shapes (tuning-proposal.md §1–3).
+
+    1. Depth discount benchmarks each piece against the package's OWN best
+       asset — contribution(v) = v · (floor + (1−floor) · (v/own_max)^γ)
+       with floor = package_floor_market, γ = package_adj_gamma_market —
+       and the side's TOTAL discount is capped at package_discount_cap ×
+       the naive sum. A single-asset side is never depth-discounted.
+    2. Crown credit per elite asset (value ≥ crown_elite_value) on EITHER
+       side, count-independent, at crown_rate_market per piece (flag
+       trade.crown_asset still the kill-switch; needs `other_values` to
+       know the trade's naive skew).
+    3. The crown credit phases out as the naive gap widens: scaled by
+       max(0, 1 − |naive_skew| / skew_phaseout), where naive_skew is the
+       sides' naive-sum gap over the SMALLER side's sum (symmetric; equals
+       results.md's stud-side-denominated skew in the stud-vs-package
+       case). An already-lopsided trade earns no consolidation credit —
+       KTC's observed shape.
+    """
+    naive = sum(values)
+    if naive <= 0:
+        return round(naive, 1)
+    own_max = max(values)
+    gamma = _c("package_adj_gamma_market")
+    floor = _c("package_floor_market")
+    contrib = sum(v * (floor + (1.0 - floor) * (v / own_max) ** gamma)
+                  for v in values)
+    cap = _c("package_discount_cap")
+    total = max(contrib, naive * (1.0 - cap))
+
+    if FLAGS.trade_crown_asset and other_values:
+        other_naive = sum(other_values)
+        denom = min(naive, other_naive)
+        if denom > 0:
+            skew = abs(naive - other_naive) / denom
+            phaseout = _c("skew_phaseout")
+            phase = 1.0 if phaseout <= 0 else max(0.0, 1.0 - skew / phaseout)
+            if phase > 0:
+                elite_ref = _c("crown_elite_value")
+                if elite_ref > 0:
+                    rate = _c("crown_rate_market")
+                    total += sum(v for v in values if v >= elite_ref) * rate * phase
     return round(total, 1)
 
 
@@ -1888,7 +2038,17 @@ class TradeService:
     # Trade generation
     # ------------------------------------------------------------------
 
-    def generate_trades(
+    def generate_trades(self, *args, **kwargs):
+        """#215 — resolve the requesting user's stud-tax mode once per job
+        and pin it (thread-local) for every package_value_v2 call this
+        generation makes, then delegate to _generate_trades_impl. An
+        already-pinned mode (tests) wins over the stored setting."""
+        user_id = kwargs.get("user_id", args[0] if args else None)
+        mode = pinned_stud_tax_mode() or stud_tax_mode_for_user(user_id)
+        with stud_tax_override(mode):
+            return self._generate_trades_impl(*args, **kwargs)
+
+    def _generate_trades_impl(
         self,
         user_id: str,
         user_elo: dict[str, float],          # { player_id: elo } — logged-in user
@@ -2140,7 +2300,13 @@ class TradeService:
     # ideas (flag: trade.asset_ideas; route POST /api/trades/asset-ideas)
     # ------------------------------------------------------------------
 
-    def generate_asset_ideas(
+    def generate_asset_ideas(self, *, user_id: str, **kwargs):
+        """#215 — same stud-tax mode pinning as generate_trades."""
+        mode = pinned_stud_tax_mode() or stud_tax_mode_for_user(user_id)
+        with stud_tax_override(mode):
+            return self._generate_asset_ideas_impl(user_id=user_id, **kwargs)
+
+    def _generate_asset_ideas_impl(
         self,
         *,
         user_id: str,
@@ -2256,8 +2422,10 @@ class TradeService:
             gvals = [_v(p) for p in give_ids]
             rvals = [_v(p) for p in recv_ids]
             v_max = max(gvals + rvals)
-            gv = package_value_v2(gvals, v_max, n_other=len(recv_ids))
-            rv = package_value_v2(rvals, v_max, n_other=len(give_ids))
+            gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
+                                  other_values=rvals)
+            rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
+                                  other_values=gvals)
             if gv <= 0 or rv <= 0:
                 return None
             # #108 — consensus IS the user's board here (never relaxed).
@@ -2841,9 +3009,11 @@ class TradeService:
                     rvals = [_vs(p) for p in c.receive_player_ids]
                     v_max = max(gvals + rvals)
                     gv = package_value_v2(gvals, v_max,
-                                          n_other=len(rvals))
+                                          n_other=len(rvals),
+                                          other_values=rvals)
                     rv = package_value_v2(rvals, v_max,
-                                          n_other=len(gvals))
+                                          n_other=len(gvals),
+                                          other_values=gvals)
                     tilt = ((rv - gv) / max(gv, rv)) if max(gv, rv) > 0 else 0.0
                     if _variant == "light":
                         mult = 1.0 + w_ab * tilt
@@ -3042,8 +3212,10 @@ class TradeService:
             gvals = [seed_value(p) for p in give_ids]
             rvals = [seed_value(p) for p in recv_ids]
             v_max = max(gvals + rvals)
-            gv = package_value_v2(gvals, v_max, n_other=len(recv_ids))
-            rv = package_value_v2(rvals, v_max, n_other=len(give_ids))
+            gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
+                                  other_values=rvals)
+            rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
+                                  other_values=gvals)
             if gv <= 0 or rv <= 0:
                 return 1.0
             fairness = min(gv, rv) / max(gv, rv)
@@ -3119,8 +3291,10 @@ class TradeService:
                 uvals_give = [user_value[p] for p in give_ids]
                 uvals_recv = [user_value[p] for p in recv_ids]
             u_max = max(uvals_give + uvals_recv)
-            give_val_user = package_value_v2(uvals_give, u_max, n_other=len(recv_ids))
-            recv_val_user = package_value_v2(uvals_recv, u_max, n_other=len(give_ids))
+            give_val_user = package_value_v2(uvals_give, u_max, n_other=len(recv_ids),
+                                             other_values=uvals_recv)
+            recv_val_user = package_value_v2(uvals_recv, u_max, n_other=len(give_ids),
+                                             other_values=uvals_give)
 
             if MARGINAL:
                 ovals_give = [_mo(p) for p in give_ids]
@@ -3129,8 +3303,10 @@ class TradeService:
                 ovals_give = [_vo(p) for p in give_ids]
                 ovals_recv = [_vo(p) for p in recv_ids]
             o_max = max(ovals_give + ovals_recv)
-            give_val_opp = package_value_v2(ovals_give, o_max, n_other=len(recv_ids))  # opp receives
-            recv_val_opp = package_value_v2(ovals_recv, o_max, n_other=len(give_ids))  # opp gives
+            give_val_opp = package_value_v2(ovals_give, o_max, n_other=len(recv_ids),
+                                            other_values=ovals_recv)  # opp receives
+            recv_val_opp = package_value_v2(ovals_recv, o_max, n_other=len(give_ids),
+                                            other_values=ovals_give)  # opp gives
 
             # Waiver-slot cost (A3): the side receiving MORE players drops a
             # waiver-level player per extra slot — subtract from that side's
@@ -3394,8 +3570,10 @@ class TradeService:
             gvals = [seed_value(p) for p in give_ids]
             rvals = [seed_value(p) for p in recv_ids]
             v_max = max(gvals + rvals)
-            gv = package_value_v2(gvals, v_max, n_other=len(recv_ids))
-            rv = package_value_v2(rvals, v_max, n_other=len(give_ids))
+            gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
+                                  other_values=rvals)
+            rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
+                                  other_values=gvals)
             if gv <= 0 or rv <= 0:
                 return
             # #108 — on a consensus card the user's board IS consensus:

@@ -886,14 +886,16 @@ function LeagueVerdict({
         </Text>
       ) : null}
       {/* Why the consensus totals differ from the naive sum of parts —
-          collapsed by default, only when the server itemized adjustments. */}
-      {ev.adjustments ? (
+          collapsed by default, only when the server itemized adjustments
+          (#215: mode 'off' shows the one-line "Value adjustments off"). */}
+      {ev.adjustments || ev.stud_tax_mode === 'off' ? (
         <View style={styles.adjustments}>
           <AdjustmentsDisclosure
             adjustments={ev.adjustments}
             naiveTotals={ev.naive_totals}
             giveTotal={ev.give_value}
             receiveTotal={ev.receive_value}
+            studTaxMode={ev.stud_tax_mode}
           />
         </View>
       ) : null}

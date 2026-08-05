@@ -165,6 +165,14 @@ Canonical set: `window`, `value` — the optional `lane` field on trade cards (f
 
 ---
 
+## Stud-tax mode strings (#214/#215)
+
+Canonical set: `market` (retuned default — NULL/unknown stored values read as market), `heavy` (pre-#214 legacy adjustment math, byte-identical), `off` (no crown premium / package-depth discount; naive sums stand). Stored per user (`users.stud_tax_mode`), served by `GET/PUT /api/settings/stud-tax`, echoed by `POST /api/trade/evaluate` as `stud_tax_mode`.
+
+**Locations to update together:** `backend/trade_service.py` (`STUD_TAX_MODES` / `STUD_TAX_DEFAULT`), `backend/database.py` (`STUD_TAX_MODES` validation + `get/set_stud_tax_mode`), `backend/server.py` (`/api/settings/stud-tax` whitelist), `mobile/src/api/calc.ts` (`StudTaxMode` union), `mobile/src/screens/SettingsScreen.tsx` (`STUD_TAX_OPTIONS` segmented control), `mobile/src/components/AdjustmentsDisclosure.tsx` (the `'off'` note).
+
+---
+
 ## Ranking method strings
 
 `users.ranking_method`: null, `'trio'`, `'manual'`, `'tiers'`, `'anchor'` (added 2026-07-10 with the Pick Anchor wizard + rank-home chooser), `'quickset'` (added 2026-07-12, #119 — the guided tier quick-set walk promoted to a first-class method; unlocks like `'tiers'` since it writes through `/api/tiers/save`).

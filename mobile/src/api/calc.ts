@@ -18,6 +18,10 @@ export interface CalcValueRow {
 
 export type CalcVerdict = 'even' | 'fair' | 'unfair';
 
+// #215 — the user-level stud-tax setting (see api/accountPrefs.ts for the
+// GET/PUT endpoints; evaluate echoes the mode it priced with).
+export type StudTaxMode = 'market' | 'heavy' | 'off';
+
 // Pick-denominated gap read: the package-value difference expressed as
 // generic-pick equivalents so the delta is an actionable counteroffer
 // ("add ≈ a Mid 2nd") instead of an abstract number.
@@ -90,6 +94,9 @@ export interface CalcEvaluation {
   adjustments?: { give: CalcAdjustment[]; receive: CalcAdjustment[] };
   /** Naive per-side sums ("sum of parts") — rides along with adjustments. */
   naive_totals?: { give: number; receive: number };
+  /** #215 — which stud-tax mode priced this read ('market' default |
+   *  'heavy' legacy | 'off' = no adjustments). Absent on old servers. */
+  stud_tax_mode?: StudTaxMode;
 }
 
 export async function getTradeValues(
@@ -108,9 +115,11 @@ export async function evaluateTrade(
   format: ScoringFormat,
   signal?: AbortSignal,
 ): Promise<CalcEvaluation> {
+  // #215: the session token rides along when present (no longer skipAuth)
+  // so the server can apply the caller's stored stud_tax_mode; the
+  // endpoint itself stays public — signed-out calls work unchanged.
   return apiRequest('/api/trade/evaluate', {
     method: 'POST',
-    skipAuth: true,
     signal,
     body: {
       give_player_ids: givePlayerIds,
