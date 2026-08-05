@@ -516,7 +516,15 @@ export default function TabNav() {
         <Tab.Screen
           name="Trades"
           component={TradesStackNav}
-          options={{ tabBarIcon: tabIcon('trade'), tabBarButtonTestID: 'tab.trades' }}
+          // #245 — presentation-level rename: the tab reads "Acquire" (trade
+          // + free-agency acquisition). Route name 'Trades' is unchanged so
+          // deep links, analytics events, and testIDs keep working.
+          options={{
+            tabBarIcon: tabIcon('trade'),
+            tabBarLabel: 'Acquire',
+            tabBarAccessibilityLabel: 'Acquire',
+            tabBarButtonTestID: 'tab.trades',
+          }}
           listeners={({ navigation, route }) => ({
             // Warm the liked-trades cache during the tab transition so
             // TradesScreen's `useQuery(['liked-trades', leagueId])` adopts

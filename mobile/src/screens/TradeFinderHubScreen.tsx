@@ -26,7 +26,7 @@ import {
   scrim,
 } from '../theme/chalkline';
 import { posColor } from '../theme/colors';
-import { Icon, Button } from '../components/chalkline';
+import { Icon, Button, TickLabel } from '../components/chalkline';
 import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { useFlag } from '../state/useFeatureFlags';
@@ -481,14 +481,21 @@ export default function TradeFinderHubScreen({ navigation, route }: any) {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.header}>
+          {/* #245 — page retitled to match the renamed tab; the TRADE
+              section label below carries the trade context. */}
           <Text style={styles.pageTitle} accessibilityRole="header">
-            Find a Trade
+            Acquire
           </Text>
         </View>
         {/* #223 — the "Trading in" LeaguePill row is gone: the global
             TopBar now carries the active league + switcher on every tab,
             and its ~63pt goes back to hub content (feeds the #218
             fit-to-screen pass). */}
+
+        {/* #245 — TRADE section header: heads the existing hub content
+            (Trade DNA panel + mode cards) now that the page title says
+            "Acquire" rather than "Find a Trade". */}
+        <TickLabel>Trade</TickLabel>
 
         {/* #212 Trade DNA panel — collapsed summary by default; Edit
             expands the editor IN PLACE (no sheet). */}
@@ -788,6 +795,37 @@ export default function TradeFinderHubScreen({ navigation, route }: any) {
             </Pressable>
           );
         })}
+
+        {/* #245 — FREE AGENCY section: one row linking to the existing
+            Free Agent finder (root-stack route 'FreeAgents', #143 — the
+            navigate call bubbles up from this tab screen to RootNav; the
+            League tab's entry row stays in place). */}
+        <TickLabel>Free agency</TickLabel>
+        <Pressable
+          testID="finder-hub.card.free-agents"
+          accessibilityRole="button"
+          accessibilityLabel="Free agent finder"
+          accessibilityHint="Best available players, ranked by your board values."
+          onPress={() => {
+            haptics.selection();
+            navigation.navigate('FreeAgents');
+          }}
+          style={({ pressed }) => [
+            styles.card,
+            pressed && { backgroundColor: ink.ink2 },
+          ]}
+        >
+          <View style={styles.cardIcon}>
+            <Icon name="plus" size={20} color={ice.base} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle}>Free Agent Finder</Text>
+            <Text style={styles.cardBody}>
+              Best available players, ranked by your board values.
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={18} color={chalk.faint} />
+        </Pressable>
       </ScrollView>
 
       {/* Specific Team — manager picker sheet. */}
