@@ -233,3 +233,7 @@ Smoke flows: `mobile/.maestro/flows/smoke/01–11` (headers carry the TC ids). F
 - LeagueScreen Explore reflow (fold V1): `league.rankings-row` · `league.free-agents-row` · `league.rookie-board-row` UNCHANGED but re-homed — they now sit on the 3-across `ExploreTile` cards (short labels "Rankings" / "Free agents" / "Rookie board"; the old full names survive as each tile's accessibilityLabel, so text-matching flows should switch to the ids)
 - LeagueProgressModule: `league.progress-invite` (the inline "Invite them" text link on the unlock sentence — replaces the old ghost "Invite leaguemates" Button, same OS-share handler; renders as a standalone "Invite leaguemates" link when matches are already unlocked)
 - MarketPulseStrip: `league.market-pulse` (the whole strip is the tap target — opens the movers sheet) · `league.market-pulse.see-all` (the "See all movers ›" text, inside the same Pressable) · `market-movers.sheet` (bottom-sheet container; closes via backdrop/onRequestClose, no explicit close control — #242 pattern)
+
+**Acquire tab tranche (2026-08-05, #245):**
+- Tab bar: `tab.trades` UNCHANGED — the tab's visible label + accessibility label are now "Acquire" (presentation-level rename; route name `Trades` kept, so text-matching flows must use the id or "Acquire")
+- TradeFinderHubScreen: `finder-hub.card.free-agents` (the FREE AGENCY section's single row → root-stack `FreeAgents`; a11y label "Free agent finder"). The hub's in-page title copy changed "Find a Trade" → "Acquire"; the new TRADE / FREE AGENCY TickLabels are headers (no ids)
