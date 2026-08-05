@@ -663,17 +663,11 @@ export default function InLeagueCalculator({
         }}
       />
 
-      {anySide && evalQ.data ? (
-        <LeagueVerdict ev={evalQ.data} oppName={opponent?.username ?? 'them'} stale={evalQ.isFetching} />
-      ) : anySide && evalQ.isLoading ? (
-        <Card>
-          <View style={styles.row}>
-            <ActivityIndicator color={ice.base} />
-            <Text style={type.bodySm}>Evaluating…</Text>
-          </View>
-        </Card>
-      ) : null}
-
+      {/* #251 (operator, via the featured-trade window's edit-in-calculator
+          hand-off): the "Recommended to even it" rows sit DIRECTLY under
+          the trade window (the give/receive sides above), ABOVE the
+          fairness summary — the fix is one tap away before the verdict
+          re-explains the gap. Pure reorder; same render condition. */}
       {anySide && ev?.eveners && ev.eveners.length > 0 && ev.gap?.add_to ? (
         <EvenerRows
           eveners={ev.eveners}
@@ -684,6 +678,17 @@ export default function InLeagueCalculator({
           }
           onAdd={addEvener}
         />
+      ) : null}
+
+      {anySide && evalQ.data ? (
+        <LeagueVerdict ev={evalQ.data} oppName={opponent?.username ?? 'them'} stale={evalQ.isFetching} />
+      ) : anySide && evalQ.isLoading ? (
+        <Card>
+          <View style={styles.row}>
+            <ActivityIndicator color={ice.base} />
+            <Text style={type.bodySm}>Evaluating…</Text>
+          </View>
+        </Card>
       ) : null}
 
       {balancePlan && balanceQ.data && balanceQ.data.length > 0 ? (

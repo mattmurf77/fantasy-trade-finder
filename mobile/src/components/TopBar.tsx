@@ -75,6 +75,17 @@ const DEFAULT_ROW_GLYPH: { name: IconName; color: string } = {
   color: chalk.dim,
 };
 
+// #247 — the header format tile. The session's activeFormat IS the active
+// league's scoring format (detected per league, per-session override via
+// the SF/1QB toggle — see useSession). Two formats exist app-wide
+// (shared/types ScoringFormat); labels compress the FormatToggle wording
+// to tile size ("SF TEP" keeps the TE-premium distinction the data
+// carries; PPR is implied for 1QB everywhere else in the app).
+const FORMAT_TILE_LABEL: Record<string, string> = {
+  '1qb_ppr': '1QB',
+  sf_tep: 'SF TEP',
+};
+
 export default function TopBar() {
   const insets = useSafeAreaInsets();
   const items       = useNotifications((s) => s.items);
@@ -89,6 +100,11 @@ export default function TopBar() {
   // can take seconds on Render free tier — no concurrent switches).
   const league    = useSession((s) => s.league);
   const switching = useSession((s) => s.switching);
+  // #247 — active league's scoring format for the header tile.
+  const activeFormat = useSession((s) => s.activeFormat);
+  const formatLabel = activeFormat
+    ? FORMAT_TILE_LABEL[activeFormat] ?? null
+    : null;
   const [switcherOpen, setSwitcherOpen] = useState(false);
   // S5 PRD-02 (flag `notif.tap_routing_v2`): the bell hydrates from the
   // server inbox on open (the in-memory feed resets on relaunch, so without
@@ -155,7 +171,9 @@ export default function TopBar() {
               onPress={() => setSwitcherOpen(true)}
               disabled={switching}
               accessibilityRole="button"
-              accessibilityLabel={`League: ${league.league_name}`}
+              accessibilityLabel={`League: ${league.league_name}${
+                formatLabel ? `, ${formatLabel} format` : ''
+              }`}
               accessibilityHint="Opens the league switcher"
               accessibilityState={{ disabled: switching, busy: switching }}
               style={({ pressed }) => [
@@ -171,6 +189,17 @@ export default function TopBar() {
                   <Text style={styles.leagueName} numberOfLines={1}>
                     {league.league_name}
                   </Text>
+                  {/* #247 — the league's scoring format as a solid-ice tile
+                      beside the name (ice = identity/action-adjacent; the
+                      cluster is the switcher affordance). 11px floor,
+                      radius ≤8 per Chalkline. The Pressable container
+                      swallows child text on iOS, so the format is also
+                      spoken via the accessibilityLabel above. */}
+                  {formatLabel ? (
+                    <View testID="topbar.format" style={styles.formatTile}>
+                      <Text style={styles.formatTileText}>{formatLabel}</Text>
+                    </View>
+                  ) : null}
                   <Icon name="chevron-down" size={14} color={ice.base} />
                 </View>
               </View>
@@ -394,6 +423,23 @@ const styles = StyleSheet.create({
     color: chalk.base,
     flexShrink: 1,
     maxWidth: 200,
+  },
+  // #247 — solid-ice format tile (data micro-label on ice fill; 11px is
+  // the Chalkline type floor, radii.xs ≤ 8).
+  formatTile: {
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: radii.xs,
+    backgroundColor: ice.base,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  formatTileText: {
+    fontFamily: fonts.dataSemi,
+    fontSize: 11,
+    lineHeight: 13,
+    letterSpacing: 0.4,
+    color: ice.on,
   },
   wordmarkTick: { width: 3, height: 14, backgroundColor: ice.base },
   wordmarkText: {
