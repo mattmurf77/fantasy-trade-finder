@@ -93,6 +93,29 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 //     league tercile: top third pos-green, middle warn-amber, bottom
 //     neg-red) and per-player positional value ranks ("RB2", "NR" for zero
 //     value). X (testID league-summary.roster-close, unchanged) restores.
+//   - #248 combined rank bars, V2 (2026-08-05, approved mock
+//     mockups/polish-lab-2026-08/combined-rank-bars.html): ONE chart carries
+//     BOTH boards. The screen now runs TWO parallel queries (one per basis —
+//     same endpoint, same per-basis queryKeys as before, cache-compatible);
+//     the basis toggle's new role is choosing which basis draws the BARS
+//     (labels flip to "Consensus sorts" / "My board sorts" once both boards
+//     are loaded and differ). The OTHER basis renders as a dashed ice tick
+//     overlay per column (testID league-summary.tick.<user_id>) at that
+//     team's other-board total, plus a signed ▲/▼ delta chip (testID
+//     league-summary.delta.<user_id>, semantic pos/neg) when the two bases'
+//     ranks differ by ≥2. Bars + ticks + the avg line share ONE max scale so
+//     a tick can never clip off the top. Tick/delta math reuses the exact
+//     same client-side derivation as the bars (computeSubset + activeTotal
+//     over the other payload's own basis-aware rosters/starters), so the
+//     All/Starters/Bench + position filters recompute both signals
+//     consistently; if the other payload can't derive starters
+//     (starters_available false), ticks hide for the starters/bench subsets
+//     rather than fabricate. When the caller has no my-board data the two
+//     payloads are value-identical (personal Elo = consensus seed) — ticks,
+//     chips and the "sorts" labels all hide and the screen renders exactly
+//     the pre-#248 consensus-only chart. Drill-in focus hides every
+//     non-focused tick/chip (mock rule) and the focus caption + drill
+//     subline state both ranks ("My board rank 7/12 · Consensus rank 2/12").
 //
 // #181 — this screen serves TWO routes:
 //   • 'LeagueRankings' — the League TAB's root (TabNav's LeagueStack): the
@@ -263,13 +286,35 @@ export default function LeagueSummaryScreen() {
   // chart card (one state, two mirrored button sets). No separate drill
   // filter.
 
-  const query = useQuery({
-    queryKey: ['league-power-rankings', leagueId, basis],
-    queryFn: () => getPowerRankings(leagueId!, basis),
+  // #248 — the screen holds BOTH bases at once via two parallel queries
+  // against the same endpoint (chosen over a combined-payload backend change:
+  // the per-basis payload is a per-league aggregate the server computes in
+  // one pass, the queryKeys are byte-identical to the pre-#248 single query
+  // so the cache carries over, and no backend/API-contract change is
+  // needed). `basis` picks which payload draws the BARS; the other payload
+  // drives the tick/delta overlay. The personal query fails quietly for
+  // unverified callers (no ticks); toggling to My board surfaces the same
+  // verification error as before.
+  const consensusQuery = useQuery({
+    queryKey: ['league-power-rankings', leagueId, 'consensus'],
+    queryFn: () => getPowerRankings(leagueId!, 'consensus'),
     enabled: !!leagueId,
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
+  const personalQuery = useQuery({
+    queryKey: ['league-power-rankings', leagueId, 'personal'],
+    queryFn: () => getPowerRankings(leagueId!, 'personal'),
+    enabled: !!leagueId,
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+  const query = basis === 'personal' ? personalQuery : consensusQuery;
+  const otherQuery = basis === 'personal' ? consensusQuery : personalQuery;
+  const refetchBoth = () => {
+    consensusQuery.refetch();
+    personalQuery.refetch();
+  };
 
   // #169 outlook odds — DARK behind `outlook.odds`. `enabled` is false unless
   // the flag is on AND a league is selected, so GET /api/league/outlook never
@@ -333,6 +378,61 @@ export default function LeagueSummaryScreen() {
     [ranked],
   );
 
+  // ── #248 — other-basis overlay (ghost tick + delta chips) ──────────────
+  // A caller with no my-board data gets personal values identical to
+  // consensus (personal Elo starts at the consensus seed) — in that case the
+  // overlay would only mark the bars against themselves, so it hides and the
+  // screen renders exactly the pre-#248 single-basis chart.
+  const otherTeams = otherQuery.data?.teams ?? [];
+  const boardsDiffer = useMemo(() => {
+    if (!query.data || !otherQuery.data) return false;
+    const totals = new Map(teams.map((t) => [t.user_id, t.total_value]));
+    return otherTeams.some((t) => totals.get(t.user_id) !== t.total_value);
+  }, [query.data, otherQuery.data, teams, otherTeams]);
+  const otherStartersAvailable =
+    otherQuery.data?.starters_available === true &&
+    otherTeams.length > 0 &&
+    otherTeams.every((t) => Array.isArray(t.starters));
+  // Ticks/deltas recompute per the filtered subset using the SAME derivation
+  // as the bars (computeSubset + activeTotal over the other payload's own
+  // basis-aware rosters + starters). Honest degradation: if the other
+  // payload can't derive starters, the overlay hides for starters/bench
+  // rather than fabricate a subset.
+  const ticksOn =
+    boardsDiffer &&
+    otherTeams.length > 0 &&
+    (subset === 'all' || otherStartersAvailable);
+  const otherComputed = useMemo(
+    () => otherTeams.map((t) => computeSubset(t, subset)),
+    [otherTeams, subset],
+  );
+  // Per-team other-basis active value + rank under the active filters (same
+  // sort + tie-break as the bars).
+  const otherByTeam = useMemo(() => {
+    const rows = otherComputed.map((tc) => ({
+      id: tc.team.user_id,
+      active: activeTotal(tc, subset, posFilter),
+    }));
+    rows.sort((a, b) => b.active - a.active || (a.id < b.id ? -1 : 1));
+    const m = new Map<string, { active: number; rank: number }>();
+    rows.forEach((r, i) => m.set(r.id, { active: r.active, rank: i + 1 }));
+    return m;
+  }, [otherComputed, subset, posFilter]);
+
+  // One shared max scale across BOTH bases (mock rule) so a tick whose
+  // other-board value beats every bar can never clip off the chart top.
+  const scaleMax = useMemo(() => {
+    if (!ticksOn) return maxActive;
+    let m = maxActive;
+    otherByTeam.forEach((v) => {
+      if (v.active > m) m = v.active;
+    });
+    return m;
+  }, [ticksOn, maxActive, otherByTeam]);
+
+  const basisLabel = basis === 'personal' ? 'my board' : 'consensus';
+  const otherLabel = basis === 'personal' ? 'consensus' : 'my board';
+
   // League-average line (2026-07-26 amendment): the mean of EXACTLY the
   // values the bars are showing — position pills × subset × basis all
   // applied (no filter = full-roster average including picks). Recomputes
@@ -385,6 +485,12 @@ export default function LeagueSummaryScreen() {
     ? ranked.findIndex((r) => r.tc.team.user_id === selectedId)
     : -1;
   const selected = selectedIdx >= 0 ? ranked[selectedIdx] : null;
+  // #248 — the focused team's other-basis rank (focus caption + drill
+  // subline state both ranks when the overlay is live).
+  const focusOther =
+    selected && ticksOn
+      ? otherByTeam.get(selected.tc.team.user_id) ?? null
+      : null;
 
   const togglePos = (setter: React.Dispatch<React.SetStateAction<Set<FilterKey>>>) =>
     (pos: FilterKey | 'ALL') => {
@@ -447,7 +553,7 @@ export default function LeagueSummaryScreen() {
         refreshControl={
           <RefreshControl
             refreshing={query.isFetching && !!query.data}
-            onRefresh={() => query.refetch()}
+            onRefresh={refetchBoth}
             tintColor={ice.base}
           />
         }
@@ -479,17 +585,20 @@ export default function LeagueSummaryScreen() {
         {/* Basis toggle — subnav-pill construction (hairline chip, active =
             ink-3 well + line-strong border). Redraft is informational-only:
             disabled with a "(soon)" suffix until a redraft value source
-            exists (backend answers 501 not_available). */}
+            exists (backend answers 501 not_available). #248 — with both
+            boards loaded (and differing) the toggle no longer swaps WHICH
+            data you see, only which basis draws the bars (ticks always show
+            the other), so the labels flip to the mock's "… sorts" wording. */}
         <View style={styles.basisRow}>
           <BasisChip
             testID="league-summary.basis.consensus"
-            label="Consensus"
+            label={boardsDiffer ? 'Consensus sorts' : 'Consensus'}
             active={basis === 'consensus'}
             onPress={() => setBasis('consensus')}
           />
           <BasisChip
             testID="league-summary.basis.personal"
-            label="My board"
+            label={boardsDiffer ? 'My board sorts' : 'My board'}
             active={basis === 'personal'}
             onPress={() => setBasis('personal')}
           />
@@ -521,7 +630,11 @@ export default function LeagueSummaryScreen() {
                     style={[type.bodySm, styles.cardCaption]}
                     testID="league-summary.focus-caption"
                   >
-                    {`League rank: ${selectedIdx + 1}/${ranked.length}`}
+                    {focusOther
+                      ? basis === 'personal'
+                        ? `My board rank ${selectedIdx + 1}/${ranked.length} · Consensus rank ${focusOther.rank}/${ranked.length}`
+                        : `Consensus rank ${selectedIdx + 1}/${ranked.length} · My board rank ${focusOther.rank}/${ranked.length}`
+                      : `League rank: ${selectedIdx + 1}/${ranked.length}`}
                   </Text>
                 </>
               ) : (
@@ -529,7 +642,9 @@ export default function LeagueSummaryScreen() {
                   <Text style={type.title} numberOfLines={1}>
                     {league?.league_name || 'League'}
                   </Text>
-                  <Text style={[type.bodySm, styles.cardCaption]}>{formatCaption}</Text>
+                  <Text style={[type.bodySm, styles.cardCaption]}>
+                    {ticksOn ? `${formatCaption} — both boards` : formatCaption}
+                  </Text>
                 </>
               )}
             </View>
@@ -554,7 +669,7 @@ export default function LeagueSummaryScreen() {
             ) : (
               <Pressable
                 testID="league-summary.refresh"
-                onPress={() => query.refetch()}
+                onPress={refetchBoth}
                 hitSlop={12}
                 accessibilityRole="button"
                 accessibilityLabel="Refresh league rankings"
@@ -611,9 +726,13 @@ export default function LeagueSummaryScreen() {
           <Text style={[type.bodySm, styles.hint, selected ? styles.hintTight : null]}>
             {`${subset === 'starters' ? 'Best starting lineup only. ' : subset === 'bench' ? 'Bench only. ' : ''}${
               posFilter.size === 0
-                ? basis === 'consensus'
-                  ? 'Ranked by roster value on community consensus.'
-                  : 'Ranked by roster value on YOUR board — unranked players use consensus.'
+                ? ticksOn
+                  ? basis === 'personal'
+                    ? 'Bar height = your board. Dashed line = consensus. Arrows mark a 2+ rank swing.'
+                    : 'Bar height = consensus. Dashed line = your board. Arrows mark a 2+ rank swing.'
+                  : basis === 'consensus'
+                    ? 'Ranked by roster value on community consensus.'
+                    : 'Ranked by roster value on YOUR board — unranked players use consensus.'
                 : `Ranked by ${[...posFilter].join(' + ')} value only — chart reordered.`
             }`}
           </Text>
@@ -640,20 +759,39 @@ export default function LeagueSummaryScreen() {
             <>
               <View style={styles.chartWrap}>
                 <View style={styles.chartRow}>
-                  {ranked.map((r, idx) => (
-                    <BarColumn
-                      key={r.tc.team.user_id}
-                      tc={r.tc}
-                      rank={idx + 1}
-                      active={r.active}
-                      maxActive={maxActive}
-                      subset={subset}
-                      filter={posFilter}
-                      focused={selectedId === r.tc.team.user_id}
-                      grayed={!!selectedId && selectedId !== r.tc.team.user_id}
-                      onPress={() => setSelectedId(r.tc.team.user_id)}
-                    />
-                  ))}
+                  {ranked.map((r, idx) => {
+                    const id = r.tc.team.user_id;
+                    // #248 — the other-basis overlay renders on every column
+                    // in the nominal state; while a team is focused only ITS
+                    // tick + chip survive (mock declutter rule, matching the
+                    // gray-out of non-focused segments).
+                    const overlayOn = ticksOn && (!selectedId || selectedId === id);
+                    const other = overlayOn ? otherByTeam.get(id) : undefined;
+                    const delta = other ? other.rank - (idx + 1) : 0;
+                    return (
+                      <BarColumn
+                        key={id}
+                        tc={r.tc}
+                        rank={idx + 1}
+                        active={r.active}
+                        maxActive={scaleMax}
+                        subset={subset}
+                        filter={posFilter}
+                        focused={selectedId === id}
+                        grayed={!!selectedId && selectedId !== id}
+                        onPress={() => setSelectedId(id)}
+                        showDeltaRow={ticksOn}
+                        tickPct={
+                          other && other.active > 0
+                            ? Math.min((other.active / scaleMax) * 100, 100)
+                            : null
+                        }
+                        delta={Math.abs(delta) >= 2 ? delta : null}
+                        otherRank={other?.rank ?? null}
+                        otherLabel={otherLabel}
+                      />
+                    );
+                  })}
                 </View>
                 {/* League-average line — dashed chalk-dim hairline at the
                     mean of the currently shown bar values (filters + subset
@@ -662,8 +800,10 @@ export default function LeagueSummaryScreen() {
                     when the view sums to zero. */}
                 {avgActive > 0
                   ? (() => {
+                      // #248 — scaleMax (not maxActive) so the line lands on
+                      // the same shared scale the bars + ticks use.
                       const topPx = Math.min(
-                        Math.max(CHART_HEIGHT * (1 - avgActive / maxActive), 15),
+                        Math.max(CHART_HEIGHT * (1 - avgActive / scaleMax), 15),
                         CHART_HEIGHT - 2,
                       );
                       return (
@@ -697,6 +837,14 @@ export default function LeagueSummaryScreen() {
                     <Text style={styles.legendLabel}>Picks</Text>
                   </View>
                 ) : null}
+                {/* #248 — the ghost-tick encoding key (dashed ice = the
+                    other basis' total under the same filters). */}
+                {ticksOn ? (
+                  <View style={styles.legendItem}>
+                    <View style={styles.legendTickSwatch} />
+                    <Text style={styles.legendLabel}>{`${otherLabel} rank`}</Text>
+                  </View>
+                ) : null}
               </View>
             </>
           )}
@@ -709,7 +857,11 @@ export default function LeagueSummaryScreen() {
         {selected ? (
           <View style={styles.drillPanel}>
             <Text style={[type.data, styles.drillSub]}>
-              {`#${selectedIdx + 1} of ${ranked.length} · ${
+              {`#${selectedIdx + 1} of ${ranked.length}${
+                focusOther
+                  ? ` (${basisLabel}) · #${focusOther.rank} of ${ranked.length} (${otherLabel})`
+                  : ''
+              } · ${
                 selected.active > 0
                   ? Math.round(selected.active).toLocaleString('en-US')
                   : '—'
@@ -990,7 +1142,15 @@ function PosFilterPills({ idPrefix, filter, onToggle, style, showPicks }: {
 // rounded top (≤8px per Chalkline), rank numeral underneath (the caller's
 // numeral in an ice pill). In drill-in focus every non-selected column
 // renders muted-gray segments.
-function BarColumn({ tc, rank, active, maxActive, subset, filter, focused, grayed, onPress }: {
+// #248 — combined-bars overlay props: `showDeltaRow` reserves a fixed-height
+// chip row above EVERY column whenever the overlay is live (so bars stay
+// baseline-aligned whether or not a chip renders); `tickPct` places the
+// dashed ice consensus/other-board tick as a bottom-% inside the column well
+// (shared scale with the bars); `delta` is the signed rank swing (bar basis
+// vs other basis), already thresholded to |Δ| ≥ 2 by the caller — null = no
+// chip. All three are null/false when the overlay is off, rendering the
+// exact pre-#248 column.
+function BarColumn({ tc, rank, active, maxActive, subset, filter, focused, grayed, onPress, showDeltaRow, tickPct, delta, otherRank, otherLabel }: {
   tc: TeamComputed;
   rank: number;
   active: number;
@@ -1000,6 +1160,11 @@ function BarColumn({ tc, rank, active, maxActive, subset, filter, focused, graye
   focused: boolean;
   grayed: boolean;
   onPress: () => void;
+  showDeltaRow: boolean;
+  tickPct: number | null;
+  delta: number | null;
+  otherRank: number | null;
+  otherLabel: string;
 }) {
   const team = tc.team;
   const shownBase: FilterKey[] =
@@ -1031,12 +1196,50 @@ function BarColumn({ tc, rank, active, maxActive, subset, filter, focused, graye
       testID={`league-summary.bar.${team.user_id}`}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`Rank ${rank}, ${name}, ${Math.round(active).toLocaleString('en-US')} total`}
+      accessibilityLabel={`Rank ${rank}, ${name}, ${Math.round(active).toLocaleString('en-US')} total${
+        otherRank != null ? `, ${otherLabel} rank ${otherRank}` : ''
+      }`}
       accessibilityState={{ selected: focused }}
       style={styles.col}
       hitSlop={{ top: 8, bottom: 0, left: 1, right: 1 }}
     >
+      {/* #248 — delta chip row: fixed height on every column while the
+          overlay is live so a chip never shifts a bar's baseline. */}
+      {showDeltaRow ? (
+        <View style={styles.deltaWrap}>
+          {delta != null ? (
+            <View
+              testID={`league-summary.delta.${team.user_id}`}
+              style={[
+                styles.deltaChip,
+                { backgroundColor: delta > 0 ? `${semantic.pos}24` : `${semantic.neg}24` },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.deltaChipText,
+                  { color: delta > 0 ? semantic.pos : semantic.neg },
+                ]}
+              >
+                {delta > 0 ? `▲${delta}` : `▼${-delta}`}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
       <View style={styles.colWell}>
+        {/* #248 — dashed ice ghost tick: the other basis' total for this
+            team on the shared bar scale (end-cap dot marks the right edge,
+            matching the mock). */}
+        {tickPct != null ? (
+          <View
+            testID={`league-summary.tick.${team.user_id}`}
+            pointerEvents="none"
+            style={[styles.consTick, { bottom: `${tickPct}%` }]}
+          >
+            <View style={styles.consTickDot} />
+          </View>
+        ) : null}
         {heightPct > 0 ? (
           <View style={[styles.colBar, { height: `${heightPct}%` }]}>
             {segSum > 0
@@ -1397,6 +1600,49 @@ const styles = StyleSheet.create({
   colRankWrapYou: { backgroundColor: ice.base },
   colRank: { ...type.data, fontSize: 11, lineHeight: 15, color: chalk.dim },
   colRankYou: { color: ice.on },
+
+  // #248 — combined-bars overlay: fixed-height delta-chip row above every
+  // column (baseline alignment), dashed ice ghost tick + end-cap dot inside
+  // the column well, and the legend's tick swatch. Same dashed-hairline
+  // construction as avgLine; ice is the established tick vocabulary.
+  deltaWrap: {
+    height: 15,
+    marginBottom: 3,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  deltaChip: {
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 3,
+  },
+  deltaChipText: { ...type.data, fontSize: 9, lineHeight: 12, fontWeight: '700' },
+  consTick: {
+    position: 'absolute',
+    left: -2,
+    right: -2,
+    height: 0,
+    borderTopWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: ice.base,
+    zIndex: 2,
+  },
+  consTickDot: {
+    position: 'absolute',
+    right: -1,
+    top: -3,
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: ice.base,
+  },
+  legendTickSwatch: {
+    width: 14,
+    height: 0,
+    borderTopWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: ice.base,
+  },
 
   legend: { flexDirection: 'row', gap: space.lg, flexWrap: 'wrap', marginTop: space.md },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
