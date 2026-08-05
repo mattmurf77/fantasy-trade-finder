@@ -39,14 +39,31 @@ pristine grid AND the traded-picks overlay. Rules:
   all read `draft_picks`, so post-draft current-year picks vanish from all
   of them at once.
 
-**MFL — documented degradation (no change):** the MFL bundle's
+**MFL — ~~documented degradation~~ CLOSED 2026-08-05.** The MFL bundle's
 `futureDraftPicks` export drops a draft's picks once that draft has been
-held (executed picks become rostered players), so no completed-draft check
-is needed on the MFL path itself — but the engine reads the copy stored at
-link/import time (`leagues.platform_future_picks`), so a league linked
-BEFORE its MFL draft keeps the stale year until the next re-import
-(`POST /api/mfl/import` or re-link). The bundle carries no cheap
-draft-status export to detect this server-side; accepted and documented.
+held (executed picks become rostered players), but the engine read the copy
+stored at link/import time (`leagues.platform_future_picks`), so a league
+linked BEFORE its MFL draft kept the stale year until the next re-import
+(`POST /api/mfl/import` or re-link). The claim that "the bundle carries no
+cheap draft-status export" was **wrong**: #207 found and verified
+`TYPE=draftResults` (zero-auth), and the parity follow-up closed the seam —
+see [../207-rookie-draft-detection/mfl-parity-status.md](../207-rookie-draft-detection/mfl-parity-status.md).
+
+MFL now gets both halves:
+1. **Snapshot refresh** — `server._refresh_mfl_future_picks` re-fetches
+   `TYPE=futureDraftPicks` (also zero-auth, verified live) on #207's
+   draft-status refresh cadence. No re-import required, no new cron.
+2. **Verdict-gated exclusion** — `server._sync_mfl_owned_picks` drops the
+   CURRENT season's picks when the league's cached `draft_status` is
+   positively `drafted`. Same **write-path layer** as this item's Sleeper
+   rule (`_sync_sleeper_owned_picks`), same fail-safe direction
+   (`not_drafted`/`unknown`/never-checked exclude nothing), same
+   self-cleaning replace-sync.
+
+**This item's Sleeper behavior is unchanged** — `_sync_sleeper_owned_picks`
+still reads its own live `GET /v1/league/<id>/drafts`, not the cached #207
+verdict (pinned by
+`test_owned_picks.py::test_cached_verdict_does_not_leak_into_the_sleeper_sync`).
 
 **Out of scope:** feedback #207 (add pre-draft rookie PICKS to rank sets)
 is a separate idea — deliberately not built here.

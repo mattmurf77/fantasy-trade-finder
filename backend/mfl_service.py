@@ -361,6 +361,37 @@ def fetch_draft_results(league_id: str, year: int, host: str,
     return out if isinstance(out, dict) else {}
 
 
+def fetch_future_draft_picks(league_id: str, year: int, host: str,
+                             cookie: str | None = None, timeout: int = 15,
+                             _opener=None) -> dict:
+    """Fetch the `futureDraftPicks` export on its own (#207/#228 MFL parity).
+
+    Same export `fetch_league_bundle` pulls at link time — this is the
+    standalone refresher so a league linked BEFORE its rookie draft stops
+    carrying that season's picks forever. MFL drops a season's picks from
+    this export once that draft has been held (verified live 2026-08-05:
+    public leagues 10005 and 60206, both post-draft, return 2027+ only), so
+    a successful refresh is the primary fix and the verdict-gated exclusion
+    in `server._sync_mfl_owned_picks` is the fail-safe behind it.
+
+    **Zero-auth, verified live** the same way `draftResults` was: HTTP 200
+    with no cookie on both probe leagues.
+
+    Best-effort like `fetch_draft_results`: any MFL error degrades to `{}`
+    so callers can tell "unavailable" (no `futureDraftPicks` key) apart from
+    "genuinely empty" (key present, no franchises) and never overwrite a good
+    snapshot with a flake.
+    """
+    if not str(league_id).strip().isdigit():
+        return {}
+    try:
+        out = _fetch_one(host, year, "futureDraftPicks", league_id, cookie,
+                         timeout, _opener)
+    except MflError:
+        return {}
+    return out if isinstance(out, dict) else {}
+
+
 def fetch_scoring_inputs(league_id: str, year: int, host: str,
                          cookie: str | None = None, timeout: int = 15,
                          _opener=None) -> dict:
@@ -481,26 +512,41 @@ def parse_bundle(raw: dict) -> dict:
                                "name": fr_name.get(fid) or f"Team {fid}",
                                "players": players})
 
-    future_picks = []
-    for fr in _as_list((raw.get("futureDraftPicks") or {})
-                       .get("futureDraftPicks", {}).get("franchise")):
-        fid = fr.get("id")
-        for pk in _as_list(fr.get("futureDraftPick")):
-            future_picks.append({
-                "franchise_id": fid,
-                "year": pk.get("year"),
-                "round": pk.get("round"),
-                "original_owner": pk.get("originalPickFor"),
-            })
-
     return {
         "league_id": str(league.get("id") or ""),
         "name": _clean_text(league.get("name")),
         "total_teams": int(league.get("franchises", {}).get("count")
                            or len(franchises) or 0),
         "franchises": franchises,
-        "future_picks": future_picks,
+        "future_picks": parse_future_picks(raw.get("futureDraftPicks") or {}),
     }
+
+
+def parse_future_picks(raw_export: dict) -> list[dict]:
+    """Normalise a raw `futureDraftPicks` export into the stored shape
+    (`leagues.platform_future_picks`).
+
+    Takes the export payload itself — `{"futureDraftPicks": {"franchise": …}}`
+    — so the link-time bundle (`parse_bundle`) and the standalone refresher
+    (`fetch_future_draft_picks`) can never produce different row shapes.
+    Returns [{"franchise_id", "year", "round", "original_owner"}].
+    """
+    future_picks: list[dict] = []
+    for fr in _as_list((raw_export or {}).get("futureDraftPicks", {})
+                       .get("franchise")):
+        if not isinstance(fr, dict):
+            continue
+        fid = fr.get("id")
+        for pk in _as_list(fr.get("futureDraftPick")):
+            if not isinstance(pk, dict):
+                continue
+            future_picks.append({
+                "franchise_id": fid,
+                "year": pk.get("year"),
+                "round": pk.get("round"),
+                "original_owner": pk.get("originalPickFor"),
+            })
+    return future_picks
 
 
 # ---------------------------------------------------------------------------

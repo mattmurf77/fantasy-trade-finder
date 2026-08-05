@@ -5,6 +5,7 @@ scan, the per-league verdict cache and its asymmetric cheap-skip TTLs.
 this owns everything that touches the DB or the network fetchers. In-memory
 SQLite throughout — the real `data/trade_finder.db` is never opened.
 """
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -12,6 +13,7 @@ from sqlalchemy import create_engine, select
 
 import backend.database as db_module
 import backend.draft_status as ds
+import backend.mfl_service as mfl_module
 import backend.server as server
 from backend.database import metadata, leagues_table, players_table
 
@@ -361,3 +363,186 @@ def test_hourly_tick_survives_a_draft_status_sweep_failure(cron_client,
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError()))
     body = _tick(cron_client)
     assert body["ok"] is True and body["draft_status_checked"] == 0
+
+
+# ── #207/#228 MFL parity — futureDraftPicks snapshot refresh ───────────────
+# The snapshot used to be captured once, at link/import, so an MFL league
+# linked before its rookie draft kept that season's picks forever. It is now
+# refreshed on the draft-status refresh cadence (no new cron), and the owned
+# picks are re-normalized in the same pass so a verdict that just flipped to
+# `drafted` takes effect immediately instead of at the next session init.
+
+MFL_ID = "10005"
+
+
+def _seed_mfl(future_picks, status=None, host="www48.myfantasyleague.com"):
+    with db_module.engine.begin() as conn:
+        conn.execute(leagues_table.delete())
+    db_module.upsert_platform_league(
+        league_id=MFL_ID, user_id="link_user", name="MFL League",
+        platform="mfl", season=2026, auth="public", my_team="0001",
+        total_rosters=12, host=host, future_picks=future_picks)
+    db_module.set_league_draft_status(MFL_ID, status,
+                                      "high" if status else None)
+    server._invalidate_draft_context_cache()
+
+
+def _stored_snapshot():
+    with db_module.engine.connect() as conn:
+        raw = conn.execute(
+            select(leagues_table.c.platform_future_picks)
+            .where(leagues_table.c.sleeper_league_id == MFL_ID)
+        ).scalar()
+    return json.loads(raw or "[]")
+
+
+def _seed_mfl_members():
+    db_module.upsert_league_members(league_id=MFL_ID, members=[
+        {"user_id": "link_user", "username": "Me", "display_name": "Me",
+         "player_ids": []}])
+
+
+def _mfl_grid(made: int, total: int = 12):
+    """A rookie-sized MFL draftResults grid with `made` of `total` picks in."""
+    return {"draftResults": {"draftUnit": {"draftPick": [
+        {"round": "1", "franchise": f"{i:04d}",
+         "player": "17472" if i <= made else ""}
+        for i in range(1, total + 1)]}}}
+
+
+_STALE = [{"franchise_id": "0001", "year": "2026", "round": "1",
+           "original_owner": "0001"},
+          {"franchise_id": "0001", "year": "2027", "round": "1",
+           "original_owner": "0001"}]
+
+# What MFL actually returns post-draft: the drafted season is simply gone
+# (verified live 2026-08-05 on public leagues 10005 and 60206).
+_FRESH_EXPORT = {"futureDraftPicks": {"franchise": {
+    "id": "0001",
+    "futureDraftPick": [{"year": "2027", "round": "1",
+                         "originalPickFor": "0001"},
+                        {"year": "2028", "round": "1",
+                         "originalPickFor": "0001"}]}}}
+
+
+def test_snapshot_refresh_replaces_a_stale_link_time_capture(mem_db,
+                                                             monkeypatch):
+    _seed_mfl(_STALE)
+    monkeypatch.setattr(mfl_module, "fetch_future_draft_picks",
+                        lambda *a, **k: _FRESH_EXPORT)
+    assert server._refresh_mfl_future_picks(MFL_ID) == 2
+    assert sorted(p["year"] for p in _stored_snapshot()) == ["2027", "2028"]
+
+
+def test_snapshot_refresh_uses_the_leagues_own_host_and_season(mem_db,
+                                                               monkeypatch):
+    _seed_mfl(_STALE, host="www46.myfantasyleague.com")
+    seen = {}
+
+    def _fake(league_id, year, host, **kw):
+        seen.update(league_id=league_id, year=year, host=host)
+        return _FRESH_EXPORT
+
+    monkeypatch.setattr(mfl_module, "fetch_future_draft_picks", _fake)
+    server._refresh_mfl_future_picks(MFL_ID)
+    assert seen == {"league_id": MFL_ID, "year": 2026,
+                    "host": "www46.myfantasyleague.com"}
+
+
+def test_snapshot_refresh_never_wipes_when_mfl_is_unavailable(mem_db,
+                                                              monkeypatch):
+    """#220's lesson. `{}` means unavailable — MFL down, or (if the export
+    ever turned out to be auth-gated) rejected without a cookie. Keep the
+    stored snapshot rather than replace-syncing it to empty; the
+    verdict-gated exclusion still covers the current season on its own."""
+    _seed_mfl(_STALE)
+    monkeypatch.setattr(mfl_module, "fetch_future_draft_picks",
+                        lambda *a, **k: {})
+    assert server._refresh_mfl_future_picks(MFL_ID) is None
+    assert _stored_snapshot() == _STALE
+
+
+def test_snapshot_refresh_writes_a_genuinely_empty_grid(mem_db, monkeypatch):
+    """A present-but-empty export is real data (every future pick spent) and
+    is distinguishable from a flake — so it IS written."""
+    _seed_mfl(_STALE)
+    monkeypatch.setattr(mfl_module, "fetch_future_draft_picks",
+                        lambda *a, **k: {"futureDraftPicks": {}})
+    assert server._refresh_mfl_future_picks(MFL_ID) == 0
+    assert _stored_snapshot() == []
+
+
+def test_snapshot_refresh_abstains_without_a_host(mem_db, monkeypatch):
+    _seed_mfl(_STALE, host=None)
+    monkeypatch.setattr(mfl_module, "fetch_future_draft_picks",
+                        lambda *a, **k: pytest.fail("must not fetch"))
+    assert server._refresh_mfl_future_picks(MFL_ID) is None
+
+
+def test_snapshot_refresh_is_a_no_op_for_a_non_mfl_league(mem_db):
+    _seed_league(platform="sleeper")
+    assert server._refresh_mfl_future_picks(LEAGUE_ID) is None
+
+
+def test_status_refresh_piggybacks_the_snapshot_and_renormalizes(mem_db,
+                                                                 monkeypatch):
+    """One pass, one cadence: verdict → snapshot → owned picks."""
+    _seed_mfl(_STALE)
+    _seed_mfl_members()
+    monkeypatch.setattr(mfl_module, "fetch_future_draft_picks",
+                        lambda *a, **k: _FRESH_EXPORT)
+    monkeypatch.setattr(mfl_module, "fetch_draft_results",
+                        lambda *a, **k: _mfl_grid(12))
+    monkeypatch.setattr(server, "is_enabled", lambda flag: True)
+    v = server._refresh_league_draft_status(MFL_ID)
+    assert (v.status, v.source) == (ds.DRAFTED, ds.SRC_MFL)
+    assert sorted(p["year"] for p in _stored_snapshot()) == ["2027", "2028"]
+    seasons = sorted(p["season"] for p in db_module.load_draft_picks(MFL_ID))
+    assert seasons == [2027, 2028]        # 2026 never reaches draft_picks
+
+
+def test_status_refresh_renormalizes_even_when_the_snapshot_fetch_fails(
+        mem_db, monkeypatch):
+    """The exclusion-only fallback: with the export unavailable the verdict
+    alone still drops the drafted season, which is the reported bug."""
+    _seed_mfl(_STALE)
+    _seed_mfl_members()
+    monkeypatch.setattr(mfl_module, "fetch_future_draft_picks",
+                        lambda *a, **k: {})
+    monkeypatch.setattr(mfl_module, "fetch_draft_results",
+                        lambda *a, **k: _mfl_grid(12))
+    monkeypatch.setattr(server, "is_enabled", lambda flag: True)
+    assert server._refresh_league_draft_status(MFL_ID).status == ds.DRAFTED
+    assert _stored_snapshot() == _STALE          # snapshot untouched
+    seasons = sorted(p["season"] for p in db_module.load_draft_picks(MFL_ID))
+    assert seasons == [2027]                     # …but 2026 is excluded
+
+
+def test_status_refresh_keeps_the_current_season_when_not_drafted(
+        mem_db, monkeypatch):
+    """Fail-safe end to end: an in-progress MFL draft keeps 2026 picks."""
+    _seed_mfl(_STALE)
+    _seed_mfl_members()
+    monkeypatch.setattr(mfl_module, "fetch_future_draft_picks",
+                        lambda *a, **k: {})
+    monkeypatch.setattr(mfl_module, "fetch_draft_results",
+                        lambda *a, **k: _mfl_grid(1))
+    monkeypatch.setattr(server, "is_enabled", lambda flag: True)
+    assert server._refresh_league_draft_status(MFL_ID).status == ds.NOT_DRAFTED
+    seasons = sorted(p["season"] for p in db_module.load_draft_picks(MFL_ID))
+    assert seasons == [2026, 2027]
+
+
+def test_status_refresh_leaves_the_mfl_path_alone_for_a_sleeper_league(
+        mem_db, monkeypatch):
+    """No change for Sleeper leagues — the whole MFL branch is platform-gated
+    (Sleeper's #228 exclusion still reads its own live drafts fetch)."""
+    _seed_league()
+    _patch_sleeper(monkeypatch,
+                   [{"draft_id": "d1", "status": "complete", "season": "2026",
+                     "last_picked": 1, "settings": {"rounds": 4}}], [[]])
+    monkeypatch.setattr(server, "_refresh_mfl_future_picks",
+                        lambda lid: pytest.fail("MFL path must not run"))
+    monkeypatch.setattr(server, "_sync_mfl_owned_picks",
+                        lambda lid: pytest.fail("MFL path must not run"))
+    assert server._refresh_league_draft_status(LEAGUE_ID).status == ds.DRAFTED

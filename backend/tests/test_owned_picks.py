@@ -307,6 +307,124 @@ def test_mfl_normalization_same_row_shape(_mfl_seeded):
     assert acq["is_traded"] == 1
 
 
+# ── #207/#228 MFL parity — verdict-gated current-season exclusion ──────────
+# Sleeper's #228 exclusion lives in the sync/write path
+# (_sync_sleeper_owned_picks → sync_draft_picks(exclude_seasons=…)); MFL's
+# twin write path is _sync_mfl_owned_picks, so the rule lands at the SAME
+# layer for both platforms and every load_draft_picks consumer stays untouched.
+# The verdict comes from the #207 leagues.draft_status cache (no network), and
+# the fail-safe is #228's: only a positive `drafted` excludes anything.
+
+_MFL_VERDICT = "test_owned_picks_mfl_verdict"
+
+
+@pytest.fixture
+def _mfl_verdict_seeded():
+    def _seed(status=None, confidence=None):
+        db.upsert_platform_league(
+            league_id=_MFL_VERDICT, user_id="link_user", name="MFL Verdict",
+            platform="mfl", season=2026, auth="public", my_team="0001",
+            total_rosters=12, host="www44.myfantasyleague.com",
+            future_picks=[
+                {"franchise_id": "0001", "year": "2026", "round": "1",
+                 "original_owner": "0001"},
+                {"franchise_id": "0001", "year": "2026", "round": "2",
+                 "original_owner": "0002"},
+                {"franchise_id": "0001", "year": "2027", "round": "1",
+                 "original_owner": "0001"},
+                {"franchise_id": "0001", "year": "2028", "round": "1",
+                 "original_owner": "0001"},
+            ],
+        )
+        db.replace_espn_league_members(_MFL_VERDICT, [
+            {"user_id": "link_user", "username": "Me", "display_name": "Me",
+             "player_ids": []},
+            {"user_id": srv._mfl_member_id(_MFL_VERDICT, "0002"),
+             "username": "Rival", "display_name": "Rival", "player_ids": []},
+        ])
+        # NULL status = never checked; anything else goes through the #207 cache.
+        db.set_league_draft_status(_MFL_VERDICT, status, confidence)
+        return _MFL_VERDICT
+    yield _seed
+    db.replace_draft_picks(_MFL_VERDICT, [])
+    db.set_league_draft_status(_MFL_VERDICT, None, None)
+
+
+def test_mfl_drafted_verdict_excludes_only_the_current_season(
+        _mfl_verdict_seeded):
+    _mfl_verdict_seeded(status="drafted", confidence="high")
+    assert srv._sync_mfl_owned_picks(_MFL_VERDICT) == 2
+    seasons = sorted(p["season"] for p in db.load_draft_picks(_MFL_VERDICT))
+    assert seasons == [2027, 2028]          # 2026 gone, future years intact
+
+
+@pytest.mark.parametrize("status,confidence", [
+    ("not_drafted", "high"),
+    ("unknown", "low"),
+    ("drafted", None),        # confidence gates nothing — status is the gate
+    (None, None),             # never checked
+])
+def test_mfl_exclusion_fail_safe_matches_228(status, confidence,
+                                             _mfl_verdict_seeded):
+    """Only a positive `drafted` hides anything. A phantom current-year pick
+    is visible and self-correcting; a silently hidden real asset is not."""
+    _mfl_verdict_seeded(status=status, confidence=confidence)
+    srv._sync_mfl_owned_picks(_MFL_VERDICT)
+    seasons = sorted(p["season"] for p in db.load_draft_picks(_MFL_VERDICT))
+    expected = [2027, 2028] if status == "drafted" else [2026, 2026, 2027, 2028]
+    assert seasons == expected
+
+
+def test_mfl_replace_sync_cleans_stale_current_season_rows(
+        _mfl_verdict_seeded):
+    """A league linked BEFORE its draft: the stale 2026 rows disappear on the
+    first normalization after the verdict flips — no repair job (#228 parity)."""
+    _mfl_verdict_seeded()                          # never checked → 4 rows
+    assert srv._sync_mfl_owned_picks(_MFL_VERDICT) == 4
+    assert any(p["season"] == 2026 for p in db.load_draft_picks(_MFL_VERDICT))
+    db.set_league_draft_status(_MFL_VERDICT, "drafted", "high")
+    assert srv._sync_mfl_owned_picks(_MFL_VERDICT) == 2
+    picks = db.load_draft_picks(_MFL_VERDICT)
+    assert picks and all(p["season"] != 2026 for p in picks)
+
+
+def test_current_season_picks_visible_is_the_one_shared_predicate():
+    """The #207 rung relabel and the MFL owned-pick exclusion both call this,
+    so the two platforms' asymmetry cannot drift apart."""
+    assert srv._current_season_picks_visible("drafted", "high") is False
+    assert srv._current_season_picks_visible("drafted", None) is False
+    for st in ("not_drafted", "unknown", None, ""):
+        assert srv._current_season_picks_visible(st) is True
+
+
+def test_cached_verdict_does_not_leak_into_the_sleeper_sync(
+        _clean_league, monkeypatch):
+    """No change for Sleeper leagues: #228 keeps reading its OWN live drafts
+    fetch, so a cached `drafted` row cannot start hiding Sleeper picks (and a
+    cached `not_drafted` cannot start un-hiding them)."""
+    db.upsert_league(league_id=_LEAGUE, user_id="u1", name="Sleeper Test",
+                     season="2026", user_player_ids=[], opponent_rosters=[])
+    db.set_league_draft_status(_LEAGUE, "drafted", "high")
+    assert db.get_league_draft_context(_LEAGUE)["status"] == "drafted"
+    try:
+        monkeypatch.setattr(srv, "_fetch_sleeper_traded_picks", lambda lid: [])
+        monkeypatch.setattr(
+            srv, "_fetch_league_rosters",
+            lambda lid: [{"roster_id": 1, "owner_id": "u1"},
+                         {"roster_id": 2, "owner_id": "u2"}])
+        monkeypatch.setattr(srv, "_fetch_sleeper_league_meta",
+                            lambda lid: {"season": "2026", "total_rosters": 2,
+                                         "settings": {"draft_rounds": 4}})
+        monkeypatch.setattr(srv, "_fetch_sleeper_drafts",
+                            lambda lid: [{"draft_id": "d1",
+                                          "status": "pre_draft",
+                                          "season": "2026", "type": "linear"}])
+        rows = srv._sync_sleeper_owned_picks(_LEAGUE, {}, "1qb_ppr")
+        assert rows is not None and any(r["season"] == 2026 for r in rows)
+    finally:
+        db.set_league_draft_status(_LEAGUE, None, None)
+
+
 # ── #200 — numeric platform ids must not hit the Sleeper grid sync ─────────
 # MFL native league ids are NUMERIC, so session-init's old
 # `str(league_id).isdigit()` gate misrouted them into the Sleeper pick sync:

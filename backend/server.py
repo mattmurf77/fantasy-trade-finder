@@ -4791,6 +4791,22 @@ def _cached_draft_context(league_id: str) -> dict | None:
     return ctx
 
 
+def _current_season_picks_visible(status: str | None,
+                                  confidence: str | None = None) -> bool:
+    """THE shared fail-safe, applied to a CACHED verdict off a leagues row.
+
+    True = the league's current-season picks are still real assets. Only a
+    positive `drafted` verdict returns False; NULL (never checked), `unknown`
+    and `not_drafted` all keep them. Every surface that hides or relabels
+    current-season picks — the #207 rung relabel and the #207/#228 MFL
+    owned-pick exclusion — routes through `draft_status.current_year_picks_
+    visible` here, so a change to the asymmetry lands on both at once.
+    """
+    from . import draft_status as _ds
+    return _ds.current_year_picks_visible(
+        _ds.DraftStatus(status or _ds.UNKNOWN, confidence or _ds.LOW))
+
+
 def _pick_rung_year_context(sess) -> tuple[int, int] | None:
     """`(pick_season, years_out)` for the session's active league.
 
@@ -4807,12 +4823,11 @@ def _pick_rung_year_context(sess) -> tuple[int, int] | None:
     ctx = _cached_draft_context(league_id)
     if not ctx or not ctx.get("season"):
         return None
-    from . import draft_status as _ds
     # The fail-safe: only a positive `drafted` verdict rolls the rungs to
     # next season. NULL (never checked), `unknown` and `not_drafted` all keep
     # the current-year meaning.
-    show_current = _ds.current_year_picks_visible(
-        _ds.DraftStatus(ctx.get("status") or _ds.UNKNOWN))
+    show_current = _current_season_picks_visible(ctx.get("status"),
+                                                 ctx.get("confidence"))
     years_out = 0 if show_current else 1
     return int(ctx["season"]) + years_out, years_out
 
@@ -7995,6 +8010,22 @@ def _sync_mfl_owned_picks(league_id: str) -> int:
     every other franchise → the synthetic mfl:<league>.f<fid> member id), then
     replace-sync into the same normalized store Sleeper writes. Returns the row
     count. Best-effort — callers wrap in try/except.
+
+    **#207/#228 MFL parity — verdict-gated exclusion.** This is the MFL twin
+    of `_sync_sleeper_owned_picks`, so #228's rule lands at the same layer for
+    both platforms and they cannot drift: when the league's CACHED draft-status
+    verdict (the #207 `leagues.draft_status` column) is positively `drafted`,
+    the CURRENT season's picks are dropped from the normalized rows. Future
+    seasons are always kept. The fail-safe direction is #228's and #207's —
+    `not_drafted` / `unknown` / never-checked exclude nothing — and it is
+    enforced through the one shared predicate,
+    `draft_status.current_year_picks_visible`.
+
+    The snapshot itself is the primary fix (`_refresh_mfl_future_picks`
+    re-fetches it, and MFL's own export drops a drafted season's picks); this
+    exclusion is the belt-and-braces layer for the window where the refresh
+    hasn't run or MFL is unreachable. The replace-sync means a stale row set
+    self-cleans on the next run — no repair job, same as #228.
     """
     from .database import get_platform_league
     row = get_platform_league(league_id, "mfl")
@@ -8014,6 +8045,11 @@ def _sync_mfl_owned_picks(league_id: str) -> int:
         cur_season = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
     except (TypeError, ValueError):
         cur_season = _MFL_DEFAULT_YEAR
+
+    # `get_platform_league` returns the whole leagues row, so the cached
+    # verdict rides along — no extra query, no network.
+    exclude_season = None if _current_season_picks_visible(
+        row.get("draft_status"), row.get("draft_status_confidence")) else cur_season
 
     def _fr_to_user(fid: str) -> str:
         fid = str(fid)
@@ -8037,6 +8073,8 @@ def _sync_mfl_owned_picks(league_id: str) -> int:
             rnd = int(pk["round"])
         except (KeyError, TypeError, ValueError):
             continue
+        if exclude_season is not None and yr == exclude_season:
+            continue                       # #228 parity — that draft happened
         cur_fid  = str(pk.get("franchise_id") or "")
         orig_fid = str(pk.get("original_owner") or cur_fid)
         owner_uid = _fr_to_user(cur_fid)
@@ -9306,12 +9344,57 @@ def _detect_league_draft_status(league_id: str, ctx: dict):
                       rosters=rosters_verdict)
 
 
+def _refresh_mfl_future_picks(league_id: str) -> int | None:
+    """Re-fetch an MFL league's `futureDraftPicks` and refresh the stored
+    snapshot (#207/#228 MFL parity). Returns the pick count written, or None
+    when nothing was written.
+
+    Closes the seam #228 documented and #207 carried forward: the snapshot
+    was captured ONCE, at link/import, so a league linked before its rookie
+    draft kept that season's picks forever. MFL drops a season's picks from
+    this export as soon as that draft is held (verified live 2026-08-05 on
+    public leagues 10005 and 60206), so a successful refresh is the real fix;
+    the verdict-gated exclusion in `_sync_mfl_owned_picks` covers the window
+    where this cannot run.
+
+    **Never wipes on a flake** (#220's lesson): `fetch_future_draft_picks`
+    returns `{}` when MFL is unreachable/auth-gated, which is distinguishable
+    from a genuinely empty grid (the `futureDraftPicks` key present with no
+    franchises). Only a payload that actually carries the key is written.
+    """
+    from .database import get_platform_league, set_platform_future_picks
+    row = get_platform_league(league_id, "mfl")
+    if not row:
+        return None
+    host = row.get("platform_host")
+    year = row.get("platform_season") or row.get("season")
+    if not host or not year:
+        return None
+    from . import mfl_service as _mfl
+    raw = _mfl.fetch_future_draft_picks(league_id, int(year), host)
+    if not isinstance(raw, dict) or "futureDraftPicks" not in raw:
+        log.info("  MFL futureDraftPicks unavailable for %s — keeping the "
+                 "stored snapshot (exclusion still applies)", league_id)
+        return None
+    picks = _mfl.parse_future_picks(raw)
+    set_platform_future_picks(league_id, picks)
+    return len(picks)
+
+
 def _refresh_league_draft_status(league_id: str, force: bool = False):
     """Detect + persist one league's rookie-draft status (best-effort).
 
     Returns the DraftStatus written, or None when the check was skipped
     (fresh cache) or the league row is unknown. Never raises — every caller
     is a background write path.
+
+    #207/#228 MFL parity rides this path rather than a new cron: whenever an
+    MFL league's status is refreshed, its `futureDraftPicks` snapshot is
+    refreshed too and its owned picks are re-normalized. Same cadence, same
+    budget (the per-status TTL cheap-skip above already bounds it), one extra
+    zero-auth export per refreshed MFL league. The re-normalization runs even
+    when the fetch fails, so a verdict that just flipped to `drafted` still
+    drops the stale season's rows.
     """
     try:
         ctx = get_league_draft_context(league_id)
@@ -9325,6 +9408,17 @@ def _refresh_league_draft_status(league_id: str, force: bool = False):
         log.info("  ✅ draft status for %s: %s (%s via %s) %s", league_id,
                  verdict.status, verdict.confidence, verdict.source,
                  verdict.evidence)
+        if (ctx.get("platform") or "").lower() == "mfl":
+            try:
+                _n = _refresh_mfl_future_picks(league_id)
+                if _n is not None:
+                    log.info("  ✅ MFL futureDraftPicks snapshot refreshed "
+                             "for %s (%d picks)", league_id, _n)
+                if is_enabled("picks.owned_sync"):
+                    _sync_mfl_owned_picks(league_id)
+            except Exception as _mfl_err:
+                log.warning("  MFL pick refresh failed for %s (continuing): "
+                            "%s", league_id, _mfl_err)
         return verdict
     except Exception as e:
         log.warning("  draft-status refresh failed for %s (continuing): %s",

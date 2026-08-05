@@ -172,6 +172,81 @@ def test_fetch_draft_results_rejects_a_non_numeric_league_id():
                                    _opener=_opener_http_error(500)) == {}
 
 
+# ── futureDraftPicks refresher (#207/#228 MFL parity) ──────────────────────
+# Verified zero-auth live 2026-08-05: public leagues 10005 (www48) and 60206
+# (www46) both return HTTP 200 with no cookie, and — both being post-draft —
+# carry 2027+ only, which is exactly the staleness this refresher closes.
+
+_FDP_PAYLOAD = {"futureDraftPicks": {"franchise": [
+    {"id": "0001", "futureDraftPick": [
+        {"year": "2027", "round": "1", "originalPickFor": "0001"},
+        {"year": "2028", "round": "2", "originalPickFor": "0002"},
+    ]},
+    # MFL collapses a single-member collection to a bare dict.
+    {"id": "0002", "futureDraftPick": {"year": "2027", "round": "3",
+                                       "originalPickFor": "0002"}},
+]}}
+
+
+def test_fetch_future_draft_picks_requests_the_right_export():
+    captured = {}
+
+    def _opener(request, timeout=None):
+        captured["url"] = request.full_url
+        captured["headers"] = request.headers
+        return _FakeResp(json.dumps(_FDP_PAYLOAD))
+
+    got = mfl.fetch_future_draft_picks("10005", 2026,
+                                       "www48.myfantasyleague.com",
+                                       _opener=_opener)
+    assert "TYPE=futureDraftPicks" in captured["url"]
+    assert "L=10005" in captured["url"] and "JSON=1" in captured["url"]
+    # zero-auth: no Cookie header is sent when no cookie is supplied
+    assert not any(k.lower() == "cookie" for k in captured["headers"])
+    assert got == _FDP_PAYLOAD
+
+
+@pytest.mark.parametrize("code", [401, 404, 500])
+def test_fetch_future_draft_picks_degrades_to_empty(code):
+    """Auth-gated / down / not-found all degrade to {} — which the caller
+    treats as 'unavailable' and keeps the stored snapshot (never wipes)."""
+    assert mfl.fetch_future_draft_picks(
+        "10005", 2026, "www48.myfantasyleague.com",
+        _opener=_opener_http_error(code)) == {}
+
+
+def test_fetch_future_draft_picks_rejects_a_non_numeric_league_id():
+    assert mfl.fetch_future_draft_picks(
+        "abc", 2026, "www48.myfantasyleague.com",
+        _opener=_opener_http_error(500)) == {}
+
+
+def test_parse_future_picks_normalises_the_export():
+    picks = mfl.parse_future_picks(_FDP_PAYLOAD)
+    assert picks == [
+        {"franchise_id": "0001", "year": "2027", "round": "1",
+         "original_owner": "0001"},
+        {"franchise_id": "0001", "year": "2028", "round": "2",
+         "original_owner": "0002"},
+        {"franchise_id": "0002", "year": "2027", "round": "3",
+         "original_owner": "0002"},
+    ]
+
+
+def test_parse_future_picks_matches_parse_bundle_exactly():
+    """One shape for both producers — the link-time bundle and the standalone
+    refresher must never write different rows into platform_future_picks."""
+    raw = _bundle()
+    assert (mfl.parse_future_picks(raw["futureDraftPicks"])
+            == mfl.parse_bundle(raw)["future_picks"])
+
+
+def test_parse_future_picks_tolerates_an_empty_or_junk_export():
+    assert mfl.parse_future_picks({}) == []
+    assert mfl.parse_future_picks({"futureDraftPicks": {}}) == []
+    assert mfl.parse_future_picks({"futureDraftPicks": {"franchise": []}}) == []
+
+
 # ── parse ───────────────────────────────────────────────────────────────────
 
 def test_parse_bundle_shape():

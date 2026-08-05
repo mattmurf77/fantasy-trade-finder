@@ -161,13 +161,19 @@ Verification plan if either is ever adopted: link one real league and diff the
 payload before/after a draft, same live-smoke discipline the ESPN plan
 already requires.
 
-## Known seams (accepted)
+## Known seams
 
-- **MFL staleness persists for owned picks.** `draftResults` makes the
-  *check* possible, but the engine still reads the `futureDraftPicks` copy
-  stored at link time (`leagues.platform_future_picks`), so an MFL league
-  linked before its draft keeps a stale year until re-import (#228 §MFL).
-  #207's rank-set labels are unaffected — they read the live verdict.
+- ~~**MFL staleness persists for owned picks.**~~ **CLOSED 2026-08-05** —
+  see [mfl-parity-status.md](mfl-parity-status.md). `draftResults` made the
+  *check* possible; the follow-up made the *assets* follow. The
+  `futureDraftPicks` snapshot is now re-fetched on this item's own
+  draft-status refresh cadence (`server._refresh_mfl_future_picks`, no new
+  cron), and `_sync_mfl_owned_picks` excludes the current season when the
+  cached verdict is positively `drafted` — #228's rule, at #228's layer, with
+  #228's fail-safe. The "folding them together is the natural follow-up" note
+  under *Deliberate non-changes* is what got built: MFL now consumes the #207
+  verdict; **Sleeper's #228 exclusion is deliberately still unchanged** and
+  keeps reading its own live drafts fetch.
 - **Rankings paste-import** matches against pool names, which stay
   `"Early 1st Round Pick"`. Pasting the new displayed string won't match a
   rung; pasting the old one still does. External ranking lists never contain

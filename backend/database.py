@@ -8555,6 +8555,28 @@ def upsert_platform_league(league_id: str, user_id: str, name: str, platform: st
         conn.execute(stmt)
 
 
+def set_platform_future_picks(league_id: str, future_picks: list) -> None:
+    """Refresh ONLY `leagues.platform_future_picks` for a linked league.
+
+    #207/#228 MFL parity: the snapshot used to be written once, at link/import
+    (`upsert_platform_league`), so a league linked before its rookie draft
+    kept that season's picks forever. `server._refresh_mfl_future_picks`
+    re-fetches MFL's `futureDraftPicks` export on the draft-status refresh
+    cadence and writes it back through here. Deliberately narrow: it must not
+    touch the binding columns (host / auth / my_team / season), which only a
+    real re-link may change.
+    """
+    if not league_id:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            update(leagues_table)
+            .where(leagues_table.c.sleeper_league_id == str(league_id))
+            .values(platform_future_picks=json.dumps(future_picks or []),
+                    updated_at=_now())
+        )
+
+
 def get_platform_league(league_id: str, platform: str) -> dict | None:
     """Return the leagues row for a linked league of the given platform, or
     None when the id is unknown or the row's platform doesn't match."""
