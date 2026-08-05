@@ -4,12 +4,19 @@ import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { ink, chalk, ice, space, radii, type, fonts } from '../theme/chalkline';
 
 // FB #156 (Trade-Finding Hub, Variant B) — the lateral quick-switch chip row
-// carried at the top of every focused mode, so the one-extra-tap cost of the
-// launcher hub disappears in practice. The three deck modes (Guided / Team /
+// carried at the top of every focused mode. #246 (guided-first landing,
+// approved mock mockups/polish-lab-2026-08/acquire-landing-guided-first.html
+// frame B1): with the launcher hub unrouted this strip IS the mode-switching
+// home — the "‹ Hub" back chevron is gone, the hint line renders only when
+// the host asks (cold start, mock B2 — dropped once a deck exists), and a
+// fifth chip, Free Agents, navigates to the FA finder (operator override of
+// the mock's tail-section placement). The three deck modes (Guided / Team /
 // Player) switch IN PLACE via `onSwitch` (navigation.setParams — the same
 // TradesScreen instance, so pinned targets persist across the switch);
-// Calculator is a separate screen (`onCalculator`); the back chevron returns
-// to the hub (`onHub`). Purely presentational — the host owns navigation.
+// Calculator (`onCalculator`) and Free Agents (`onFreeAgents`) are pushed
+// screens, not deck modes — same chip construction (the Calc chip set that
+// precedent; no visual distinction). Purely presentational — the host owns
+// navigation.
 
 export type FinderMode = 'guided' | 'team' | 'player';
 
@@ -28,11 +35,12 @@ const COPY: Record<FinderMode, { title: string; hint: string }> = {
   },
 };
 
-const CHIPS: { key: FinderMode | 'calc'; label: string }[] = [
+const CHIPS: { key: FinderMode | 'calc' | 'free-agents'; label: string }[] = [
   { key: 'guided', label: 'Guided' },
   { key: 'team', label: 'Team' },
   { key: 'player', label: 'Player' },
   { key: 'calc', label: 'Calc' },
+  { key: 'free-agents', label: 'Free agents' },
 ];
 
 interface Props {
@@ -41,18 +49,21 @@ interface Props {
   onSwitch: (mode: FinderMode) => void;
   /** Jump to the Manual Calculator screen. */
   onCalculator: () => void;
-  /** Return to the launcher hub. */
-  onHub: () => void;
+  /** Jump to the Free Agent finder (root-stack `FreeAgents`, #246). */
+  onFreeAgents: () => void;
   /** Team mode: the scoped league-mate's display name, if chosen. */
   teamName?: string | null;
+  /** Render the one-line mode hint (cold start only, #246 mock B2). */
+  showHint?: boolean;
 }
 
 export default function TradeFinderModeBar({
   mode,
   onSwitch,
   onCalculator,
-  onHub,
+  onFreeAgents,
   teamName,
+  showHint = false,
 }: Props) {
   const copy = COPY[mode];
   const hint =
@@ -62,17 +73,6 @@ export default function TradeFinderModeBar({
 
   return (
     <View style={styles.wrap}>
-      <Pressable
-        testID="trades.finder-mode.hub"
-        accessibilityRole="button"
-        accessibilityLabel="Back to trade finder hub"
-        onPress={onHub}
-        hitSlop={8}
-        style={({ pressed }) => [styles.backRow, pressed && { opacity: 0.6 }]}
-      >
-        <Text style={styles.backText}>‹ Hub</Text>
-      </Pressable>
-
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -88,7 +88,11 @@ export default function TradeFinderModeBar({
               accessibilityState={{ selected: active }}
               accessibilityLabel={c.label}
               onPress={() =>
-                c.key === 'calc' ? onCalculator() : onSwitch(c.key)
+                c.key === 'calc'
+                  ? onCalculator()
+                  : c.key === 'free-agents'
+                    ? onFreeAgents()
+                    : onSwitch(c.key)
               }
               style={({ pressed }) => [
                 styles.chip,
@@ -107,15 +111,13 @@ export default function TradeFinderModeBar({
       <Text style={styles.title} accessibilityRole="header">
         {copy.title}
       </Text>
-      <Text style={styles.hint}>{hint}</Text>
+      {showHint ? <Text style={styles.hint}>{hint}</Text> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { marginBottom: space.md, gap: space.xs },
-  backRow: { alignSelf: 'flex-start', paddingVertical: space.xs },
-  backText: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
   chipRow: { gap: space.sm, paddingVertical: space.xs },
   chip: {
     paddingHorizontal: space.md,

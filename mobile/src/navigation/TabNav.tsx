@@ -27,7 +27,8 @@ import QuickRankScreen from '../screens/QuickRankScreen';
 import ManualRanksScreen from '../screens/ManualRanksScreen';
 import TrendsScreen from '../screens/TrendsScreen';
 import TradesScreen from '../screens/TradesScreen';
-import TradeFinderHubScreen from '../screens/TradeFinderHubScreen';
+// #246 — TradeFinderHubScreen is unrouted (guided-first landing); the file
+// stays in the tree pending a later cleanup pass, but nothing imports it.
 import PortfolioScreen from '../screens/PortfolioScreen';
 import TradeCalculatorScreen from '../screens/TradeCalculatorScreen';
 import MatchesScreen from '../screens/MatchesScreen';
@@ -368,17 +369,26 @@ function RankStackNav() {
 }
 
 function TradesStackNav() {
-  // FB #156 — Trade-Finding Hub (Variant B). Flag on: the Trades home is the
-  // launcher hub, and TradesScreen (the deck) is a pushed `TradeDeck` route the
-  // hub opens per mode. Flag off: TradesScreen stays the home exactly as before
-  // (TradeDeck unregistered), so the onboarding trades-first flow — which
-  // auto-generates on the deck home — is untouched.
+  // #246 — guided-first Acquire landing (approved mock mockups/
+  // polish-lab-2026-08/acquire-landing-guided-first.html, V1). Flag on:
+  // `TradesHome` lands DIRECTLY in the guided deck — TradesScreen with a
+  // default `mode:'guided'` param — instead of the #156 launcher hub
+  // (TradeFinderHubScreen is now UNROUTED; kept in the tree pending
+  // cleanup). Every existing navigate('TradesHome') call site keeps
+  // working and now lands on a trade; mode switching lives in the deck's
+  // persistent chip strip (TradeFinderModeBar). `TradeDeck` stays
+  // registered for the `app/trades/finder` deep-link path (same
+  // component; a link there just pushes a second deck instance with
+  // back-to-landing semantics). Flag off: TradesScreen stays the classic
+  // standalone home exactly as before (no mode param, TradeDeck
+  // unregistered).
   const finderHubOn = useFlag('trades.finder_hub');
   return (
     <TradesStack.Navigator screenOptions={{ headerShown: false }}>
       <TradesStack.Screen
         name="TradesHome"
-        component={finderHubOn ? TradeFinderHubScreen : TradesScreen}
+        component={TradesScreen}
+        initialParams={finderHubOn ? { mode: 'guided' } : undefined}
       />
       {finderHubOn ? (
         <TradesStack.Screen name="TradeDeck" component={TradesScreen} />
