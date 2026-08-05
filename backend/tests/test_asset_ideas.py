@@ -395,6 +395,58 @@ def test_receive_direction_position_locked():
     assert [i["give_player_ids"] for i in groups["lateral"]] == [["G_lat"]]
 
 
+# ── #250 — Specific-Team scope (opponent_user_id) ─────────────────────────
+
+def _two_opponent_service():
+    """The give fixture's opponent plus a SECOND league-mate holding a
+    value-twin roster — unscoped sweeps return ideas from both."""
+    players = {pid: _Player(pid) for pid in GIVE_ELO}
+    for pid in ("U9", "L9", "D19", "D29"):
+        players[pid] = _Player(pid)
+    elos = {**GIVE_ELO, "U9": 1700.0, "L9": 1570.0,
+            "D19": 1520.0, "D29": 1500.0}
+    opp = LeagueMember(user_id="opp", username="OppTeam",
+                       roster=["U", "L", "L2", "D1", "D2"], elo_ratings={})
+    opp9 = LeagueMember(user_id="opp9", username="OtherTeam",
+                        roster=["U9", "L9", "D19", "D29"], elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[opp, opp9]))
+    return svc, elos
+
+
+def test_give_direction_scoped_to_opponent():
+    """#250 — with opponent_user_id set, every idea's counterparty is that
+    member and no other team's players appear on the receive side."""
+    svc, elos = _two_opponent_service()
+    kw = dict(user_id="user", user_roster=["P", "S1"], league_id="L1",
+              seed_elo=dict(elos), asset_id="P", direction="give",
+              fairness_threshold=0.50, raw_user_elo=dict(elos))
+    # Sanity: unscoped sweep sees both teams.
+    unscoped = svc.generate_asset_ideas(**kw)
+    parties = {i["counterparty_user_id"]
+               for g in unscoped.values() for i in g}
+    assert parties == {"opp", "opp9"}
+    # Scoped sweep: only the targeted team, only its players coming back.
+    scoped = svc.generate_asset_ideas(**kw, opponent_user_id="opp9")
+    ideas = [i for g in scoped.values() for i in g]
+    assert ideas, "scoped sweep should still find ideas on the target team"
+    opp9_roster = {"U9", "L9", "D19", "D29"}
+    for idea in ideas:
+        assert idea["counterparty_user_id"] == "opp9"
+        assert set(idea["receive_player_ids"]) <= opp9_roster
+
+
+def test_receive_direction_scope_mismatch_returns_empty():
+    """#250 — acquiring a pin owned by someone OTHER than the scoped
+    opponent yields no ideas (never off-team acquire options); a matching
+    scope returns the normal groups."""
+    svc = _recv_service()          # pin T is owned by opp2
+    empty = {"upgrade": [], "lateral": [], "downgrade": []}
+    assert _recv_ideas(svc, opponent_user_id="opp3") == empty
+    assert _recv_ideas(_recv_service(), opponent_user_id="opp2") == _recv_ideas()
+
+
 def test_unknown_asset_or_direction_returns_empty():
     svc = _give_service()
     empty = {"upgrade": [], "lateral": [], "downgrade": []}
@@ -510,6 +562,22 @@ def test_route_ideas_carry_value_verdict(route_client):
             assert idea["favors"] == "receive"
         else:
             assert idea["favors"] == "give"
+
+
+def test_route_passes_opponent_scope(route_client):
+    """#250 — body opponent_user_id threads through to the sweep: scoping
+    the give fixture (single opponent 'opp') to a different user id yields
+    empty groups; scoping to 'opp' matches the unscoped read."""
+    ff._flags_cache = {**ff.DEFAULT_FLAGS, "trade.asset_ideas": True}
+    r = _post(route_client, {"asset_id": "P", "direction": "give",
+                             "opponent_user_id": "someone_else"})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["groups"] == {
+        "upgrade": [], "lateral": [], "downgrade": []}
+    r_scoped = _post(route_client, {"asset_id": "P", "direction": "give",
+                                    "opponent_user_id": "opp"})
+    r_plain = _post(route_client, {"asset_id": "P", "direction": "give"})
+    assert r_scoped.get_json()["groups"] == r_plain.get_json()["groups"]
 
 
 def test_route_validation(route_client):
