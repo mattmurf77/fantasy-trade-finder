@@ -379,6 +379,19 @@ FLAG_KEYS: tuple[str, ...] = (
     # OFF (default) ⇒ no recurring fetch anywhere; the manual Refresh
     # control is always present either way.
     "draft.live_poll",
+    # M5 — MFL parity on the Draft Room. Gates the MFL BINDING inside
+    # GET /api/draft/board only (the renderer already exists and is tested):
+    # ON, an MFL league's board is built from TYPE=draftResults, whose
+    # pre-populated grid carries a franchise on every unmade pick.
+    # OFF (default) ⇒ an MFL league gets the same honest
+    # `platform_unsupported` payload M3 shipped, byte-identical, and ZERO
+    # MFL reads are attempted — no league-row lookup, no crosswalk load, no
+    # export call. Sleeper responses are unaffected either way (D10).
+    # Live mode is release-gated separately: a drafting MFL league reports
+    # state:"live" honestly, but MFL's mid-draft update latency is
+    # UNVERIFIED, so recurring refresh stays behind `draft.live_poll` until
+    # the timed probe in docs/plans/rookie-draft/build-m5.md passes.
+    "draft.mfl",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
