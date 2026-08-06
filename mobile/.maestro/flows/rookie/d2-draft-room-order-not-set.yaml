@@ -1,0 +1,71 @@
+appId: com.fantasytradefinder.app
+# tc: T-M4-QA-02 / D5 (the pre-draft identity slot_to_roster_id trap)
+# profile: standard + ffv3-predraft corpus merged into the fixture dir
+# flags: draft.room ON, draft.live_poll OFF
+# FFv3 1312140920132497408 has draft_order:null while the draft detail object
+# carries an IDENTITY slot_to_roster_id map. The room must say "order not set"
+# and render round-level ownership — never an invented order.
+tags: [rookie, draft-room, order-not-set]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.1312140920132497408"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.1312140920132497408"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+
+- tapOn:
+    id: "tab.league"
+# The League tab lands on League rankings; the Explore tiles live on League home.
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 20000
+- tapOn:
+    id: "league-summary.league-home"
+- scrollUntilVisible:
+    element:
+      id: "league.draft-room-row"
+    direction: DOWN
+    timeout: 25000
+    visibilityPercentage: 100
+    speed: 30
+    centerElement: true
+- tapOn:
+    id: "league.draft-room-row"
+- extendedWaitUntil:
+    visible:
+      id: "draft-room.notice.order_not_set"
+    timeout: 30000
+- assertVisible:
+    id: "draft-room.as-of"
+- assertVisible:
+    id: "draft-room.order-row"
+- assertVisible: "Round ownership"
+- takeScreenshot: rookie-d2-order-not-set
+- scrollUntilVisible:
+    element:
+      id: "draft-room.undrafted-row"
+    direction: DOWN
+    timeout: 40000
+    visibilityPercentage: 100
+    speed: 30
+    centerElement: true
+- takeScreenshot: rookie-d2-undrafted

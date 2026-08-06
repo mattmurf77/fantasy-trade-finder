@@ -101,7 +101,11 @@ NOTICE_MFL_RECONNECT = "mfl_reconnect"
 _NOTICE_MESSAGES = {
     NOTICE_ORDER_NOT_SET: "The draft order is not set yet — showing who owns each round.",
     NOTICE_STARTUP_DRAFT: "Startup draft — rookie list hidden.",
-    NOTICE_PLATFORM_UNSUPPORTED: "Draft rooms are available for Sleeper and MyFantasyLeague.",
+    # States what is NOT available rather than what is: MFL renders here but is
+    # deliberately unbound until M5, so naming it as supported contradicts the
+    # `unavailable` board this notice rides on. (The mobile room overrides this
+    # per code; this is the payload fallback every other consumer reads.)
+    NOTICE_PLATFORM_UNSUPPORTED: "Draft rooms aren't available for this platform yet.",
     NOTICE_CLASS_NOT_LOADED: "This rookie class has not loaded yet.",
     NOTICE_MFL_RECONNECT: "Reconnect MyFantasyLeague to refresh this draft.",
 }

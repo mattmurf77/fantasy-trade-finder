@@ -1,0 +1,87 @@
+appId: com.fantasytradefinder.app
+# tc: T-M2-QA-03/05 (build-m2-mobile.md QA notes 3 and 5)
+# profile: standard
+# flags: ranks.rookie_subset ON
+# Quick Set under scope opens at a rookie-bearing rung and must NOT mark the
+# position complete; Trios under scope on TE (the thinnest position) must draw
+# a matchup or show the typed-empty notice — never a spinner, never an error.
+tags: [rookie, scope, quickset, trios]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+
+# --- Quick Set under scope (QA note 3) ---
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 15000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.quickset"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.quickset"
+- extendedWaitUntil:
+    visible:
+      id: "quick-set.scope"
+    timeout: 20000
+- takeScreenshot: rookie-r2-quickset-unscoped
+- tapOn:
+    id: "quick-set.scope-rookie"
+- extendedWaitUntil:
+    visible:
+      id: "quick-set.scope-consolidated"
+    timeout: 15000
+- takeScreenshot: rookie-r2-quickset-scoped
+
+# --- Trios under scope, thinnest position (QA note 5) ---
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 15000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.trios"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.trios"
+- extendedWaitUntil:
+    visible:
+      id: "trios.scope"
+    timeout: 20000
+- tapOn:
+    id: "trios.scope-rookie"
+- extendedWaitUntil:
+    visible:
+      id: "trios.scope-consolidated"
+    timeout: 15000
+- takeScreenshot: rookie-r2-trios-scoped

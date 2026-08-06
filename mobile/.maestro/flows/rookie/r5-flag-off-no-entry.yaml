@@ -1,0 +1,83 @@
+appId: com.fantasytradefinder.app
+# tc: T-M2-QA-01 flag-OFF half + D10 (no entry point)
+# profile: standard
+# flags: ranks.rookie_subset OFF, draft.room OFF
+# With both flags off there is no scope control on any rank surface, no
+# RankHome rookie section, and the League tab keeps today's rookie-board tile.
+tags: [rookie, flag-off]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 15000
+# Quick Set is the rank-tab destination: no scope control with the flag off.
+- assertNotVisible:
+    id: "quick-set.scope"
+- assertNotVisible:
+    id: "quick-set.scope-rookie"
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.tiers"
+    timeout: 10000
+- assertNotVisible:
+    id: "rank-home.rookie-ranks"
+- tapOn:
+    id: "rankmenu.tiers"
+- extendedWaitUntil:
+    visible:
+      id: "tiers.list"
+    timeout: 20000
+- assertNotVisible:
+    id: "tiers.scope"
+- assertNotVisible:
+    id: "tiers.scope-rookie"
+- takeScreenshot: rookie-r5-tiers-flag-off
+
+- tapOn:
+    id: "tab.league"
+# The League tab lands on League rankings; the Explore tiles live on League home.
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 20000
+- tapOn:
+    id: "league-summary.league-home"
+- scrollUntilVisible:
+    element:
+      id: "league.rookie-board-row"
+    direction: DOWN
+    timeout: 25000
+    visibilityPercentage: 100
+    speed: 30
+    centerElement: true
+- assertNotVisible:
+    id: "league.draft-room-row"
+- takeScreenshot: rookie-r5-league-tile-flag-off

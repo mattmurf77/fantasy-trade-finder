@@ -1,0 +1,85 @@
+appId: com.fantasytradefinder.app
+# tc: T-M2-QA-01/02/06 (build-m2-mobile.md QA notes 1, 2, 6)
+# profile: standard
+# flags: ranks.rookie_subset ON
+# Scope control renders on Tiers, narrows the board, and the "see all rookies"
+# link reaches the consolidated cross-position view.
+tags: [rookie, scope, tiers]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.990000000000000001"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+
+# --- Tiers carries the scope control (QA note 2) ---
+- tapOn:
+    id: "tab.rank"
+- extendedWaitUntil:
+    visible:
+      id: "rank.more-ways"
+    timeout: 15000
+- tapOn:
+    id: "rank.more-ways"
+- extendedWaitUntil:
+    visible:
+      id: "rankmenu.tiers"
+    timeout: 10000
+- tapOn:
+    id: "rankmenu.tiers"
+- extendedWaitUntil:
+    visible:
+      id: "tiers.list"
+    timeout: 20000
+- assertVisible:
+    id: "tiers.scope"
+- assertVisible:
+    id: "tiers.scope-all"
+- assertVisible:
+    id: "tiers.scope-rookie"
+- takeScreenshot: rookie-r1-tiers-scope-off
+- tapOn:
+    id: "tiers.scope-rookie"
+- extendedWaitUntil:
+    visible:
+      id: "tiers.scope-consolidated"
+    timeout: 15000
+- takeScreenshot: rookie-r1-tiers-scoped
+
+# --- The consolidated cross-position view (QA note 6) ---
+- tapOn:
+    id: "tiers.scope-consolidated"
+- extendedWaitUntil:
+    visible:
+      id: "rookie-ranks.list"
+    timeout: 20000
+- assertVisible:
+    id: "rookie-ranks.filter.all"
+- assertVisible:
+    id: "rookie-ranks.filter.te"
+- takeScreenshot: rookie-r1-consolidated-all
+- tapOn:
+    id: "rookie-ranks.filter.te"
+- extendedWaitUntil:
+    visible:
+      id: "rookie-ranks.list"
+    timeout: 10000
+- takeScreenshot: rookie-r1-consolidated-te

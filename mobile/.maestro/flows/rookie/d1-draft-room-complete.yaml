@@ -1,0 +1,103 @@
+appId: com.fantasytradefinder.app
+# tc: T-M4-QA-01 / D5 (complete draft renders a full board)
+# profile: standard + lakeview-complete corpus merged into the fixture dir
+# flags: draft.room ON, draft.live_poll OFF
+# Lakeview 1312076055586050048: complete 4x12 rookie draft, populated
+# draft_order, 55 traded picks. The League tile must read "Rookie draft".
+tags: [rookie, draft-room]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "leagues.row.1312076055586050048"
+    timeout: 30000
+- tapOn:
+    id: "leagues.row.1312076055586050048"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+
+- tapOn:
+    id: "tab.league"
+# The League tab lands on League rankings; the Explore tiles live on League home.
+- extendedWaitUntil:
+    visible:
+      id: "league-summary.league-home"
+    timeout: 20000
+- tapOn:
+    id: "league-summary.league-home"
+- scrollUntilVisible:
+    element:
+      id: "league.draft-room-row"
+    direction: DOWN
+    timeout: 25000
+    visibilityPercentage: 100
+    speed: 30
+    centerElement: true
+- assertNotVisible:
+    id: "league.rookie-board-row"
+- takeScreenshot: rookie-d1-league-tile-swapped
+- tapOn:
+    id: "league.draft-room-row"
+- extendedWaitUntil:
+    visible:
+      id: "draft-room.state"
+    timeout: 30000
+- assertVisible:
+    id: "draft-room.as-of"
+- assertVisible:
+    id: "draft-room.refresh"
+- assertVisible:
+    id: "draft-room.order-row"
+- takeScreenshot: rookie-d1-draft-room-complete
+- scrollUntilVisible:
+    element:
+      id: "draft-room.basis.consensus"
+    direction: DOWN
+    timeout: 40000
+    visibilityPercentage: 100
+    speed: 30
+    centerElement: true
+# D9: the terminal CTA is a deep link out to the platform — never a write path.
+- scrollUntilVisible:
+    element:
+      id: "draft-room.deep-link"
+    direction: DOWN
+    timeout: 40000
+    visibilityPercentage: 100
+    speed: 30
+    centerElement: true
+- scrollUntilVisible:
+    element:
+      id: "draft-room.basis.consensus"
+    direction: UP
+    timeout: 40000
+    visibilityPercentage: 100
+    speed: 30
+    centerElement: true
+- assertVisible:
+    id: "draft-room.basis.my-board"
+- tapOn:
+    id: "draft-room.basis.my-board"
+- scrollUntilVisible:
+    element:
+      id: "draft-room.undrafted-row"
+    direction: DOWN
+    timeout: 40000
+    visibilityPercentage: 100
+    speed: 30
+    centerElement: true
+- takeScreenshot: rookie-d1-undrafted-my-board
