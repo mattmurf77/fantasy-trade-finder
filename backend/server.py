@@ -772,6 +772,7 @@ g_universal_seed: dict[str, float] = {}
 from .pick_values import (
     GENERIC_PICK_SEEDS, _PICK_ORDINALS, generic_pick_label, pick_pool_value,
     discount_pick_value, parse_generic_pick_id, year_pick_label,
+    priced_pool_value,          # M6b read-time pricing seam (flag trade.slot_pricing)
 )
 
 
@@ -6135,6 +6136,57 @@ def stud_tax_setting_route():
         return jsonify({"error": "internal_error"}), 500
 
 
+@app.route("/api/settings/pick-pricing", methods=["GET", "PUT"])
+def pick_pricing_setting_route():
+    """GET/PUT /api/settings/pick-pricing — M6b per-user pick-pricing mode.
+
+    GET → {"mode": "tier_ladder"|"market_slots"} (stored setting;
+    'tier_ladder' — TODAY'S BEHAVIOUR — is the default). PUT persists it.
+    Sibling of /api/settings/stud-tax in every respect except one: this route
+    is FLAG-GATED. `trade.slot_pricing` off ⇒ 404 on both verbs, so the mode
+    cannot even be stored while the repricing is dark.
+
+    Unlike #214/#215 — which shipped its retuned mode as the DEFAULT — the
+    market mode here is opt-in. Operator decision O2 authorises the toggle and
+    the calibration, not a change to what today's users are charged for picks.
+    """
+    if not is_enabled("trade.slot_pricing"):
+        return jsonify({"error": "not_found"}), 404
+    from .database import (get_pick_pricing_mode, set_pick_pricing_mode,
+                           PICK_PRICING_MODES)
+    sess = _require_session()
+    g_user_id = sess["user_id"]
+    if request.method == "GET":
+        try:
+            return jsonify({"mode": get_pick_pricing_mode(g_user_id)})
+        except Exception as e:
+            log.error("pick-pricing read failed for %s: %s", g_user_id, e)
+            return jsonify({"error": "internal_error"}), 500
+    denial = _verified_write_denial(sess)
+    if denial is not None:
+        return denial
+    body = request.get_json(silent=True) or {}
+    mode = body.get("mode", "")
+    if mode not in PICK_PRICING_MODES:
+        return jsonify({"error": f"Invalid mode: {mode!r}"}), 400
+    try:
+        set_pick_pricing_mode(g_user_id, mode)
+        log.info("pick-pricing mode set for %s: %s", g_user_id, mode)
+        try:
+            record_event(
+                g_user_id, "pick_pricing_mode_changed",
+                league_id=getattr(sess.get("league"), "league_id", None),
+                source="api", props={"mode": mode},
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as ev_err:
+            log.warning("record_event(pick_pricing_mode_changed) failed: %s", ev_err)
+        return jsonify({"ok": True, "mode": mode})
+    except Exception as e:
+        log.error("pick-pricing write failed for %s: %s", g_user_id, e)
+        return jsonify({"error": "internal_error"}), 500
+
+
 @app.route("/api/scoring/switch", methods=["POST"])
 @_gate_unverified_write
 def switch_scoring_format():
@@ -7972,12 +8024,23 @@ def trade_evaluate_route():
     in the response so clients can label the read (e.g. the mobile
     "Value adjustments off" note).
     """
+    _sess_for_mode = None
     _mode = _trade_service_mod.pinned_stud_tax_mode()
     if _mode is None:
         _sess_for_mode = _get_session(request.headers.get("X-Session-Token", ""))
         _mode = (_trade_service_mod.stud_tax_mode_for_user(_sess_for_mode.get("user_id"))
                  if _sess_for_mode else _trade_service_mod.STUD_TAX_DEFAULT)
-    with _trade_service_mod.stud_tax_override(_mode):
+    # M6b — the pick-pricing mode rides the same request-scoped pin. Resolved
+    # from the same (optional) session: Mode A stays public, and an anonymous
+    # caller gets the 'tier_ladder' default. An outer pin wins, as above.
+    _pp_mode = _trade_service_mod.pinned_pick_pricing_mode()
+    if _pp_mode is None:
+        if _sess_for_mode is None:
+            _sess_for_mode = _get_session(request.headers.get("X-Session-Token", ""))
+        _pp_mode = _trade_service_mod.pick_pricing_mode_for_user(
+            _sess_for_mode.get("user_id") if _sess_for_mode else None)
+    with _trade_service_mod.stud_tax_override(_mode), \
+            _trade_service_mod.pick_pricing_override(_pp_mode):
         return _trade_evaluate_impl(_mode)
 
 
@@ -8029,11 +8092,18 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         # league_id rides along, resolve each owned pick_id to its pool_value
         # (already in elo_to_value units, so it composes directly with player
         # values). Generic picks (generic_pick_*) still resolve via `seed`.
+        #
+        # M6b — the price is resolved at READ time under the caller's
+        # pick-pricing mode (pinned for this request by trade_evaluate_route,
+        # alongside the #215 stud-tax pin). `tier_ladder` (default, and the
+        # only reachable mode while `trade.slot_pricing` is off) returns the
+        # stored pool_value unchanged. The stored column is never written.
         league_pick_vals: dict[str, float] = {}
         if league_id and league_id != "league_demo":
             try:
                 for _p in load_draft_picks(league_id=league_id):
-                    league_pick_vals[_p["pick_id"]] = float(_p.get("pool_value") or 0.0)
+                    league_pick_vals[_p["pick_id"]] = priced_pool_value(
+                        _p, scoring_format=fmt)
             except Exception as _lp_err:
                 log.warning("evaluate: owned-pick load failed (continuing): %s", _lp_err)
 
@@ -8535,23 +8605,40 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     does NOT price through dynasty_value — it reads Elo maps, which must be
     primed with these picks via _pick_asset_elos (see _inject_owned_picks) or
     every pick silently defaults to Elo 1500.
+
+    **M6b (flag `trade.slot_pricing`, operator decision O2)** — the price is
+    resolved HERE, at read time, through `pick_values.priced_pool_value` under
+    the thread-local pricing mode. The stored `draft_picks.pool_value` column
+    is NEVER rewritten: it is written by a league-wide sync path and shared by
+    every user of the league, so a per-user mode that rewrote it would
+    silently reprice the user's leaguemates. Under the default `tier_ladder`
+    mode `priced_pool_value` returns the stored value unchanged and no
+    DynastyProcess read is attempted, so this call is a no-op.
+
+    The cap is applied AFTER pricing (sort key is the priced value), because
+    `market_slots` re-shapes the curve — a 2029 3rd and a 2026 1st do not keep
+    their relative order across the two modes, and capping on the stale order
+    would inject a different top-N than the one the engine then prices.
     """
     cap = _picks_pool_cap()
     if cap <= 0:
         return {}
     v2e = _trade_service_mod.value_to_elo
     by_owner: dict[str, list[dict]] = {}
+    _priced: dict[str, float] = {}
     for p in load_draft_picks(league_id=league_id):
         owner = p.get("owner_user_id")
         if owner:
             by_owner.setdefault(owner, []).append(p)
+            _priced[p["pick_id"]] = priced_pool_value(
+                p, scoring_format=scoring_format)
 
     out: dict[str, list] = {}
     for owner, picks in by_owner.items():
-        picks.sort(key=lambda p: (p.get("pool_value") or 0.0), reverse=True)
+        picks.sort(key=lambda p: _priced.get(p["pick_id"], 0.0), reverse=True)
         assets = []
         for p in picks[:cap]:
-            pool_v = float(p.get("pool_value") or 0.0)
+            pool_v = _priced.get(p["pick_id"], 0.0)
             if pool_v <= 0:
                 continue
             # Inverse of dynasty_value's PICK bridge so the engine reproduces
@@ -8610,8 +8697,19 @@ def _inject_owned_picks(*, league_id: str, scoring_format: str, trade_service,
     Returns (seed_map, user_roster, n_injected). seed_map is returned as a
     job-local COPY when picks were injected, so the session's shared
     service._seed is never polluted with pick ids.
+
+    **M6b** — this is the pricing-mode entry point for BOTH pick-bearing
+    engine lanes (the /api/trades/generate job and /api/trades/asset-ideas):
+    the deck owner's `pick_pricing_mode` is resolved once and pinned for the
+    whole injection, exactly as #215 pins the stud-tax mode. An already-active
+    outer pin wins (tests and the M6b matrix/deck harnesses pin around a whole
+    job). Flag off ⇒ `pick_pricing_mode_for_user` returns 'tier_ladder'
+    without a DB read and every price below is today's stored value.
     """
-    pick_assets = _owned_pick_assets(league_id, scoring_format)
+    _pp_mode = (_trade_service_mod.pinned_pick_pricing_mode()
+                or _trade_service_mod.pick_pricing_mode_for_user(user_id))
+    with _trade_service_mod.pick_pricing_override(_pp_mode):
+        pick_assets = _owned_pick_assets(league_id, scoring_format)
     # league.members are shared session objects reused across jobs, so
     # injection must be IDEMPOTENT: strip any owned-pick ids this league
     # injected on a prior run (they alone start with "{league_id}_" — real
