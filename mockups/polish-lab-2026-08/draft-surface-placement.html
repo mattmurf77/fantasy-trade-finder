@@ -1,0 +1,1485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polish Lab — Where does draft handling live? (rookie-draft placement)</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --lineStrong:#59647A;
+  --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+  --ice:#56D9EC; --icePress:#3FC2D6; --onIce:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+  --cond:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090c;color:var(--chalk);font-family:var(--ui);
+  display:flex;flex-direction:column;align-items:center;padding:24px 12px 96px;gap:0;min-height:100vh}
+.wrap{width:100%;max-width:1360px;display:flex;flex-direction:column;align-items:center;gap:16px}
+
+/* ── page furniture ─────────────────────────────────────────────── */
+.note{width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;
+  padding:18px 20px;font-size:13.5px;line-height:1.6;color:var(--dim)}
+.note h1{font-family:var(--cond);font-weight:700;text-transform:uppercase;letter-spacing:.02em;
+  font-size:26px;color:var(--chalk);margin-bottom:8px}
+.note p{margin-top:9px}
+.note b,.note strong{color:var(--chalk)}
+.note code{font-family:var(--mono);font-size:12px;color:var(--ice);background:rgba(86,217,236,.07);
+  padding:1px 4px;border-radius:3px}
+.note ul{margin:8px 0 0 20px}.note li{margin:4px 0}
+
+.notesbar{display:flex;gap:14px;align-items:center;background:var(--ink1);
+  border:1px solid var(--line);border-radius:8px;padding:10px 14px;
+  position:sticky;top:8px;z-index:20;width:100%}
+.notesbar .txt{flex:1;font-size:12px;color:var(--dim);line-height:1.4}
+.copybtn{background:var(--ice);color:var(--onIce);border:0;border-radius:6px;padding:9px 14px;
+  font-family:var(--cond);font-size:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;
+  cursor:pointer;flex:0 0 auto}
+.copybtn:hover{filter:brightness(1.08)}
+.notecount{color:var(--faint);font-size:11px;flex:0 0 auto}
+
+.sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--dim);display:flex;align-items:center;gap:8px;margin:34px 0 2px;width:100%}
+.sec::before{content:"";width:3px;height:14px;background:var(--ice);flex:0 0 auto}
+.sec .fb{color:var(--faint);letter-spacing:.02em;text-transform:none;font-weight:400;font-size:11.5px}
+
+.opt{width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:18px 20px;
+  display:flex;flex-direction:column;gap:14px}
+.opt.rec{border-color:var(--ice);box-shadow:0 0 0 1px rgba(86,217,236,.18)}
+.optHead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.optHead .n{font-family:var(--cond);font-weight:700;font-size:24px;text-transform:uppercase;
+  letter-spacing:.02em;color:var(--chalk)}
+.optHead .badge{font:600 10.5px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+  padding:3px 8px;border-radius:3px;border:1px solid var(--line);color:var(--dim)}
+.badge.ship{border-color:var(--pos);color:var(--pos)}
+.badge.recb{border-color:var(--ice);color:var(--ice)}
+.badge.ask{border-color:var(--flare);color:var(--flare)}
+.optBody{font-size:13.5px;line-height:1.6;color:var(--dim)}
+.optBody b{color:var(--chalk)}
+.optBody code{font-family:var(--mono);font-size:12px;color:var(--ice)}
+
+.frames{display:flex;flex-wrap:wrap;gap:28px;justify-content:center;align-items:flex-start;width:100%}
+.fr{display:flex;flex-direction:column;gap:8px;align-items:center;width:393px}
+.fr .ftag{font-family:var(--cond);font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+  font-size:15px;padding:3px 12px;border-radius:2px;border:1px solid var(--line);color:var(--dim);
+  align-self:center}
+.fr .ftag.a{color:var(--ice);border-color:var(--ice)}
+.fr .ftag.warnt{color:var(--warn);border-color:var(--warn)}
+.fr .fcap{font-size:11.5px;color:var(--faint);line-height:1.5;text-align:center;padding:0 4px}
+
+/* ── state / cost tables ────────────────────────────────────────── */
+table.t{width:100%;border-collapse:collapse;font-size:12.5px;line-height:1.5}
+table.t th{text-align:left;font:600 10.5px var(--ui);letter-spacing:.07em;text-transform:uppercase;
+  color:var(--dim);border-bottom:1px solid var(--lineStrong);padding:7px 9px}
+table.t td{border-bottom:1px solid var(--line);padding:8px 9px;color:var(--dim);vertical-align:top}
+table.t td:first-child{color:var(--chalk);font-weight:600;white-space:nowrap}
+table.t tr.rec td{background:rgba(86,217,236,.06)}
+table.t tr.rec td:first-child{color:var(--ice)}
+table.t td b{color:var(--chalk)}
+table.t .num{font-family:var(--mono);color:var(--chalk)}
+table.t .bad{color:var(--neg)}
+table.t .ok{color:var(--pos)}
+table.t .mid{color:var(--warn)}
+
+/* ── phone frame ─────────────────────────────────────────────────── */
+.phone{width:393px;background:var(--ink0);border:1px solid var(--line);border-radius:22px;
+  overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55);position:relative}
+.sbar{height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;
+  font-size:11.5px;color:var(--dim);font-family:var(--mono)}
+svg.i{fill:none;stroke-width:1.75;stroke-linecap:square;stroke-linejoin:miter}
+.ann{position:absolute;z-index:9;font-size:10.5px;font-family:var(--mono);
+  background:rgba(12,14,17,.95);border-radius:2px;padding:2px 6px;line-height:1.4}
+.ann.f{color:var(--flare);border:1px solid var(--flare)}
+.ann.c{color:var(--ice);border:1px solid var(--ice)}
+.ann.w{color:var(--warn);border:1px solid var(--warn)}
+
+/* TopBar — 52pt, #223/#224 construction */
+.topbar{height:52px;display:flex;align-items:center;gap:10px;padding:0 14px;
+  background:var(--ink0);border-bottom:1px solid var(--line)}
+.brandtick{width:3px;height:24px;background:var(--ice);flex:0 0 auto}
+.tbleft{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.tbLabel{font:600 10px var(--ui);letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+.tbName{font:600 15px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;max-width:180px}
+.tbicons{display:flex;align-items:center;gap:14px;flex:0 0 auto}
+
+/* global draft strip (Option E) */
+.gstrip{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--ink2);
+  border-bottom:1px solid var(--line);min-height:36px}
+.gstrip .dot{width:7px;height:7px;background:var(--pos);flex:0 0 auto}
+.gstrip .gt{font:600 12.5px var(--ui);color:var(--chalk);white-space:nowrap}
+.gstrip .gs{font-size:11.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.gstrip .gcta{font:600 11px var(--ui);letter-spacing:.07em;text-transform:uppercase;color:var(--ice);
+  display:flex;align-items:center;gap:3px;flex:0 0 auto}
+
+/* Tab bar — 49pt */
+.tabbar{height:49px;display:flex;background:var(--ink0);border-top:1px solid var(--line)}
+.tb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  min-width:0;position:relative}
+.tb .lbl{font:600 11px var(--ui);color:var(--dim);white-space:nowrap}
+.tb.on .lbl{color:var(--ice)}
+.tb .w{position:absolute;top:5px;right:calc(50% - 20px);width:6px;height:6px;background:var(--flare)}
+
+/* generic screen body */
+.body{padding:14px 16px 18px;display:flex;flex-direction:column;gap:12px;background:var(--ink0)}
+.tickl{display:flex;align-items:center;gap:7px;font:600 11px var(--ui);letter-spacing:.08em;
+  text-transform:uppercase;color:var(--dim)}
+.tickl::before{content:"";width:3px;height:12px;background:var(--ice);flex:0 0 auto}
+.hd{font-family:var(--cond);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:21px;
+  color:var(--chalk)}
+.sub{font-size:12.5px;color:var(--dim);line-height:1.45}
+.stackhdr{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;
+  background:var(--ink0);border-bottom:1px solid var(--line)}
+.stackhdr .bk{display:flex;align-items:center;gap:5px;font:600 13px var(--ui);color:var(--chalk)}
+.stackhdr .ttl{font-family:var(--cond);font-weight:600;font-size:17px;text-transform:uppercase;
+  letter-spacing:.054em;color:var(--chalk)}
+.stackhdr .rt{font:600 12px var(--ui);color:var(--dim)}
+
+/* Explore tiles (League home) */
+.tiles{display:flex;gap:8px}
+.tile{flex:1;min-width:0;background:var(--ink2);border:1px solid var(--line);border-radius:8px;
+  padding:10px 8px;display:flex;flex-direction:column;gap:5px;align-items:flex-start}
+.tile .tt{font:600 13px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  max-width:100%}
+.tile .ts{font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.tile.hot{border-color:var(--flare)}
+.tile .hotchip{font:600 9.5px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--flare)}
+
+/* chips */
+.chiprow{display:flex;gap:8px;overflow:hidden}
+.chip{border:1px solid var(--line);border-radius:8px;padding:7px 12px;font:600 11px var(--ui);
+  letter-spacing:.07em;text-transform:uppercase;color:var(--dim);white-space:nowrap;background:transparent}
+.chip.on{background:var(--ink3);color:var(--chalk);border-color:var(--lineStrong)}
+.chip.live{border-color:var(--flare);color:var(--flare)}
+.chip.live .ld{display:inline-block;width:5px;height:5px;background:var(--pos);margin-right:5px;
+  vertical-align:middle}
+
+/* segmented scope control (RookieScopeControl) */
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg .s{flex:1;height:44px;display:flex;align-items:center;justify-content:center;
+  border-bottom:2px solid transparent;font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--dim)}
+.seg .s.on{background:var(--ink3);color:var(--chalk)}
+.seg .s.on.ice{border-bottom-color:var(--ice)}
+.seg .s.on.fl{border-bottom-color:var(--flare)}
+.seglink{align-self:flex-end;display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--dim);
+  text-decoration:underline;text-decoration-color:var(--ice)}
+
+/* rows */
+.row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.row .rt{font:600 15px var(--ui);color:var(--chalk)}
+.row .rs{font-size:12.5px;color:var(--dim);line-height:1.4;margin-top:2px}
+
+/* Draft-room specifics */
+.statusbar{display:flex;align-items:center;gap:10px;padding-bottom:2px}
+.statusbar .st{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--pos)}
+.statusbar .st.up{color:var(--dim)}
+.statusbar .asof{font-family:var(--mono);font-size:11px;color:var(--faint);flex:1}
+.statusbar .rf{border:1px solid var(--lineStrong);border-radius:8px;padding:5px 10px;
+  font:600 11px var(--ui);letter-spacing:.07em;text-transform:uppercase;color:var(--chalk)}
+.notice{background:var(--ink2);border:1px solid var(--lineStrong);border-radius:8px;padding:10px 12px;
+  font-size:12.5px;color:var(--dim);line-height:1.5}
+.pickchips{display:flex;gap:8px;flex-wrap:wrap}
+.pickchip{border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:var(--ink2);
+  display:flex;flex-direction:column;gap:1px}
+.pickchip .p{font-family:var(--mono);font-size:13px;color:var(--chalk)}
+.pickchip .f{font-size:10.5px;color:var(--faint)}
+.orow{display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line)}
+.orow .slot{font-family:var(--mono);font-size:13px;color:var(--dim);width:38px;flex:0 0 auto}
+.orow .om{min-width:0;flex:1}
+.orow .own{font-size:13.5px;color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.orow .own .tr{color:var(--faint);font-size:11.5px}
+.orow .pkd{font-size:12.5px;color:var(--dim);margin-top:2px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.orow .nmy{font-size:12.5px;color:var(--faint);margin-top:2px}
+.urow{display:flex;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.urow .rk{font-family:var(--mono);font-size:12.5px;color:var(--faint);width:22px;flex:0 0 auto}
+.urow .um{flex:1;min-width:0}
+.urow .un{font:600 14px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.urow .um2{font-size:11.5px;color:var(--dim);margin-top:1px}
+.urow .vv{font-family:var(--mono);font-size:13px;color:var(--chalk);flex:0 0 auto}
+.urow .nv{font-family:var(--mono);font-size:11.5px;color:var(--faint);flex:0 0 auto}
+.cta{background:var(--ice);color:var(--onIce);border-radius:8px;height:46px;display:flex;
+  align-items:center;justify-content:center;font-family:var(--cond);font-weight:700;font-size:17px;
+  text-transform:uppercase;letter-spacing:.04em}
+.ctanote{font-size:11.5px;color:var(--faint);text-align:center;line-height:1.45}
+.empty{padding:20px 8px;text-align:center;font-size:13px;color:var(--dim);line-height:1.5}
+
+/* fold marker */
+.foldline{position:relative;height:0}
+.foldline::after{content:"658pt fold";position:absolute;right:6px;top:-9px;font-family:var(--mono);
+  font-size:9.5px;color:var(--warn);background:var(--ink0);padding:0 4px}
+.foldrule{border-top:1px dashed var(--warn);margin:0 -16px}
+
+/* seasonal timeline */
+.tl{width:100%;background:var(--ink1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;
+  display:flex;flex-direction:column;gap:10px}
+.tlbar{display:flex;height:38px;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.tlseg{display:flex;align-items:center;justify-content:center;font:600 10.5px var(--ui);
+  letter-spacing:.05em;text-transform:uppercase;color:var(--faint);border-right:1px solid var(--line)}
+.tlseg:last-child{border-right:0}
+.tlseg.hot{background:rgba(240,80,140,.14);color:var(--flare)}
+.tlseg.warm{background:rgba(86,217,236,.10);color:var(--ice)}
+.tlseg.dead{background:transparent}
+.tlkey{display:flex;gap:18px;flex-wrap:wrap;font-size:11.5px;color:var(--dim)}
+.tlkey span::before{content:"";display:inline-block;width:9px;height:9px;margin-right:6px;
+  vertical-align:middle;border:1px solid var(--line)}
+.tlkey .k1::before{background:rgba(240,80,140,.5);border-color:var(--flare)}
+.tlkey .k2::before{background:rgba(86,217,236,.4);border-color:var(--ice)}
+.tlkey .k3::before{background:transparent}
+
+/* notes */
+.notewrap{display:flex;flex-direction:column;gap:4px;width:100%}
+.notelbl{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;
+  letter-spacing:.06em;font-weight:600;color:var(--dim)}
+.notelbl .dot{width:6px;height:6px;border-radius:50%;background:var(--warn);display:none}
+.notewrap.noted .notelbl .dot{display:block}
+.pagenote{width:100%;background:var(--ink0);color:var(--chalk);border:1px solid var(--line);
+  border-radius:6px;padding:8px 10px;font-family:var(--ui);font-size:12.5px;min-height:48px;resize:vertical}
+.pagenote::placeholder{color:var(--faint)}
+.pagenote:focus{outline:none;border-color:var(--ice)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="note">
+  <h1>Where does draft handling live?</h1>
+  <p><b>Operator ask:</b> <em>"We need to explore where to present the draft handling to users. Draft a few
+    options — one such option would be to create a 5th tab at the bottom."</em></p>
+  <p><b>What is actually built and dark right now</b> (verified on branch <code>wave/integration</code>,
+    all flags OFF):</p>
+  <ul>
+    <li><b>Rookie scope</b> (<code>ranks.rookie_subset</code>) — one shared
+      <code>RookieScopeControl</code> (All players | Rookies) on all six ranking modes, plus a consolidated
+      cross-position <code>RookieRanksScreen</code> (route <code>RookieRanks</code>, deep link
+      <code>app/rank/rookies</code>) entered from every scope control <em>and</em> a "Rookies" section on
+      RankHome. Session-only, view-filter-only — same board, same Elo (D2).</li>
+    <li><b>Draft Room</b> (<code>draft.room</code> + <code>draft.live_poll</code>) — a root-stack
+      <code>DraftRoomScreen</code>: status bar (state + <code>as_of</code> + Refresh), designed notices
+      (order-not-set / class-not-loaded / startup / platform-unsupported / stale / unavailable), Your picks,
+      the board (slot · owner · pick), and Still-on-the-board with a Consensus | My-board toggle. Its
+      <b>only</b> entry point today is the League-page Explore tile, which swaps from "Rookie board" to
+      "Rookie draft" when <code>draft.room</code> is on.</li>
+    <li>Upcoming: <b>M5 MFL parity</b> and <b>M6/M6b per-slot pick values</b> (display first, then a
+      #214-style engine toggle). Whatever we pick must not preclude either.</li>
+  </ul>
+  <p><b>The crux is not "where does it fit" — it is "what does it look like when there is no draft."</b>
+    A rookie draft is live for roughly two to six weeks a year, in a window (late Apr → late Aug) that is the
+    <em>opposite</em> of the window in which this app is otherwise most used. Every option below is judged
+    first on its <b>no-draft</b> render, and only second on its live render. The frames come in pairs for
+    exactly that reason.</p>
+  <p><b>Method notes.</b> Frames are 393pt (iPhone 15/16-class). Fold math uses the #243 audit budget:
+    852 − 59 top inset − 52 TopBar − 49 tab bar − 34 bottom inset = <b>658pt usable</b>. Chalkline tokens
+    only (no emoji glyphs, no gradients, radius ≤ 8px, ice = actions, flare = informational). Position hexes
+    are the cross-client data encoding, untouched.</p>
+</div>
+
+<div class="notesbar">
+  <div class="txt">Leave a note under any option — it persists in this browser (localStorage), not the file.
+    Use <b style="color:var(--chalk)">Copy all notes</b> to pull everything into one paste.</div>
+  <button class="copybtn" id="copyall">Copy all notes</button>
+  <div class="notecount" id="notecount"></div>
+</div>
+
+<!-- ══════════════════ THE SEASON SHAPE ══════════════════ -->
+<div class="sec">The season shape<span class="fb">why "empty 11 months" is the deciding constraint, not tab-bar width</span></div>
+
+<div class="tl">
+  <div class="tlbar">
+    <div class="tlseg dead" style="flex:3">Sep–Nov</div>
+    <div class="tlseg dead" style="flex:3">Dec–Feb</div>
+    <div class="tlseg dead" style="flex:2">Mar–Apr</div>
+    <div class="tlseg warm" style="flex:1.4">late Apr</div>
+    <div class="tlseg hot" style="flex:2.2">May–Aug</div>
+  </div>
+  <div class="tlkey">
+    <span class="k1">Draft live or imminent — the room has real, changing data</span>
+    <span class="k2">Class loads (post-NFL-draft); rookie ranking becomes real</span>
+    <span class="k3">No draft anywhere. Board is a recap at best; often nothing at all</span>
+  </div>
+  <div class="optBody" style="font-size:12.5px">
+    Three honest facts from the plan that constrain placement: <b>(1)</b> Feb–Apr is
+    <em>structurally</em> empty — Sleeper carries no rows for a class until ~late April, which is why
+    <code>class_not_loaded</code> is a designed state rather than a bug. <b>(2)</b> Most FTF sessions happen in
+    the fall, when every league's rookie draft is months behind and the only true render is a <em>recap</em>.
+    <b>(3)</b> Draft state is already known per league at session time (<code>backend/draft_status.py</code>
+    ships <code>drafted / not_drafted / unknown</code> + confidence on the leagues rows), so
+    "show this only when it matters" is <b>data we already have</b>, not new plumbing. That last fact is what
+    makes the conditional options real rather than hypothetical.
+  </div>
+</div>
+
+<!-- ══════════════════ OPTION C — BASELINE ══════════════════ -->
+<div class="sec">Option C — League tab Explore tile<span class="fb">the shipped behavior; baseline for everything else</span></div>
+
+<div class="opt">
+  <div class="optHead">
+    <span class="n">C · League tab Explore tile</span>
+    <span class="badge ship">Built &amp; dark today</span>
+  </div>
+  <div class="optBody">
+    What <code>draft.room</code> currently does: the third Explore tile on League home swaps from
+    "Rookie board" to "Rookie draft" and pushes the root-stack <code>DraftRoom</code>. Flag off restores the
+    old tile, so the row is never emptied. <b>Zero new nav surface, zero fold cost</b> — it reuses a slot
+    that already exists.
+  </div>
+  <div class="frames">
+
+    <!-- C1: live -->
+    <div class="fr">
+      <div class="ftag">C1 · entry — League home, draft live</div>
+      <div class="phone">
+        <div class="ann c" style="top:150px;right:12px">3rd tile, one slot, two occupants</div>
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft">
+            <div class="brandtick"></div>
+            <div style="min-width:0">
+              <div class="tbLabel">League</div>
+              <div class="tbName">Dynasty Degens</div>
+            </div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><circle cx="10" cy="10" r="3"/><circle cx="10" cy="10" r="5.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M15.7 4.3l-1.8 1.8M6.1 13.9l-1.8 1.8"/></svg>
+          </div>
+        </div>
+        <div class="stackhdr">
+          <div class="bk"><svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M12 4l-6 6 6 6"/></svg>Back</div>
+          <div class="ttl">League home</div>
+          <div style="width:44px"></div>
+        </div>
+        <div class="body">
+          <div class="tickl">Explore</div>
+          <div class="tiles">
+            <div class="tile">
+              <svg class="i" width="18" height="18" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 17V9M10 17V3M17 17v-6"/></svg>
+              <div class="tt">Rankings</div><div class="ts">Every team ranked</div>
+            </div>
+            <div class="tile">
+              <svg class="i" width="18" height="18" viewBox="0 0 20 20" stroke="#97A1AE"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4 4"/></svg>
+              <div class="tt">Free agents</div><div class="ts">Best available</div>
+            </div>
+            <div class="tile">
+              <svg class="i" width="18" height="18" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg>
+              <div class="tt">Rookie draft</div><div class="ts">Board &amp; who's left</div>
+            </div>
+          </div>
+          <div class="tickl" style="margin-top:6px">Market pulse</div>
+          <div class="sub">Risers and fallers across the league this week.</div>
+          <div class="row" style="border-bottom:0"><div style="flex:1">
+            <div class="rt">Recent activity</div>
+            <div class="rs">3 trades, 2 waiver claims in the last 7 days</div>
+          </div>
+          <svg class="i" width="16" height="16" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 4l6 6-6 6"/></svg></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 17V9M10 17V3M17 17v-6"/></svg><span class="lbl">Rank</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg><span class="lbl">Acquire</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg><span class="lbl">Matches</span></div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg><span class="lbl">League</span></div>
+        </div>
+      </div>
+      <div class="fcap">Tile row is unchanged in height. Nothing signals that a draft is <em>happening</em> —
+        the tile reads identically in May and in November.</div>
+    </div>
+
+    <!-- C2: the room, live -->
+    <div class="fr">
+      <div class="ftag a">C2 · landing — DraftRoom (root-stack push), live</div>
+      <div class="phone">
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft"><div class="brandtick"></div>
+            <div style="min-width:0"><div class="tbLabel">League</div><div class="tbName">Dynasty Degens</div></div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><circle cx="10" cy="10" r="3"/><circle cx="10" cy="10" r="5.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18"/></svg>
+          </div>
+        </div>
+        <div class="stackhdr">
+          <div class="bk"><svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M12 4l-6 6 6 6"/></svg>Back</div>
+          <div class="ttl">Rookie draft</div>
+          <div style="width:44px"></div>
+        </div>
+        <div class="body">
+          <div class="statusbar">
+            <span class="st">Drafting now</span>
+            <span class="asof">Updated just now</span>
+            <span class="rf">Refresh</span>
+          </div>
+          <div class="tickl">Your picks</div>
+          <div class="pickchips">
+            <div class="pickchip"><span class="p">1.04</span></div>
+            <div class="pickchip"><span class="p">2.04</span></div>
+            <div class="pickchip"><span class="p">3.01</span><span class="f">from BortlesFan</span></div>
+          </div>
+          <div class="tickl">Board</div>
+          <div class="orow"><span class="slot">1.01</span><div class="om">
+            <div class="own">TeamJanet</div>
+            <div class="pkd"><span style="color:var(--rb)">RB</span> Ashton Jeanty · LV</div></div></div>
+          <div class="orow"><span class="slot">1.02</span><div class="om">
+            <div class="own">murph <span class="tr">&nbsp; from GridironGus</span></div>
+            <div class="pkd"><span style="color:var(--wr)">WR</span> Tetairoa McMillan · CAR</div></div></div>
+          <div class="orow"><span class="slot">1.03</span><div class="om">
+            <div class="own">BortlesFan</div>
+            <div class="nmy">Not made yet</div></div></div>
+          <div class="orow"><span class="slot">1.04</span><div class="om">
+            <div class="own">You</div>
+            <div class="nmy">Not made yet</div></div></div>
+          <div class="tickl" style="margin-top:4px">Still on the board</div>
+          <div class="chiprow"><span class="chip on">Consensus</span><span class="chip">My board</span></div>
+          <div class="urow"><span class="rk">1</span><div class="um"><div class="un">Omarion Hampton</div>
+            <div class="um2"><span style="color:var(--rb)">RB</span> · LAC</div></div><span class="vv">6410</span></div>
+          <div class="urow"><span class="rk">2</span><div class="um"><div class="un">Travis Hunter</div>
+            <div class="um2"><span style="color:var(--wr)">WR</span> · JAX</div></div><span class="vv">6180</span></div>
+          <div class="foldline"><div class="foldrule"></div></div>
+          <div class="urow"><span class="rk">3</span><div class="um"><div class="un">Colston Loveland</div>
+            <div class="um2"><span style="color:var(--te)">TE</span> · CHI</div></div><span class="vv">4720</span></div>
+        </div>
+      </div>
+      <div class="fcap">Root-stack push: no tab bar underneath (that is why the screen carries its own
+        <code>FeedbackFAB aboveTabBar={false}</code>). ~640pt of content before the deep-link CTA.</div>
+    </div>
+
+    <!-- C3: recap -->
+    <div class="fr">
+      <div class="ftag warnt">C3 · the November case — drafted league, recap</div>
+      <div class="phone">
+        <div class="ann w" style="top:132px;right:12px">same tile, stale value</div>
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft"><div class="brandtick"></div>
+            <div style="min-width:0"><div class="tbLabel">League</div><div class="tbName">Dynasty Degens</div></div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+          </div>
+        </div>
+        <div class="stackhdr">
+          <div class="bk"><svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M12 4l-6 6 6 6"/></svg>Back</div>
+          <div class="ttl">Rookie draft</div>
+          <div style="width:44px"></div>
+        </div>
+        <div class="body">
+          <div class="statusbar">
+            <span class="st up">Complete</span>
+            <span class="asof">Updated 3d ago</span>
+            <span class="rf">Refresh</span>
+          </div>
+          <div class="tickl">Your picks</div>
+          <div class="pickchips">
+            <div class="pickchip"><span class="p">1.04</span></div>
+            <div class="pickchip"><span class="p">2.04</span></div>
+            <div class="pickchip"><span class="p">3.01</span><span class="f">from BortlesFan</span></div>
+          </div>
+          <div class="tickl">Board</div>
+          <div class="orow"><span class="slot">1.01</span><div class="om"><div class="own">TeamJanet</div>
+            <div class="pkd"><span style="color:var(--rb)">RB</span> Ashton Jeanty · LV</div></div></div>
+          <div class="orow"><span class="slot">1.02</span><div class="om"><div class="own">murph</div>
+            <div class="pkd"><span style="color:var(--wr)">WR</span> Tetairoa McMillan · CAR</div></div></div>
+          <div class="orow"><span class="slot">1.03</span><div class="om"><div class="own">BortlesFan</div>
+            <div class="pkd"><span style="color:var(--wr)">WR</span> Emeka Egbuka · TB</div></div></div>
+          <div class="orow"><span class="slot">1.04</span><div class="om"><div class="own">You</div>
+            <div class="pkd"><span style="color:var(--rb)">RB</span> Omarion Hampton · LAC</div></div></div>
+          <div class="tickl" style="margin-top:4px">Still on the board</div>
+          <div class="empty">Every rookie is off the board.</div>
+        </div>
+      </div>
+      <div class="fcap">The recap is a <b>real, legitimately useful artifact</b> ("who took what, what did I
+        give up") — but it is a look-once-a-season artifact. It does not justify a permanent top-level slot;
+        it justifies a permanent <em>discoverable</em> slot, which is exactly what an Explore tile is.</div>
+    </div>
+
+  </div>
+
+  <table class="t">
+    <tr><th>State</th><th>What the user sees</th></tr>
+    <tr><td>Draft live</td><td>Identical tile. No urgency signal at all — the user must already know to go
+      look. <span class="bad">This is Option C's one real failure.</span></td></tr>
+    <tr><td>Upcoming</td><td>Identical tile → room shows "Not started" + order or round-ownership.</td></tr>
+    <tr><td>Done</td><td>Identical tile → recap board. Correct and honest.</td></tr>
+    <tr><td>No-draft league</td><td>Tile still present; room renders <code>platform_unsupported</code> or
+      <code>unavailable</code>. A dead-end tile occupying 1/3 of the Explore row all year.</td></tr>
+    <tr><td>Rookie-scope interaction</td><td><b>None.</b> Draft entry lives on League, rookie ranking lives
+      on Rank. The two halves of one job are two tabs apart — a user prepping for a draft has no path from
+      "my rookie board" to "the draft" or back.</td></tr>
+    <tr><td>Fold cost</td><td><span class="num">0pt</span> — reuses the existing 3rd tile slot. (Adding a
+      4th tile instead would drop tiles from <span class="num">115pt</span> to
+      <span class="num">84pt</span> wide, truncating "Board &amp; who's left" — which is precisely why O1
+      chose replace-not-add.)</td></tr>
+    <tr><td>Implementation</td><td><span class="ok">Zero — it is written.</span></td></tr>
+  </table>
+
+  <div class="notewrap">
+    <div class="notelbl"><span class="dot"></span>Notes — Option C (League Explore tile)</div>
+    <textarea class="pagenote" data-key="Option C — League tab Explore tile (baseline)" placeholder="Notes on this option…"></textarea>
+  </div>
+</div>
+
+<!-- ══════════════════ OPTION A — 5TH TAB ══════════════════ -->
+<div class="sec">Option A — a fifth bottom tab<span class="fb">the operator's named option, mocked at real width, costed honestly</span></div>
+
+<div class="opt">
+  <div class="optHead">
+    <span class="n">A · Permanent 5th tab "Draft"</span>
+    <span class="badge ask">Operator's named option</span>
+  </div>
+  <div class="optBody">
+    <b>First, the fit question, answered honestly: it fits.</b> At 393pt a 5-tab bar gives each tab
+    <b>78.6pt</b> (4 tabs = 98.25pt); on the narrowest supported device (iPhone SE, 375pt) it is
+    <b>75pt</b>. Both are far above the 44pt tap-target floor, and at the tab label size
+    (Archivo 600 / 11px) the longest label in the set — "Acquire" and "Matches", 7 characters, ≈43pt — clears
+    78.6pt with ~35pt to spare. iOS HIG permits 5. <b>So "it won't fit" is not a valid argument against this
+    option, and I am not going to make it.</b> The real costs are elsewhere: what the tab <em>means</em> when
+    empty, and what it costs the four tabs it dilutes.
+  </div>
+  <div class="frames">
+
+    <!-- A1 -->
+    <div class="fr">
+      <div class="ftag a">A1 · 5-tab bar at 393pt — live draft</div>
+      <div class="phone">
+        <div class="ann c" style="bottom:58px;left:12px">78.6pt / tab · labels fit</div>
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft"><div class="brandtick"></div>
+            <div style="min-width:0"><div class="tbLabel">League</div><div class="tbName">Dynasty Degens</div></div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><circle cx="10" cy="10" r="3"/><circle cx="10" cy="10" r="5.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18"/></svg>
+          </div>
+        </div>
+        <div class="body" style="padding-bottom:36px">
+          <div class="statusbar">
+            <span class="st">Drafting now</span>
+            <span class="asof">Updated just now</span>
+            <span class="rf">Refresh</span>
+          </div>
+          <div class="tickl">Your picks</div>
+          <div class="pickchips">
+            <div class="pickchip"><span class="p">1.04</span></div>
+            <div class="pickchip"><span class="p">2.04</span></div>
+            <div class="pickchip"><span class="p">3.01</span><span class="f">from BortlesFan</span></div>
+          </div>
+          <div class="tickl">Board</div>
+          <div class="orow"><span class="slot">1.01</span><div class="om"><div class="own">TeamJanet</div>
+            <div class="pkd"><span style="color:var(--rb)">RB</span> Ashton Jeanty · LV</div></div></div>
+          <div class="orow"><span class="slot">1.02</span><div class="om"><div class="own">murph <span class="tr">&nbsp; from GridironGus</span></div>
+            <div class="pkd"><span style="color:var(--wr)">WR</span> Tetairoa McMillan · CAR</div></div></div>
+          <div class="orow"><span class="slot">1.03</span><div class="om"><div class="own">BortlesFan</div>
+            <div class="nmy">Not made yet</div></div></div>
+          <div class="tickl" style="margin-top:4px">Still on the board</div>
+          <div class="chiprow"><span class="chip on">Consensus</span><span class="chip">My board</span></div>
+          <div class="urow" style="border-bottom:0"><span class="rk">1</span><div class="um"><div class="un">Omarion Hampton</div>
+            <div class="um2"><span style="color:var(--rb)">RB</span> · LAC</div></div><span class="vv">6410</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 17V9M10 17V3M17 17v-6"/></svg><span class="lbl">Rank</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg><span class="lbl">Acquire</span></div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg><span class="lbl">Draft</span><span class="w"></span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg><span class="lbl">Matches</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg><span class="lbl">League</span></div>
+        </div>
+      </div>
+      <div class="fcap">Lands directly in the room — no push, no back. Flare dot = "picks have landed since
+        you last looked" (informational, ADR-005-legal). The tab bar is legible; the objection is not width.</div>
+    </div>
+
+    <!-- A2 -->
+    <div class="fr">
+      <div class="ftag warnt">A2 · the other ~46 weeks — same tab, nothing in it</div>
+      <div class="phone">
+        <div class="ann f" style="top:150px;right:12px">a top-level tab whose job is to say "no"</div>
+        <div class="ann f" style="bottom:56px;left:12px">still 78.6pt of permanent chrome</div>
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft"><div class="brandtick"></div>
+            <div style="min-width:0"><div class="tbLabel">League</div><div class="tbName">Dynasty Degens</div></div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><circle cx="10" cy="10" r="3"/><circle cx="10" cy="10" r="5.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18"/></svg>
+          </div>
+        </div>
+        <div class="body" style="min-height:430px;justify-content:center">
+          <div class="statusbar" style="justify-content:center">
+            <span class="st up">Complete</span>
+            <span class="asof" style="flex:0 0 auto">Updated 118d ago</span>
+          </div>
+          <div class="notice">Your 2026 rookie draft finished in May. The 2027 class loads after the NFL
+            draft (late April).</div>
+          <div class="empty">Nothing is drafting right now.<br>Come back in the spring, or look back at
+            what you took.</div>
+          <div class="chiprow" style="justify-content:center"><span class="chip">See the 2026 recap</span>
+            <span class="chip">Rank rookies</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 17V9M10 17V3M17 17v-6"/></svg><span class="lbl">Rank</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg><span class="lbl">Acquire</span></div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg><span class="lbl">Draft</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg><span class="lbl">Matches</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg><span class="lbl">League</span></div>
+        </div>
+      </div>
+      <div class="fcap">This is the render that decides the option. It is well-designed and still wrong:
+        a tab bar is the app's <em>promise about what this app is for</em>, and for ~46 weeks a year this
+        one promises a room with nothing in it.</div>
+    </div>
+
+  </div>
+
+  <table class="t">
+    <tr><th>Dimension</th><th>Assessment</th></tr>
+    <tr><td>Draft live</td><td><span class="ok">Best-in-class.</span> One tap from anywhere, no push/back,
+      badge-able, survives backgrounding. Nothing else here matches it during the live window.</td></tr>
+    <tr><td>Upcoming</td><td>Good — the tab is where you go to check order/traded picks. Genuinely useful for
+      the ~2 weeks before.</td></tr>
+    <tr><td>Done</td><td>A recap behind a permanent tab. Correct content, wildly over-weighted placement.</td></tr>
+    <tr><td>No-draft league</td><td><span class="bad">Worst case.</span> A user on ESPN/Fleaflicker, or in a
+      redraft league, carries a permanent tab that can only ever say "not here yet".</td></tr>
+    <tr><td>Rookie-scope interaction</td><td>Actively <b>harmful</b> if left unmanaged: the app would then
+      have rookie ranking on the Rank tab and rookie drafting on a Draft tab, teaching users the two are
+      unrelated. If A is chosen, the Draft tab <em>must</em> carry a "Rank the rookies" entry that flips
+      <code>rookieScope</code> and pushes <code>RookieRanks</code> — otherwise the tab fragments the feature
+      it is meant to promote.</td></tr>
+    <tr><td>Space cost</td><td>Tab bar height is fixed at 49pt — <b>no fold cost</b>. The cost is
+      <em>attention</em>: each existing tab's share of the bar drops from 25% to 20%, and "Acquire" (the
+      core-loop tab, #245/#246) loses prominence to a seasonal feature.</td></tr>
+    <tr><td>Implementation</td><td><span class="mid">Moderate.</span> New <code>Tab.Screen</code> in TabNav +
+      moving <code>DraftRoom</code> off the root stack (or nesting a Draft stack for future MFL/slot-value
+      sub-screens), a new deep-link entry in <code>utils/deepLinks.ts</code>, a new
+      <code>registerScrollToTop</code> handler, tab-order decisions vs <code>initialRouteName</code>, and
+      re-baselining every "which tab index" assumption in Maestro flows.</td></tr>
+  </table>
+
+  <div class="notewrap">
+    <div class="notelbl"><span class="dot"></span>Notes — Option A (permanent 5th tab)</div>
+    <textarea class="pagenote" data-key="Option A — permanent 5th tab" placeholder="Notes on this option…"></textarea>
+  </div>
+</div>
+
+<!-- ══════════════════ OPTION A′ — CONDITIONAL TAB ══════════════════ -->
+<div class="opt">
+  <div class="optHead">
+    <span class="n">A&prime; · Seasonal / conditional tab</span>
+    <span class="badge">A real option, not a hedge</span>
+  </div>
+  <div class="optBody">
+    The tab exists <b>only while it has something to say</b>, then disappears. This is the version of A worth
+    arguing about, because it converts A's fatal weakness (the empty render) into a non-event — you never see
+    the empty render, because the tab is not there.
+    <br><br>
+    <b>What drives it (all already available):</b> <code>session_init</code> returns each league's row from
+    <code>backend/draft_status.py</code> — <code>status ∈ {drafted, not_drafted, unknown}</code> +
+    <code>confidence</code> + <code>source</code>. Proposed predicate, evaluated once at TabNav mount (the
+    same contract <code>initialRouteName</code> and #244's launch routing already use):
+  </div>
+
+  <table class="t">
+    <tr><th>Show the Draft tab when…</th><th>Signal</th><th>Note</th></tr>
+    <tr><td>A draft is live</td><td><code>board.state === 'live'</code> for any linked league</td>
+      <td>Unambiguous. Tab appears with a flare dot.</td></tr>
+    <tr><td>A draft is imminent</td><td><code>not_drafted</code> + <code>confidence: high</code> + a draft
+      object exists (Sleeper <code>pre_draft</code> / MFL populated grid)</td>
+      <td>This is the honest bound. Sleeper gives no scheduled start time we can trust, so "imminent" really
+      means "a draft object exists and has not run" — which in practice is true from late April until the
+      league drafts.</td></tr>
+    <tr><td>Recently completed</td><td><code>drafted</code> and <code>as_of</code> within N days
+      (proposal: 14)</td><td>Keeps the recap discoverable while it is still interesting, then retires it to
+      the League tile.</td></tr>
+    <tr><td class="bad">Never show when</td><td><code>unknown</code>, low confidence, unsupported platform, or
+      a startup-shaped draft</td><td>Fail-safe matches <code>current_year_picks_visible()</code>: absence is
+      self-correcting; a tab that lies is not.</td></tr>
+  </table>
+
+  <div class="frames">
+    <div class="fr">
+      <div class="ftag a">A&prime;1 · in season — tab present, flare dot</div>
+      <div class="phone">
+        <div class="ann c" style="bottom:56px;right:12px">present: state = live</div>
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft"><div class="brandtick"></div>
+            <div style="min-width:0"><div class="tbLabel">League</div><div class="tbName">Dynasty Degens</div></div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+          </div>
+        </div>
+        <div class="body" style="min-height:406px">
+          <div class="hd">Fully Guided</div>
+          <div class="sub">We read your roster &amp; league and walk you to the best deals.</div>
+          <div class="chiprow"><span class="chip on">Guided</span><span class="chip">Team</span>
+            <span class="chip">Player</span><span class="chip">Calc</span>
+            <span class="chip" style="opacity:.5">Free ag…</span></div>
+          <div style="border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--ink1);
+            display:flex;flex-direction:column;gap:8px">
+            <div class="tickl">Suggested trade</div>
+            <div class="sub">You get <b style="color:var(--chalk)">Puka Nacua</b> · You give
+              <b style="color:var(--chalk)">Kyren Williams + 2027 1st</b></div>
+            <div style="height:8px;background:var(--ink3);border-radius:2px;overflow:hidden">
+              <div style="width:58%;height:100%;background:var(--ice)"></div></div>
+            <div class="sub" style="font-size:11.5px">Both boards gain — you +2.1%, them +1.4%</div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 17V9M10 17V3M17 17v-6"/></svg><span class="lbl">Rank</span></div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg><span class="lbl">Acquire</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg><span class="lbl">Draft</span><span class="w"></span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg><span class="lbl">Matches</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg><span class="lbl">League</span></div>
+        </div>
+      </div>
+      <div class="fcap">78.6pt tabs. Same bar as A1 — the difference is entirely temporal.</div>
+    </div>
+
+    <div class="fr">
+      <div class="ftag">A&prime;2 · out of season — back to four tabs</div>
+      <div class="phone">
+        <div class="ann c" style="bottom:56px;right:12px">absent: no live/imminent draft</div>
+        <div class="ann w" style="top:132px;left:12px">nav shape changed under the user</div>
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft"><div class="brandtick"></div>
+            <div style="min-width:0"><div class="tbLabel">League</div><div class="tbName">Dynasty Degens</div></div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+          </div>
+        </div>
+        <div class="body" style="min-height:406px">
+          <div class="hd">Fully Guided</div>
+          <div class="sub">We read your roster &amp; league and walk you to the best deals.</div>
+          <div class="chiprow"><span class="chip on">Guided</span><span class="chip">Team</span>
+            <span class="chip">Player</span><span class="chip">Calc</span>
+            <span class="chip" style="opacity:.5">Free ag…</span></div>
+          <div style="border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--ink1);
+            display:flex;flex-direction:column;gap:8px">
+            <div class="tickl">Suggested trade</div>
+            <div class="sub">You get <b style="color:var(--chalk)">Puka Nacua</b> · You give
+              <b style="color:var(--chalk)">Kyren Williams + 2027 1st</b></div>
+            <div style="height:8px;background:var(--ink3);border-radius:2px;overflow:hidden">
+              <div style="width:58%;height:100%;background:var(--ice)"></div></div>
+            <div class="sub" style="font-size:11.5px">Both boards gain — you +2.1%, them +1.4%</div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 17V9M10 17V3M17 17v-6"/></svg><span class="lbl">Rank</span></div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg><span class="lbl">Acquire</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg><span class="lbl">Matches</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg><span class="lbl">League</span></div>
+        </div>
+      </div>
+      <div class="fcap">98.25pt tabs. The empty render is <em>gone</em> — but so is muscle memory, and any
+      bookmark/deep link into the tab must still resolve.</div>
+    </div>
+  </div>
+
+  <table class="t">
+    <tr><th>Dimension</th><th>Assessment</th></tr>
+    <tr><td>Live / upcoming</td><td><span class="ok">Same peak value as A</span>, with a flare dot that now
+      genuinely means something because the tab's presence already means "something is happening".</td></tr>
+    <tr><td>Done</td><td>Tab lingers N days (proposal 14) for the recap, then retires. Recap remains
+      permanently reachable from the League tile — so nothing is lost, only demoted.</td></tr>
+    <tr><td>No-draft league</td><td><span class="ok">Never appears.</span> The single biggest win over A.</td></tr>
+    <tr><td>Rookie-scope</td><td>Same requirement as A — the tab must carry a "Rank the rookies" row into
+      <code>RookieRanks</code>, or the feature fragments.</td></tr>
+    <tr><td>Multi-league</td><td><b>The hard part.</b> Scope is per-league, the tab bar is global. Rules
+      needed: does the tab show when <em>any</em> linked league is drafting, or only the active one? If any,
+      tapping it while the active league isn't drafting must offer a league switch, not a lie. Recommended:
+      drive off the <b>active</b> league (matching the TopBar switcher's mental model), and surface other
+      leagues' drafts through the strip in Option E.</td></tr>
+    <tr><td>Space cost</td><td>0pt fold either way; tab width oscillates 98.25pt ↔ 78.6pt across the year.</td></tr>
+    <tr><td>Implementation</td><td><span class="bad">Highest of any option here.</span> Conditionally
+      rendering a <code>Tab.Screen</code> changes the navigator's route array, which reshuffles indices and
+      can reset nested stack state; <code>initialRouteName</code> and #244's completion-aware launch routing
+      are both "first mount only" contracts that a mid-session tab insertion violates. Safe shape: evaluate
+      the predicate <b>once at mount</b> (same as <code>initialTab</code>), so the bar changes at most once
+      per launch, and keep <code>DraftRoom</code> ALSO registered on the root stack so deep links resolve
+      whether or not the tab exists. That is two registrations of one screen — permanent complexity for a
+      seasonal payoff.</td></tr>
+  </table>
+
+  <div class="notewrap">
+    <div class="notelbl"><span class="dot"></span>Notes — Option A&prime; (conditional/seasonal tab)</div>
+    <textarea class="pagenote" data-key="Option A-prime — seasonal / conditional tab" placeholder="Notes on this option…"></textarea>
+  </div>
+</div>
+
+<!-- ══════════════════ OPTION B — ACQUIRE ══════════════════ -->
+<div class="sec">Option B — inside the Acquire tab<span class="fb">the draft as the third acquisition channel</span></div>
+
+<div class="opt rec">
+  <div class="optHead">
+    <span class="n">B · Acquire tab — a sixth mode chip + a section</span>
+    <span class="badge recb">Recommended (with D)</span>
+  </div>
+  <div class="optBody">
+    Since #245/#246 the tab is named <b>Acquire</b> and its landing is the guided deck with a persistent
+    <code>TradeFinderModeBar</code> chip strip: <b>Guided · Team · Player · Calc · Free agents</b>. Three of
+    those switch deck mode in place; two (Calc, Free agents) push screens — <b>with no visual distinction</b>,
+    which is the precedent that makes a Draft chip legitimate rather than a hack. There are exactly three ways
+    to get a player in dynasty: trade for him, pick him up, or draft him. Two are already in this tab.
+    <br><br>
+    <b>This is the cheapest placement in the entire app:</b> the chip strip is a horizontal
+    <code>ScrollView</code>, so a sixth chip costs <b>0pt of vertical fold</b>. The one non-obvious
+    constraint is horizontal: the five existing chips already measure ≈402pt against ≈361pt of usable width,
+    so an appended sixth chip would be scrolled off-screen. While a draft is live the Draft chip has to
+    <b>lead</b>, not trail — mocked that way in B1.
+  </div>
+  <div class="frames">
+
+    <div class="fr">
+      <div class="ftag a">B1 · entry — draft live, chip carries the live dot</div>
+      <div class="phone">
+        <div class="ann c" style="top:96px;right:12px">6th chip · 0pt fold cost</div>
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft"><div class="brandtick"></div>
+            <div style="min-width:0"><div class="tbLabel">League</div><div class="tbName">Dynasty Degens</div></div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><circle cx="10" cy="10" r="3"/><circle cx="10" cy="10" r="5.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18"/></svg>
+          </div>
+        </div>
+        <div class="body">
+          <div class="chiprow"><span class="chip live"><span class="ld"></span>Draft</span>
+            <span class="chip on">Guided</span><span class="chip">Team</span>
+            <span class="chip">Player</span><span class="chip">Calc</span>
+            <span class="chip" style="opacity:.5">Free ag…</span></div>
+          <div class="hd">Fully Guided</div>
+          <div class="sub">We read your roster &amp; league and walk you to the best deals.</div>
+          <div style="border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--ink1);
+            display:flex;flex-direction:column;gap:8px">
+            <div class="tickl">Suggested trade</div>
+            <div class="sub">You get <b style="color:var(--chalk)">Puka Nacua</b> · You give
+              <b style="color:var(--chalk)">Kyren Williams + 2027 1st</b></div>
+            <div style="height:8px;background:var(--ink3);border-radius:2px;overflow:hidden">
+              <div style="width:58%;height:100%;background:var(--ice)"></div></div>
+            <div class="sub" style="font-size:11.5px">Both boards gain — you +2.1%, them +1.4%</div>
+          </div>
+          <div class="row" style="border-top:1px solid var(--line);border-bottom:0;padding-top:14px">
+            <svg class="i" width="18" height="18" viewBox="0 0 20 20" stroke="#F0508C"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg>
+            <div style="flex:1">
+              <div class="rt">Your rookie draft is live</div>
+              <div class="rs">Round 1, pick 3 — you're on the clock in 2</div>
+            </div>
+            <svg class="i" width="16" height="16" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M8 4l6 6-6 6"/></svg>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 17V9M10 17V3M17 17v-6"/></svg><span class="lbl">Rank</span></div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg><span class="lbl">Acquire</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg><span class="lbl">Matches</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg><span class="lbl">League</span></div>
+        </div>
+      </div>
+      <div class="fcap">Two entries, one cost: the chip (0pt vertical) plus an optional <b>~62pt</b> tail
+        row that renders <em>only</em> in live/upcoming states — the same render-only-when-true discipline as
+        the Market pulse strip. <b style="color:var(--warn)">Order matters:</b> today's five chips already
+        measure ≈402pt against ≈361pt of usable width, so the strip is genuinely scrolled — a sixth chip
+        <em>appended</em> would sit off-screen and never be seen. A live Draft chip must therefore
+        <b>lead</b> the strip while a draft is active (and drop back to last, or out entirely, when it
+        isn't).</div>
+    </div>
+
+    <div class="fr">
+      <div class="ftag">B2 · no draft — chip is simply absent</div>
+      <div class="phone">
+        <div class="ann c" style="top:96px;right:12px">no chip, no row, no dead end</div>
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft"><div class="brandtick"></div>
+            <div style="min-width:0"><div class="tbLabel">League</div><div class="tbName">Dynasty Degens</div></div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><circle cx="10" cy="10" r="3"/><circle cx="10" cy="10" r="5.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18"/></svg>
+          </div>
+        </div>
+        <div class="body">
+          <div class="chiprow"><span class="chip on">Guided</span><span class="chip">Team</span>
+            <span class="chip">Player</span><span class="chip">Calc</span>
+            <span class="chip">Free agents</span></div>
+          <div class="hd">Fully Guided</div>
+          <div class="sub">We read your roster &amp; league and walk you to the best deals.</div>
+          <div style="border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--ink1);
+            display:flex;flex-direction:column;gap:8px">
+            <div class="tickl">Suggested trade</div>
+            <div class="sub">You get <b style="color:var(--chalk)">Puka Nacua</b> · You give
+              <b style="color:var(--chalk)">Kyren Williams + 2027 1st</b></div>
+            <div style="height:8px;background:var(--ink3);border-radius:2px;overflow:hidden">
+              <div style="width:58%;height:100%;background:var(--ice)"></div></div>
+            <div class="sub" style="font-size:11.5px">Both boards gain — you +2.1%, them +1.4%</div>
+          </div>
+          <div style="border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--ink1);
+            display:flex;flex-direction:column;gap:8px">
+            <div class="tickl">Next up</div>
+            <div class="sub">You get <b style="color:var(--chalk)">Trey McBride</b> · You give
+              <b style="color:var(--chalk)">Tee Higgins</b></div>
+            <div style="height:8px;background:var(--ink3);border-radius:2px;overflow:hidden">
+              <div style="width:41%;height:100%;background:var(--ice)"></div></div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 17V9M10 17V3M17 17v-6"/></svg><span class="lbl">Rank</span></div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg><span class="lbl">Acquire</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg><span class="lbl">Matches</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg><span class="lbl">League</span></div>
+        </div>
+      </div>
+      <div class="fcap">The strip reverts to today's five chips exactly. No empty state to design, because
+        there is no surface to be empty. Nav shape unchanged — the tab bar never moves.</div>
+    </div>
+
+  </div>
+
+  <table class="t">
+    <tr><th>Dimension</th><th>Assessment</th></tr>
+    <tr><td>Draft live</td><td>Chip carries a live dot; an optional tail row states the actual fact
+      ("Round 1, pick 3 — you're on the clock in 2"). Two taps from cold start
+      (tab → chip), one if already on Acquire.</td></tr>
+    <tr><td>Upcoming</td><td>Chip present without the dot; tail row reads "Your rookie draft hasn't started
+      — 3 picks, first at 1.04."</td></tr>
+    <tr><td>Done</td><td>Chip retires with the same N-day rule as A&prime;; recap stays on the League tile
+      permanently. The Acquire tab should <b>not</b> hold a permanent recap — recaps are not acquisition.</td></tr>
+    <tr><td>No-draft league</td><td><span class="ok">Chip absent.</span> Zero residue, zero designed empty
+      state, and — unlike A&prime; — the disappearance is invisible because a scrolling chip strip has no
+      fixed shape the user has memorized.</td></tr>
+    <tr><td>Rookie-scope interaction</td><td><span class="mid">Partial.</span> Better than C (draft now sits
+      in a tab the user visits weekly), still not adjacent to rookie ranking. This is exactly why the
+      recommendation is <b>B + D together</b>, not B alone.</td></tr>
+    <tr><td>Space cost</td><td>Chip: <span class="num">0pt</span> (horizontal scroll). Tail row:
+      <span class="num">~62pt</span>, conditional — and it lands well below the 658pt fold on the deck
+      landing, so it costs nothing above the fold either.</td></tr>
+    <tr><td>Implementation</td><td><span class="ok">Lowest of the new options.</span> One entry in
+      <code>CHIPS</code> in <code>TradeFinderModeBar.tsx</code> + an <code>onDraft</code> prop; the room stays
+      a root-stack push, so deep links, the FeedbackFAB mount, and the M5/M6 sub-screens are all untouched.
+      Precedent already exists: Calc and Free agents are push-not-switch chips in the same strip.</td></tr>
+    <tr><td>M5 / M6 headroom</td><td><span class="ok">Unaffected.</span> MFL parity and per-slot pick values
+      render inside the room; the entry point does not care.</td></tr>
+  </table>
+
+  <div class="notewrap">
+    <div class="notelbl"><span class="dot"></span>Notes — Option B (Acquire tab chip + section)</div>
+    <textarea class="pagenote" data-key="Option B — Acquire tab chip + conditional section" placeholder="Notes on this option…"></textarea>
+  </div>
+</div>
+
+<!-- ══════════════════ OPTION D — RANK ══════════════════ -->
+<div class="sec">Option D — Rank tab adjacency<span class="fb">draft prep IS ranking; the rookie surfaces are already here</span></div>
+
+<div class="opt rec">
+  <div class="optHead">
+    <span class="n">D · Beside the rookie ranking section</span>
+    <span class="badge recb">Recommended (with B)</span>
+  </div>
+  <div class="optBody">
+    <code>RankHomeScreen</code> already grows a <b>"Rookies"</b> section when
+    <code>ranks.rookie_subset</code> is on — one row into <code>RookieRanks</code> that also flips the shared
+    scope. And every rookie-scoped ranking surface already carries "See all rookies in one list". <b>The
+    ranking half of draft prep is shipped and lives here.</b> Option D adds the room as a sibling row, so the
+    two halves of one job sit in one place: <em>rank the class → see who's left</em>.
+    <br><br>
+    The reverse link matters just as much: from inside the room, "Rank the rookies" should push
+    <code>RookieRanks</code> with <code>setScope('rookie')</code> — the exact call
+    <code>rank-home.rookie-ranks</code> already makes. That loop is what turns two features into one.
+  </div>
+  <div class="frames">
+
+    <div class="fr">
+      <div class="ftag a">D1 · entry — RankHome "Rookies" section, two rows</div>
+      <div class="phone">
+        <div class="ann c" style="top:288px;right:12px">existing section, +1 row (~64pt)</div>
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft"><div class="brandtick"></div>
+            <div style="min-width:0"><div class="tbLabel">League</div><div class="tbName">Dynasty Degens</div></div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+          </div>
+        </div>
+        <div class="stackhdr">
+          <div class="bk"><svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M12 4l-6 6 6 6"/></svg>Back</div>
+          <div class="ttl">Rank</div>
+          <div class="rt">More ways to rank</div>
+        </div>
+        <div class="body">
+          <div class="sub">Pick how you want to rank players.</div>
+          <div style="border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--ink2)">
+            <div style="display:flex;gap:8px;align-items:baseline">
+              <span class="tickl" style="color:var(--dim)">Fastest</span>
+              <span style="font:600 10.5px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--flare)">recommended</span>
+            </div>
+            <div class="rt" style="margin-top:4px">Quick set</div>
+            <div class="rs">Drop each position into tiers in a couple of minutes.</div>
+          </div>
+          <div style="border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--ink2)">
+            <div class="tickl" style="color:var(--dim)">Most precise</div>
+            <div class="rt" style="margin-top:4px">Head-to-heads</div>
+            <div class="rs">Three at a time. Slowest, sharpest board.</div>
+          </div>
+          <div class="tickl" style="margin-top:6px">Rookies</div>
+          <div class="row"><div style="flex:1">
+            <div class="rt">All rookies, one list</div>
+            <div class="rs">Every rookie across QB/RB/WR/TE ranked together — same values as your
+              position boards.</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 4l6 6-6 6"/></svg></div>
+          <div class="row" style="border-bottom:0"><div style="flex:1">
+            <div class="rt">Rookie draft <span style="color:var(--flare);font:600 10px var(--ui);
+              letter-spacing:.08em;text-transform:uppercase">&nbsp;live</span></div>
+            <div class="rs">Round 1, pick 3 — see the board and who's left.</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M8 4l6 6-6 6"/></svg></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M3 17V9M10 17V3M17 17v-6"/></svg><span class="lbl">Rank</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg><span class="lbl">Acquire</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg><span class="lbl">Matches</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg><span class="lbl">League</span></div>
+        </div>
+      </div>
+      <div class="fcap">The "Rookies" section already exists and already has one row. The second row is the
+        smallest possible addition that makes rank-then-draft a single place.
+        <b>Caveat:</b> RankHome is the <em>demoted</em> chooser since #122 — most users land straight on
+        Quick Set and never see it. That is why D needs its second entry, D2.</div>
+    </div>
+
+    <div class="fr">
+      <div class="ftag a">D2 · the entry that actually gets seen — scope control</div>
+      <div class="phone">
+        <div class="ann c" style="top:130px;right:12px">shipped control · +1 link line</div>
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft"><div class="brandtick"></div>
+            <div style="min-width:0"><div class="tbLabel">League</div><div class="tbName">Dynasty Degens</div></div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+          </div>
+        </div>
+        <div class="stackhdr">
+          <div style="width:44px"></div>
+          <div class="ttl">Quick Set Tiers</div>
+          <div class="rt">More ways to rank</div>
+        </div>
+        <div class="body">
+          <div class="seg">
+            <div class="s">All players</div>
+            <div class="s on fl">Rookies</div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:16px">
+            <span class="seglink">See all rookies in one list
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M8 4l6 6-6 6"/></svg></span>
+          </div>
+          <div style="display:flex;justify-content:flex-end">
+            <span class="seglink" style="text-decoration-color:var(--flare)">Open the rookie draft
+              <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M8 4l6 6-6 6"/></svg></span>
+          </div>
+          <div class="tickl">RB · Tier 1</div>
+          <div class="row" style="padding:9px 0"><div style="width:4px;height:26px;background:var(--rb)"></div>
+            <div style="flex:1"><div class="rt" style="font-size:14px">Ashton Jeanty</div>
+            <div class="rs">LV · rookie</div></div>
+            <span style="font-family:var(--mono);font-size:13px;color:var(--chalk)">6910</span></div>
+          <div class="row" style="padding:9px 0"><div style="width:4px;height:26px;background:var(--rb)"></div>
+            <div style="flex:1"><div class="rt" style="font-size:14px">Omarion Hampton</div>
+            <div class="rs">LAC · rookie</div></div>
+            <span style="font-family:var(--mono);font-size:13px;color:var(--chalk)">6410</span></div>
+          <div class="tickl" style="margin-top:4px">RB · Tier 2</div>
+          <div class="row" style="padding:9px 0;border-bottom:0"><div style="width:4px;height:26px;background:var(--rb)"></div>
+            <div style="flex:1"><div class="rt" style="font-size:14px">Quinshon Judkins</div>
+            <div class="rs">CLE · rookie</div></div>
+            <span style="font-family:var(--mono);font-size:13px;color:var(--chalk)">5220</span></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M3 17V9M10 17V3M17 17v-6"/></svg><span class="lbl">Rank</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg><span class="lbl">Acquire</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg><span class="lbl">Matches</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg><span class="lbl">League</span></div>
+        </div>
+      </div>
+      <div class="fcap">The scope control appears on all six ranking modes. Adding a second, conditional
+        link line under it puts the draft one tap away from <em>every</em> rookie-ranking surface — the
+        single highest-leverage entry point in the app, and it costs <b>~32pt, only while a draft exists</b>.
+        <span style="color:var(--warn)">Honest caveat:</span> two stacked underlined links risk reading as a
+        link stack; if that fails review, put the draft entry inside the consolidated
+        <code>RookieRanksScreen</code> header instead, where it has room.</div>
+    </div>
+
+  </div>
+
+  <table class="t">
+    <tr><th>Dimension</th><th>Assessment</th></tr>
+    <tr><td>Draft live</td><td>Flare "live" tag on the RankHome row + the conditional link under every scope
+      control. Not as loud as a tab — but it is loud <em>exactly where a user preparing for a draft already
+      is</em>.</td></tr>
+    <tr><td>Upcoming</td><td><span class="ok">D's best state.</span> This is the pre-draft prep window: rank
+      the class, then check the order/who owns what. The two are one gesture apart.</td></tr>
+    <tr><td>Done</td><td>Row retires with the class; the recap stays on the League tile. Rank surfaces should
+      not carry a permanent recap link.</td></tr>
+    <tr><td>No-draft league</td><td>Nothing renders. The "Rookies" section itself is already gated on
+      <code>ranks.rookie_subset</code>, so a no-rookie-class or unsupported-platform user sees today's
+      RankHome unchanged.</td></tr>
+    <tr><td>Rookie-scope interaction</td><td><span class="ok">Maximal — this is the point.</span> The room's
+      "My board" undrafted ordering reads the <em>same</em> board these surfaces edit (same Elo, view filter,
+      D2), so the adjacency is not merely thematic: editing rookies here literally reorders the undrafted
+      list there. Placing the entry anywhere else hides that causal link.</td></tr>
+    <tr><td>Space cost</td><td>RankHome row <span class="num">~64pt</span> (scrolling chooser, ample budget).
+      Scope-control link line <span class="num">~32pt</span> — on Quick Set the control sits at the very top,
+      so this <em>is</em> above-fold spend: <span class="num">658 → 626pt</span> of content budget, and only
+      while a draft exists.</td></tr>
+    <tr><td>Implementation</td><td><span class="ok">Low.</span> One row in <code>RankHomeScreen</code>'s
+      existing <code>rookieSection</code>; one conditional link inside <code>RookieScopeControl</code> (which
+      already owns a navigate + the shared copy model, so all six surfaces inherit it for free — the same
+      "one control, six hosts" property the component was built for). Room stays root-stack.</td></tr>
+  </table>
+
+  <div class="notewrap">
+    <div class="notelbl"><span class="dot"></span>Notes — Option D (Rank tab adjacency)</div>
+    <textarea class="pagenote" data-key="Option D — Rank tab adjacency" placeholder="Notes on this option…"></textarea>
+  </div>
+</div>
+
+<!-- ══════════════════ OPTION E — GLOBAL STRIP ══════════════════ -->
+<div class="sec">Option E — contextual global surface<span class="fb">a strip that exists only while a draft is live, from anywhere</span></div>
+
+<div class="opt">
+  <div class="optHead">
+    <span class="n">E · Conditional strip under the TopBar</span>
+    <span class="badge">Additive — pairs with any of the above</span>
+  </div>
+  <div class="optBody">
+    A 36pt strip mounted in <code>TabNav</code> directly beneath the global <code>TopBar</code>, present on
+    every tab, rendering <b>only</b> while a draft is live or on the clock. It is the one option that solves
+    the problem none of the others do: <b>"a pick happened and I'm not looking at the draft screen."</b>
+    <br><br>
+    <b>Why a strip and not a TopBar button:</b> the TopBar's 52pt is already fully allocated — league tick +
+    two-line LEAGUE/name stack + ice chevron on the left, bell + gear on the right. A third right-side
+    control would either shrink the league name (which #223/#224 deliberately grew the bar to fit) or crowd
+    the bell's unread badge back toward the screen edge, which that mock explicitly moved it away from.
+    A separate strip has room for the actual fact — "1.03 · BortlesFan on the clock" — which a 20pt icon
+    never could.
+  </div>
+  <div class="frames">
+
+    <div class="fr">
+      <div class="ftag a">E1 · draft live — strip visible on every tab</div>
+      <div class="phone">
+        <div class="ann c" style="top:126px;right:12px">36pt · global · conditional</div>
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft"><div class="brandtick"></div>
+            <div style="min-width:0"><div class="tbLabel">League</div><div class="tbName">Dynasty Degens</div></div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><circle cx="10" cy="10" r="3"/><circle cx="10" cy="10" r="5.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18"/></svg>
+          </div>
+        </div>
+        <div class="gstrip">
+          <span class="dot"></span>
+          <span class="gt">1.03</span>
+          <span class="gs">BortlesFan on the clock · you're up in 1</span>
+          <span class="gcta">Open
+            <svg class="i" width="12" height="12" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M8 4l6 6-6 6"/></svg></span>
+        </div>
+        <div class="body" style="min-height:372px">
+          <div class="hd">Matches</div>
+          <div class="sub">Mutual likes across your leagues.</div>
+          <div class="row"><div style="flex:1">
+            <div class="rt">BortlesFan · Dynasty Degens</div>
+            <div class="rs">Breece Hall for DK Metcalf</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 4l6 6-6 6"/></svg></div>
+          <div class="row"><div style="flex:1">
+            <div class="rt">murph · Lakeview</div>
+            <div class="rs">Jahmyr Gibbs for CeeDee Lamb</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 4l6 6-6 6"/></svg></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 17V9M10 17V3M17 17v-6"/></svg><span class="lbl">Rank</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg><span class="lbl">Acquire</span></div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg><span class="lbl">Matches</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg><span class="lbl">League</span></div>
+        </div>
+      </div>
+      <div class="fcap">Green dot = live (semantic, matching the room's own "Drafting now"). The number is
+        Plex Mono per the data-numeral rule. "Open" is ice because it is an action.</div>
+    </div>
+
+    <div class="fr">
+      <div class="ftag">E2 · not live — strip does not exist</div>
+      <div class="phone">
+        <div class="ann c" style="top:88px;right:12px">0pt · nothing mounted</div>
+        <div class="sbar"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+        <div class="topbar">
+          <div class="tbleft"><div class="brandtick"></div>
+            <div style="min-width:0"><div class="tbLabel">League</div><div class="tbName">Dynasty Degens</div></div>
+            <svg class="i" width="14" height="14" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M4 8l6 6 6-6"/></svg>
+          </div>
+          <div class="tbicons">
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></svg>
+            <svg class="i" width="20" height="20" viewBox="0 0 20 20" stroke="#ECEFF4"><circle cx="10" cy="10" r="3"/><circle cx="10" cy="10" r="5.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18"/></svg>
+          </div>
+        </div>
+        <div class="body" style="min-height:408px">
+          <div class="hd">Matches</div>
+          <div class="sub">Mutual likes across your leagues.</div>
+          <div class="row"><div style="flex:1">
+            <div class="rt">BortlesFan · Dynasty Degens</div>
+            <div class="rs">Breece Hall for DK Metcalf</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 4l6 6-6 6"/></svg></div>
+          <div class="row"><div style="flex:1">
+            <div class="rt">murph · Lakeview</div>
+            <div class="rs">Jahmyr Gibbs for CeeDee Lamb</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 4l6 6-6 6"/></svg></div>
+          <div class="row" style="border-bottom:0"><div style="flex:1">
+            <div class="rt">TeamJanet · Dynasty Degens</div>
+            <div class="rs">Puka Nacua for Trey McBride</div></div>
+            <svg class="i" width="16" height="16" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M8 4l6 6-6 6"/></svg></div>
+        </div>
+        <div class="tabbar">
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 17V9M10 17V3M17 17v-6"/></svg><span class="lbl">Rank</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg><span class="lbl">Acquire</span></div>
+          <div class="tb on"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#56D9EC"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg><span class="lbl">Matches</span></div>
+          <div class="tb"><svg class="i" width="22" height="22" viewBox="0 0 20 20" stroke="#97A1AE"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg><span class="lbl">League</span></div>
+        </div>
+      </div>
+      <div class="fcap">Byte-identical to today. The strip has no dormant state to design — the whole surface
+        is conditional.</div>
+    </div>
+
+  </div>
+
+  <table class="t">
+    <tr><th>Dimension</th><th>Assessment</th></tr>
+    <tr><td>Draft live</td><td><span class="ok">The strongest live affordance of any option, including the
+      tab</span> — a tab tells you the room exists; the strip tells you what is happening in it, from
+      wherever you are.</td></tr>
+    <tr><td>Upcoming</td><td>Should <b>not</b> render. "Your draft is in 6 weeks" as persistent global chrome
+      is nagging. Live and on-the-clock only.</td></tr>
+    <tr><td>Done / no-draft</td><td><span class="ok">Does not exist.</span></td></tr>
+    <tr><td>Rookie-scope</td><td>Neutral — it is a jump, not a home. E is a <b>notifier</b>, never the primary
+      placement; it must be paired with a real entry (B and/or D).</td></tr>
+    <tr><td>Space cost</td><td><span class="num">36pt</span> off <em>every</em> screen's budget while
+      present: <span class="num">658 → 622pt</span>. #243 already found several surfaces overflowing that
+      budget, so this is a real (if time-boxed) regression — and it must be re-checked against the tightest
+      surfaces (League home cleared the fold with only ~55pt spare).</td></tr>
+    <tr><td>Multi-league</td><td>Handles it better than a tab: the strip can name the league
+      ("Lakeview · 2.07 on the clock") and tapping it can switch league <em>and</em> open the room, reusing
+      the <code>LeagueSwitcherSheet</code> the TopBar already owns.</td></tr>
+    <tr><td>Implementation</td><td><span class="mid">Moderate.</span> New component mounted in
+      <code>TabNav</code> beside <code>&lt;TopBar /&gt;</code>. The real cost is the <b>data</b>: it needs
+      live draft state on every screen, which today only <code>DraftRoomScreen</code>'s focused query
+      provides. Gating it on <code>draft.live_poll</code> and reusing the existing per-draft server TTL cache
+      keeps the request budget honest — but this is a genuinely new polling consumer and the "ZERO requests
+      when backgrounded" bar applies to it too. <b>Ship after B/D, not before.</b></td></tr>
+  </table>
+
+  <div class="notewrap">
+    <div class="notelbl"><span class="dot"></span>Notes — Option E (global conditional strip)</div>
+    <textarea class="pagenote" data-key="Option E — contextual global strip" placeholder="Notes on this option…"></textarea>
+  </div>
+</div>
+
+<!-- ══════════════════ MATRIX ══════════════════ -->
+<div class="sec">Side by side<span class="fb">the same five questions asked of every option</span></div>
+
+<div class="opt">
+  <table class="t">
+    <tr>
+      <th>Option</th><th>Live</th><th>Upcoming</th><th>Done</th><th>No draft (the crux)</th>
+      <th>Rookie-scope link</th><th>Fold cost</th><th>Build cost</th>
+    </tr>
+    <tr>
+      <td>C · League tile <span style="color:var(--faint);font-weight:400">(shipped)</span></td>
+      <td class="bad">No signal</td><td>OK</td><td class="ok">Right home for recap</td>
+      <td>Dead-end tile all year</td><td class="bad">None</td><td class="num">0pt</td>
+      <td class="ok">Done</td>
+    </tr>
+    <tr>
+      <td>A · Permanent tab</td>
+      <td class="ok">Best</td><td class="ok">Best</td><td>Over-weighted</td>
+      <td class="bad">Empty tab ~46 wks/yr</td><td class="bad">Fragments it</td><td class="num">0pt</td>
+      <td class="mid">Moderate</td>
+    </tr>
+    <tr>
+      <td>A&prime; · Conditional tab</td>
+      <td class="ok">Best</td><td class="ok">Best</td><td>Lingers N days</td>
+      <td class="ok">Absent</td><td class="bad">Fragments it</td><td class="num">0pt</td>
+      <td class="bad">Highest</td>
+    </tr>
+    <tr class="rec">
+      <td>B · Acquire chip</td>
+      <td class="ok">Strong</td><td class="ok">Strong</td><td>Chip retires</td>
+      <td class="ok">Chip absent, invisibly</td><td class="mid">Partial</td>
+      <td class="num">0pt <span style="color:var(--faint)">(+62 cond.)</span></td>
+      <td class="ok">Lowest</td>
+    </tr>
+    <tr class="rec">
+      <td>D · Rank adjacency</td>
+      <td>Good</td><td class="ok">Best fit</td><td>Row retires</td>
+      <td class="ok">Nothing renders</td><td class="ok">Maximal</td>
+      <td class="num">~32pt cond.</td><td class="ok">Low</td>
+    </tr>
+    <tr>
+      <td>E · Global strip</td>
+      <td class="ok">Unmatched</td><td>Should not render</td><td class="ok">n/a</td>
+      <td class="ok">Does not exist</td><td>Neutral</td>
+      <td class="num">36pt while live</td><td class="mid">Moderate</td>
+    </tr>
+  </table>
+</div>
+
+<!-- ══════════════════ RECOMMENDATION ══════════════════ -->
+<div class="sec">Recommendation</div>
+
+<div class="opt rec">
+  <div class="optHead">
+    <span class="n">Ship B + D now. Keep C as the permanent home. Hold A&prime;. Add E later.</span>
+    <span class="badge recb">My call</span>
+  </div>
+  <div class="optBody">
+    <p><b>The reasoning in one paragraph.</b> A fifth tab is not too wide — at 393pt it renders cleanly at
+    78.6pt per tab and every label fits with room to spare, so the honest objection is not fit but
+    <em>meaning</em>: a bottom tab is the app's standing claim about what it is for, and a rookie draft is
+    true for two to six weeks in the one season when this app is otherwise quietest. The conditional version
+    (A&prime;) fixes that by never showing the empty render, but it pays for it in exactly the place this
+    codebase is most fragile — <code>TabNav</code>'s first-mount-only contracts (<code>initialRouteName</code>,
+    #244's completion-aware launch routing, #245/#246's freshly re-landed Acquire semantics) plus a
+    dual-registration of <code>DraftRoom</code> so deep links survive the tab's absence. That is permanent
+    structural complexity bought for a seasonal payoff, and I would not spend it before we have a single
+    real draft's worth of usage data. Meanwhile the two cheapest options are also the two most conceptually
+    correct: <b>B</b> because the draft genuinely is the third acquisition channel and the Acquire chip strip
+    already treats push-screens (Calc, Free agents) as peers of in-place modes, so a Draft chip costs one
+    array entry and <em>zero</em> vertical fold; and <b>D</b> because the ranking half of draft prep is
+    already shipped on the Rank tab, and the room's "My board" undrafted ordering literally reads the board
+    those surfaces edit — placing the draft entry beside the rookie-scope control makes a causal relationship
+    visible instead of leaving it as trivia. Together B and D cover the two moments that matter (during the
+    draft: I'm acquiring; before it: I'm ranking), cost roughly one array entry plus two conditional rows,
+    and leave <code>C</code> in place as the permanent, season-agnostic home for the recap — which is the one
+    thing that legitimately should live somewhere forever. <b>E</b> is the right answer to the real live-draft
+    problem (a pick landed and I'm on another screen), but it is a notifier, not a placement, and it needs
+    <code>draft.live_poll</code> proven in the field plus a re-run of the #243 fold audit at 622pt before it
+    earns a place in global chrome — so it ships second, not first. Revisit <b>A&prime;</b> after one real
+    draft season: if the data shows users repeatedly hunting for the room mid-draft despite B, D, and E, the
+    tab has earned itself; until then it is a large permanent bet on a small seasonal window.</p>
+    <p><b>Concretely, in order:</b></p>
+    <ul>
+      <li><b>Now (flag flip + ~2 small diffs):</b> keep the shipped League tile (C). Add the Draft chip to
+        <code>TradeFinderModeBar.CHIPS</code> with an <code>onDraft</code> push (B). Add the second row to
+        <code>RankHomeScreen</code>'s <code>rookieSection</code> and the conditional link inside
+        <code>RookieScopeControl</code> (D). Add the reverse "Rank the rookies" entry inside
+        <code>DraftRoomScreen</code> so the loop closes both ways.</li>
+      <li><b>Gate all three</b> on the draft-state predicate (live / not-drafted-with-a-draft-object /
+        drafted-within-14-days) so no entry point is ever a dead end — and fail closed on
+        <code>unknown</code>, matching <code>current_year_picks_visible()</code>.</li>
+      <li><b>Next:</b> E, behind <code>draft.live_poll</code>, after the throwaway-league live test (O7) and
+        a fold re-check of the tightest #243 surfaces at 622pt.</li>
+      <li><b>Later / conditional:</b> A&prime;, only on evidence from a real draft season.</li>
+    </ul>
+    <p><b>One thing I would not do:</b> ship A (permanent tab) as the first placement. It is the only option
+    on this page whose worst state is also its most common state.</p>
+  </div>
+
+  <div class="notewrap">
+    <div class="notelbl"><span class="dot"></span>Notes — recommendation / verdict</div>
+    <textarea class="pagenote" data-key="Recommendation — B + D now, C stays, hold A-prime, E later" placeholder="Agree? Override? Notes here…"></textarea>
+  </div>
+</div>
+
+<div class="note" style="margin-top:26px">
+  <p style="margin-top:0"><b>Sources for every claim above</b> (branch <code>wave/integration</code> unless
+  noted): <code>mobile/src/navigation/TabNav.tsx</code> (4 tabs, "Acquire" label, #244 launch routing,
+  RankMenu) · <code>mobile/src/components/TradeFinderModeBar.tsx</code> (5-chip strip, push-vs-switch
+  precedent) · <code>mobile/src/screens/LeagueScreen.tsx</code> (3-across Explore row, the one-slot/two-occupant
+  draft tile) · <code>mobile/src/screens/DraftRoomScreen.tsx</code> (states, status bar, notices, sections,
+  polling gates) · <code>mobile/src/components/RookieScopeControl.tsx</code> +
+  <code>mobile/src/state/rookieScope.ts</code> (segmented control, consolidated-view copy, session-only scope)
+  · <code>mobile/src/screens/RankHomeScreen.tsx</code> (existing "Rookies" section) ·
+  <code>backend/draft_status.py</code> (drafted / not_drafted / unknown + confidence; fail-safe asymmetry) ·
+  <code>docs/plans/rookie-draft/plan.md</code> §M2/M3/M4 + "Operator decisions — 2026-08-06" (O1-expanded,
+  O2/M6b, O5, O8) · <code>docs/feedback/items/243-scroll-audit/</code> (658pt budget method) ·
+  <code>docs/design/design-system.md</code> (tokens, ice/flare division of labor, type floor).</p>
+  <p><b>Not settled here</b> (flagged, not hand-waved): the multi-league rule for any conditional surface;
+  whether "imminent" can ever mean a real date (Sleeper exposes no trustworthy scheduled start); and where
+  M6's per-slot pick values surface outside the room — none of the recommended placements preclude any of
+  those.</p>
+</div>
+
+</div>
+
+<script>
+(function(){
+  var KEY = 'ftf-polish-lab-2026-08-draft-surface-placement-notes';
+  var notes = {};
+  try { notes = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { notes = {}; }
+
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.pagenote'));
+  var notecount = document.getElementById('notecount');
+
+  function refresh(){
+    var n = 0;
+    boxes.forEach(function(b){
+      var has = !!(notes[b.dataset.key] || '').trim();
+      b.closest('.notewrap').classList.toggle('noted', has);
+      if (has) n++;
+    });
+    notecount.textContent = n ? (n + ' of ' + boxes.length + ' noted') : 'no notes yet';
+  }
+
+  boxes.forEach(function(b){
+    b.value = notes[b.dataset.key] || '';
+    b.addEventListener('input', function(){
+      notes[b.dataset.key] = b.value;
+      try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {}
+      refresh();
+    });
+  });
+
+  document.getElementById('copyall').addEventListener('click', async function(){
+    var lines = [];
+    boxes.forEach(function(b){
+      var t = (notes[b.dataset.key] || '').trim();
+      if (t) lines.push('## ' + b.dataset.key + '\n' + t);
+    });
+    var text = lines.length ? lines.join('\n\n') : '(no notes)';
+    var ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand('copy'); } catch (e2) {}
+      ta.remove();
+    }
+    var btn = document.getElementById('copyall');
+    var orig = btn.textContent;
+    btn.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(function(){ btn.textContent = orig; }, 1500);
+  });
+
+  refresh();
+})();
+</script>
+
+</body>
+</html>

@@ -150,3 +150,14 @@ No new infra, cron, or datastore (M7's push would need one). New artifacts: `dra
 - **O5: NO startup-draft support now** — label-and-degrade stands.
 - **O4 (default adopted): #161 demotion under scope demotes only visible, unselected rookies.**
 - **O9: NO manual override** (as recommended).
+
+## Operator decision — draft-surface placement (2026-08-06)
+
+Approved mock: `mockups/polish-lab-2026-08/draft-surface-placement.html`. **Option B + seasonal A′** (the agent recommended B+D and holding A′; the operator took B plus the seasonal tab):
+
+- **B (permanent home): a Draft chip in the Acquire tab's mode strip.** It must **LEAD** the strip — the shipped five chips already measure ≈402pt against ≈361pt usable, so the strip scrolls and an appended sixth chip would never be seen.
+- **A′ (seasonal): a 5th bottom tab "Draft", visible ONLY during draft season**, driven by the shipped per-league `draft_status` verdicts (`not_drafted`/`drafting` with a current-season rookie-shaped draft object ⇒ visible; `drafted`/`unknown`/none ⇒ hidden). Sleeper exposes no trustworthy scheduled start time, so "imminent" can only mean "a draft object exists and hasn't run."
+- **Multi-league rule (default, flag it in review):** the tab bar is global while draft status is per-league ⇒ the tab appears when ANY linked league qualifies, and lands on that league's room (a league chooser when >1 qualifies).
+- **C stays** as the League-tab recap home for drafted leagues.
+- **Required by the mock's finding #2:** any tab-based surface must carry a "Rank the rookies" entry back into `RookieRanks`, or the tab teaches users that rookie ranking and rookie drafting are unrelated.
+- **D (Rank-tab adjacency): not now** — the operator chose B; revisit if QA shows draft prep starting on Rank.
