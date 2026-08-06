@@ -136,3 +136,17 @@ No new infra, cron, or datastore (M7's push would need one). New artifacts: `dra
 
 ### Unresolved disagreements
 - **O9 (manual per-league draft-status override):** B originally proposed it as a cheap escape hatch; A called it risk theater reintroducing a second source of truth. Plan adopts A's NO-for-V1 with B's position recorded; revisit on field evidence of confidence-tier misfires.
+
+---
+
+## Operator decisions — 2026-08-06 (bind all build waves)
+
+- **O8: UPGRADE Render** — live polling is real; ship `draft.live_poll` per M4 with the live-test release gate. Fan-in budget must be restated per worker count at upgrade time.
+- **O7: YES** — operator creates the throwaway Sleeper league + started draft in week one.
+- **O2: MARKET SLOT VALUES IN THE TRADE ENGINE** — not display-only. This invokes the plan's own guardrail: a dedicated calibration batch (M6b) with a #214-style user toggle (market-slots / tier-ladder), before/after matrix replay, deck sanity diff. Display on the draft board still lands first (M6). Note the operator's O10 remark for a future direction: pick values mapping to the USER'S OWN rookie rankings (personalized pick pricing) — not in scope now, but the toggle architecture should not preclude a third mode later.
+- **O10: NO pick rungs inside rookie scope** — players only.
+- **O1 (expanded scope): rookies get a CONSOLIDATED cross-position ranking view**, reachable from any rank page as a new section — rookies remain in their position views AND appear in one rookie-ranking view; values stay synced by construction (same Elo space, view filter — the D2 architecture already guarantees it). M2's mobile milestone adds this consolidated view as a first-class deliverable, not just per-mode toggles. League-page tile: Draft Room replaces it (flag-off restores).
+- **O3: percentile map** for non-12-team slot prices, labeled approximation.
+- **O5: NO startup-draft support now** — label-and-degrade stands.
+- **O4 (default adopted): #161 demotion under scope demotes only visible, unselected rookies.**
+- **O9: NO manual override** (as recommended).
