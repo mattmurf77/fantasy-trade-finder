@@ -223,6 +223,12 @@ users_table = Table("users", metadata,
     # trade_service.stud_tax_mode_for_user for /api/trade/evaluate and
     # deck generation.
     Column("stud_tax_mode",         String),
+    # ── M6b draft-pick pricing mode (flag `trade.slot_pricing`) ───────────
+    # 'tier_ladder' (default/NULL — today's shipped ladder, unchanged) |
+    # 'market_slots' (DynastyProcess per-slot market curve). Read at pick
+    # PRICING time by trade_service.pick_pricing_mode_for_user; it never
+    # rewrites draft_picks.pool_value, which is league-shared.
+    Column("pick_pricing_mode",     String),
 )
 
 leagues_table = Table("leagues", metadata,
@@ -1803,6 +1809,8 @@ def _migrate_db() -> None:
         ("users",              "profile_public",        "INTEGER"),
         # #214/#215 — per-user stud-tax mode ('market'|'heavy'|'off')
         ("users",              "stud_tax_mode",         "VARCHAR"),
+        # M6b — per-user pick-pricing mode ('tier_ladder'|'market_slots')
+        ("users",              "pick_pricing_mode",     "VARCHAR"),
         # ESPN league linking Phase 1 (flag `espn.link`; plan
         # docs/plans/espn-league-linking-plan-2026-07-11.md) — see
         # leagues_table column comments.
@@ -3194,6 +3202,43 @@ def set_stud_tax_mode(user_id: str, mode: str) -> None:
             conn.execute(insert(users_table).values(
                 sleeper_user_id=user_id,
                 stud_tax_mode=mode,
+                created_at=_now(),
+            ))
+
+
+PICK_PRICING_MODES = ("tier_ladder", "market_slots")
+
+
+def get_pick_pricing_mode(user_id: str) -> str:
+    """M6b — the user's stored pick-pricing mode. Missing row / NULL /
+    unknown value = 'tier_ladder' (today's shipped behaviour). Callers go
+    through trade_service.pick_pricing_mode_for_user, which also applies the
+    `trade.slot_pricing` flag gate."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.pick_pricing_mode).where(
+                users_table.c.sleeper_user_id == user_id
+            )
+        ).fetchone()
+    mode = row.pick_pricing_mode if row else None
+    return mode if mode in PICK_PRICING_MODES else "tier_ladder"
+
+
+def set_pick_pricing_mode(user_id: str, mode: str) -> None:
+    """M6b — persist the user's pick-pricing mode. Same validation + row-race
+    guard as set_stud_tax_mode."""
+    if mode not in PICK_PRICING_MODES:
+        raise ValueError(f"invalid pick_pricing_mode: {mode!r}")
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(users_table)
+            .where(users_table.c.sleeper_user_id == user_id)
+            .values(pick_pricing_mode=mode)
+        )
+        if res.rowcount == 0:
+            conn.execute(insert(users_table).values(
+                sleeper_user_id=user_id,
+                pick_pricing_mode=mode,
                 created_at=_now(),
             ))
 

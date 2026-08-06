@@ -252,15 +252,39 @@ def test_m6_02_ladder_and_bands_are_byte_unchanged(slot_values_on, tmp_path, mon
 
 
 @pytest.mark.parametrize("module", ["trade_service.py", "trade_optimizer.py",
-                                    "pick_values.py", "ranking_service.py"])
+                                    "ranking_service.py"])
 def test_m6_02_slot_values_do_not_reach_the_valuation_lanes(module):
-    """Structural bound on KD-9: the trade engine, the pick ladder and the
-    ranking service must not read the display-only pick-price map. Engine
-    adoption is M6b's repricing decision (plan O2), and it will have to change
-    this test on purpose."""
+    """Structural bound on KD-9: the trade engine's scoring lanes and the
+    ranking service must not read the pick-price map.
+
+    **M6b amended this test on purpose, exactly as its own docstring said it
+    would have to.** Operator decision O2 authorises engine adoption behind
+    `trade.slot_pricing`, so `pick_values.py` — which now owns
+    `market_pick_pool_value` — dropped out of the parametrize list. Everything
+    else stands: the map reaches the engine through ONE named seam
+    (`pick_values.priced_pool_value`) and nowhere else. The replacement
+    guarantee is the behavioural one below plus T-M6B-01/02/04 in
+    `test_pick_pricing_m6b.py`.
+    """
     source = (REPO / "backend" / module).read_text()
     assert "load_pick_slot_values" not in source
     assert "PICK_VALUES_URL" not in source
+
+
+def test_m6_02b_pick_values_reads_dp_only_through_the_m6b_seam():
+    """The M6b replacement for `pick_values.py`'s structural bound: the module
+    may reach `load_pick_slot_values`, but ONLY from
+    `market_pick_pool_value`, and it must never hold the URL itself."""
+    source = (REPO / "backend" / "pick_values.py").read_text()
+    assert "PICK_VALUES_URL" not in source
+    code = [ln for ln in source.splitlines()
+            if "load_pick_slot_values" in ln and not ln.lstrip().startswith("#")
+            and "`" not in ln]
+    assert code == ["    from .data_loader import load_pick_slot_values",
+                    "    slot_map = load_pick_slot_values(scoring_format)"], code
+    # …and both lines sit inside market_pick_pool_value.
+    body = source.split("def market_pick_pool_value")[1].split("\ndef ")[0]
+    assert all(ln.strip() in body for ln in code)
 
 
 # ── T-M6-03 — fetch failure ──────────────────────────────────────────────

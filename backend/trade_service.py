@@ -553,6 +553,78 @@ def stud_tax_mode_for_user(user_id: str | None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# M6b — draft-pick pricing mode (per-user setting `pick_pricing_mode`)
+# ---------------------------------------------------------------------------
+# 'tier_ladder' (DEFAULT — today's behaviour, EXACTLY) — an owned pick prices
+#     at its stored `draft_picks.pool_value`, written by
+#     `pick_values.pick_pool_value` (the shipped ladder's Mid rung of the
+#     round, year-discounted).
+# 'market_slots' — the pick prices off DynastyProcess's published market curve
+#     for its absolute season+round (`pick_values.market_pick_pool_value`).
+#
+# NOTE THE DEFAULT. #214 shipped its retuned mode ('market') as the default;
+# **this wave does NOT**. Operator decision O2 authorises the toggle and the
+# calibration, not a change to what today's users see. `tier_ladder` is the
+# default and the flag `trade.slot_pricing` is OFF, so nothing reprices until
+# somebody deliberately flips both.
+#
+# Same thread-local shape as the #215 stud-tax mode above, for the same
+# reason: entry points that know the user pin it once for the whole job, and
+# every pick priced inside inherits it — including `pick_values`'
+# `priced_pool_value`, which resolves `mode=None` through this pin.
+
+PICK_PRICING_MODES = ("tier_ladder", "market_slots")
+PICK_PRICING_DEFAULT = "tier_ladder"
+
+_pick_pricing_local = threading.local()
+
+
+def current_pick_pricing_mode() -> str:
+    m = getattr(_pick_pricing_local, "mode", None)
+    return m if m in PICK_PRICING_MODES else PICK_PRICING_DEFAULT
+
+
+def pinned_pick_pricing_mode() -> str | None:
+    """The explicitly pinned thread-local mode, or None. Mirrors
+    `pinned_stud_tax_mode` — entry points keep an active outer pin instead of
+    re-resolving the stored setting, which is also what lets a test (or the
+    M6b matrix/deck harnesses) pin a mode around a whole job."""
+    m = getattr(_pick_pricing_local, "mode", None)
+    return m if m in PICK_PRICING_MODES else None
+
+
+@contextmanager
+def pick_pricing_override(mode: str | None):
+    """Pin the pick-pricing mode for `priced_pool_value` calls on this thread."""
+    prev = getattr(_pick_pricing_local, "mode", None)
+    _pick_pricing_local.mode = (mode if mode in PICK_PRICING_MODES
+                                else PICK_PRICING_DEFAULT)
+    try:
+        yield
+    finally:
+        _pick_pricing_local.mode = prev
+
+
+def pick_pricing_mode_for_user(user_id: str | None) -> str:
+    """The stored per-user mode — **the single flag gate**.
+
+    `trade.slot_pricing` OFF (the shipped state) ⇒ always `tier_ladder`, no DB
+    read, so a stored `market_slots` set while the flag was briefly on cannot
+    reprice anybody. DB-unavailable is likewise safe: default.
+    """
+    from .feature_flags import is_enabled
+    if not is_enabled("trade.slot_pricing"):
+        return PICK_PRICING_DEFAULT
+    if not user_id:
+        return PICK_PRICING_DEFAULT
+    try:
+        from .database import get_pick_pricing_mode
+        return get_pick_pricing_mode(user_id)
+    except Exception:
+        return PICK_PRICING_DEFAULT
+
+
+# ---------------------------------------------------------------------------
 # KTC-style Dynasty Value
 # ---------------------------------------------------------------------------
 # Exponential decay: rank 1 ≈ 9875, rank 200 ≈ 806, rank 500 ≈ ~66

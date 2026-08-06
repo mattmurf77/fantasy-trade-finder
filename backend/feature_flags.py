@@ -404,6 +404,17 @@ FLAG_KEYS: tuple[str, ...] = (
     # order entry (never null), no `slot_value_approx` key, and values.csv is
     # never fetched. A fetch failure with the flag ON degrades the same way.
     "picks.slot_values",
+    # M6b — DynastyProcess market slot values IN THE TRADE ENGINE (plan
+    # operator decision O2, which reverses hld KD-9 / lld §4.7). Gates the
+    # per-user `pick_pricing_mode` setting ('tier_ladder' default |
+    # 'market_slots'): the /api/settings/pick-pricing route and the mode
+    # resolution in trade_service.pick_pricing_mode_for_user.
+    # OFF (default) ⇒ pick_pricing_mode_for_user returns 'tier_ladder' for
+    # EVERY user without reading the DB, /api/settings/pick-pricing 404s, and
+    # every owned pick prices at its stored `draft_picks.pool_value` exactly
+    # as today. `GENERIC_PICK_SEEDS`, the tier ladder and the tier bands are
+    # byte-unchanged in BOTH modes — this flag reprices owned picks only.
+    "trade.slot_pricing",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

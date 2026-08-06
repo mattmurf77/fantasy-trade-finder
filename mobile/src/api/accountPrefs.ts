@@ -49,3 +49,23 @@ export async function setStudTaxMode(
     mode,
   });
 }
+
+// ── M6b — draft-pick pricing mode (flag `trade.slot_pricing`; 404 while the
+// flag is dark, which the Settings section treats as "hide the control").
+// 'tier_ladder' (DEFAULT — today's shipped pick ladder) | 'market_slots'
+// (DynastyProcess per-slot market curve). Note the default differs from
+// #215's: the market mode here is opt-in, not the shipped behaviour.
+export type PickPricingMode = 'tier_ladder' | 'market_slots';
+
+export async function getPickPricingMode(): Promise<{ mode: PickPricingMode }> {
+  return api.get<{ mode: PickPricingMode }>('/api/settings/pick-pricing');
+}
+
+export async function setPickPricingMode(
+  mode: PickPricingMode,
+): Promise<{ ok: boolean; mode: PickPricingMode }> {
+  return api.put<{ ok: boolean; mode: PickPricingMode }>(
+    '/api/settings/pick-pricing',
+    { mode },
+  );
+}
