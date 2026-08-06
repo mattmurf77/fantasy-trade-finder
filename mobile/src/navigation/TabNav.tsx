@@ -25,6 +25,12 @@ import TiersScreen from '../screens/TiersScreen';
 import QuickSetTiersScreen from '../screens/QuickSetTiersScreen';
 import QuickRankScreen from '../screens/QuickRankScreen';
 import ManualRanksScreen from '../screens/ManualRanksScreen';
+// rookie-draft M2 (operator decision O1-expanded) — the consolidated
+// cross-position rookie ranking view. Same Elo space, same board, read
+// through the scope view filter; entered from any rank page's scope control
+// and from the rank-home chooser. Both entry points are flag-gated, so with
+// `ranks.rookie_subset` off this route is unreachable in the UI.
+import RookieRanksScreen from '../screens/RookieRanksScreen';
 import TrendsScreen from '../screens/TrendsScreen';
 import TradesScreen from '../screens/TradesScreen';
 // #246 — TradeFinderHubScreen is unrouted (guided-first landing); the file
@@ -59,6 +65,7 @@ export type RankRoute =
   | 'QuickSetTiers'
   | 'QuickRank'
   | 'ManualRanks'
+  | 'RookieRanks'
   | 'Trends';
 export type TradesRoute = 'TradesHome' | 'TradeDeck' | 'Portfolio' | 'TradeCalculator';
 
@@ -353,6 +360,18 @@ function RankStackNav() {
           rankDest
             ? rankSubScreenOptions('Overall Ranks', 'RankHome')
             : subScreenOptions('Overall Ranks', 'RankHome')
+        }
+      />
+      {/* rookie-draft M2 / O1-expanded — the consolidated rookie view is a
+          sibling rank surface, not a drill-down: same back topology as
+          every other one (#162/#165 — fallback is the RankHome chooser). */}
+      <RankStack.Screen
+        name="RookieRanks"
+        component={RookieRanksScreen}
+        options={
+          rankDest
+            ? rankSubScreenOptions('Rookie Ranks', 'RankHome')
+            : subScreenOptions('Rookie Ranks', 'RankHome')
         }
       />
       <RankStack.Screen

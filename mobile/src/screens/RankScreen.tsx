@@ -40,11 +40,15 @@ import {
 import FormatToggle from '../components/FormatToggle';
 import Toast from '../components/Toast';
 import { InfoButton } from '../components/HelpSheet';
+import RookieScopeControl, { RookieScopeEmpty } from '../components/RookieScopeControl';
+import { useRookieScope } from '../state/rookieScope';
 import {
   getNextTrio,
   getProgress,
   getStreak,
   submitTrioRanking,
+  isScopedEmpty,
+  type ScopedEmpty,
 } from '../api/rankings';
 import type { Position, ScoringFormat, Trio, RankingProgress } from '../shared/types';
 import { useFlag } from '../state/useFeatureFlags';
@@ -118,9 +122,16 @@ export default function RankScreen() {
   );
 
   // ── Data ────────────────────────────────────────────────────────────
+  // rookie-draft M2 — Trios ships LAST in the scope rollout (plan §M2),
+  // gated on M0's measurement: 85 valued rookies league-wide with TE=21,
+  // so every format/position can still draw a 3-candidate matchup. Under
+  // scope the rookie subset constrains CANDIDATE SELECTION only — the Elo
+  // updates a submitted trio produces are unchanged full-board updates, so
+  // ranking rookies here moves them on the one shared board.
+  const rookieScope = useRookieScope();
   const trioQuery = useQuery({
-    queryKey: ['trio', position],
-    queryFn: () => getNextTrio(position),
+    queryKey: rookieScope.isRookie ? ['trio', position, 'rookie'] : ['trio', position],
+    queryFn: () => getNextTrio(position, { scope: rookieScope.param }),
     staleTime: 0,           // each trio is fresh; never reuse
     refetchOnMount: 'always',
   });
@@ -239,7 +250,14 @@ export default function RankScreen() {
   }, [queryClient, position]);
 
   // ── Helpers ─────────────────────────────────────────────────────────
-  const trio = trioQuery.data;
+  // The scoped path can answer with the typed empty response instead of a
+  // trio ({empty:true, reason:'thin_pool'} — a thin rookie pool at a
+  // position is a designed state, never a 400). Narrow once here so the
+  // rest of the screen keeps working with a plain `Trio | undefined`.
+  const trioEmpty: ScopedEmpty | null = isScopedEmpty(trioQuery.data)
+    ? trioQuery.data
+    : null;
+  const trio: Trio | undefined = trioEmpty ? undefined : (trioQuery.data as Trio | undefined);
   const progress = progressQuery.data;
 
   const rankOf = useCallback(
@@ -398,6 +416,16 @@ export default function RankScreen() {
           disabled={formatSwitching}
         />
 
+        {/* rookie-draft M2 — the shared scope control (flush: this screen's
+            ScrollView already pads). A flip clears the in-progress
+            selection: the next trio is drawn from a different pool. */}
+        <RookieScopeControl
+          surface="trios"
+          flush
+          disabled={submitMutation.isPending}
+          onChange={() => setSelectionOrder([])}
+        />
+
         {/* Position switcher — Chalkline segmented control */}
         <View style={styles.switcher}>
           {POSITIONS.map((p, i) => {
@@ -518,7 +546,18 @@ export default function RankScreen() {
             trios-three-up-v2.html, Variant A) replace the vertical stack of
             full PlayerCards. The row is one fixed 128pt block (~324pt → 128pt)
             so the whole screen fits the 614pt Rank-stack budget. */}
-        {trioQuery.isLoading || !trio ? (
+        {trioEmpty ? (
+          /* rookie-draft M2 — the scoped path's typed empty response. A
+             position whose rookie pool can't field three candidates is a
+             designed state, not a failed fetch, so it must not render as a
+             perpetual skeleton or an error. */
+          <RookieScopeEmpty
+            surface="trios"
+            empty={trioEmpty}
+            position={position}
+            flush
+          />
+        ) : trioQuery.isLoading || !trio ? (
           // Three skeleton cards keep the page shape stable during the
           // /api/trio round-trip (Mobile #M1). Mirrors the static-fill
           // pattern from MatchesScreen.tsx:253-264 — no animation

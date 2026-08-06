@@ -33,7 +33,9 @@ import {
 } from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
 import PositionChip from '../components/PositionChip';
-import { getRankings, reorderRankings } from '../api/rankings';
+import RookieScopeControl, { RookieScopeEmpty } from '../components/RookieScopeControl';
+import { useRookieScope } from '../state/rookieScope';
+import { getRankings, reorderRankings, splitRankings } from '../api/rankings';
 import { haptics } from '../utils/haptics';
 import { valueForElo } from '../utils/playerValue';
 import { readErrorCopy } from '../utils/verification';
@@ -133,17 +135,27 @@ export default function ManualRanksScreen() {
   // chips is instant. The reorder
   // endpoint accepts a per-position `ordered_ids` payload — when the
   // filter is 'ALL' we send `position: null` and the full ID list.
+  // rookie-draft M2 — Overall ranks INHERITS the scope: the board narrows
+  // to the rookie subset and the debounced save posts that subsequence.
+  // No save change is needed — /api/rankings/reorder permutes the Elo
+  // multiset of exactly the ids posted (write-identity I-2), so reordering
+  // the rookies among themselves is byte-identical to the same reorder run
+  // on the full board's rookie subsequence, and no vet ever moves.
+  const rookieScope = useRookieScope();
   const ranksQuery = useQuery({
-    queryKey: ['rankings', activeFormat, 'all'],
-    queryFn: () => getRankings(null),
+    queryKey: rookieScope.isRookie
+      ? ['rankings', activeFormat, 'all', 'rookie']
+      : ['rankings', activeFormat, 'all'],
+    queryFn: () => getRankings(null, { scope: rookieScope.param }),
     staleTime: 30_000,
   });
+  const scopeEmpty = splitRankings(ranksQuery.data).empty;
 
   // Snapshot the server result into local state on load. Re-sync whenever
   // the underlying query data changes (e.g. invalidation from elsewhere).
   // ELO-sort so the initial order is best → worst.
   useEffect(() => {
-    const all = (ranksQuery.data?.rankings || []) as RankedPlayer[];
+    const all = splitRankings(ranksQuery.data).rows as RankedPlayer[];
     const sorted = [...all].sort((a, b) => (b.elo || 0) - (a.elo || 0));
     setRows(sorted);
   }, [ranksQuery.data]);
@@ -535,6 +547,18 @@ export default function ManualRanksScreen() {
         specific spot.
       </Text>
 
+      {/* rookie-draft M2 — inherited scope control. A flip changes which
+          board the drag list is editing, so any in-flight rank edit is
+          dismissed first (same reasoning as the position filter below). */}
+      <RookieScopeControl
+        surface="manual-ranks"
+        disabled={saveStatus === 'pending' || saveStatus === 'saving'}
+        onChange={() => {
+          setEditingPid(null);
+          Keyboard.dismiss();
+        }}
+      />
+
       <View style={styles.filterRow}>
         {FILTERS.map((f) => {
           const active = f === filter;
@@ -594,6 +618,13 @@ export default function ManualRanksScreen() {
         <View style={styles.center}>
           <ActivityIndicator color={ice.base} />
         </View>
+      ) : scopeEmpty ? (
+        /* rookie-draft M2 — designed state, not an error. */
+        <RookieScopeEmpty
+          surface="manual-ranks"
+          empty={scopeEmpty}
+          position={filter === 'ALL' ? null : filter}
+        />
       ) : ranksQuery.isError ? (
         <View style={styles.center}>
           <Text style={styles.errorText}>

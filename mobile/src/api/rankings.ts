@@ -70,6 +70,55 @@ export async function formatHeader(): Promise<Record<string, string>> {
   return fmt ? { 'X-Scoring-Format': fmt } : {};
 }
 
+// ── Rookie scope (rookie-draft M2, flag `ranks.rookie_subset`) ─────────
+// `?scope=rookie` is a POST-Elo VIEW FILTER on the server (see the header
+// comment in backend/server.py above `_apply_rookie_scope`): the pool, the
+// Elo computation and every write stay on the FULL position pool, and the
+// subset is applied to the already-computed response. So a rookie's value
+// is the same number scoped or unscoped — one board, one Elo space.
+//
+// The flag is server-delivered: with it off the backend never even parses
+// the parameter, and the client never sends one (rookieScopeParam() returns
+// undefined) — the two halves fail closed independently.
+export type RankScopeParam = 'rookie';
+
+/** The typed empty response. A thin or unloaded rookie class is a real,
+ *  expected state of this feature (a class does not exist upstream until
+ *  ~late April), so the scoped path returns 200 with a reason the UI can
+ *  render — never the bare 400 the unscoped path returns for a <3 pool. */
+export interface ScopedEmpty {
+  empty: true;
+  reason: 'thin_pool' | 'class_not_loaded' | 'stale_player_cache' | string;
+  position: string | null;
+  scope: RankScopeParam;
+  count: number;
+}
+
+export function isScopedEmpty(d: unknown): d is ScopedEmpty {
+  return !!d && typeof d === 'object' && (d as ScopedEmpty).empty === true;
+}
+
+export interface RankingsResponse {
+  position: string | null;
+  rankings: any[];
+  interaction_count?: number;
+  threshold?: number;
+  threshold_met?: boolean;
+  version?: number;
+}
+
+/** Split a possibly-scoped rankings payload into rows + empty state, so a
+ *  screen never has to narrow the union inline. `rows` is `[]` on the empty
+ *  branch, which is exactly what every list already renders. */
+export function splitRankings(
+  d: RankingsResponse | ScopedEmpty | undefined,
+): { rows: any[]; empty: ScopedEmpty | null } {
+  if (isScopedEmpty(d)) return { rows: [], empty: d };
+  return { rows: d?.rankings ?? [], empty: null };
+}
+
+const scopeQuery = (scope?: RankScopeParam) => (scope ? `scope=${scope}` : '');
+
 export interface Streak {
   current: number;
   longest: number;
@@ -82,9 +131,17 @@ export async function getStreak() {
 }
 
 // GET /api/trio?position=QB — next trio for the user's active format.
-export async function getNextTrio(position?: Position | null) {
-  const qs = position ? `?position=${position}` : '';
-  return api.get<Trio>(`/api/trio${qs}`);
+// `scope: 'rookie'` narrows CANDIDATE SELECTION to the rookie subset; the
+// Elo updates the user's picks produce are unchanged full-board updates.
+// The scoped path can answer `{empty:true, reason:'thin_pool'}` (200).
+export async function getNextTrio(
+  position?: Position | null,
+  opts?: { scope?: RankScopeParam },
+) {
+  const parts = [position ? `position=${position}` : '', scopeQuery(opts?.scope)]
+    .filter(Boolean);
+  const qs = parts.length ? `?${parts.join('&')}` : '';
+  return api.get<Trio | ScopedEmpty>(`/api/trio${qs}`);
 }
 
 // POST /api/rank3  body: { ranked: [pid_first, pid_second, pid_third] }
@@ -112,10 +169,19 @@ export async function getProgress() {
 }
 
 // GET /api/rankings?position=QB — full ranked list. Used by the Tiers screen
-// as the source of truth for per-position ordering.
-export async function getRankings(position?: Position | null) {
-  const qs = position ? `?position=${position}` : '';
-  return api.get<{ position: string | null; rankings: any[] }>(`/api/rankings${qs}`);
+// as the source of truth for per-position ordering. Omit `position` for the
+// cross-position board (also what the consolidated rookie view reads).
+// `scope: 'rookie'` filters the response to the rookie subset with `rank`
+// renumbered 1..n; every other field (elo, tier meters, consensus rank)
+// is passed through untouched.
+export async function getRankings(
+  position?: Position | null,
+  opts?: { scope?: RankScopeParam },
+) {
+  const parts = [position ? `position=${position}` : '', scopeQuery(opts?.scope)]
+    .filter(Boolean);
+  const qs = parts.length ? `?${parts.join('&')}` : '';
+  return api.get<RankingsResponse | ScopedEmpty>(`/api/rankings${qs}`);
 }
 
 // POST /api/rankings/reorder — apply a manual reorder to the user's rankings.
@@ -210,15 +276,30 @@ export async function saveTiers(
   tiers: Record<string, string[]>,
   clearedPids: string[] = [],
   demotedPids: string[] = [],
+  // rookie-draft M2: a SCOPED save writes only part of the board. The
+  // server answers it with the merged-band rule (merge the scoped pids into
+  // the band's current full order, spread over the FULL merged list,
+  // persist the scoped pids only) so a rookies-only save values each rookie
+  // exactly as the equivalent full-band save would — and never respreads
+  // the vets around them. It also does NOT mark the position complete:
+  // `tiers_saved`/`all_done` are completeness markers feeding LeagueScreen's
+  // ranked count, quicksetProgress's cache and #244 launch routing, and a
+  // rookies-only pass has not completed a position. `via` is the forensic
+  // tag the board-restore procedure keys off.
+  opts?: { scope?: RankScopeParam; via?: 'rookie_tiers' | 'rookie_quickset' | 'rookie_anchors' },
 ) {
   // demoted_pids (#161): players the user explicitly passed over during a
   // Quick Set tier save — the backend pins them below every tier band
-  // (unranked) instead of letting them silently keep their old tier.
+  // (unranked) instead of letting them silently keep their old tier. Under
+  // scope this is bounded to the VISIBLE subset (operator decision O4): an
+  // unshown vet is never demoted, because it was never on screen to pass over.
   return api.post<any>('/api/tiers/save', {
     position,
     tiers,
     cleared_pids: clearedPids,
     demoted_pids: demotedPids,
+    ...(opts?.scope ? { scope: opts.scope } : {}),
+    ...(opts?.via ? { via: opts.via } : {}),
   });
 }
 
@@ -255,9 +336,10 @@ export interface AnchorSaveResponse {
 // write to (#112) — without it, session/local format drift could order
 // candidates by the wrong format (e.g. 1QB order in an SF league,
 // pushing QBs into the depth end of the queue).
-export async function getAnchorPool() {
-  return api.get<{ position: string | null; rankings: any[] }>(
-    '/api/rankings',
+export async function getAnchorPool(opts?: { scope?: RankScopeParam }) {
+  const qs = opts?.scope ? `?${scopeQuery(opts.scope)}` : '';
+  return api.get<RankingsResponse | ScopedEmpty>(
+    `/api/rankings${qs}`,
     { headers: await formatHeader() },
   );
 }

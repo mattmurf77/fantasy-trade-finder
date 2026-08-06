@@ -32,7 +32,9 @@ import { TickLabel, Button, Text as ChalkText } from '../components/chalkline';
 import Toast from '../components/Toast';
 import FormatToggle from '../components/FormatToggle';
 import { setPinnedBottomBarHeight } from '../components/FeedbackFAB';
-import { getRankings, reorderRankings } from '../api/rankings';
+import RookieScopeControl, { RookieScopeEmpty } from '../components/RookieScopeControl';
+import { useRookieScope } from '../state/rookieScope';
+import { getRankings, reorderRankings, splitRankings } from '../api/rankings';
 import { TIERS, TIER_LABEL, tierForElo } from '../utils/tierBands';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
@@ -97,17 +99,31 @@ export default function QuickRankScreen() {
   const [searchFocused, setSearchFocused] = useState(false);
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
 
+  // rookie-draft M2 — Quick Rank INHERITS the scope (plan §M2 rollout
+  // ladder): it needs no save change at all, because /api/rankings/reorder
+  // is already subset-safe (it permutes the Elo multiset of exactly the ids
+  // posted — write-identity I-2), so a within-tier pass over the rookies in
+  // a tier is byte-identical to the same pass run unscoped on that
+  // subsequence. Only the pool it reads narrows.
+  const rookieScope = useRookieScope();
   const rankingsQuery = useQuery({
-    queryKey: ['rankings', activeFormat, position],
-    queryFn: () => getRankings(position),
+    queryKey: rookieScope.isRookie
+      ? ['rankings', activeFormat, position, 'rookie']
+      : ['rankings', activeFormat, position],
+    queryFn: () => getRankings(position, { scope: rookieScope.param }),
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
 
+  const { rows: rankingRows, empty: scopeEmpty } = useMemo(() => {
+    const s = splitRankings(rankingsQuery.data);
+    return { rows: s.rows as RankedPlayer[], empty: s.empty };
+  }, [rankingsQuery.data]);
+
   // Tier → members (elo desc). Membership is invariant under our own saves
   // (pure permutation), so the step list stays stable across the walk.
   const membersByTier = useMemo(() => {
-    const rows = ((rankingsQuery.data?.rankings as RankedPlayer[] | undefined) ?? [])
+    const rows = rankingRows
       .slice()
       .sort((a, b) => (b.elo ?? 0) - (a.elo ?? 0));
     const map = new Map<Tier, RankedPlayer[]>();
@@ -119,7 +135,7 @@ export default function QuickRankScreen() {
       else map.set(t, [p]);
     }
     return map;
-  }, [rankingsQuery.data, position, fmt]);
+  }, [rankingRows, position, fmt]);
 
   // The walk's steps: ladder order, tiers with 2+ players only (a lone
   // player is already "ranked" within its tier).
@@ -333,6 +349,18 @@ export default function QuickRankScreen() {
         />
       </View>
 
+      {/* rookie-draft M2 — inherited scope control (same component, same
+          state as every other rank surface). A flip restarts the walk. */}
+      <RookieScopeControl
+        surface="quick-rank"
+        disabled={saving}
+        onChange={() => {
+          setStepIdx(0);
+          setClicked([]);
+          setSearch('');
+        }}
+      />
+
       {/* Position switcher — PositionTabs spec, same construction as the
           quick-set walk's. */}
       <View style={styles.switcher}>
@@ -367,6 +395,9 @@ export default function QuickRankScreen() {
         <View style={styles.centered}>
           <ActivityIndicator color={chalk.dim} />
         </View>
+      ) : scopeEmpty ? (
+        /* rookie-draft M2 — designed state, not an error. */
+        <RookieScopeEmpty surface="quick-rank" empty={scopeEmpty} position={position} />
       ) : rankingsQuery.isError ? (
         <View style={styles.centered}>
           <Text style={styles.errorText}>Could not load rankings.</Text>

@@ -33,7 +33,9 @@ import { TickLabel, Button, Icon, Text as ChalkText } from '../components/chalkl
 import Toast from '../components/Toast';
 import FormatToggle from '../components/FormatToggle';
 import { setPinnedBottomBarHeight } from '../components/FeedbackFAB';
-import { getRankings, saveTiers } from '../api/rankings';
+import RookieScopeControl, { RookieScopeEmpty } from '../components/RookieScopeControl';
+import { useRookieScope } from '../state/rookieScope';
+import { getRankings, saveTiers, splitRankings } from '../api/rankings';
 import { TIERS, TIER_LABEL, tierForElo } from '../utils/tierBands';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
@@ -126,19 +128,27 @@ export default function QuickSetTiersScreen() {
   const tier = TIERS[tierIdx];
   const isLastTier = tierIdx === TIERS.length - 1;
 
+  // rookie-draft M2 — the walk's pool narrows to the rookie subset. Scope
+  // rides the query key (a strict suffix, so every existing prefix
+  // invalidation still covers it) and the walk restarts on a scope change.
+  const rookieScope = useRookieScope();
   const rankingsQuery = useQuery({
-    queryKey: ['rankings', activeFormat, position],
-    queryFn: () => getRankings(position),
+    queryKey: rookieScope.isRookie
+      ? ['rankings', activeFormat, position, 'rookie']
+      : ['rankings', activeFormat, position],
+    queryFn: () => getRankings(position, { scope: rookieScope.param }),
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
 
+  const { rows: rankingRows, empty: scopeEmpty } = useMemo(() => {
+    const s = splitRankings(rankingsQuery.data);
+    return { rows: s.rows as RankedPlayer[], empty: s.empty };
+  }, [rankingsQuery.data]);
+
   const players = useMemo(
-    () =>
-      ((rankingsQuery.data?.rankings as RankedPlayer[] | undefined) ?? [])
-        .slice()
-        .sort((a, b) => (b.elo ?? 0) - (a.elo ?? 0)),
-    [rankingsQuery.data],
+    () => rankingRows.slice().sort((a, b) => (b.elo ?? 0) - (a.elo ?? 0)),
+    [rankingRows],
   );
 
   // pid → tier claimed earlier in this run. A player claimed by ANOTHER
@@ -158,6 +168,44 @@ export default function QuickSetTiersScreen() {
       }),
     [players, claimedBy, tier],
   );
+
+  // rookie-draft M2 — start the ladder at the FIRST ROOKIE-BEARING RUNG.
+  // A rookie class rarely reaches the top of an 8-rung pick ladder, so an
+  // unscoped start would open the walk on two or three empty steps and read
+  // as "there's nothing here". The first rung that currently holds a scoped
+  // player is the honest entry point; the user can still walk Back into the
+  // higher rungs (they stay in the ladder, they just aren't the start).
+  const firstScopedTierIdx = useMemo(() => {
+    if (!rookieScope.isRookie || players.length === 0) return 0;
+    let best = TIERS.length;
+    for (const p of players) {
+      const t = tierForElo(p.elo, position, fmt);
+      if (!t) continue;
+      const i = TIERS.indexOf(t);
+      if (i >= 0 && i < best) best = i;
+    }
+    return best === TIERS.length ? 0 : best;
+  }, [rookieScope.isRookie, players, position, fmt]);
+
+  // Apply that start ONCE per (position, format, scope) walk — never on a
+  // background refetch, which would yank the user out of the step they are
+  // standing in. `isPlaceholderData` is the load-bearing guard: the query
+  // keeps the PREVIOUS key's rows on screen while the new scope fetches, so
+  // without it the start rung would be computed from the wrong pool and
+  // then never recomputed (the key would already be marked applied).
+  const walkStartRef = React.useRef<string>('');
+  React.useEffect(() => {
+    if (players.length === 0 || rankingsQuery.isPlaceholderData) return;
+    const key = `${position}:${fmt}:${rookieScope.scope}`;
+    if (walkStartRef.current === key) return;
+    walkStartRef.current = key;
+    if (firstScopedTierIdx > 0) {
+      setTierIdx(firstScopedTierIdx);
+      setSelected(new Set());
+      setSearch('');
+    }
+  }, [players.length, position, fmt, rookieScope.scope, firstScopedTierIdx,
+      rankingsQuery.isPlaceholderData]);
 
   // #138 — what the grid RENDERS. Selection lives in the pid set and save
   // reads gridPlayers, so filtering the view can never drop a picked
@@ -186,16 +234,27 @@ export default function QuickSetTiersScreen() {
   const goTo = useCallback(
     (idx: number, savedMap: Partial<Record<Tier, string[]>>) => {
       if (idx >= TIERS.length) {
-        // Onboarding: record the completed position — the Trades provenance
-        // chip flips CONSENSUS VALUES → YOUR BOARD off this list. Inert
-        // write when onboarding surfaces are dark.
-        const donePositions = getOnboardingState().quicksetCompletedPositions;
-        if (!donePositions.includes(position)) {
-          patchOnboardingState({
-            quicksetCompletedPositions: [...donePositions, position],
-          });
+        // rookie-draft M2 (the client mirror of server invariant I-4): a
+        // ROOKIES-ONLY walk has not completed the position, so it must not
+        // write the completion record. `quicksetCompletedPositions` feeds
+        // state/quicksetProgress.ts, which drives #244 launch routing (a
+        // "complete" QB would route a no-pref user to Trios) plus the Trades
+        // provenance chip and LeagueScreen's ranked count. The server-side
+        // twin of this rule lives in the scoped save (no save_tiers_position,
+        // no `quickset_completed` — our saves carry via:'rookie_quickset').
+        // The forensic trail for a scoped walk is that `via` tag.
+        if (!rookieScope.isRookie) {
+          // Onboarding: record the completed position — the Trades provenance
+          // chip flips CONSENSUS VALUES → YOUR BOARD off this list. Inert
+          // write when onboarding surfaces are dark.
+          const donePositions = getOnboardingState().quicksetCompletedPositions;
+          if (!donePositions.includes(position)) {
+            patchOnboardingState({
+              quicksetCompletedPositions: [...donePositions, position],
+            });
+          }
+          track('quickset_completed', { position, onboarding: onboardingReturn }, 'QuickSetTiers');
         }
-        track('quickset_completed', { position, onboarding: onboardingReturn }, 'QuickSetTiers');
         if (onboardingReturn) {
           // Item 7 exit: no Quick Rank offer (suppressed by ruling F2), post
           // the regen handoff, and return to Trades. Unknown route names
@@ -231,12 +290,21 @@ export default function QuickSetTiersScreen() {
       setSelected(new Set(savedMap[TIERS[idx]] ?? []));
       setSearch(''); // #138 — the filter is per step
     },
-    [navigation, position],
+    [navigation, position, rookieScope.isRookie, onboardingReturn],
   );
 
   const saveMutation = useMutation({
     mutationFn: ({ ids, cleared, demoted }: { ids: string[]; cleared: string[]; demoted: string[] }) =>
-      saveTiers(position, ids.length > 0 ? { [tier]: ids } : {}, cleared, demoted),
+      saveTiers(
+        position,
+        ids.length > 0 ? { [tier]: ids } : {},
+        cleared,
+        demoted,
+        // rookie-draft M2 — merged-band scoped save + the forensic via tag.
+        rookieScope.isRookie
+          ? { scope: 'rookie', via: 'rookie_quickset' }
+          : undefined,
+      ),
     onSuccess: (_data, { ids }) => {
       const nextSaved = { ...savedByTier, [tier]: ids };
       setSavedByTier(nextSaved);
@@ -274,6 +342,12 @@ export default function QuickSetTiersScreen() {
     // arbitrarily deeper tier. Players claimed by an earlier tier this
     // run aren't in the grid and are never demoted; lower-tier players
     // still get their own steps later in the walk.
+    //
+    // rookie-draft M2 / operator decision O4: this derives from
+    // `gridPlayers`, which under scope IS the rookie subset — so a scoped
+    // save demotes only rookies that were VISIBLE and unselected, and an
+    // unshown vet is never touched. No scope branch is needed: the rule was
+    // already bounded by what the user could see.
     const tierRank = TIERS.indexOf(tier);
     const demoted =
       ids.length === 0
@@ -418,6 +492,20 @@ export default function QuickSetTiersScreen() {
         />
       </View>
 
+      {/* rookie-draft M2 — the shared All players | Rookies control. A scope
+          flip restarts the walk (the ladder start, the grid and the
+          this-run bookkeeping all belong to one scope). */}
+      <RookieScopeControl
+        surface="quick-set"
+        disabled={saving}
+        onChange={() => {
+          setTierIdx(0);
+          setSelected(new Set());
+          setSavedByTier({});
+          setSearch('');
+        }}
+      />
+
       {/* Position switcher — PositionTabs spec, same construction as the
           Tiers board's. */}
       <View style={styles.switcher}>
@@ -457,8 +545,9 @@ export default function QuickSetTiersScreen() {
           <Text style={styles.stepProgress}>{`Tier ${tierIdx + 1} of ${TIERS.length}`}</Text>
         </View>
         <Text style={styles.stepHint}>
-          Tap every {position} who belongs in {TIER_LABEL[tier]}, then save to
-          move on. Each card shows the tier the player is in now.
+          Tap every {rookieScope.isRookie ? 'rookie ' : ''}{position} who
+          belongs in {TIER_LABEL[tier]}, then save to move on. Each card shows
+          the tier the player is in now.
         </Text>
       </View>
 
@@ -487,6 +576,9 @@ export default function QuickSetTiersScreen() {
         <View style={styles.centered}>
           <ActivityIndicator color={chalk.dim} />
         </View>
+      ) : scopeEmpty ? (
+        /* rookie-draft M2 — designed state, not an error. */
+        <RookieScopeEmpty surface="quick-set" empty={scopeEmpty} position={position} />
       ) : rankingsQuery.isError ? (
         <View style={styles.centered}>
           <Text style={styles.errorText}>Could not load rankings.</Text>

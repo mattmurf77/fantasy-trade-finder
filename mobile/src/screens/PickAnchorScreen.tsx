@@ -13,9 +13,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Button, Card, PositionBadge } from '../components/chalkline';
 import TierBadge from '../components/TierBadge';
+import RookieScopeControl, { RookieScopeEmpty } from '../components/RookieScopeControl';
+import { useRookieScope } from '../state/rookieScope';
 import {
   getAnchorPool,
   saveAnchor,
+  splitRankings,
   type AnchorKey,
   type AnchorSaveResponse,
 } from '../api/rankings';
@@ -86,13 +89,21 @@ export default function PickAnchorScreen() {
   // the default, so mirror that here for storage keys + band walks.
   const activeFormat = useSession((s) => s.activeFormat) ?? '1qb_ppr';
 
+  // rookie-draft M2 — the first surface in the scope rollout. The wizard's
+  // ANSWERS are unchanged under scope: /api/anchor/save pins one pid at a
+  // time and apply_anchor is already subset-safe (write-identity I-2), so
+  // scope only narrows which players the queue asks about.
+  const rookieScope = useRookieScope();
+
   // Snapshot the pool once (staleTime: Infinity) — anchoring re-sorts the
   // server-side rankings, and a mid-wizard refetch would shuffle the queue
   // under the user's thumbs. getAnchorPool sends X-Scoring-Format (#112)
   // so the queue is ordered by the same format's board the saves write to.
+  // The scope rides the query KEY so the two pools cache side by side and
+  // switching back doesn't re-fetch.
   const poolQuery = useQuery({
-    queryKey: ['anchor-pool', activeFormat],
-    queryFn: getAnchorPool,
+    queryKey: ['anchor-pool', activeFormat, rookieScope.scope],
+    queryFn: () => getAnchorPool({ scope: rookieScope.param }),
     staleTime: Infinity,
   });
 
@@ -158,13 +169,16 @@ export default function PickAnchorScreen() {
   }, [queryClient]);
 
   // Real players only, best-first — generic picks ARE the ladder, so they
-  // are never asked about.
+  // are never asked about. (Under rookie scope the server already omits
+  // them — operator decision O10, players only — so this filter is a no-op
+  // there rather than a second rule.)
+  const { rows: poolRows, empty: scopeEmpty } = splitRankings(poolQuery.data);
   const queue: QueueRow[] = useMemo(() => {
-    const rows = (poolQuery.data?.rankings ?? []) as QueueRow[];
+    const rows = poolRows as QueueRow[];
     return rows
       .filter((r) => r.team !== 'PICK' && POSITIONS.includes(r.position))
       .sort((a, b) => b.elo - a.elo);
-  }, [poolQuery.data]);
+  }, [poolRows]);
 
   // #133 — the wizard serves the scoped queue (still value-descending);
   // 'ALL' preserves the original single cross-position queue.
@@ -224,6 +238,19 @@ export default function PickAnchorScreen() {
     );
   }
 
+  // rookie-draft M2 — the typed empty response ({empty:true, reason}) is a
+  // designed state of the scoped path, not an error: render the shared
+  // notice (which carries the always-works "Show all players" escape) with
+  // the scope control still on screen.
+  if (scopeEmpty) {
+    return (
+      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+        <RookieScopeControl surface="anchors" flush />
+        <RookieScopeEmpty surface="anchors" empty={scopeEmpty} flush />
+      </ScrollView>
+    );
+  }
+
   if (poolQuery.isError || queue.length === 0) {
     // #128 — the old error state was a plain View ("pull back and retry")
     // with nothing to pull and nothing to tap. Real recovery affordances:
@@ -260,6 +287,10 @@ export default function PickAnchorScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      {/* rookie-draft M2 — the shared All players | Rookies control, above
+          the #133 position pills (the two compose: rookie RBs only). */}
+      <RookieScopeControl surface="anchors" flush />
+
       {/* #133 — scope pills, PositionTabs construction (components.md):
           hairline segmented group, active = ink-3 fill + 2px underline in
           the position's color (ice for ALL — action, not a data encoding). */}
@@ -292,6 +323,7 @@ export default function PickAnchorScreen() {
 
       <Text style={styles.progress}>
         {answered} / {scopedQueue.length} anchored
+        {rookieScope.isRookie ? ' · Rookies' : ''}
         {scope !== 'ALL' ? ` · ${scope}` : ''}
         {' · '}{activeFormat === 'sf_tep' ? 'SF TEP' : '1QB PPR'}
       </Text>
@@ -349,7 +381,11 @@ export default function PickAnchorScreen() {
           <View style={styles.tile}>
             <Text style={[type.title, styles.name]}>All anchored</Text>
             <Text style={styles.meta}>
-              {scope === 'ALL'
+              {rookieScope.isRookie
+                ? scope === 'ALL'
+                  ? 'Every rookie in your pool has a pick anchor. Switch to All players above to keep going.'
+                  : `Every rookie ${scope} in your pool has a pick anchor. Switch positions above to keep going.`
+                : scope === 'ALL'
                 ? 'Every player in your pool has a pick anchor. Your tiers and trade values now speak the same language: firsts.'
                 : `Every ${scope} in your pool has a pick anchor. Switch positions above to keep going.`}
             </Text>

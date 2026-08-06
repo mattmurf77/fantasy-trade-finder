@@ -47,11 +47,14 @@ import TileStats from '../components/TileStats';
 import TierStickyHeader from '../components/TierStickyHeader';
 import TierTargetChips from '../components/TierTargetChips';
 import Toast from '../components/Toast';
+import RookieScopeControl, { RookieScopeEmpty } from '../components/RookieScopeControl';
+import { useRookieScope } from '../state/rookieScope';
 import {
   getRankings,
   getRisersAndFallers,
   saveTiers,
   getTiersStatus,
+  splitRankings,
 } from '../api/rankings';
 import { copyTiersFromFormat } from '../api/league';
 import { autoBucket, autoBucketMixed, TIERS, TIER_LABEL } from '../utils/tierBands';
@@ -195,12 +198,30 @@ export default function TiersScreen() {
   // #132 — the All view reads the UNFILTERED rankings payload. Query key
   // deliberately matches ManualRanksScreen's overall board
   // (['rankings', fmt, 'all'] ⇄ getRankings(null)) so the two share a cache.
+  // rookie-draft M2 — scope rides the query KEY so the scoped and unscoped
+  // boards cache side by side (flipping back is instant) and can never be
+  // confused for one another. Flag off ⇒ scope is always 'all' and the key
+  // is the pre-M2 key exactly.
+  const rookieScope = useRookieScope();
   const rankingsQuery = useQuery({
-    queryKey: ['rankings', activeFormat, isAllView ? 'all' : position],
-    queryFn: () => getRankings(isAllView ? null : position),
+    queryKey: rookieScope.isRookie
+      ? ['rankings', activeFormat, isAllView ? 'all' : position, 'rookie']
+      : ['rankings', activeFormat, isAllView ? 'all' : position],
+    queryFn: () => getRankings(isAllView ? null : position, { scope: rookieScope.param }),
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
+  // One narrowing of the (rankings | typed-empty) union for the whole
+  // screen. `rankingRows` is [] on the empty branch, which every derived
+  // list already handles; `scopeEmpty` drives the one notice we render.
+  const { rows: rankingRows, empty: scopeEmpty } = useMemo(
+    () => {
+      const s = splitRankings(rankingsQuery.data);
+      return { rows: s.rows as RankedPlayer[], empty: s.empty };
+    },
+    [rankingsQuery.data],
+  );
+  const hasRankingRows = rankingRows.length > 0;
 
   const tiersStatusQuery = useQuery({
     queryKey: ['tiers-status'],
@@ -276,17 +297,15 @@ export default function TiersScreen() {
   const allPosRanks = useMemo(() => {
     if (position !== 'ALL') return null;
     const map = new Map<string, number>();
-    const data = rankingsQuery.data?.rankings as RankedPlayer[] | undefined;
-    if (!data) return map;
     const counts: Partial<Record<string, number>> = {};
-    const sorted = [...data].sort((a, b) => (b.elo ?? 0) - (a.elo ?? 0));
+    const sorted = [...rankingRows].sort((a, b) => (b.elo ?? 0) - (a.elo ?? 0));
     for (const p of sorted) {
       const n = (counts[p.position] ?? 0) + 1;
       counts[p.position] = n;
       map.set(p.id, n);
     }
     return map;
-  }, [position, rankingsQuery.data]);
+  }, [position, rankingRows]);
 
   const saveMutation = useMutation({
     // Wrap the tier save in a Sentry span — measures end-to-end latency
@@ -304,11 +323,20 @@ export default function TiersScreen() {
         for (const t of TIERS) for (const p of buckets[t]) stillAssigned.add(p.id);
         const cleared = Array.from(clearedPids).filter((id) => !stillAssigned.has(id));
 
+        // rookie-draft M2 — under scope the board on screen is a SUBSET, so
+        // the save is tagged scoped and the server applies the merged-band
+        // rule (each rookie lands exactly where the equivalent full-band
+        // save would put it; the vets around them are never respread) and
+        // does NOT mark the position complete.
+        const scopeOpts = rookieScope.isRookie
+          ? ({ scope: 'rookie', via: 'rookie_tiers' } as const)
+          : undefined;
+
         if (!isAllView) {
           // Only send the real tiers — `unassigned` isn't a tier on the server.
           const payload: Record<string, string[]> = {};
           for (const t of TIERS) payload[t] = buckets[t].map((p) => p.id);
-          return saveTiers(position, payload, cleared);
+          return saveTiers(position, payload, cleared, [], scopeOpts);
         }
 
         // #132 All view — /api/tiers/save is per-position (QB/RB/WR/TE
@@ -336,7 +364,7 @@ export default function TiersScreen() {
         // payload + the pool) — a cleared pid posted to the wrong position
         // would be silently ignored server-side.
         const posById = new Map<string, Position>();
-        for (const p of (rankingsQuery.data?.rankings as RankedPlayer[] | undefined) ?? []) {
+        for (const p of rankingRows) {
           posById.set(p.id, p.position as Position);
         }
         for (const p of buckets.unassigned) posById.set(p.id, p.position as Position);
@@ -349,7 +377,7 @@ export default function TiersScreen() {
           (pos) =>
             TIERS.some((t) => perPos[pos][t].length > 0) ||
             clearedByPos[pos].length > 0,
-        ).map((pos) => saveTiers(pos, perPos[pos], clearedByPos[pos]));
+        ).map((pos) => saveTiers(pos, perPos[pos], clearedByPos[pos], [], scopeOpts));
         return Promise.all(calls);
       }),
     onSuccess: () => {
@@ -426,12 +454,11 @@ export default function TiersScreen() {
 
   // Re-auto-bucket whenever the rankings response changes OR position switches.
   useEffect(() => {
-    const data = rankingsQuery.data;
-    if (!data?.rankings) return;
+    if (!hasRankingRows) return;
 
     // Players come back with per-position ELO + rank. The data shape is
     // any[] per api/rankings.ts so cast each row into RankedPlayer.
-    const players = (data.rankings as RankedPlayer[]).slice().sort(
+    const players = rankingRows.slice().sort(
       (a, b) => (b.elo ?? 0) - (a.elo ?? 0),
     );
 
@@ -446,7 +473,11 @@ export default function TiersScreen() {
       (tiersStatusQuery.data?.scoring_format as ScoringFormat) ||
       '1qb_ppr';
 
-    const bucketKey = `${position}:${fmt}`;
+    // rookie-draft M2: scope is part of the bucket identity. Without it a
+    // scope flip that kept position+format would be treated as a background
+    // refetch and the dirty-guard would hold the OTHER scope's unsaved
+    // layout on screen.
+    const bucketKey = `${position}:${fmt}:${rookieScope.scope}`;
     if (bucketKey === bucketKeyRef.current && bucketsDirtyRef.current) {
       return; // background refetch mid-edit — keep the user's unsaved layout
     }
@@ -466,7 +497,8 @@ export default function TiersScreen() {
     // position's pending clears.
     setClearedPids(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rankingsQuery.data, position, activeFormat, tiersStatusQuery.data?.scoring_format]);
+  }, [rankingRows, position, activeFormat, rookieScope.scope,
+      tiersStatusQuery.data?.scoring_format]);
 
   // ── Bulk move (multi-select) ────────────────────────────────────────
   // Collapse the selected chips into a CONTIGUOUS BLOCK and move the whole
@@ -1021,17 +1053,23 @@ export default function TiersScreen() {
   // layout.
   const resetMutation = useMutation({
     mutationFn: () => {
-      const data = rankingsQuery.data;
-      const players = (data?.rankings as RankedPlayer[] | undefined) ?? [];
+      const players = rankingRows;
+      // rookie-draft M2 — under scope `players` IS the rookie subset, so a
+      // reset clears exactly the rookies' overrides and leaves every vet
+      // override byte-unchanged (the scoped clear rides the same merged-band
+      // path, and still never marks the position complete).
+      const scopeOpts = rookieScope.isRookie
+        ? ({ scope: 'rookie', via: 'rookie_tiers' } as const)
+        : undefined;
       if (!isAllView) {
-        return saveTiers(position, {}, players.map((p) => p.id));
+        return saveTiers(position, {}, players.map((p) => p.id), [], scopeOpts);
       }
       // #132 All view — clear-only saves routed per position (the save
       // endpoint is per-position; see saveMutation).
       const byPos: Record<Position, string[]> = { QB: [], RB: [], WR: [], TE: [] };
       for (const p of players) byPos[p.position as Position]?.push(p.id);
       const calls = POSITIONS.filter((pos) => byPos[pos].length > 0).map(
-        (pos) => saveTiers(pos, {}, byPos[pos]),
+        (pos) => saveTiers(pos, {}, byPos[pos], [], scopeOpts),
       );
       return Promise.all(calls);
     },
@@ -1056,12 +1094,21 @@ export default function TiersScreen() {
   });
 
   const onResetToSuggested = useCallback(() => {
-    if (!rankingsQuery.data?.rankings) return;
+    if (!hasRankingRows) return;
+    // rookie-draft M2 — the dialog must name what will actually be cleared:
+    // under scope that is the rookies only, not the position's whole board.
+    const who = rookieScope.isRookie
+      ? isAllView ? 'every rookie' : `every rookie ${position}`
+      : isAllView ? 'every position' : position;
     Alert.alert(
-      isAllView
+      rookieScope.isRookie
+        ? isAllView
+          ? 'Reset ALL rookie tiers to suggested?'
+          : `Reset rookie ${position} tiers to suggested?`
+        : isAllView
         ? 'Reset ALL tiers to suggested?'
         : `Reset ${position} tiers to suggested?`,
-      `Your manual placements for ${isAllView ? 'every position' : position} ` +
+      `Your manual placements for ${who} ` +
         `will be cleared and replaced with the app's suggested tiers. ` +
         `This takes effect immediately.`,
       [
@@ -1073,7 +1120,7 @@ export default function TiersScreen() {
         },
       ],
     );
-  }, [rankingsQuery.data, position, resetMutation]);
+  }, [hasRankingRows, isAllView, position, resetMutation, rookieScope.isRookie]);
 
   // ── Render ──────────────────────────────────────────────────────────
   return (
@@ -1115,7 +1162,7 @@ export default function TiersScreen() {
             variant="ghost"
             compact
             label="Reset to suggested"
-            disabled={!rankingsQuery.data?.rankings}
+            disabled={!hasRankingRows}
             onPress={onResetToSuggested}
             style={styles.headerBtn}
           />
@@ -1149,6 +1196,13 @@ export default function TiersScreen() {
           disabled={formatSwitching}
         />
       </View>
+      )}
+
+      {/* rookie-draft M2 — the shared All players | Rookies control. Hidden
+          while the board is expanded (#81 gives the board the whole screen)
+          and gone entirely with `ranks.rookie_subset` off. */}
+      {expanded ? null : (
+        <RookieScopeControl surface="tiers" disabled={saveMutation.isPending} />
       )}
 
       {/* Position switcher — PositionTabs spec: segmented group, active
@@ -1288,6 +1342,15 @@ export default function TiersScreen() {
             onPress={() => rankingsQuery.refetch()}
           />
         </View>
+      ) : scopeEmpty ? (
+        /* rookie-draft M2 — a thin/unloaded rookie class is a designed
+           state, so it renders the shared notice rather than an empty board
+           the user could drag into. */
+        <RookieScopeEmpty
+          surface="tiers"
+          empty={scopeEmpty}
+          position={isAllView ? null : position}
+        />
       ) : (
         <View testID="tiers.list" style={styles.boardWrap}>
         <DraggableFlatList

@@ -113,6 +113,11 @@ const V2_SCREENS = {
           QuickSetTiers: 'quickset',
           QuickRank: 'quickrank',
           ManualRanks: 'ranks',
+          // rookie-draft M2 — the consolidated cross-position rookie view.
+          // Addressable like every other rank surface; the screen itself
+          // renders an honest unavailable state when `ranks.rookie_subset`
+          // is off (there is no in-app entry point in that state).
+          RookieRanks: 'rookies',
           Trends: 'trends',
         },
       },

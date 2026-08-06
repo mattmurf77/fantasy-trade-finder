@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Icon } from '../components/chalkline';
+import { Icon, TickLabel } from '../components/chalkline';
 import RankImportSheet from '../components/RankImportSheet';
 import Toast from '../components/Toast';
 import { setRankingMethod } from '../api/rankings';
@@ -15,6 +15,7 @@ import {
   PRIMARY_METHODS,
   type ChooserMethod,
 } from '../navigation/rankChooserModel';
+import { CONSOLIDATED_VIEW, useRookieScope } from '../state/rookieScope';
 
 // Build-your-board chooser — reached from the rank surfaces' "More ways to
 // rank" header path (since #122 the Rank tab defaults no-pref users straight
@@ -42,6 +43,13 @@ import {
 export default function RankHomeScreen({ navigation }: any) {
   const setPref = useSession((s) => s.setRankingMethodPref);
   const importOn = useFlag('ranks.import');
+  // rookie-draft M2 / O1-expanded — the chooser is where a user goes to
+  // find a way to rank, so the consolidated rookie view gets a discoverable
+  // home here as well as the in-context link on every rank surface's scope
+  // control. Entering from here also flips the shared scope to rookies, so
+  // the modes the user picks next are already scoped — the section and the
+  // control are two doors into ONE state.
+  const rookieScope = useRookieScope();
   const [moreOpen, setMoreOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -200,6 +208,34 @@ export default function RankHomeScreen({ navigation }: any) {
           </View>
         ) : null}
 
+        {rookieScope.enabled ? (
+          <View style={styles.rookieSection}>
+            <TickLabel>Rookies</TickLabel>
+            <Pressable
+              testID="rank-home.rookie-ranks"
+              accessibilityRole="button"
+              accessibilityLabel={CONSOLIDATED_VIEW.title}
+              accessibilityHint={CONSOLIDATED_VIEW.body}
+              onPress={() => {
+                haptics.selection();
+                rookieScope.setScope('rookie');
+                navigation.navigate(CONSOLIDATED_VIEW.route);
+              }}
+              style={({ pressed }) => [
+                styles.moreRow,
+                { borderBottomWidth: 0 },
+                pressed && { backgroundColor: ink.ink3 },
+              ]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.moreRowTitle}>{CONSOLIDATED_VIEW.title}</Text>
+                <Text style={styles.moreRowSub}>{CONSOLIDATED_VIEW.body}</Text>
+              </View>
+              <Icon name="chevron-right" size={16} color={chalk.dim} />
+            </Pressable>
+          </View>
+        ) : null}
+
         <Text style={styles.mixNote}>
           Every method writes to the same board — mix anytime. Change your
           pick in Settings.
@@ -313,5 +349,15 @@ const styles = StyleSheet.create({
   moreRowTitle: { fontFamily: fonts.uiSemi, fontSize: 14, color: chalk.base },
   moreRowSub: { ...type.bodySm, marginTop: 2 },
 
+  // rookie-draft M2 — the Rookies section reuses the "More ways" row
+  // construction so it reads as a peer entry, not a promo.
+  rookieSection: {
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.md,
+    paddingTop: space.sm,
+  },
   mixNote: { ...type.bodySm, color: chalk.faint, textAlign: 'center' },
 });
