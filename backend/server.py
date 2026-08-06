@@ -469,11 +469,14 @@ _SLEEPER_FIXTURES_DIR = os.environ.get("FTF_SLEEPER_FIXTURES_DIR")
 _SLEEPER_RECORD       = os.environ.get("FTF_SLEEPER_RECORD") == "1"
 
 if _TEST_MODE and not (_SLEEPER_FIXTURES_DIR and _players_cache_override
-                       and os.environ.get("FTF_DP_VALUES_FILE")):
+                       and os.environ.get("FTF_DP_VALUES_FILE")
+                       and os.environ.get("FTF_DP_PICK_VALUES_FILE")):
     raise SystemExit(
-        "FTF_TEST_MODE=1 requires FTF_SLEEPER_FIXTURES_DIR, FTF_PLAYERS_CACHE_FILE and "
-        "FTF_DP_VALUES_FILE — a test-mode backend that can reach live Sleeper/DynastyProcess "
-        "or write the real players cache is a rails hole (prd.md R-12).")
+        "FTF_TEST_MODE=1 requires FTF_SLEEPER_FIXTURES_DIR, FTF_PLAYERS_CACHE_FILE, "
+        "FTF_DP_VALUES_FILE and FTF_DP_PICK_VALUES_FILE — a test-mode backend that can "
+        "reach live Sleeper/DynastyProcess or write the real players cache is a rails "
+        "hole (prd.md R-12). FTF_DP_PICK_VALUES_FILE pins DynastyProcess's SECOND remote "
+        "file, files/values.csv (rookie-draft M6 slot values, T-M6-01).")
 if _SLEEPER_RECORD and _TEST_MODE:
     raise SystemExit("FTF_SLEEPER_RECORD is deliberately live — it cannot run with FTF_TEST_MODE=1.")
 if _SLEEPER_RECORD and _SLEEPER_FIXTURES_DIR and any(

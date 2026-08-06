@@ -21,6 +21,8 @@ Outputs (written atomically: staging dir + rename), for `--profile <name>`:
                                          server._load_sleeper_cache() expects
     <out>/dp-values/<name>.csv           DP-shaped values CSV for
                                          FTF_DP_VALUES_FILE (data_loader seam)
+    <out>/dp-values/<name>.picks.csv     DP-shaped PICK-row CSV for
+                                         FTF_DP_PICK_VALUES_FILE (M6 seam)
     <out>/<name>.manifest.json           schema hash, seed, flags, counts
 
 Exit codes (LLD §2.5):
@@ -745,6 +747,34 @@ def _dp_csv_text(world: World) -> str:
     return buf.getvalue()
 
 
+def _dp_pick_csv_text() -> str:
+    """DP-shaped *combined* values CSV carrying only `pos == "PICK"` rows, for
+    the data_loader FTF_DP_PICK_VALUES_FILE seam (rookie-draft M6).
+
+    `values.csv` is a SECOND live DynastyProcess egress, so `backend/server`
+    refuses to start in test mode without this file pinned. The world does not
+    model draft picks, so the curve is synthetic-but-shaped: a geometric decay
+    over the 12-team slots of rounds 1-5, plus the three 2027 first-round
+    rungs. Values only need to be positive, monotone and DP-scaled — the
+    harness renders them, it does not calibrate against them.
+    """
+    buf = io.StringIO()
+    writer = csv.writer(buf, quoting=csv.QUOTE_ALL, lineterminator="\n")
+    writer.writerow(["player", "pos", "value_1qb", "value_2qb"])
+    n = 0
+    for round_no in range(1, 6):
+        for slot in range(1, 13):
+            n += 1
+            v1 = max(1, round(5600 * (0.82 ** (n - 1))))
+            writer.writerow([f"{SEASON} Pick {round_no}.{slot:02d}", "PICK",
+                             v1, round(v1 * 1.25)])
+    for label, v1 in ((f"{SEASON + 1} Early 1st", 3347),
+                      (f"{SEASON + 1} Mid 1st", 1554),
+                      (f"{SEASON + 1} Late 1st", 754)):
+        writer.writerow([label, "PICK", v1, round(v1 * 1.25)])
+    return buf.getvalue()
+
+
 def _league_meta(world: World, lid: str) -> dict:
     lg = world.leagues[lid]
     spec = lg["spec"]
@@ -925,6 +955,11 @@ def seed_profile(name_or_path: str, out_dir: str | Path = DEFAULT_OUT_DIR,
         dp_path.parent.mkdir(parents=True, exist_ok=True)
         dp_path.write_text(_dp_csv_text(world))
 
+        # 4b) DynastyProcess PICK values CSV (FTF_DP_PICK_VALUES_FILE seam) —
+        #     the second remote file, pinned so test mode has no egress hole.
+        dp_picks_path = staging / "dp-values" / f"{name}.picks.csv"
+        dp_picks_path.write_text(_dp_pick_csv_text())
+
         # 5) manifest (last — its presence marks a complete seed)
         counts["sleeper_fixtures"] = len(cassettes)
         manifest = {
@@ -942,6 +977,7 @@ def seed_profile(name_or_path: str, out_dir: str | Path = DEFAULT_OUT_DIR,
                 "sleeper_dir": f"sleeper/{name}",
                 "players_cache": f"players-cache/{name}.json",
                 "dp_values": f"dp-values/{name}.csv",
+                "dp_pick_values": f"dp-values/{name}.picks.csv",
             },
             "pool_fixture": POOL_FIXTURE.name,
         }
@@ -956,6 +992,7 @@ def seed_profile(name_or_path: str, out_dir: str | Path = DEFAULT_OUT_DIR,
         os.replace(db_path, out_dir / f"{name}.db")
         os.replace(cache_path, out_dir / "players-cache" / f"{name}.json")
         os.replace(dp_path, out_dir / "dp-values" / f"{name}.csv")
+        os.replace(dp_picks_path, out_dir / "dp-values" / f"{name}.picks.csv")
         os.replace(manifest_path, out_dir / f"{name}.manifest.json")
     except SeederError:
         raise
@@ -1011,6 +1048,7 @@ def print_env(name: str, out_dir: str | Path = DEFAULT_OUT_DIR,
         f"FTF_SLEEPER_FIXTURES_DIR={q(str(out_dir / 'sleeper' / name))}",
         f"FTF_PLAYERS_CACHE_FILE={q(str(out_dir / 'players-cache' / (name + '.json')))}",
         f"FTF_DP_VALUES_FILE={q(str(out_dir / 'dp-values' / (name + '.csv')))}",
+        f"FTF_DP_PICK_VALUES_FILE={q(str(out_dir / 'dp-values' / (name + '.picks.csv')))}",
         f"FTF_FLAGS={q(flags_json)}",
         "FTF_TEST_MODE=1",
         f"FTF_TEST_PROFILE={q(name)}",

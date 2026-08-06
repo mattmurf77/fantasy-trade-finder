@@ -95,6 +95,7 @@ def test_profile_outputs_exist(seeded, name):
     assert (out_dir / "sleeper" / name).is_dir()
     assert (out_dir / "players-cache" / f"{name}.json").exists()
     assert (out_dir / "dp-values" / f"{name}.csv").exists()
+    assert (out_dir / "dp-values" / f"{name}.picks.csv").exists()
     assert manifest["profile"] == name
     assert manifest["seed"] == SEED
     assert manifest["season"] == 2026
@@ -467,8 +468,12 @@ def test_print_env_block(seeded, capsys):
         out_dir.resolve() / "players-cache/standard.json")
     assert kv["FTF_DP_VALUES_FILE"] == str(
         out_dir.resolve() / "dp-values/standard.csv")
+    # M6 — values.csv is a SECOND DynastyProcess egress and the backend now
+    # startup-aborts in test mode without it pinned (T-M6-01).
+    assert kv["FTF_DP_PICK_VALUES_FILE"] == str(
+        out_dir.resolve() / "dp-values/standard.picks.csv")
     assert kv["FTF_TEST_MODE"] == "1"
-    assert len(lines) == 7
+    assert len(lines) == 8
     assert kv["FTF_TEST_PROFILE"] == "standard"
     flags = json.loads(kv["FTF_FLAGS"])
     assert flags == manifest["flags"]
