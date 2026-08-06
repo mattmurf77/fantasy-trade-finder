@@ -76,42 +76,128 @@ Adopt `docs/plans/rookie-draft/mock-draft-plan.md` §4–9 — **now tracked on 
 
 **M12 — view a Sleeper mock: REJECT unless S-2 passes.** Concretely broken without a league: unreachable by route (`league_not_found`), ownerless slots, empty `my_picks`, no traded-pick overlay, no rostered subtraction, and mocks are typically 15+ rounds ⇒ classified startup ⇒ undrafted suppressed ⇒ the room renders nothing. Even if S-2 passes it is the lowest-value batch here.
 
-## 6. W3 — Asserted availability tracking (item 2) · 3.5 batches · scope CONDITIONAL on S-1
+## 6. W3 — ESPN pick assignment · Draft Room state · offline recording (item 2, REVISED)
 
-**Store (per-user, ownership-free, append-only):**
+**Supersedes the prior §6 entirely.** Operator revisions (2026-08-06): picks tie to rosters again; assignment lives on the **League tab, separate from the draft feature**; the ESPN Draft Room shows "picks have not been assigned"; any user may record picks during a real offline draft; **no user-entered values**; **assigned picks are TRADEABLE**.
+
+### 6.0 Prior-plan artifacts this REVERSES (builders must be told)
+
+| Artifact | Status |
+|---|---|
+| §2 "Out": writing `draft_picks` / flipping `picks_supported` | **REVERSED — now the core of the work** |
+| §2 "Out": a board grid with slots/owners; "the schema must not be able to express ownership" | **REVERSED — ownership IS the feature** |
+| Prior §6 "standalone, doesn't link to league rosters" | **REVERSED by the operator** |
+| **D2** (import-graph proof no manual module reaches the engine) | **DELETED — a builder honoring it cannot build this.** Replaced by D12/D13 |
+| **D3** (golden identity with a populated session) | **RESTATED as flag-OFF-only.** Flags ON, responses must change — that is the point |
+| **D4** (platform-wins supersede machinery) | **RETIRED from W3** — ESPN has no draft object, ever; nothing can supersede. Recovers ≈0.5 batch |
+| §8 O4 ("ownership later or never") | **CLOSED — now, tradeable, staged** |
+
+### 6.1 RESOLVED DISAGREEMENT — storage: write `draft_picks` with a provenance triple
+
+The two lenses split. **Risk lens:** never write `draft_picks` — `replace_draft_picks` is an unconditional DELETE+insert and `pick_id`'s unique key has no user dimension, so a second writer destroys the first and any platform sync wipes the board. **Execution lens:** write it — the grain is *already exactly* `pick_id = {league}_{season}_{round}_{original_roster}`; seven read sites share five pieces of pricing/labelling machinery (including the inverse bridge `inv_pick_value` at `server.py:8655`) that a parallel store must reimplement or adapter-convert into `draft_picks` shape anyway; and **MFL is a working precedent** — `_sync_mfl_owned_picks` builds rows outside the Sleeper sync, stamps `platform`, and calls `replace_draft_picks`.
+
+**RESOLUTION: the execution lens wins, because the risk lens's objection was written for the per-user isolation model the operator has now rejected.** Under shared league truth, one row per slot is *correct*, so the "no user dimension" property is a feature. Its destruction concern is real but hypothetical (nothing calls `replace_draft_picks` for an ESPN league today) and is closed mechanically:
+- `replace_draft_picks(..., preserve_source: str | None = None)`; the assignment projection is the only caller passing `'user'`, and every other caller's DELETE is scoped to `source != 'user'` for platforms with no pick ownership.
+- **D12** (AST/import-graph) asserts no path outside the assignment routes reaches `replace_draft_picks`/`sync_draft_picks` for a `platform='espn'` league.
+- Every write emits a `pick_assignment_changed` user_event, so any loss is reconstructible.
+
 ```
-manual_draft_sessions(id, user_id, league_id, season, platform,
-                      mode 'paste'|'live', status 'active'|'superseded'|'abandoned'|'archived',
-                      marked_count, created_at, updated_at, superseded_by, superseded_at)
-manual_draft_marks(id, session_id, player_id, action 'mark'|'unmark',
-                   source 'user_paste'|'user_tap', marked_at,
-                   UNIQUE(session_id, player_id, marked_at))
-                      -- NO slot, NO round, NO owner. The schema cannot express ownership.
-                      -- `action` is what makes undo NON-DESTRUCTIVE (D6 demands both
-                      --  "undoable" and "never destructive"; a bare DELETE gives neither).
-                      --  The single renderer folds to the LATEST row per player.
-                      --  `marked_count` is DERIVED, or written in the same transaction —
-                      --  a denormalized counter drifts from the marks on double-tap.
-                      --  (session_id, player_id) is also the idempotency key for the
-                      --  offline queue: live marking happens in venues with bad wifi, so
-                      --  marks queue locally and replay idempotently, or the <40%/60%
-                      --  coverage abort metric measures connectivity, not user intent.
+draft_picks:  + source       TEXT  -- 'platform' (NULL reads as platform) | 'user'
+              + assigned_by  TEXT  -- FTF user_id of last editor
+              + assigned_at  TEXT  -- ISO8601; also the optimistic-concurrency token
 ```
-Five properties, each answering a named failure: per-**user** (no cross-user blast radius); **no ownership columns** (keeps manual data structurally out of the trade engine); read by exactly one renderer; **never writes `leagues.draft_status*`**; always labeled in transit.
+Added through the existing additive-column migration seam (the same one that added `pool_value`/`platform`). No backfill.
 
-**The O9 tension, resolved:** O9 rejected a manual *draft-status override* because it makes user input feed `current_year_picks_visible()` → #228 pick hiding → #207 rung labels → asset math. That poison stays rejected. Separate the concepts: **board content** ("who's gone") lives in per-user marks read by one renderer; **visibility** ("should a draft surface appear for me") becomes `userIsTrackingDraft(leagueId)` — a record of the user's own act, not an assertion about the world. `leagueQualifiesForDraftTab()` stays byte-unchanged; the union happens at the call site in a separately-named function. Enforced by D2/D3 plus a test that the shipped predicate's source is unmodified. **If the store is ever made league-scoped or gains ownership columns, O9's objection lands and this must not ship.**
+**Containment is the default, not a table split.** Both lenses independently converged here: `load_draft_picks(..., source='platform')` **defaults to platform-only**, so all seven existing call sites stay byte-identical until explicitly opted in, one at a time. Safe-by-default, greppable, testable.
 
-**Composition:** `draft_board_service` is untouched and never imports the manual store. The **route** builds the platform board first; only when it is `unavailable`/`platform_unsupported` (or the league has no current-season draft object) does it hand off to a manual renderer emitting the same `schema:1` envelope with `source:"user"`. New states ride `notice.code` (`manual_available`, `manual_tracking`, `manual_archived`) — never a new member of a closed enum.
+**`picks_supported` becomes a DATA test, not a platform test:** `platform != "espn" or bool(assigned_rows)` — ESPN with no assignments still honestly says false. Note (verified by both lenses): `picks_supported` is a **display label only**, appearing twice inside `/api/league/picks`; the two engine guards are **duplicated literals** at `server.py:4571` and `:9310`, not shared — factor them into one `_owned_picks_available()` helper or they drift the moment one is relaxed.
 
-**Standalone by operator ruling (2026-08-06): "it doesn't need to link to league rosters."** This is a significant simplification and it resolves the league-source problem above: a tracking session is a **standalone draft tracker** keyed to the user, not a projection of a league's roster state. Consequences, all favorable — the undrafted list is the rookie class minus marks (no rostered subtraction, so no crosswalk dependency and no ESPN roster freshness coupling); it works for a league FTF has never seen; it needs no entry in the tab's league list; and it removes the "two FTF users in one league disagree" problem entirely because nothing is league-scoped. `league_id` becomes an OPTIONAL label on the session (for the user's own orientation and for the D4 supersede path when a league does exist), never a data dependency.
+### 6.2 The conservation bound — what the operator's "no values" ruling bought
 
-**Interaction:** **one tap = taken, no attribution** (the 80% of the value; attribution is the expensive half). Undo always. Persistent "N of 48 recorded." **Paste-recap import ships FIRST** (one action for all 48, reusing the shipped tolerant paste parser + fuzzy pool matcher from `rankings_import`), then live marking.
+Because price is a pure server-side function of `(round, season−current, format)` via the **shipped** `pick_pool_value` (the identical function Sleeper's sync uses), and because every owner must be an existing `league_members` row inside a fixed `rounds × total_rosters` grid, this holds provably:
 
-**O9 invariant is pinned BEHAVIORALLY, not by source-text identity** — a table test over the (status × confidence × platform) verdict matrix plus the D2 import-graph test. (`leagueQualifiesForDraftTab` has already changed twice this session; "assert the source is unmodified" would be brittle by construction.)
+> **Total asserted pick value in a league equals that of an equivalent Sleeper league of the same size. A bad or malicious assignment can REDISTRIBUTE value; it can never CREATE it.**
 
-**Placement:** the League tile and the Acquire chip — **the seasonal tab stays hidden for ESPN in V1** (matching the defect fix in §0.3: no tab without a renderable board). Tab qualification from an active asserted session ships dark and flips only after a pilot.
+The only inflation lever is `rounds` — clamp to the shipped `ROOKIE_MAX_ROUNDS = 8` (V1 caps at 5). This is the strongest safety property in the design and it is a direct consequence of the operator's ruling.
 
-**Numeric abort:** instrument marks per session. If <40% of started live sessions reach 60% coverage within 24h in the first real window, retire live marking and keep paste-recap only.
+### 6.3 Concurrency + disagreement (both lenses' answers, combined)
+
+- **Per-SLOT last-writer-wins with optimistic concurrency** (execution lens): `PUT` carries the `assigned_at` the client read; mismatch ⇒ **409 + current row** ⇒ "Dana changed this 4 minutes ago — keep theirs, or use yours?" Two users fixing two different picks never collide. No locks, no roles, no approval.
+- **Persistent disagreement ⇒ contested ⇒ UNPRICED** (risk lens): if the same slot is reassigned to a *different* owner by ≥2 distinct users, mark it contested, **exclude it from the priced union entirely**, and show it as an open question. Rationale: the worst outcome isn't disagreement, it's the engine silently re-pricing back and forth while two people correct each other. A visible hole beats invisible churn.
+- **Audit trail is `user_events`**, not a new table — `pick_assignment_changed {league, season, round, original_team, old_owner, new_owner, actor}`.
+- **Escalation trigger:** >5% of slots edited by ≥2 distinct users within 7 days ⇒ stop widening; consider commissioner designation. Below that, ship as-is.
+
+### 6.4 Staged read-site enablement — this IS the containment
+
+Do not light all seven at once. Each stage is a release gate.
+
+| Stage | Sites | User gains | Blast radius |
+|---|---|---|---|
+| **S1** | `/api/league/picks` (8558), `evaluate` (8104) | sees and prices their picks in the calculator | acting user |
+| **S2** | power rankings (17230), own outlook seed (4387) | draft capital in standings; better outlook | league-visible, descriptive |
+| **S3** | owned-pick injection (8629), opponent shares (4526) | picks appear in **generated suggestions** | unsolicited recommendations about others' assets |
+| **S4** | `_roster_eveners` (953) | one-tap "add their 2027 1st" sweeteners | **highest** |
+
+**Ship S1 in this wave; S2 at the pilot; HOLD S3 and S4 until the contested rate is measured.** "FTF told me to ask for a pick I don't own" is the reputational failure that gets an app deleted. Filtering S4 is one predicate.
+
+### 6.5 Milestones
+
+**M-A — assignment (League tab) · flag `picks.assign`.** Store + seeder + routes (`GET/PUT /api/league/pick-assignments`, `POST …/order`) + `PickAssignmentScreen`.
+**The 48-tap problem — three defaults, in priority order:** (1) **seed the pristine grid** — every team owns its own picks, so a league with 3 trades leaves 45 slots untouched; (2) **order is set once**, a drag list of N teams for round 1 + a snake/linear toggle — and note the execution lens's finding that **snake vs linear changes slot NUMBERING only, never ownership**, so the toggle is safe; (3) **edit only the traded ones**, which float into a "Traded picks" review summary. Progress explicit, save per-slot, no giant dirty form.
+**Entry point: a dedicated "Draft picks" section BELOW Explore** — *not* a 4th Explore tile (that row is a fold-budgeted 3-across grid already contested by `draft.room`/`league.rookie_board_entry`). Sub-line reads "Not assigned yet" / "48 of 48 · 3 traded". This also keeps assignment visibly "separate from the draft feature," as the operator asked.
+
+**M-B — Draft Room ESPN state · same flag.** New `notice.code = picks_not_assigned` (**no new member of any closed enum** — `state` stays `unavailable`); flag off ⇒ byte-identical `platform_unsupported`; assignments present ⇒ a real `upcoming` board (order from the grid, `picks: []`, full rookie class undrafted) with **zero platform egress**. CTA routes to M-A. Note the operator called this an "error" — it is an **unconfigured state with a user-performable fix**, and the copy must read that way.
+
+**M-C — trade-math activation · SEPARATE flag `picks.assign_tradeable`.** The seven sites opt in per §6.4; both engine guards → one helper; provenance `source` on every payload that prices a pick; UI label **"Member-entered — not verified with ESPN"** on all five priced surfaces, each with a one-action correction deep-link (`{leagueId, season, focusPickId}`). **Two flags, deliberately:** trade math can be killed without destroying the 48 rows the user typed.
+
+**M-D — live offline recording · flag `draft.manual_picks` (separate wave).** `recorded_picks(… league, season, round, slot, overall, picking_team_id, player_id, recorded_by, voided_at, UNIQUE(league,season,overall))`. **Both lenses converged and the risk lens retracted its earlier burden argument:** with the grid assigned, attribution costs ZERO extra gestures — the app knows whose pick 1.03 is, so recording stays ~two taps (tap player → confirm) with the cursor auto-advancing, and the team is editable only when the grid was wrong. **One recorder for all 48 picks, any linked user.** Non-destructive undo via `voided_at`. `(league, season, overall)` is the offline-queue idempotency key — **copy `mobile/src/api/events.ts`'s battle-tested AsyncStorage queue contract verbatim** (uuid idempotency, backoff, foreground flush, `{accepted, deduped, rejected}` reconciliation); do not invent a second one. **`overall` is legitimate here and must never leak backwards onto a `draft_picks` row.**
+
+### 6.6 Two live defects this wave inherits
+
+- **P-1 (BLOCKING for M-A, live TODAY):** `useSession.connectLeague` **replaces** the league cache with `/api/sleeper/leagues` output, which filters to non-numeric ids and therefore contains **no ESPN league**. So connecting any Sleeper league mid-session silently drops every ESPN row — the ESPN re-sync button already disappears this way, and the assignment tile would inherit it. **Fix (≈6 lines + test, owned by M-A): make `connectLeague` MERGE, preserving cached rows whose platform is not `sleeper`.**
+- **P-2 (out of scope, budgeted):** the seasonal Draft tab stays ESPN-blind — three independent guards (the non-numeric filter, the predicate's ESPN line, and the `confidence === 'high'` requirement ESPN can never meet). Under the revision the League tab is the entry point, so this is not needed. If ever wanted: 0.5 batch, its own gate. **Recommend: cut for V1.**
+
+### 6.7 Done-criteria (replacing D2/D3/D4 for this wave)
+
+| # | Criterion |
+|---|---|
+| **D12** | Containment by default: `load_draft_picks` defaults `source='platform'`; an AST test enumerates every call site and asserts only the sanctioned set opts in; no path outside the assignment routes reaches `replace_draft_picks`/`sync_draft_picks` for an ESPN league; no path writes `leagues.draft_status*` from user input (**O9 survives, pinned behaviorally — not by source-text identity**) |
+| **D13** | **No user-entered values, ever.** No assignment route accepts a value field; every `source='user'` row's price is byte-equal to `compute_pick_value`/`pick_pool_value` for its (round, years_out, format). Conservation bound property-tested |
+| **D14** | Pristine-seed correctness: exactly R×N slots, each owned by its original team, idempotent re-seed, orphaned owner ids surface as re-assign rows and are excluded from pricing — never silently dropped |
+| **D15** | The ESPN room is honest in all three states (flag off / assigned-none / assigned-some), zero platform egress |
+| **D16** | Concurrent edits never silently clobber (409 on stale CAS; different slots both succeed); every write emits its audit event |
+| **D17** | Provenance is inescapable: `source` on every payload that prices an asserted pick + the label and correction path on all five priced surfaces |
+| **D18** | Recording is idempotent and non-destructive; replaying the offline queue changes nothing; `overall` never appears on a `draft_picks` row |
+| **D10** | Both new flags OFF ⇒ byte-identical on all seven sites + board/picks/evaluate/power-rankings; zero new entry points; `schema` stays 1 |
+
+### 6.8 Effort, risks, aborts
+
+W3 grows **3.5 → ≈5.25 batches** (ownership was previously explicitly out of scope); plan total ≈**10.25**, offset ≈0.5 by retiring D4.
+
+| Risk | Numeric abort |
+|---|---|
+| **Adoption — nobody completes the grid**, so everything downstream is inert (highest-probability failure, and measured before the expensive halves matter) | <50% of started grids reach 100% within 72h in the pilot ⇒ cut M-C and M-D; keep assignment as a draft-board-only surface |
+| Live recording abandoned in a real draft room | <40% of started sessions reach 60% of slots in 24h ⇒ retire recording, keep the grid + board (which stand alone). **Report split by whether a grid existed**, or it conflates two failures |
+| Offline queue integrity | **Zero tolerance** — any duplicate or lost pick after reconnect ⇒ recording stays on the allowlist. That is an idempotency bug, not a UX metric |
+| Containment | If D10's golden diff cannot be made green on any un-opted site, the wave **stops at M-A** |
+| Persistent multi-user disagreement | >5% of slots contested in 7 days ⇒ S3/S4 do not open |
+
+### 6.9 Residual risks the operator is accepting knowingly
+
+1. **A leaguemate can change what FTF recommends to you.** Inherent to shared truth. Bounded by the conservation bound, contested-⇒-unpriced, one-action correction, and staged propagation — but not engineerable away.
+2. **There is usually no corrector.** Most ESPN leagues will have exactly one FTF user, so the realistic failure is one person's honest mistake persisting unnoticed — wiki mechanics without a wiki-sized crowd. This is why entry correctness (pristine seed, confirm-the-board step) matters more than conflict resolution.
+3. **No self-healing.** Unlike Sleeper/MFL, ESPN will never contradict a wrong grid. A bad assignment is wrong until a human fixes it.
+4. **Spent picks linger** unless retired — current-season assigned picks should hard-retire on a fixed date (Sept 1) in addition to the existing rosters-heuristic path.
+5. **Provenance is a badge, and users skim badges.** Structural disclosure still reads as "FTF says" to some users — the strongest argument for holding S4.
+
+### 6.10 Open questions needing the operator
+
+- **O-D1 — Snake or linear default?** (Numbering only, never ownership — so the toggle is safe either way.) Recommend **linear** for rookie drafts; confirm.
+- **O-D2 — Default rounds?** Recommend **4**, capped at 5 in V1.
+- **O-D3 — Future seasons (2027/2028/2029 picks)?** The operator described 1.01–4.12 (this year). But **most dynasty pick value lives in future firsts**, and the pristine-seed default makes the seeder change a loop bound — though the grid becomes ~4× larger to review. Recommend **current season in V1, future seasons as the first follow-on** (expect it to be requested the moment trade math lights up).
+- **O-D4 — Do assigned picks enter generated suggestions (S3/S4) at all in V1?** Recommend **no** — S1/S2 only, gate S3/S4 on the measured contested rate.
+- **O-D5 — Rookie-only framing?** Assignment is round-count-agnostic and would work for an ESPN redraft, but that reopens O5 (startup support). Recommend rookie-only copy in V1.
+- **A new ADR is warranted** — "user-asserted pick ownership is league-scoped truth in `draft_picks`" reverses a documented invariant and must not live only in a plan file.
 
 ## 7. Sequencing, effort, concurrency
 
