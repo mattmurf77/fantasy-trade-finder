@@ -1556,6 +1556,33 @@ accuracy_scores_table = Table("accuracy_scores", metadata,
     Index("ix_accuracy_scores_user", "user_id"),
 )
 
+# ── draft-extensions W2 — FTF-native mock draft (plan §5, lld §3.3) ────────
+# A resumable simulation is genuinely stateful: in-memory state dies on a
+# Render spin-down, which is a real event on the free plan. `server_default`
+# (not Python `default`) so a raw-SQL insert cannot produce NULL — the
+# referrals_table precedent above.
+#
+# One active mock per (user, league) is enforced in APPLICATION CODE inside
+# the create transaction, not by a constraint: `UniqueConstraint(user_id,
+# league_id, status)` would also block a second *abandoned* row, and the
+# partial unique index that fixes that is dialect-divergent across
+# SQLite/Postgres.
+mock_drafts_table = Table("mock_drafts", metadata,
+    Column("id",         Integer, primary_key=True, autoincrement=True),
+    Column("user_id",    String,  nullable=False),
+    Column("league_id",  String,  nullable=False),
+    Column("season",     Integer, nullable=False),
+    Column("status",     String,  nullable=False, server_default="active"),
+                                                  # active | complete | abandoned
+    Column("settings",   Text,    nullable=False),  # JSON — mock_draft_service.build_settings
+    Column("picks",      Text,    nullable=False, server_default="[]"),
+                                                  # JSON array, append-only
+    Column("rng_seed",   Integer, nullable=False),
+    Column("created_at", String),
+    Column("updated_at", String),
+    Index("ix_mock_drafts_user_league", "user_id", "league_id"),
+)
+
 # Default values seeded on first run.  Only inserted if the key doesn't
 # already exist (INSERT OR IGNORE) so manual overrides survive re-deploys.
 _MODEL_CONFIG_DEFAULTS = [
@@ -9766,3 +9793,93 @@ def count_recent_shared_packages(user_id: str, *, hours: int = 1) -> int:
                         shared_packages_table.c.created_at >= cutoff))
         ).scalar()
     return int(n or 0)
+
+
+# ---------------------------------------------------------------------------
+# Mock drafts — draft-extensions W2 (plan §5, lld §3.3)
+# ---------------------------------------------------------------------------
+# Thin persistence for `backend/mock_draft_service`. The engine owns every
+# rule; these four functions only move rows. `settings` and `picks` are opaque
+# JSON strings here on purpose — the shapes belong to the service, and
+# re-parsing them in two places is how two vocabularies start.
+
+def create_mock_draft(user_id: str, league_id: str, season: int,
+                      settings_json: str, picks_json: str,
+                      rng_seed: int, status: str = "active") -> int:
+    """Insert one mock, abandoning any prior ACTIVE row for the same
+    (user, league) in the SAME transaction. Returns the new row id.
+
+    The abandon-then-insert pair is what enforces "one active mock per user
+    per league" (lld §3.3); doing it in one transaction is what stops a
+    double-tapped create from leaving two active rows behind.
+    """
+    now = _now()
+    with engine.begin() as conn:
+        conn.execute(
+            mock_drafts_table.update()
+            .where(and_(mock_drafts_table.c.user_id == str(user_id),
+                        mock_drafts_table.c.league_id == str(league_id),
+                        mock_drafts_table.c.status == "active"))
+            .values(status="abandoned", updated_at=now)
+        )
+        result = conn.execute(insert(mock_drafts_table).values(
+            user_id=str(user_id), league_id=str(league_id), season=int(season),
+            status=status, settings=settings_json, picks=picks_json,
+            rng_seed=int(rng_seed), created_at=now, updated_at=now,
+        ))
+    return int(result.inserted_primary_key[0])
+
+
+def load_mock_draft(mock_id: int, user_id: str | None = None) -> dict | None:
+    """One mock by id, optionally scoped to its owner (the authz check)."""
+    conditions = [mock_drafts_table.c.id == int(mock_id)]
+    if user_id is not None:
+        conditions.append(mock_drafts_table.c.user_id == str(user_id))
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(mock_drafts_table).where(and_(*conditions))
+        ).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def load_current_mock_draft(user_id: str, league_id: str) -> dict | None:
+    """The user's ACTIVE mock for this league, else its most recent COMPLETE
+    one (the resume-or-recap contract of `GET /api/mock-draft`)."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(mock_drafts_table)
+            .where(and_(mock_drafts_table.c.user_id == str(user_id),
+                        mock_drafts_table.c.league_id == str(league_id),
+                        mock_drafts_table.c.status == "active"))
+            .order_by(mock_drafts_table.c.id.desc())
+            .limit(1)
+        ).fetchone()
+        if row is None:
+            row = conn.execute(
+                select(mock_drafts_table)
+                .where(and_(mock_drafts_table.c.user_id == str(user_id),
+                            mock_drafts_table.c.league_id == str(league_id),
+                            mock_drafts_table.c.status == "complete"))
+                .order_by(mock_drafts_table.c.id.desc())
+                .limit(1)
+            ).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def update_mock_draft(mock_id: int, user_id: str, *, picks_json: str | None = None,
+                      status: str | None = None) -> bool:
+    """Persist an advanced (or abandoned) mock. Owner-scoped; False when the
+    row is not the caller's."""
+    values: dict = {"updated_at": _now()}
+    if picks_json is not None:
+        values["picks"] = picks_json
+    if status is not None:
+        values["status"] = status
+    with engine.begin() as conn:
+        result = conn.execute(
+            mock_drafts_table.update()
+            .where(and_(mock_drafts_table.c.id == int(mock_id),
+                        mock_drafts_table.c.user_id == str(user_id)))
+            .values(**values)
+        )
+    return bool(result.rowcount)

@@ -415,6 +415,20 @@ FLAG_KEYS: tuple[str, ...] = (
     # as today. `GENERIC_PICK_SEEDS`, the tier ladder and the tier bands are
     # byte-unchanged in BOTH modes — this flag reprices owned picks only.
     "trade.slot_pricing",
+    # draft-extensions W2 — the FTF-native mock draft. Gates all four
+    # /api/mock-draft routes; effective gating is `draft.room` AND
+    # `draft.mock`. Independent of `draft.live_poll` (the mock never polls),
+    # `draft.mfl` and `picks.slot_values`.
+    # OFF (default) ⇒ every mock route 404s `feature_disabled` before any
+    # session work, the `mock_drafts` table is never read or written, and no
+    # other route's response changes.
+    # NOTE: this flag stays OFF beyond the usual "lands dark" convention. W2's
+    # calibration gate FAILED on 2026-08-06 (mock_draft_service.CPU_MODEL_VALIDATED
+    # is False; see docs/plans/draft-extensions/mock-calibration-2026-08.md),
+    # so the plan's abort criterion cut the CPU-bot mock. With the flag ON the
+    # create route answers the typed-empty `{"empty": true, "reason":
+    # "cpu_model_unvalidated"}` rather than serving unvalidated bots.
+    "draft.mock",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

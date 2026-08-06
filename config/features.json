@@ -146,5 +146,7 @@
   "draft.live_poll": false,
   "draft.mfl": true,
   "picks.slot_values": true,
-  "trade.slot_pricing": true
+  "trade.slot_pricing": true,
+  "_comment_draft_extensions": "2026-08-06 Draft-surface extensions (docs/plans/draft-extensions/). draft.mock gates the four /api/mock-draft routes and the mobile mock surface; effective gating is draft.room AND draft.mock, and it is independent of draft.live_poll (the mock never polls), draft.mfl and picks.slot_values. It stays OFF beyond the usual lands-dark convention: W2's calibration gate FAILED (docs/plans/draft-extensions/mock-calibration-2026-08.md), so the plan's W2 abort criterion cut the CPU-bot mock. With the flag ON the create route answers the typed-empty {empty:true, reason:'cpu_model_unvalidated'} instead of serving bots whose noise model failed hold-out validation.",
+  "draft.mock": false
 }

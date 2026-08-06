@@ -247,6 +247,15 @@ release gate. M0 (the player-cache refresh) is deliberately **not** flag-gated �
 | `draft.live_poll` | false | M4 live polling — the Draft Room refetching **our own** `/api/draft/board` every 15 s. Three gates, all required: the flag, the screen being focused, and the app being foregrounded; polling additionally stops unless the board's own `state == "live"`. **Blurred or backgrounded is ZERO requests** (the QA pass threshold is literally zero). The manual **Refresh** control is present flag-on or flag-off, so the room is fully usable dark. Flip gate: the throwaway-league live test (plan O7) — a release gate, not a build gate. |
 | `draft.mfl` | false | M5 MFL parity. Gates the **MFL binding** inside `GET /api/draft/board` — the renderer itself already ships and is fixture-tested. ON ⇒ an MFL league's board is built from `TYPE=draftResults` ([api-reference § MFL league linking](api-reference.md#mfl-league-linking)), whose pre-populated grid carries a franchise on **every** pick, made or not, so MFL's pre-draft ownership is strictly better than Sleeper's (D8); an expired MFL cookie serves the stored snapshot with `notice.mfl_reconnect` + `stale:true`, **never stale-as-live**. **Off ⇒ an MFL league gets the byte-identical `platform_unsupported` payload M3 shipped and ZERO MFL reads are attempted** — no league-row lookup, no crosswalk load, no export call. Sleeper responses are unchanged either way (D10). **Live mode is release-gated separately:** a drafting MFL league reports `state:"live"` honestly, but MFL's mid-draft update latency is UNVERIFIED — recurring refresh stays behind `draft.live_poll` until the timed probe in [build-m5](plans/rookie-draft/build-m5.md#the-live-probe) passes. Flipping `draft.mfl` on starts no poll. |
 
+### Draft-surface extensions (2026-08-06)
+
+Registered under the `_comment_draft_extensions` block in `config/features.json`; plan/HLD/LLD in
+[docs/plans/draft-extensions/](plans/draft-extensions/).
+
+| Flag | Default | Gates |
+|---|---|---|
+| `draft.mock` | false | **W2** — the FTF-native mock draft: all four `/api/mock-draft` routes ([api-reference § Mock draft](api-reference.md#mock-draft-flag-draftmock)) and the mobile mock surface. Effective gating is `draft.room` **AND** `draft.mock`; it is independent of `draft.live_poll` (the mock never polls), `draft.mfl` and `picks.slot_values`. **Off ⇒ every mock route 404s `feature_disabled` before any session work, the `mock_drafts` table is never touched, and no other route's response changes.** ⚠️ **This flag stays OFF beyond the usual lands-dark convention.** W2's calibration gate FAILED ([mock-calibration-2026-08.md](plans/draft-extensions/mock-calibration-2026-08.md)) — the specified noise model cannot reproduce the reach distribution of a real rookie draft at any value in the specified grid, on the hold-out or on an independent corpus — so the plan's W2 abort criterion **cut the CPU-bot mock**. `mock_draft_service.CPU_MODEL_VALIDATED` is `False`, and with the flag ON the create route answers the typed-empty `{empty:true, reason:"cpu_model_unvalidated"}` rather than serving unvalidated bots. Flipping it on is not a release decision until that gate is re-run green against a re-specced model. |
+
 #### Ship-by / kill-by review convention (07/prd-04)
 
 Dark flags are inventory, not archive. **Every flag dark ≥90 days gets a recorded decision at a quarterly flag review: schedule a canary via the experiments engine, or delete the code path.** "Still thinking" is not a decision — the review's exit criterion is zero flags >90 days old without one. Record the decision as a one-line ship-by/kill-by note in the flag's `features.json` comment block (or the table above). The teardown block's clock starts 2026-07-19.
@@ -475,6 +484,17 @@ Numeric knobs for the playoff/championship-odds pipeline (gated by `outlook.odds
 | `verdict_lopsided_min_gap_pct` | 0.20 | `classify_verdict` band cut: gap ≥ this → `lopsided`; else `slight` |
 
 These were introduced by backlog #6 (verdict banner) and are **vendored into `_DEFAULT_CFG` by backlog #27** (open calculator) when #6 is not yet integrated — the public `/api/calc/score` calls `classify_verdict`, so it shares the exact band thresholds in-app trade cards use. If #6 lands first, the keys already exist and #27's copy is a harmless duplicate to drop on merge.
+
+### Mock-draft CPU drafters (draft-extensions W2) — `mock_draft_service._DEFAULT_CFG`
+
+Read through `mock_draft_service._c`, which overlays `database.get_config()` on the module defaults. **Deliberately NOT seeded into `_MODEL_CONFIG_DEFAULTS`:** these belong to a feature whose calibration gate is closed, so the code default is the single source until an operator inserts a row. Both values are snapshotted into `mock_drafts.settings.noise` at create, so retuning them can never change an in-flight mock.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `mock_max_reach_slots` | 3.0 | Structural cap on how many consensus rank slots a positional need can pull a player up: `need_bonus ≤ outlook_alpha(persona) × severity × this`. A **product cap, not a fitted parameter** — fitting it alongside the jitter is unidentifiable at the corpus sizes available. It also sets the CPU candidate window, `K = ceil(this) + 5`. |
+| `mock_jitter_slots` | 1.25 | Per-candidate `Uniform(0, this)` noise in rank-slot units — **the** parameter the calibration procedure fits. ⚠️ The default is the product's starting value, **not a validated fit**: the fit pinned at the grid boundary (3.00) and then failed both hold-out bars and both independent-corpus bars, so `CPU_MODEL_VALIDATED` is `False` and the CPU-bot mock is cut. See [mock-calibration-2026-08.md](plans/draft-extensions/mock-calibration-2026-08.md) before touching this. |
+
+The persona weight itself is **not** a new key — it is `outlook_alpha(persona_outlook)`, the existing `outlook_alpha_*` map above, reused verbatim.
 
 ---
 

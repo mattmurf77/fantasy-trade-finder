@@ -117,6 +117,9 @@ from .database import (
     count_rookie_class_rows,
     set_league_draft_status, get_league_draft_context,
     load_league_ids_for_draft_status_refresh,
+    # draft-extensions W2 — mock drafts
+    create_mock_draft, load_mock_draft, load_current_mock_draft,
+    update_mock_draft,
     sync_draft_picks, load_draft_picks, replace_draft_picks, compute_pick_value,
     create_notification, get_notifications, mark_notifications_read,
     # M5 Push additions — device tokens
@@ -10211,6 +10214,257 @@ def draft_board_route():
     fetchers = dbs.PlatformFetchers(sleeper_get   = _sleeper_get,
                                     rookie_ids_fn = _rookie_player_ids)
     return jsonify(dbs.build_board(req, fetchers))
+
+
+# ---------------------------------------------------------------------------
+# draft-extensions W2 — FTF-native mock draft (plan §5, lld §2.3 / §4.2)
+#
+# Thin shims over `backend/mock_draft_service`, which owns every rule. Three
+# properties these routes exist to hold:
+#
+#   * ONE consensus definition (amendment 1). `_get_universal_pool(fmt)`'s seed
+#     is injected as `consensus_elo` — the SAME map GET /api/draft/board gets
+#     — and the engine ranks candidates through `draft_board_service._undrafted`
+#     itself. There is no second "market consensus" anywhere in this tranche.
+#   * ZERO platform egress after creation (D8/INV-10). Everything the mock
+#     needs is snapshotted into `settings` at create: order, ownership,
+#     personas, the lineup template, the noise parameters. `GET`, `/pick` and
+#     `/abandon` read the DB and the process pool and nothing else.
+#   * The calibration GATE is closed (plan §5's W2 abort criterion). While
+#     `mock_draft_service.CPU_MODEL_VALIDATED` is False the create route
+#     serves M2's typed-empty `200 {"empty": true, "reason":
+#     "cpu_model_unvalidated"}` rather than a board full of bots whose noise
+#     model failed hold-out validation. No closed client enum gains a member —
+#     the new state rides the existing typed-empty contract (plan D10).
+# ---------------------------------------------------------------------------
+
+_MOCK_DEFAULT_LINEUP = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX"]
+
+
+def _mock_league_context(sess: dict, league_id: str, season: int):
+    """Build the engine's injected context from the session + the DB.
+
+    Called on the CREATE path only, where a cached league-meta read is
+    allowed; every later route rebuilds it from data already snapshotted into
+    the row, so nothing downstream can reach a platform.
+    """
+    from . import draft_board_service as dbs
+    from . import mock_draft_service as mds
+
+    g_league = sess.get("league")
+    members = list(getattr(g_league, "members", []) or [])
+    rosters = {str(m.user_id): [str(p) for p in (m.roster or [])] for m in members}
+    usernames = {str(m.user_id): m.username for m in members}
+    rostered = {pid for ids in rosters.values() for pid in ids}
+
+    fmt = _active_format(sess)
+    _pool_players, consensus_seed = _get_universal_pool(fmt)
+    rookie_ids = _rookie_player_ids(int(season))
+    rows = dbs.database_players(sorted(rookie_ids)) if rookie_ids else {}
+    lineup = _sleeper_lineup_slots(str(league_id)) or list(_MOCK_DEFAULT_LINEUP)
+
+    return mds.MockContext(
+        league_id      = str(league_id),
+        season         = int(season),
+        consensus_elo  = consensus_seed,
+        rookie_ids     = frozenset(rookie_ids),
+        player_rows    = rows,
+        rostered_ids   = frozenset(rostered),
+        rosters        = rosters,
+        lineup_slots   = lineup,
+        usernames      = usernames,
+        scoring_format = fmt,
+    ), [str(m.user_id) for m in members]
+
+
+def _mock_context_from_row(sess: dict, state: dict):
+    """Rebuild the context for an EXISTING mock — DB + process pool only.
+
+    The lineup template and the scoring format come off the snapshotted
+    `settings`, not off a league-meta fetch, which is what makes D8's
+    zero-egress claim structural rather than incidental.
+    """
+    from . import draft_board_service as dbs
+    from . import mock_draft_service as mds
+
+    settings = state.get("settings") or {}
+    g_league = sess.get("league")
+    members = list(getattr(g_league, "members", []) or [])
+    rosters = {str(m.user_id): [str(p) for p in (m.roster or [])] for m in members}
+    usernames = {str(m.user_id): m.username for m in members}
+    fmt = settings.get("scoring_format") or _active_format(sess)
+    _pool_players, consensus_seed = _get_universal_pool(fmt)
+    rookie_ids = _rookie_player_ids(int(state["season"]))
+    rows = dbs.database_players(sorted(rookie_ids)) if rookie_ids else {}
+    return mds.MockContext(
+        league_id      = str(state["league_id"]),
+        season         = int(state["season"]),
+        consensus_elo  = consensus_seed,
+        rookie_ids     = frozenset(rookie_ids),
+        player_rows    = rows,
+        rostered_ids   = frozenset(p for ids in rosters.values() for p in ids),
+        rosters        = rosters,
+        lineup_slots   = settings.get("lineup_slots") or list(_MOCK_DEFAULT_LINEUP),
+        usernames      = usernames,
+        scoring_format = fmt,
+    )
+
+
+def _mock_resolve_league(sess: dict, league_id: str):
+    """`(league_id, season)` or a Flask error tuple — the board route's rule."""
+    if not league_id:
+        return None, ({"error": "league_id is required"}, 400)
+    ctx = get_league_draft_context(league_id)
+    if ctx:
+        return str(league_id), int(ctx.get("season") or _CURRENT_SEASON)
+    g_league = sess.get("league")
+    if g_league and str(league_id) == str(g_league.league_id):
+        return str(league_id), _CURRENT_SEASON
+    return None, ({"error": "league_not_found"}, 404)
+
+
+@app.route("/api/mock-draft", methods=["GET", "POST"])
+@_gate_unverified_write
+@_gate_unverified_read
+def mock_draft_route():
+    """GET/POST /api/mock-draft — create, or read the current mock.
+
+    POST `{league_id, rounds?, type?, rng_seed?}` creates (abandoning any
+    prior active row for that user+league in the SAME transaction), resolves
+    order / ownership / personas, and would advance the CPU to the user's
+    first turn. GET `?league_id=&basis=consensus|my_board` returns the active
+    mock, or the most recent complete one as a recap.
+
+    Errors: 404 feature_disabled (flag off, before ANY session work) ·
+    400 league_id is required · 404 league_not_found · 400 bad_basis ·
+    400 not_rookie_draft (rounds beyond ROOKIE_MAX_ROUNDS) · 401/409 via the
+    session helpers. Typed-empty `200 {"empty": true, "reason": …}` for
+    `class_not_loaded` and `cpu_model_unvalidated`.
+    """
+    if not is_enabled("draft.mock"):
+        return jsonify({"error": "feature_disabled"}), 404
+
+    from . import draft_board_service as dbs
+    from . import mock_draft_service as mds
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    body = request.get_json(silent=True) or {} if request.method == "POST" else {}
+    g_league = sess.get("league")
+    league_id = (body.get("league_id") or request.args.get("league_id")
+                 or (g_league.league_id if g_league else ""))
+    league_id, season = _mock_resolve_league(sess, str(league_id or ""))
+    if league_id is None:
+        payload, code = season
+        return jsonify(payload), code
+
+    user_id = str(sess.get("user_id") or "")
+
+    if request.method == "GET":
+        basis = (request.args.get("basis") or dbs.BASIS_CONSENSUS).strip().lower()
+        if basis not in (dbs.BASIS_CONSENSUS, dbs.BASIS_MY_BOARD):
+            return jsonify({"error": "bad_basis"}), 400
+        row = load_current_mock_draft(user_id, league_id)
+        if row is None:
+            return jsonify(mds.empty_payload("no_active_mock"))
+        state = mds.loads(row)
+        ctx = _mock_context_from_row(sess, state)
+        board_elo = None
+        if basis == dbs.BASIS_MY_BOARD:
+            board_elo = {rp.player.id: rp.elo
+                         for rp in sess["service"].get_rankings(position=None).rankings}
+        return jsonify(mds.state_payload(state, ctx, basis=basis,
+                                         board_elo=board_elo))
+
+    rounds = body.get("rounds")
+    try:
+        rounds = int(rounds) if rounds is not None else mds.DEFAULT_ROUNDS
+    except (TypeError, ValueError):
+        return jsonify({"error": "not_rookie_draft"}), 400
+    if rounds < 1 or rounds > mds._ROOKIE_MAX_ROUNDS:
+        # A round count only a startup draft reaches. Stated as a DATA test
+        # rather than a live board build so creation stays egress-free.
+        return jsonify({"error": "not_rookie_draft"}), 400
+
+    ctx, owners = _mock_league_context(sess, league_id, season)
+    if not mds.class_loaded(ctx):
+        return jsonify(mds.empty_payload(mds.REASON_CLASS_NOT_LOADED))
+    if not mds.CPU_MODEL_VALIDATED:
+        # W2's abort criterion (plan §5). The engine, its tests and the
+        # calibration harness all ship; the bots do not.
+        return jsonify(mds.empty_payload(mds.REASON_CPU_MODEL_UNVALIDATED))
+
+    rng_seed = body.get("rng_seed")
+    try:
+        rng_seed = int(rng_seed) if rng_seed is not None else random.randrange(2 ** 31)
+    except (TypeError, ValueError):
+        rng_seed = random.randrange(2 ** 31)
+
+    settings = mds.build_settings(
+        ctx, owners=owners, user_owner_id=user_id, rounds=rounds,
+        draft_type=body.get("type"), rng=random.Random(rng_seed))
+    state = mds.new_state(ctx, settings, rng_seed, user_id=user_id)
+    mds.advance_cpu(state, ctx)
+    settings_json, picks_json = mds.dumps(state)
+    state["id"] = create_mock_draft(user_id, league_id, season, settings_json,
+                                    picks_json, rng_seed, state["status"])
+    return jsonify(mds.state_payload(state, ctx))
+
+
+@app.route("/api/mock-draft/pick", methods=["POST"])
+@_gate_unverified_write
+def mock_draft_pick_route():
+    """POST /api/mock-draft/pick `{mock_id, player_id}`.
+
+    409 `not_your_turn` · 400 `player_unavailable` (drafted-in-mock and
+    already-rostered alike) · 404 `mock_not_found` · else the advanced state.
+    """
+    if not is_enabled("draft.mock"):
+        return jsonify({"error": "feature_disabled"}), 404
+
+    from . import mock_draft_service as mds
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    body = request.get_json(silent=True) or {}
+    user_id = str(sess.get("user_id") or "")
+    row = load_mock_draft(body.get("mock_id") or 0, user_id)
+    if row is None:
+        return jsonify({"error": "mock_not_found"}), 404
+    state = mds.loads(row)
+    if state["status"] != mds.STATUS_ACTIVE:
+        return jsonify({"error": "not_your_turn"}), 409
+
+    ctx = _mock_context_from_row(sess, state)
+    try:
+        mds.apply_user_pick(state, ctx, str(body.get("player_id") or ""))
+    except mds.NotYourTurn:
+        return jsonify({"error": "not_your_turn"}), 409
+    except mds.PlayerUnavailable:
+        return jsonify({"error": "player_unavailable"}), 400
+    _settings_json, picks_json = mds.dumps(state)
+    update_mock_draft(state["id"], user_id, picks_json=picks_json,
+                      status=state["status"])
+    return jsonify(mds.state_payload(state, ctx))
+
+
+@app.route("/api/mock-draft/abandon", methods=["POST"])
+@_gate_unverified_write
+def mock_draft_abandon_route():
+    """POST /api/mock-draft/abandon `{mock_id}` → `{ok: true}`."""
+    if not is_enabled("draft.mock"):
+        return jsonify({"error": "feature_disabled"}), 404
+
+    from . import mock_draft_service as mds
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    body = request.get_json(silent=True) or {}
+    user_id = str(sess.get("user_id") or "")
+    if not update_mock_draft(body.get("mock_id") or 0, user_id,
+                             status=mds.STATUS_ABANDONED):
+        return jsonify({"error": "mock_not_found"}), 404
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------

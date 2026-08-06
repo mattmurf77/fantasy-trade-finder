@@ -322,6 +322,29 @@ Read-only rookie-draft board ([plan](plans/rookie-draft/plan.md) §M3/§M4, [lld
 
 **Read gate — recorded divergence.** `/api/draft/board` carries `@_gate_unverified_read` wholesale, per the plan. The nearest precedent, `/api/league/power-rankings`, applies the gate **inline for `basis=personal` only**, because its consensus output is a league-shared aggregate. The blanket decorator therefore gates the consensus board more tightly than that precedent. This is deliberate, not an oversight.
 
+## Mock draft (flag `draft.mock`)
+
+FTF-native simulated rookie draft bound to a real league ([plan](plans/draft-extensions/plan.md) §5, [lld](plans/draft-extensions/lld.md) §2.3). Payload logic lives in `backend/mock_draft_service.py`; `backend/server.py` is a thin shim. **No platform draft is created, joined or written**, and there is **zero platform egress after creation** — order, ownership, personas, the lineup template and the noise parameters are all snapshotted into the row at create, so every later call reads only the DB and the in-process value pool.
+
+> **Status: the CPU-bot mock is CUT.** W2's calibration gate FAILED (see [mock-calibration-2026-08.md](plans/draft-extensions/mock-calibration-2026-08.md)), so `mock_draft_service.CPU_MODEL_VALIDATED` is `False` and the plan's abort criterion applies. **Even with `draft.mock` ON**, `POST /api/mock-draft` answers the typed-empty `200 {"schema": 1, "empty": true, "reason": "cpu_model_unvalidated"}` instead of creating a mock. The routes, the store and the engine ship so a re-specced noise model can be re-gated without rebuilding the wave.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/mock-draft` | Create. Body `{league_id?, rounds?, type?, rng_seed?}` (`league_id` defaults to the session league; `rounds` default 4, clamped 1–8; `type` ∈ `linear` (default) \| `snake`). Abandons any prior **active** mock for that user+league **in the same transaction**, resolves order / ownership / personas, and advances the CPU to the user's first turn. → the state payload below, or a typed-empty. |
+| GET | `/api/mock-draft` | Read. Query `league_id` + `basis` ∈ `consensus` (default) \| `my_board`. Returns the active mock, else the most recent **complete** one as a recap, else `200 {"schema": 1, "empty": true, "reason": "no_active_mock"}`. |
+| POST | `/api/mock-draft/pick` | `{mock_id, player_id}` → the advanced state. |
+| POST | `/api/mock-draft/abandon` | `{mock_id}` → `{ok: true}`. |
+
+**State payload** reuses the Draft Room's `schema: 1` vocabulary verbatim so the same render components serve both: `{schema, mock_id, status, league_id, season, on_the_clock: {pick_no, round, slot, roster_id, is_user}, order[], picks[], undrafted[], undrafted_basis, my_picks[], settings_echo, notice}`. `order[]`/`undrafted[]` entry shapes are exactly the board's; `picks[]` adds one field, `by` ∈ `user`\|`cpu`. `status` ∈ `active`\|`complete`\|`abandoned`. `settings_echo` carries `{rounds, type, teams, order_source, personas, noise}` — `order_source` is `assigned` only when a real platform order was resolved, `randomized` otherwise, and it is **never** an invented "real" order.
+
+**One consensus definition (binding).** CPU drafters rank candidates through `draft_board_service._undrafted(basis="consensus")` against the same `_get_universal_pool()` seed the Draft Room gets. The user's own board (`basis=my_board`) re-sorts **only the user's own undrafted list** and never enters a CPU decision — otherwise every mock would read the user's rankings back to them, and the room's undrafted order and the bots would visibly disagree on one screen.
+
+**Determinism.** `rng_seed` is stored on the row and the per-pick stream is `Random(rng_seed * 10007 + pick_no)` — a pure function of `(seed, pick_no)`, never of call order, so a resumed mock replays byte-identically. The fitted noise parameters are snapshotted into `settings.noise`, so retuning `model_config` cannot change an in-flight mock.
+
+**No polling.** The mock only changes when the user acts, so this surface never touches the `draft.live_poll` refetch machinery.
+
+Errors: 404 `feature_disabled` (flag off, checked **before any session work**, on all four routes) / `league_not_found` / `mock_not_found` (also returned when the row is not the caller's) · 400 `league_id is required` / `bad_basis` / `not_rookie_draft` (rounds outside 1–`ROOKIE_MAX_ROUNDS`) / `player_unavailable` · 409 `not_your_turn` · 401 · 403 `verification_required` · 409 session not initialized. Typed-empty `200 {"schema": 1, "empty": true, "reason": …}` for `class_not_loaded`, `no_active_mock` and `cpu_model_unvalidated` — new states ride this field rather than a new member of any closed client enum.
+
 ## ESPN league linking (flag `espn.link`)
 
 Read-only import of ESPN Fantasy leagues via the community-reverse-engineered v3 API ([plan](plans/espn-league-linking-plan-2026-07-11.md)). Gated everywhere by `espn.link` (default **false**; every route 404s `feature_disabled` when off). Rosters are crosswalked to **Sleeper player ids** at import (`backend/espn_service.py`, DynastyProcess `db_playerids.csv`, 24h-TTL cache with bundled-snapshot fallback); unmatched players are skipped and reported by name — never placeholder-invented. Private-league cookies (`espn_s2`+`SWID`, manual paste; WebView capture is Phase 1b) are Fernet-encrypted at rest (`espn_credentials`, same `SLEEPER_TOKEN_KEY`). No ESPN write path exists or is planned.

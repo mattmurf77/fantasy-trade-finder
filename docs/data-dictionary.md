@@ -959,6 +959,28 @@ Quarterly accuracy-scoring output (plan §Accuracy engine). One row per (snapsho
 
 ---
 
+## `mock_drafts`
+
+FTF-native mock-draft state (draft-extensions W2, [plan](plans/draft-extensions/plan.md) §5 / [lld](plans/draft-extensions/lld.md) §3.3). One row per simulation. A resumable simulation is genuinely stateful — in-memory state dies on a Render spin-down, which is a real event on the free plan — so this is the wave's only new table. Written by `backend/database.py`'s four `*_mock_draft` helpers; every rule lives in `backend/mock_draft_service.py`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `user_id` | str, not null | Owner. Every read/write helper is owner-scoped — a row is invisible to anyone else |
+| `league_id` | str, not null | Indexed with `user_id` (`ix_mock_drafts_user_league`) |
+| `season` | int, not null | |
+| `status` | str, not null, `server_default 'active'` | `active` \| `complete` \| `abandoned` |
+| `settings` | text (JSON), not null | `{rounds, type, teams, order[], order_source, slots[], ownership{}, personas{}, user_owner_id, lineup_slots[], scoring_format, noise{jitter_slots, max_reach}}`. **Everything the mock needs is snapshotted here at create** — which is what makes "zero platform egress after creation" structural. `ownership` is frozen at create so a mid-mock `draft_picks` resync cannot shift picks under the user; `noise` is frozen so retuning `model_config` cannot change an in-flight mock |
+| `picks` | text (JSON), not null, `server_default '[]'` | Append-only `[{pick_no, round, slot, roster_id, player_id, by}]`, `by` ∈ `user`\|`cpu` |
+| `rng_seed` | int, not null | Per-pick RNG is `Random(rng_seed * 10007 + pick_no)` — a pure function of `(seed, pick_no)`, never of call order, so a resumed mock replays byte-identically |
+| `created_at` / `updated_at` | str | ISO-8601 UTC |
+
+**No unique constraint, deliberately.** "One active mock per user per league" is enforced in application code inside `create_mock_draft`'s transaction (abandon-then-insert). `UniqueConstraint(user_id, league_id, status)` would also block a second *abandoned* row, and the partial unique index that fixes that is dialect-divergent across SQLite/Postgres.
+
+**`server_default`, not Python `default`** (the `referrals` precedent), so a raw-SQL insert cannot produce NULL.
+
+---
+
 ## Experiment engine tables (analytics platform P3)
 
 `backend/experiments.py` + `backend/analytics_stats.py`. Append-only except `experiments.status`. Gated on `experiments.engine`.
