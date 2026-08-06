@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getLeagues } from '../api/sleeper';
 import { useSession, NO_LEAGUE_ID } from './useSession';
 import type { LeagueSummary } from '../shared/types';
+import { useFeatureFlags } from './useFeatureFlags';
 
 // rookie-draft — the seasonal Draft tab's data source (operator decision
 // "draft-surface placement", 2026-08-06, option A′).
@@ -50,14 +51,29 @@ let cached: QualifyingDraftLeague[] = [];
 
 /** The predicate, in one place. Exported for tests and for any surface that
  *  needs to ask the same question of a league it already holds. */
-export function leagueQualifiesForDraftTab(lg: LeagueSummary): boolean {
-  return lg.draft_status === 'not_drafted' && lg.draft_status_confidence === 'high';
+export function leagueQualifiesForDraftTab(
+  lg: LeagueSummary,
+  mflBound: boolean = false,
+): boolean {
+  if (lg.draft_status !== 'not_drafted' || lg.draft_status_confidence !== 'high') {
+    return false;
+  }
+  // A qualifying verdict is necessary but NOT sufficient: the tab must never
+  // lead to a room that cannot render a board. `draft_board_service` only has
+  // a bound adapter for Sleeper, and for MFL only behind `draft.mfl` — an
+  // unbound platform returns `unsupported_board()`, i.e. a tab whose only
+  // content is "not available for this platform yet". Bind the predicate to
+  // what the room can actually serve.
+  const platform = String(lg.platform || 'sleeper').toLowerCase();
+  if (platform === 'sleeper') return true;
+  if (platform === 'mfl') return mflBound;
+  return false; // espn / fleaflicker / unknown — no adapter, no tab
 }
 
-function pick(leagues: LeagueSummary[]): QualifyingDraftLeague[] {
+function pick(leagues: LeagueSummary[], mflBound: boolean): QualifyingDraftLeague[] {
   return leagues
     .filter((lg) => lg.league_id && lg.league_id !== NO_LEAGUE_ID)
-    .filter(leagueQualifiesForDraftTab)
+    .filter((lg) => leagueQualifiesForDraftTab(lg, mflBound))
     .map((lg) => ({ league_id: String(lg.league_id), name: lg.name || 'League' }));
 }
 
@@ -89,7 +105,7 @@ export async function refreshDraftLeagues(): Promise<void> {
   if (!userId || s.user?.account_only || s.isDemo) return;
   try {
     const leagues = await getLeagues(userId);
-    cached = pick(leagues);
+    cached = pick(leagues, !!useFeatureFlags.getState().flags['draft.mfl']);
     await AsyncStorage.setItem(KEY, JSON.stringify(cached));
   } catch {
     /* offline or unauthenticated — keep the previous snapshot */
