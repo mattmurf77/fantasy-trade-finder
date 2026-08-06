@@ -1,7 +1,11 @@
 appId: com.fantasytradefinder.app
 # tc: T-M4-QA-01 / D5 (complete draft renders a full board)
 # profile: standard + lakeview-complete corpus merged into the fixture dir
-# flags: draft.room ON, draft.live_poll OFF
+# flags: draft.room ON, draft.live_poll OFF, draft.rank_inline OFF
+# W1 (2026-08-06): the row ids gained a per-row qualifier
+# (draft-room.undrafted-row.<pid>, .order-row.<round>-<slot>), so the
+# selectors below are regexes that REQUIRE the qualifier — asserting the
+# shared, non-unique ids are gone as much as asserting the rows render.
 # Lakeview 1312076055586050048: complete 4x12 rookie draft, populated
 # draft_order, 55 traded picks. The League tile must read "Rookie draft".
 tags: [rookie, draft-room]
@@ -61,7 +65,7 @@ tags: [rookie, draft-room]
 - assertVisible:
     id: "draft-room.refresh"
 - assertVisible:
-    id: "draft-room.order-row"
+    id: "draft-room.order-row..*"
 - takeScreenshot: rookie-d1-draft-room-complete
 - scrollUntilVisible:
     element:
@@ -94,7 +98,7 @@ tags: [rookie, draft-room]
     id: "draft-room.basis.my-board"
 - scrollUntilVisible:
     element:
-      id: "draft-room.undrafted-row"
+      id: "draft-room.undrafted-row..*"
     direction: DOWN
     timeout: 40000
     visibilityPercentage: 100

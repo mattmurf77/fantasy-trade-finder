@@ -24,6 +24,7 @@ import {
 } from '../api/rankings';
 import { useSession } from '../state/useSession';
 import { useRecoverOnResume } from '../hooks/useRecoverOnResume';
+import { ANCHOR_ROWS } from '../utils/anchorRows';
 import { tierForElo, TIER_LABEL } from '../utils/tierBands';
 import { chalk, ice, ink, position, radii, space, type } from '../theme/chalkline';
 import { haptics } from '../utils/haptics';
@@ -36,20 +37,9 @@ import type { Position, Tier } from '../shared/types';
 // position groups; the tier falls out of the pinned value server-side).
 // Progress persists per format in AsyncStorage so the wizard resumes.
 
-const ANCHOR_ROWS: { key: AnchorKey; label: string }[][] = [
-  [
-    { key: '4_firsts', label: '4 1sts' },
-    { key: '3_firsts', label: '3 1sts' },
-    { key: '2_firsts', label: '2 1sts' },
-    { key: '1_first', label: '1 1st' },
-  ],
-  [
-    { key: '1_second', label: '1 2nd' },
-    { key: '1_third', label: '1 3rd' },
-    { key: '1_fourth', label: '1 4th' },
-    { key: 'no_value', label: 'No value' },
-  ],
-];
+// The rung grid moved to utils/anchorRows when the Draft Room's anchor
+// sheet became a second host (draft-extensions W1) — one table, so a rung
+// can never diverge between the wizard and the sheet.
 
 const POSITIONS: readonly string[] = ['QB', 'RB', 'WR', 'TE'];
 

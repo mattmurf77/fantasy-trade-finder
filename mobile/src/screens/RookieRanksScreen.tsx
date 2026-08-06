@@ -71,7 +71,15 @@ interface Row extends RankedPlayer {
   posRookieRank: number;
 }
 
-export default function RookieRanksScreen() {
+export default function RookieRanksScreen({ route, navigation }: any = {}) {
+  // draft-extensions W1 — the Draft Room bridge is TWO-WAY now. It lands
+  // two hops from any editing gesture, so without a way back "rank this
+  // rookie" costs the user their place on the board. The param is set only
+  // by the Draft Room; every other entry omits it and this row never
+  // renders.
+  const returnTo: string | undefined = route?.params?.returnTo;
+  const returnLeagueId: string | undefined = route?.params?.returnLeagueId;
+
   const activeFormat = useSession((s) => s.activeFormat);
   const fmt: ScoringFormat = activeFormat || '1qb_ppr';
   const { setFormat, switching: formatSwitching } = useScoringFormat();
@@ -169,6 +177,26 @@ export default function RookieRanksScreen() {
         onDismiss={() => setToast(null)}
       />
 
+      {returnTo === 'DraftRoom' ? (
+        <Pressable
+          testID="rookie-ranks.back-to-draft"
+          accessibilityRole="button"
+          accessibilityLabel="Back to the draft room"
+          onPress={() =>
+            navigation?.navigate?.(
+              'DraftRoom',
+              returnLeagueId ? { leagueId: returnLeagueId } : undefined,
+            )
+          }
+          style={({ pressed }) => [
+            styles.backRow,
+            pressed && { backgroundColor: ink.ink3 },
+          ]}
+        >
+          <Text style={styles.backText}>‹ Back to the draft room</Text>
+        </Pressable>
+      ) : null}
+
       <View style={styles.header}>
         <TickLabel>Rookies</TickLabel>
         <Text style={styles.hint}>
@@ -264,6 +292,19 @@ export default function RookieRanksScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
+  // W1 — the return leg of the Draft Room bridge. Renders only when the
+  // Draft Room set the param.
+  backRow: {
+    marginHorizontal: space.lg,
+    marginTop: space.md,
+    alignSelf: 'flex-start',
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: space.sm,
+    borderRadius: radii.sm,
+  },
+  backText: { ...type.label, color: ice.base },
+
   header: { paddingHorizontal: space.lg, paddingTop: space.md, gap: space.xs },
   hint: { ...type.bodySm, lineHeight: 19 },
   formatRow: { marginHorizontal: space.lg, marginTop: space.sm },

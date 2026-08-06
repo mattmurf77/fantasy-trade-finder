@@ -1145,6 +1145,16 @@ VALID_ANCHORS = (
     set(_ANCHOR_FIRST_MULTIPLES) | set(_ANCHOR_SINGLE_PICK) | {"no_value"}
 )
 
+# draft-extensions W1 (lld §2.1) — which SURFACE asked the anchor question.
+# Request-only: it rides `anchor_answered`'s props so "set a value from the
+# draft room" is separable from the wizard, and the RESPONSE is byte-
+# unchanged. An unrecognised value FALLS BACK to "anchors"; it never 400s.
+#
+# This is deliberately NOT the tiers-save `via` whitelist (see
+# save_tiers_route) — W1's hard constraint is the anchor lane only, and no
+# W1 surface may reach save_tiers_position / the merged-band path.
+_ANCHOR_VIA = ("anchors", "draft_room")
+
 # Per-user pick-value scale (#111, re-derived 2026-07-12 for #117): "a
 # top-tier asset is worth N firsts". The #117 seed recalibration puts the
 # consensus board's top asset at the 4-firsts rung (Elo ≈ 1927), so the
@@ -7210,6 +7220,10 @@ def save_anchor_route():
     body      = request.get_json(force=True) or {}
     player_id = str(body.get("player_id") or "").strip()
     anchor    = str(body.get("anchor") or "").strip()
+    # draft-extensions W1 — optional surface attribution. Whitelisted with a
+    # fallback (never a 400) and request-only; the response is unchanged.
+    raw_via   = str(body.get("via") or body.get("surface") or "").strip()
+    via       = raw_via if raw_via in _ANCHOR_VIA else "anchors"
 
     if not player_id:
         return jsonify({"error": "player_id required"}), 400
@@ -7275,7 +7289,7 @@ def save_anchor_route():
                 league_id=getattr(g_league, "league_id", None),
                 source="api",
                 props={"player_id": player_id, "pick_value": anchor,
-                       "skipped": False},
+                       "skipped": False, "via": via},
                 # #152 — anchor_answered is a rank-class streak event now,
                 # so tz rides along for local-day streak math (same as
                 # trio_swipe / tier_save).
