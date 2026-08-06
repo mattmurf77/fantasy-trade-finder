@@ -417,13 +417,6 @@ def test_mfl_opener_refuses_an_unrecorded_export():
 
 # ── T-M1-04 — [RV-3] the bulk players fetch ──────────────────────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="[RV-3] _ensure_sleeper_cache_populated fetches /v1/players/nfl with raw "
-           "urllib, so the fixture seam cannot intercept it (server.py says so in "
-           "its own comment). M0 owns the one-line fix: route the bulk fetch "
-           "through _sleeper_get. When M0 lands, this XPASSes -- DELETE THIS "
-           "MARKER, do not relax strict=True.")
 def test_m1_04_bulk_players_fetch_is_intercepted_by_the_fixture_seam(
         tmp_path, monkeypatch, counters_reset):
     """The plan's replay mechanism does not currently cover the 5 MB dump.
