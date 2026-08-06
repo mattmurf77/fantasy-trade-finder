@@ -10188,6 +10188,13 @@ def draft_board_route():
         basis         = basis,
         board_elo     = board_elo,
         consensus_elo = consensus_seed,
+        # M6's slot prices are format-specific (DP's SF column prices a 1.01
+        # ~48 Elo above its 1QB one, and the whole curve differs), so the
+        # board must price in the session's ACTIVE format. Without this the
+        # dataclass default (`data_loader.DEFAULT_SCORING` = 1qb_ppr) served
+        # 1QB slot values to every Superflex league — flagged as a
+        # pre-flip blocker in build-m6.md's open questions.
+        scoring       = _active_format(sess),
         **(mfl_bind["request_fields"] if mfl_bind else {}),
     )
     if mfl_bind is not None:

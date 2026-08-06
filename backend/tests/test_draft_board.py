@@ -121,7 +121,25 @@ PICK_KEYS = {"round", "pick_no", "slot", "player_id", "name", "position",
              "team", "picked_by_user_id", "picked_at"}
 
 
-def test_payload_is_schema_1_field_for_field(tmp_path, monkeypatch):
+@pytest.fixture
+def slot_values_off():
+    """Pin `picks.slot_values` OFF explicitly.
+
+    The schema/MFL-grid assertions below describe the board WITHOUT M6's
+    optional `slot_value` axis. They relied on the ambient flag state, which
+    held only while the flag shipped false; when it was flipped on for
+    release they began failing on a default rather than on the shape they
+    name. Pinning makes them true at every point in the flag's rollout —
+    `test_slot_values.py` owns the flag-ON shape.
+    """
+    import backend.feature_flags as _ff
+    saved = _ff._flags_cache
+    _ff._flags_cache = {**_ff.DEFAULT_FLAGS, "picks.slot_values": False}
+    yield
+    _ff._flags_cache = saved
+
+
+def test_payload_is_schema_1_field_for_field(slot_values_off, tmp_path, monkeypatch):
     payload, _, _ = board("lakeview-complete", tmp_path, monkeypatch,
                           league_id=LAKEVIEW_LEAGUE)
     assert payload["schema"] == 1
@@ -596,7 +614,7 @@ MFL_EXPECTED = {
 
 
 @pytest.mark.parametrize("corpus", sorted(MFL_EXPECTED))
-def test_m5_mfl_grid_states_through_the_injected_opener(corpus):
+def test_m5_mfl_grid_states_through_the_injected_opener(slot_values_off, corpus):
     state, teams, rounds = MFL_EXPECTED[corpus]
     man = mfl_manifest(corpus)
     calls: list[str] = []
@@ -1233,3 +1251,46 @@ def test_placement_a_draft_context_failure_never_breaks_the_league_list(
         ff._flags_cache = saved
     assert resp.status_code == 200
     assert resp.get_json()[0]["draft_status"] is None
+
+
+# ---------------------------------------------------------------------------
+# Pre-flip fix (2026-08-06): the board must price slot values in the
+# session's ACTIVE scoring format.
+#
+# `BoardRequest.scoring` defaults to `data_loader.DEFAULT_SCORING` (1qb_ppr).
+# The M3 route never set it, so with `picks.slot_values` on, every Superflex
+# league was served 1QB slot prices — DP's SF column prices a 1.01 ~48 Elo
+# above its 1QB one and the whole curve differs, so the numbers were visibly
+# wrong for SF users. build-m6.md flagged this as a blocker to flipping the
+# flag; this pins the fix.
+# ---------------------------------------------------------------------------
+
+def test_board_prices_slot_values_in_the_sessions_active_format(
+    client, session, monkeypatch,
+):
+    seen = {}
+
+    def _capture(req, fetchers):
+        seen["scoring"] = req.scoring
+        return {"schema": 1, "state": "unavailable"}
+
+    from backend import draft_board_service as dbs
+    monkeypatch.setattr(dbs, "build_board", _capture)
+    monkeypatch.setattr(server, "get_league_draft_context",
+                        lambda lid: {"platform": "sleeper", "season": 2026})
+
+    saved = _pin_flags(**{"draft.room": True, "picks.slot_values": True})
+    try:
+        session["active_format"] = "sf_tep"
+        session["services"]["sf_tep"] = session["service"]
+        assert _get(client).status_code == 200
+        assert seen["scoring"] == "sf_tep", (
+            "the board priced in the default format, not the session's — "
+            "Superflex leagues would see 1QB slot values")
+
+        seen.clear()
+        session["active_format"] = "1qb_ppr"
+        assert _get(client).status_code == 200
+        assert seen["scoring"] == "1qb_ppr"
+    finally:
+        ff._flags_cache = saved

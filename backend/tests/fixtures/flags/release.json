@@ -143,7 +143,7 @@
   "ranks.rookie_subset": true,
   "draft.room": true,
   "draft.live_poll": false,
-  "draft.mfl": false,
-  "picks.slot_values": false,
-  "trade.slot_pricing": false
+  "draft.mfl": true,
+  "picks.slot_values": true,
+  "trade.slot_pricing": true
 }

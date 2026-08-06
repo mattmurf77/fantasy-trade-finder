@@ -58,6 +58,23 @@ def slot_values_on():
     ff._flags_cache = saved
 
 
+@pytest.fixture
+def slot_values_off():
+    """Pin `picks.slot_values` OFF **explicitly**.
+
+    These tests originally relied on the ambient flag state, which was
+    correct only while the flag shipped false in `config/features.json`.
+    Once it was flipped on for release they started failing, asserting a
+    default rather than the behaviour they name. A flag-off test must pin
+    the flag off, so it proves the same thing at every point in the
+    flag's rollout.
+    """
+    saved = ff._flags_cache
+    ff._flags_cache = {**ff.DEFAULT_FLAGS, "picks.slot_values": False}
+    yield
+    ff._flags_cache = saved
+
+
 def _fetchers():
     return dbs.PlatformFetchers(
         sleeper_get=server._sleeper_get,
@@ -218,7 +235,7 @@ def test_percentile_map_examples():
 
 # ── T-M6-02 — flag off ───────────────────────────────────────────────────
 
-def test_m6_02_flag_off_omits_the_key_entirely(tmp_path, monkeypatch):
+def test_m6_02_flag_off_omits_the_key_entirely(slot_values_off, tmp_path, monkeypatch):
     """Not `None`, not `0.0` — ABSENT. A null would render as 'this pick is
     worthless' on every client (the repo's omit-when-absent convention)."""
     assert ff.DEFAULT_FLAGS["picks.slot_values"] is False
@@ -229,7 +246,7 @@ def test_m6_02_flag_off_omits_the_key_entirely(tmp_path, monkeypatch):
     assert "slot_value_approx" not in board
 
 
-def test_m6_02_flag_off_never_reads_the_source(tmp_path, monkeypatch):
+def test_m6_02_flag_off_never_reads_the_source(slot_values_off, tmp_path, monkeypatch):
     def boom(*a, **kw):                       # pragma: no cover — must not run
         raise AssertionError("values.csv read with picks.slot_values OFF")
 
@@ -385,7 +402,7 @@ def test_mfl_non_twelve_team_gets_the_percentile_map_and_the_marker(slot_values_
         assert entry["slot_value"] == expected
 
 
-def test_mfl_flag_off_omits_the_key():
+def test_mfl_flag_off_omits_the_key(slot_values_off):
     board = mfl_board("mfl-complete")
     assert board["order"]
     assert all("slot_value" not in e for e in board["order"])
