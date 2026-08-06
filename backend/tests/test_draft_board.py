@@ -18,10 +18,12 @@ fetchers, so the corpora reach it directly.
   T-M3-11  breaker: 3 failures -> open, zero upstream for 120 s; one success closes
   T-M3-12  budget: a 4th cycle inside 60 s -> degraded.budget_exceeded
   T-M5-*   MFL grids through the injected `_opener` seam
+  T-M3-13  route shim: flag off -> 404 feature_disabled, no other route moves
 
-**T-M3-13 (flag off -> 404 feature_disabled) is deliberately absent.** It is a
-route assertion and this wave ships no route (`draft.room`'s 4-touch and the
-`server.py` shim belong to the next wave, which owns that file).
+The T-M3-13 block at the bottom is the only part that needs Flask: it drives
+`GET /api/draft/board` to pin what belongs to the shim rather than to the
+service — the `draft.room` gate, session/league resolution, and the platform
+binding (Sleeper only this wave; M5 wires MFL behind `draft.mfl`).
 
 Run: ``python3 -m pytest backend/tests/test_draft_board.py``
 """
@@ -679,3 +681,178 @@ def test_the_whole_matrix_is_replayed_never_live(tmp_path, monkeypatch):
         assert test_support.counters["vcr_misses"] == 0
     finally:
         test_support.counters.update(before)
+
+
+# ---------------------------------------------------------------------------
+# T-M3-13 — the route shim (GET /api/draft/board)
+#
+# Everything above drives `build_board` directly. These drive the Flask
+# route, because three things are the SHIM's job and cannot be asserted at
+# the service layer: the `draft.room` gate, the session/league resolution,
+# and the platform binding (only Sleeper is bound in this wave — M5 wires
+# MFL behind `draft.mfl`).
+# ---------------------------------------------------------------------------
+
+import backend.feature_flags as ff                             # noqa: E402
+from backend.ranking_service import Player, RankingService     # noqa: E402
+from backend.trade_service import League, LeagueMember         # noqa: E402
+
+ROUTE = "/api/draft/board"
+ROUTE_TOKEN = "test-token-m3-13"
+
+
+def _pin_flags(**overrides) -> dict:
+    """The repo's flag-pinning idiom (there is no conftest.py). Returns the
+    previous cache so the caller can restore it."""
+    saved = ff._flags_cache
+    ff._flags_cache = {**ff.DEFAULT_FLAGS, **overrides}
+    return saved
+
+
+@pytest.fixture()
+def flag_off():
+    saved = _pin_flags()
+    try:
+        yield
+    finally:
+        ff._flags_cache = saved
+
+
+@pytest.fixture()
+def flag_on():
+    saved = _pin_flags(**{"draft.room": True})
+    try:
+        yield
+    finally:
+        ff._flags_cache = saved
+
+
+@pytest.fixture()
+def client():
+    server.app.config["TESTING"] = True
+    return server.app.test_client()
+
+
+@pytest.fixture()
+def session(monkeypatch):
+    """A minimal initialized session for the Lakeview league.
+
+    `_get_universal_pool` is stubbed so the route never depends on the
+    process-wide pool build, and `_rookie_player_ids` so the undrafted list
+    is deterministic rather than whatever the local players table holds.
+    """
+    pool = [Player(id="p1", name="Rookie One", position="WR", team="ARI", age=22)]
+    service = RankingService(players=pool)
+    league = League(league_id=LAKEVIEW_LEAGUE, name="Lakeview", platform="sleeper",
+                    members=[LeagueMember(user_id=OPERATOR, username="op",
+                                          roster=[], elo_ratings={})])
+    sess = {
+        "user_id":       OPERATOR,
+        "league":        league,
+        "players":       pool,
+        "services":      {"1qb_ppr": service},
+        "service":       service,
+        "trade_svc":     object(),
+        "active_format": "1qb_ppr",
+        "last_active":   0.0,
+    }
+    monkeypatch.setattr(server, "_get_universal_pool",
+                        lambda fmt: (pool, {"p1": 1500.0}))
+    monkeypatch.setattr(server, "_rookie_player_ids", lambda season: set())
+    with server._sessions_lock:
+        server._sessions[ROUTE_TOKEN] = sess
+    try:
+        yield sess
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(ROUTE_TOKEN, None)
+
+
+def _get(client, **params):
+    qs = "&".join(f"{k}={v}" for k, v in params.items())
+    return client.get(f"{ROUTE}?{qs}" if qs else ROUTE,
+                      headers={"X-Session-Token": ROUTE_TOKEN})
+
+
+def test_m3_13_flag_off_is_404_feature_disabled(client, flag_off, session):
+    resp = _get(client)
+    assert resp.status_code == 404
+    assert resp.get_json() == {"error": "feature_disabled"}
+
+
+def test_m3_13_flag_off_gates_before_any_session_work(client, flag_off):
+    """No token at all still gets the 404 — the gate is the route's first
+    statement, so an unauthenticated probe learns nothing about the session."""
+    resp = client.get(ROUTE)
+    assert resp.status_code == 404
+    assert resp.get_json() == {"error": "feature_disabled"}
+
+
+def test_m3_13_flag_off_changes_no_other_route(client):
+    """D10: the tranche is inert while dark — a neighbouring unflagged route
+    answers byte-identically with `draft.room` off and on."""
+    saved = ff._flags_cache
+    try:
+        _pin_flags()
+        off = client.get("/api/tier-config")
+        off_body = off.get_data()
+        _pin_flags(**{"draft.room": True, "draft.live_poll": True})
+        on = client.get("/api/tier-config")
+        assert (on.status_code, on.get_data()) == (off.status_code, off_body)
+    finally:
+        ff._flags_cache = saved
+
+
+def test_m3_13_flag_on_without_a_session_is_401(client, flag_on):
+    resp = client.get(ROUTE)
+    assert resp.status_code == 401
+
+
+def test_route_rejects_an_unknown_basis(client, flag_on, session):
+    resp = _get(client, basis="vibes")
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "bad_basis"}
+
+
+def test_route_404s_a_league_it_has_never_seen(client, flag_on, session,
+                                               monkeypatch):
+    monkeypatch.setattr(server, "get_league_draft_context", lambda lid: None)
+    resp = _get(client, league_id="9999999999")
+    assert resp.status_code == 404
+    assert resp.get_json() == {"error": "league_not_found"}
+
+
+def test_route_renders_the_honest_state_for_an_unbound_platform(
+        client, flag_on, session, monkeypatch):
+    """Only Sleeper is bound this wave. An MFL league must say "not available
+    here" — NOT "reconnect MyFantasyLeague", which would blame the user for a
+    feature (M5) that has not shipped."""
+    monkeypatch.setattr(server, "get_league_draft_context",
+                        lambda lid: {"platform": "mfl", "season": 2026})
+    resp = _get(client)
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["platform"] == "mfl"
+    assert payload["state"] == "unavailable"
+    assert payload["notice"]["code"] == "platform_unsupported"
+
+
+def test_route_serves_a_schema_1_board_from_the_corpus(
+        client, flag_on, session, monkeypatch, tmp_path):
+    """End-to-end through the shim: session → league → fetchers → payload."""
+    DraftReplay("lakeview-complete", tmp_path).install(monkeypatch, server)
+    monkeypatch.setattr(server, "get_league_draft_context",
+                        lambda lid: {"platform": "sleeper", "season": 2026})
+    resp = _get(client, basis="my_board")
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert set(payload) == EXPECTED_KEYS
+    assert payload["schema"] == 1
+    assert payload["platform"] == "sleeper"
+    assert payload["state"] == "complete"
+    assert payload["undrafted_basis"] == "my_board"
+    assert payload["league_id"] == LAKEVIEW_LEAGUE
+    assert len(payload["picks"]) == 48
+    assert payload["deep_link"].startswith("https://sleeper.com/draft/nfl/")
+    # D9 — the terminal CTA is a link; the route wrote nothing anywhere.
+    assert payload["my_picks"], "the operator owns picks in this corpus"

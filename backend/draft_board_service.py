@@ -1048,6 +1048,20 @@ def _payload(req: BoardRequest, platform: str, *, state: str, kind: str,
     }
 
 
+def unsupported_board(req: BoardRequest) -> dict:
+    """The honest `platform_unsupported` payload, without an upstream read.
+
+    `build_board` already returns this for a platform this module cannot
+    read at all. The route needs it for a platform this module CAN read but
+    the current build does not BIND: M5 wires MFL behind `draft.mfl`, so
+    until then an MFL league must say "not available here", not
+    "reconnect MyFantasyLeague" (which would blame the user for a feature
+    that has not shipped).
+    """
+    return _render_unavailable(req, str(req.platform or "").lower(),
+                               notice=_notice(NOTICE_PLATFORM_UNSUPPORTED))
+
+
 def _render_unavailable(req: BoardRequest, platform: str, *,
                         notice: dict | None = None,
                         degraded: dict | None = None,

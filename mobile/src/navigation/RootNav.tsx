@@ -21,6 +21,7 @@ import SleeperConnectScreen from '../screens/SleeperConnectScreen';
 import TestStagesScreen from '../screens/TestStagesScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
+import DraftRoomScreen from '../screens/DraftRoomScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import AnalystGuide from '../components/AnalystGuide';
@@ -52,6 +53,9 @@ type AuthStack = {
   // the League tab's Explore rows.
   LeagueSummary: undefined;
   FreeAgents: undefined;
+  // rookie-draft M4 (flag `draft.room`) — read-only Draft Room, entered
+  // from the League tab's Explore tile.
+  DraftRoom: undefined;
   // Operator QA (flag testing.stage_users): synthetic adoption-stage users.
   TestStages: undefined;
 };
@@ -500,6 +504,35 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerLeft: () => (
               <HeaderBack
                 testID="free-agents.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
+          })}
+        />
+        {/* Draft Room — pushed from the League tab's "Rookie draft" tile
+            (flag `draft.room`). Registered unconditionally: the FLAG gates
+            the entry point, not the route, so an in-flight push survives a
+            flag revalidation instead of unmounting under the user. */}
+        <Stack.Screen
+          name="DraftRoom"
+          component={DraftRoomScreen}
+          options={({ navigation }) => ({
+            headerShown: true,
+            title: 'Rookie draft',
+            headerTitle: () => <HeaderTitle>Rookie draft</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+            // #151 pattern — see FreeAgents above (RNS#3294): the native
+            // back control is dead on iOS 26 when the previous screen has
+            // headerShown:false, so we mount our own.
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="draft-room.back-btn"
                 onPress={() =>
                   navigation.canGoBack()
                     ? navigation.goBack()

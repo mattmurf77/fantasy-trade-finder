@@ -391,3 +391,18 @@ Until M0 the player pipeline had **no refresh path at all**: the only bulk fetch
 **Known void:** `reset_user_rankings` (the "reset my rankings" action) sets `tier_overrides = NULL`, dropping the snapshot along with the board. That is correct — the user asked for a clean slate — but the restore path does **not** survive a self-service reset. There is no recovery after that point.
 
 **Known, accepted cosmetic effect (RB-7):** because a merged-band save positions incumbents without rewriting them, a partial save can read as slightly out of order against stale neighbours until the next full-band save of that position. That is inherent to any partial save, not a bug to chase.
+
+## Draft Room polling budget (rookie-draft M4, 2026-08-06)
+
+The Draft Room is the first surface in the app that fetches on a timer. `refetchInterval` had **zero** occurrences in `mobile/` before it, and the app-wide default is `refetchOnWindowFocus: false`, so there is no established pattern to lean on — the budget below is the whole contract.
+
+**Client → our server.** `DraftRoomScreen`'s query polls `GET /api/draft/board` every **15 s**, and only when ALL of: flag `draft.live_poll` is on · the screen is focused (`useIsFocused`) · the app is foregrounded (`useAppActive`, AppState `'active'`) · the board's own `state == "live"`. Anything else evaluates `refetchInterval` to `false`, which stops the timer rather than slowing it. `refetchIntervalInBackground: false` is set explicitly even though it is already the default.
+
+- **The pass threshold for blurred or backgrounded is literally ZERO requests** — not "fewer", not "one straggler". Verify by instrumentation (a request counter or a proxy log), never by reading the code: the failure mode here is a timer that keeps firing invisibly and bills every user's battery.
+- The manual **Refresh** control is present with the flag on or off. The room is fully usable dark; polling is an upgrade, not a dependency.
+
+**Our server → the platform.** Independent of the client. `draft_board_service` keeps one shared entry per `(platform, league, draft)` with TTLs 20 s live / 5 min upcoming / 24 h complete, per-key single-flight (N simultaneous viewers of one draft ⇒ **one** upstream read), a rolling-60 s cap of **3** upstream cycles per draft, and a 3-failure / 120 s circuit breaker. Within a cycle it reads the 1.2 KB draft-detail object and fetches the 20 KB pick list **only when `last_picked` moves** — a direct `/picks` poll reads a complete draft's ~24 h CDN cache while believing it is live.
+
+**If the fan-in guarantee has to be restated:** the ≤3 req/min/draft ceiling is **per process**. The Render upgrade (plan O8) that makes live polling viable also allows multiple workers — at that point the real ceiling is `3 × worker_count` per draft, and the number in the plan needs restating rather than re-deriving.
+
+**Kill order, cheapest first:** flip `draft.live_poll` off (polling stops, manual Refresh survives, the room stays up) → flip `draft.room` off (the route 404s, the League tile reverts to the rookie-board sheet, nothing else in the app changes).

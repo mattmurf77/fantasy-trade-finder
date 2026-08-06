@@ -362,6 +362,23 @@ FLAG_KEYS: tuple[str, ...] = (
     # validated, not logged — so flag-on and flag-off responses are
     # byte-identical on held-constant data (plan D4).
     "ranks.rookie_subset",
+    # M3/M4 — the Draft Room. Gates GET /api/draft/board (read-only,
+    # backend/draft_board_service.py) AND the mobile entry point: with the
+    # flag ON the League tab's Explore tile becomes "Rookie draft" and
+    # pushes the DraftRoom screen; OFF it is today's "Rookie board" tile
+    # (league.rookie_board_entry), so no user is ever stranded.
+    # OFF (default) ⇒ the route 404s `feature_disabled` before any session
+    # or league work, and nothing else in the app changes.
+    "draft.room",
+    # M4 — client-side live polling of OUR /api/draft/board (never the
+    # platform). 15 s interval, and ONLY while the screen is focused, the
+    # app is in the foreground, and the board's own `state` is "live";
+    # blurred or backgrounded is ZERO requests. Separate from `draft.room`
+    # so the room can ship on manual Refresh alone while the throwaway-
+    # league live test (plan O7) is still the release gate for polling.
+    # OFF (default) ⇒ no recurring fetch anywhere; the manual Refresh
+    # control is always present either way.
+    "draft.live_poll",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
