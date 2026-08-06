@@ -368,12 +368,20 @@ class RankingService:
         self,
         position: Optional[str] = None,
         skipped_player_ids: Optional[set] = None,
+        scoped: bool = False,
     ) -> MatchupTrio:
         """Return the most informative next 3 players to rank.
 
         skipped_player_ids (Agent 1): persistent "I don't know this player"
         exclusions. Players in this set are filtered out of the candidate pool
         so they never appear in future trios for this user + format.
+
+        scoped (rookie-draft M2): the caller has narrowed the candidate set via
+        `skipped_player_ids` (rookie scope reuses that channel so no new
+        parameter threads through the selectors). The ONE lane that channel
+        cannot constrain is `cross_pos`, which reaches across the FULL pool by
+        design — so it is dropped from the variety table. Default False keeps
+        every existing caller byte-identical.
         """
         _skipped: set = skipped_player_ids or set()
 
@@ -402,7 +410,7 @@ class RankingService:
         #   boundary    — cross-tier edge probe (moves value across a band)
         #   within_tier — top-vs-bottom of the same tier (fixes intra-tier order)
         #   tightest    — legacy near-equal fine ordering (smart/algorithmic)
-        variety = self._pick_trio_variety(position)
+        variety = self._pick_trio_variety(position, scoped=scoped)
 
         trio: Optional[MatchupTrio] = None
         if variety == "boundary":
@@ -482,11 +490,17 @@ class RankingService:
             for p in ("QB", "RB", "WR", "TE")
         )
 
-    def _pick_trio_variety(self, position: Optional[str]) -> str:
+    def _pick_trio_variety(self, position: Optional[str],
+                           scoped: bool = False) -> str:
         """Weighted choice of trio strategy, avoiding an immediate repeat.
 
         Overall mode (position=None) has no positional bands, so only the
         tightest (position-agnostic) strategy applies.
+
+        `scoped` (M2 lane audit): drop `cross_pos`. Every other lane honours
+        the caller's `skipped_player_ids` exclusion, but `_cross_position_trio`
+        buckets the FULL pool across positions, so under a scoped request it
+        would serve players the user is not being shown.
         """
         if position is None:
             return "tightest"
@@ -495,7 +509,9 @@ class RankingService:
         # #132 — cross-position lane joins the mix only post-unlock; its
         # share comes out of the tightest remainder, so the boundary /
         # within-tier calibration lanes keep their tuned rates.
-        w_x = max(0.0, _c("trio_cross_pos_rate")) if self._trade_unlocked() else 0.0
+        w_x = (0.0 if scoped
+               else max(0.0, _c("trio_cross_pos_rate")) if self._trade_unlocked()
+               else 0.0)
         w_t = max(0.0, 1.0 - w_b - w_w - w_x)
         choices = {k: v for k, v in
                    (("boundary", w_b), ("within_tier", w_w),
@@ -1323,6 +1339,134 @@ class RankingService:
                     self._elo_overrides[pid] = hi - (hi - lo) * i / (n - 1)
 
         self._version += 1
+
+    def apply_tiers_subset(
+        self,
+        position: Optional[str],
+        tiers: dict[str, list[str]],
+        scope_pids: set[str],
+        scoring_format: str = "1qb_ppr",
+        cleared_pids: Optional[list[str]] = None,
+        demoted_pids: Optional[list[str]] = None,
+    ) -> dict[str, list[str]]:
+        """Scoped tier save — the merged-band rule (rookie-draft plan D2/D3).
+
+        `apply_tiers` above is deliberately NOT modified: the unscoped lane
+        stays byte-identical (D4), and this is the only lane that knows about
+        a subset.
+
+        THE PROBLEM. A scoped board shows the user only part of a tier's
+        membership (today: only the rookies). Two obvious implementations both
+        destroy boards:
+
+          * spread the SUBMITTED list over the band — the "naive scoped-list
+            spread". The top rookie lands at the band ceiling, leapfrogging
+            every veteran incumbent the user never saw.
+          * spread the submitted list and persist the whole band — rewrites
+            the overrides of untouched members the user never saw either.
+
+        THE RULE. Reconstruct the *merged full-band order* `M` by merging the
+        scoped pids (anchored by their CURRENT values) into the band's current
+        full membership, spread linearly over the FULL merged list with
+        arithmetic identical to `apply_tiers`, and persist the result for the
+        SCOPED pids ONLY. That is the only construction satisfying both
+        write-identity (a scoped pid gets exactly the Elo the equivalent
+        full-band save would give it — the equivalence bar, T-M2-07) and
+        no-respread (untouched members' overrides are byte-unchanged, D3/I-3).
+
+        `cleared_pids` / `demoted_pids` (#161) are scoped too: a clear or a
+        demotion for a pid the user could not see is ignored (O4). Demoting an
+        unshown veteran is the one way this can silently damage a board.
+
+        Returns `{tier_name: M}` so the caller can assert the equivalence bar
+        without recomputing the merge.
+
+        Known, accepted (plan round 4, RB-7): because incumbents are POSITIONED
+        but not rewritten, a partial save can cosmetically invert against stale
+        neighbours until the next full-band save. That is inherent to any
+        partial save.
+        """
+        pool = self._pool(position)
+        pool_ids = {p.id for p in pool}
+        bands = self.tier_bands_for(position, scoring_format)
+        # FULL-pool Elo — every rookie-vs-vet swipe still counts. Computed
+        # once, BEFORE the mutations below, exactly as apply_tiers reads a
+        # single consistent picture of the board.
+        current = self._compute_elo(pool)
+
+        def value_of(pid: str) -> float:
+            """Where this pid sits right now: their override if they have
+            one, else their computed Elo."""
+            return self._elo_overrides.get(pid, current.get(pid, self.ELO_INITIAL))
+
+        # ── clears and demotions, SCOPED (D3 / #161 / O4) ──────────────────
+        for pid in (cleared_pids or []):
+            if pid in scope_pids:            # a clear for an unshown vet is ignored
+                self._elo_overrides.pop(pid, None)
+        for pid in (demoted_pids or []):
+            if pid in scope_pids and pid in pool_ids:   # visible + scoped only
+                self._elo_overrides[pid] = self.DEMOTED_ELO
+
+        merged_orders: dict[str, list[str]] = {}
+        _SLOT = ("SCOPED_SLOT",)
+
+        for tier_name, submitted in tiers.items():
+            band = bands.get(tier_name)
+            if band is None:
+                continue
+            lo, hi = band
+
+            scoped = [pid for pid in submitted
+                      if pid in pool_ids and pid in scope_pids]
+            if not scoped:
+                continue                      # nothing to write for this tier
+
+            # 1. INCUMBENTS — the band's current membership, minus everything
+            #    in scope (so a pid can never appear twice in M).
+            incumbents = [pid for pid in pool_ids
+                          if pid not in scope_pids and lo <= value_of(pid) <= hi]
+            #    value desc, pid asc — fully deterministic regardless of set
+            #    iteration order.
+            incumbents.sort(key=lambda p: (-value_of(p), p))
+
+            # 2. ANCHOR the scoped block by its CURRENT values, clamped into
+            #    the band. The clamp is what makes a promotion INTO the tier
+            #    well-defined: without it a scoped pid outside the band has no
+            #    merge position at all.
+            anchors = {pid: min(max(value_of(pid), lo), hi) for pid in scoped}
+
+            # 3. MERGE two descending sequences into positional slots. Ties
+            #    resolve to the user's submitted order.
+            merged: list = []
+            i = 0                             # incumbent cursor
+            for pid in sorted(scoped,
+                              key=lambda p: (-anchors[p], scoped.index(p))):
+                while i < len(incumbents) and value_of(incumbents[i]) > anchors[pid]:
+                    merged.append(incumbents[i])
+                    i += 1
+                merged.append(_SLOT)
+            merged.extend(incumbents[i:])
+
+            # 4. FILL the scoped slots, top-to-bottom, with the USER'S
+            #    submitted order — that order is authoritative among them.
+            it = iter(scoped)
+            merged = [next(it) if s is _SLOT else s for s in merged]
+
+            # 5. SPREAD over the FULL merged list. `len(merged)`, NOT
+            #    `len(scoped)` — see the naive-spread trap in the docstring.
+            #    Arithmetic identical to apply_tiers.
+            n = len(merged)
+            for idx, pid in enumerate(merged):
+                v = hi if n == 1 else hi - (hi - lo) * idx / (n - 1)
+                # 6. PERSIST SCOPED PIDS ONLY. This `if` is the whole of D3 —
+                #    removing it produces the rejected full-band persist.
+                if pid in scope_pids:
+                    self._elo_overrides[pid] = v
+
+            merged_orders[tier_name] = merged
+
+        self._version += 1
+        return merged_orders
 
     def apply_anchor(self, player_id: str, target_elo: float):
         """

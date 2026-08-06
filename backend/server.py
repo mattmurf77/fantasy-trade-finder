@@ -134,6 +134,8 @@ from .database import (
     get_profile_public, set_profile_public,
     save_tiers_position, get_tiers_saved,
     save_tier_overrides, load_tier_overrides,
+    # rookie-draft M2 — the pre-scope board snapshot (operator restore path)
+    take_tier_override_snapshot,
     save_anchor_scale, load_anchor_scale,
     mark_format_unlocked, get_unlocked_formats,
     set_league_scoring, get_league_scoring, get_league_summary,
@@ -5248,6 +5250,97 @@ def _apply_pick_rung_year_labels(dicts: list[dict], sess) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Rookie scope (flag `ranks.rookie_subset`) — rookie-draft M2, lld.md §4.2
+#
+# `?scope=rookie` is a POST-Elo VIEW FILTER, and nothing else. `_pool`,
+# `_compute_elo`, `apply_reorder` and `apply_anchor` all stay on the FULL
+# position pool: filtering the pool would drop every rookie-vs-vet swipe from
+# the Elo computation and silently fork the Elo space into a second, quietly
+# different ranking. There is ONE board per user per format, and a rookie's
+# value on it is the same number whether you are looking at the whole board or
+# just the rookies (D2). The filter therefore runs on the already-computed,
+# already-enriched response list, immediately before serialization.
+#
+# Flag off ⇒ the parameter is never read. That is how D4 (flag on vs off ⇒
+# byte-identical responses) holds structurally rather than by diffing.
+#
+# O10 (operator decision, 2026-08-06): NO generic pick rungs inside rookie
+# scope — PLAYERS ONLY. (lld.md §4.2 predates that call and says the
+# opposite; the plan's operator-decisions section is what binds.)
+# ---------------------------------------------------------------------------
+
+class _BadScope(Exception):
+    """An unknown `scope` value, with the flag ON. Raised (rather than
+    returned) so it escapes the routes' broad `except Exception → 400
+    bad_request` and reports the real reason. Mirrors _SessionExpired."""
+
+
+@app.errorhandler(_BadScope)
+def handle_bad_scope(e):
+    return jsonify({"error": "bad_scope"}), 400
+
+
+def _requested_scope() -> str | None:
+    """'rookie' or None. Returns None unconditionally when the flag is off —
+    the query parameter is not parsed, not validated, not logged."""
+    if not is_enabled("ranks.rookie_subset"):
+        return None
+    raw = request.args.get("scope")
+    if raw is None:
+        return None
+    if raw != "rookie":
+        raise _BadScope(raw)
+    return "rookie"
+
+
+def _scope_season(sess) -> int:
+    """The season whose rookie class is in scope: the active league's, else
+    the process default. Mirrors _pick_rung_year_context's league read."""
+    league = sess.get("league") if isinstance(sess, dict) else None
+    league_id = getattr(league, "league_id", None)
+    if league_id and league_id != "league_demo":
+        ctx = _cached_draft_context(league_id)
+        if ctx and ctx.get("season"):
+            try:
+                return int(ctx["season"])
+            except (TypeError, ValueError):
+                pass
+    return _CURRENT_SEASON
+
+
+def _rookie_scope_ids(sess) -> set[str]:
+    """Player ids in scope for the session league's season.
+
+    THE predicate is `database.load_rookie_player_ids` (the SQL mirror of
+    `draft_status.is_rookie_row`), memoised per (season, pool_generation).
+    Players only — see O10 above.
+    """
+    return _rookie_player_ids(_scope_season(sess))
+
+
+def _scoped_empty(reason: str, position: str | None, count: int):
+    """The typed empty response. A thin or unloaded rookie pool is a real,
+    expected state of this feature (a class does not exist in Sleeper's dump
+    until ~late April), so it is a 200 with a reason the client can render —
+    never the bare 400 the unscoped path returns for a <3 pool."""
+    return jsonify({"empty": True, "reason": reason, "position": position,
+                    "scope": "rookie", "count": count})
+
+
+def _apply_rookie_scope(rankings: list[dict], sess) -> list[dict]:
+    """THE seam. Filters an ALREADY-COMPUTED, ALREADY-ENRICHED response list
+    to the rookie subset, preserving relative order and re-numbering `rank`
+    1..n. Every other field — elo, wins, losses, consensus rank, tile meters —
+    is passed through untouched.
+    """
+    ids = _rookie_scope_ids(sess)
+    out = [dict(d) for d in rankings if d.get("id") in ids]
+    for i, d in enumerate(out):
+        d["rank"] = i + 1
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Ranking API Routes
 # ---------------------------------------------------------------------------
 
@@ -5258,6 +5351,16 @@ def get_trio():
     sess["last_active"] = time.time()
     service = sess["service"]
     position = request.args.get("position") or None
+    # M2 — read the scope BEFORE the try (see get_rankings). Under scope the
+    # rookie subset constrains CANDIDATE SELECTION only; Elo updates from the
+    # user's picks stay full-board updates.
+    scope = _requested_scope()
+    scope_ids: set[str] = set()
+    if scope == "rookie":
+        ok, reason = _rookie_scope_allowed()
+        if not ok:
+            return _scoped_empty(reason, position, 0)
+        scope_ids = _rookie_scope_ids(sess)
     # Agent 1: persistent "I don't know this player" skips for this user+format
     try:
         skipped_ids = _skip_load(
@@ -5267,6 +5370,20 @@ def get_trio():
     except Exception as _skip_err:
         log.warning("load_skips failed (continuing without filter): %s", _skip_err)
         skipped_ids = set()
+
+    if scope == "rookie":
+        # Reuse the existing `skipped_player_ids` channel rather than threading
+        # a new parameter through _boundary_trio / _within_tier_trio /
+        # _algorithmic_trio — they all already honour it. The one lane it
+        # cannot constrain (cross_pos) is disabled via `scoped=True` below.
+        pool = service._pool(position)
+        scoped_pool = [p for p in pool
+                       if p.id in scope_ids and p.id not in skipped_ids]
+        if len(scoped_pool) < 3:
+            return _scoped_empty("thin_pool", position, len(scoped_pool))
+        skipped_ids = set(skipped_ids) | {p.id for p in pool
+                                          if p.id not in scope_ids}
+
     try:
         # Agent A1 — swipe.qc_compliments: periodically substitute a lopsided
         # "QC" trio so we can reward the user when they match the community
@@ -5276,7 +5393,11 @@ def get_trio():
         qc_trio_obj = None
         qc_expected_order: list = []
         qc_counter_key: str | None = None  # set below if QC eligible
-        if is_enabled("swipe.qc_compliments"):
+        # M2 lane audit: the QC path builds its OWN pool below and filters only
+        # `skipped_ids`, so it would leak non-rookies into a scoped trio.
+        # Skipped entirely under scope — a deliberate degradation (QC
+        # compliments on a thin rookie pool are low-value).
+        if is_enabled("swipe.qc_compliments") and scope != "rookie":
             try:
                 # Per-session counter keyed by position (or "" for cross-pos).
                 # Counts rankings *since* the last QC trio for that position.
@@ -5310,7 +5431,9 @@ def get_trio():
         if qc_trio_obj is not None:
             trio = qc_trio_obj
         else:
-            trio = service.get_next_trio(position=position, skipped_player_ids=skipped_ids)
+            trio = service.get_next_trio(position=position,
+                                         skipped_player_ids=skipped_ids,
+                                         scoped=(scope == "rookie"))
         resp = {
             "player_a":  player_to_dict(trio.player_a),
             "player_b":  player_to_dict(trio.player_b),
@@ -5358,6 +5481,17 @@ def get_trio():
                     )
 
         return jsonify(resp)
+    except ValueError as e:
+        # The <3-candidates bar. On the SCOPED path a thin pool is a designed
+        # state, not an error (the tiered pool can narrow below 3 even when
+        # the scoped pool cleared the pre-check above). The unscoped path
+        # keeps today's 400 byte-for-byte.
+        if scope == "rookie":
+            log.info("scoped trio thin pool [%s]: %s", position, e)
+            n = len([p for p in service._pool(position) if p.id in scope_ids])
+            return _scoped_empty("thin_pool", position, n)
+        log.exception("get_trio failed")
+        return jsonify({"error": "bad_request"}), 400
     except Exception as e:
         log.exception("get_trio failed")
         return jsonify({"error": "bad_request"}), 400
@@ -5641,6 +5775,13 @@ def get_rankings():
     sess["last_active"] = time.time()
     service = sess["service"]
     position = request.args.get("position") or None
+    # Read the scope BEFORE the try: an unknown value must surface as
+    # `bad_scope`, not be swallowed by the broad handler below.
+    scope = _requested_scope()
+    if scope == "rookie":
+        ok, reason = _rookie_scope_allowed()
+        if not ok:
+            return _scoped_empty(reason, position, 0)
     try:
         rank_set = service.get_rankings(position=position)
         rankings = [ranked_player_to_dict(rp) for rp in rank_set.rankings]
@@ -5698,6 +5839,13 @@ def get_rankings():
                     d[key] = s["score"]
         except Exception:
             log.warning("tile trade-score enrichment failed", exc_info=True)
+        # THE seam (M2). Deliberately AFTER both enrichments: they are pid-
+        # keyed and already best-effort, so filtering first would only save
+        # work while creating a second place that has to know about scope.
+        if scope == "rookie":
+            rankings = _apply_rookie_scope(rankings, sess)
+            if not rankings:
+                return _scoped_empty("class_not_loaded", position, 0)
         return jsonify({
             "position":          rank_set.position,
             "rankings":          rankings,
@@ -6780,20 +6928,45 @@ def save_tiers_route():
     if total_assigned == 0 and not cleared_pids and not demoted_pids:
         return jsonify({"error": "No players in any tier"}), 400
 
+    # M2 — a SCOPED save writes only part of the board. Read behind the flag,
+    # so an old-flag-off server ignores the key entirely.
+    scope = body.get("scope") if is_enabled("ranks.rookie_subset") else None
+
     try:
-        # apply_tiers assigns ELOs inside each tier's band (see
-        # backend/tier_config.json) so on reload the frontend re-buckets
-        # players into the same tier they were placed. Bands are
-        # position+format-aware. cleared_pids lets the frontend tell us
-        # "this player is back in the pool — drop their override";
-        # demoted_pids pins passed-over players below every band (#161).
-        service.apply_tiers(
-            position=position,
-            tiers=tiers,
-            scoring_format=fmt,
-            cleared_pids=cleared_pids,
-            demoted_pids=demoted_pids,
-        )
+        if scope == "rookie":
+            # `tier_overrides` is a wholesale-overwritten blob with no
+            # history, and this is the first feature that writes a PARTIAL
+            # board. Snapshot BEFORE any mutation — idempotent, so this costs
+            # one indexed read per scoped save after the first.
+            try:
+                take_tier_override_snapshot(g_user_id)
+            except Exception as snap_err:
+                log.warning("pre-scope snapshot failed: %s", snap_err)
+            # The merged-band rule: merge the scoped pids into the band's
+            # current full order, spread over the FULL merged list, persist
+            # the scoped pids ONLY. See RankingService.apply_tiers_subset.
+            service.apply_tiers_subset(
+                position=position,
+                tiers=tiers,
+                scope_pids=_rookie_scope_ids(sess),
+                scoring_format=fmt,
+                cleared_pids=cleared_pids,
+                demoted_pids=demoted_pids,
+            )
+        else:
+            # apply_tiers assigns ELOs inside each tier's band (see
+            # backend/tier_config.json) so on reload the frontend re-buckets
+            # players into the same tier they were placed. Bands are
+            # position+format-aware. cleared_pids lets the frontend tell us
+            # "this player is back in the pool — drop their override";
+            # demoted_pids pins passed-over players below every band (#161).
+            service.apply_tiers(
+                position=position,
+                tiers=tiers,
+                scoring_format=fmt,
+                cleared_pids=cleared_pids,
+                demoted_pids=demoted_pids,
+            )
 
         # Persist the full tier override dict for THIS format so it survives
         # session rebuilds. The other format's overrides are untouched.
@@ -6833,8 +7006,17 @@ def save_tiers_route():
         _record_trends_snapshot(
             service, g_user_id, g_league, fmt, assigned_pids + cleared_pids)
 
-        # Mark this position as saved for the active format
-        saved = save_tiers_position(g_user_id, position, scoring_format=fmt)
+        # Mark this position as saved for the active format.
+        #
+        # NOT under scope (M2, I-4). `tiers_saved` / `all_done` are
+        # COMPLETENESS markers, and a rookies-only save does not complete a
+        # position. One line, four downstream surfaces: LeagueScreen's ranked
+        # count, quicksetProgress's cache, the web celebration, and #244
+        # launch routing.
+        if scope == "rookie":
+            saved = get_tiers_saved(g_user_id, scoring_format=fmt)   # READ only
+        else:
+            saved = save_tiers_position(g_user_id, position, scoring_format=fmt)
         all_done = all(p in saved for p in ("QB", "RB", "WR", "TE"))
 
         # Tracking plan v2 §S3 — tier_save into user_events. This is the ONLY
@@ -6843,7 +7025,14 @@ def save_tiers_route():
         # tier_save is now a rank-class streak event, so tz rides along for
         # local-day streak math. `via` lets QuickSet saves self-identify;
         # default 'tiers' keeps old clients honest.
-        via = body.get("via") if body.get("via") in ("tiers", "quickset") else "tiers"
+        # M2 (KD-10): the `rookie_*` tags are the forensic trail the board-
+        # restore procedure keys off ("confirm the damage window from the
+        # user's via:'rookie_*' events"). The whitelist is EXTENDED, never
+        # replaced — an unrecognised via still falls back to "tiers".
+        via = (body.get("via")
+               if body.get("via") in ("tiers", "quickset", "rookie_tiers",
+                                      "rookie_quickset", "rookie_anchors")
+               else "tiers")
         try:
             record_event(
                 g_user_id, "tier_save",

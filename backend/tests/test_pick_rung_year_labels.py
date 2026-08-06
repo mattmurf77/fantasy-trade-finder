@@ -68,7 +68,8 @@ class _FakeService:
             version=1, computed_at="2026-08-05T00:00:00Z",
         )
 
-    def get_next_trio(self, position=None, skipped_player_ids=None):
+    def get_next_trio(self, position=None, skipped_player_ids=None,
+                      scoped=False):
         a, b, c = (self._players + self._players + self._players)[:3]
         return MatchupTrio(a, b, c, reasoning="test")
 

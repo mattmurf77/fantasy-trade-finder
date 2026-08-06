@@ -352,6 +352,16 @@ FLAG_KEYS: tuple[str, ...] = (
     # Protocol providers; the projection/points source is config-selected via
     # FTF_OUTLOOK_STRENGTH_SOURCE. Preseason payloads are flagged beta.
     "outlook.odds",
+    # ── Rookie draft (docs/plans/rookie-draft/) ────────────────────────────
+    # M2 — `?scope=rookie` on /api/rankings + /api/trio, and `scope` in the
+    # /api/tiers/save body. A POST-Elo VIEW filter over the ONE existing board:
+    # scoped Elo == unscoped Elo for every rookie, and a scoped tier save uses
+    # the merged-band rule (persist the scoped pids only, at exactly the values
+    # a full-band save would give them).
+    # OFF (default) ⇒ the `scope` parameter is NEVER READ — not parsed, not
+    # validated, not logged — so flag-on and flag-off responses are
+    # byte-identical on held-constant data (plan D4).
+    "ranks.rookie_subset",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

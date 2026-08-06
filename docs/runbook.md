@@ -371,3 +371,23 @@ Until M0 the player pipeline had **no refresh path at all**: the only bulk fetch
 **Rookie class-load monitor.** `daily-tick` runs one indexed `COUNT` for `rookie_year == <next season>` and logs `CLASS-LOAD <year> rookie class has appeared` once per process the first time it is non-empty. Sleeper's dump carries **no** rows for a class until ~late April, so Feb–Apr is a structurally empty window the Draft Room has to design around; this log line is the only signal that the window closed. It uses the EXACT `rookie_year` test on purpose — the `years_exp == 0 AND team` proxy in THE rookie predicate is season-independent and would fire on day one.
 
 **Measuring the class.** `python3 -m backend.scripts.measure_rookie_pool --refresh` runs a synchronous refresh, then writes `docs/plans/rookie-draft/measurement.md` with valued-rookie counts per scoring format × position plus the plan's abort criterion (any format under 15 valued rookies ⇒ rookie scope ships for Pick Anchors + Tiers only). Re-run it before any rookie UI wave — the numbers move as DynastyProcess picks up more of the class.
+
+## Rookie-scope board restore (rookie-draft M2, 2026-08-06)
+
+`users.tier_overrides` is a wholesale-overwritten JSON blob with **no history** — a prior filtering bug permanently destroyed a user's board, and `server.py` still carries the comment saying so. Rookie scope (`ranks.rookie_subset`) is the first feature that writes a **partial** board, so a one-time snapshot plus this procedure is a **precondition for flipping that flag**.
+
+- **What is stored:** a sibling key `__pre_rookie_scope__` inside the same `tier_overrides` column — `{v:1, taken_at, reason:"pre_scope_v1", formats:{"1qb_ppr":{pid:elo}, "sf_tep":{…}}}`. No new table, no migration. `database.take_tier_override_snapshot(user_id)` writes it from `POST /api/tiers/save` **before any mutation**, only when `scope == "rookie"`. It is idempotent on purpose: the FIRST scoped save captures the pre-scope state and later saves never overwrite it with an already-damaged board.
+- **What keeps it alive:** `database._parse_extra_keys`. `_parse_per_format_json` narrows to `SCORING_FORMATS`, so every writer that round-trips this column must merge non-format keys back (`{**extras, **all_overrides}`) or the very next save of either format silently deletes the snapshot. That merge is pinned by `backend/tests/test_rookie_scope.py::test_m2_01_sibling_key_survives_alternating_format_saves` — **if it ever goes red the restore path is gone and the flag must go back off.**
+
+**Procedure:**
+
+1. Confirm the damage window from the user's `via:'rookie_*'` rows in `user_events` (`rookie_tiers` / `rookie_quickset` / `rookie_anchors` — the forensic tags scoped saves carry).
+2. Verify the snapshot predates that window:
+   `python3 -c "from backend.database import load_tier_override_snapshot as l; print(l('<user_id>'))"`
+3. Restore (both formats; pass a format string to restore just one):
+   `python3 -c "from backend.database import restore_tier_overrides_from_snapshot as r; print(r('<user_id>'))"` → per-format counts. **Repeatable** — the restore does not consume the snapshot.
+4. Have the user re-init their session (`POST /api/session/init`). In-memory `_elo_overrides` are only re-read at session init, so until they do, their live session still shows the damaged board.
+
+**Known void:** `reset_user_rankings` (the "reset my rankings" action) sets `tier_overrides = NULL`, dropping the snapshot along with the board. That is correct — the user asked for a clean slate — but the restore path does **not** survive a self-service reset. There is no recovery after that point.
+
+**Known, accepted cosmetic effect (RB-7):** because a merged-band save positions incumbents without rewriting them, a partial save can read as slightly out of order against stale neighbours until the next full-band save of that position. That is inherent to any partial save, not a bug to chase.

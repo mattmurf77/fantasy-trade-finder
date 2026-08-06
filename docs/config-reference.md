@@ -230,6 +230,17 @@ flags flipped ON at its TestFlight ship. F8 (offline eval harness) is unflagged 
 | `deck.first_session` | false | F9 first-session win: confidence-weighted top-5 + 8–10-card clamp on a user's FIRST deck per league, the honest mid-deck adaptation moment (client), the "Built from your updated board" header on every board-refreshed deck (2026-07-26 amendment; needs `deck.signal_v2` for the previous-deck timestamp), and the `first_session_*` activation events. Off ⇒ byte-identical payloads/ordering/UI. |
 | `deck.replenishment` | false | F10 deck-completion summary card + weekly post-waivers pre-generation (daily-tick hook) + 1/week preference-gated fresh-deck push. |
 
+### Rookie draft + Draft Room (2026-08-06)
+
+Registered under the `_comment_rookie_draft` block in `config/features.json`; plan/HLD/LLD in
+[docs/plans/rookie-draft/](plans/rookie-draft/). All flags land OFF and flip at each milestone's
+release gate. M0 (the player-cache refresh) is deliberately **not** flag-gated — its lever is the
+`FTF_PLAYERS_REFRESH` env var above.
+
+| Flag | Default | Gates |
+|---|---|---|
+| `ranks.rookie_subset` | false | M2 rookie scope: `?scope=rookie` on `/api/rankings` + `/api/trio`, and `scope`/`via:"rookie_*"` in the `POST /api/tiers/save` body. A **post-Elo view filter** over the ONE existing board — a rookie's Elo is identical scoped or unscoped, and a scoped tier save uses the merged-band rule (persist the scoped pids only, at exactly the values a full-band save would give them; see [ADR-009](adr/adr-009-rookie-scope-view-filter.md)). **Off ⇒ the `scope` parameter is never read** — not parsed, not validated, not logged — so flag-on and flag-off responses are byte-identical on held-constant data. Precondition for flipping it: the pre-scope snapshot + restore procedure ([runbook § Rookie-scope board restore](runbook.md)) is live. |
+
 #### Ship-by / kill-by review convention (07/prd-04)
 
 Dark flags are inventory, not archive. **Every flag dark ≥90 days gets a recorded decision at a quarterly flag review: schedule a canary via the experiments engine, or delete the code path.** "Still thinking" is not a decision — the review's exit criterion is zero flags >90 days old without one. Record the decision as a one-line ship-by/kill-by note in the flag's `features.json` comment block (or the table above). The teardown block's clock starts 2026-07-19.

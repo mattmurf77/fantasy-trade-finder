@@ -3208,6 +3208,31 @@ def _parse_per_format_json(raw: str | None, is_list: bool) -> dict:
     return out
 
 
+def _parse_extra_keys(raw: str | None) -> dict:
+    """Top-level keys of a per-format JSON column that are NOT scoring formats.
+
+    `_parse_per_format_json` deliberately narrows its output to SCORING_FORMATS;
+    any writer that round-trips the column through it must merge these back or
+    it silently DELETES them. That is not hypothetical — the rookie-scope
+    pre-save snapshot (`__PRE_ROOKIE_SCOPE_KEY__`) lives as a sibling key in
+    `users.tier_overrides`, and without this merge the very next tier save of
+    either format would destroy it.
+
+    Deliberately NOT applied to `tiers_saved` / `anchor_scale`: nothing stores
+    sibling keys there, and narrowing is the correct behaviour for a column
+    with no extras.
+    """
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {k: v for k, v in parsed.items() if k not in SCORING_FORMATS}
+
+
 def save_tiers_position(
     user_id: str,
     position: str,
@@ -3288,13 +3313,17 @@ def save_tier_overrides(
                     users_table.c.sleeper_user_id == user_id
                 )
             ).fetchone()
-        all_overrides = _parse_per_format_json(row.tier_overrides if row else None, is_list=False)
+        raw = row.tier_overrides if row else None
+        all_overrides = _parse_per_format_json(raw, is_list=False)
+        # Non-format sibling keys (the pre-rookie-scope snapshot) survive the
+        # round-trip. `extras` FIRST so a format key can never be shadowed.
+        extras = _parse_extra_keys(raw)
         # Cast ELO values to float so JSON stays clean
         all_overrides[scoring_format] = {pid: float(elo) for pid, elo in overrides.items()}
         conn.execute(
             update(users_table)
             .where(users_table.c.sleeper_user_id == user_id)
-            .values(tier_overrides=json.dumps(all_overrides))
+            .values(tier_overrides=json.dumps({**extras, **all_overrides}))
         )
 
 
@@ -3317,6 +3346,128 @@ def load_tier_overrides(
         return {}
 
 
+# ── Rookie-scope pre-save snapshot (M2, LLD §3.2) ─────────────────────────
+# `tier_overrides` is a wholesale-overwritten JSON blob with NO history: a
+# prior filtering bug permanently destroyed a user's board. Rookie scope is
+# the first feature that writes a PARTIAL board, so a one-time snapshot of
+# the whole blob is taken before the first scoped save — the operator restore
+# path (docs/runbook.md § "Rookie-scope board restore") is a precondition for
+# flipping `ranks.rookie_subset`.
+#
+# Stored as a sibling key INSIDE the same column — no new table, no
+# migration. `_parse_extra_keys` above is what keeps it alive.
+PRE_ROOKIE_SCOPE_KEY = "__pre_rookie_scope__"
+_PRE_ROOKIE_SCOPE_VERSION = 1
+
+
+def take_tier_override_snapshot(user_id: str,
+                                reason: str = "pre_scope_v1") -> bool:
+    """One-shot snapshot of every format's tier overrides. Idempotent.
+
+    Returns True iff a snapshot was written; False when one already exists
+    (or the user has no row). Cheap after the first call — one indexed read.
+    """
+    is_postgres = not DATABASE_URL.startswith("sqlite")
+    with engine.begin() as conn:
+        if is_postgres:
+            row = conn.execute(
+                text("SELECT tier_overrides FROM users WHERE sleeper_user_id = :uid FOR UPDATE"),
+                {"uid": user_id},
+            ).fetchone()
+        else:
+            row = conn.execute(
+                select(users_table.c.tier_overrides).where(
+                    users_table.c.sleeper_user_id == user_id
+                )
+            ).fetchone()
+        if row is None:
+            return False
+        raw = row.tier_overrides
+        extras = _parse_extra_keys(raw)
+        if PRE_ROOKIE_SCOPE_KEY in extras:
+            return False
+        all_overrides = _parse_per_format_json(raw, is_list=False)
+        extras[PRE_ROOKIE_SCOPE_KEY] = {
+            "v":        _PRE_ROOKIE_SCOPE_VERSION,
+            "taken_at": _now(),
+            "reason":   reason,
+            "formats":  {fmt: dict(all_overrides.get(fmt) or {})
+                         for fmt in SCORING_FORMATS},
+        }
+        res = conn.execute(
+            update(users_table)
+            .where(users_table.c.sleeper_user_id == user_id)
+            .values(tier_overrides=json.dumps({**extras, **all_overrides}))
+        )
+        return bool(res.rowcount)
+
+
+def load_tier_override_snapshot(user_id: str) -> dict | None:
+    """The stored pre-scope snapshot object, or None."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.tier_overrides).where(
+                users_table.c.sleeper_user_id == user_id
+            )
+        ).fetchone()
+    snap = _parse_extra_keys(row.tier_overrides if row else None).get(
+        PRE_ROOKIE_SCOPE_KEY)
+    return snap if isinstance(snap, dict) else None
+
+
+def restore_tier_overrides_from_snapshot(
+    user_id: str,
+    scoring_format: str | None = None,
+) -> dict[str, int]:
+    """Operator restore. `scoring_format=None` restores BOTH formats.
+
+    Returns {format: override_count_restored}. Does NOT delete the snapshot —
+    a restore must be repeatable. The caller must have the user re-init their
+    session; in-memory `_elo_overrides` are only re-read at session_init.
+    """
+    targets = ([scoring_format] if scoring_format
+               else list(SCORING_FORMATS))
+    is_postgres = not DATABASE_URL.startswith("sqlite")
+    counts: dict[str, int] = {}
+    with engine.begin() as conn:
+        if is_postgres:
+            row = conn.execute(
+                text("SELECT tier_overrides FROM users WHERE sleeper_user_id = :uid FOR UPDATE"),
+                {"uid": user_id},
+            ).fetchone()
+        else:
+            row = conn.execute(
+                select(users_table.c.tier_overrides).where(
+                    users_table.c.sleeper_user_id == user_id
+                )
+            ).fetchone()
+        if row is None:
+            return counts
+        raw = row.tier_overrides
+        extras = _parse_extra_keys(raw)
+        snap = extras.get(PRE_ROOKIE_SCOPE_KEY)
+        if not isinstance(snap, dict):
+            return counts
+        formats = snap.get("formats")
+        if not isinstance(formats, dict):
+            return counts
+        all_overrides = _parse_per_format_json(raw, is_list=False)
+        for fmt in targets:
+            if fmt not in SCORING_FORMATS:
+                continue
+            stored = formats.get(fmt)
+            restored = ({pid: float(elo) for pid, elo in stored.items()}
+                        if isinstance(stored, dict) else {})
+            all_overrides[fmt] = restored
+            counts[fmt] = len(restored)
+        conn.execute(
+            update(users_table)
+            .where(users_table.c.sleeper_user_id == user_id)
+            .values(tier_overrides=json.dumps({**extras, **all_overrides}))
+        )
+    return counts
+
+
 def reset_user_rankings(user_id: str) -> dict[str, int]:
     """Wipe every persisted ranking artifact for one user (all formats).
 
@@ -3328,6 +3479,11 @@ def reset_user_rankings(user_id: str) -> dict[str, int]:
     ranking method — plus the published member_rankings other members' trade
     math reads. elo_history snapshots are kept (telemetry trail, not
     replayed into rankings).
+
+    Known void (M2): clearing `tier_overrides` also drops the sibling
+    `__pre_rookie_scope__` snapshot. That is correct — the user asked for a
+    clean slate — but it means the rookie-scope restore path does not survive
+    a self-service reset. Recorded in docs/runbook.md.
 
     Returns row/field counts for the route's response + support log.
     """
