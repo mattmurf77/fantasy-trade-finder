@@ -11826,26 +11826,18 @@ def _ensure_sleeper_cache_populated() -> dict:
     if cached is not None:
         return cached
 
-    if _TEST_MODE:
-        # This bulk fetch uses raw urllib (not _sleeper_get), so the fixture
-        # seam can't intercept it. In test mode the seeded warm-cache file IS
-        # the data source — a miss here means the seeder output is missing.
+    if _TEST_MODE and not os.environ.get("FTF_SLEEPER_FIXTURES_DIR"):
+        # In test mode the seeded warm-cache file IS the data source — a miss
+        # here means the seeder output is missing (unless a fixture corpus is
+        # mounted, in which case the seam below serves the bulk payload).
         raise RuntimeError(
             f"players cache missing in test mode (expected seeded file at {PLAYERS_CACHE_FILE})")
 
     log.info("  📡 cache miss — fetching from Sleeper (~5MB)…")
-    req = urllib.request.Request(
-        "https://api.sleeper.app/v1/players/nfl",
-        headers={"User-Agent": "FantasyTradeFinder/1.0"},
-    )
-    with urllib.request.urlopen(req, timeout=45) as r:
-        raw = json.loads(r.read())
-
-    log.info("  raw payload has %d players", len(raw))
-
-    # Filter to skill positions only (cuts ~80% of the payload). Shared with
-    # the M0 refresh daemon so the two paths can never drift.
-    relevant = _filter_bulk_players(raw)
+    # T-M1-04 [RV-3]: routed through _fetch_players_bulk → _sleeper_get so the
+    # fixture/replay seam intercepts the bulk dump; shared with the M0 refresh
+    # daemon so the two paths can never drift (it filters to skill positions).
+    relevant = _fetch_players_bulk()
     log.info("  filtered to %d skill-position players", len(relevant))
 
     # Persist to disk
