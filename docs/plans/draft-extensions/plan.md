@@ -7,7 +7,9 @@ Sources: Agent A (execution lens) + Agent B (risk lens), both grounded on `origi
 
 1. **Item 1 is already built AND flag-on.** `ranks.rookie_subset` and `draft.room` are `true` in prod config. `DraftRoomScreen` renders `draft-room.rank-rookies` in **every** board state → `Main → Rank → RookieRanks`. Three other entries exist. **Nothing to build for the link itself.** Two real gaps remain: the bridge is *one-way* (no return route, lands two hops from any editing gesture), and undrafted rows are inert `View`s with a **shared, non-unique testID** — the flow is currently untestable.
 2. **The mock draft feature does not exist.** No service, table, or flag. `docs/plans/rookie-draft/mock-draft-plan.md` is an **untracked, local-only** reviewed draft. So item 3 is build-from-zero, not an entry-point wire-up.
-3. **A live defect existed and is FIXED** (`ab5050f`, this session): the seasonal tab predicate checked draft status but not platform binding, so MFL leagues got a tab leading to "not available for this platform." Predicate now requires a bound adapter (Sleeper always, MFL iff `draft.mfl`, others never). **This is also the template for the ESPN question below.**
+3. **CORRECTED (review round 2).** The tab-predicate guard shipped in `ab5050f` was **inert as first written**, and the "live defect" it targeted was **unreachable**. Two facts, both verified: the leagues route never emitted a `platform` key, so `mobile/src/api/sleeper.ts` coerced every league to `'sleeper'` and the new branch returned `true` for all of them; and MFL/ESPN/Fleaflicker leagues **cannot appear on that route at all** — `load_local_leagues_for_user` filters to non-numeric ids while every linked platform validates numeric ids at link time. So no user has ever seen the MFL phantom tab, and the guard changed nothing.
+   **Now made real** (this session): the route stamps `platform` from the draft context, the snapshot key is bumped `v1→v2` (a stale snapshot feeds TabNav at first mount), and `mflBound` is a required argument. The guard is correct defensive work — it becomes load-bearing the moment linked-platform leagues enter that list — but it is **not** evidence about ESPN.
+   **The real gap this exposed, and a named prerequisite:** the tab's league source excludes every linked platform league by data path. §6's "tab qualification from an active tracking session" increment silently assumed ESPN leagues were in that list; **they are not**, so that increment must either add a league source or be dropped. Budget it or cut it — do not let a builder discover it.
 4. **ESPN's exclusion is structural.** `draft_picks.platform` carries the comment "ESPN never writes rows"; `picks_supported = platform != "espn"` gates two engine guards; ESPN import is one read-only GET. But ESPN rosters DO arrive in our Sleeper id space via a 99.2%-coverage crosswalk — which is what makes an undrafted list computable at all.
 5. **ESPN can never reach the seasonal tab today, by design:** its verdict routes to the rosters heuristic, which **caps at MEDIUM by construction**, and the tab requires `high`.
 6. **There is a free, unspent ESPN probe.** `&view=mDraftDetail` costs **zero extra HTTP requests** (one token appended to an existing call) and reportedly returns `draftDetail:{drafted, picks[]}`. Never verified; explicitly "do not build on it." **Both lenses independently named running it the highest-leverage half-day available.**
@@ -66,7 +68,8 @@ Long-press (plus an explicit "⋯" affordance for accessibility) on an undrafted
 
 Adopt `docs/plans/rookie-draft/mock-draft-plan.md` §4–9 — **now tracked on main (`dc32c2a`); it had been untracked local-only, so the wave it scopes had no spec to read** — with three risk-lens amendments that are binding:
 - **CPU basis = market consensus**, explicitly labeled in-UI, never the user's board and never our internal user-influenced Elo. Otherwise every mock reads our rankings back to the user, and where our Elo disagrees with community consensus the bots look dumb and the user blames our values.
-- **The noise model is FITTED, not chosen.** We hold a real completed 48-pick rookie draft (`lakeview-complete`). Measure the actual `|pick_no − consensus_rank|` distribution, fit jitter and the reach cap to it, and make the acceptance test "bots replaying Lakeview land inside the fitted band." Reach cap ≤2 slots initially, `model_config`-tunable.
+- **The noise model is FITTED, and fit must be SEPARATED FROM VALIDATION.** Fitting jitter to Lakeview and then validating on Lakeview is true by construction — it detects simulator bugs, not a wrong model. Fit on a held-out split (rounds 1–2 → validate 3–4, or k-fold over the 48 picks) AND validate against an independent recorded completion already in the tree (`mfl-complete` 30/30, `mfl-partial` 36/72 — check rookie- vs startup-shape first; `mfl-multi-unit` is startup). State the numeric failure threshold and what happens when it is missed. **W2 abort criterion (it had none): if the noise model fails holdout validation inside the calibration batch, practice/replay ships as a QA-only surface and the CPU-bot mock is cut.**
+- **Reuse the shipped consensus seam** (`_get_universal_pool()` → `consensus_seed`, the same source `BASIS_CONSENSUS` uses). A second "market consensus" definition means the room's undrafted order and the mock bots visibly disagree on the same screen.
 - **Access (the operator's actual item 3):** CTA inside the Draft Room rendered in `upcoming`/`unavailable`/no-draft-object states — **not** restricted to `kind=="rookie"`, because an unscheduled draft is the *primary* mock case; plus the **Acquire chip**, which exists year-round whenever `draft.room` is on, so the mock inherits a 12-month home with **no new tab and no new chip** (the strip already measures ≈402pt vs ≈361pt usable). One canonical deep link on the root stack only.
 - **Honest seasonality:** a *real-league rookie* mock needs an undrafted class, so it is dead Sept 2026–Apr 2027 like everything else. The year-round surface is **practice/replay mode** (2026 class vs pre-draft roster snapshots from the M1 corpora) — ship it as the dogfood/QA surface and the calibration harness, **not** as a marketed year-round feature.
 *Done bar:* D7, D8, D9, D10.
@@ -80,8 +83,19 @@ Adopt `docs/plans/rookie-draft/mock-draft-plan.md` §4–9 — **now tracked on 
 manual_draft_sessions(id, user_id, league_id, season, platform,
                       mode 'paste'|'live', status 'active'|'superseded'|'abandoned'|'archived',
                       marked_count, created_at, updated_at, superseded_by, superseded_at)
-manual_draft_marks(id, session_id, player_id, source 'user_paste'|'user_tap', marked_at)
+manual_draft_marks(id, session_id, player_id, action 'mark'|'unmark',
+                   source 'user_paste'|'user_tap', marked_at,
+                   UNIQUE(session_id, player_id, marked_at))
                       -- NO slot, NO round, NO owner. The schema cannot express ownership.
+                      -- `action` is what makes undo NON-DESTRUCTIVE (D6 demands both
+                      --  "undoable" and "never destructive"; a bare DELETE gives neither).
+                      --  The single renderer folds to the LATEST row per player.
+                      --  `marked_count` is DERIVED, or written in the same transaction —
+                      --  a denormalized counter drifts from the marks on double-tap.
+                      --  (session_id, player_id) is also the idempotency key for the
+                      --  offline queue: live marking happens in venues with bad wifi, so
+                      --  marks queue locally and replay idempotently, or the <40%/60%
+                      --  coverage abort metric measures connectivity, not user intent.
 ```
 Five properties, each answering a named failure: per-**user** (no cross-user blast radius); **no ownership columns** (keeps manual data structurally out of the trade engine); read by exactly one renderer; **never writes `leagues.draft_status*`**; always labeled in transit.
 
@@ -89,7 +103,11 @@ Five properties, each answering a named failure: per-**user** (no cross-user bla
 
 **Composition:** `draft_board_service` is untouched and never imports the manual store. The **route** builds the platform board first; only when it is `unavailable`/`platform_unsupported` (or the league has no current-season draft object) does it hand off to a manual renderer emitting the same `schema:1` envelope with `source:"user"`. New states ride `notice.code` (`manual_available`, `manual_tracking`, `manual_archived`) — never a new member of a closed enum.
 
+**Standalone by operator ruling (2026-08-06): "it doesn't need to link to league rosters."** This is a significant simplification and it resolves the league-source problem above: a tracking session is a **standalone draft tracker** keyed to the user, not a projection of a league's roster state. Consequences, all favorable — the undrafted list is the rookie class minus marks (no rostered subtraction, so no crosswalk dependency and no ESPN roster freshness coupling); it works for a league FTF has never seen; it needs no entry in the tab's league list; and it removes the "two FTF users in one league disagree" problem entirely because nothing is league-scoped. `league_id` becomes an OPTIONAL label on the session (for the user's own orientation and for the D4 supersede path when a league does exist), never a data dependency.
+
 **Interaction:** **one tap = taken, no attribution** (the 80% of the value; attribution is the expensive half). Undo always. Persistent "N of 48 recorded." **Paste-recap import ships FIRST** (one action for all 48, reusing the shipped tolerant paste parser + fuzzy pool matcher from `rankings_import`), then live marking.
+
+**O9 invariant is pinned BEHAVIORALLY, not by source-text identity** — a table test over the (status × confidence × platform) verdict matrix plus the D2 import-graph test. (`leagueQualifiesForDraftTab` has already changed twice this session; "assert the source is unmodified" would be brittle by construction.)
 
 **Placement:** the League tile and the Acquire chip — **the seasonal tab stays hidden for ESPN in V1** (matching the defect fix in §0.3: no tab without a renderable board). Tab qualification from an active asserted session ships dark and flips only after a pilot.
 

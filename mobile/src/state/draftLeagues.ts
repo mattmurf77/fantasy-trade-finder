@@ -39,7 +39,7 @@ import { useFeatureFlags } from './useFeatureFlags';
 // self-correcting (the Acquire tab's Draft chip is the permanent home and is
 // always there when `draft.room` is on), a tab that lies is not.
 
-const KEY = 'ftf_draft_leagues_v1';
+const KEY = 'ftf_draft_leagues_v2';
 
 /** A linked league with a current-season rookie draft that hasn't run. */
 export interface QualifyingDraftLeague {

@@ -12290,6 +12290,11 @@ def sleeper_leagues(user_id):
                 ctx = None
             lg["draft_status"] = (ctx or {}).get("status")
             lg["draft_status_confidence"] = (ctx or {}).get("confidence")
+            # The client's tab predicate also requires a BOUND platform adapter
+            # (ab5050f). Without this key `mobile/src/api/sleeper.ts` coerces every
+            # league to 'sleeper', which made that guard inert — it returned true
+            # for everything. get_league_draft_context already carries platform.
+            lg["platform"] = (ctx or {}).get("platform") or "sleeper"
 
     return jsonify(sleeper_data)
 
