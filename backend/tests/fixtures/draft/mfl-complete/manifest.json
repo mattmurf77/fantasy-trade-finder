@@ -1,0 +1,22 @@
+{
+ "platform": "mfl",
+ "provenance": "recorded-live",
+ "recorded": "2026-08-06",
+ "league_id": "10005",
+ "host": "www48.myfantasyleague.com",
+ "year": 2026,
+ "pins": [
+  "1 draftUnit(s), 30/30 picks made",
+  "franchise populated on EVERY pick, made or not (D8's premise)"
+ ],
+ "drives": [
+  "T-M5-01",
+  "T-M5-02",
+  "T-M5-03",
+  "T-M5-04",
+  "D8"
+ ],
+ "made": 30,
+ "total": 30,
+ "units": 1
+}

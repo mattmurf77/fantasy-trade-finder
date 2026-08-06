@@ -1,0 +1,52 @@
+[
+ {
+  "created": 1767201283062,
+  "creators": [
+   "313560442465169408"
+  ],
+  "draft_id": "1312140920136699904",
+  "draft_order": null,
+  "last_message_id": "1312140920136699904",
+  "last_message_time": 1767201283062,
+  "last_picked": null,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "description": "",
+   "name": "Fantasy Football Version 3",
+   "scoring_type": "idp_1qb",
+   "show_team_names": "0"
+  },
+  "season": "2026",
+  "season_type": "regular",
+  "settings": {
+   "alpha_sort": 0,
+   "autopause_enabled": 0,
+   "autopause_end_time": 720,
+   "autopause_start_time": 240,
+   "autostart": 1,
+   "cpu_autopick": 0,
+   "enforce_position_limits": 1,
+   "nomination_timer": 60,
+   "pick_timer": 180,
+   "player_type": 0,
+   "reversal_round": 0,
+   "rounds": 4,
+   "slots_bn": 21,
+   "slots_db": 2,
+   "slots_dl": 2,
+   "slots_flex": 1,
+   "slots_idp_flex": 1,
+   "slots_k": 1,
+   "slots_lb": 2,
+   "slots_qb": 1,
+   "slots_rb": 2,
+   "slots_te": 1,
+   "slots_wr": 2,
+   "teams": 12
+  },
+  "sport": "nfl",
+  "start_time": null,
+  "status": "pre_draft",
+  "type": "linear"
+ }
+]

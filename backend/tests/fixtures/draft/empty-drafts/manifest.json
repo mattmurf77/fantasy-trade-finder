@@ -1,0 +1,14 @@
+{
+ "platform": "sleeper",
+ "provenance": "authored",
+ "recorded": "2026-08-06",
+ "league_id": "9000000000000000001",
+ "draft_id": null,
+ "derivation": "No live league was harmed. drafts.json is literally [] and the league object is a lakeview clone with the id/name swapped -- there is nothing to record.",
+ "pins": [
+  "drafts == [] -> state 'unavailable', never a fabricated board"
+ ],
+ "drives": [
+  "T-M3-04"
+ ]
+}

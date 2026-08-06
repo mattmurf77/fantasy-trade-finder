@@ -1,0 +1,14 @@
+{
+ "platform": "sleeper",
+ "provenance": "derived-from-lakeview-complete",
+ "recorded": "2026-08-06",
+ "league_id": "1312076055586050048",
+ "draft_id": "1312076055594430464",
+ "derivation": "settings.rounds 4 -> 28; status -> pre_draft; picks -> []; last_picked/start_time -> null. draft_order and the non-identity slot_to_roster_id are kept from the live recording, so this is a startup draft with a REAL order.",
+ "pins": [
+  "settings.rounds == 28 -> the labelled-and-degraded startup path"
+ ],
+ "drives": [
+  "T-M3-10"
+ ]
+}

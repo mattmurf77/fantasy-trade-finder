@@ -1,0 +1,254 @@
+{
+ "draftResults": {
+  "draftUnit": {
+   "static_url": "https://www48.myfantasyleague.com/fflnetdynamic2026/10005_LEAGUE_draft_results.xml",
+   "draftType": "SAME",
+   "draftPick": [
+    {
+     "comments": "[Pick made from Pre-Draft List] ",
+     "franchise": "0007",
+     "player": "17472",
+     "pick": "01",
+     "round": "01",
+     "timestamp": "1785589226"
+    },
+    {
+     "comments": "",
+     "franchise": "0010",
+     "player": "17473",
+     "pick": "02",
+     "round": "01",
+     "timestamp": "1785589702"
+    },
+    {
+     "franchise": "0006",
+     "comments": "[Pick made from Pre-Draft List] ",
+     "player": "17497",
+     "pick": "03",
+     "timestamp": "1785589702",
+     "round": "01"
+    },
+    {
+     "round": "01",
+     "timestamp": "1785589702",
+     "comments": "[Pick made from Pre-Draft List] ",
+     "franchise": "0004",
+     "player": "17499",
+     "pick": "04"
+    },
+    {
+     "round": "01",
+     "timestamp": "1785589702",
+     "pick": "05",
+     "player": "17498",
+     "comments": "[Pick traded from PatsWin1.\nPick made from Pre-Draft List] ",
+     "franchise": "0007"
+    },
+    {
+     "timestamp": "1785598520",
+     "round": "01",
+     "comments": "",
+     "franchise": "0001",
+     "player": "17501",
+     "pick": "06"
+    },
+    {
+     "timestamp": "1785602289",
+     "round": "01",
+     "pick": "07",
+     "franchise": "0001",
+     "comments": "[Pick traded from DoCoMo IV.] ",
+     "player": "17543"
+    },
+    {
+     "pick": "08",
+     "player": "17502",
+     "franchise": "0009",
+     "comments": "",
+     "timestamp": "1785621491",
+     "round": "01"
+    },
+    {
+     "round": "01",
+     "timestamp": "1785621491",
+     "pick": "09",
+     "comments": "[Pick made from Pre-Draft List] ",
+     "franchise": "0003",
+     "player": "17462"
+    },
+    {
+     "pick": "10",
+     "franchise": "0008",
+     "comments": "[Pick made from Pre-Draft List] ",
+     "player": "17514",
+     "round": "01",
+     "timestamp": "1785621491"
+    },
+    {
+     "timestamp": "1785621536",
+     "round": "02",
+     "comments": "",
+     "franchise": "0007",
+     "player": "17544",
+     "pick": "01"
+    },
+    {
+     "round": "02",
+     "timestamp": "1785621745",
+     "pick": "02",
+     "player": "17506",
+     "comments": "",
+     "franchise": "0010"
+    },
+    {
+     "round": "02",
+     "timestamp": "1785629214",
+     "pick": "03",
+     "franchise": "0006",
+     "comments": "",
+     "player": "17477"
+    },
+    {
+     "player": "17500",
+     "comments": "[Pick traded from Robert Borg.\nPick made from Pre-Draft List] ",
+     "franchise": "0001",
+     "pick": "04",
+     "round": "02",
+     "timestamp": "1785629214"
+    },
+    {
+     "round": "02",
+     "timestamp": "1785630428",
+     "player": "17512",
+     "franchise": "0005",
+     "comments": "",
+     "pick": "05"
+    },
+    {
+     "timestamp": "1785640207",
+     "round": "02",
+     "comments": "[Pick traded from Clobberin Time 2.] ",
+     "franchise": "0002",
+     "player": "17476",
+     "pick": "06"
+    },
+    {
+     "pick": "07",
+     "franchise": "0002",
+     "comments": "",
+     "player": "17607",
+     "round": "02",
+     "timestamp": "1785640336"
+    },
+    {
+     "pick": "08",
+     "franchise": "0009",
+     "comments": "[Timer expired: Pick made based on ADP Rank] ",
+     "player": "17545",
+     "timestamp": "1785690946",
+     "round": "02"
+    },
+    {
+     "comments": "[Pick made from Pre-Draft List] ",
+     "franchise": "0003",
+     "player": "17507",
+     "pick": "09",
+     "timestamp": "1785690946",
+     "round": "02"
+    },
+    {
+     "timestamp": "1785690946",
+     "round": "02",
+     "comments": "[Pick made from Pre-Draft List] ",
+     "franchise": "0008",
+     "player": "17503",
+     "pick": "10"
+    },
+    {
+     "round": "03",
+     "timestamp": "1785690946",
+     "player": "17508",
+     "comments": "[Pick made from Pre-Draft List] ",
+     "franchise": "0007",
+     "pick": "01"
+    },
+    {
+     "pick": "02",
+     "player": "17520",
+     "comments": "",
+     "franchise": "0010",
+     "round": "03",
+     "timestamp": "1785691129"
+    },
+    {
+     "pick": "03",
+     "comments": "",
+     "franchise": "0006",
+     "player": "17485",
+     "round": "03",
+     "timestamp": "1785691647"
+    },
+    {
+     "franchise": "0004",
+     "comments": "[Pick made from Pre-Draft List] ",
+     "player": "17509",
+     "pick": "04",
+     "round": "03",
+     "timestamp": "1785691647"
+    },
+    {
+     "pick": "05",
+     "comments": "",
+     "franchise": "0005",
+     "player": "17482",
+     "round": "03",
+     "timestamp": "1785692861"
+    },
+    {
+     "pick": "06",
+     "franchise": "0001",
+     "comments": "",
+     "player": "17478",
+     "timestamp": "1785694527",
+     "round": "03"
+    },
+    {
+     "pick": "07",
+     "comments": "",
+     "franchise": "0002",
+     "player": "17511",
+     "timestamp": "1785700394",
+     "round": "03"
+    },
+    {
+     "timestamp": "1785722454",
+     "round": "03",
+     "player": "17546",
+     "comments": "[Timer expired: Pick made based on ADP Rank] ",
+     "franchise": "0009",
+     "pick": "08"
+    },
+    {
+     "round": "03",
+     "timestamp": "1785722454",
+     "franchise": "0003",
+     "comments": "[Pick made from Pre-Draft List] ",
+     "player": "17474",
+     "pick": "09"
+    },
+    {
+     "franchise": "0008",
+     "comments": "[Pick made from Pre-Draft List] ",
+     "player": "17505",
+     "pick": "10",
+     "round": "03",
+     "timestamp": "1785722454"
+    }
+   ],
+   "round1DraftOrder": "0007,0010,0006,0004,0007,0001,0001,0009,0003,0008,",
+   "unit": "LEAGUE"
+  }
+ },
+ "version": "1.0",
+ "encoding": "utf-8"
+}

@@ -1,0 +1,20 @@
+{
+ "platform": "sleeper",
+ "provenance": "recorded-live",
+ "recorded": "2026-08-06",
+ "league_id": "1312076055586050048",
+ "draft_id": "1312076055594430464",
+ "pins": [
+  "complete draft, 48 picks (4 rounds x 12 teams)",
+  "populated draft_order (12 user ids -> slots)",
+  "NON-identity slot_to_roster_id (the honest-order control)",
+  "55 league-level traded_picks rows"
+ ],
+ "drives": [
+  "T-M3-01",
+  "T-M3-02",
+  "T-M3-05",
+  "T-M3-06",
+  "D5"
+ ]
+}

@@ -1,0 +1,62 @@
+[
+ {
+  "created": 1767185818149,
+  "creators": [
+   "852266560109293568",
+   "852642665873940480"
+  ],
+  "draft_id": "1312076055594430464",
+  "draft_order": {
+   "313560442465169408": 6,
+   "454869184224948224": 4,
+   "694249360803848192": 11,
+   "790036237204447232": 2,
+   "852254555294019584": 9,
+   "852263741075611648": 10,
+   "852266560109293568": 5,
+   "852623581539045376": 8,
+   "852642665873940480": 7,
+   "862148445476081664": 3,
+   "911858813945528320": 1,
+   "974112322165735424": 12
+  },
+  "last_message_id": "1357212391829426176",
+  "last_message_time": 1777947159300,
+  "last_picked": 1777947157960,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "description": "",
+   "name": "Lakeview League \ud83c\udfc8",
+   "scoring_type": "dynasty_2qb",
+   "show_team_names": "0"
+  },
+  "season": "2026",
+  "season_type": "regular",
+  "settings": {
+   "alpha_sort": 0,
+   "autopause_enabled": 1,
+   "autopause_end_time": 720,
+   "autopause_start_time": 180,
+   "autostart": 0,
+   "cpu_autopick": 0,
+   "enforce_position_limits": 1,
+   "nomination_timer": 60,
+   "pick_timer": 14400,
+   "player_type": 0,
+   "reversal_round": 3,
+   "rounds": 4,
+   "slots_bn": 14,
+   "slots_flex": 2,
+   "slots_qb": 1,
+   "slots_rb": 2,
+   "slots_super_flex": 1,
+   "slots_te": 1,
+   "slots_wr": 3,
+   "teams": 12
+  },
+  "sport": "nfl",
+  "start_time": 1777775410143,
+  "status": "complete",
+  "type": "linear"
+ }
+]

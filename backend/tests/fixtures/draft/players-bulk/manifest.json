@@ -1,0 +1,14 @@
+{
+ "platform": "sleeper",
+ "provenance": "authored",
+ "recorded": "2026-08-06",
+ "league_id": null,
+ "draft_id": null,
+ "derivation": "3-player stand-in for the ~5 MB /v1/players/nfl dump. The [RV-3] test asserts the fixture seam INTERCEPTS the bulk fetch; the payload's contents are not part of that claim.",
+ "pins": [
+  "players/nfl.json exists at the path _sleeper_fixture_path derives"
+ ],
+ "drives": [
+  "T-M1-04"
+ ]
+}

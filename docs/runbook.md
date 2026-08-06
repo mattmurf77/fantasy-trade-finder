@@ -209,6 +209,17 @@ Spec: `docs/plans/mobile-testing/` (plan/prd/hld/lld/test-cases). **Day-to-day d
 - **`bash: /Users/…/Fantasy: No such file or directory` in the EXConstants "Generate app.config" phase** — the project path contains spaces ("Fantasy Trade Finder") and `EXConstants.podspec` builds an unquoted `bash -l -c` command. Fixed durably by the quoting hook in `mobile/ios/Podfile` `post_install`; re-runs of `pod install` keep the fix. If an expo-constants upgrade changes the phase, the hook no-ops (guarded) — re-check quoting.
 - When wrapping `sim-build.sh` in a pipeline, capture its exit code directly — `… | tail` reports the pipe's status, not the build's (this bit us once: a "0" that was actually a failed build).
 
+### Draft replay corpora (rookie-draft M1, 2026-08-06)
+
+The same `FTF_SLEEPER_FIXTURES_DIR` seam backs the Draft Room's offline test matrix. Corpora + full inventory: `backend/tests/fixtures/draft/README.md`; replayer: `backend/tests/support/draft_replay.py`; tests: `backend/tests/test_draft_replay.py`.
+
+- **Record mode refuses a non-empty dir.** `server.py` exits if `FTF_SLEEPER_RECORD=1` and the fixtures dir already holds any `**/*.json` — never a silent overwrite. So **record one corpus per directory**, into a fresh temp dir, then move it under `backend/tests/fixtures/draft/`. Record mode is deliberately live and cannot run with `FTF_TEST_MODE=1`.
+- **Live-recorded corpora (2026-08-06):** Sleeper `lakeview-complete` (complete, 48 picks, real order) and `ffv3-predraft` (`draft_order:null` + the identity `slot_to_roster_id` trap); MFL `draftResults` grids for all four states — 0/60, 36/72, 30/30, and a 2-`draftUnit` 192/192. `startup-shaped`, `empty-drafts` and `players-bulk` are derived/authored and say so in their manifests.
+- **MFL is a different seam.** No env fixture dir — `mfl_service` injects `_opener`, so MFL corpora are committed `draftResults.json` snapshots served by `draft_replay.mfl_opener()`. Any MFL path in `draft_board_service` must thread `_opener` all the way down or M5 becomes untestable.
+- **`DraftReplay` mutates a temp copy**, never the committed cassettes (pinned by a test). `truncate_picks(k)` also moves `status`/`last_picked` on *both* copies of the draft object — the `/league/<id>/drafts` list and the `/draft/<id>` detail — because Sleeper serves the same draft twice and a fixture that lets them drift is a fixture that lies.
+- **Sleeper picks have no timestamps** (live-verified). `last_picked` exists only on the detail object, so the replayer synthesises a monotonic ladder anchored to the recorded value; `truncate_picks(total)` reproduces the cassette byte-for-byte.
+- **Known-red, on purpose:** `test_m1_04_bulk_players_fetch_is_intercepted_by_the_fixture_seam` is a `strict=True` xfail. `_ensure_sleeper_cache_populated` fetches the ~5 MB `/v1/players/nfl` dump with raw `urllib`, so the fixture seam cannot see it ([RV-3]). M0's one-line fix — route it through `_sleeper_get` — flips it to XPASS, which under `strict=True` fails the suite until the marker is deleted. That is the handoff, not a bug.
+
 ## Sign in with Apple — App Store Connect / Apple Developer setup (account-auth P2, 2026-07-11)
 
 The `auth.accounts` surface ships dark. Before flipping the flag ON (and before any TestFlight build exercises the Apple button), the operator must complete these one-time steps — none of them are automatable from this repo:
