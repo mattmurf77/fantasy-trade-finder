@@ -488,12 +488,17 @@ These were introduced by backlog #6 (verdict banner) and are **vendored into `_D
 
 ### Mock-draft CPU drafters (draft-extensions W2) — `mock_draft_service._DEFAULT_CFG`
 
-Read through `mock_draft_service._c`, which overlays `database.get_config()` on the module defaults. **Deliberately NOT seeded into `_MODEL_CONFIG_DEFAULTS`:** these belong to a feature whose calibration gate is closed, so the code default is the single source until an operator inserts a row. Both values are snapshotted into `mock_drafts.settings.noise` at create, so retuning them can never change an in-flight mock.
+Read through `mock_draft_service._c`, which overlays `database.get_config()` on the module defaults. **Deliberately NOT seeded into `_MODEL_CONFIG_DEFAULTS`:** these belong to a feature whose calibration gate is closed, so the code default is the single source until an operator inserts a row. All three values are snapshotted into `mock_drafts.settings.noise` at create, so retuning them can never change an in-flight mock.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mock_max_reach_slots` | 3.0 | Structural cap on how many consensus rank slots a positional need can pull a player up: `need_bonus ≤ outlook_alpha(persona) × severity × this`. A **product cap, not a fitted parameter** — fitting it alongside the jitter is unidentifiable at the corpus sizes available. It also sets the CPU candidate window, `K = ceil(this) + 5`. |
-| `mock_jitter_slots` | 1.25 | Per-candidate `Uniform(0, this)` noise in rank-slot units — **the** parameter the calibration procedure fits. ⚠️ The default is the product's starting value, **not a validated fit**: the fit pinned at the grid boundary (3.00) and then failed both hold-out bars and both independent-corpus bars, so `CPU_MODEL_VALIDATED` is `False` and the CPU-bot mock is cut. See [mock-calibration-2026-08.md](plans/draft-extensions/mock-calibration-2026-08.md) before touching this. |
+| `mock_max_reach_slots` | 3.0 | Structural cap on how many consensus rank slots a positional **need** can pull a player up: `need_bonus ≤ outlook_alpha(persona) × severity × this`. A **product cap, not a fitted parameter** — fitting it alongside the noise is unidentifiable at the corpus sizes available. |
+| `mock_bpa_prob` | 0.50 | First of the **two** fitted parameters of the W2b mixture: the probability that a CPU pick is the strict board pick (`argmin(rank − need_bonus)`, no idiosyncrasy). The complement takes the reach branch below. |
+| `mock_reach_decay` | 0.95 | Second fitted parameter: the reach branch's per-slot survival ratio — reaching one slot further is `this` times as likely, i.e. `P(reach = d) ∝ this ᵈ`, truncated at the candidate window. Implemented as a per-candidate `Gumbel(0, −1/ln(this))` draw, which by the Gumbel-max identity makes the reach depth exactly geometric. |
+
+⚠️ **The two defaults above are the recorded W2b fit, but the model is NOT validated.** It passes the Lakeview hold-out on both bars and `mfl-complete` on KS, and fails `mfl-complete`'s paired-mean bar, so `CPU_MODEL_VALIDATED` is `False` and the CPU-bot mock stays cut. Read [mock-calibration-2026-08b.md](plans/draft-extensions/mock-calibration-2026-08b.md) — especially §6, on why the residual is a corpus disagreement rather than a model-form failure — before touching either key.
+
+The CPU **candidate window** `K` is *not* a `model_config` key and is not fitted: it is the module constant `mock_draft_service.MOCK_CANDIDATE_WINDOW = 12`, a product cap on how deep a bot may reach, which truncates the geometric tail. The calibration artifact §5 shows the verdict is invariant to it across `K ∈ 8…20`.
 
 The persona weight itself is **not** a new key — it is `outlook_alpha(persona_outlook)`, the existing `outlook_alpha_*` map above, reused verbatim.
 

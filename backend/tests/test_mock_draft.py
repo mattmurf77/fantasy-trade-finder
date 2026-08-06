@@ -7,6 +7,8 @@ Spec: ``docs/plans/draft-extensions/plan.md`` §5 · ``lld.md`` §2.3/§3.3/§4.
   T-W2-02  snake vs linear turn order; the ownership overlay, incl. back-to-back
   T-W2-03  reach cap: exactly <= mock_max_reach_slots early, and never earlier
   T-W2-04  BPA persona: `jets` never deviates > 1 slot over 500 seeded draws
+  T-W2-04b the W2b mixture: the reach branch is geometric in `reach_decay`,
+           truncated by the candidate window, and persona-independent
   T-W2-05  determinism: same rng_seed => byte-identical draft; seeds differ
   T-W2-06  need-severity table: the §6.3 examples verbatim
   T-W2-07  persona precedence declared > inferred > not_sure
@@ -19,7 +21,8 @@ Spec: ``docs/plans/draft-extensions/plan.md`` §5 · ``lld.md`` §2.3/§3.3/§4.
   T-W2-14  CPU basis is consensus: a divergent user board changes nothing
   T-W2-15  ONE consensus definition: the pool IS _undrafted(basis=consensus)
   T-W2-16  THE CALIBRATION GATE — fit on rounds 1-2, hold out 3-4, both bars,
-           then `mfl-complete` with NO refit. Currently records a FAILURE.
+           then `mfl-complete` with NO refit. Re-run in W2b against the
+           two-parameter mixture; still records a FAILURE (1 bar of 4).
   T-W2-17  corpus shape check before any corpus is used for calibration
 
 T-W2-18 is a mobile Jest test and belongs to W2b.
@@ -30,6 +33,7 @@ Run: ``python3 -m pytest backend/tests/test_mock_draft.py``
 from __future__ import annotations
 
 import ast
+import collections
 import csv
 import json
 import math
@@ -84,14 +88,17 @@ def linear_players(n: int, positions=("WR", "RB", "TE", "QB")) -> list[tuple]:
 
 
 def make_state(ctx, *, owners, user, rounds=2, draft_type=mds.TYPE_LINEAR,
-               ownership=None, personas=None, seed=7, jitter=None, reach=None):
+               ownership=None, personas=None, seed=7, bpa_prob=None,
+               decay=None, reach=None):
     settings = mds.build_settings(
         ctx, owners=owners, user_owner_id=user, rounds=rounds,
         draft_type=draft_type, order=list(owners),
         order_source=mds.ORDER_SOURCE_ASSIGNED, ownership=ownership,
         personas=personas, rng=random.Random(seed))
-    if jitter is not None:
-        settings["noise"]["jitter_slots"] = jitter
+    if bpa_prob is not None:
+        settings["noise"]["bpa_prob"] = bpa_prob
+    if decay is not None:
+        settings["noise"]["reach_decay"] = decay
     if reach is not None:
         settings["noise"]["max_reach"] = reach
     return mds.new_state(ctx, settings, seed)
@@ -150,19 +157,28 @@ def _candidates(positions):
             for i, pos in enumerate(positions, start=1)]
 
 
+#: "Noise off" under the W2b mixture: every pick takes the strict board pick,
+#: so the NEED term is isolated and the §6.1 examples stay assertable verbatim.
+NEED_ONLY = {"bpa_prob": 1.0, "reach_decay": mds.MOCK_REACH_DECAY_DEFAULT}
+
+
 def test_w2_03_reach_cap_is_exact_and_never_exceeded():
     """The bonus is at most `need_weight x severity x max_reach` = 3.0 rank
     slots, so a needed player at rank r wins exactly while `r - 3 < 1`.
 
     r == 4 is the boundary and it LOSES: the scores tie at 1.0 and ties go to
     the better consensus rank (mock-draft-plan §6.1). So the cap is honoured
-    from both sides — reached at 3 slots, never at 4."""
+    from both sides — reached at 3 slots, never at 4.
+
+    The NEED cap is a product cap and W2b did not touch it: the re-spec
+    replaced the noise term only, so this test is unchanged apart from the
+    spelling of "noise off"."""
     needs = {"RB": 1.0, "WR": 0.0}
     for rank, expected in ((2, "p2"), (3, "p3"), (4, "p1"), (5, "p1")):
         positions = ["WR"] * 8
         positions[rank - 1] = "RB"
         chosen = mds.cpu_pick(_candidates(positions), "championship", needs,
-                              random.Random(0), max_reach=3.0, jitter_slots=0.0)
+                              random.Random(0), max_reach=3.0, **NEED_ONLY)
         assert chosen == expected, f"needed RB at rank {rank} -> {chosen}"
 
 
@@ -171,7 +187,7 @@ def test_w2_03_persona_scales_the_reach_with_no_second_code_path():
     board = _candidates(["WR", "WR", "RB", "WR", "WR", "WR", "WR", "WR"])
     needs = {"RB": 1.0, "WR": 0.0}
     picks = {p: mds.cpu_pick(board, p, needs, random.Random(0),
-                             max_reach=3.0, jitter_slots=0.0)
+                             max_reach=3.0, **NEED_ONLY)
              for p in ("championship", "contender", "rebuilder", "jets")}
     assert picks["championship"] == "p3"        # 3 - 3.00 = 0.0 < 1
     assert picks["contender"] == "p3"           # 3 - 2.25 = 0.75 < 1
@@ -180,15 +196,87 @@ def test_w2_03_persona_scales_the_reach_with_no_second_code_path():
 
 
 def test_w2_04_jets_persona_is_bpa_within_one_slot_over_500_draws():
+    """The persona knob governs the NEED reach, and `jets` gets none of it.
+
+    W2b amendment, stated rather than hidden: under the mixture the
+    idiosyncrasy branch is persona-INDEPENDENT (see the test below), because
+    neither calibration corpus carries persona labels and there is therefore no
+    evidence to condition it on. So this asserts what the persona knob actually
+    owns — the need term — with the reach branch off. `jets` never deviates."""
     board = _candidates(["WR", "RB", "TE", "QB", "WR", "RB", "TE", "QB"])
     needs = {pos: 1.0 for pos in ("QB", "RB", "WR", "TE")}
-    jitter = mds.MOCK_JITTER_SLOTS_DEFAULT
     ranks = []
     for seed in range(500):
         chosen = mds.cpu_pick(board, "jets", needs, random.Random(seed),
-                              max_reach=3.0, jitter_slots=jitter)
+                              max_reach=3.0, **NEED_ONLY)
         ranks.append(int(chosen[1:]))
     assert max(ranks) <= 2, f"jets deviated {max(ranks) - 1} slots from BPA"
+
+
+# ---------------------------------------------------------------------------
+# T-W2-04b — the W2b mixture's two branches, asserted separately
+# ---------------------------------------------------------------------------
+
+def _reach_draws(*, bpa_prob, decay, n=6000, outlook=mds.DEFAULT_OUTLOOK,
+                 width=20):
+    """`n` seeded picks off a flat, need-free board -> the reach depths."""
+    board = _candidates(["WR"] * width)
+    needs = {pos: 0.0 for pos in ("QB", "RB", "WR", "TE")}
+    return [int(mds.cpu_pick(board, outlook, needs, random.Random(seed),
+                             max_reach=3.0, bpa_prob=bpa_prob,
+                             reach_decay=decay)[1:]) - 1
+            for seed in range(n)]
+
+
+def test_w2_04b_bpa_prob_is_exactly_the_mass_on_the_board_pick():
+    """`bpa_prob = 1` is strict BPA; `bpa_prob = 0` never short-circuits."""
+    assert set(_reach_draws(bpa_prob=1.0, decay=0.9, n=500)) == {0}
+    reaching = _reach_draws(bpa_prob=0.0, decay=0.9, n=2000)
+    assert max(reaching) > 5, "the reach branch never leaves the board pick"
+
+
+def test_w2_04b_the_reach_branch_is_geometric_in_reach_decay():
+    """The Gumbel-max identity, verified rather than asserted in prose.
+
+    An argmin over `rank - Gumbel(0, beta)` is a softmax over `-rank`, so the
+    reach depth is geometric with per-slot ratio `reach_decay`. Checked as the
+    ratio of successive frequencies over the head of the distribution, where
+    the window truncation has not yet bitten.
+    """
+    for decay in (0.5, 0.7):
+        draws = _reach_draws(bpa_prob=0.0, decay=decay, n=20000)
+        hist = collections.Counter(draws)
+        for d in range(4):
+            ratio = hist[d + 1] / hist[d]
+            assert abs(ratio - decay) < 0.06, (
+                f"decay={decay}: P({d+1})/P({d}) = {ratio:.3f}")
+
+
+def test_w2_04b_the_candidate_window_truncates_the_tail_and_is_not_fitted():
+    """`K` is a product cap applied by the ENGINE, not by the scoring function:
+    no CPU pick can land beyond it at ANY parameter, including the degenerate
+    flat branch on a board 6x wider than the window."""
+    window = mds.candidate_window(mds.MOCK_MAX_REACH_DEFAULT)
+    assert window == mds.MOCK_CANDIDATE_WINDOW
+    # Unwindowed, the flat branch reaches far past K — so the cap is real work.
+    assert max(_reach_draws(bpa_prob=0.0, decay=0.999, n=2000, width=72)) > window
+
+    ctx = make_ctx(players=linear_players(80))
+    state = make_state(ctx, owners=["a", "b"], user="zz", rounds=8,
+                       bpa_prob=0.0, decay=0.999)
+    run(state, ctx)
+    pool_ids = [r["player_id"] for r in mds.consensus_pool(ctx)]
+    assert max(mds.reach_series([p["player_id"] for p in state["picks"]],
+                                pool_ids)) < window
+
+
+def test_w2_04b_the_reach_branch_is_persona_independent():
+    """Stated explicitly so nobody later reads persona-scaled idiosyncrasy into
+    the model: with needs zeroed, every persona draws the same reach law."""
+    by_persona = {outlook: _reach_draws(bpa_prob=0.0, decay=0.9, n=1500,
+                                        outlook=outlook)
+                  for outlook in ("championship", "rebuilder", "jets")}
+    assert len(set(tuple(v) for v in by_persona.values())) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +371,7 @@ def test_w2_08_a_team_does_not_triple_tap_one_position():
                        ownership={2: "a", 3: "a"},
                        personas={"a": {"outlook": "championship",
                                        "source": "declared"}},
-                       jitter=0.0)
+                       bpa_prob=1.0)
     run(state, ctx)
     a_positions = [ctx.player_rows[p["player_id"]]["position"]
                    for p in state["picks"] if p["roster_id"] == "a"]
@@ -311,7 +399,7 @@ def test_w2_05_different_seeds_differ():
     bodies = set()
     for seed in range(12):
         state = make_state(ctx, owners=owners, user="zz", rounds=4, seed=seed,
-                           jitter=3.0)
+                           bpa_prob=0.0)
         run(state, ctx)
         bodies.add(mds.dumps(state)[1])
     assert len(bodies) > 1, "seeds must produce statistically different drafts"
@@ -369,7 +457,7 @@ def test_w2_10_unvalued_rookies_are_present_last_and_drafted_only_at_the_end():
     pool = mds.consensus_pool(ctx)
     assert [r["player_id"] for r in pool] == ["p1", "p2", "p3", "p4"]
     assert [r["valued"] for r in pool] == [True, True, False, False]
-    state = make_state(ctx, owners=["a", "b"], user="zz", rounds=2, jitter=0.0)
+    state = make_state(ctx, owners=["a", "b"], user="zz", rounds=2, bpa_prob=1.0)
     run(state, ctx)
     order = [p["player_id"] for p in state["picks"]]
     assert order[:2] == ["p1", "p2"], "the valued pool must exhaust first"
@@ -456,10 +544,12 @@ def test_w2_11_the_row_snapshots_its_own_noise_parameters():
     """A resumed mock replays at ITS fitted noise even if model_config moved."""
     ctx = make_ctx(players=linear_players(10))
     settings = mds.build_settings(ctx, owners=["a"], user_owner_id="a",
-                                  config_overrides={"mock_jitter_slots": 2.5,
+                                  config_overrides={"mock_bpa_prob": 0.25,
+                                                    "mock_reach_decay": 0.75,
                                                     "mock_max_reach_slots": 4.0},
                                   rng=random.Random(0))
-    assert settings["noise"] == {"jitter_slots": 2.5, "max_reach": 4.0}
+    assert settings["noise"] == {"bpa_prob": 0.25, "reach_decay": 0.75,
+                                 "max_reach": 4.0}
 
 
 # ---------------------------------------------------------------------------
@@ -559,8 +649,8 @@ def test_the_artifact_the_gate_points_at_exists_and_states_a_verdict():
     assert artifact.exists(), f"the I-10 gate artifact is missing: {artifact}"
     text = artifact.read_text()
     assert "VERDICT" in text
-    for token in ("mock_jitter_slots", "Wasserstein", "KS", "lakeview-complete",
-                  "mfl-complete"):
+    for token in ("mock_bpa_prob", "mock_reach_decay", "Wasserstein", "KS",
+                  "lakeview-complete", "mfl-complete"):
         assert token in text, f"the artifact never states {token}"
 
 
@@ -771,7 +861,13 @@ def test_w2_11_only_one_active_mock_survives_per_user_and_league():
 # plumbing. `FIT_BLOCK` is fitted, `HOLDOUT_BLOCK` is only ever validated —
 # separating them is the entire point of amendment 2.
 
-JITTER_GRID = [round(0.25 * k, 2) for k in range(1, 13)]     # [0.25 … 3.00]
+# The W2b grid, declared over each parameter's NATURAL domain rather than a
+# hand-picked interval — that is what makes "the optimum is interior" mean
+# something. `bpa_prob` is a probability; `reach_decay` is a survival ratio in
+# (0, 1), with 0.95/0.99 appended because the interesting region of a geometric
+# ratio compresses against 1.
+BPA_GRID = [round(0.1 * k, 2) for k in range(0, 10)]         # [0.00 … 0.90]
+DECAY_GRID = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99]
 FIXED_MAX_REACH = 3.0                                        # a product cap, not fitted
 FIT_SIMS = 1000         # per grid point (lld §4.2.3 step 2)
 VALIDATE_SIMS = 1000
@@ -950,19 +1046,21 @@ def _fit_and_validate():
     fit_obs, hold_obs = observed[:cut], observed[cut:]
     personas = {o: mds.DEFAULT_OUTLOOK for o in set(owners_kept)}
 
-    def sim(jitter, sims, count, owners_slice, viable_seed):
+    def sim(params, sims, count, owners_slice, viable_seed):
+        bpa, decay = params
         out = []
         for seed in range(sims):
             out += mds.simulate_reaches(pool, owners_slice, personas, viable_seed,
-                                        targets, jitter_slots=jitter,
+                                        targets, bpa_prob=bpa, reach_decay=decay,
                                         max_reach=FIXED_MAX_REACH, seed=seed)[:count]
         return out
 
     grid = {}
-    for jitter in JITTER_GRID:
-        sample = sim(jitter, FIT_SIMS, cut, owners_kept[:cut], viable0)
-        grid[jitter] = _wasserstein1([abs(x) for x in sample],
-                                     [abs(x) for x in fit_obs])
+    for bpa in BPA_GRID:
+        for decay in DECAY_GRID:
+            sample = sim((bpa, decay), FIT_SIMS, cut, owners_kept[:cut], viable0)
+            grid[(bpa, decay)] = _wasserstein1([abs(x) for x in sample],
+                                               [abs(x) for x in fit_obs])
     fitted = min(grid, key=grid.get)
 
     hold_sim = sim(fitted, VALIDATE_SIMS, n - cut, owners_kept, viable0)
@@ -981,8 +1079,8 @@ def _fit_and_validate():
     for seed in range(VALIDATE_SIMS):
         msim += mds.simulate_reaches(mpool, mkept, {o: mds.DEFAULT_OUTLOOK for o in mkept},
                                      mviable, mds.slot_targets(STANDARD_LINEUP),
-                                     jitter_slots=fitted, max_reach=FIXED_MAX_REACH,
-                                     seed=seed)
+                                     bpa_prob=fitted[0], reach_decay=fitted[1],
+                                     max_reach=FIXED_MAX_REACH, seed=seed)
     mfl_d, mfl_p = _ks_two_sample([abs(x) for x in msim], [abs(x) for x in mobs])
     mfl_delta = abs(statistics.mean(abs(x) for x in msim)
                     - statistics.mean(abs(x) for x in mobs))
@@ -992,7 +1090,11 @@ def _fit_and_validate():
         "observed": observed,
         "fit_mean": statistics.mean(abs(x) for x in fit_obs),
         "hold_mean": statistics.mean(abs(x) for x in hold_obs),
-        "grid": grid, "fitted": fitted,
+        "grid": {f"{b}/{d}": w for (b, d), w in grid.items()},
+        "grid_best_w1": grid[fitted], "grid_worst_w1": max(grid.values()),
+        "fitted_bpa_prob": fitted[0], "fitted_reach_decay": fitted[1],
+        "fitted_is_interior": (fitted[0] not in (BPA_GRID[0], BPA_GRID[-1])
+                               and fitted[1] not in (DECAY_GRID[0], DECAY_GRID[-1])),
         "hold_sim_mean": statistics.mean(abs(x) for x in hold_sim),
         "hold_ks_d": hold_d, "hold_ks_p": hold_p, "hold_delta": hold_delta,
         "hold_pass": hold_p >= KS_ALPHA and hold_delta <= MEAN_BAR,
@@ -1021,20 +1123,53 @@ def test_w2_16_calibration_gate():
         f"deliberately. Report: {json.dumps(report, default=float)}")
 
 
-def test_w2_16_the_failure_is_structural_not_a_tuning_miss():
-    """Why the gate failed, pinned so nobody retunes into the same wall.
+def test_w2_16_the_w2a_model_form_could_not_have_passed():
+    """W2a's verdict, kept falsifiable after its model was deleted.
 
-    The model's reachable support is bounded by ~`max_reach + jitter` slots:
-    a candidate at rank r can only win when `r - bonus - jitter < 1`. The
-    corpus puts 20 %+ of real picks beyond that bound, so no value of the
-    fitted parameter — in the grid or outside it — reproduces the shape.
+    The single-parameter model's reachable support was bounded by roughly
+    `max_reach + jitter` slots: a candidate at rank r could only win when
+    `r - bonus - jitter < 1`, with jitter capped by the top of its grid (3.00).
+    The corpus puts 15 %+ of real picks beyond that bound, so no value of that
+    parameter reproduced the shape. This is why W2b re-specced the FAMILY
+    rather than re-tuning — if the observed tail ever moves enough to make the
+    old form viable, this test goes red and the history needs re-deriving.
     """
     ctx, pool, drafted, _owners, _v, _t = _lakeview_corpus()
     observed = mds.reach_series(drafted, [r["player_id"] for r in pool])
-    bound = FIXED_MAX_REACH + max(JITTER_GRID)
-    beyond = [d for d in observed if d > bound]
+    beyond = [d for d in observed if d > FIXED_MAX_REACH + 3.00]
     assert len(beyond) / len(observed) > 0.15, (
         "the observed tail moved — re-derive the structural argument")
+
+
+def test_w2_16_the_residual_failure_is_a_corpus_disagreement_not_a_model_form():
+    """W2b's verdict, pinned the same way W2a's was.
+
+    The mixture passes the Lakeview hold-out on both bars and `mfl-complete` on
+    KS; the one bar it fails is `mfl-complete`'s paired mean. That bar is not
+    reachable by ANY corpus-invariant noise model: the two corpora's OWN
+    observed mean |d| differ by more than twice the ±1.0 bar, before a model is
+    involved at all. A single parameter set whose simulated mean lands inside
+    ±1.0 of one is necessarily outside ±1.0 of the other.
+
+    This is deliberately NOT an argument for widening the bar — it is the
+    evidence the operator needs to decide whether the bar is testing the model
+    or the corpora. See the artifact §6.
+    """
+    _c1, pool, drafted, _o, _v, _t = _lakeview_corpus()
+    lakeview = mds.reach_series(drafted, [r["player_id"] for r in pool])
+    _c2, mpool, mdrafted, _mo, _r = _mfl_corpus("mfl-complete")
+    mfl = mds.reach_series(mdrafted, [r["player_id"] for r in mpool])
+    spread = abs(statistics.mean(mfl) - statistics.mean(lakeview))
+    assert spread > 2 * MEAN_BAR, (
+        f"the corpora agree to within {spread:.2f} slots now — the residual "
+        "failure may have become a model-form failure again; re-derive it")
+
+    # …and the driver is a handful of picks inside a block of consensus-TIED
+    # deep-tail players, where "reach" is measuring a tiebreak, not a decision.
+    values = {r["player_id"]: r.get("value") for r in mpool}
+    tail = [pid for pid in mdrafted if pid in values]
+    ties = collections.Counter(values[pid] for pid in tail if values[pid])
+    assert max(ties.values()) > 1, "no tied consensus values in the MFL corpus"
 
 
 def test_w2_16_the_observable_is_stationary_across_the_split():

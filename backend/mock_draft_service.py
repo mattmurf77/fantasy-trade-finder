@@ -19,11 +19,14 @@ and the mock's bots visibly disagree on one screen. ``basis="my_board"``
 re-sorts the *user's* undrafted list only and never reaches a CPU decision.
 
 **Amendment 2 — the noise model is FITTED, and the fit is a GATE.** See
-:data:`CPU_MODEL_VALIDATED` and ``docs/plans/draft-extensions/mock-calibration-2026-08.md``.
-The gate **FAILED** on 2026-08-06, so :func:`advance_cpu` is not reachable
-from the routes; the engine, its tests and the harness that produced the
-verdict all ship so the verdict is reproducible and a re-specced model can be
-re-gated without a rebuild.
+:data:`CPU_MODEL_VALIDATED` and :data:`CALIBRATION_ARTIFACT`. W2a's
+single-parameter uniform-jitter model failed the gate on a model-FORM ground;
+W2b re-specced it as the two-parameter mixture in :func:`cpu_pick` and re-ran
+the same gate unchanged. The re-fit **still FAILS**, on one bar of four
+instead of four of four, so :func:`advance_cpu` remains unreachable from the
+routes; the engine, its tests and the harness that produced the verdict all
+ship so the verdict is reproducible and a further re-spec can be re-gated
+without a rebuild.
 
 **INV-10 — deterministic and self-contained.** Same ``rng_seed`` ⇒ a
 byte-identical draft; zero platform egress after creation (this module
@@ -68,21 +71,34 @@ REASON_CLASS_NOT_LOADED = "class_not_loaded"
 REASON_CPU_MODEL_UNVALIDATED = "cpu_model_unvalidated"
 
 # ── Tunables (``model_config``; see docs/config-reference.md) ─────────────
-#: Product cap on how many consensus slots a need can pull a player up. NOT a
-#: fitted parameter — fitting it alongside the jitter is unidentifiable at
-#: n = 24 (lld §4.2.3 step 2).
+#: Product cap on how many consensus slots a *need* can pull a player up. NOT
+#: a fitted parameter — fitting it alongside the noise is unidentifiable at
+#: n = 23 (lld §4.2.3 step 2).
 MOCK_MAX_REACH_DEFAULT = 3.0
-#: THE fitted parameter. The default below is the product-specified starting
-#: value, NOT a validated fit — see :data:`CPU_MODEL_VALIDATED`.
-MOCK_JITTER_SLOTS_DEFAULT = 1.25
+
+#: THE two fitted parameters of the W2b mixture (see :func:`cpu_pick`).
+#: ``mock_bpa_prob`` = P(this pick is the strict board pick, no idiosyncrasy).
+#: ``mock_reach_decay`` = the per-slot survival ratio of the reach branch:
+#: reaching one slot further is ``decay`` times as likely. The values below are
+#: the W2b fit on ``lakeview-complete`` rounds 1-2 — recorded, but NOT
+#: validated: see :data:`CPU_MODEL_VALIDATED`.
+MOCK_BPA_PROB_DEFAULT = 0.50
+MOCK_REACH_DECAY_DEFAULT = 0.95
 
 _DEFAULT_CFG: dict[str, float] = {
     "mock_max_reach_slots": MOCK_MAX_REACH_DEFAULT,
-    "mock_jitter_slots": MOCK_JITTER_SLOTS_DEFAULT,
+    "mock_bpa_prob": MOCK_BPA_PROB_DEFAULT,
+    "mock_reach_decay": MOCK_REACH_DECAY_DEFAULT,
 }
 
-#: Candidate window: everything a max reach plus headroom could pull up.
-CANDIDATE_HEADROOM = 5
+#: Candidate window ``K`` — the deepest a CPU may reach, in consensus slots.
+#: A PRODUCT CAP, never a fitted parameter (W2b brief): the mixture's reach
+#: branch is truncated BY it rather than fitted TO it. Set once, from the FIT
+#: block alone — ``lakeview-complete`` rounds 1-2 reach at most 9 slots, so a
+#: window under 10 could not represent the fit data at all — rounded up to 12.
+#: Beyond ~a dozen slots a bot's pick stops reading as conviction and starts
+#: reading as broken, which is the product half of the same number.
+MOCK_CANDIDATE_WINDOW = 12
 
 #: "Worth a 3rd or better" — the `third` tier floor from
 #: ``docs/cross-client-invariants.md``. A roster-clogging body below this does
@@ -102,16 +118,23 @@ DEFAULT_ROUNDS = 4
 # ---------------------------------------------------------------------------
 # THE CALIBRATION GATE (I-10)
 # ---------------------------------------------------------------------------
-# `docs/plans/draft-extensions/mock-calibration-2026-08.md` is a GATE, not a
-# report (plan §5, lld §4.2.3). It records that the specified noise model
-# — argmin over `rank - need_bonus - Uniform(0, jitter)` with the reach capped
-# at `mock_max_reach_slots` — cannot reproduce the reach distribution of the
-# `lakeview-complete` corpus at ANY value in the specified grid, on the FIT
-# block let alone the hold-out. The failure is structural (a model-form
-# failure, not a tuning failure): the model's reachable support is bounded by
-# roughly `max_reach + jitter` slots while 23 % of real picks reach 6-9 slots.
+# `docs/plans/draft-extensions/mock-calibration-2026-08b.md` is a GATE, not a
+# report (plan §5, lld §4.2.3).
 #
-# Per the plan's W2 abort criterion the CPU-bot mock is therefore CUT: the
+# W2a: the specified single-parameter model — argmin over
+# `rank - need_bonus - Uniform(0, jitter)` — failed all FOUR bars. The failure
+# was a model-FORM failure: its reachable support is bounded by roughly
+# `max_reach + jitter` slots while 21 % of real picks reach 6-9.
+#
+# W2b (this file): re-specced to the two-parameter mixture in `cpu_pick` and
+# re-ran the SAME gate, unchanged. It now passes the Lakeview hold-out on both
+# bars and the independent `mfl-complete` corpus on KS — three of four — and
+# fails `mfl-complete`'s paired-mean bar. The residual is NOT a model-form
+# failure: the two corpora's observed mean |d| differ by 2.7 slots, 2.7x the
+# +/-1.0 bar itself, so no corpus-invariant noise model can satisfy both mean
+# bars at once. See the artifact §6 before touching anything.
+#
+# Per the plan's W2 abort criterion the CPU-bot mock therefore stays CUT: the
 # routes refuse to generate CPU picks while this stays False, returning the
 # typed-empty `200 {"empty": true, "reason": "cpu_model_unvalidated"}` that
 # M2's contract already carries. Do NOT flip this to re-enable bots without
@@ -119,7 +142,7 @@ DEFAULT_ROUNDS = 4
 # re-specced model — flipping it is the exact "fit on the validation set"
 # failure the amendment exists to prevent.
 CPU_MODEL_VALIDATED = False
-CALIBRATION_ARTIFACT = "docs/plans/draft-extensions/mock-calibration-2026-08.md"
+CALIBRATION_ARTIFACT = "docs/plans/draft-extensions/mock-calibration-2026-08b.md"
 
 
 class MockDraftError(Exception):
@@ -167,9 +190,10 @@ def _c(key: str, overrides: Mapping[str, float] | None = None) -> float:
 
 
 def noise_params(overrides: Mapping[str, float] | None = None) -> dict[str, float]:
-    """``{jitter_slots, max_reach}`` — what gets snapshotted into a new row."""
+    """``{bpa_prob, reach_decay, max_reach}`` — snapshotted into a new row."""
     return {
-        "jitter_slots": _c("mock_jitter_slots", overrides),
+        "bpa_prob": _c("mock_bpa_prob", overrides),
+        "reach_decay": _c("mock_reach_decay", overrides),
         "max_reach": _c("mock_max_reach_slots", overrides),
     }
 
@@ -340,42 +364,92 @@ def need_weight(outlook: str | None) -> float:
 # The scoring function (mock-draft-plan §6.1)
 # ---------------------------------------------------------------------------
 
+def _gumbel(rng: random.Random, scale: float) -> float:
+    """A standard Gumbel(0, ``scale``) draw."""
+    u = min(max(rng.random(), 1e-12), 1.0 - 1e-12)
+    return -float(scale) * math.log(-math.log(u))
+
+
+def _decay_to_scale(decay: float) -> float:
+    """``beta`` such that the reach branch decays by ``decay`` per slot.
+
+    ``P(reach = d) ∝ exp(-d / beta)``, so ``decay = exp(-1/beta)`` and
+    ``beta = -1 / ln(decay)``. ``decay <= 0`` ⇒ 0 ⇒ the branch is inert.
+    """
+    decay = float(decay)
+    if decay <= 0.0:
+        return 0.0
+    decay = min(decay, 0.999)              # 1.0 = flat over the window
+    return -1.0 / math.log(decay)
+
+
 def cpu_pick(candidates_ranked: Sequence[Mapping[str, Any]],
              persona_outlook: str | None,
              needs_for_team: Mapping[str, float],
              rng: random.Random,
              *,
              max_reach: float = MOCK_MAX_REACH_DEFAULT,
-             jitter_slots: float = MOCK_JITTER_SLOTS_DEFAULT) -> str:
-    """One CPU pick — ``argmin(rank - need_bonus - jitter)``.
+             bpa_prob: float = MOCK_BPA_PROB_DEFAULT,
+             reach_decay: float = MOCK_REACH_DECAY_DEFAULT) -> str:
+    """One CPU pick — ``argmin(rank - need_bonus - reach_noise)``.
 
     ``candidates_ranked`` is the head of the consensus pool, 1-based by list
     position. ``needs_for_team`` is ``{pos: severity}``. Ties resolve to the
     better consensus rank because the scan keeps the first strict minimum.
 
-    The reach is capped structurally: ``need_bonus <= need_weight * 1.0 *
-    max_reach``, so a championship team with a desperate need reaches at most
-    ``max_reach`` slots and a `jets` team is pure BPA. One scoring function,
-    persona = parameters — there is no per-persona code path.
+    **The need term** is unchanged from W2a and is not part of the noise model:
+    ``need_bonus <= need_weight * 1.0 * max_reach``, so a championship team with
+    a desperate need reaches at most ``max_reach`` slots and a `jets` team takes
+    the board pick. One scoring function, persona = parameters.
+
+    **The noise term is the W2b re-spec** (build-w2b.md). W2a drew
+    ``Uniform(0, jitter)`` per candidate; its reachable support was bounded by
+    ``max_reach + jitter`` ≈ 6 slots, which cannot produce the observed shape —
+    ~44 % of real picks are exactly the board pick, yet 21 % reach 6-9 slots.
+    That is a MIXTURE, so the model is one:
+
+    * with probability ``bpa_prob`` the CPU takes the strict board pick — every
+      candidate's noise is 0, so the argmin is exactly ``rank - need_bonus``;
+    * otherwise each candidate draws an i.i.d. ``Gumbel(0, beta)``.
+
+    Gumbel is chosen over log-normal/negative-binomial for one structural
+    reason, not for fit convenience: by the Gumbel-max identity, an argmin over
+    ``rank - G`` with ``G ~ Gumbel(0, beta)`` is *exactly* a softmax over
+    ``-rank``, i.e. the reach depth is **geometric** with per-slot ratio
+    ``exp(-1/beta) = reach_decay`` — the heavy-tailed discrete law the evidence
+    asks for, obtained without leaving the shipped per-candidate additive-noise
+    code shape and without a second ordering of the pool (amendment 1).
+
+    The two parameters are ``bpa_prob`` and ``reach_decay``. The candidate
+    window ``K`` (:data:`MOCK_CANDIDATE_WINDOW`) truncates the geometric tail
+    and is deliberately NOT fitted.
     """
     if not candidates_ranked:
         raise PlayerUnavailable("no candidates")
     weight = need_weight(persona_outlook)
+    scale = _decay_to_scale(reach_decay)
+    # ONE Bernoulli per pick, drawn first so the branch (and therefore the
+    # whole stream) is a pure function of the seed.
+    reaching = scale > 0.0 and rng.random() >= float(bpa_prob)
     best_id: str | None = None
     best_score: float | None = None
     for rank, row in enumerate(candidates_ranked, start=1):
         pos = str(row.get("position") or "").upper()
         bonus = weight * float(needs_for_team.get(pos, 0.0)) * float(max_reach)
-        jitter = rng.uniform(0.0, float(jitter_slots)) if jitter_slots > 0 else 0.0
-        score = rank - bonus - jitter
+        noise = _gumbel(rng, scale) if reaching else 0.0
+        score = rank - bonus - noise
         if best_score is None or score < best_score:
             best_id, best_score = str(row.get("player_id")), score
     return str(best_id)
 
 
 def candidate_window(max_reach: float) -> int:
-    """``K = ceil(max_reach) + 5`` — the scan width (mock-draft-plan §6.1)."""
-    return int(math.ceil(float(max_reach))) + CANDIDATE_HEADROOM
+    """``K`` — the scan width, and the product cap on a CPU reach.
+
+    :data:`MOCK_CANDIDATE_WINDOW`, floored so the *need* term can always reach
+    its own ``max_reach`` cap even if the window is retuned downwards.
+    """
+    return max(MOCK_CANDIDATE_WINDOW, int(math.ceil(float(max_reach))) + 1)
 
 
 # ---------------------------------------------------------------------------
@@ -568,7 +642,8 @@ def advance_cpu(state: dict, ctx: MockContext,
 
     noise = state["settings"].get("noise") or noise_params()
     max_reach = float(noise.get("max_reach", MOCK_MAX_REACH_DEFAULT))
-    jitter = float(noise.get("jitter_slots", MOCK_JITTER_SLOTS_DEFAULT))
+    bpa_prob = float(noise.get("bpa_prob", MOCK_BPA_PROB_DEFAULT))
+    reach_decay = float(noise.get("reach_decay", MOCK_REACH_DECAY_DEFAULT))
     window = candidate_window(max_reach)
     rows = pool if pool is not None else consensus_pool(ctx)
 
@@ -589,7 +664,8 @@ def advance_cpu(state: dict, ctx: MockContext,
         player_id = cpu_pick(available[:window], persona.get("outlook"),
                              _severities(ctx, state, str(owner)),
                              _pick_rng(state, slot["pick_no"]),
-                             max_reach=max_reach, jitter_slots=jitter)
+                             max_reach=max_reach, bpa_prob=bpa_prob,
+                             reach_decay=reach_decay)
         _append(state, slot, player_id, BY_CPU)
 
 
@@ -786,7 +862,7 @@ def simulate_reaches(pool_rows: Sequence[Mapping[str, Any]],
                      personas: Mapping[str, str],
                      viable_by_owner: Mapping[str, Mapping[str, int]],
                      targets: Mapping[str, tuple[int, int]],
-                     *, jitter_slots: float, max_reach: float,
+                     *, bpa_prob: float, reach_decay: float, max_reach: float,
                      seed: int) -> list[int]:
     """One seeded replay of a recorded draft through the SHIPPED
     :func:`cpu_pick`, returning the simulated reach series.
@@ -796,7 +872,7 @@ def simulate_reaches(pool_rows: Sequence[Mapping[str, Any]],
     distributions comparable.
     """
     rng_root = random.Random(seed)
-    available = [dict(r) for r in pool_rows]
+    available = list(pool_rows)             # read-only: never mutated in place
     viable = {o: dict(v) for o, v in viable_by_owner.items()}
     window = candidate_window(max_reach)
     out: list[int] = []
@@ -807,9 +883,12 @@ def simulate_reaches(pool_rows: Sequence[Mapping[str, Any]],
         needs = {pos: severity(viable.get(owner, {}), targets, pos)
                  for pos in _POSITIONS}
         rng = random.Random(rng_root.randrange(2 ** 31) * 10_007 + pick_no)
-        chosen = cpu_pick(available[:window], personas.get(owner, DEFAULT_OUTLOOK),
-                          needs, rng, max_reach=max_reach, jitter_slots=jitter_slots)
-        position = next(i for i, r in enumerate(available)
+        head = available[:window]
+        chosen = cpu_pick(head, personas.get(owner, DEFAULT_OUTLOOK),
+                          needs, rng, max_reach=max_reach, bpa_prob=bpa_prob,
+                          reach_decay=reach_decay)
+        # The pick is always inside the window, so the scan is O(K), not O(n).
+        position = next(i for i, r in enumerate(head)
                         if str(r["player_id"]) == chosen)
         out.append(position)
         pos = str(available[position].get("position") or "").upper()
