@@ -51,7 +51,7 @@ import {
   space,
   type,
 } from '../theme/chalkline';
-import { Button, TickLabel } from '../components/chalkline';
+import { Button, Icon, TickLabel } from '../components/chalkline';
 import FeedbackFAB from '../components/FeedbackFAB';
 import {
   DraftSchemaError,
@@ -69,14 +69,31 @@ import { useFlag } from '../state/useFeatureFlags';
 
 const POLL_INTERVAL_MS = 15_000;
 
-export default function DraftRoomScreen() {
-  const leagueId = useSession((s) => s.league?.league_id);
+export default function DraftRoomScreen({ route, navigation }: any = {}) {
+  // rookie-draft placement — the seasonal Draft tab's multi-league rule
+  // lands on a SPECIFIC league's room, which may not be the session's
+  // active one (switching the active league would reset rankings, the deck
+  // and the format; reading one league's board must not cost that). The
+  // param is an override only: every pre-existing entry point (the League
+  // tile, the Acquire chip, the deep link) passes nothing and keeps reading
+  // the active league exactly as before.
+  const paramLeagueId: string | undefined = route?.params?.leagueId;
+  const sessionLeagueId = useSession((s) => s.league?.league_id);
+  const leagueId = paramLeagueId ?? sessionLeagueId;
+  // Set only by the seasonal Draft tab's registration — see Shell.
+  const inTabs: boolean = !!route?.params?.inTabs;
   const [basis, setBasis] = useState<DraftBasis>('consensus');
   // The pre-class-load toggle. Session-only by design (#133 precedent):
   // it answers "what am I looking at right now", not a stored preference.
   const [showLastYear, setShowLastYear] = useState(false);
 
   const livePollEnabled = useFlag('draft.live_poll');
+  // Mock finding #2 (operator decision 2026-08-06): without this, a draft
+  // SURFACE teaches users that rookie ranking and rookie drafting are
+  // unrelated features. Gated on the rookie-scope flag — the destination
+  // renders its own "not available yet" state when it's off, and an entry
+  // point into that state would be a dead end.
+  const rookieScopeOn = useFlag('ranks.rookie_subset');
   const isFocused = useIsFocused();
   const appActive = useAppActive();
 
@@ -113,7 +130,7 @@ export default function DraftRoomScreen() {
 
   if (!leagueId) {
     return (
-      <Shell>
+      <Shell inTabs={inTabs}>
         <View style={styles.centerFill}>
           <Text testID="draft-room.empty-text" style={styles.emptyBody}>
             Connect a league to see its rookie draft.
@@ -125,7 +142,7 @@ export default function DraftRoomScreen() {
 
   if (query.isLoading) {
     return (
-      <Shell>
+      <Shell inTabs={inTabs}>
         <View style={styles.centerFill}>
           <ActivityIndicator color={ice.base} />
         </View>
@@ -136,7 +153,7 @@ export default function DraftRoomScreen() {
   if (query.isError || !board) {
     const schemaTooNew = query.error instanceof DraftSchemaError;
     return (
-      <Shell>
+      <Shell inTabs={inTabs}>
         <View style={styles.centerFill}>
           <Text testID="draft-room.error-text" style={styles.errorText}>
             {schemaTooNew
@@ -155,8 +172,19 @@ export default function DraftRoomScreen() {
     <Shell
       refreshing={query.isFetching && !query.isLoading}
       onRefresh={onRefresh}
+      inTabs={inTabs}
     >
       <StatusBar board={board} onRefresh={onRefresh} busy={query.isFetching} />
+      {rookieScopeOn ? (
+        <RankRookiesRow
+          onPress={() =>
+            navigation?.navigate?.('Main', {
+              screen: 'Rank',
+              params: { screen: 'RookieRanks' },
+            })
+          }
+        />
+      ) : null}
       {board.notice ? (
         <Notice
           board={board}
@@ -210,10 +238,15 @@ function Shell({
   children,
   refreshing,
   onRefresh,
+  inTabs = false,
 }: {
   children: React.ReactNode;
   refreshing?: boolean;
   onRefresh?: () => void;
+  /** True when rendered inside the seasonal Draft TAB (option A′), where
+   *  RootNav's global FAB already covers the screen — mounting our own
+   *  would double it (#196/#197). The root-stack push passes nothing. */
+  inTabs?: boolean;
 }) {
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -233,8 +266,11 @@ function Shell({
         {children}
       </ScrollView>
       {/* #188 — root-stack push covers RootNav's FAB mount; carry our own.
-          No tab bar under this screen → aboveTabBar={false}. */}
-      <FeedbackFAB activeScreen="DraftRoom" aboveTabBar={false} />
+          No tab bar under this screen → aboveTabBar={false}. Inside the
+          seasonal Draft tab the global mount already covers us. */}
+      {inTabs ? null : (
+        <FeedbackFAB activeScreen="DraftRoom" aboveTabBar={false} />
+      )}
     </SafeAreaView>
   );
 }
@@ -301,6 +337,39 @@ function StatusBar({
         <Text style={styles.refreshText}>Refresh</Text>
       </Pressable>
     </View>
+  );
+}
+
+// ── "Rank the rookies" — the bridge back into RookieRanks ────────────────
+// Required by the approved placement mock's finding #2: a draft surface
+// that does not lead back to rookie RANKING teaches users the two are
+// unrelated features, when in fact the undrafted list below can be ordered
+// by exactly the board that link edits. Renders in every board state
+// (including `unavailable`) — pre-draft prep is when it matters most, and
+// that is precisely when the board has the least to show.
+
+function RankRookiesRow({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      testID="draft-room.rank-rookies"
+      accessibilityRole="button"
+      accessibilityLabel="Rank the rookies"
+      accessibilityHint="Opens your consolidated rookie ranking board"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.rankRookiesRow,
+        pressed && { backgroundColor: ink.ink3 },
+      ]}
+    >
+      <View style={styles.rankRookiesText}>
+        <Text style={styles.rankRookiesTitle}>Rank the rookies</Text>
+        <Text style={styles.rankRookiesSub}>
+          Order this class on your own board — the undrafted list can read
+          from it.
+        </Text>
+      </View>
+      <Icon name="chevron-right" size={16} color={chalk.dim} />
+    </Pressable>
   );
 }
 
@@ -635,6 +704,22 @@ const styles = StyleSheet.create({
     paddingVertical: space.sm,
   },
   refreshText: { ...type.label, color: ice.base },
+
+  rankRookiesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    backgroundColor: ink.ink1,
+    borderColor: ink.line,
+    borderWidth: 1,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    minHeight: 44,
+  },
+  rankRookiesText: { flex: 1, gap: 2 },
+  rankRookiesTitle: { ...type.label, color: ice.base },
+  rankRookiesSub: { ...type.bodySm, color: chalk.faint },
 
   notice: {
     backgroundColor: ink.ink1,

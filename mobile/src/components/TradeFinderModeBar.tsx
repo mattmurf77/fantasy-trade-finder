@@ -35,13 +35,28 @@ const COPY: Record<FinderMode, { title: string; hint: string }> = {
   },
 };
 
-const CHIPS: { key: FinderMode | 'calc' | 'free-agents'; label: string }[] = [
+type ChipKey = FinderMode | 'calc' | 'free-agents' | 'draft';
+
+const CHIPS: { key: ChipKey; label: string }[] = [
   { key: 'guided', label: 'Guided' },
   { key: 'team', label: 'Team' },
   { key: 'player', label: 'Player' },
   { key: 'calc', label: 'Calc' },
   { key: 'free-agents', label: 'Free agents' },
 ];
+
+// rookie-draft placement, option B (operator decision 2026-08-06, approved
+// mock `mockups/polish-lab-2026-08/draft-surface-placement.html` frame B1) —
+// the draft is the third way to acquire a player (trade for him, pick him
+// up, draft him), and the other two already live in this strip.
+//
+// It LEADS, and that is not a style choice: the five shipped chips already
+// measure ≈402pt against ≈361pt of usable width, so the strip is genuinely
+// scrolled — an APPENDED sixth chip would sit off-screen and never be seen
+// (mock finding, Option B implementation row). Same push-chip construction
+// as Calc and Free agents, which set the precedent that a chip may navigate
+// rather than switch deck mode, with deliberately no visual distinction.
+const DRAFT_CHIP: { key: ChipKey; label: string } = { key: 'draft', label: 'Draft' };
 
 interface Props {
   mode: FinderMode;
@@ -51,6 +66,10 @@ interface Props {
   onCalculator: () => void;
   /** Jump to the Free Agent finder (root-stack `FreeAgents`, #246). */
   onFreeAgents: () => void;
+  /** Jump to the Draft Room (root-stack `DraftRoom`, rookie-draft option B).
+   *  OMIT to render today's five chips exactly — the host passes this only
+   *  when `draft.room` is on, so the flag gates the chip's existence. */
+  onDraft?: () => void;
   /** Team mode: the scoped league-mate's display name, if chosen. */
   teamName?: string | null;
   /** Render the one-line mode hint (cold start only, #246 mock B2). */
@@ -62,10 +81,14 @@ export default function TradeFinderModeBar({
   onSwitch,
   onCalculator,
   onFreeAgents,
+  onDraft,
   teamName,
   showHint = false,
 }: Props) {
   const copy = COPY[mode];
+  // Draft LEADS when present (see DRAFT_CHIP); absent ⇒ the array is the
+  // shipped five, identical object identity and order.
+  const chips = onDraft ? [DRAFT_CHIP, ...CHIPS] : CHIPS;
   const hint =
     mode === 'team' && teamName
       ? `Only mutual-gain deals with ${teamName}.`
@@ -78,7 +101,7 @@ export default function TradeFinderModeBar({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.chipRow}
       >
-        {CHIPS.map((c) => {
+        {chips.map((c) => {
           const active = c.key === mode;
           return (
             <Pressable
@@ -92,7 +115,9 @@ export default function TradeFinderModeBar({
                   ? onCalculator()
                   : c.key === 'free-agents'
                     ? onFreeAgents()
-                    : onSwitch(c.key)
+                    : c.key === 'draft'
+                      ? onDraft?.()
+                      : onSwitch(c.key)
               }
               style={({ pressed }) => [
                 styles.chip,

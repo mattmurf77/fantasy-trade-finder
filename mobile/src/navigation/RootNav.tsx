@@ -54,8 +54,12 @@ type AuthStack = {
   LeagueSummary: undefined;
   FreeAgents: undefined;
   // rookie-draft M4 (flag `draft.room`) — read-only Draft Room, entered
-  // from the League tab's Explore tile.
-  DraftRoom: undefined;
+  // from the League tab's Explore tile and (placement wave) the Acquire
+  // tab's leading Draft chip. `leagueId` is an OVERRIDE used only by the
+  // seasonal Draft tab's league chooser when more than one linked league
+  // has a pending draft; every other entry point omits it and the room
+  // reads the session's active league exactly as before.
+  DraftRoom: { leagueId?: string } | undefined;
   // Operator QA (flag testing.stage_users): synthetic adoption-stage users.
   TestStages: undefined;
 };
