@@ -1,7 +1,12 @@
 appId: com.fantasytradefinder.app
 # tc: T-M4-QA-02 / D5 (the pre-draft identity slot_to_roster_id trap)
 # profile: standard + ffv3-predraft corpus merged into the fixture dir
-# flags: draft.room ON, draft.live_poll OFF
+# flags: draft.room ON, draft.live_poll OFF, draft.rank_inline OFF
+# W1 (2026-08-06): the row ids gained a per-row qualifier
+# (draft-room.undrafted-row.<pid>, .order-row.<round>-<slot>), so the
+# selectors below are regexes that REQUIRE the qualifier. Here `<slot>` is
+# `r` — the platform published no order, so these rows are round-level
+# ownership, not slots.
 # FFv3 1312140920132497408 has draft_order:null while the draft detail object
 # carries an IDENTITY slot_to_roster_id map. The room must say "order not set"
 # and render round-level ownership — never an invented order.
@@ -57,12 +62,12 @@ tags: [rookie, draft-room, order-not-set]
 - assertVisible:
     id: "draft-room.as-of"
 - assertVisible:
-    id: "draft-room.order-row"
+    id: "draft-room.order-row..*"
 - assertVisible: "Round ownership"
 - takeScreenshot: rookie-d2-order-not-set
 - scrollUntilVisible:
     element:
-      id: "draft-room.undrafted-row"
+      id: "draft-room.undrafted-row..*"
     direction: DOWN
     timeout: 40000
     visibilityPercentage: 100

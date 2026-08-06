@@ -375,10 +375,22 @@ export async function setAnchorScale(topTierFirsts: TopTierFirsts) {
 // (the pick ladder drives uniform valuation across position groups); the
 // tier falls out of the pinned Elo via the server's band walk. Sends
 // X-Scoring-Format so the override lands on the format the wizard shows.
-export async function saveAnchor(playerId: string, anchor: AnchorKey) {
+//
+// `via` (draft-extensions W1) names the SURFACE that asked, so a value set
+// on the fly in the Draft Room is separable from a wizard pass. It is
+// REQUEST-ONLY — the server whitelists it into `anchor_answered`'s props
+// and the response is byte-unchanged. Omitting it sends today's exact
+// body, so the wizard's call site is untouched.
+export type AnchorVia = 'anchors' | 'draft_room';
+
+export async function saveAnchor(
+  playerId: string,
+  anchor: AnchorKey,
+  via?: AnchorVia,
+) {
   return api.post<AnchorSaveResponse>(
     '/api/anchor/save',
-    { player_id: playerId, anchor },
+    via ? { player_id: playerId, anchor, via } : { player_id: playerId, anchor },
     { headers: await formatHeader() },
   );
 }

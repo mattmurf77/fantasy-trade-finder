@@ -145,5 +145,8 @@
   "draft.live_poll": true,
   "draft.mfl": true,
   "picks.slot_values": true,
-  "trade.slot_pricing": true
+  "trade.slot_pricing": true,
+
+  "_comment_draft_extensions": "2026-08-06 Draft-surface extensions W1 (docs/plans/draft-extensions/). draft.rank_inline gates the Draft Room's per-player row ACTIONS: long-press + an accessibilityActions custom action (the shipped TradeCard vocabulary — there is no visible overflow glyph in this app) opens the shared PlayerContextMenu with Set my value (an anchor sheet on the SHIPPED POST /api/anchor/save lane, carrying via:draft_room), Rank the rookies (the existing bridge, now two-way) and Add to targets, plus the coverage nudge. Anchor lane ONLY — nothing this flag opens may reach save_tiers_position or the merged-band path (AST + runtime tests in backend/tests/test_draft_extensions_w1.py). Off = undrafted rows are the inert Views they are today; the per-player testIDs ship unflagged because they are inert and are what makes the flag testable.",
+  "draft.rank_inline": false
 }

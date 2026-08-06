@@ -282,7 +282,7 @@ A player holds at most one tag per (user, league). If you add a list type, updat
 
 ## Pick anchor keys
 
-The pick-anchor wizard's answer vocabulary (2026-07-10), defined in `backend/server.py:VALID_ANCHORS` and sent verbatim by mobile (`mobile/src/api/rankings.ts:AnchorKey`, buttons in `mobile/src/screens/PickAnchorScreen.tsx`):
+The pick-anchor wizard's answer vocabulary (2026-07-10), defined in `backend/server.py:VALID_ANCHORS` and sent verbatim by mobile (`mobile/src/api/rankings.ts:AnchorKey`; the rung grid lives in `mobile/src/utils/anchorRows.ts` — extracted from `PickAnchorScreen` by draft-extensions W1 when the Draft Room's `AnchorSheet` became a second host, so a rung can never diverge between the two surfaces):
 
 | Key | Button label | Pins to |
 |---|---|---|
@@ -294,6 +294,8 @@ The pick-anchor wizard's answer vocabulary (2026-07-10), defined in `backend/ser
 | `1_third` | 1 3rd | Mid 3rd seed (Elo 1320) |
 | `1_fourth` | 1 4th | Mid 4th seed (Elo 1240) |
 | `no_value` | No value | Elo 1100 — below every band → unranked |
+
+**Anchor `via` (draft-extensions W1, 2026-08-06) — a SEPARATE whitelist from the tiers-save one.** `POST /api/anchor/save` accepts an optional `via` (alias `surface`) ∈ `{anchors, draft_room}` (`backend/server.py:_ANCHOR_VIA`; mobile `AnchorVia` in `mobile/src/api/rankings.ts`). It is **request-only** — it rides `anchor_answered`'s event props and the response is byte-unchanged — and an unrecognised value **falls back to `anchors`**, never 400s. It is deliberately not the `POST /api/tiers/save` `via` whitelist: that one gates the merged-band path, which the Draft Room's actions must never reach (pinned by `backend/tests/test_draft_extensions_w1.py`). Omitting `via` sends the pre-W1 body exactly.
 
 Anchor values are position-uniform on purpose (uniform valuation across position groups); tier assignment falls out of the per-position/format band walk. The Elo seeds come from `GENERIC_PICK_SEEDS` (`backend/pick_values.py` since #158 — re-exported by `backend/server.py`, so `server.GENERIC_PICK_SEEDS` still resolves) — if those seeds or the anchor set change, update the backend constant, the mobile union type + button rows, and this table. The ≈-Elo values above assume the default `elo_value_*` config (base 1000, ref 1500, k 0.005).
 

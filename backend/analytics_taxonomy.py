@@ -77,6 +77,15 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # Guided avatar tour (docs/plans/onboarding-conversion/guided-avatar-script.md §6)
     "guide_step_shown", "guide_step_advanced", "guide_step_skipped",
     "guide_tour_dismissed", "guide_tour_completed",
+    # Draft Room per-player actions (draft-extensions W1, lld §2.2 / §4.1;
+    # tracking-plan addendum docs/business/analytics/2026-08-06-draft-room-
+    # w1-addendum.md). The Draft Room shipped with ZERO track() calls — D0's
+    # first deliverable is that the bridge row and the new row actions are
+    # measurable at all. NOTE: the anchor WRITE itself stays server-fired
+    # (`anchor_answered`, now carrying `via`); these four are the client-side
+    # intent/exposure signals the server cannot see.
+    "draft_room_row_menu_opened", "draft_room_action_taken",
+    "draft_room_coverage_nudge_shown", "draft_room_rank_rookies_tapped",
 })
 
 # ---------------------------------------------------------------------------
@@ -195,6 +204,19 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "guide_step_skipped":    frozenset({"step"}),
     "guide_tour_dismissed":  frozenset({"at_step"}),
     "guide_tour_completed":  frozenset({"steps_seen"}),
+    # Draft Room W1 — `surface` is the host ('draft_room'); `valued` mirrors
+    # the payload's `undrafted[].valued` (false = the row has no consensus
+    # value, which is exactly the row the anchor action exists for); `rank`
+    # is the row's cross-position undrafted rank, not a list index.
+    # `action` ∈ set_value | rank_rookies | add_target. `window` is the
+    # coverage nudge's fixed top-N (25). `state` is the board state the
+    # bridge row was tapped from; `from` is the host surface.
+    "draft_room_row_menu_opened":      frozenset({"surface", "player_id",
+                                                  "valued", "rank"}),
+    "draft_room_action_taken":         frozenset({"action", "player_id",
+                                                  "valued"}),
+    "draft_room_coverage_nudge_shown": frozenset({"unvalued_count", "window"}),
+    "draft_room_rank_rookies_tapped":  frozenset({"state", "from"}),
 }
 
 

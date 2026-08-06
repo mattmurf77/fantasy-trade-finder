@@ -24,6 +24,26 @@
 // Live polling (flag `draft.live_poll`) is this app's FIRST recurring
 // fetch. Three gates, all required, and a hard ZERO requests when blurred
 // or backgrounded — see the refetchInterval below.
+//
+// ── draft-extensions W1 (flag `draft.rank_inline`, lands OFF) ───────────
+// The room shipped with inert undrafted rows and ZERO track() calls, so
+// the one job it cannot do today is the one you have on the clock: "this
+// guy isn't priced and I have 90 seconds." W1 adds, flag-gated:
+//   · long-press + an `accessibilityActions` custom action on an undrafted
+//     row (the shipped TradeCard vocabulary — there is NO "⋯" glyph
+//     anywhere in this app, and adding one would need a components.md spec
+//     under ADR-004/005) opening the shared PlayerContextMenu;
+//   · Set my value  → the new AnchorSheet on the SHIPPED /api/anchor/save
+//     lane. THE ANCHOR LANE ONLY: nothing here may reach /api/tiers/save,
+//     save_tiers_position or the merged-band path (pinned by AST + runtime
+//     tests in backend/tests/test_draft_extensions_w1.py);
+//   · Rank the rookies → the existing bridge, now two-way (it passes a
+//     return route so RookieRanks can come back here);
+//   · Add to targets → the shipped per-user-per-league asset-pref write;
+//   · the coverage nudge, read off `undrafted[].valued`.
+// Flag OFF ⇒ rows are the inert Views they are today: no long-press, no
+// a11y action, no menu, no sheet, no nudge. The per-player testIDs ship
+// UNFLAGGED — they are inert, and they are what makes the flag testable.
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
@@ -38,7 +58,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   chalk,
@@ -53,6 +73,11 @@ import {
 } from '../theme/chalkline';
 import { Button, Icon, TickLabel } from '../components/chalkline';
 import FeedbackFAB from '../components/FeedbackFAB';
+import PlayerContextMenu, {
+  type PlayerMenuAction,
+} from '../components/PlayerContextMenu';
+import AnchorSheet, { type AnchorTarget } from '../components/AnchorSheet';
+import Toast from '../components/Toast';
 import {
   DraftSchemaError,
   getDraftBoard,
@@ -62,12 +87,22 @@ import {
   type DraftPick,
   type UndraftedRow,
 } from '../api/draft';
+import { setAssetPref } from '../api/league';
+import { track } from '../api/events';
 import { readErrorCopy } from '../utils/verification';
+import { haptics } from '../utils/haptics';
 import { useAppActive } from '../hooks/useAppActive';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import type { Player } from '../shared/types';
 
 const POLL_INTERVAL_MS = 15_000;
+
+// The coverage nudge's window: the top N of the (rank-ordered) undrafted
+// list. Fixed on purpose — "N of the top 25 have no value on your board"
+// is a claim the user can check, and a window that moved with list length
+// would not be.
+const COVERAGE_WINDOW = 25;
 
 export default function DraftRoomScreen({ route, navigation }: any = {}) {
   // rookie-draft placement — the seasonal Draft tab's multi-league rule
@@ -87,7 +122,10 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   // it answers "what am I looking at right now", not a stored preference.
   const [showLastYear, setShowLastYear] = useState(false);
 
+  const queryClient = useQueryClient();
   const livePollEnabled = useFlag('draft.live_poll');
+  // W1 — per-player row actions. Off ⇒ the rows stay inert Views.
+  const rowActionsOn = useFlag('draft.rank_inline');
   // Mock finding #2 (operator decision 2026-08-06): without this, a draft
   // SURFACE teaches users that rookie ranking and rookie drafting are
   // unrelated features. Gated on the rookie-scope flag — the destination
@@ -127,6 +165,144 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   const onRefresh = useCallback(() => {
     query.refetch();
   }, [query]);
+
+  // ── W1 row actions ────────────────────────────────────────────────────
+  // menuTarget is only ever set while `draft.rank_inline` is on, so both
+  // sheets are unreachable with the flag off.
+  const [menuTarget, setMenuTarget] = useState<UndraftedRow | null>(null);
+  const [anchorTarget, setAnchorTarget] = useState<AnchorTarget | null>(null);
+  const [toast, setToast] = useState<
+    { msg: string; tone?: 'success' | 'warn' } | null
+  >(null);
+
+  const goToRookieRanks = useCallback(() => {
+    // The bridge is two-way as of W1: RookieRanks gets a return route, so
+    // acting on a rookie from the board no longer costs your place.
+    navigation?.navigate?.('Main', {
+      screen: 'Rank',
+      params: {
+        screen: 'RookieRanks',
+        params: { returnTo: 'DraftRoom', returnLeagueId: leagueId },
+      },
+    });
+  }, [navigation, leagueId]);
+
+  const onSaveAnchored = useCallback(
+    (playerId: string, res: { value: number }) => {
+      // Re-price the row from the SERVER's authoritative answer rather than
+      // guessing it client-side: the anchor→value mapping depends on the
+      // user's stored pick-value scale (#111) and lives in one place, the
+      // backend. Duplicating it here to shave a round-trip would fork a
+      // cross-client invariant.
+      queryClient.setQueryData<DraftBoard>(
+        ['draft-board', leagueId, basis],
+        (prev) =>
+          prev
+            ? {
+                ...prev,
+                undrafted: prev.undrafted.map((r) =>
+                  r.player_id === playerId
+                    ? { ...r, value: res.value, valued: true }
+                    : r,
+                ),
+              }
+            : prev,
+      );
+      // The anchor moved the board everywhere, not just here.
+      for (const key of ['rankings', 'progress', 'trio', 'tiers-status', 'trends']) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      queryClient.invalidateQueries({ queryKey: ['draft-board', leagueId] });
+    },
+    [queryClient, leagueId, basis],
+  );
+
+  const addTarget = useCallback(
+    (row: UndraftedRow) => {
+      if (!leagueId) return;
+      setAssetPref(leagueId, row.player_id, 'target')
+        .then(() => {
+          // The shared key every other targets surface reads.
+          queryClient.invalidateQueries({
+            queryKey: ['asset-prefs', leagueId],
+          });
+          setToast({ msg: `${row.name} added to targets`, tone: 'success' });
+        })
+        .catch(() =>
+          setToast({ msg: "Couldn't add to targets", tone: 'warn' }),
+        );
+    },
+    [leagueId, queryClient],
+  );
+
+  const menuActionsFor = useCallback(
+    (row: UndraftedRow): PlayerMenuAction[] => [
+      {
+        key: 'set-value',
+        label: 'Set my value',
+        hint: 'Anchor this rookie on your board',
+        testID: 'draft-room.action.set-value',
+        onPress: () => {
+          track('draft_room_action_taken', {
+            action: 'set_value',
+            player_id: row.player_id,
+            valued: row.valued,
+          }, 'DraftRoom');
+          setMenuTarget(null);
+          setAnchorTarget({
+            player_id: row.player_id,
+            name: row.name || row.player_id,
+            position: row.position,
+            team: row.team,
+            value: row.value,
+            valued: row.valued,
+          });
+        },
+      },
+      {
+        key: 'rank-rookies',
+        label: 'Rank the rookies',
+        hint: 'Order the whole class on your own board',
+        testID: 'draft-room.action.rank-rookies',
+        onPress: () => {
+          track('draft_room_action_taken', {
+            action: 'rank_rookies',
+            player_id: row.player_id,
+            valued: row.valued,
+          }, 'DraftRoom');
+          setMenuTarget(null);
+          goToRookieRanks();
+        },
+      },
+      {
+        key: 'add-target',
+        label: 'Add to targets',
+        hint: 'Steer trade ideas toward acquiring him',
+        testID: 'draft-room.action.add-target',
+        onPress: () => {
+          track('draft_room_action_taken', {
+            action: 'add_target',
+            player_id: row.player_id,
+            valued: row.valued,
+          }, 'DraftRoom');
+          setMenuTarget(null);
+          addTarget(row);
+        },
+      },
+    ],
+    [goToRookieRanks, addTarget],
+  );
+
+  const onRowMenu = useCallback((row: UndraftedRow) => {
+    haptics.selection();
+    track('draft_room_row_menu_opened', {
+      surface: 'draft_room',
+      player_id: row.player_id,
+      valued: row.valued,
+      rank: row.rank,
+    }, 'DraftRoom');
+    setMenuTarget(row);
+  }, []);
 
   if (!leagueId) {
     return (
@@ -177,12 +353,16 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
       <StatusBar board={board} onRefresh={onRefresh} busy={query.isFetching} />
       {rookieScopeOn ? (
         <RankRookiesRow
-          onPress={() =>
-            navigation?.navigate?.('Main', {
-              screen: 'Rank',
-              params: { screen: 'RookieRanks' },
-            })
-          }
+          onPress={() => {
+            // D0 — the bridge row shipped emitting NOTHING. This is the
+            // first analytics the Draft Room has ever had.
+            track(
+              'draft_room_rank_rookies_tapped',
+              { state: board.state, from: 'draft_room' },
+              'DraftRoom',
+            );
+            goToRookieRanks();
+          }}
         />
       ) : null}
       {board.notice ? (
@@ -210,6 +390,7 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
             basis={basis}
             onBasis={setBasis}
             showLastYear={showLastYear}
+            onRowMenu={rowActionsOn ? onRowMenu : undefined}
           />
         </>
       )}
@@ -228,8 +409,40 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
           </Text>
         </View>
       ) : null}
+
+      {/* W1 — both sheets are unreachable with `draft.rank_inline` off:
+          their targets are only ever set by the flag-gated row handler. */}
+      <PlayerContextMenu
+        visible={!!menuTarget}
+        player={menuTarget ? rowAsPlayer(menuTarget) : null}
+        actions={menuTarget ? menuActionsFor(menuTarget) : []}
+        onClose={() => setMenuTarget(null)}
+      />
+      <AnchorSheet
+        visible={!!anchorTarget}
+        target={anchorTarget}
+        via="draft_room"
+        onClose={() => setAnchorTarget(null)}
+        onSaved={onSaveAnchored}
+      />
+      <Toast
+        visible={!!toast}
+        message={toast?.msg || ''}
+        tone={toast?.tone}
+        onDismiss={() => setToast(null)}
+      />
     </Shell>
   );
+}
+
+/** UndraftedRow → the shared menu's Player shape (header disclosure only). */
+function rowAsPlayer(row: UndraftedRow): Player {
+  return {
+    id: row.player_id,
+    name: row.name || row.player_id,
+    position: row.position,
+    team: row.team,
+  };
 }
 
 // ── Shell ────────────────────────────────────────────────────────────────
@@ -481,7 +694,10 @@ function BoardSection({ board }: { board: DraftBoard }) {
         return (
           <View
             key={`${slot.round}-${slot.slot ?? i}`}
-            testID="draft-room.order-row"
+            // D0 — the shipped id was shared across every row. The
+            // qualifier is the SLOT (round + slot, or `r` when the platform
+            // has not published an order), a stable domain id — never `i`.
+            testID={`draft-room.order-row.${slot.round}-${slot.slot ?? 'r'}`}
             style={styles.orderRow}
           >
             <Text style={styles.slotCell}>{slotLabel(slot)}</Text>
@@ -515,7 +731,8 @@ function BoardSection({ board }: { board: DraftBoard }) {
 
 function PickRow({ pick, label }: { pick: DraftPick; label: string }) {
   return (
-    <View testID="draft-room.pick-row" style={styles.orderRow}>
+    // D0 — `pick_no` is unique within a draft and stable across refetches.
+    <View testID={`draft-room.pick-row.${pick.pick_no}`} style={styles.orderRow}>
       <Text style={styles.slotCell}>{label}</Text>
       <View style={styles.orderMain}>
         <Text style={styles.pickedText} numberOfLines={1}>
@@ -537,17 +754,42 @@ function UndraftedSection({
   basis,
   onBasis,
   showLastYear,
+  onRowMenu,
 }: {
   board: DraftBoard;
   basis: DraftBasis;
   onBasis: (b: DraftBasis) => void;
   showLastYear: boolean;
+  /** W1 — undefined with `draft.rank_inline` off, which is what keeps the
+   *  rows inert Views exactly as they shipped. */
+  onRowMenu?: (row: UndraftedRow) => void;
 }) {
   const suppressedForClass = board.notice?.code === 'class_not_loaded';
-  if (board.undrafted_suppressed && !(suppressedForClass && showLastYear)) {
-    return null;
-  }
+  const hidden =
+    board.undrafted_suppressed && !(suppressedForClass && showLastYear);
   const rows = board.undrafted;
+
+  // Coverage nudge (W1) — how much of the top of the board you have not
+  // priced yet. Source is the payload's own `valued` field; the window is
+  // the first COVERAGE_WINDOW entries, and `undrafted[]` is already
+  // rank-ordered server-side. `hidden` is part of the condition, not just
+  // the render: a startup-draft board suppresses this whole section, and
+  // an exposure event for something nobody saw is worse than no event.
+  const unvaluedTop = useMemo(
+    () => rows.slice(0, COVERAGE_WINDOW).filter((r) => !r.valued).length,
+    [rows],
+  );
+  const nudgeOn = !hidden && !!onRowMenu && unvaluedTop > 0;
+  React.useEffect(() => {
+    if (!nudgeOn) return;
+    track(
+      'draft_room_coverage_nudge_shown',
+      { unvalued_count: unvaluedTop, window: COVERAGE_WINDOW },
+      'DraftRoom',
+    );
+  }, [nudgeOn, unvaluedTop]);
+
+  if (hidden) return null;
   const anyUnvalued = rows.some((r) => !r.valued);
 
   return (
@@ -580,20 +822,38 @@ function UndraftedSection({
           than hidden — a prospect with no price is still on the board.
         </Text>
       ) : null}
+      {nudgeOn ? (
+        <Text testID="draft-room.coverage-nudge" style={styles.coverageNudge}>
+          {unvaluedTop} of the top {COVERAGE_WINDOW} have no value on your
+          board. Hold a row to set one.
+        </Text>
+      ) : null}
       {rows.length === 0 ? (
         <Text testID="draft-room.undrafted-empty" style={styles.emptyBody}>
           Every rookie is off the board.
         </Text>
       ) : (
-        rows.map((r) => <UndraftedRowView key={r.player_id} row={r} />)
+        rows.map((r) => (
+          <UndraftedRowView key={r.player_id} row={r} onMenu={onRowMenu} />
+        ))
       )}
     </View>
   );
 }
 
-function UndraftedRowView({ row }: { row: UndraftedRow }) {
-  return (
-    <View testID="draft-room.undrafted-row" style={styles.undraftedRow}>
+function UndraftedRowView({
+  row,
+  onMenu,
+}: {
+  row: UndraftedRow;
+  onMenu?: (row: UndraftedRow) => void;
+}) {
+  // Per-player testID (D0). The shipped id was shared across every row,
+  // which is why this flow was untestable; the qualifier is the stable
+  // domain id per mobile/src/components/CLAUDE.md — never a list index.
+  const testID = `draft-room.undrafted-row.${row.player_id}`;
+  const body = (
+    <>
       <Text style={styles.rankCell}>{row.rank}</Text>
       <View style={styles.orderMain}>
         <Text style={styles.playerName} numberOfLines={1}>
@@ -609,7 +869,44 @@ function UndraftedRowView({ row }: { row: UndraftedRow }) {
       <Text style={row.valued ? styles.valueCell : styles.noValueCell}>
         {row.valued ? Math.round(row.value as number) : 'No value'}
       </Text>
-    </View>
+    </>
+  );
+
+  // Flag off ⇒ the exact inert View this row shipped as.
+  if (!onMenu) {
+    return (
+      <View testID={testID} style={styles.undraftedRow}>
+        {body}
+      </View>
+    );
+  }
+
+  // Long-press + an `accessibilityActions` custom action — the shipped
+  // TradeCard vocabulary (RB-12). The custom action is not optional
+  // garnish: a long-press-only control is unreachable to assistive tech,
+  // and a VISIBLE overflow glyph would be net-new to the Chalkline system
+  // and needs a components.md spec first.
+  return (
+    <Pressable
+      testID={testID}
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={`${row.name || row.player_id}, ${row.position || ''}${
+        row.valued ? '' : ', no value on your board'
+      }`}
+      accessibilityHint="Hold for player options"
+      accessibilityActions={[{ name: 'menu', label: 'Player options' }]}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'menu') onMenu(row);
+      }}
+      onLongPress={() => onMenu(row)}
+      style={({ pressed }) => [
+        styles.undraftedRow,
+        pressed && { backgroundColor: ink.ink1 },
+      ]}
+    >
+      {body}
+    </Pressable>
   );
 }
 
@@ -782,6 +1079,19 @@ const styles = StyleSheet.create({
     color: chalk.base,
     backgroundColor: ink.ink1,
     borderColor: ink.line,
+    borderWidth: 1,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+  },
+
+  // W1 coverage nudge — flare is the informational-highlight accent
+  // (ADR-005); ice stays reserved for actions.
+  coverageNudge: {
+    ...type.bodySm,
+    color: chalk.base,
+    backgroundColor: ink.ink1,
+    borderColor: flare.base,
     borderWidth: 1,
     borderRadius: radii.sm,
     paddingHorizontal: space.md,
