@@ -9790,6 +9790,115 @@ def _fetch_sleeper_drafts(league_id: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Draft Room — GET /api/draft/board (rookie-draft M3; plan §M3, lld §2.1/§4.4)
+# ---------------------------------------------------------------------------
+# The payload is built entirely by backend/draft_board_service.py, which is
+# import-free of Flask so the M1 replay corpora can drive it directly. This
+# is the shim the LLD specifies: resolve session + league, bind the
+# production fetchers, call build_board, jsonify.
+#
+# Two properties belong to this shim rather than to the service:
+#   * `draft.room` OFF ⇒ 404 feature_disabled, before any session or league
+#     work (the espn.link / mfl.link convention).
+#   * Only Sleeper is BOUND in this wave. MFL rendering exists in the
+#     service and is tested, but M5 owns its wiring behind `draft.mfl`;
+#     until then every non-Sleeper league gets the honest
+#     platform_unsupported state instead of a half-wired MFL read.
+#
+# `_sleeper_get` is passed as the fetcher transport, which buys fixture
+# replay for free (FTF_SLEEPER_FIXTURES_DIR, A-7), and `_rookie_player_ids`
+# is passed as the rookie predicate so the board shares the process-wide
+# (season, pool-generation) memo instead of re-querying per request.
+
+@app.route("/api/draft/board")
+@_gate_unverified_read
+def draft_board_route():
+    """GET /api/draft/board?league_id=...&basis=consensus|my_board
+
+    Read-only Draft Room payload (`schema: 1`): the draft's state, the pick
+    order with per-slot ownership, the picks made so far, the caller's own
+    picks, and the undrafted rookies ordered by consensus or by the
+    caller's board. Never writes to a platform (D9) — the terminal CTA is
+    `deep_link`.
+
+    An upstream failure is NEVER a 5xx: it surfaces inside a 200 as
+    `state`/`degraded`/`stale`, with `as_of` always present so the client
+    can say how old the board is.
+
+    Query params:
+      league_id — optional, defaults to the session league.
+      basis     — `consensus` (default) or `my_board`; echoed as
+                  `undrafted_basis`.
+
+    Errors: 404 feature_disabled (flag off) · 404 league_not_found ·
+    400 league_id is required · 400 bad_basis · 401 via _require_session ·
+    403 verification_required via the read gate · 409 session_not_initialized.
+
+    Read-gated (@_gate_unverified_read): `basis=my_board` prices the
+    undrafted list on the caller's board, so this is board-derived content
+    like /api/rankings. NOTE the divergence from the nearest precedent:
+    /api/league/power-rankings applies the gate INLINE for `basis=personal`
+    only, because its consensus output is a league-shared aggregate. The
+    plan (D-M3) specifies the blanket decorator here; recorded in the
+    gated-read matrix in docs/api-reference.md so it doesn't read as an
+    oversight.
+    """
+    if not is_enabled("draft.room"):
+        return jsonify({"error": "feature_disabled"}), 404
+
+    from . import draft_board_service as dbs
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_league  = sess.get("league")
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+
+    basis = (request.args.get("basis") or dbs.BASIS_CONSENSUS).strip().lower()
+    if basis not in (dbs.BASIS_CONSENSUS, dbs.BASIS_MY_BOARD):
+        return jsonify({"error": "bad_basis"}), 400
+
+    # Platform + season: the persisted league row is authoritative (it is
+    # what #207's detector reads). An in-session league that has no row yet
+    # still resolves — it carries its own platform — and anything else is a
+    # league we know nothing about.
+    ctx = get_league_draft_context(league_id)
+    if ctx:
+        platform = str(ctx.get("platform") or "sleeper").lower()
+        season   = int(ctx.get("season") or _CURRENT_SEASON)
+    elif g_league and league_id == g_league.league_id:
+        platform = str(getattr(g_league, "platform", "sleeper") or "sleeper").lower()
+        season   = _CURRENT_SEASON
+    else:
+        return jsonify({"error": "league_not_found"}), 404
+
+    # Consensus seed always; the caller's board only when they asked for it
+    # (get_rankings walks the whole pool, so it is not free).
+    _pool_players, consensus_seed = _get_universal_pool(_active_format(sess))
+    board_elo = None
+    if basis == dbs.BASIS_MY_BOARD:
+        board_elo = {rp.player.id: rp.elo
+                     for rp in sess["service"].get_rankings(position=None).rankings}
+
+    req = dbs.BoardRequest(
+        league_id     = str(league_id),
+        platform      = platform,
+        season        = season,
+        user_id       = sess.get("user_id"),
+        basis         = basis,
+        board_elo     = board_elo,
+        consensus_elo = consensus_seed,
+    )
+    if platform != dbs.SLEEPER:
+        return jsonify(dbs.unsupported_board(req))
+
+    fetchers = dbs.PlatformFetchers(sleeper_get   = _sleeper_get,
+                                    rookie_ids_fn = _rookie_player_ids)
+    return jsonify(dbs.build_board(req, fetchers))
+
+
+# ---------------------------------------------------------------------------
 # #207 — per-league rookie-draft status refresh
 #
 # backend/draft_status.py owns the decision; this owns the fetching and the

@@ -139,6 +139,8 @@
   "deck.value_model": false,
   "deck.first_session": true,
   "deck.replenishment": true,
-  "_comment_rookie_draft": "2026-08-06 Rookie rankings + Draft Room (docs/plans/rookie-draft/). All flags land OFF and flip at each milestone's release gate. ranks.rookie_subset gates the scope=rookie view filter on /api/rankings + /api/trio and the merged-band scoped tier save; off = the scope param is never read.",
-  "ranks.rookie_subset": false
+  "_comment_rookie_draft": "2026-08-06 Rookie rankings + Draft Room (docs/plans/rookie-draft/). All flags land OFF and flip at each milestone's release gate. ranks.rookie_subset gates the scope=rookie view filter on /api/rankings + /api/trio and the merged-band scoped tier save; off = the scope param is never read. draft.room gates GET /api/draft/board and the mobile Draft Room (off = the League tab keeps today's rookie-board tile). draft.live_poll gates the 15s client poll of our own endpoint (focus + foreground + state:live only); it stays off until the throwaway-league live test passes.",
+  "ranks.rookie_subset": false,
+  "draft.room": false,
+  "draft.live_poll": false
 }

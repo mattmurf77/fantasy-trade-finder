@@ -94,6 +94,11 @@ export default function LeagueScreen() {
   // S7 PRD-04 item 2 (flag league.rookie_board_entry) — the previously
   // orphaned RookieDraftBoardSheet mounts behind an Explore row.
   const showRookieBoard = useFlag('league.rookie_board_entry');
+  // rookie-draft M4 / operator decision O1 — the Draft Room REPLACES the
+  // rookie-board tile, but only when its flag is on. The replacement is
+  // conditional on purpose: an unconditional swap would leave every user
+  // with nothing in that slot the moment `draft.room` was flipped back off.
+  const showDraftRoom = useFlag('draft.room');
   const [rookieOpen, setRookieOpen] = useState(false);
   // (#181) The ux.retap_active_tab scroll-to-top registration moved to
   // LeagueSummaryScreen's tab-root variant — this screen is no longer the
@@ -508,9 +513,23 @@ export default function LeagueScreen() {
             accessibilityLabel="Free agents"
             onPress={() => navigation.navigate('FreeAgents')}
           />
-          {/* S7 PRD-04 item 2 (flag league.rookie_board_entry) — mounts the
-              rookie board bottom sheet in place (no nav route needed). */}
-          {showRookieBoard ? (
+          {/* Third tile, one slot, two occupants (rookie-draft O1):
+              `draft.room` ON  → "Rookie draft" → the root-stack DraftRoom
+                                 screen (the FreeAgents navigate() pattern);
+              `draft.room` OFF → today's "Rookie board" sheet, unchanged
+                                 (flag league.rookie_board_entry).
+              Flipping draft.room off therefore RESTORES the old tile rather
+              than emptying the row. */}
+          {showDraftRoom ? (
+            <ExploreTile
+              testID="league.draft-room-row"
+              icon="flag"
+              label="Rookie draft"
+              sub="Board & who's left"
+              accessibilityLabel="Rookie draft room"
+              onPress={() => navigation.navigate('DraftRoom')}
+            />
+          ) : showRookieBoard ? (
             <ExploreTile
               testID="league.rookie-board-row"
               icon="flag"

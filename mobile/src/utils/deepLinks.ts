@@ -100,6 +100,11 @@ const V2_SCREENS = {
   // Root-stack league-wide surfaces (#142/#143) — pushed over the tabs.
   LeagueSummary: 'app/league/summary',
   FreeAgents: 'app/league/free-agents',
+  // rookie-draft M4. Addressable even while `draft.room` is off: the flag
+  // gates the League tab's ENTRY TILE, not the route, and a link that
+  // 404s at the API renders the room's honest error state rather than a
+  // dead path.
+  DraftRoom: 'app/league/draft-room',
   Main: {
     path: 'app',
     screens: {
