@@ -161,3 +161,7 @@ Approved mock: `mockups/polish-lab-2026-08/draft-surface-placement.html`. **Opti
 - **C stays** as the League-tab recap home for drafted leagues.
 - **Required by the mock's finding #2:** any tab-based surface must carry a "Rank the rookies" entry back into `RookieRanks`, or the tab teaches users that rookie ranking and rookie drafting are unrelated.
 - **D (Rank-tab adjacency): not now** — the operator chose B; revisit if QA shows draft prep starting on Rank.
+
+### C-1 — live-poll fetch budget after the Render upgrade (owner: the `draft.live_poll` release gate)
+
+The `≤3 upstream fetches / 60s / draft` budget and its fan-in cache are **per-process**. O8 upgraded Render, so any multi-worker config makes the real ceiling `3 × workers` per draft against a platform that asks for ≥1s spacing. **Decision: keep the web service at `--workers 1`** — the upgrade was bought for no-spin-down (cold starts during a live draft), not concurrency, and one worker keeps the shipped budget honest with zero code change. If workers ever increase, the per-process budget must be divided by worker count (env-configurable) BEFORE `draft.live_poll` is flipped. Verify the worker count as part of the live-poll release gate alongside the throwaway-league test.

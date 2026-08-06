@@ -435,7 +435,8 @@ def _requested_scope(sess) -> str | None:
 
 def _rookie_scope_ids(sess) -> set[str]:
     """Player ids in scope for the session league's season, PLUS the generic
-    pick rungs (O10 = YES, year-labeled, listed after players)."""
+    pick rungs. NOTE: O10 was decided NO (players only) — this line
+    predates the operator decision; M2 correctly implements NO."""
     season = _scope_season(sess)                  # league season, else current NFL season
     ids = _rookie_ids_memo(season)                # memoised per (season, pool_generation())
     return ids | set(GENERIC_PICK_IDS)            # pick_values.GENERIC_PICK_SEEDS keys → pick ids
@@ -910,4 +911,4 @@ Run: `python3 -m pytest backend/tests/` from the repo root. **There is no CI and
 
 **Plan-verified-live assumptions carried, not re-verified locally:** Sleeper CDN TTLs (`s-maxage=30` on the detail object, ~24 h on complete `/picks`) · MFL `draftResults` zero-auth on public leagues and `liveDraft` being dead · DP `values.csv` carrying `2026 Pick 1.01…5.12` rows in the exact scale `seed_elo_for_value` consumes. Each is the first task of the milestone that depends on it.
 
-**Left to the build PRD, not this document:** the copy for each designed state; the RB-7 sentence about cosmetic inversion after a partial save; and the O1/O3/O5/O8/O10 operator confirmations the plan already records (O10 = generic pick rungs under scope is implemented as **YES, year-labeled, after players**, per the plan's recommendation).
+**Left to the build PRD, not this document:** the copy for each designed state; the RB-7 sentence about cosmetic inversion after a partial save; and the O1/O3/O5/O8/O10 operator confirmations the plan already records (**O10 CORRECTED 2026-08-06: the operator decided NO — pick rungs do NOT appear under rookie scope, players only. M2 implements NO; this document's earlier YES is superseded by the plan's decisions block.**).
