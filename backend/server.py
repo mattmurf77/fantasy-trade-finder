@@ -28,6 +28,7 @@ import random
 import re
 import secrets
 import ssl
+import tempfile
 import threading
 import time
 import traceback
@@ -112,6 +113,8 @@ from .database import (
     load_rookies,
     # #207 — rookie-draft detection inputs + the per-league verdict cache
     load_rookie_player_ids, count_known_player_ids,
+    # rookie-draft M0 — class-load monitor
+    count_rookie_class_rows,
     set_league_draft_status, get_league_draft_context,
     load_league_ids_for_draft_status_refresh,
     sync_draft_picks, load_draft_picks, replace_draft_picks, compute_pick_value,
@@ -413,6 +416,11 @@ def _load_sleeper_cache() -> dict | None:
             data = json.loads(PLAYERS_CACHE_FILE.read_text())
             _sleeper_cache = data
             print(f"✅ Loaded Sleeper player cache ({len(data)} players) from disk")
+            # M0 dev guard: the cache had no refresh path before the daily
+            # tick landed, and a months-old file silently mis-classifies a
+            # whole rookie class. Log its age on the boot read so the number
+            # is in the log before anything reads a rookie predicate.
+            _log_players_cache_age()
             return data
         except Exception as e:
             print(f"⚠️  Could not read Sleeper cache ({e})")
@@ -712,6 +720,7 @@ def _maybe_sync_players() -> None:
 
         adp_map = _fetch_sleeper_adp()   # {} if endpoint unavailable
         count   = sync_players(cache, adp_map=adp_map or None)
+        _invalidate_rookie_ids_memo()
         log.info("✅ Synced %d players to DB%s",
                  count, f"  ({len(adp_map)} with ADP)" if adp_map else "")
     except Exception as e:
@@ -1313,17 +1322,79 @@ def build_universal_pool(
     return players, seeds
 
 
+def _load_dp_maps(fmts: list[str]) -> None:
+    """Populate `dp_{values,elo,pos}_by_format` for the given formats.
+
+    The per-format DynastyProcess CSV fetches are independent network calls.
+    Run the formats concurrently so the build phase isn't bottlenecked on
+    serial round-trips. Each task loads that format's values + elo maps.
+    A fetch failure inside load_consensus_* returns {} rather than raising;
+    we still guard the future result here so one format's failure can never
+    block or break the other. An empty values map is treated as fetch
+    failure: nothing is cached for that format, so a later access retries
+    (after _DP_FETCH_RETRY_SECONDS) instead of freezing an empty pool in
+    until process restart.
+
+    Extracted from `_ensure_universal_pools` so the M0 refresh daemon
+    (`_invalidate_player_pipeline`) re-fetches through the SAME code path
+    rather than a second copy that could drift.
+    """
+    def _load_format_dp(fmt: str) -> tuple[dict[str, float], dict[str, float], dict[str, str]]:
+        # Single fetch per format via load_consensus_maps — also yields the
+        # DP position map that makes the pool join position-strict (#127).
+        elo, vals, pos = load_consensus_maps(scoring=fmt)
+        return vals, elo, pos
+
+    now = time.monotonic()
+    pending = [
+        fmt for fmt in fmts
+        if (fmt not in dp_values_by_format or fmt not in dp_elo_by_format
+            or fmt not in dp_pos_by_format)
+        and now >= _dp_fetch_retry_at.get(fmt, 0.0)
+    ]
+    if not pending:
+        return
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(pending)) as ex:
+        future_to_fmt = {ex.submit(_load_format_dp, fmt): fmt for fmt in pending}
+        for future in concurrent.futures.as_completed(future_to_fmt):
+            fmt = future_to_fmt[future]
+            try:
+                vals, elo, pos = future.result()
+            except Exception as e:
+                log.warning("  DP fetch failed for %s (%s)", fmt, e)
+                vals, elo, pos = {}, {}, {}
+            if not vals:
+                _dp_fetch_retry_at[fmt] = time.monotonic() + _DP_FETCH_RETRY_SECONDS
+                log.warning("  no DP values for %s — pool not built, retry allowed in %ds",
+                            fmt, int(_DP_FETCH_RETRY_SECONDS))
+                continue
+            _dp_fetch_retry_at.pop(fmt, None)
+            dp_values_by_format.setdefault(fmt, vals)
+            dp_elo_by_format.setdefault(fmt, elo)
+            dp_pos_by_format.setdefault(fmt, pos)
+
+
 def _ensure_universal_pools() -> None:
     """Build the universal pool for BOTH scoring formats (idempotent).
 
     Each format gets its own player list + seed map so 1QB PPR and SF TEP
     rank sets stay completely independent.
-    """
-    global g_universal_players, g_universal_seed, dp_values
 
+    Single-flight (M0): the fast path is lock-free, but an actual BUILD is
+    serialised on `_pool_build_lock`. `_player_sync_lock` guards player-table
+    syncs only — without this guard the refresh daemon and a request worker
+    could each fan out their own DynastyProcess fetch (plan §M0).
+    """
     if g_universal_by_format.get("1qb_ppr") and g_universal_by_format.get("sf_tep"):
         return  # both built
+    with _pool_build_lock:
+        if g_universal_by_format.get("1qb_ppr") and g_universal_by_format.get("sf_tep"):
+            return  # built while we waited for the lock
+        _build_universal_pools_locked()
 
+
+def _build_universal_pools_locked() -> None:
+    """`_ensure_universal_pools` body. Caller MUST hold `_pool_build_lock`."""
     cache = _load_sleeper_cache()
     if cache is None:
         return
@@ -1337,48 +1408,8 @@ def _ensure_universal_pools() -> None:
     except Exception:
         all_db_players = None
 
-    # The per-format DynastyProcess CSV fetches are independent network calls.
-    # Run the two formats concurrently so the build phase isn't bottlenecked on
-    # serial round-trips. Each task loads that format's values + elo maps.
-    # A fetch failure inside load_consensus_* returns {} rather than raising;
-    # we still guard the future result here so one format's failure can never
-    # block or break the other. An empty values map is treated as fetch
-    # failure: nothing is cached for that format, so a later access retries
-    # (after _DP_FETCH_RETRY_SECONDS) instead of freezing an empty pool in
-    # until process restart.
-    def _load_format_dp(fmt: str) -> tuple[dict[str, float], dict[str, float], dict[str, str]]:
-        # Single fetch per format via load_consensus_maps — also yields the
-        # DP position map that makes the pool join position-strict (#127).
-        elo, vals, pos = load_consensus_maps(scoring=fmt)
-        return vals, elo, pos
-
-    now = time.monotonic()
-    pending = [
-        fmt for fmt in DL_SCORING_FORMATS
-        if fmt not in g_universal_by_format
-        and (fmt not in dp_values_by_format or fmt not in dp_elo_by_format
-             or fmt not in dp_pos_by_format)
-        and now >= _dp_fetch_retry_at.get(fmt, 0.0)
-    ]
-    if pending:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(pending)) as ex:
-            future_to_fmt = {ex.submit(_load_format_dp, fmt): fmt for fmt in pending}
-            for future in concurrent.futures.as_completed(future_to_fmt):
-                fmt = future_to_fmt[future]
-                try:
-                    vals, elo, pos = future.result()
-                except Exception as e:
-                    log.warning("  DP fetch failed for %s (%s)", fmt, e)
-                    vals, elo, pos = {}, {}, {}
-                if not vals:
-                    _dp_fetch_retry_at[fmt] = time.monotonic() + _DP_FETCH_RETRY_SECONDS
-                    log.warning("  no DP values for %s — pool not built, retry allowed in %ds",
-                                fmt, int(_DP_FETCH_RETRY_SECONDS))
-                    continue
-                _dp_fetch_retry_at.pop(fmt, None)
-                dp_values_by_format.setdefault(fmt, vals)
-                dp_elo_by_format.setdefault(fmt, elo)
-                dp_pos_by_format.setdefault(fmt, pos)
+    _load_dp_maps([fmt for fmt in DL_SCORING_FORMATS
+                   if fmt not in g_universal_by_format])
 
     for fmt in DL_SCORING_FORMATS:
         if fmt in g_universal_by_format:
@@ -1398,7 +1429,21 @@ def _ensure_universal_pools() -> None:
         g_universal_by_format[fmt] = {"players": players, "seed": seed}
         log.info("  universal pool built for %s: %d players", fmt, len(players))
 
-    # Maintain backwards-compat aliases pointing at the default 1qb_ppr pool
+    _rebind_legacy_pool_aliases()
+
+
+def _rebind_legacy_pool_aliases() -> None:
+    """Point the backwards-compat aliases at the default 1qb_ppr pool.
+
+    Caller MUST hold `_pool_build_lock`. These three globals are the ONE place
+    a clear-then-update is unavoidable (external code holds references to the
+    objects themselves, so they cannot be rebound by assignment). They are
+    refreshed LAST, after `g_universal_by_format` is already consistent, and
+    the window is a few microseconds of pure Python with no I/O.
+    `_get_universal_pool` reads `g_universal_by_format`, not these aliases, so
+    no request path observes the window (LLD [RV-5]: these two are the only
+    torn-read surface in the design — re-evaluate if a new reader appears).
+    """
     default = g_universal_by_format.get("1qb_ppr", {})
     g_universal_players[:] = default.get("players", [])
     g_universal_seed.clear()
@@ -1422,6 +1467,354 @@ def _get_universal_pool(scoring_format: str) -> tuple[list[Player], dict[str, fl
                   scoring_format)
     pool = g_universal_by_format.get(scoring_format) or g_universal_by_format.get("1qb_ppr") or {}
     return pool.get("players", []), pool.get("seed", {})
+
+
+# ---------------------------------------------------------------------------
+# M0 — player-cache refresh lifecycle (rookie-draft plan §M0 / lld.md §4.0)
+# ---------------------------------------------------------------------------
+# Before M0 the player pipeline had NO refresh path: the only bulk fetch was
+# on a disk-cache MISS, and the "24 h sync gate" re-synced the DB from that
+# same stale file — so a new rookie class never appeared without a redeploy,
+# and the universal pool was frozen per-process by `_ensure_universal_pools`'
+# early return. This block adds the missing lifecycle:
+#
+#   POST /api/cron/players-refresh  → 202 immediately, work on a DAEMON thread
+#     (Render "cron" is an HTTP POST into the single web worker; a ~45 s inline
+#      fetch would stall a request worker)
+#   fetch  → _fetch_players_bulk        (through _sleeper_get, so the fixture
+#                                        seam and the FTF_TEST_MODE egress rail
+#                                        both cover it — lld [RV-3])
+#   write  → _atomic_write_players_cache (temp file + os.replace in the SAME
+#                                        directory; no reader ever sees a
+#                                        partial file)
+#   swap   → _invalidate_player_pipeline (ORDERED; see its docstring)
+#   mark   → _bump_pool_generation      (membership-only; existing members
+#                                        carry their seed Elo forward — D1)
+#
+# M0 is NOT flag-gated (it has no user-visible surface), so the operational
+# lever is the env kill switch FTF_PLAYERS_REFRESH=0 — no deploy required.
+# ---------------------------------------------------------------------------
+
+_PLAYERS_CACHE_TTL_SECONDS = 20 * 3600   # < 24 h so a daily tick never skips on jitter
+_PLAYERS_BULK_URL          = "https://api.sleeper.app/v1/players/nfl"
+_PLAYERS_BULK_TIMEOUT      = 45          # matches _ensure_sleeper_cache_populated
+_PLAYERS_REFRESH_ENABLED   = os.environ.get("FTF_PLAYERS_REFRESH", "1") != "0"
+_STALE_CACHE_MAX_AGE_SECONDS = 7 * 86_400   # dev-only rookie-scope guard
+
+_players_refresh_lock   = threading.Lock()   # guards the in-flight flag ONLY
+_players_refresh_active = False
+# Reentrant on purpose: `_invalidate_player_pipeline` bumps the generation
+# while it already holds the lock for the rebind.
+_pool_build_lock        = threading.RLock()  # single-flight for pool BUILDS
+_pool_generation        = 0                  # monotonic; membership marker only
+_last_refresh_status: dict = {}              # health/observability, last run only
+
+
+def pool_generation() -> int:
+    """Current universal-pool generation.
+
+    Deliberately lock-free: a plain int read is atomic under the GIL, and
+    taking `_pool_build_lock` here would park `session_init` behind the
+    refresh daemon's DP fetch — exactly the request-latency regression D1
+    forbids. The lock's job is to order the BUMP against the rebind, not to
+    protect this read.
+    """
+    return _pool_generation
+
+
+def _bump_pool_generation() -> int:
+    global _pool_generation
+    with _pool_build_lock:
+        _pool_generation += 1
+        log.info("players-refresh: pool generation → %d", _pool_generation)
+        return _pool_generation
+
+
+def _players_cache_age_seconds() -> float | None:
+    """Age of the on-disk players cache in seconds, or None when absent."""
+    try:
+        return max(0.0, time.time() - PLAYERS_CACHE_FILE.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def _log_players_cache_age() -> None:
+    age = _players_cache_age_seconds()
+    if age is None:
+        log.warning("players cache: no file at %s", PLAYERS_CACHE_FILE)
+    else:
+        log.info("players cache: %s is %.1f days old (mtime %s)",
+                 PLAYERS_CACHE_FILE, age / 86_400,
+                 datetime.fromtimestamp(PLAYERS_CACHE_FILE.stat().st_mtime,
+                                        timezone.utc).isoformat())
+
+
+def _rookie_scope_allowed() -> tuple[bool, str | None]:
+    """Dev guard (plan §M0): refuse rookie-scoped reads off a stale cache.
+
+    A months-old cache misclassifies a whole rookie class (the Apr-2026 dev
+    file held 157 teamless "rookies", 2 with a team). Prod is exempt because
+    the daily tick keeps it fresh and a refusal there would be the worse
+    failure; `FTF_TEST_MODE` is exempt because the Maestro harness runs a
+    deliberately pinned cache file. Consumed by M2's scoped path.
+    """
+    if _TEST_MODE or _IS_PROD_ENV:
+        return True, None
+    age = _players_cache_age_seconds()
+    if age is not None and age > _STALE_CACHE_MAX_AGE_SECONDS:
+        return False, "stale_player_cache"
+    return True, None
+
+
+def _filter_bulk_players(raw: dict) -> dict:
+    """Skill positions with a full name — cuts ~80% of the ~5 MB payload."""
+    return {
+        pid: p for pid, p in raw.items()
+        if p.get("position") in ("QB", "RB", "WR", "TE")
+        and p.get("full_name")
+    }
+
+
+def _fetch_players_bulk() -> dict:
+    """GET /v1/players/nfl, filtered to the dynasty-relevant subset.
+
+    Routed through `_sleeper_get` on purpose ([RV-3]): the legacy cold-start
+    fetch in `_ensure_sleeper_cache_populated` uses raw urllib, so the fixture
+    seam cannot intercept it and `FTF_TEST_MODE` cannot see the egress. The
+    URL already matches the `api.sleeper.app/v1/` prefix, so the cassette
+    lands at `players/nfl.json` with no other change.
+    """
+    raw = _sleeper_get(_PLAYERS_BULK_URL, timeout=_PLAYERS_BULK_TIMEOUT)
+    if not isinstance(raw, dict):
+        raise RuntimeError(f"players bulk fetch returned {type(raw).__name__}, expected dict")
+    return _filter_bulk_players(raw)
+
+
+def _atomic_write_players_cache(relevant: dict) -> None:
+    """Write the cache so no reader can ever observe a partial file.
+
+    Temp file in the SAME directory then `os.replace` — `os.replace` is only
+    atomic within one filesystem, so a /tmp staging file would not do.
+    """
+    parent = PLAYERS_CACHE_FILE.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=str(parent),
+        prefix=PLAYERS_CACHE_FILE.name + ".", suffix=".tmp", delete=False)
+    try:
+        with tmp:
+            json.dump(relevant, tmp)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp.name, PLAYERS_CACHE_FILE)
+    except Exception:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise
+
+
+def _invalidate_player_pipeline(relevant: dict) -> None:
+    """THE ordered invalidation (plan §M0). The ORDER is load-bearing:
+
+    1. disk        — already written atomically by the caller. Doing it first
+                     means a crash anywhere below still leaves the next boot
+                     with fresh data.
+    2. `_sleeper_cache` global — a single assignment, atomic for readers.
+    3. `sync_players` — called DIRECTLY, bypassing `needs_player_sync()`: we
+                     know the data is new and the 24 h gate would skip it.
+                     `sync_players` stamps `last_synced` itself ([RV-4]).
+    4. DP value maps — cleared. They are *inputs* to the pool build and are
+                     read nowhere else.
+    5. pools       — BUILD-NEW-THEN-REBIND, never clear-in-place. A cleared
+                     pool would hand a concurrent `session_init` an empty
+                     board; `_player_sync_lock` serialises writers but does
+                     not guard pool readers.
+    6. generation  — bumped AFTER the rebind. Marking stale before the new
+                     world exists would send a session boundary to a
+                     half-built pool.
+
+    Steps 4-6 run under `_pool_build_lock` so the daemon and a cold request
+    worker cannot each fan out their own DynastyProcess fetch. Request threads
+    whose pools are already built never touch the lock.
+    """
+    global _sleeper_cache
+    from .data_loader import SCORING_FORMATS as DL_SCORING_FORMATS
+
+    # 2 — in-memory cache
+    _sleeper_cache = relevant
+
+    # 3 — players table (rookie_year, team, years_exp all come from here)
+    try:
+        with _player_sync_lock:
+            adp_map = _fetch_sleeper_adp()
+            count = sync_players(relevant, adp_map=adp_map or None)
+        _invalidate_rookie_ids_memo()
+        log.info("players-refresh: synced %d players to the DB", count)
+    except Exception as e:
+        log.warning("players-refresh: player DB sync failed (continuing): %s", e)
+
+    with _pool_build_lock:
+        # 4 — DP value maps (inputs to the build)
+        dp_values_by_format.clear()
+        dp_elo_by_format.clear()
+        dp_pos_by_format.clear()
+        _dp_fetch_retry_at.clear()
+
+        try:
+            all_db_players = load_players(position=None)
+        except Exception:
+            all_db_players = None
+
+        _load_dp_maps(list(DL_SCORING_FORMATS))
+
+        # 5 — build into a LOCAL dict first
+        new_by_format: dict[str, dict] = {}
+        for fmt in DL_SCORING_FORMATS:
+            if fmt not in dp_values_by_format:
+                continue  # DP fetch failed for this format — keep the old pool
+            players, seed = build_universal_pool(
+                sleeper_cache=relevant,
+                dp_elo=dp_elo_by_format.get(fmt, {}),
+                dp_vals=dp_values_by_format.get(fmt, {}),
+                all_db_players=all_db_players,
+                dp_pos=dp_pos_by_format.get(fmt),
+            )
+            if players:
+                new_by_format[fmt] = {"players": players, "seed": seed}
+
+        if not new_by_format:
+            log.warning("players-refresh: no pool rebuilt — keeping the previous "
+                        "pools and generation entirely")
+            return
+
+        g_universal_by_format.update(new_by_format)   # rebind, per format
+        _rebind_legacy_pool_aliases()
+
+        # 6 — mark stale (membership-only; rebuild happens lazily at the next
+        #     session boundary, carrying existing members' seeds forward)
+        _bump_pool_generation()
+    log.info("players-refresh: pools rebound for %s", sorted(new_by_format))
+
+
+def _players_refresh_worker() -> None:
+    """Daemon body. Fetch → atomic write → ordered invalidation → bump.
+
+    Never raises: a failed refresh must leave the previous cache, players
+    table and pools completely intact (the next tick retries).
+    """
+    global _players_refresh_active, _last_refresh_status
+    started_at = time.monotonic()
+    status: dict = {"at": datetime.now(timezone.utc).isoformat(),
+                    "ok": False, "error": None, "players": 0,
+                    "generation": pool_generation()}
+    try:
+        relevant = _fetch_players_bulk()
+        if not relevant:
+            raise RuntimeError("bulk fetch yielded no skill-position players")
+        _atomic_write_players_cache(relevant)
+        _invalidate_player_pipeline(relevant)
+        status.update(ok=True, players=len(relevant), generation=pool_generation())
+        log.info("players-refresh: DONE %d players, generation=%d, %.1fs",
+                 len(relevant), pool_generation(), time.monotonic() - started_at)
+    except Exception as e:
+        status["error"] = f"{type(e).__name__}: {e}"
+        log.warning("players-refresh: FAILED after %.1fs — previous cache/pools "
+                    "left intact: %s", time.monotonic() - started_at, e)
+    finally:
+        _last_refresh_status = status
+        with _players_refresh_lock:
+            _players_refresh_active = False
+
+
+def _refresh_players_cache_async(force: bool = False) -> bool:
+    """Start ONE background refresh. True iff a thread was started.
+
+    Never blocks; never raises. No-ops when `FTF_PLAYERS_REFRESH=0`, when a
+    refresh is already in flight, or when the cache is younger than the TTL
+    and `force` is False.
+    """
+    global _players_refresh_active
+    if not _PLAYERS_REFRESH_ENABLED:
+        log.info("players-refresh: skipped — FTF_PLAYERS_REFRESH=0")
+        return False
+    if not force:
+        age = _players_cache_age_seconds()
+        if age is not None and age < _PLAYERS_CACHE_TTL_SECONDS:
+            return False
+    with _players_refresh_lock:
+        if _players_refresh_active:
+            log.info("players-refresh: skipped — already in flight")
+            return False
+        _players_refresh_active = True
+    try:
+        threading.Thread(target=_players_refresh_worker,
+                         name="players-refresh", daemon=True).start()
+        return True
+    except Exception as e:            # thread creation failure — release the flag
+        with _players_refresh_lock:
+            _players_refresh_active = False
+        log.warning("players-refresh: could not start daemon: %s", e)
+        return False
+
+
+# ── THE rookie predicate ───────────────────────────────────────────────────
+# `database.load_rookie_player_ids(season)` is the single source of truth
+# (SQL mirror of `draft_status.is_rookie_row`) — recorded in
+# docs/cross-client-invariants.md § "Rookie predicate". Memoised per
+# (season, pool_generation) so a scoped request costs one indexed scan per
+# generation instead of one per request; a generation bump drops the prior
+# entries because the players table has just been re-synced underneath them.
+_rookie_ids_memo: dict[tuple[int, int], set[str]] = {}
+
+
+def _invalidate_rookie_ids_memo() -> None:
+    """Drop the memo. Called after ANY `sync_players` from this module — the
+    generation bump covers the refresh daemon, but the boot sync and the
+    cold-start cache fill also rewrite the players table underneath it.
+    """
+    _rookie_ids_memo.clear()
+
+
+def _rookie_player_ids(season: int) -> set[str]:
+    gen = pool_generation()
+    key = (int(season), gen)
+    hit = _rookie_ids_memo.get(key)
+    if hit is not None:
+        return hit
+    ids = load_rookie_player_ids(int(season))
+    for stale in [k for k in _rookie_ids_memo if k[1] != gen]:
+        del _rookie_ids_memo[stale]   # prior generations only — seasons coexist
+    _rookie_ids_memo[key] = ids
+    return ids
+
+
+# ── Rookie class-load monitor ──────────────────────────────────────────────
+# The default NFL season this process reasons about when there is no league
+# context (siblings: _ESPN_DEFAULT_SEASON, _MFL_DEFAULT_YEAR).
+_CURRENT_SEASON = 2026
+_class_load_seen: set[int] = set()    # one-shot per process, per season
+
+
+def _check_rookie_class_load(season: int) -> bool:
+    """Log once when `season`'s rookie class first appears in `players`.
+
+    Sleeper's dump carries no `rookie_year == <next season>` rows until ~late
+    April, so Feb–Apr is a structurally empty window the Draft Room has to
+    design around. The arrival is a one-shot event; this is the alert.
+    Returns True on the tick that first sees it.
+    """
+    season = int(season)
+    if season in _class_load_seen:
+        return False
+    n = count_rookie_class_rows(season)
+    if n <= 0:
+        return False
+    _class_load_seen.add(season)
+    log.warning("CLASS-LOAD %s rookie class has appeared (%d rows in players)",
+                season, n)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -4770,6 +5163,10 @@ _DRAFT_CONTEXT_TTL_SECONDS = 300
 def _invalidate_draft_context_cache(league_id: str | None = None) -> None:
     if league_id is None:
         _DRAFT_CONTEXT_CACHE.clear()
+        # Both caches are derived from the same league+players snapshot, and
+        # a full clear is the "forget everything derived" hook (tests use it
+        # between in-memory DBs).
+        _invalidate_rookie_ids_memo()
     else:
         _DRAFT_CONTEXT_CACHE.pop(str(league_id), None)
 
@@ -7801,14 +8198,15 @@ def get_player_profile_route(player_id):
 def get_rookies_route():
     """
     GET /api/rookies
-    Returns all rookie / pre-draft prospect players from the DB for the
-    dynasty rookie draft board.  Includes:
-      • players with years_exp = 0 (first-year players)
-      • players with years_exp IS NULL (undrafted prospects)
-    Grouped by position in the response for easy frontend rendering.
+    Returns the current season's rookie class from the DB for the dynasty
+    rookie draft board, grouped by position for easy frontend rendering.
+
+    Membership is THE pinned rookie predicate (M0) — `rookie_year == season`,
+    with the `years_exp == 0 AND team` proxy only when the class year is
+    missing. Retired in M4 in favour of the Draft Room's undrafted list.
     """
     try:
-        rookies = load_rookies()
+        rookies = load_rookies(_CURRENT_SEASON)
         # Group by position for convenient frontend rendering
         grouped: dict[str, list] = {"QB": [], "RB": [], "WR": [], "TE": []}
         for r in rookies:
@@ -9260,7 +9658,7 @@ def _rosters_rookie_verdict(rosters_player_ids: list[list[str]],
     if not teams:
         return None
     try:
-        rookie_ids = load_rookie_player_ids(season)
+        rookie_ids = _rookie_player_ids(season)
     except Exception as e:
         log.warning("  draft-status: rookie-class lookup failed: %s", e)
         return None
@@ -11445,12 +11843,9 @@ def _ensure_sleeper_cache_populated() -> dict:
 
     log.info("  raw payload has %d players", len(raw))
 
-    # Filter to skill positions only (cuts ~80% of the payload)
-    relevant = {
-        pid: p for pid, p in raw.items()
-        if p.get("position") in ("QB", "RB", "WR", "TE")
-        and p.get("full_name")
-    }
+    # Filter to skill positions only (cuts ~80% of the payload). Shared with
+    # the M0 refresh daemon so the two paths can never drift.
+    relevant = _filter_bulk_players(raw)
     log.info("  filtered to %d skill-position players", len(relevant))
 
     # Persist to disk
@@ -11469,6 +11864,7 @@ def _ensure_sleeper_cache_populated() -> dict:
             if needs_player_sync():
                 adp_map = _fetch_sleeper_adp()
                 count = sync_players(relevant, adp_map=adp_map or None)
+                _invalidate_rookie_ids_memo()
                 log.info("  ✅ synced %d players to DB after cache fetch", count)
             else:
                 log.info("  player DB already fresh — skipping sync")
@@ -11685,10 +12081,32 @@ def session_init():
     if existing_services:
         any_svc = next(iter(existing_services.values()), None)
         existing_tagged_user = getattr(any_svc, "_user_id", None) if any_svc else None
-    need_rebuild = existing_services is None or existing_tagged_user != user_id
+    # M0 — the session boundary is the ONE place a pool-generation bump takes
+    # effect. A bump changes pool MEMBERSHIP only: existing members carry
+    # their prior seed Elo forward (rule G-SEED below), so re-seeding stays on
+    # the user-change cadence and nothing moves mid-session (D1).
+    existing_generation = existing_sess.get("pool_generation") if existing_sess else None
+    current_generation  = pool_generation()
+    user_changed = existing_services is None or existing_tagged_user != user_id
+    gen_changed  = existing_services is not None and existing_generation != current_generation
+    need_rebuild = user_changed or gen_changed
+    if gen_changed and not user_changed:
+        log.info("  pool generation %s → %s — rebuilding services (membership only)",
+                 existing_generation, current_generation)
 
     if need_rebuild:
         from .database import SCORING_FORMATS as DB_SCORING_FORMATS
+
+        # Rule G-SEED: on a GENERATION-change rebuild the prior services'
+        # seed maps are carried forward, so only NEW pool members get a fresh
+        # consensus seed. On a USER-change rebuild carry_seed is None and the
+        # build is byte-identical to pre-M0 behavior.
+        carry_seeds: dict[str, dict[str, float]] = {}
+        if gen_changed and not user_changed and existing_services:
+            for _fmt, _svc in existing_services.items():
+                prior = getattr(_svc, "_seed", None)
+                if isinstance(prior, dict) and prior:
+                    carry_seeds[_fmt] = dict(prior)
 
         def _build_service_for_format(fmt: str) -> tuple[str, RankingService]:
             """Build one format's RankingService — runs in a worker thread.
@@ -11707,10 +12125,15 @@ def session_init():
             the main thread so the caller still sees the error.
             """
             fmt_pool, fmt_seed = _get_universal_pool(fmt)
+            carry = carry_seeds.get(fmt)
+            seed_ratings = (
+                {pid: carry.get(pid, base) for pid, base in fmt_seed.items()}
+                if carry else fmt_seed
+            )
             svc = RankingService(
                 players           = fmt_pool,
                 matchup_generator = matchup_gen,
-                seed_ratings      = fmt_seed,
+                seed_ratings      = seed_ratings,
             )
             svc._user_id = user_id
             svc._scoring_format = fmt
@@ -11841,6 +12264,9 @@ def session_init():
         "active_format": active_format,
         "display_name":  display_name,
         "last_active":   time.time(),
+        # M0 — the generation these services were built from. A later bump
+        # makes the NEXT session_init rebuild once (membership only).
+        "pool_generation": current_generation,
     }
     user_changed = bool(existing_sess
                         and existing_sess.get("user_id") != user_id)
@@ -13414,11 +13840,46 @@ def cron_daily_tick():
         except Exception as e:
             log.warning("daily-tick: value-model refit failed (non-fatal): %s", e)
 
+    # ── M0 — player-cache refresh fallback guard ──
+    # The dedicated POST /api/cron/players-refresh is the primary trigger, but
+    # a missed day means a whole rookie class stays invisible. Mirrors the
+    # hourly-tick value-snapshot fallback guard: fires only when the cache is
+    # already past its TTL, starts a DAEMON (never blocks the tick), and is
+    # wrapped so a failure here can never touch the push work above.
+    #
+    # Deployed environments only (`_IS_PROD_ENV`, the same signal
+    # `_require_cron_auth` keys off). A local/SQLite run has a long-stale dev
+    # cache by construction, and an implicit fallback there would make this
+    # response environment-dependent and rewrite the shared dev cache from a
+    # test run. The dedicated route (with `?force=1`) is how you exercise a
+    # refresh locally.
+    players_refresh_started: bool | None = None
+    try:
+        _age = _players_cache_age_seconds()
+        if _IS_PROD_ENV and (_age is None or _age > _PLAYERS_CACHE_TTL_SECONDS):
+            players_refresh_started = _refresh_players_cache_async()
+    except Exception as e:
+        log.warning("daily-tick: players-refresh guard failed (continuing): %s", e)
+
+    # ── M0 — rookie class-load monitor ──
+    # The NEXT season's class does not exist in Sleeper's dump until ~late
+    # April. Its arrival is a one-shot, unobservable-in-advance event that the
+    # Draft Room's pre-class-load state depends on, so log it loudly the first
+    # time a row appears. One indexed query per tick; the log line IS the
+    # alert (there is no pager).
+    try:
+        _check_rookie_class_load(_CURRENT_SEASON + 1)
+    except Exception as e:
+        log.warning("daily-tick: class-load monitor failed (continuing): %s", e)
+
     log.info("daily-tick: %s", counters)
+    extra: dict = {}
+    if players_refresh_started is not None:
+        extra["players_refresh_started"] = players_refresh_started
     if replenish_stats is not None:
         log.info("daily-tick replenish: %s", replenish_stats)
-        return jsonify({"ok": True, **counters, "replenish": replenish_stats})
-    return jsonify({"ok": True, **counters})
+        return jsonify({"ok": True, **counters, "replenish": replenish_stats, **extra})
+    return jsonify({"ok": True, **counters, **extra})
 
 
 @app.route("/api/cron/value-snapshot", methods=["POST"])
@@ -13438,6 +13899,26 @@ def cron_value_snapshot():
     _require_cron_auth()
     today, counters = _write_daily_value_snapshots()
     return jsonify({"ok": True, "snapshot_date": today, **counters})
+
+
+@app.route("/api/cron/players-refresh", methods=["POST"])
+def cron_players_refresh():
+    """Refresh the Sleeper bulk player cache (rookie-draft M0).
+
+    Render "cron" is an HTTP POST into the single-worker web service, so this
+    handler must NEVER do the ~45 s fetch inline. It starts a daemon thread
+    and returns **202 immediately** — always 202, including when `started` is
+    False because a refresh is already in flight or the cache is younger than
+    the TTL. It never returns the payload.
+
+    `?force=1` ignores the TTL. Kill switch: `FTF_PLAYERS_REFRESH=0`.
+    Auth: X-Cron-Secret, same as every other /api/cron/*.
+    """
+    _require_cron_auth()
+    started = _refresh_players_cache_async(force=request.args.get("force") == "1")
+    return jsonify({"ok": True, "started": started,
+                    "generation": pool_generation(),
+                    "cache_age_s": _players_cache_age_seconds()}), 202
 
 
 def _write_daily_value_snapshots() -> tuple[str, dict[str, int]]:

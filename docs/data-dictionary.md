@@ -368,6 +368,8 @@ TikTok-discovery **F7 exploration slots & archetype audition** (flag `deck.explo
 
 Canonical player reference, synced from Sleeper bulk payload (skill positions, Active or prospects). Re-synced if empty or `last_synced` > 24h.
 
+**Freshness (rookie-draft M0, 2026-08-06).** That 24 h gate only ever re-read the on-disk cache, which itself had no refresh path — so the table could sit five months stale without anything noticing. `POST /api/cron/players-refresh` now re-fetches the Sleeper dump daily and calls `sync_players` **directly**, bypassing `needs_player_sync()` (the data is known-new and the gate would skip it); `sync_players` stamps `last_synced` itself. Every value below — `rookie_year`, `team`, `years_exp` — is only as true as the last refresh, which is why THE rookie predicate is freshness-sensitive rather than merely correct. See [runbook.md § Player-cache refresh](runbook.md).
+
 | Column | Type | Notes |
 |---|---|---|
 | `player_id` | str PK | |
@@ -376,7 +378,7 @@ Canonical player reference, synced from Sleeper bulk payload (skill positions, A
 | `team` | str | abbr or null (FA) |
 | `age`, `birth_date` | int / str | |
 | `years_exp` | int | 0=rookie, null=prospect. Counts **accrued** NFL seasons, so it is NOT a draft-class field (a 2023 UDFA who spent two years on practice squads reads 1) |
-| `rookie_year` | str | `"YYYY"` draft class from Sleeper's `metadata.rookie_year` (#207) — the exact class field `years_exp` isn't. NULL when Sleeper omits it (camp bodies / UDFAs) or serves the bogus `"0"`; readers then fall back to `years_exp == 0 AND team IS NOT NULL`. Read by `load_rookie_player_ids` for the rookie-draft roster heuristic (`backend/draft_status.py`) |
+| `rookie_year` | str | `"YYYY"` draft class from Sleeper's `metadata.rookie_year` (#207) — the exact class field `years_exp` isn't. NULL when Sleeper omits it (camp bodies / UDFAs) or serves the bogus `"0"`; readers then fall back to `years_exp == 0 AND team IS NOT NULL`. That pair IS the single pinned rookie predicate — [cross-client-invariants.md § Rookie predicate](cross-client-invariants.md) — reachable **only** through `load_rookie_player_ids(season)` (SQL mirror of `draft_status.is_rookie_row`) or, for the exact-year question the class-load monitor asks, `count_rookie_class_rows(season)`. Do not hand-roll a third rule: `load_rookies` was exactly that and has been rebased. No rows exist for a class until Sleeper loads it ~late April |
 | `depth_chart_position`, `depth_chart_order` | str / int | |
 | `status`, `injury_status`, `injury_body_part` | str | |
 | `height`, `weight`, `college` | str | |

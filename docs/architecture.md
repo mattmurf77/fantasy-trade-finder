@@ -37,6 +37,8 @@ flowchart LR
   end
 
   SL -->|users, leagues, rosters, players| SRV
+  SL -->|bulk /v1/players/nfl, daily refresh daemon| PC[players cache<br/>atomic file swap]
+  PC -->|ordered invalidation| SRV
   SL -->|trade block otb flags GraphQL| TBS[trade_block_service.py]
   TBS --> DB
   DP -->|consensus values| DL
@@ -62,6 +64,8 @@ flowchart LR
   MOB <-->|/api/*| SRV
   EXT <-->|/api/extension/*| SRV
 ```
+
+**Player-data lifecycle (rookie-draft M0).** The Sleeper bulk player dump is the root input for `players`, the universal ranking pool and every rookie predicate. `POST /api/cron/players-refresh` starts a **daemon thread** (never inline — Render cron is an HTTP POST into the single web worker) which fetches through `_sleeper_get`, writes the ~5 MB cache with a temp file + `os.replace`, then walks a fixed invalidation order: disk → `_sleeper_cache` → `sync_players` → DynastyProcess value maps → universal pools (build-new-then-rebind under `_pool_build_lock`, never clear-in-place) → **pool-generation** bump. The generation is a membership marker only: `POST /api/session/init` is the one boundary that acts on it, rebuilding a user's `RankingService` per format while carrying every existing member's seed Elo forward. Full operational detail in [runbook.md § Player-cache refresh](runbook.md).
 
 ## Components
 

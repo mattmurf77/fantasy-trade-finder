@@ -6883,33 +6883,57 @@ def load_players_by_ids(player_ids: list[str]) -> dict[str, dict]:
     return {row.player_id: dict(row._mapping) for row in rows}
 
 
-def load_rookies() -> list[dict]:
+def load_rookies(season: int = 2026) -> list[dict]:
     """
-    Return all rookie / prospect players from the DB, suitable for
-    displaying on a dynasty rookie draft board.
+    Return `season`'s rookie class from the DB, suitable for displaying on a
+    dynasty rookie draft board. Sorted by search_rank (lower = higher-ranked
+    prospect), NULLs last.
 
-    Includes:
-      • years_exp = 0  (players in their first NFL season)
-      • years_exp IS NULL  (pre-draft prospects / UDFAs with no league record yet)
-
-    Sorted by search_rank (lower = higher-ranked prospect), NULLs last.
+    **Rebased onto THE rookie predicate** (rookie-draft M0): membership is
+    `load_rookie_player_ids(season)` — `rookie_year == season`, falling back
+    to `years_exp == 0 AND team IS NOT NULL` only when the class year is
+    missing. The previous rule here (`years_exp == 0 OR years_exp IS NULL`,
+    no team requirement and no `rookie_year` test) was a THIRD, looser
+    definition that swept in the whole teamless pre-NFL-draft prospect tail
+    plus every unclassifiable camp body — 157 phantom "rookies" against the
+    April-2026 dev cache. See docs/cross-client-invariants.md § Rookie
+    predicate. This function and `GET /api/rookies` are retired in M4.
     """
-    with engine.connect() as conn:
-        rows = conn.execute(
-            select(players_table).where(
-                and_(
-                    players_table.c.position.in_(["QB", "RB", "WR", "TE"]),
-                    or_(
-                        players_table.c.years_exp == 0,
-                        players_table.c.years_exp.is_(None),
-                    ),
+    ids = load_rookie_player_ids(season)
+    if not ids:
+        return []
+    id_list = sorted(ids)
+    rows: list = []
+    # Chunked so a large class can never trip SQLite's bound-variable limit.
+    for i in range(0, len(id_list), 500):
+        with engine.connect() as conn:
+            rows.extend(conn.execute(
+                select(players_table).where(
+                    and_(
+                        players_table.c.position.in_(["QB", "RB", "WR", "TE"]),
+                        players_table.c.player_id.in_(id_list[i:i + 500]),
+                    )
                 )
-            ).order_by(
-                players_table.c.search_rank.is_(None),
-                players_table.c.search_rank,
-            )
-        ).fetchall()
-    return [dict(r._mapping) for r in rows]
+            ).fetchall())
+    out = [dict(r._mapping) for r in rows]
+    out.sort(key=lambda r: (r.get("search_rank") is None,
+                            r.get("search_rank") or 0))
+    return out
+
+
+def count_rookie_class_rows(season: int) -> int:
+    """How many `players` rows carry `rookie_year == season` EXACTLY.
+
+    Deliberately the exact test only — no `years_exp` proxy. The proxy is
+    season-independent, so it would report the current class as present for
+    every future season and make the class-load monitor (M0) fire on day one.
+    """
+    yr = str(int(season))
+    with engine.connect() as conn:
+        return int(conn.execute(
+            select(func.count()).select_from(players_table)
+            .where(players_table.c.rookie_year == yr)
+        ).scalar() or 0)
 
 
 def load_rookie_player_ids(season: int) -> set[str]:

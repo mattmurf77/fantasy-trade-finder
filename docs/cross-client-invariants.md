@@ -309,6 +309,25 @@ Anchor values are position-uniform on purpose (uniform valuation across position
 
 ---
 
+## Rookie predicate
+
+**There is exactly ONE test for "is this player in season N's rookie class".** Anything that scopes, filters, counts or labels rookies — server, client, script or report — resolves to it:
+
+> `rookie_year == str(season)` when Sleeper carried a plausible 4-digit class year; **otherwise** the proxy `years_exp == 0 AND team IS NOT NULL AND team != ''`.
+
+`metadata.rookie_year` is the exact "class of YYYY" field. `years_exp` counts *accrued* seasons, so it is **not** a class field (a 2023 UDFA who spent two years on practice squads reads `years_exp == 1`); it is only the fallback for rows whose class year Sleeper never carried. The `team` requirement on the proxy is what drops the teamless pre-NFL-draft prospect tail that would otherwise read as rookies every January.
+
+**Two consequences worth stating out loud:**
+
+- **The proxy branch is season-independent.** A row with no class year matches *every* season by construction. Anything that must answer "has next season's class loaded yet?" needs the EXACT test only — that is `database.count_rookie_class_rows(season)` (the M0 class-load monitor), never this predicate.
+- **`database.load_rookies()` / `GET /api/rookies` were a THIRD, looser rule** (`years_exp == 0 OR years_exp IS NULL`, no `team` requirement, no `rookie_year` test) that swept in the whole teamless prospect tail plus every unclassifiable camp body — 157 phantom "rookies" against the April-2026 dev cache, 2 of them with a team. They were rebased onto this predicate in rookie-draft M0 and are retired entirely in M4.
+
+**Locations:** `backend/draft_status.py:is_rookie_row` (the decision, pure) · `backend/database.py:load_rookie_player_ids` (the indexed SQL mirror — THE callable) · `backend/server.py:_rookie_player_ids` (memoised per `(season, pool_generation())`) · `backend/database.py:load_rookies` (rebased; retired in M4) · `backend/database.py:count_rookie_class_rows` (exact-only, class-load monitor). Tests: `backend/tests/test_players_refresh.py::test_load_rookie_player_ids_mirrors_is_rookie_row` pins the two implementations against the full `rookie_year` × `years_exp` × `team` matrix.
+
+**Freshness is part of the predicate.** It reads `players` rows written by `sync_players` from the Sleeper bulk cache, and a class only exists in that dump from ~late April. A stale cache therefore does not return "no rookies" — it returns *last* year's answer, or a teamless prospect list. `POST /api/cron/players-refresh` (M0) is what keeps it true; outside prod, `server._rookie_scope_allowed()` refuses rookie-scoped reads off a cache older than 7 days.
+
+---
+
 ## Feedback lifecycle statuses
 
 `app_feedback.status` vocabulary, defined in `backend/database.py:FEEDBACK_STATUSES` and mirrored by the mobile inbox chips (`mobile/src/screens/FeedbackInboxScreen.tsx:STATUS_LABEL`):
