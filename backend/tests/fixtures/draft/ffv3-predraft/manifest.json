@@ -1,0 +1,16 @@
+{
+ "platform": "sleeper",
+ "provenance": "recorded-live",
+ "recorded": "2026-08-06",
+ "league_id": "1312140920132497408",
+ "draft_id": "1312140920136699904",
+ "pins": [
+  "draft_order: null, start_time: null, last_picked: null, picks: []",
+  "THE IDENTITY slot_to_roster_id TRAP: {'1':1 ... '12':12} on the /v1/draft/<id> detail object while the league /drafts list reports slot_to_roster_id: null for the same draft",
+  "reading the identity map as an order invents a draft order (D5)"
+ ],
+ "drives": [
+  "T-M3-03",
+  "D5"
+ ]
+}

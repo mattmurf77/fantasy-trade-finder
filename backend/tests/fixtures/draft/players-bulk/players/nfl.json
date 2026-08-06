@@ -1,0 +1,23 @@
+{
+ "13287": {
+  "player_id": "13287",
+  "full_name": "Jeremiyah Love",
+  "position": "RB",
+  "team": "NYJ",
+  "years_exp": 0
+ },
+ "4034": {
+  "player_id": "4034",
+  "full_name": "Christian McCaffrey",
+  "position": "RB",
+  "team": "SF",
+  "years_exp": 8
+ },
+ "0000": {
+  "player_id": "0000",
+  "full_name": "Not A Skill Player",
+  "position": "K",
+  "team": "SF",
+  "years_exp": 3
+ }
+}

@@ -1,0 +1,203 @@
+[
+ {
+  "avatar": "5f850fab37b179579b707b984ab4fb2e",
+  "display_name": "mattmurf77",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "allow_pn": "on",
+   "archived": "off",
+   "avatar": "https://sleepercdn.com/uploads/4f9855c9bb07f8e6a0175e66a440bedc.jpg",
+   "mention_pn": "on",
+   "team_name": "The Dart Knight Rises"
+  },
+  "settings": null,
+  "user_id": "313560442465169408"
+ },
+ {
+  "avatar": "6dcbee5f295974c3ea459f3aa1e3ba02",
+  "display_name": "DrByron34",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "allow_pn": "on",
+   "mention_pn": "on"
+  },
+  "settings": null,
+  "user_id": "454869184224948224"
+ },
+ {
+  "avatar": "b319fdf8b7b5b0359d3c78622ba4d70c",
+  "display_name": "sauter",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "allow_pn": "on",
+   "avatar": "https://sleepercdn.com/uploads/d6bc504224ea823653524c732d2e9f32.jpg",
+   "mention_pn": "on",
+   "team_name": "The Nixers"
+  },
+  "settings": null,
+  "user_id": "694249360803848192"
+ },
+ {
+  "avatar": "b8bb6d2bad0479a029e53b2a22e218e9",
+  "display_name": "pprendergast",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "allow_pn": "on",
+   "avatar": "https://sleepercdn.com/uploads/14f7624ca319a7863149484e3bfa088c.jpg",
+   "mention_pn": "on",
+   "team_name": "Slim Pickens"
+  },
+  "settings": null,
+  "user_id": "790036237204447232"
+ },
+ {
+  "avatar": "f0edbf4278f53f9425db175073df6584",
+  "display_name": "SwaggyJ0",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "allow_pn": "on",
+   "mention_pn": "on",
+   "team_name": "Swaggy J's Pond"
+  },
+  "settings": null,
+  "user_id": "852254555294019584"
+ },
+ {
+  "avatar": "e7af4deab0289b4f5505646424895246",
+  "display_name": "bmcaloon",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "allow_pn": "on",
+   "archived": "off",
+   "mention_pn": "on",
+   "team_name": "Pewter Gym"
+  },
+  "settings": null,
+  "user_id": "852263741075611648"
+ },
+ {
+  "avatar": "b3ddc712773e58f43d4ed576fb2fd708",
+  "display_name": "mlakejr",
+  "is_bot": false,
+  "is_owner": true,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "allow_pn": "on",
+   "archived": "off",
+   "avatar": "https://sleepercdn.com/uploads/fe5f97a2ef1a04caa935e63d8f7ecea0",
+   "mention_pn": "on",
+   "team_name": "Boutte & the Breece"
+  },
+  "settings": null,
+  "user_id": "852266560109293568"
+ },
+ {
+  "avatar": "82aec8e811b839b8ec25d7b458afd57b",
+  "display_name": "pmquinn24",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "allow_pn": "on",
+   "allow_sms": "on",
+   "mention_pn": "on",
+   "team_name": "Brock Tua"
+  },
+  "settings": null,
+  "user_id": "852623581539045376"
+ },
+ {
+  "avatar": "e7af4deab0289b4f5505646424895246",
+  "display_name": "KevinLake",
+  "is_bot": false,
+  "is_owner": true,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "allow_pn": "on",
+   "avatar": "https://sleepercdn.com/uploads/405aee37981c3c88526620064260134d.jpg",
+   "league_report_pn": "on",
+   "mascot_message": "on",
+   "mention_pn": "on",
+   "player_like_pn": "on",
+   "player_nickname_update": "on",
+   "team_name": "Hurts Donut",
+   "team_name_update": "on",
+   "trade_block_pn": "on",
+   "transaction_commissioner": "on",
+   "transaction_free_agent": "on",
+   "transaction_trade": "on",
+   "transaction_waiver": "on",
+   "user_message_pn": "on"
+  },
+  "settings": null,
+  "user_id": "852642665873940480"
+ },
+ {
+  "avatar": "b3338675f635c2c1f42b469621d38ec6",
+  "display_name": "gildalbora",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "allow_pn": "on",
+   "archived": "off",
+   "mention_pn": "on"
+  },
+  "settings": null,
+  "user_id": "862148445476081664"
+ },
+ {
+  "avatar": "ba767a3689a330446f9b0375252673da",
+  "display_name": "bobphil22",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "allow_pn": "on",
+   "allow_sms": "on",
+   "avatar": "https://sleepercdn.com/uploads/c9b6a1ac4e36e0c6b9d0dd26257104cb.jpg",
+   "mention_pn": "on",
+   "team_name": "The Replacements"
+  },
+  "settings": null,
+  "user_id": "911858813945528320"
+ },
+ {
+  "avatar": "4f4090e5e9c3941414db40a871e3e909",
+  "display_name": "johnphillips3289",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312076055586050048",
+  "metadata": {
+   "allow_pn": "on",
+   "allow_sms": "on",
+   "league_report_pn": "off",
+   "mascot_message": "off",
+   "mention_pn": "on",
+   "player_like_pn": "on",
+   "player_nickname_update": "off",
+   "team_name": "Critical Chase Theory",
+   "team_name_update": "off",
+   "trade_block_pn": "off",
+   "transaction_commissioner": "off",
+   "transaction_free_agent": "off",
+   "transaction_trade": "off",
+   "transaction_waiver": "off",
+   "user_message_pn": "on"
+  },
+  "settings": null,
+  "user_id": "974112322165735424"
+ }
+]

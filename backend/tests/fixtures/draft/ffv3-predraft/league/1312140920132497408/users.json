@@ -1,0 +1,241 @@
+[
+ {
+  "avatar": "5f850fab37b179579b707b984ab4fb2e",
+  "display_name": "mattmurf77",
+  "is_bot": false,
+  "is_owner": true,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "allow_pn": "on",
+   "archived": "off",
+   "avatar": "https://sleepercdn.com/uploads/6de9d959a418a72e50b3925f39fc8af9.jpg",
+   "mascot_message": "off",
+   "mention_pn": "on",
+   "player_like_pn": "on",
+   "player_nickname_update": "off",
+   "show_mascots": "off",
+   "team_name": "Achane\u2019s Eleven",
+   "team_name_update": "off",
+   "trade_block_pn": "on",
+   "transaction_commissioner": "on",
+   "transaction_free_agent": "on",
+   "transaction_trade": "on",
+   "transaction_waiver": "on",
+   "user_message_pn": "on"
+  },
+  "settings": null,
+  "user_id": "313560442465169408"
+ },
+ {
+  "avatar": "4fb394f49d806fbad75dd79ecc68f525",
+  "display_name": "Bcork",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "allow_pn": "on",
+   "mention_pn": "on"
+  },
+  "settings": null,
+  "user_id": "460238423161040896"
+ },
+ {
+  "avatar": "8fcf0e0e6a75e96a591d2a4a4a400f41",
+  "display_name": "gdubs10",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "allow_pn": "on",
+   "avatar": "https://sleepercdn.com/uploads/8502dadfaa9a3d8a4787b916ee85a1a7.jpg",
+   "mention_pn": "on",
+   "team_name": "Darty Szn"
+  },
+  "settings": null,
+  "user_id": "479505639769370624"
+ },
+ {
+  "avatar": "e7af4deab0289b4f5505646424895246",
+  "display_name": "KevinLake",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "allow_pn": "on",
+   "allow_sms": "on",
+   "archived": "off",
+   "avatar": "https://sleepercdn.com/uploads/eb90786b102f08c60e2056c867b6e051.jpg",
+   "join_voice_pn": "off",
+   "league_report_pn": "on",
+   "mascot_message": "off",
+   "mention_pn": "on",
+   "player_like_pn": "on",
+   "player_nickname_update": "off",
+   "team_name": "Diggs in a Blanket",
+   "team_name_update": "off",
+   "trade_block_pn": "on",
+   "transaction_commissioner": "on",
+   "transaction_free_agent": "on",
+   "transaction_trade": "on",
+   "transaction_waiver": "on",
+   "user_message_pn": "on"
+  },
+  "settings": null,
+  "user_id": "852642665873940480"
+ },
+ {
+  "avatar": "b3338675f635c2c1f42b469621d38ec6",
+  "display_name": "dondags20",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "allow_pn": "on",
+   "allow_sms": "on",
+   "mention_pn": "on"
+  },
+  "settings": null,
+  "user_id": "865989413879033856"
+ },
+ {
+  "avatar": "f0378f6af69e6aad7807c1ff690176e4",
+  "display_name": "jonbonjourvi",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "allow_pn": "on",
+   "avatar": "https://sleepercdn.com/uploads/bccd923d7d33cb7aef1647157cffcef4",
+   "mention_pn": "on",
+   "team_name": "The Bizness"
+  },
+  "settings": null,
+  "user_id": "867830050538598400"
+ },
+ {
+  "avatar": "b319fdf8b7b5b0359d3c78622ba4d70c",
+  "display_name": "JohnStanfield",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "allow_pn": "on",
+   "allow_sms": "on",
+   "mascot_message": "on",
+   "mention_pn": "on",
+   "player_like_pn": "on",
+   "player_nickname_update": "on",
+   "team_name": "2027 Dynasty Champions",
+   "team_name_update": "on",
+   "trade_block_pn": "on",
+   "transaction_commissioner": "on",
+   "transaction_free_agent": "on",
+   "transaction_trade": "on",
+   "transaction_waiver": "on",
+   "user_message_pn": "on"
+  },
+  "settings": null,
+  "user_id": "867831697150996480"
+ },
+ {
+  "avatar": "6337beaa68da3855b10fae1a092fdc24",
+  "display_name": "lofman",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "allow_pn": "on",
+   "league_report_pn": "on",
+   "mascot_message": "on",
+   "mention_pn": "on",
+   "player_like_pn": "on",
+   "player_nickname_update": "on",
+   "team_name_update": "on",
+   "trade_block_pn": "on",
+   "transaction_commissioner": "on",
+   "transaction_free_agent": "on",
+   "transaction_trade": "on",
+   "transaction_waiver": "off",
+   "user_message_pn": "on"
+  },
+  "settings": null,
+  "user_id": "867866820202364928"
+ },
+ {
+  "avatar": "b319fdf8b7b5b0359d3c78622ba4d70c",
+  "display_name": "bsharp3",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "allow_pn": "on",
+   "league_report_pn": "off",
+   "mascot_message": "off",
+   "mention_pn": "on",
+   "player_like_pn": "on",
+   "player_nickname_update": "off",
+   "team_name_update": "off",
+   "trade_block_pn": "off",
+   "transaction_commissioner": "off",
+   "transaction_free_agent": "off",
+   "transaction_trade": "off",
+   "transaction_waiver": "off",
+   "user_message_pn": "off"
+  },
+  "settings": null,
+  "user_id": "867952021926498304"
+ },
+ {
+  "avatar": "82aec8e811b839b8ec25d7b458afd57b",
+  "display_name": "PaulSm3nis",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "allow_pn": "on",
+   "mention_pn": "on"
+  },
+  "settings": null,
+  "user_id": "867953231890898944"
+ },
+ {
+  "avatar": "e6dbfed95a805892c9d5870d8605645f",
+  "display_name": "MangoPatti",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "allow_pn": "on",
+   "join_voice_pn": "off",
+   "mascot_message": "off",
+   "mention_pn": "on",
+   "player_like_pn": "on",
+   "player_nickname_update": "off",
+   "team_name": "MangoPattis",
+   "team_name_update": "off",
+   "trade_block_pn": "off",
+   "transaction_commissioner": "on",
+   "transaction_free_agent": "off",
+   "transaction_trade": "on",
+   "transaction_waiver": "off",
+   "user_message_pn": "off"
+  },
+  "settings": null,
+  "user_id": "867953552205717504"
+ },
+ {
+  "avatar": "b319fdf8b7b5b0359d3c78622ba4d70c",
+  "display_name": "Shark357",
+  "is_bot": false,
+  "is_owner": false,
+  "league_id": "1312140920132497408",
+  "metadata": {
+   "allow_pn": "on",
+   "archived": "off",
+   "mention_pn": "on",
+   "team_name": "Shark's Machine "
+  },
+  "settings": null,
+  "user_id": "869689490434908160"
+ }
+]

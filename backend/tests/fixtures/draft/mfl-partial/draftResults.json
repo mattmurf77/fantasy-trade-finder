@@ -1,0 +1,590 @@
+{
+ "version": "1.0",
+ "encoding": "utf-8",
+ "draftResults": {
+  "draftUnit": {
+   "static_url": "https://www46.myfantasyleague.com/fflnetdynamic2026/10125_LEAGUE_draft_results.xml",
+   "round1DraftOrder": "0010,0001,0011,0001,0007,0005,0006,0008,0010,0008,0001,0002,",
+   "draftType": "SAME",
+   "draftPick": [
+    {
+     "timestamp": "1781017277",
+     "player": "17472",
+     "round": "01",
+     "pick": "01",
+     "comments": "",
+     "franchise": "0010"
+    },
+    {
+     "round": "01",
+     "pick": "02",
+     "timestamp": "1781017346",
+     "player": "17462",
+     "franchise": "0001",
+     "comments": ""
+    },
+    {
+     "comments": "",
+     "franchise": "0011",
+     "timestamp": "1781020367",
+     "player": "17499",
+     "round": "01",
+     "pick": "03"
+    },
+    {
+     "timestamp": "1781021179",
+     "player": "17497",
+     "pick": "04",
+     "round": "01",
+     "comments": "[Pick traded from Kings of the Empire.] ",
+     "franchise": "0001"
+    },
+    {
+     "pick": "05",
+     "round": "01",
+     "player": "17498",
+     "timestamp": "1781024354",
+     "comments": "",
+     "franchise": "0007"
+    },
+    {
+     "franchise": "0005",
+     "comments": "",
+     "round": "01",
+     "pick": "06",
+     "timestamp": "1781029345",
+     "player": "17473"
+    },
+    {
+     "player": "17463",
+     "timestamp": "1781038933",
+     "pick": "07",
+     "round": "01",
+     "comments": "",
+     "franchise": "0006"
+    },
+    {
+     "timestamp": "1781042551",
+     "player": "17501",
+     "round": "01",
+     "pick": "08",
+     "comments": "",
+     "franchise": "0008"
+    },
+    {
+     "comments": "[Pick traded from FORCEful Assassin's .] ",
+     "franchise": "0010",
+     "round": "01",
+     "pick": "09",
+     "timestamp": "1781043602",
+     "player": "17502"
+    },
+    {
+     "franchise": "0008",
+     "comments": "[Pick traded from Chewy's Beer Chuggers .\nPick traded from Knights of the Beer Republic.] ",
+     "timestamp": "1781045242",
+     "player": "17543",
+     "round": "01",
+     "pick": "10"
+    },
+    {
+     "franchise": "0001",
+     "comments": "[Pick traded from Dark Wing Ducks.] ",
+     "timestamp": "1781045402",
+     "player": "17544",
+     "round": "01",
+     "pick": "11"
+    },
+    {
+     "pick": "12",
+     "round": "01",
+     "player": "17477",
+     "timestamp": "1781054854",
+     "franchise": "0002",
+     "comments": "[Pick traded from The Force.] "
+    },
+    {
+     "comments": "",
+     "franchise": "0010",
+     "timestamp": "1781056451",
+     "player": "17512",
+     "round": "02",
+     "pick": "01"
+    },
+    {
+     "comments": "",
+     "franchise": "0001",
+     "pick": "02",
+     "round": "02",
+     "player": "17500",
+     "timestamp": "1781059558"
+    },
+    {
+     "comments": "",
+     "franchise": "0011",
+     "timestamp": "1781073757",
+     "player": "17557",
+     "pick": "03",
+     "round": "02"
+    },
+    {
+     "franchise": "0001",
+     "comments": "[Pick traded from Kings of the Empire.\nPick traded from Boobs and Beers.] ",
+     "timestamp": "1781075026",
+     "player": "17514",
+     "round": "02",
+     "pick": "04"
+    },
+    {
+     "timestamp": "1781107778",
+     "player": "17520",
+     "round": "02",
+     "pick": "05",
+     "comments": "",
+     "franchise": "0007"
+    },
+    {
+     "pick": "06",
+     "round": "02",
+     "timestamp": "1781123882",
+     "player": "17476",
+     "franchise": "0005",
+     "comments": ""
+    },
+    {
+     "round": "02",
+     "pick": "07",
+     "player": "17506",
+     "timestamp": "1781123948",
+     "franchise": "0002",
+     "comments": "[Pick traded from Boobs and Beers.] "
+    },
+    {
+     "comments": "[Pick traded from Not Another Death Stars.\nPick traded from Knights of the Beer Republic.] ",
+     "franchise": "0002",
+     "player": "17474",
+     "timestamp": "1781128246",
+     "pick": "08",
+     "round": "02"
+    },
+    {
+     "comments": "[Pick traded from FORCEful Assassin's .] ",
+     "franchise": "0010",
+     "pick": "09",
+     "round": "02",
+     "timestamp": "1781152416",
+     "player": "17503"
+    },
+    {
+     "timestamp": "1781163902",
+     "player": "17478",
+     "round": "02",
+     "pick": "10",
+     "comments": "[Pick traded from Chewy's Beer Chuggers .] ",
+     "franchise": "0001"
+    },
+    {
+     "comments": "[Pick traded from Dark Wing Ducks.] ",
+     "franchise": "0005",
+     "player": "17509",
+     "timestamp": "1781179724",
+     "round": "02",
+     "pick": "11"
+    },
+    {
+     "franchise": "0005",
+     "comments": "[Pick traded from The Force.\nPick traded from Knights of the Beer Republic.] ",
+     "pick": "12",
+     "round": "02",
+     "player": "17482",
+     "timestamp": "1781194960"
+    },
+    {
+     "player": "17652",
+     "timestamp": "1781196963",
+     "pick": "01",
+     "round": "03",
+     "comments": "",
+     "franchise": "0010"
+    },
+    {
+     "round": "03",
+     "pick": "02",
+     "player": "17466",
+     "timestamp": "1781201167",
+     "franchise": "0001",
+     "comments": "[Pick traded from Knights of the Beer Republic.\nPick traded from Dark Side of the Brew.] "
+    },
+    {
+     "pick": "03",
+     "round": "03",
+     "player": "17607",
+     "timestamp": "1781201288",
+     "franchise": "0011",
+     "comments": ""
+    },
+    {
+     "round": "03",
+     "pick": "04",
+     "player": "17485",
+     "timestamp": "1781202389",
+     "franchise": "0001",
+     "comments": "[Pick traded from Kings of the Empire.] "
+    },
+    {
+     "franchise": "0010",
+     "comments": "[Pick traded from Astro zombie Droids.] ",
+     "timestamp": "1781203408",
+     "player": "17507",
+     "pick": "05",
+     "round": "03"
+    },
+    {
+     "timestamp": "1781209862",
+     "player": "17481",
+     "round": "03",
+     "pick": "06",
+     "comments": "",
+     "franchise": "0005"
+    },
+    {
+     "pick": "07",
+     "round": "03",
+     "player": "17586",
+     "timestamp": "1781225876",
+     "franchise": "0006",
+     "comments": ""
+    },
+    {
+     "franchise": "0001",
+     "comments": "[Pick traded from Not Another Death Stars.] ",
+     "player": "17556",
+     "timestamp": "1781226008",
+     "pick": "08",
+     "round": "03"
+    },
+    {
+     "franchise": "0012",
+     "comments": "",
+     "round": "03",
+     "pick": "09",
+     "timestamp": "1781242200",
+     "player": "17468"
+    },
+    {
+     "timestamp": "1781246539",
+     "player": "17558",
+     "round": "03",
+     "pick": "10",
+     "franchise": "0001",
+     "comments": "[Pick traded from Chewy's Beer Chuggers .] "
+    },
+    {
+     "franchise": "0009",
+     "comments": "",
+     "timestamp": "1781291159",
+     "player": "17511",
+     "round": "03",
+     "pick": "11"
+    },
+    {
+     "pick": "12",
+     "round": "03",
+     "timestamp": "1781317891",
+     "player": "17508",
+     "comments": "[Pick traded from The Force.\nPick traded from Dark Side of the Brew.] ",
+     "franchise": "0001"
+    },
+    {
+     "franchise": "0010",
+     "comments": "",
+     "player": "",
+     "timestamp": "",
+     "pick": "01",
+     "round": "04"
+    },
+    {
+     "round": "04",
+     "pick": "02",
+     "timestamp": "",
+     "player": "",
+     "comments": "[Pick traded from Knights of the Beer Republic.] ",
+     "franchise": "0005"
+    },
+    {
+     "player": "",
+     "timestamp": "",
+     "pick": "03",
+     "round": "04",
+     "comments": "",
+     "franchise": "0011"
+    },
+    {
+     "comments": "",
+     "franchise": "0002",
+     "round": "04",
+     "pick": "04",
+     "timestamp": "",
+     "player": ""
+    },
+    {
+     "round": "04",
+     "pick": "05",
+     "timestamp": "",
+     "player": "",
+     "comments": "",
+     "franchise": "0007"
+    },
+    {
+     "round": "04",
+     "pick": "06",
+     "timestamp": "",
+     "player": "",
+     "comments": "[Pick traded from Dark Side of the Brew.] ",
+     "franchise": "0001"
+    },
+    {
+     "comments": "",
+     "franchise": "0006",
+     "round": "04",
+     "pick": "07",
+     "timestamp": "",
+     "player": ""
+    },
+    {
+     "comments": "[Pick traded from Not Another Death Stars.] ",
+     "franchise": "0001",
+     "player": "",
+     "timestamp": "",
+     "pick": "08",
+     "round": "04"
+    },
+    {
+     "round": "04",
+     "pick": "09",
+     "timestamp": "",
+     "player": "",
+     "comments": "[Pick traded from FORCEful Assassin's .] ",
+     "franchise": "0005"
+    },
+    {
+     "pick": "10",
+     "round": "04",
+     "player": "",
+     "timestamp": "",
+     "comments": "[Pick traded from Chewy's Beer Chuggers .\nPick traded from Knights of the Beer Republic.] ",
+     "franchise": "0002"
+    },
+    {
+     "timestamp": "",
+     "player": "",
+     "pick": "11",
+     "round": "04",
+     "comments": "",
+     "franchise": "0009"
+    },
+    {
+     "comments": "[Pick traded from The Force.] ",
+     "franchise": "0009",
+     "round": "04",
+     "pick": "12",
+     "timestamp": "",
+     "player": ""
+    },
+    {
+     "comments": "",
+     "franchise": "0010",
+     "timestamp": "",
+     "player": "",
+     "round": "05",
+     "pick": "01"
+    },
+    {
+     "timestamp": "",
+     "player": "",
+     "pick": "02",
+     "round": "05",
+     "franchise": "0001",
+     "comments": ""
+    },
+    {
+     "round": "05",
+     "pick": "03",
+     "player": "",
+     "timestamp": "",
+     "comments": "",
+     "franchise": "0011"
+    },
+    {
+     "pick": "04",
+     "round": "05",
+     "player": "",
+     "timestamp": "",
+     "franchise": "0002",
+     "comments": ""
+    },
+    {
+     "pick": "05",
+     "round": "05",
+     "timestamp": "",
+     "player": "",
+     "franchise": "0007",
+     "comments": ""
+    },
+    {
+     "round": "05",
+     "pick": "06",
+     "timestamp": "",
+     "player": "",
+     "comments": "",
+     "franchise": "0005"
+    },
+    {
+     "round": "05",
+     "pick": "07",
+     "player": "",
+     "timestamp": "",
+     "comments": "[Pick traded from Boobs and Beers.] ",
+     "franchise": "0001"
+    },
+    {
+     "franchise": "0008",
+     "comments": "",
+     "player": "",
+     "timestamp": "",
+     "pick": "08",
+     "round": "05"
+    },
+    {
+     "franchise": "0001",
+     "comments": "[Pick traded from FORCEful Assassin's .] ",
+     "player": "",
+     "timestamp": "",
+     "pick": "09",
+     "round": "05"
+    },
+    {
+     "round": "05",
+     "pick": "10",
+     "player": "",
+     "timestamp": "",
+     "comments": "[Pick traded from Chewy's Beer Chuggers .] ",
+     "franchise": "0001"
+    },
+    {
+     "pick": "11",
+     "round": "05",
+     "player": "",
+     "timestamp": "",
+     "comments": "",
+     "franchise": "0009"
+    },
+    {
+     "player": "",
+     "timestamp": "",
+     "round": "05",
+     "pick": "12",
+     "comments": "[Pick traded from The Force.] ",
+     "franchise": "0009"
+    },
+    {
+     "franchise": "0010",
+     "comments": "",
+     "pick": "01",
+     "round": "06",
+     "timestamp": "",
+     "player": ""
+    },
+    {
+     "franchise": "0009",
+     "comments": "[Pick traded from Knights of the Beer Republic.] ",
+     "timestamp": "",
+     "player": "",
+     "round": "06",
+     "pick": "02"
+    },
+    {
+     "pick": "03",
+     "round": "06",
+     "player": "",
+     "timestamp": "",
+     "comments": "",
+     "franchise": "0011"
+    },
+    {
+     "franchise": "0002",
+     "comments": "",
+     "player": "",
+     "timestamp": "",
+     "pick": "04",
+     "round": "06"
+    },
+    {
+     "comments": "",
+     "franchise": "0007",
+     "timestamp": "",
+     "player": "",
+     "round": "06",
+     "pick": "05"
+    },
+    {
+     "franchise": "0005",
+     "comments": "",
+     "round": "06",
+     "pick": "06",
+     "timestamp": "",
+     "player": ""
+    },
+    {
+     "comments": "",
+     "franchise": "0006",
+     "round": "06",
+     "pick": "07",
+     "timestamp": "",
+     "player": ""
+    },
+    {
+     "pick": "08",
+     "round": "06",
+     "timestamp": "",
+     "player": "",
+     "comments": "",
+     "franchise": "0008"
+    },
+    {
+     "pick": "09",
+     "round": "06",
+     "player": "",
+     "timestamp": "",
+     "franchise": "0001",
+     "comments": "[Pick traded from FORCEful Assassin's .] "
+    },
+    {
+     "franchise": "0001",
+     "comments": "[Pick traded from Chewy's Beer Chuggers .] ",
+     "round": "06",
+     "pick": "10",
+     "timestamp": "",
+     "player": ""
+    },
+    {
+     "player": "",
+     "timestamp": "",
+     "pick": "11",
+     "round": "06",
+     "franchise": "0009",
+     "comments": ""
+    },
+    {
+     "comments": "[Pick traded from The Force.] ",
+     "franchise": "0001",
+     "timestamp": "",
+     "player": "",
+     "round": "06",
+     "pick": "12"
+    }
+   ],
+   "unit": "LEAGUE"
+  }
+ }
+}
