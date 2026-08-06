@@ -54,6 +54,11 @@ own reach cap, and the shape would still be wrong. Full derivation in the artifa
 **Not touched:** any `mobile/` file (owned by another agent this wave), `draft_board_service.py`,
 `trade_service.py`, `power_rankings.py`, `_MODEL_CONFIG_DEFAULTS`.
 
+**Merge with W1.** `origin/main` gained W1 (`draft.rank_inline`) mid-build. The three flag files
+conflicted and were resolved by union-dedupe per plan §7's concurrency discipline: both keys in
+`FLAG_KEYS`, both in the JSON, and one combined `_comment_draft_extensions` block covering the
+pair (the key name collided). No behavioural line of either wave was changed by the resolution.
+
 ## The three binding amendments, as implemented
 
 1. **CPU basis = market consensus via the shipped seam.** `server._get_universal_pool(fmt)[1]`
@@ -77,7 +82,7 @@ own reach cap, and the shape would still be wrong. Full derivation in the artifa
 
 | Gate | Result |
 |---|---|
-| `python3 -m pytest backend/tests -q` | **1817 passed, 1 skipped, exit 0** (baseline ~1764; +53 new) |
+| `python3 -m pytest backend/tests -q` | **1817 passed, 1 skipped, exit 0** at commit time (baseline ~1764; +53 new). **1845 / 1 skipped / exit 0** after merging `origin/main` (W1 landed in parallel) |
 | `cd mobile && npx tsc --noEmit` | **clean, exit 0** — untouched, as required (`mobile/node_modules` was symlinked from the main checkout for the run and removed after) |
 | Flag mirror (`test_release_flags_mirror_features_json`) | green |
 | Zero platform egress | T-W2-13: AST import check + an unbound-fetcher check + a full mock run under `FTF_TEST_MODE` with `test_support.counters` byte-unchanged |

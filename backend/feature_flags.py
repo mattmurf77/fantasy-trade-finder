@@ -415,6 +415,21 @@ FLAG_KEYS: tuple[str, ...] = (
     # as today. `GENERIC_PICK_SEEDS`, the tier ladder and the tier bands are
     # byte-unchanged in BOTH modes — this flag reprices owned picks only.
     "trade.slot_pricing",
+    # draft-extensions W1 — per-player ACTIONS on the Draft Room's undrafted
+    # rows (docs/plans/draft-extensions/plan.md §4, lld §4.1). ON ⇒ a
+    # long-press (plus the `accessibilityActions` custom action, the shipped
+    # TradeCard vocabulary) on an undrafted row opens the shared
+    # PlayerContextMenu with Set my value → an anchor sheet on the SHIPPED
+    # POST /api/anchor/save lane, Rank the rookies (the existing bridge, now
+    # two-way), and Add to targets; the coverage nudge renders too.
+    # HARD CONSTRAINT: the anchor lane ONLY — no surface this flag opens may
+    # reach save_tiers_position or the merged-band path (AST + runtime
+    # tests in backend/tests/test_draft_extensions_w1.py).
+    # OFF (default) ⇒ undrafted rows are the inert Views they are today: no
+    # long-press handler, no a11y action, no menu, no sheet, no nudge. The
+    # per-player testIDs ship UNFLAGGED (they are inert, and they are what
+    # makes the flag testable at all).
+    "draft.rank_inline",
     # draft-extensions W2 — the FTF-native mock draft. Gates all four
     # /api/mock-draft routes; effective gating is `draft.room` AND
     # `draft.mock`. Independent of `draft.live_poll` (the mock never polls),
