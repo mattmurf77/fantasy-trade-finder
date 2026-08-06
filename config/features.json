@@ -140,8 +140,9 @@
   "deck.value_model": false,
   "deck.first_session": true,
   "deck.replenishment": true,
-  "_comment_rookie_draft": "2026-08-06 Rookie rankings + Draft Room (docs/plans/rookie-draft/). All flags land OFF and flip at each milestone's release gate. ranks.rookie_subset gates the scope=rookie view filter on /api/rankings + /api/trio and the merged-band scoped tier save; off = the scope param is never read. draft.room gates GET /api/draft/board and the mobile Draft Room (off = the League tab keeps today's rookie-board tile). draft.live_poll gates the 15s client poll of our own endpoint (focus + foreground + state:live only); it stays off until the throwaway-league live test passes.",
+  "_comment_rookie_draft": "2026-08-06 Rookie rankings + Draft Room (docs/plans/rookie-draft/). All flags land OFF and flip at each milestone's release gate. ranks.rookie_subset gates the scope=rookie view filter on /api/rankings + /api/trio and the merged-band scoped tier save; off = the scope param is never read. draft.room gates GET /api/draft/board and the mobile Draft Room (off = the League tab keeps today's rookie-board tile). draft.live_poll gates the 15s client poll of our own endpoint (focus + foreground + state:live only); it stays off until the throwaway-league live test passes. picks.slot_values gates the display-only per-slot pick prices on the Draft Room board (DynastyProcess values.csv PICK rows, hermetic seam FTF_DP_PICK_VALUES_FILE); off = the slot_value key is omitted entirely and values.csv is never fetched.",
   "ranks.rookie_subset": false,
   "draft.room": false,
-  "draft.live_poll": false
+  "draft.live_poll": false,
+  "picks.slot_values": false
 }

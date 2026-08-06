@@ -379,6 +379,18 @@ FLAG_KEYS: tuple[str, ...] = (
     # OFF (default) ⇒ no recurring fetch anywhere; the manual Refresh
     # control is always present either way.
     "draft.live_poll",
+    # M6 — per-slot draft-pick market prices on the Draft Room board, read
+    # from DynastyProcess's SECOND file (files/values.csv PICK rows) via
+    # data_loader.load_pick_slot_values and served in seed-Elo space on
+    # `order[]` entries — a DISPLAY axis only. GENERIC_PICK_SEEDS, the tier
+    # ladder, the tier bands and the trade engine do NOT read it (engine
+    # adoption is the separate M6b repricing wave, plan O2). Non-12-team
+    # leagues get a percentile map and the payload carries
+    # `slot_value_approx: true` (plan O3).
+    # OFF (default) ⇒ the `slot_value` key is OMITTED ENTIRELY from every
+    # order entry (never null), no `slot_value_approx` key, and values.csv is
+    # never fetched. A fetch failure with the flag ON degrades the same way.
+    "picks.slot_values",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
