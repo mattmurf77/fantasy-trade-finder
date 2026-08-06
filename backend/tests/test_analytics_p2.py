@@ -16,6 +16,7 @@ Isolated in-memory SQLite patched into BOTH db.engine and db.ro_engine (the
 reports read via ro_engine; two :memory: engines are different DBs).
 """
 import json
+from datetime import date
 from unittest.mock import patch
 
 import pytest
@@ -120,6 +121,80 @@ def test_dark_event_renders_dark_not_zero(engine):
     stage1 = next(r for r in env["rows"] if r["stage"] == 1)   # signin_started
     assert stage1["step_conv"]["caveat"] == "dark"
     assert stage1["reached"] is None
+
+
+def test_overview_kpis_series_and_coverage(engine):
+    # The dashboard home: KPI cards carry a daily series (zero-filled across
+    # the window) so the renderer can draw a sparkline with no client math,
+    # and coverage names what is flowing vs waiting — honestly.
+    env, _ = aq.run_report("overview", start=START, end=END)
+    r = env["rows"]
+    keys = {k["key"] for k in r["kpis"]}
+    assert {"active_users", "wat", "activation"} <= keys
+    active = next(k for k in r["kpis"] if k["key"] == "active_users")
+    # zero-filled daily series across the inclusive window
+    ndays = (date.fromisoformat(END) - date.fromisoformat(START)).days + 1
+    assert len(active["series"]) == ndays
+    assert active["value"] == 2                     # alice + bob, demo excluded
+    # frustration signals are all client-fired → dark, never a fabricated 0
+    assert all(f["caveat"] == "dark" for f in r["frustration"])
+    # coverage tells the operator exactly why
+    assert r["coverage"]["status"] == "client_capture_off"
+    assert r["coverage"]["client_events_dark_total"] > 0
+    assert "signup" in r["coverage"]["events_flowing"]
+
+
+def test_journeys_paths_around_anchor(engine):
+    # Journeys reconstructs sessions from a 30-min inactivity gap (server rows
+    # carry NULL session_id) and ranks what precedes/follows the anchor.
+    env, _ = aq.run_report("journeys", start=START, end=END)
+    r = env["rows"]
+    assert r["anchor"] in r["candidates"]          # defaults to the most frequent
+    assert r["sessions"] > 0 and r["anchor_hits"] > 0
+    # every before/after step carries a count and a share of anchor hits
+    for step in r["before"] + r["after"]:
+        assert step["count"] > 0 and 0 < step["share"] <= 1
+    # an explicit anchor is honored
+    env2, _ = aq.run_report("journeys", start=START, end=END, anchor="trio_swipe")
+    assert env2["rows"]["anchor"] == "trio_swipe"
+
+
+def test_retention_triangle_shape(engine):
+    # Weekly signup cohorts × weeks-since; cells beyond the window are None
+    # (never a fabricated 0), and small cohorts are flagged for the renderer.
+    env, _ = aq.run_report("retention", start=START, end=END)
+    rows = env["rows"]
+    assert rows, "seeded signups should produce at least one cohort"
+    r0 = rows[0]
+    assert r0["size"] >= 1
+    assert len(r0["cells"]) == aq.RETENTION_WEEKS + 1
+    w0 = r0["cells"][0]
+    assert w0["week_n"] == 0
+    assert w0["retained"] >= 1                     # signup week counts as active
+    assert w0["small"] is True                     # 2 users < N_MIN
+    # weeks past the window edge render as None, not 0%
+    assert any(c is None for c in r0["cells"][1:])
+
+
+def test_segments_evaluate_and_reject_bad_ops(engine):
+    # A saved segment is evaluated live against the window.
+    from sqlalchemy import insert as _ins
+    with engine.begin() as conn:
+        conn.execute(_ins(db.analytics_segments_table).values(
+            name="calc users", definition_json=json.dumps({"did": "calc_trade_evaluated"}),
+            created_at="2026-07-13T00:00:00+00:00"))
+    env, _ = aq.run_report("segments", start=START, end=END)
+    seg = env["rows"][0]
+    assert seg["name"] == "calc users"
+    assert seg["users"] == 1                       # only u_bob used the calculator
+    assert 0 < seg["share"] <= 1
+    # the grammar is closed — unknown ops and unknown events are rejected,
+    # so no user string can reach SQL.
+    with engine.connect() as conn:
+        with pytest.raises(aq.BadParam):
+            aq.evaluate_segment(conn, {"evil": "DROP TABLE users"}, START, END, False, 100)
+        with pytest.raises(aq.BadParam):
+            aq.evaluate_segment(conn, {"did": "not_a_real_event"}, START, END, False, 100)
 
 
 def test_composed_reports_propagate_dark_caveats(engine):

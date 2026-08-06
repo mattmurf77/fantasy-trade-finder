@@ -5,6 +5,7 @@ import { ink, chalk, semantic, radii, fonts, shadowSheet } from '../theme/chalkl
 import { Icon } from './chalkline';
 import FeedbackSheet from './FeedbackSheet';
 import { useFeedback } from '../state/useFeedback';
+import { useSession } from '../state/useSession';
 import { openFeedbackCount } from '../utils/feedbackBadge';
 import { useFlag } from '../state/useFeatureFlags';
 
@@ -82,6 +83,8 @@ export default function FeedbackFAB({ activeScreen, aboveTabBar = true }: Props)
   const items  = useFeedback((s) => s.items);
   const hydrate = useFeedback((s) => s.hydrate);
   const refreshStatuses = useFeedback((s) => s.refreshStatuses);
+  // Session gate for the authed status pull below.
+  const hasToken = useSession((s) => s.hasToken);
   const [sheetOpen, setSheetOpen] = useState(false);
   // S3 PRD-01 — content-aware offset. Flag off → 0 extra offset always.
   const touchPolish = useFlag('ux.touch_polish');
@@ -92,8 +95,22 @@ export default function FeedbackFAB({ activeScreen, aboveTabBar = true }: Props)
     // drops for closed/resolved notes without the user opening the inbox
     // (#184). refreshStatuses is best-effort and silent on failure; the FAB
     // mounts once in RootNav, so this is one GET per launch.
-    void hydrate().then(() => refreshStatuses());
-  }, [hydrate, refreshStatuses]);
+    //
+    // The hydrate leg is a local AsyncStorage read and always runs — and it
+    // must stay AHEAD of refreshStatuses, which merges into `items` and
+    // persists the result (running it on an un-hydrated empty list would
+    // write the notes away). The status pull hits the session-authed
+    // /api/feedback/mine, so it waits for hasToken: this FAB mounts with the
+    // authed tabs, including the cold start where the restored token turns
+    // out to be dead. hasToken is in the dep list, so the pull happens on
+    // the launch where a session already exists AND when one arrives later
+    // (revalidateSession / sign-in) — hydrate() self-guards on `hydrated`,
+    // so the re-run costs nothing.
+    void hydrate().then(() => {
+      if (!hasToken) return;
+      return refreshStatuses();
+    });
+  }, [hydrate, refreshStatuses, hasToken]);
 
   useEffect(() => {
     const listener = (h: number) => setBarHeight(h);

@@ -78,6 +78,13 @@ interface SessionState {
   user: SavedUser | null;
   league: SavedLeague | null;
   leagues: LeagueSummary[];         // cached list for the switcher
+  /** "This device holds a session token." The canonical `enabled:` gate for
+   *  authed queries — true from the moment a session is established
+   *  (bootstrap restore / setLeague / revalidateSession / startDemoSession)
+   *  and false the moment one is destroyed (sign-out, or a 401 that cleared
+   *  the stored token — see setOnSessionExpired at the bottom of this file).
+   *  Gate on THIS, not on `league?.league_id`: account-only sessions ride the
+   *  `no_league` sentinel and must still be able to rank. */
   hasToken: boolean;
   /** Active scoring format — hydrated from AsyncStorage via rankings.ts.
    *  Null until bootstrap() completes (or the user hasn't set a format). */
@@ -512,6 +519,23 @@ export function consumeAppleReauthHint(): boolean {
 }
 
 setOnSessionExpired(() => {
+  // First, unconditionally: the stored token is GONE (client.ts just
+  // cleared it), so `hasToken` — the store's mirror of "this device holds
+  // a session" — must stop claiming otherwise. It only ever fell to false
+  // on sign-out, so a session that died mid-flight left every consumer
+  // gated on it (RootNav's progress tail, the league format-stats applier,
+  // the Rank surfaces, the feedback FAB) firing token-less requests that
+  // could only 401 — the pre-auth 401 cluster in the 2026-08 production
+  // analytics pull. Suppressing them is the whole point of the gate.
+  //
+  // Self-healing, not a stall: every path that establishes a session sets
+  // it back to true (revalidateSession on boot/foreground resume,
+  // setLeague after a sign-in or league switch, startDemoSession), which
+  // flips the gated queries back to enabled and refetches. Queries that
+  // already hold data keep showing it while disabled, so the screen falls
+  // back to stale values rather than an error state.
+  useSession.setState({ hasToken: false });
+
   const s = useSession.getState();
   if (s.isDemo || !s.user?.account_only) return;
   try {
@@ -522,7 +546,6 @@ setOnSessionExpired(() => {
   } catch {
     return; // can't read the flag → keep legacy behavior
   }
-  useSession.setState({ hasToken: false });
   _appleReauthPending = true;
   try {
     // Lazy require breaks the RootNav → useSession import cycle; resolved

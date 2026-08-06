@@ -33,6 +33,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
@@ -91,8 +92,9 @@ FEATURE_VERTICALS = {
     "send_in_sleeper":["sleeper_send_succeeded"],   # dark
 }
 
-VALID_REPORTS = ("waterfall", "time", "bottlenecks", "churn", "releases",
-                 "adoption", "engagement", "pfo", "onepager")
+VALID_REPORTS = ("overview", "waterfall", "time", "bottlenecks", "churn",
+                 "releases", "adoption", "engagement", "pfo", "onepager",
+                 "journeys", "retention", "segments", "rankquality")
 WINDOW_MAX_DAYS = 90
 N_MIN = 20
 ROW_CAP_JSON = 5000
@@ -271,6 +273,165 @@ def _resolved_intent_days(conn, start_day, end_day, event_filter, params_extra,
             stmt = stmt.bindparams(bindparam(k, expanding=True))
             p[k] = sorted(v)
     return conn.execute(stmt, p).mappings().all()
+
+
+# ---------------------------------------------------------------------------
+# Overview — the dashboard home (Fullstory-style KPI cards + daily series).
+# Every KPI ships as {label, value, delta_pct, series[], unit, caveat} so the
+# renderer can draw a big number, a sparkline, and a WoW delta with no client
+# computation. Coverage tells the operator exactly what is measured vs waiting.
+# ---------------------------------------------------------------------------
+
+def _daily_distinct(conn, start_day, end_day, event_filter, params, include_demo, row_cap):
+    """[(day, n_distinct_users)] for the window, zero-filled across every day."""
+    rows = _resolved_intent_days(conn, start_day, end_day, event_filter, params,
+                                 include_demo, row_cap)
+    by_day = defaultdict(set)
+    for r in rows:
+        by_day[r["day"]].add(r["resolved_user_id"])
+    out = []
+    d0, d1 = date.fromisoformat(start_day), date.fromisoformat(end_day)
+    cur = d0
+    while cur <= d1:
+        k = cur.isoformat()
+        out.append({"day": k, "value": len(by_day.get(k, set()))})
+        cur += timedelta(days=1)
+    return out
+
+
+def _delta_pct(series):
+    """Trailing-7d vs prior-7d % change on a daily series (None when no base)."""
+    vals = [p["value"] for p in series]
+    if len(vals) < 14:
+        return None
+    cur, prev = sum(vals[-7:]), sum(vals[-14:-7])
+    if prev == 0:
+        return None
+    return (cur - prev) / prev
+
+
+def _event_count(conn, start_day, end_day, events):
+    q = text(
+        "SELECT COUNT(*) FROM user_events WHERE event_type IN :ev "
+        "AND substr(occurred_at,1,10) >= :s AND substr(occurred_at,1,10) <= :e "
+        "AND user_id NOT LIKE 'device:%'"
+    ).bindparams(bindparam("ev", expanding=True))
+    return conn.execute(q, {"ev": list(events), "s": start_day, "e": end_day}).scalar() or 0
+
+
+def report_overview(conn, start_day, end_day, include_demo, row_cap, **_):
+    caveats = []
+    kpis = []
+
+    # --- Active users (intent) + WAT north star, as daily series -----------
+    active = _daily_distinct(conn, start_day, end_day,
+                             "ue.event_type NOT IN :non_intent",
+                             {"non_intent": NON_INTENT_EVENTS}, include_demo, row_cap)
+    wat = _daily_distinct(conn, start_day, end_day, "ue.event_type IN :wat",
+                          {"wat": WAT_LIVE}, include_demo, row_cap)
+    total_active = len({u for r in _resolved_intent_days(
+        conn, start_day, end_day, "ue.event_type NOT IN :non_intent",
+        {"non_intent": NON_INTENT_EVENTS}, include_demo, row_cap)
+        for u in [r["resolved_user_id"]]})
+    wat_users = len({r["resolved_user_id"] for r in _resolved_intent_days(
+        conn, start_day, end_day, "ue.event_type IN :wat", {"wat": WAT_LIVE},
+        include_demo, row_cap)})
+
+    kpis.append({"key": "active_users", "label": "Active users",
+                 "sublabel": "distinct, intent events", "value": total_active,
+                 "unit": "count", "series": active, "delta_pct": _delta_pct(active),
+                 "caveat": None})
+    kpis.append({"key": "wat", "label": "Weekly Active Traders",
+                 "sublabel": "north star — a trade opinion", "value": wat_users,
+                 "unit": "count", "series": wat, "delta_pct": _delta_pct(wat),
+                 "caveat": None})
+
+    # --- Trade-loop volume (the product's reason for existing) -------------
+    decks = _event_count(conn, start_day, end_day, ["trades_generated"])
+    opinions = _event_count(conn, start_day, end_day, ["trade_proposed", "match_swiped"])
+    matches = _event_count(conn, start_day, end_day, ["trade_ratified"])
+    kpis.append({"key": "decks", "label": "Trade decks generated", "sublabel": "server-fired",
+                 "value": decks, "unit": "count", "series": None,
+                 "delta_pct": None, "caveat": None if decks else "no_data"})
+    kpis.append({"key": "opinions", "label": "Trade opinions", "sublabel": "likes + passes",
+                 "value": opinions, "unit": "count", "series": None,
+                 "delta_pct": None, "caveat": None if opinions else "no_data"})
+    kpis.append({"key": "matches", "label": "Mutual matches", "sublabel": "both sides accepted",
+                 "value": matches, "unit": "count", "series": None,
+                 "delta_pct": None, "caveat": None if matches else "no_data"})
+
+    # --- Activation (live: signup → first board unlock) --------------------
+    su = {r["resolved_user_id"] for r in _resolved_intent_days(
+        conn, start_day, end_day, "ue.event_type IN :ev", {"ev": {"signup"}},
+        include_demo, row_cap)}
+    ac = {r["resolved_user_id"] for r in _resolved_intent_days(
+        conn, start_day, end_day, "ue.event_type IN :ev",
+        {"ev": {"ranking_complete_first_time"}}, include_demo, row_cap)}
+    act_cell = rate_cell(len(su & ac), len(su),
+                         dark=is_dark(conn, ["signup"], start_day, end_day))
+    kpis.append({"key": "activation", "label": "Activation", "sublabel": "signup → board unlocked",
+                 "value": act_cell["value"], "unit": "rate", "series": None,
+                 "delta_pct": None, "n": act_cell["n"], "caveat": act_cell["caveat"]})
+
+    # --- Frustration signals (Fullstory-style; ours are product-specific) ---
+    # insult rate + client errors are client-fired → dark until the SDK ships.
+    frustration = []
+    for label, evs, denom_evs in (
+        ("Flagged trades (insult)", ["trade_flagged"], ["trade_card_viewed"]),
+        ("API failures", ["api_request_failed"], None),
+        ("Client errors", ["client_error"], None),
+        ("Sign-in failures", ["signin_failed"], ["signin_attempted"]),
+    ):
+        dark = is_dark(conn, evs, start_day, end_day)
+        n = 0 if dark else _event_count(conn, start_day, end_day, evs)
+        denom = _event_count(conn, start_day, end_day, denom_evs) if denom_evs and not dark else None
+        frustration.append({"label": label, "count": None if dark else n,
+                            "rate": (n / denom) if denom else None,
+                            "caveat": "dark" if dark else None})
+
+    # --- Top failing routes (props parsed in Python — no json1) ------------
+    # A raw failure count is not actionable; the route × status pair is. Prod
+    # 2026-08-05 showed /api/league/format-stats → 409 fourteen times (the
+    # session_not_initialized race) hiding behind an undifferentiated "81".
+    failing = []
+    try:
+        prop_rows = conn.execute(text(
+            "SELECT props FROM user_events WHERE event_type = 'api_request_failed' "
+            "AND substr(occurred_at,1,10) >= :s AND substr(occurred_at,1,10) <= :e "
+            "LIMIT :cap"), {"s": start_day, "e": end_day, "cap": row_cap}).scalars().all()
+        agg = defaultdict(int)
+        for raw in prop_rows:
+            try:
+                p = json.loads(raw) if raw else {}
+            except Exception:
+                continue
+            agg[(p.get("route") or "?", p.get("status"))] += 1
+        failing = [{"route": r, "status": s, "count": n}
+                   for (r, s), n in sorted(agg.items(), key=lambda kv: -kv[1])[:8]]
+    except Exception:
+        failing = []
+
+    # --- Coverage: what's measured vs waiting (honest, not depressing) -----
+    live_types = conn.execute(text(
+        "SELECT DISTINCT event_type FROM user_events "
+        "WHERE substr(occurred_at,1,10) >= :s AND substr(occurred_at,1,10) <= :e "
+        "LIMIT 200"), {"s": start_day, "e": end_day}).scalars().all()
+    live_set = set(live_types)
+    client_dark = sorted(ALLOWED_CLIENT_EVENTS - live_set)
+    coverage = {
+        "events_flowing": sorted(live_set),
+        "client_events_dark": client_dark[:12],
+        "client_events_dark_total": len(client_dark),
+        "status": ("client_capture_off" if client_dark else "full"),
+        "explain": ("Server-fired events are flowing. Client events (install, "
+                    "sign-in funnel, think-time, errors) start flowing when "
+                    "analytics.ingest is enabled and an app build carries the SDK."),
+    }
+    caveats.append(_dark_caveat("coverage:client_events",
+                                f"{len(client_dark)} client event types have no rows in window — "
+                                "metrics that need them render — rather than a fabricated 0"))
+    return ({"kpis": kpis, "frustration": frustration,
+             "failing_routes": failing, "coverage": coverage}, caveats, None)
 
 
 # ---------------------------------------------------------------------------
@@ -686,10 +847,508 @@ def report_onepager(conn, start_day, end_day, include_demo, row_cap, **_):
 
 
 # ---------------------------------------------------------------------------
+# Journeys — path analysis (Fullstory "Journeys"): what users do immediately
+# before and after an anchor event, ranked by frequency.
+#
+# Sessions are RECONSTRUCTED in Python from a 30-minute inactivity gap rather
+# than read off session_id, because server-fired rows carry NULL session_id
+# (only client rows have one). This works on today's data and stays correct
+# when client sessions arrive.
+# ---------------------------------------------------------------------------
+
+SESSION_GAP_S = 30 * 60
+
+
+def _iso_to_epoch(s):
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def _sessionized_paths(conn, start_day, end_day, include_demo, row_cap):
+    """[[event_type, …], …] — one ordered list per reconstructed session."""
+    excl, ex_params = device_exclusion(
+        alias="ue", include_demo=include_demo,
+        tester_device_ids=_tester_device_ids(), start_day=start_day, end_day=end_day)
+    sql = f"""
+        SELECT ue.user_id AS uid, ue.event_type AS et, ue.occurred_at AS at
+          FROM user_events ue
+         WHERE substr(ue.occurred_at,1,10) >= :start_day
+           AND substr(ue.occurred_at,1,10) <= :end_day
+           AND ue.event_type NOT IN :non_intent
+           AND {excl}
+         ORDER BY ue.user_id, ue.occurred_at
+         LIMIT :row_cap"""
+    stmt = text(sql).bindparams(bindparam("non_intent", expanding=True))
+    p = {"start_day": start_day, "end_day": end_day, "row_cap": row_cap,
+         "non_intent": sorted(NON_INTENT_EVENTS)}
+    p.update(ex_params)
+    rows = conn.execute(stmt, p).mappings().all()
+    sessions, cur, last_uid, last_ts = [], [], None, None
+    for r in rows:
+        ts = _iso_to_epoch(r["at"])
+        new_session = (r["uid"] != last_uid or last_ts is None or ts is None
+                       or (ts - last_ts) > SESSION_GAP_S)
+        if new_session and cur:
+            sessions.append(cur)
+            cur = []
+        cur.append(r["et"])
+        last_uid, last_ts = r["uid"], ts
+    if cur:
+        sessions.append(cur)
+    return sessions
+
+
+def report_journeys(conn, start_day, end_day, include_demo, row_cap,
+                    anchor=None, **_):
+    """Top paths INTO and OUT OF an anchor event. `anchor` defaults to the
+    most frequent event in the window so the view is never empty-by-default."""
+    caveats = []
+    sessions = _sessionized_paths(conn, start_day, end_day, include_demo, row_cap)
+    freq = defaultdict(int)
+    for s in sessions:
+        for e in s:
+            freq[e] += 1
+    if not freq:
+        caveats.append(_dark_caveat("report:journeys",
+                                    "no intent events in window — nothing to path"))
+        return {"anchor": None, "candidates": [], "before": [], "after": [],
+                "sequences": [], "sessions": 0}, caveats, None
+    if anchor not in freq:
+        anchor = max(freq, key=freq.get)
+
+    before, after, seqs = defaultdict(int), defaultdict(int), defaultdict(int)
+    anchor_hits = 0
+    for s in sessions:
+        for i, e in enumerate(s):
+            if e != anchor:
+                continue
+            anchor_hits += 1
+            before[s[i - 1] if i > 0 else "(session start)"] += 1
+            after[s[i + 1] if i + 1 < len(s) else "(session end)"] += 1
+        # whole-session shape (deduped consecutive repeats keeps it readable)
+        shape = [s[0]]
+        for e in s[1:]:
+            if e != shape[-1]:
+                shape.append(e)
+        if anchor in shape:
+            seqs[" → ".join(shape[:6])] += 1
+
+    def top(d, total):
+        out = [{"step": k, "count": v,
+                "share": (v / total) if total else None}
+               for k, v in sorted(d.items(), key=lambda kv: -kv[1])[:8]]
+        return out
+
+    return ({"anchor": anchor,
+             "anchor_hits": anchor_hits,
+             "sessions": len(sessions),
+             "candidates": [k for k, _ in sorted(freq.items(), key=lambda kv: -kv[1])[:14]],
+             "before": top(before, anchor_hits),
+             "after": top(after, anchor_hits),
+             "sequences": [{"path": k, "count": v} for k, v in
+                           sorted(seqs.items(), key=lambda kv: -kv[1])[:8]]},
+            caveats, None)
+
+
+# ---------------------------------------------------------------------------
+# Retention — the classic cohort triangle (Fullstory "Retention").
+# Weekly signup cohorts × weeks-since-signup, % with ≥1 intent event.
+# ---------------------------------------------------------------------------
+
+RETENTION_WEEKS = 8
+
+
+def report_retention(conn, start_day, end_day, include_demo, row_cap, **_):
+    caveats = []
+    # Cohort = the ISO week of a user's FIRST signup event in-window.
+    signup_rows = _resolved_intent_days(conn, start_day, end_day,
+                                        "ue.event_type IN :ev", {"ev": {"signup"}},
+                                        include_demo, row_cap)
+    first_day = {}
+    for r in signup_rows:
+        u = r["resolved_user_id"]
+        if u not in first_day or r["day"] < first_day[u]:
+            first_day[u] = r["day"]
+    if not first_day:
+        caveats.append(_dark_caveat("report:retention",
+                                    "no signup events in window — no cohorts to track"))
+        return [], caveats, {"cohorts": 0, "weeks": RETENTION_WEEKS}
+
+    # Activity = any intent event, by week.
+    act_rows = _resolved_intent_days(conn, start_day, end_day,
+                                     "ue.event_type NOT IN :non_intent",
+                                     {"non_intent": NON_INTENT_EVENTS},
+                                     include_demo, row_cap)
+    active_weeks = defaultdict(set)
+    for r in act_rows:
+        active_weeks[r["resolved_user_id"]].add(week_key(r["day"]))
+
+    cohorts = defaultdict(set)
+    for u, d in first_day.items():
+        cohorts[week_key(d)].add(u)
+
+    rows = []
+    for cw in sorted(cohorts):
+        users = cohorts[cw]
+        cw_date = date.fromisoformat(cw)
+        cells = []
+        for n in range(RETENTION_WEEKS + 1):
+            target = (cw_date + timedelta(weeks=n)).isoformat()
+            # Only compute weeks that fall inside the window.
+            if target > end_day:
+                cells.append(None)
+                continue
+            retained = sum(1 for u in users if target in active_weeks.get(u, set()))
+            cells.append({"week_n": n, "retained": retained,
+                          "rate": (retained / len(users)) if users else None,
+                          "small": len(users) < N_MIN})
+        rows.append({"cohort": cw, "size": len(users), "cells": cells})
+    caveats.append(_dark_caveat("metric:retention.small_cohorts",
+                                f"cohorts under {N_MIN} users show counts; rates are "
+                                "directional only at beta scale"))
+    return rows, caveats, {"cohorts": len(rows), "weeks": RETENTION_WEEKS}
+
+
+# ---------------------------------------------------------------------------
+# Segments — saved cohort definitions (Fullstory "Segments").
+# A segment is a named filter over users; evaluating it returns the matching
+# user set + a breakdown, and its id can be passed as `segment=saved:<id>`
+# to scope other reports.
+# ---------------------------------------------------------------------------
+
+# Filter grammar (kept deliberately small and safe — every operand maps to a
+# code-controlled SQL fragment; NO user string ever reaches SQL unparameterized):
+#   {"did": "<event_type>"}            user emitted this event in-window
+#   {"did_not": "<event_type>"}        user did NOT emit it in-window
+#   {"platform": "ios|web|extension"}  any event carried this platform  [client-dark today]
+#   {"min_events": 5}                  at least N intent events
+# Product-table ops — these work TODAY regardless of client instrumentation,
+# because they read member_rankings / leagues / trade_decisions rather than
+# the event log (which is why they're the useful ones right now):
+#   {"has_ranks": true}                user has a saved board (member_rankings)
+#   {"min_players_ranked": 100}        board depth
+#   {"scoring_format": "1qb_ppr"}      ranked in this format
+#   {"min_leagues": 2}                 multi-league users
+#   {"traded": true}                   has any trade decision (like/pass)
+#   {"liked_trades_min": 1}            liked at least N suggested trades
+SEGMENT_OPS = ("did", "did_not", "platform", "min_events",
+               "has_ranks", "min_players_ranked", "scoring_format",
+               "min_leagues", "traded", "liked_trades_min")
+
+
+def evaluate_segment(conn, definition, start_day, end_day, include_demo, row_cap):
+    """Return the set of user_ids matching a segment definition."""
+    # Universe = event-active users UNION real user rows. The union matters:
+    # product-table ops (has_ranks, traded, …) must be able to match users who
+    # have a board or a trade history but no captured events yet — which is
+    # every user until client instrumentation is on.
+    base = {r["resolved_user_id"] for r in _resolved_intent_days(
+        conn, start_day, end_day, "ue.event_type NOT IN :non_intent",
+        {"non_intent": NON_INTENT_EVENTS}, include_demo, row_cap)}
+    try:
+        known = set(conn.execute(text(
+            "SELECT sleeper_user_id FROM users")).scalars().all())
+        if not include_demo:
+            known = {u for u in known if u and not u.startswith("demo_")
+                     and not u.startswith("test_user_fp_")}
+        base |= known
+    except Exception:
+        pass
+    users = set(base)
+    counts = defaultdict(int)
+    for r in _resolved_intent_days(conn, start_day, end_day,
+                                   "ue.event_type NOT IN :non_intent",
+                                   {"non_intent": NON_INTENT_EVENTS},
+                                   include_demo, row_cap):
+        counts[r["resolved_user_id"]] += 1
+
+    for key, val in (definition or {}).items():
+        if key not in SEGMENT_OPS:
+            raise BadParam(f"unknown segment op: {key}")
+        if key in ("did", "did_not"):
+            if val not in (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS):
+                raise BadParam(f"unknown event_type in segment: {val}")
+            hit = {r["resolved_user_id"] for r in _resolved_intent_days(
+                conn, start_day, end_day, "ue.event_type IN :ev", {"ev": {val}},
+                include_demo, row_cap)}
+            users = (users & hit) if key == "did" else (users - hit)
+        elif key == "platform":
+            if val not in ("ios", "web", "extension"):
+                raise BadParam(f"unknown platform: {val}")
+            hit = {r["resolved_user_id"] for r in _resolved_intent_days(
+                conn, start_day, end_day, "ue.platform = :plat", {"plat": val},
+                include_demo, row_cap)}
+            users &= hit
+        elif key == "min_events":
+            try:
+                n = int(val)
+            except Exception:
+                raise BadParam("min_events must be an integer")
+            users = {u for u in users if counts.get(u, 0) >= n}
+        else:
+            users &= _product_op(conn, key, val)
+    return users, base
+
+
+def _product_op(conn, key, val):
+    """Product-table segment ops (work without client instrumentation). Every
+    branch uses a fixed SQL string + bound params — `val` never reaches SQL as
+    text except as a bind."""
+    if key == "has_ranks":
+        rows = conn.execute(text(
+            "SELECT DISTINCT user_id FROM member_rankings")).scalars().all()
+        got = set(rows)
+        return got if val else (set() if val is None else got)
+    if key == "min_players_ranked":
+        try:
+            n = int(val)
+        except Exception:
+            raise BadParam("min_players_ranked must be an integer")
+        rows = conn.execute(text(
+            "SELECT user_id FROM member_rankings GROUP BY user_id "
+            "HAVING COUNT(*) >= :n"), {"n": n}).scalars().all()
+        return set(rows)
+    if key == "scoring_format":
+        if val not in ("1qb_ppr", "sf_tep"):
+            raise BadParam(f"unknown scoring_format: {val}")
+        rows = conn.execute(text(
+            "SELECT DISTINCT user_id FROM member_rankings "
+            "WHERE scoring_format = :f"), {"f": val}).scalars().all()
+        return set(rows)
+    if key == "min_leagues":
+        try:
+            n = int(val)
+        except Exception:
+            raise BadParam("min_leagues must be an integer")
+        rows = conn.execute(text(
+            "SELECT user_id FROM league_members GROUP BY user_id "
+            "HAVING COUNT(DISTINCT league_id) >= :n"), {"n": n}).scalars().all()
+        return set(rows)
+    if key == "traded":
+        rows = conn.execute(text(
+            "SELECT DISTINCT user_id FROM trade_decisions")).scalars().all()
+        return set(rows)
+    if key == "liked_trades_min":
+        try:
+            n = int(val)
+        except Exception:
+            raise BadParam("liked_trades_min must be an integer")
+        rows = conn.execute(text(
+            "SELECT user_id FROM trade_decisions WHERE decision = 'like' "
+            "GROUP BY user_id HAVING COUNT(*) >= :n"), {"n": n}).scalars().all()
+        return set(rows)
+    raise BadParam(f"unknown segment op: {key}")
+
+
+def report_segments(conn, start_day, end_day, include_demo, row_cap, **_):
+    """List saved segments with their live size in the current window."""
+    caveats = []
+    try:
+        saved = conn.execute(text(
+            "SELECT id, name, definition_json, created_at FROM analytics_segments "
+            "ORDER BY created_at DESC LIMIT :cap"), {"cap": row_cap}).mappings().all()
+    except Exception:
+        saved = []
+    rows = []
+    for s in saved:
+        try:
+            definition = json.loads(s["definition_json"] or "{}")
+            users, base = evaluate_segment(conn, definition, start_day, end_day,
+                                           include_demo, row_cap)
+            rows.append({"id": s["id"], "name": s["name"], "definition": definition,
+                         "users": len(users),
+                         "share": (len(users) / len(base)) if base else None,
+                         "created_at": s["created_at"], "error": None})
+        except BadParam as e:
+            rows.append({"id": s["id"], "name": s["name"],
+                         "definition": None, "users": None, "share": None,
+                         "created_at": s["created_at"], "error": str(e)})
+    if not rows:
+        caveats.append(_dark_caveat("report:segments",
+                                    "no saved segments yet — POST /api/admin/segments "
+                                    "with {name, definition} to create one"))
+    return rows, caveats, {"saved": len(rows), "ops": list(SEGMENT_OPS)}
+
+
+# ---------------------------------------------------------------------------
+# Rank quality — "what is letting users rank actually worth?"
+#
+# Compares each user's own player Elos (member_rankings) against the consensus
+# Elo for the same player+format (player_value_history, latest snapshot). Three
+# questions, one query set:
+#   1. HOW MUCH do users diverge from consensus? (mean |Δ|, correlation, spread)
+#      → the size of the personalization signal the trade engine is acting on.
+#   2. WHICH ranking surface did they use? (method mix from ranking events)
+#   3. Is the divergence HONEST or SELF-SERVING? — own_roster_bias compares a
+#      user's Δ on players they OWN vs players they don't. A user who marks up
+#      their own roster and marks down everyone else's is manufacturing
+#      favorable trades; that's the gaming signature, and it is separable from
+#      "has genuinely different opinions" (which is symmetric across ownership).
+#
+# Everything here reads product tables, NOT user_events — so it works today,
+# independent of client instrumentation.
+# ---------------------------------------------------------------------------
+
+def _spearman(pairs):
+    """Rank correlation without scipy. pairs = [(a, b), …]."""
+    n = len(pairs)
+    if n < 3:
+        return None
+
+    def ranks(vals):
+        order = sorted(range(len(vals)), key=lambda i: vals[i])
+        r = [0.0] * len(vals)
+        i = 0
+        while i < len(order):
+            j = i
+            while j + 1 < len(order) and vals[order[j + 1]] == vals[order[i]]:
+                j += 1
+            avg = (i + j) / 2.0 + 1.0
+            for k in range(i, j + 1):
+                r[order[k]] = avg
+            i = j + 1
+        return r
+
+    ra, rb = ranks([p[0] for p in pairs]), ranks([p[1] for p in pairs])
+    ma, mb = sum(ra) / n, sum(rb) / n
+    num = sum((ra[i] - ma) * (rb[i] - mb) for i in range(n))
+    da = math.sqrt(sum((x - ma) ** 2 for x in ra))
+    dbv = math.sqrt(sum((x - mb) ** 2 for x in rb))
+    return (num / (da * dbv)) if da and dbv else None
+
+
+def _consensus_map(conn):
+    """{(player_id, scoring_format): consensus_elo} from the latest snapshot."""
+    rows = conn.execute(text(
+        "SELECT player_id, scoring_format, consensus_elo FROM player_value_history "
+        "WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM player_value_history) "
+        "AND consensus_elo IS NOT NULL")).fetchall()
+    return {(r[0], r[1] or "1qb_ppr"): r[2] for r in rows}
+
+
+def _owned_players(conn):
+    """{(league_id, user_id): {player_id, …}} from league_members.roster_data."""
+    owned = {}
+    rows = conn.execute(text(
+        "SELECT league_id, user_id, roster_data FROM league_members "
+        "WHERE roster_data IS NOT NULL")).fetchall()
+    for lid, uid, raw in rows:
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        ids = data if isinstance(data, list) else (data.get("players") or [])
+        owned[(lid, uid)] = {str(p) for p in ids if p}
+    return owned
+
+
+def report_rankquality(conn, start_day, end_day, include_demo, row_cap, **_):
+    caveats = []
+    consensus = _consensus_map(conn)
+    if not consensus:
+        caveats.append(_dark_caveat("report:rankquality",
+                                    "no consensus snapshot in player_value_history — "
+                                    "run the value-snapshot cron before comparing"))
+        return [], caveats, None
+    owned = _owned_players(conn)
+
+    rank_rows = conn.execute(text(
+        "SELECT user_id, league_id, player_id, elo, scoring_format "
+        "FROM member_rankings LIMIT :cap"), {"cap": row_cap}).mappings().all()
+    by_user = defaultdict(list)
+    for r in rank_rows:
+        by_user[r["user_id"]].append(r)
+
+    # Ranking-surface mix (which feature produced the board) from live events.
+    method_rows = conn.execute(text(
+        "SELECT user_id, event_type, COUNT(*) n FROM user_events "
+        "WHERE event_type IN ('trio_swipe','tier_save','anchor_answered',"
+        "'quickset_completed','quickrank_completed','ranking_reorder') "
+        "GROUP BY user_id, event_type")).fetchall()
+    methods = defaultdict(dict)
+    for uid, et, n in method_rows:
+        methods[uid][et] = n
+
+    rows = []
+    for uid, urows in by_user.items():
+        if not include_demo and (uid.startswith("demo_") or uid.startswith("device:")):
+            continue
+        pairs, deltas, own_d, other_d = [], [], [], []
+        for r in urows:
+            key = (str(r["player_id"]), r["scoring_format"] or "1qb_ppr")
+            cons = consensus.get(key)
+            if cons is None or r["elo"] is None:
+                continue
+            d = r["elo"] - cons
+            pairs.append((r["elo"], cons))
+            deltas.append(d)
+            roster = owned.get((r["league_id"], uid))
+            if roster is not None:
+                (own_d if str(r["player_id"]) in roster else other_d).append(d)
+        if not deltas:
+            continue
+        n = len(deltas)
+        mean_abs = sum(abs(d) for d in deltas) / n
+        # The gaming signature: own-roster markup MINUS others' markup. A user
+        # with genuinely different opinions diverges symmetrically (≈0); a user
+        # manufacturing favorable trades marks their own players UP and
+        # everyone else's DOWN, so the gap is large and positive.
+        bias = None
+        if len(own_d) >= 5 and len(other_d) >= 5:
+            bias = (sum(own_d) / len(own_d)) - (sum(other_d) / len(other_d))
+        rows.append({
+            "user_id": uid,
+            "players_ranked": n,
+            "mean_abs_delta": round(mean_abs, 1),
+            "spearman_vs_consensus": (round(_spearman(pairs), 3)
+                                      if _spearman(pairs) is not None else None),
+            "own_roster_bias": (round(bias, 1) if bias is not None else None),
+            "own_n": len(own_d), "other_n": len(other_d),
+            "methods": methods.get(uid) or {},
+            "integrity_flag": _integrity_flag(mean_abs, _spearman(pairs), bias, n),
+        })
+    rows.sort(key=lambda r: -(r["own_roster_bias"] or 0))
+    caveats.append(_dark_caveat("metric:own_roster_bias",
+                                "needs ≥5 owned and ≥5 non-owned ranked players per "
+                                "user; renders — otherwise. Elo units, not %"))
+    summary = {
+        "users_scored": len(rows),
+        "consensus_players": len(consensus),
+        "median_abs_delta": percentile([r["mean_abs_delta"] for r in rows], 0.5),
+        "note": ("mean_abs_delta = average |user Elo − consensus Elo| across the "
+                 "user's ranked players; own_roster_bias = own-player markup minus "
+                 "other-player markup (Elo). High bias + low correlation = review."),
+    }
+    return rows, caveats, summary
+
+
+def _integrity_flag(mean_abs, spearman, bias, n):
+    """Cheap triage label for consensus-eligibility review. Deliberately
+    conservative: 'divergent' is NOT an accusation — only the combination of a
+    large own-roster markup with weak consensus correlation is suspicious."""
+    if n < 25:
+        return "insufficient"
+    if bias is not None and bias >= 100 and (spearman is None or spearman < 0.5):
+        return "review"          # marks own roster up AND ordering unlike market
+    if bias is not None and bias >= 150:
+        return "review"          # extreme self-markup regardless of correlation
+    if spearman is not None and spearman < 0.2:
+        return "divergent"       # very different ordering, but not self-serving
+    return "ok"
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
 _BUILDERS = {
+    "overview": report_overview,
+    "journeys": report_journeys,
+    "retention": report_retention,
+    "segments": report_segments,
+    "rankquality": report_rankquality,
     "waterfall": report_waterfall,
     "time": report_time,
     "bottlenecks": report_bottlenecks,
@@ -717,7 +1376,7 @@ def _parse_window(start, end):
 
 
 def run_report(report, *, start=None, end=None, include_demo=False,
-               fmt="json", segment=None):
+               fmt="json", segment=None, anchor=None):
     """Compute a report on the read-only engine. Returns (envelope_dict, None)
     for json, or (csv_str, 'text/csv') for csv. Raises BadParam on bad input."""
     if report not in VALID_REPORTS:
@@ -727,8 +1386,10 @@ def run_report(report, *, start=None, end=None, include_demo=False,
     builder = _BUILDERS[report]
     with db.ro_engine.connect() as conn:
         rows, caveats, summary = builder(
-            conn, start_day, end_day, include_demo, row_cap, segment=segment)
-    params_echo = {"segment": segment, "include_demo": include_demo, "format": fmt}
+            conn, start_day, end_day, include_demo, row_cap,
+            segment=segment, anchor=anchor)
+    params_echo = {"segment": segment, "include_demo": include_demo,
+                   "format": fmt, "anchor": anchor}
     env = _envelope(report, start_day, end_day, rows, caveats, params_echo)
     if summary is not None:
         env["summary"] = summary

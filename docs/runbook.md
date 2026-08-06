@@ -317,6 +317,29 @@ ADR-007 / docs/plans/analytics-platform/lld.md. Operational facts:
 - **wrapped_events cutover rollback = revert the deploy.** The cutover is the one non-flag-gated P0 change: the five wrapped writers now write `user_events`, and the boundary instant is `model_config` key `analytics.wrapped_cutover_at` (epoch seconds, seeded once at first boot). Rolling back the deploy restores the old writers and the old narrative reader; the key is INSERT-or-ignore so it survives the rollback and stays correct on roll-forward (events written to `user_events` during the rollback window are invisible to the legacy reader — an accepted, bounded gap). **Never edit the key by hand** — moving it double-counts or hides league-activity rows.
 - **Pause vs engine-flag kill:** to stop client event ingestion, flip the `analytics.client_events` feature flag off (route 404s under the v0 contract; from P1 it answers `disposition:"disabled"` and clients stop flushing). That is the pause lever. Do NOT "kill" analytics by touching the engine wiring or dropping indexes — the ingest/ro engines are import-time constructs shared with boot checks, and the unique `event_id` index is the retry-idempotency keystone (dropping it turns every client retry into duplicate rows).
 
+## Reading REAL analytics (prod, not dev) — 2026-08-05
+
+`data/trade_finder.db` is the **local dev** DB and contains almost nothing but
+test-suite artifacts (`caller_uid`, `user_anchor_test`, `stm_user` are pytest
+fixtures). Any analytics run against it is measuring the test suite. Real usage
+lives in Render Postgres.
+
+```bash
+python3 -m backend.tools.prod_analytics --diagnose          # eventing health
+python3 -m backend.tools.prod_analytics --report overview --days 28
+python3 -m backend.tools.prod_analytics --list
+```
+
+Read-only is enforced **server-side** (`default_transaction_read_only=on` +
+`statement_timeout`), so the connection cannot write even if the code tries.
+Credentials come from `DATABASE_URL_PROD` in `secrets.local.env` — never pass
+them on the command line (shell history). Or just open
+`https://fantasy-trade-finder.onrender.com/admin/analytics.html`.
+
+**Latency caveat (2026-08-05):** `api_request_failed.ms` is **omitted** when a
+request spanned a foreground exit (`bg: true`). Filter on "`ms` present";
+averaging raw `ms` includes device-sleep time and is wrong.
+
 ## Analytics platform P1 — ingestion pipeline + kill-switch latency (2026-07-18)
 
 The `/api/events` rewrite (`backend/analytics_ingest.py`) + mobile SDK rewrite. Operational facts:

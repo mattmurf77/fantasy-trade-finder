@@ -161,7 +161,9 @@ async function emitAnalyticsEvent(eventType, props) {
     if (sess && sess.token) headers['X-Session-Token'] = sess.token;
     await fetch(`${API_BASE}/api/events`, {
       method: 'POST', headers,
-      body: JSON.stringify({ events: [{
+      // platform in the body — the extension sends no X-Device header, so the
+      // backend can't derive it and rows would land with platform NULL.
+      body: JSON.stringify({ platform: 'extension', events: [{
         event_id: _uuid(), event_type: eventType, client_ts: new Date().toISOString(),
         session_id: _extSession, seq: _extSeq, props: props || null }] }),
     });

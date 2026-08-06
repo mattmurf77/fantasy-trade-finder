@@ -150,6 +150,53 @@ def test_batch_insert_with_session(harness):
     assert props["tab"] == "trades" and props["seq"] == 2
 
 
+def test_api_request_failed_keeps_bg_and_allows_missing_ms(harness):
+    # The client omits `ms` when a request spanned a foreground exit (the
+    # wall-clock number would be meaningless) and sends bg=true instead.
+    # `bg` must survive the prop allowlist or the fix is unobservable.
+    client, engine = harness
+    r = _post(client, [_envelope(event_type="api_request_failed", props={
+        "route": "/api/sleeper/rosters/:id", "method": "GET",
+        "status": 0, "timeout": True, "bg": True,   # note: no "ms"
+    })], token=TOKEN)
+    assert r.get_json()["accepted"] == 1
+    props = json.loads(_rows(engine)[0]._mapping["props"])
+    assert props["bg"] is True          # survived the allowlist
+    assert "ms" not in props            # untrustworthy sample, correctly absent
+    assert props["route"] == "/api/sleeper/rosters/:id"
+
+
+def test_platform_from_body_when_no_device_header(harness):
+    # Web + extension send no X-Device header, so they declare `platform` in
+    # the body. Regression guard for the 2026-08-05 prod bug: every client
+    # event had platform NULL because no SDK sent either signal.
+    client, engine = harness
+    r = client.post("/api/events",
+                    headers={"Content-Type": "application/json",
+                             "X-Device-Id": DEVICE, "X-Source": "web"},
+                    data=json.dumps({"platform": "web",
+                                     "events": [_envelope(event_type="app_opened",
+                                                          props={"launch_type": "web"})]}))
+    assert r.status_code == 200 and r.get_json()["accepted"] == 1
+    row = _rows(engine)[0]._mapping
+    assert row["platform"] == "web"          # body value honored
+    assert row["source"] == "web"
+
+
+def test_platform_derived_from_device_header(harness):
+    # Mobile sends X-Device (+ X-OS-Version / X-App-Version); the backend
+    # derives platform and stores the version snapshot. Guards the fix that
+    # made events.ts forward getClientHeaders().
+    client, engine = harness
+    r = _post(client, [_envelope(event_type="app_opened", props={"launch_type": "cold"})],
+              token=TOKEN, headers={"X-Device": "iphone", "X-OS-Version": "18.2",
+                                    "X-App-Version": "1.9.0"})
+    assert r.get_json()["accepted"] == 1
+    row = _rows(engine)[0]._mapping
+    assert row["platform"] == "ios"
+    assert row["os_version"] == "18.2" and row["app_version"] == "1.9.0"
+
+
 # ── (c) identity resolution ────────────────────────────────────────────────
 
 def test_no_session_uses_device_identity(harness):

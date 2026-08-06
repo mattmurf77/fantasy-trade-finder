@@ -976,3 +976,6 @@ Append-only status-change log: `id` PK, `experiment_key`, `version`, `from_statu
 
 ### `experiment_metric_snapshots`
 Daily rollup per `(experiment_key, version, variant, metric_key, window)`: `n` (exposed units), `numerator`/`denominator` (proportion), `mean`/`m2` (continuous, Welford), `computed_at`. On-request at beta scale; cron-ready for Postgres.
+
+### `analytics_segments`
+Saved analytics cohorts (Fullstory-style Segments). `id` PK, `name` (unique), `definition_json`, `created_at`. The definition is a **closed grammar** (`did` / `did_not` / `platform` / `min_events`) evaluated live per query window by `analytics_queries.evaluate_segment` — every operand maps to a code-controlled SQL fragment, so a segment can never inject SQL. Unknown ops/events/platforms raise `BadParam` → 400.

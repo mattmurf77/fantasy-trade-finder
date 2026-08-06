@@ -133,7 +133,9 @@ Also built same date (server-fired, §S3 rollout order "server-fired first"): `r
 
 | Event | Props | Source | Purpose |
 |---|---|---|---|
-| `api_request_failed` | `route` (normalized: query stripped, digit runs → `:id`), `method`, `status` (0 = network/timeout), `ms`, `timeout` | `client.ts` wrapper (every failed `apiRequest`; excludes `/api/events` recursion + caller aborts) | Universal silent-API-failure detection per screen/route |
+| `api_request_failed` | `route` (normalized: query stripped, digit runs → `:id`), `method`, `status` (0 = network/timeout), `ms` (**omitted when untrustworthy** — see `bg`), `timeout`, `bg` *(added 2026-08-05)* | `client.ts` wrapper (every failed `apiRequest`; excludes `/api/events` recursion + caller aborts) | Universal silent-API-failure detection per screen/route |
+
+> **`bg` / conditional `ms` (2026-08-05).** Production showed several *different* routes reporting the *same* duration (992310 ms, 3906711 ms) at the same instant — the device slept mid-request and wall-clock kept running, so those were never real latency. The client now measures with a monotonic clock, sets `bg: true` when a request spanned a foreground exit, and **omits `ms` entirely** on untrustworthy samples (background span, or a value outside [0, 60s]). **Latency analysis must filter on "`ms` present"**; `bg` explains the gaps. Averaging raw `ms` across all rows is wrong.
 | `screen_left` | `screen`, `dwell_ms`, `reason` (`nav` \| `background`) | `RootNav` (nav-away + app-background) | Real dwell time incl. the truncated-last-screen case |
 
 Envelope addition: `user_events.country` — ISO-3166 alpha-2 from CDN geo header only (`CF-IPCountry` / `X-Country-Code`), never raw IP (FR-47 posture). NULL on bare Render; populates automatically if a CDN fronts the service. Device/app characteristic joins (`device_type`, `os_version`, `app_version`) were already stamped per row at ingest — no change needed.

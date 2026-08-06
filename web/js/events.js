@@ -117,9 +117,12 @@
     try { var tok = localStorage.getItem(TOKEN_KEY); if (tok) headers["X-Session-Token"] = tok; } catch (e) {}
     var ctrl = ("AbortController" in window) ? new AbortController() : null;
     var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, SEND_TIMEOUT_MS) : null;
+    // `platform` is declared in the body: the web app sends no X-Device header,
+    // so the backend can't derive it. Without this every web event lands with
+    // platform NULL and per-platform segmentation is blind.
     fetch("/api/events", { method: "POST", headers: headers,
-        body: JSON.stringify({ events: batch }), signal: ctrl ? ctrl.signal : undefined,
-        keepalive: true })
+        body: JSON.stringify({ events: batch, platform: "web" }),
+        signal: ctrl ? ctrl.signal : undefined, keepalive: true })
       .then(function (res) {
         if (timer) clearTimeout(timer);
         if (res.status >= 500) { applyBackoff(false); inFlight = false; return; }
@@ -156,7 +159,8 @@
       if (!flagOn() || !queue.length || !navigator.sendBeacon) return;
       var batch = queue.slice(0, BATCH_MAX);
       var ok = navigator.sendBeacon("/api/events",
-        new Blob([JSON.stringify({ events: batch, device_id: deviceId() })], { type: "application/json" }));
+        new Blob([JSON.stringify({ events: batch, device_id: deviceId(), platform: "web" })],
+                 { type: "application/json" }));
       if (ok) { queue.splice(0, batch.length); persist(); }
     } catch (e) {}
   }

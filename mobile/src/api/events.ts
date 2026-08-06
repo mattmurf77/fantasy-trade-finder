@@ -31,7 +31,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
-import { getBaseUrl, getDeviceId, getSessionToken } from './client';
+import { getBaseUrl, getClientHeaders, getDeviceId, getSessionToken } from './client';
 import { useFeatureFlags } from '../state/useFeatureFlags';
 
 // Re-exported for API stability — the canonical mint now lives in client.ts
@@ -284,6 +284,11 @@ async function sendBatch(batch: QueuedEvent[]): Promise<SendResult> {
   try {
     const [deviceId, token] = await Promise.all([getDeviceId(), getSessionToken()]);
     const headers: Record<string, string> = {
+      // X-Device / X-OS-Version / X-App-Version / X-User-TZ — the backend
+      // derives platform + app_version + os_version from these. Omitting them
+      // (the pre-2026-08-05 bug) landed every client event with those columns
+      // NULL, which blinded per-platform and per-release reporting.
+      ...getClientHeaders(),
       'Content-Type': 'application/json',
       'X-Device-Id': deviceId,
     };

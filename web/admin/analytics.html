@@ -1,338 +1,718 @@
 <!DOCTYPE html>
-<!-- Analytics dashboard (analytics-platform P2). Thin renderer: it fetches the
-     CRON_SECRET-gated JSON from /api/admin/analytics/<report> and renders it.
-     ALL SQL + computation lives server-side in backend/analytics_queries.py;
-     this page computes nothing. Data values are written via textContent only
-     (never innerHTML) so a hostile event string can't XSS the one browser that
-     holds the admin secret. Chalkline design system (ADR-005). -->
+<!-- FTF Analytics — operator dashboard (analytics-platform P2, redesigned to a
+     Fullstory-class bar minus session replay).
+
+     Thin renderer by contract: it fetches CRON_SECRET-gated JSON from
+     /api/admin/analytics/<report> and draws it. ALL SQL + computation lives in
+     backend/analytics_queries.py. Data values are written via textContent only
+     (never innerHTML) so a hostile event string can't XSS the one browser
+     holding the admin secret; SVG charts are built with createElementNS.
+     Chalkline design system (ADR-005). -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FTF Analytics</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
   <style>
-    :root {
+    :root{
       --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
       --line:#262C35; --line-strong:#3D4654;
       --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
       --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
       --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
-      --mono:'IBM Plex Mono','SFMono-Regular',Menlo,monospace;
+      --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+      --sans:'Archivo','Barlow Condensed',system-ui,-apple-system,sans-serif;
     }
     *{box-sizing:border-box;margin:0;padding:0}
-    body{background:var(--ink-0);color:var(--chalk);
-      font-family:'Archivo','Barlow Condensed',sans-serif;
-      font-size:13px;line-height:1.5;padding:0 0 80px}
+    body{background:var(--ink-0);color:var(--chalk);font-family:var(--sans);
+      font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+
+    /* ── chrome ───────────────────────────────────────────────── */
     header{background:var(--ink-1);border-bottom:1px solid var(--line);
-      padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;
-      position:sticky;top:0;z-index:10}
-    h1{font-size:16px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
-    .controls{display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap}
+      padding:12px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+      position:sticky;top:0;z-index:20}
+    .brand{font-size:14px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+    .brand span{color:var(--ice)}
+    .spacer{margin-left:auto}
+    .ctl{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
     input,button,select{font-family:inherit;font-size:12px;background:var(--ink-2);
-      color:var(--chalk);border:1px solid var(--line-strong);border-radius:6px;
-      padding:6px 9px}
+      color:var(--chalk);border:1px solid var(--line-strong);border-radius:6px;padding:6px 10px}
     input[type=date]{color-scheme:dark}
-    button{cursor:pointer}
+    button{cursor:pointer;transition:background .12s,border-color .12s}
+    button:hover{border-color:var(--ice)}
     button.primary{background:var(--ice);color:var(--on-ice);border-color:var(--ice);font-weight:600}
     button.primary:hover{background:var(--ice-press)}
-    .tabs{display:flex;gap:2px;background:var(--ink-1);padding:0 12px;
-      border-bottom:1px solid var(--line);overflow-x:auto;position:sticky;top:51px;z-index:9}
-    .tab{padding:10px 13px;color:var(--chalk-dim);cursor:pointer;white-space:nowrap;
-      border-bottom:2px solid transparent;font-size:12px;letter-spacing:.02em}
+    .range{display:flex;gap:0;border:1px solid var(--line-strong);border-radius:6px;overflow:hidden}
+    .range button{border:0;border-radius:0;padding:6px 11px;background:transparent;color:var(--chalk-dim)}
+    .range button.on{background:var(--ink-3);color:var(--ice);font-weight:600}
+
+    nav{background:var(--ink-1);border-bottom:1px solid var(--line);padding:0 14px;
+      display:flex;gap:2px;overflow-x:auto;position:sticky;top:49px;z-index:19}
+    .tab{padding:11px 14px;color:var(--chalk-dim);cursor:pointer;white-space:nowrap;
+      border-bottom:2px solid transparent;font-size:12.5px;letter-spacing:.01em}
     .tab:hover{color:var(--chalk)}
-    .tab.active{color:var(--ice);border-bottom-color:var(--ice)}
-    main{padding:20px;max-width:1200px;margin:0 auto}
-    .meta{color:var(--chalk-faint);font-size:11px;font-family:var(--mono);margin-bottom:12px}
-    table{border-collapse:collapse;width:100%;font-size:12px;margin-bottom:20px}
-    th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
-    th{color:var(--chalk-dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.03em}
-    td{font-family:var(--mono)}
-    td.num{text-align:left}
-    .dash{color:var(--chalk-faint)}       /* '—' dark cell */
-    .small{color:var(--warn);font-size:11px}  /* n_too_small */
-    .caveats{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
-      padding:12px 14px;margin-bottom:18px;font-size:12px}
-    .caveats h3{font-size:11px;text-transform:uppercase;color:var(--chalk-dim);margin-bottom:6px;letter-spacing:.03em}
-    .cav{color:var(--chalk-dim);margin:3px 0;font-family:var(--mono);font-size:11px}
-    .cav b{color:var(--warn);font-weight:600}
-    .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;margin-bottom:16px}
-    .kpi{display:inline-block;margin-right:28px}
-    .kpi .v{font-size:24px;font-weight:700;font-family:var(--mono)}
-    .kpi .l{font-size:11px;color:var(--chalk-dim);text-transform:uppercase;letter-spacing:.03em}
-    .err{color:var(--neg);border-color:var(--neg)}
-    .gate{max-width:400px;margin:80px auto;text-align:center}
-    .gate input{width:100%;margin:12px 0;text-align:center;font-family:var(--mono)}
+    .tab.on{color:var(--ice);border-bottom-color:var(--ice)}
+    .tab.muted{color:var(--chalk-faint)}
+
+    main{padding:22px;max-width:1240px;margin:0 auto}
+    .meta{color:var(--chalk-faint);font-size:11px;font-family:var(--mono);margin-bottom:16px}
+
+    /* ── cards / grid ─────────────────────────────────────────── */
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:12px;margin-bottom:20px}
+    .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:15px 16px}
+    .card h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
+      color:var(--chalk-dim);font-weight:600;margin-bottom:2px}
+    .card .sub{font-size:10.5px;color:var(--chalk-faint);margin-bottom:10px}
+    .big{font-size:30px;font-weight:700;font-family:var(--mono);line-height:1.1;letter-spacing:-.02em}
+    .big.na{color:var(--chalk-faint);font-size:22px}
+    .delta{font-size:11px;font-family:var(--mono);margin-left:9px;vertical-align:middle}
+    .delta.up{color:var(--pos)} .delta.down{color:var(--neg)} .delta.flat{color:var(--chalk-faint)}
+    .spark{margin-top:9px;display:block}
+    .why{font-size:10.5px;color:var(--warn);margin-top:8px;line-height:1.4}
+
+    section{margin-bottom:26px}
+    section > h2{font-size:12px;text-transform:uppercase;letter-spacing:.07em;
+      color:var(--chalk-dim);font-weight:600;margin-bottom:11px;
+      display:flex;align-items:center;gap:9px}
+    section > h2::after{content:"";flex:1;height:1px;background:var(--line)}
+
+    /* ── funnel ───────────────────────────────────────────────── */
+    .funnel{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:16px 18px}
+    .frow{display:grid;grid-template-columns:150px 1fr 118px;gap:12px;align-items:center;
+      padding:7px 0;border-bottom:1px solid var(--line)}
+    .frow:last-child{border-bottom:0}
+    .fname{font-size:12px}
+    .fname small{display:block;color:var(--chalk-faint);font-family:var(--mono);font-size:10px}
+    .fbar{height:22px;background:var(--ink-3);border-radius:3px;overflow:hidden;position:relative}
+    .fbar i{display:block;height:100%;background:var(--ice);border-radius:3px}
+    .fbar.dark{background:repeating-linear-gradient(135deg,var(--ink-2),var(--ink-2) 5px,var(--ink-3) 5px,var(--ink-3) 10px)}
+    .fnum{font-family:var(--mono);font-size:12px;text-align:right;color:var(--chalk-dim)}
+    .fnum b{color:var(--chalk);font-weight:600}
+    .drop{color:var(--neg);font-size:11px}
+
+    /* ── tables ───────────────────────────────────────────────── */
+    table{border-collapse:collapse;width:100%;font-size:12px;
+      background:var(--ink-1);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+    th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line)}
+    tbody tr:last-child td{border-bottom:0}
+    tbody tr:hover{background:var(--ink-2)}
+    th{color:var(--chalk-dim);font-weight:600;font-size:10.5px;text-transform:uppercase;
+      letter-spacing:.05em;background:var(--ink-2)}
+    td{font-family:var(--mono);font-size:12px}
+    td.txt{font-family:var(--sans)}
+    .bar-cell{display:flex;align-items:center;gap:8px}
+    .bar-cell i{display:block;height:7px;background:var(--ice);border-radius:2px;min-width:2px}
+
+    .dash{color:var(--chalk-faint)}
+    .pill{display:inline-block;font-size:10px;font-family:var(--mono);padding:2px 7px;
+      border-radius:999px;border:1px solid var(--line-strong);color:var(--chalk-dim)}
+    .pill.warn{color:var(--warn);border-color:var(--warn)}
+    .pill.ok{color:var(--pos);border-color:var(--pos)}
+
+    .note{background:var(--ink-1);border:1px solid var(--line);border-left:2px solid var(--warn);
+      border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:12px;color:var(--chalk-dim)}
+    .note b{color:var(--chalk);font-weight:600}
+    .note code{font-family:var(--mono);font-size:11px;color:var(--ice)}
+    .empty{background:var(--ink-1);border:1px dashed var(--line-strong);border-radius:8px;
+      padding:26px;text-align:center;color:var(--chalk-dim)}
+    .empty b{display:block;color:var(--chalk);margin-bottom:5px;font-size:13px}
+
+    /* ── gate ─────────────────────────────────────────────────── */
+    .gate{max-width:360px;margin:16vh auto;text-align:center}
+    .gate .brand{font-size:18px;margin-bottom:6px}
+    .gate p{color:var(--chalk-dim);margin-bottom:16px;font-size:12px}
+    .gate input{width:100%;margin-bottom:10px;text-align:center;font-family:var(--mono)}
+    .gate button{width:100%}
+    .err{color:var(--neg);font-size:12px;margin-top:10px;min-height:16px}
     .hidden{display:none}
-    a.export{color:var(--ice);text-decoration:none;font-size:11px;font-family:var(--mono)}
+    a.exp{color:var(--ice);text-decoration:none;font-size:11px;font-family:var(--mono)}
+    a.exp:hover{text-decoration:underline}
   </style>
 </head>
 <body>
   <div id="gate" class="gate">
-    <h1>FTF Analytics</h1>
-    <p style="color:var(--chalk-dim);margin-top:8px">Operator access — enter the admin secret.</p>
-    <input id="secret" type="password" placeholder="X-Cron-Secret" autocomplete="off">
-    <button class="primary" id="gate-go" style="width:100%">Enter</button>
-    <p id="gate-err" style="color:var(--neg);margin-top:10px;min-height:16px"></p>
+    <div class="brand">FTF <span>Analytics</span></div>
+    <p>Operator access</p>
+    <input id="secret" type="password" placeholder="Admin secret" autocomplete="off">
+    <button class="primary" id="go">Enter</button>
+    <p class="err" id="gate-err"></p>
   </div>
 
   <div id="app" class="hidden">
     <header>
-      <h1>FTF Analytics</h1>
-      <div class="controls">
-        <input id="start" type="date">
-        <input id="end" type="date">
-        <button id="reload" class="primary">Reload</button>
-        <a id="csv" class="export" href="#" target="_blank">↓ CSV</a>
-        <button id="signout">Sign out</button>
+      <div class="brand">FTF <span>Analytics</span></div>
+      <div class="ctl spacer">
+        <div class="range" id="range">
+          <button data-days="7">7d</button>
+          <button data-days="28" class="on">28d</button>
+          <button data-days="90">90d</button>
+        </div>
+        <input id="start" type="date"><input id="end" type="date">
+        <button id="reload" class="primary">Refresh</button>
+        <a id="csv" class="exp" href="#" target="_blank">↓ CSV</a>
+        <button id="out">Sign out</button>
       </div>
     </header>
-    <div class="tabs" id="tabs"></div>
-    <main id="content"></main>
+    <nav id="tabs"></nav>
+    <main id="main"></main>
   </div>
 
-  <script>
-  (function(){
-    "use strict";
-    var TABS = [
-      ["waterfall","Waterfall"],["time","Time / Think"],["bottlenecks","Bottlenecks"],
-      ["churn","Churn"],["releases","Releases"],["adoption","Adoption"],
-      ["engagement","Engagement"],["pfo","PFO"],["onepager","One-Pager"],
-      ["experiments","Experiments"],["health","Health"]
-    ];
-    var SS_KEY = "ftf.adminSecret";
-    var active = "engagement";
-    var $ = function(id){ return document.getElementById(id); };
+<script>
+(function(){
+  "use strict";
+  var SS="ftf.adminSecret", SVG="http://www.w3.org/2000/svg";
+  var TABS=[["overview","Overview"],["waterfall","Funnel"],["journeys","Journeys"],
+            ["retention","Retention"],["segments","Segments"],["engagement","Engagement"],
+            ["adoption","Feature adoption"],["pfo","Core loop"],["bottlenecks","Friction"],
+            ["churn","Churn"],["releases","Releases"],["time","Time on task"],
+            ["onepager","Weekly"],["experiments","Experiments"],["health","Health"]];
+  var journeyAnchor=null;
+  var active="overview";
+  var $=function(i){return document.getElementById(i);};
+  var el=function(t,c,x){var e=document.createElement(t); if(c)e.className=c;
+    if(x!=null)e.textContent=String(x); return e;};
+  var clear=function(n){while(n.firstChild)n.removeChild(n.firstChild);};
+  var svgEl=function(t,a){var e=document.createElementNS(SVG,t);
+    for(var k in a) e.setAttribute(k,a[k]); return e;};
 
-    // ---- element helpers (textContent only; no innerHTML of data) ----
-    function el(tag, cls, txt){ var e=document.createElement(tag);
-      if(cls) e.className=cls; if(txt!=null) e.textContent=String(txt); return e; }
-    function clear(node){ while(node.firstChild) node.removeChild(node.firstChild); }
+  function fmt(v,unit){
+    if(v==null) return "—";
+    if(unit==="rate") return (v*100).toFixed(1)+"%";
+    if(typeof v==="number" && !Number.isInteger(v)) return v.toFixed(2);
+    return String(v);
+  }
+  function pct(v){ return (v>0?"+":"")+(v*100).toFixed(0)+"%"; }
 
-    // Render a metric cell object {value,n,caveat} OR a scalar.
-    function cell(v){
-      var td = el("td","num");
-      if(v && typeof v==="object" && ("value" in v || "caveat" in v || "error" in v)){
-        if(v.error){ td.textContent="ERR: "+v.error; td.classList.add("err"); return td; }
-        if(v.caveat==="dark"){ td.textContent="—"; td.className="num dash"; return td; }
-        if(v.caveat==="n_too_small"){
-          var s=el("span","small","n="+(v.n==null?"?":v.n)+" (<20)"); td.appendChild(s); return td; }
-        var val=v.value;
-        td.textContent = (val==null? "—" : (typeof val==="number" && val<=1 && val>=0 && String(val).indexOf(".")>=0 ? (val*100).toFixed(1)+"%" : val));
-        return td;
-      }
-      td.textContent = (v==null? "—" : v);
-      if(v==null) td.className="num dash";
-      return td;
+  // ── charts (SVG, built node-by-node — no innerHTML) ──────────────
+  function sparkline(series,w,h){
+    w=w||200; h=h||34;
+    var s=svgEl("svg",{width:w,height:h,viewBox:"0 0 "+w+" "+h,class:"spark"});
+    if(!series||!series.length) return s;
+    var vals=series.map(function(p){return p.value;});
+    var max=Math.max.apply(null,vals), min=0;
+    var span=(max-min)||1, n=series.length;
+    var x=function(i){return n<2?w/2:(i/(n-1))*(w-2)+1;};
+    var y=function(v){return h-2-((v-min)/span)*(h-6);};
+    var d="",a="";
+    series.forEach(function(p,i){ d+=(i?"L":"M")+x(i).toFixed(1)+" "+y(p.value).toFixed(1)+" "; });
+    a="M"+x(0).toFixed(1)+" "+(h-1)+" "+d.replace(/^M/,"L")+"L"+x(n-1).toFixed(1)+" "+(h-1)+"Z";
+    var gid="g"+Math.floor(Math.random()*1e6);
+    var defs=svgEl("defs",{}); var lg=svgEl("linearGradient",{id:gid,x1:"0",y1:"0",x2:"0",y2:"1"});
+    lg.appendChild(svgEl("stop",{offset:"0%","stop-color":"#56D9EC","stop-opacity":".28"}));
+    lg.appendChild(svgEl("stop",{offset:"100%","stop-color":"#56D9EC","stop-opacity":"0"}));
+    defs.appendChild(lg); s.appendChild(defs);
+    s.appendChild(svgEl("path",{d:a,fill:"url(#"+gid+")"}));
+    s.appendChild(svgEl("path",{d:d.trim(),fill:"none",stroke:"#56D9EC","stroke-width":"1.6",
+      "stroke-linejoin":"round","stroke-linecap":"round"}));
+    if(max>0){ var li=vals.lastIndexOf(max);
+      s.appendChild(svgEl("circle",{cx:x(n-1),cy:y(vals[n-1]),r:"2.2",fill:"#56D9EC"})); }
+    return s;
+  }
+
+  function kpiCard(k){
+    var c=el("div","card");
+    c.appendChild(el("h3",null,k.label));
+    if(k.sublabel) c.appendChild(el("div","sub",k.sublabel));
+    var row=el("div");
+    var isNA=(k.value==null);
+    var big=el("span",isNA?"big na":"big", fmt(k.value,k.unit));
+    row.appendChild(big);
+    if(k.delta_pct!=null){
+      var cls=k.delta_pct>0.001?"delta up":(k.delta_pct<-0.001?"delta down":"delta flat");
+      row.appendChild(el("span",cls,pct(k.delta_pct)+" vs prior 7d"));
     }
+    c.appendChild(row);
+    if(k.series && k.series.length) c.appendChild(sparkline(k.series));
+    if(k.caveat==="dark") c.appendChild(el("div","why","Needs client events — not captured yet"));
+    else if(k.caveat==="n_too_small") c.appendChild(el("div","why","n="+(k.n==null?"?":k.n)+" — too small to rate"));
+    else if(k.caveat==="no_data") c.appendChild(el("div","why","No events in this window"));
+    return c;
+  }
 
-    function table(cols, rows, cellKeys){
-      var t=el("table"), thead=el("thead"), tr=el("tr");
-      cols.forEach(function(c){ tr.appendChild(el("th",null,c)); });
-      thead.appendChild(tr); t.appendChild(thead);
+  // ── renderers ───────────────────────────────────────────────────
+  function renderOverview(b){
+    var m=$("main"), r=b.rows;
+    m.appendChild(metaLine(b));
+    if(r.coverage && r.coverage.status!=="full"){
+      var note=el("div","note");
+      var t=el("b","Partial capture. ");
+      note.appendChild(t);
+      note.appendChild(document.createTextNode(r.coverage.explain+" "));
+      var code=el("code","analytics.ingest");
+      note.appendChild(document.createTextNode("Flip "));
+      note.appendChild(code);
+      note.appendChild(document.createTextNode(" to start. "+r.coverage.client_events_dark_total+
+        " client event types are waiting; "+r.coverage.events_flowing.length+" server types are flowing."));
+      m.appendChild(note);
+    }
+    var s1=el("section"); s1.appendChild(el("h2",null,"Key metrics"));
+    var g=el("div","grid");
+    (r.kpis||[]).forEach(function(k){ g.appendChild(kpiCard(k)); });
+    s1.appendChild(g); m.appendChild(s1);
+
+    var s2=el("section"); s2.appendChild(el("h2",null,"Friction signals"));
+    var fg=el("div","grid");
+    (r.frustration||[]).forEach(function(f){
+      var c=el("div","card");
+      c.appendChild(el("h3",null,f.label));
+      c.appendChild(el("div", f.count==null?"big na":"big", f.count==null?"—":f.count));
+      if(f.rate!=null) c.appendChild(el("div","sub",(f.rate*100).toFixed(1)+"% of views"));
+      if(f.caveat==="dark") c.appendChild(el("div","why","Needs client events — not captured yet"));
+      fg.appendChild(c);
+    });
+    s2.appendChild(fg); m.appendChild(s2);
+
+    // Top failing routes — a count alone isn't actionable; route × status is.
+    if((r.failing_routes||[]).length){
+      var s2b=el("section"); s2b.appendChild(el("h2",null,"Top failing requests"));
+      var t=el("table"), th=el("thead"), tr=el("tr");
+      ["route","status","count"].forEach(function(h){tr.appendChild(el("th",null,h));});
+      th.appendChild(tr); t.appendChild(th);
       var tb=el("tbody");
-      rows.forEach(function(r){
+      r.failing_routes.forEach(function(f){
         var row=el("tr");
-        cellKeys.forEach(function(k){
-          var v = r[k];
-          if(v && typeof v==="object" && !("value" in v) && !("error" in v)){
-            row.appendChild(el("td",null,JSON.stringify(v)));   // plain object → JSON text
-          } else { row.appendChild(cell(v)); }
-        });
+        row.appendChild(el("td","txt",f.route));
+        var st=el("td");
+        var code=(f.status===0||f.status==null)?"network":String(f.status);
+        st.appendChild(el("span", (f.status>=500||f.status===0)?"pill warn":"pill", code));
+        row.appendChild(st);
+        row.appendChild(el("td",null,f.count));
         tb.appendChild(row);
       });
-      t.appendChild(tb); return t;
+      t.appendChild(tb); s2b.appendChild(t); m.appendChild(s2b);
     }
 
-    function caveatsBlock(caveats){
-      if(!caveats || !caveats.length) return null;
-      var box=el("div","caveats"); box.appendChild(el("h3",null,"Caveats — why some cells read —"));
-      caveats.forEach(function(c){
-        var p=el("p","cav"); p.appendChild(el("b",null,"["+c.code+"] "));
-        p.appendChild(document.createTextNode((c.scope||"")+" — "+(c.detail||"")));
-        box.appendChild(p);
-      });
-      return box;
-    }
-
-    // ---- fetch ----
-    function secret(){ return sessionStorage.getItem(SS_KEY)||""; }
-    function api(report, cb){
-      var qs = "?start="+encodeURIComponent($("start").value)+"&end="+encodeURIComponent($("end").value);
-      fetch("/api/admin/analytics/"+report+qs, { headers:{ "X-Cron-Secret": secret() } })
-        .then(function(res){
-          if(res.status===401||res.status===403){ signOut("Secret rejected — re-enter."); throw new Error("auth"); }
-          return res.json().then(function(j){ return {status:res.status, body:j}; });
-        }).then(function(r){ cb(null, r); })
-        .catch(function(e){ if(e.message!=="auth") cb(e); });
-    }
-
-    // ---- per-report renderers ----
-    function render(report, r){
-      var c=$("content"); clear(c);
-      if(r.status===400){ var e=el("div","card err","Error: "+(r.body&&r.body.error)); c.appendChild(e); return; }
-      var b=r.body;
-      var meta=el("div","meta",
-        "window "+(b.window?b.window.start+" → "+b.window.end:"")+" · UTC ISO-week (Mon) · generated "+ (b.generated_at||""));
-      c.appendChild(meta);
-
-      if(report==="health"){ renderHealth(c,b); return; }
-      if(report==="experiments"){ renderExperiments(c); return; }
-
-      // Summary KPIs where present.
-      if(b.summary){
-        var card=el("div","card");
-        Object.keys(b.summary).forEach(function(k){
-          var v=b.summary[k];
-          if(v && typeof v==="object") return;   // skip nested (streak dist etc.)
-          var kpi=el("div","kpi");
-          kpi.appendChild(el("div","v", v==null?"—":v)); kpi.appendChild(el("div","l",k));
-          card.appendChild(kpi);
-        });
-        if(card.childNodes.length) c.appendChild(card);
-      }
-
-      var cav=caveatsBlock(b.caveats); if(cav) c.appendChild(cav);
-
-      // Table shape per report.
-      var rows=b.rows;
-      if(report==="pfo" || report==="onepager"){
-        c.appendChild(el("pre","card")).textContent = JSON.stringify(rows,null,2);
-        return;
-      }
-      if(!Array.isArray(rows) || !rows.length){ c.appendChild(el("div","card","No rows in window.")); return; }
-      // Logical column order: label-ish keys first, then the rest (Flask sorts
-      // JSON keys alphabetically, so we re-order for readability here).
-      var FIRST=["week","stage","name","vertical","counter","user_id","app_version","action"];
-      var ks=Object.keys(rows[0]);
-      var keys=FIRST.filter(function(k){return ks.indexOf(k)>=0;})
-                    .concat(ks.filter(function(k){return FIRST.indexOf(k)<0;}));
-      c.appendChild(table(keys, rows, keys));
-    }
-
-    // ---- experiments tab: list + monitor cards + design calculator ----
-    function renderExperiments(c){
-      c.appendChild(el("div","meta","experiment engine (P3) · assignment is deterministic + persisted · verdicts withheld until horizon"));
-      // Design calculator.
-      var calc=el("div","card");
-      calc.appendChild(el("h3",null,"Design calculator")).style.cssText="font-size:11px;text-transform:uppercase;color:var(--chalk-dim);margin-bottom:8px;letter-spacing:.03em";
-      var row=el("div"); row.style.cssText="display:flex;gap:8px;flex-wrap:wrap;align-items:center";
-      function inp(id,ph,val){ var i=document.createElement("input"); i.id=id; i.placeholder=ph; i.value=val; i.style.width="130px"; return i; }
-      var bIn=inp("calc-base","baseline rate","0.30"), mIn=inp("calc-mde","MDE (abs)","0.05"),
-          aIn=inp("calc-arms","# arms","2"), eIn=inp("calc-elig","eligible/week","40");
-      var go=el("button","primary","Compute"); go.style.cssText="font-size:12px";
-      [bIn,mIn,aIn,eIn,go].forEach(function(x){ row.appendChild(x); });
-      calc.appendChild(row);
-      var out=el("div"); out.style.cssText="margin-top:10px;font-family:var(--mono);font-size:12px;color:var(--chalk-dim)";
-      calc.appendChild(out);
-      go.onclick=function(){
-        var body={baseline_rate:parseFloat(bIn.value)||0.3, mde:parseFloat(mIn.value)||0.05,
-                  variants:Array(Math.max(2,parseInt(aIn.value)||2)).fill(1), eligible_per_week:parseFloat(eIn.value)||0};
-        fetch("/api/admin/experiments/preview",{method:"POST",headers:{"X-Cron-Secret":secret(),"Content-Type":"application/json"},body:JSON.stringify(body)})
-          .then(function(r){return r.json();}).then(function(d){
-            clear(out);
-            out.appendChild(el("div",null,"n/arm: "+(d.n_per_arm!=null?d.n_per_arm.toLocaleString():"—")+"   ·   predicted weeks: "+(d.predicted_weeks!=null?Math.round(d.predicted_weeks):"—")));
-            var b=el("div",d.underpowered?"small":null,d.banner); b.style.marginTop="6px"; out.appendChild(b);
-          }).catch(function(){ clear(out); out.appendChild(el("div","err","preview failed")); });
-      };
-      c.appendChild(calc);
-      // Experiment list.
-      var listWrap=el("div"); c.appendChild(listWrap);
-      fetch("/api/admin/experiments",{headers:{"X-Cron-Secret":secret()}})
-        .then(function(res){ if(res.status>=400){signOut("Secret rejected.");throw 0;} return res.json(); })
-        .then(function(b){
-          var exps=(b&&b.experiments)||[];
-          if(!exps.length){ listWrap.appendChild(el("div","card","No experiments yet. Create one via the gated API (or the /an-experiment skill).")); return; }
-          exps.forEach(function(e){ renderExperimentCard(listWrap,e); });
-        }).catch(function(){});
-    }
-    function renderExperimentCard(wrap,e){
+    if(r.coverage){
+      var s3=el("section"); s3.appendChild(el("h2",null,"Data coverage"));
       var card=el("div","card");
-      var head=el("div"); head.style.cssText="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap";
-      var name=el("span",null,e.key+" v"+e.version); name.style.cssText="font-weight:700;font-family:var(--mono)";
-      var st=el("span","small",e.status); st.style.color=(e.status==="running"?"var(--ice)":e.status==="decided"?"var(--pos)":"var(--chalk-dim)");
-      head.appendChild(name); head.appendChild(st);
-      head.appendChild(el("span",null,e.layer+" · "+e.primary_metric)).style.cssText="color:var(--chalk-faint);font-size:11px";
-      card.appendChild(head);
-      var ro=el("div"); ro.style.cssText="margin-top:8px"; ro.appendChild(el("div","meta","loading readout…")); card.appendChild(ro);
-      wrap.appendChild(card);
-      if(e.status==="draft") { clear(ro); ro.appendChild(el("div","meta","draft — not started")); return; }
-      fetch("/api/admin/experiments/"+encodeURIComponent(e.key)+"/readout?version="+e.version,{headers:{"X-Cron-Secret":secret()}})
-        .then(function(r){return r.json();}).then(function(d){
-          clear(ro);
-          if(d.banner){ var b=el("div","cav"); b.appendChild(el("b",null,"[verdict] ")); b.appendChild(document.createTextNode(d.banner)); ro.appendChild(b); }
-          if(d.verdict){ ro.appendChild(el("div",null,"verdict: "+d.verdict)).style.cssText="color:var(--pos);font-family:var(--mono);margin:4px 0"; }
-          if(d.srm && d.srm.red){ ro.appendChild(el("div","err","SRM red (p<.001) — verdict suppressed")); }
-          var arms=(d.arms||[]).map(function(a){ return {variant:a.variant, exposed_n:a.n, success:a.success==null?"—":a.success}; });
-          if(arms.length) ro.appendChild(table(["variant","exposed_n","success"], arms, ["variant","exposed_n","success"]));
-        }).catch(function(){ clear(ro); ro.appendChild(el("div","meta","readout unavailable")); });
+      var fl=el("div"); fl.appendChild(el("span","pill ok","flowing"));
+      (r.coverage.events_flowing||[]).forEach(function(t){
+        var p=el("span","pill",t); p.style.marginLeft="6px"; fl.appendChild(p); });
+      card.appendChild(fl);
+      var dk=el("div"); dk.style.marginTop="10px";
+      dk.appendChild(el("span","pill warn","waiting"));
+      (r.coverage.client_events_dark||[]).forEach(function(t){
+        var p=el("span","pill",t); p.style.marginLeft="6px"; dk.appendChild(p); });
+      if(r.coverage.client_events_dark_total>(r.coverage.client_events_dark||[]).length){
+        dk.appendChild(el("span","pill","+"+(r.coverage.client_events_dark_total-
+          r.coverage.client_events_dark.length)+" more"));
+      }
+      card.appendChild(dk);
+      s3.appendChild(card); m.appendChild(s3);
     }
+  }
 
-    function renderHealth(c,b){
-      var card=el("div","card");
-      [["WAL",b.wal===null?"n/a (pg)":String(b.wal)],
-       ["event_id index",String(b.event_id_index_present)],
-       ["WAL bytes",b.wal_file_bytes==null?"—":b.wal_file_bytes]].forEach(function(p){
-        var k=el("div","kpi"); k.appendChild(el("div","v",p[1])); k.appendChild(el("div","l",p[0])); card.appendChild(k);
+  function renderFunnel(b){
+    var m=$("main"); m.appendChild(metaLine(b));
+    var rows=b.rows||[];
+    var maxN=Math.max.apply(null,rows.map(function(r){return r.reached||0;}).concat([1]));
+    var wrap=el("div","funnel");
+    rows.forEach(function(r){
+      var row=el("div","frow");
+      var nm=el("div","fname",r.name.replace(/_/g," "));
+      nm.appendChild(el("small",null,"stage "+r.stage));
+      row.appendChild(nm);
+      var bar=el("div", r.reached==null?"fbar dark":"fbar");
+      if(r.reached!=null){ var i=el("i"); i.style.width=Math.max(2,(r.reached/maxN)*100)+"%"; bar.appendChild(i); }
+      row.appendChild(bar);
+      var num=el("div","fnum");
+      if(r.reached==null){ num.appendChild(el("span","dash","not captured")); }
+      else{
+        var b1=el("b",null,r.reached); num.appendChild(b1);
+        if(r.step_conv && r.step_conv.value!=null)
+          num.appendChild(el("span",null," · "+(r.step_conv.value*100).toFixed(0)+"%"));
+        if(r.dropoff>0) num.appendChild(el("div","drop","−"+r.dropoff+" dropped"));
+      }
+      row.appendChild(num);
+      wrap.appendChild(row);
+    });
+    m.appendChild(wrap);
+    caveatNote(b);
+  }
+
+  function renderTable(b){
+    var m=$("main"); m.appendChild(metaLine(b));
+    var rows=b.rows;
+    if(b.summary){
+      var g=el("div","grid");
+      Object.keys(b.summary).forEach(function(k){
+        var v=b.summary[k]; if(v&&typeof v==="object"&&!("value" in v))return;
+        var c=el("div","card"); c.appendChild(el("h3",null,k.replace(/_/g," ")));
+        c.appendChild(el("div", (v&&typeof v==="object")? (v.value==null?"big na":"big") : "big",
+          (v&&typeof v==="object")? fmt(v.value,"rate") : fmt(v)));
+        g.appendChild(c);
       });
-      c.appendChild(card);
-      var counters=b.counters||{};
-      var rows=Object.keys(counters).map(function(k){ return {counter:k, value:counters[k]}; });
-      c.appendChild(el("div","meta","ingest counters — since "+(b.since||"deploy")));
-      c.appendChild(table(["counter","value"], rows, ["counter","value"]));
+      if(g.childNodes.length) m.appendChild(g);
     }
+    caveatNote(b);
+    if(!Array.isArray(rows)||!rows.length){
+      var e=el("div","empty"); e.appendChild(el("b","No rows in this window"));
+      e.appendChild(document.createTextNode("Either nothing happened, or the events that feed this view aren't captured yet."));
+      m.appendChild(e); return;
+    }
+    var FIRST=["week","stage","name","vertical","counter","user_id","app_version","action"];
+    var ks=Object.keys(rows[0]);
+    var keys=FIRST.filter(function(k){return ks.indexOf(k)>=0;})
+                  .concat(ks.filter(function(k){return FIRST.indexOf(k)<0;}));
+    // numeric column for inline bars
+    var barKey=null, barMax=0;
+    keys.forEach(function(k){ if(typeof rows[0][k]==="number"){
+      var mx=Math.max.apply(null,rows.map(function(r){return typeof r[k]==="number"?r[k]:0;}));
+      if(mx>barMax){barMax=mx;barKey=k;} } });
+    var t=el("table"), th=el("thead"), tr=el("tr");
+    keys.forEach(function(k){ tr.appendChild(el("th",null,k.replace(/_/g," "))); });
+    th.appendChild(tr); t.appendChild(th);
+    var tb=el("tbody");
+    rows.forEach(function(r){
+      var row=el("tr");
+      keys.forEach(function(k){
+        var v=r[k], td=el("td");
+        if(v&&typeof v==="object"&&("value" in v||"caveat" in v)){
+          if(v.caveat==="dark"){ td.appendChild(el("span","dash","—")); }
+          else if(v.caveat==="n_too_small"){ td.appendChild(el("span","pill warn","n="+(v.n==null?"?":v.n))); }
+          else td.textContent=fmt(v.value,"rate");
+        } else if(Array.isArray(v)){ td.className="txt"; td.textContent=v.join(", "); }
+        else if(v&&typeof v==="object"){ td.textContent=JSON.stringify(v); }
+        else if(k===barKey&&typeof v==="number"&&barMax>0){
+          var w=el("div","bar-cell"); var i=el("i"); i.style.width=Math.max(2,(v/barMax)*70)+"px";
+          w.appendChild(i); w.appendChild(el("span",null,v)); td.appendChild(w);
+        } else { if(typeof v==="string")td.className="txt"; td.textContent=(v==null?"—":v); if(v==null)td.className="dash"; }
+        row.appendChild(td);
+      });
+      tb.appendChild(row);
+    });
+    t.appendChild(tb); m.appendChild(t);
+  }
 
-    // ---- tab machinery ----
-    function selectTab(report){
-      active=report;
-      Array.prototype.forEach.call($("tabs").children, function(t){
-        t.classList.toggle("active", t.dataset.report===report); });
-      var csv=$("csv");
-      csv.href="/api/admin/analytics/"+report+"?format=csv&start="+$("start").value+"&end="+$("end").value;
-      csv.style.display=(report==="health"||report==="experiments")?"none":"inline";
-      if(report==="health"){ apiHealth(); return; }
-      if(report==="experiments"){ var cc=$("content"); clear(cc); renderExperiments(cc); return; }
-      load();
-    }
-    function apiHealth(){
-      fetch("/api/admin/analytics/health",{headers:{"X-Cron-Secret":secret()}})
-        .then(function(res){ if(res.status>=400){signOut("Secret rejected.");throw 0;} return res.json(); })
-        .then(function(b){ render("health",{status:200,body:b}); }).catch(function(){});
-    }
-    function load(){
-      var c=$("content"); clear(c); c.appendChild(el("div","meta","loading "+active+"…"));
-      api(active, function(err,r){ if(err){ clear(c); c.appendChild(el("div","card err","Network error.")); return; } render(active,r); });
-    }
+  function renderPfo(b){
+    var m=$("main"); m.appendChild(metaLine(b));
+    var r=b.rows||{};
+    var s=el("section"); s.appendChild(el("h2",null,"Core-loop guardrails"));
+    var g=el("div","grid");
+    Object.keys(r.guardrails||{}).forEach(function(k){
+      var v=r.guardrails[k], c=el("div","card");
+      c.appendChild(el("h3",null,k.replace(/_/g," ")));
+      c.appendChild(el("div", v.value==null?"big na":"big", v.value==null?"—":fmt(v.value,"rate")));
+      if(v.caveat==="dark") c.appendChild(el("div","why","Needs client events — not captured yet"));
+      else if(v.caveat==="n_too_small") c.appendChild(el("div","why","n="+v.n+" — too small to rate"));
+      g.appendChild(c);
+    });
+    s.appendChild(g); m.appendChild(s);
+    var s2=el("section"); s2.appendChild(el("h2",null,"Time-to-first-value stages"));
+    var t=el("table"), th=el("thead"), tr=el("tr");
+    ["stage","measure","value"].forEach(function(h){tr.appendChild(el("th",null,h));});
+    th.appendChild(tr); t.appendChild(th);
+    var tb=el("tbody");
+    (r.stages||[]).forEach(function(st){
+      var row=el("tr");
+      row.appendChild(el("td","txt",st.stage.replace(/_/g," ")));
+      row.appendChild(el("td","txt",st.measure));
+      var td=el("td");
+      if(!st.cell||st.cell.caveat==="dark") td.appendChild(el("span","dash","—"));
+      else if(st.cell.caveat==="n_too_small") td.appendChild(el("span","pill warn","n="+st.cell.n));
+      else td.textContent=fmt(st.cell.value,"rate");
+      row.appendChild(td); tb.appendChild(row);
+    });
+    t.appendChild(tb); s2.appendChild(t); m.appendChild(s2);
+    caveatNote(b);
+  }
 
-    // ---- gate ----
-    function showApp(){ $("gate").classList.add("hidden"); $("app").classList.remove("hidden");
-      buildTabs(); defaultDates(); selectTab(active); }
-    function signOut(msg){ sessionStorage.removeItem(SS_KEY); $("app").classList.add("hidden");
-      $("gate").classList.remove("hidden"); if(msg) $("gate-err").textContent=msg; }
-    function buildTabs(){ var t=$("tabs"); clear(t);
-      TABS.forEach(function(p){ var d=el("div","tab",p[1]); d.dataset.report=p[0];
-        d.onclick=function(){ selectTab(p[0]); }; t.appendChild(d); }); }
-    function defaultDates(){ var now=new Date(); var end=now.toISOString().slice(0,10);
-      var s=new Date(now.getTime()-27*864e5).toISOString().slice(0,10);
-      $("start").value=s; $("end").value=end; }
+  // ── Journeys: what happens before/after an anchor event ──────────
+  function renderJourneys(b){
+    var m=$("main"), r=b.rows||{};
+    m.appendChild(metaLine(b));
+    if(!r.anchor){
+      var e=el("div","empty"); e.appendChild(el("b","No paths to draw"));
+      e.appendChild(document.createTextNode("No intent events in this window."));
+      m.appendChild(e); caveatNote(b); return;
+    }
+    // anchor picker
+    var pick=el("div","card"); pick.style.marginBottom="16px";
+    pick.appendChild(el("h3",null,"Anchor event"));
+    pick.appendChild(el("div","sub","Paths are computed around this event. Sessions are reconstructed from a 30-minute inactivity gap."));
+    var sel=document.createElement("select");
+    (r.candidates||[]).forEach(function(c){
+      var o=document.createElement("option"); o.value=c; o.textContent=c;
+      if(c===r.anchor) o.selected=true; sel.appendChild(o); });
+    sel.onchange=function(){ journeyAnchor=sel.value; load(); };
+    pick.appendChild(sel);
+    var stat=el("span"); stat.style.marginLeft="12px";
+    stat.style.fontFamily="var(--mono)"; stat.style.fontSize="11px";
+    stat.style.color="var(--chalk-dim)";
+    stat.textContent=r.anchor_hits+" occurrences across "+r.sessions+" sessions";
+    pick.appendChild(stat);
+    m.appendChild(pick);
 
-    $("gate-go").onclick=function(){ var v=$("secret").value.trim();
-      if(!v){ $("gate-err").textContent="Enter the secret."; return; }
-      sessionStorage.setItem(SS_KEY,v);
-      // Probe health to validate the secret before entering.
-      fetch("/api/admin/analytics/health",{headers:{"X-Cron-Secret":v}}).then(function(res){
-        if(res.status>=400){ sessionStorage.removeItem(SS_KEY); $("gate-err").textContent="Secret rejected."; return; }
-        showApp();
-      }).catch(function(){ $("gate-err").textContent="Network error."; });
+    var cols=el("div"); cols.style.display="grid";
+    cols.style.gridTemplateColumns="1fr 1fr"; cols.style.gap="14px";
+    [["Before →","before"],["→ After","after"]].forEach(function(p){
+      var s=el("section"); s.appendChild(el("h2",null,p[0]+" "+r.anchor));
+      var box=el("div","card");
+      var list=r[p[1]]||[];
+      if(!list.length) box.appendChild(el("div","sub","nothing recorded"));
+      list.forEach(function(st){
+        var row=el("div"); row.style.display="grid";
+        row.style.gridTemplateColumns="1fr 84px"; row.style.alignItems="center";
+        row.style.gap="10px"; row.style.padding="6px 0";
+        var lab=el("div"); lab.style.fontSize="12px";
+        lab.textContent=st.step;
+        var barwrap=el("div"); barwrap.style.marginTop="4px";
+        var bar=el("div","fbar"); bar.style.height="6px";
+        var i=el("i"); i.style.width=Math.max(2,(st.share||0)*100)+"%"; bar.appendChild(i);
+        barwrap.appendChild(bar); lab.appendChild(barwrap);
+        var num=el("div","fnum", st.count+(st.share!=null?"  "+(st.share*100).toFixed(0)+"%":""));
+        row.appendChild(lab); row.appendChild(num); box.appendChild(row);
+      });
+      s.appendChild(box); cols.appendChild(s);
+    });
+    m.appendChild(cols);
+
+    if((r.sequences||[]).length){
+      var s2=el("section"); s2.appendChild(el("h2",null,"Common session shapes"));
+      var box2=el("div","card");
+      r.sequences.forEach(function(sq){
+        var row=el("div"); row.style.display="flex";
+        row.style.justifyContent="space-between"; row.style.padding="6px 0";
+        row.style.borderBottom="1px solid var(--line)";
+        var p=el("div"); p.style.fontFamily="var(--mono)"; p.style.fontSize="11.5px";
+        p.textContent=sq.path;
+        row.appendChild(p); row.appendChild(el("div","fnum",sq.count));
+        box2.appendChild(row);
+      });
+      s2.appendChild(box2); m.appendChild(s2);
+    }
+    caveatNote(b);
+  }
+
+  // ── Retention: cohort triangle heatmap ───────────────────────────
+  function renderRetention(b){
+    var m=$("main"); m.appendChild(metaLine(b));
+    var rows=b.rows||[];
+    if(!rows.length){
+      var e=el("div","empty"); e.appendChild(el("b","No cohorts yet"));
+      e.appendChild(document.createTextNode("Retention needs signup events in the window. Widen the range, or wait for capture."));
+      m.appendChild(e); caveatNote(b); return;
+    }
+    var weeks=(b.summary&&b.summary.weeks)||8;
+    var t=el("table"), th=el("thead"), tr=el("tr");
+    tr.appendChild(el("th",null,"cohort"));
+    tr.appendChild(el("th",null,"users"));
+    for(var w=0;w<=weeks;w++) tr.appendChild(el("th",null,"W"+w));
+    th.appendChild(tr); t.appendChild(th);
+    var tb=el("tbody");
+    rows.forEach(function(r){
+      var row=el("tr");
+      row.appendChild(el("td","txt",r.cohort));
+      row.appendChild(el("td",null,r.size));
+      (r.cells||[]).forEach(function(c){
+        var td=el("td");
+        if(!c){ td.className="dash"; td.textContent="·"; }
+        else{
+          var rate=c.rate==null?0:c.rate;
+          // heat: ice at increasing opacity — one hue, honest ramp
+          td.style.background="rgba(86,217,236,"+(rate*0.55).toFixed(3)+")";
+          td.textContent = c.small ? String(c.retained)
+                                   : (rate*100).toFixed(0)+"%";
+          td.title=c.retained+" of "+r.size+" retained";
+          if(c.small) td.style.color="var(--chalk-dim)";
+        }
+        row.appendChild(td);
+      });
+      tb.appendChild(row);
+    });
+    t.appendChild(tb); m.appendChild(t);
+    var legend=el("div","meta");
+    legend.textContent="Cells show % of the cohort active that week. Cohorts under 20 users show raw counts instead of a rate.";
+    legend.style.marginTop="10px"; m.appendChild(legend);
+    caveatNote(b);
+  }
+
+  // ── Segments: saved cohorts + builder ────────────────────────────
+  function renderSegments(b){
+    var m=$("main"); m.appendChild(metaLine(b));
+    var rows=b.rows||[];
+    var s=el("section"); s.appendChild(el("h2",null,"Saved segments"));
+    if(!rows.length){
+      var e=el("div","empty"); e.appendChild(el("b","No segments saved"));
+      e.appendChild(document.createTextNode("Build one below — it's evaluated live against the current window."));
+      s.appendChild(e);
+    } else {
+      var g=el("div","grid");
+      rows.forEach(function(r){
+        var c=el("div","card");
+        c.appendChild(el("h3",null,r.name));
+        c.appendChild(el("div","sub",JSON.stringify(r.definition)));
+        c.appendChild(el("div", r.users==null?"big na":"big", r.users==null?"—":r.users));
+        if(r.share!=null) c.appendChild(el("div","sub",(r.share*100).toFixed(0)+"% of active users"));
+        if(r.error) c.appendChild(el("div","why",r.error));
+        var del=el("button",null,"Delete"); del.style.marginTop="10px";
+        del.onclick=function(){
+          fetch("/api/admin/segments/"+r.id,{method:"DELETE",
+            headers:{"X-Cron-Secret":secret()}}).then(load); };
+        c.appendChild(del);
+        g.appendChild(c);
+      });
+      s.appendChild(g);
+    }
+    m.appendChild(s);
+
+    var s2=el("section"); s2.appendChild(el("h2",null,"New segment"));
+    var box=el("div","card");
+    box.appendChild(el("div","sub","A segment is a named filter over users, evaluated live per window. Ops: did · did_not · platform · min_events"));
+    var nm=document.createElement("input"); nm.placeholder="Name (e.g. Calculator users)";
+    nm.style.width="240px"; nm.style.marginRight="8px";
+    var opSel=document.createElement("select");
+    ["did","did_not","platform","min_events"].forEach(function(o){
+      var x=document.createElement("option"); x.value=o; x.textContent=o; opSel.appendChild(x); });
+    opSel.style.marginRight="8px";
+    var val=document.createElement("input"); val.placeholder="value (e.g. calc_trade_evaluated)";
+    val.style.width="230px"; val.style.marginRight="8px";
+    var save=el("button","primary","Save segment");
+    var msg=el("div","why"); msg.style.marginTop="9px";
+    save.onclick=function(){
+      var d={}; var v=val.value.trim();
+      d[opSel.value]= (opSel.value==="min_events") ? Number(v) : v;
+      fetch("/api/admin/segments",{method:"POST",
+        headers:{"Content-Type":"application/json","X-Cron-Secret":secret()},
+        body:JSON.stringify({name:nm.value.trim(),definition:d})})
+        .then(function(r){return r.json().then(function(j){return {s:r.status,j:j};});})
+        .then(function(o){ if(o.s>=400){ msg.textContent=o.j.detail||o.j.error; }
+                           else { nm.value=""; val.value=""; load(); } });
     };
-    $("secret").addEventListener("keydown",function(e){ if(e.key==="Enter") $("gate-go").click(); });
-    $("reload").onclick=load;
-    $("signout").onclick=function(){ signOut(""); };
+    box.appendChild(nm); box.appendChild(opSel); box.appendChild(val); box.appendChild(save);
+    box.appendChild(msg);
+    s2.appendChild(box); m.appendChild(s2);
+    caveatNote(b);
+  }
 
-    if(secret()) showApp();   // resume within the tab session
-  })();
-  </script>
+  function renderHealth(b){
+    var m=$("main");
+    var g=el("div","grid");
+    [["WAL",b.wal===null?"n/a (pg)":String(b.wal)],
+     ["event_id index",String(b.event_id_index_present)],
+     ["WAL bytes",b.wal_file_bytes==null?"—":b.wal_file_bytes]].forEach(function(p){
+      var c=el("div","card"); c.appendChild(el("h3",null,p[0]));
+      c.appendChild(el("div","big",p[1])); g.appendChild(c); });
+    m.appendChild(g);
+    var s=el("section"); s.appendChild(el("h2",null,"Ingest counters (since deploy)"));
+    var t=el("table"),th=el("thead"),tr=el("tr");
+    ["counter","value"].forEach(function(h){tr.appendChild(el("th",null,h));});
+    th.appendChild(tr);t.appendChild(th);
+    var tb=el("tbody"), c=b.counters||{};
+    Object.keys(c).forEach(function(k){
+      var row=el("tr"); row.appendChild(el("td","txt",k.replace(/_/g," ")));
+      row.appendChild(el("td",null,c[k])); tb.appendChild(row); });
+    t.appendChild(tb); s.appendChild(t); m.appendChild(s);
+  }
+
+  function metaLine(b){
+    var w=b.window||{};
+    return el("div","meta","window "+(w.start||"")+" → "+(w.end||"")+
+      "  ·  UTC ISO-week (Mon)  ·  generated "+(b.generated_at||""));
+  }
+  function caveatNote(b){
+    if(!b.caveats||!b.caveats.length) return;
+    var m=$("main"), n=el("div","note");
+    n.appendChild(el("b","Why some cells read — "));
+    b.caveats.forEach(function(c){
+      var p=el("div"); p.style.marginTop="5px";
+      p.textContent=c.scope+" — "+c.detail; n.appendChild(p); });
+    m.appendChild(n);
+  }
+
+  // ── fetch / routing ─────────────────────────────────────────────
+  function secret(){ return sessionStorage.getItem(SS)||""; }
+  function qs(){ return "?start="+$("start").value+"&end="+$("end").value; }
+  function load(){
+    var m=$("main"); clear(m); m.appendChild(el("div","meta","loading "+active+"…"));
+    if(active==="experiments"){ clear(m); return renderExperiments(); }
+    var url="/api/admin/analytics/"+active+(active==="health"?"":qs())+
+            (active==="journeys"&&journeyAnchor?("&anchor="+encodeURIComponent(journeyAnchor)):"");
+    fetch(url,{headers:{"X-Cron-Secret":secret()}}).then(function(res){
+      if(res.status===401||res.status===403){ signOut("Secret rejected."); throw 0; }
+      return res.json();
+    }).then(function(b){
+      clear(m);
+      if(b.error){ var e=el("div","empty"); e.appendChild(el("b","Error"));
+        e.appendChild(document.createTextNode(b.detail||b.error)); m.appendChild(e); return; }
+      if(active==="health") return renderHealth(b);
+      if(active==="overview") return renderOverview(b);
+      if(active==="waterfall") return renderFunnel(b);
+      if(active==="pfo") return renderPfo(b);
+      if(active==="journeys") return renderJourneys(b);
+      if(active==="retention") return renderRetention(b);
+      if(active==="segments") return renderSegments(b);
+      renderTable(b);
+    }).catch(function(){});
+  }
+  function renderExperiments(){
+    var m=$("main");
+    fetch("/api/admin/experiments",{headers:{"X-Cron-Secret":secret()}})
+      .then(function(r){return r.json();}).then(function(b){
+        clear(m);
+        var list=(b&&b.experiments)||[];
+        if(!list.length){
+          var e=el("div","empty");
+          e.appendChild(el("b","No experiments yet"));
+          e.appendChild(document.createTextNode("Design one with /an-experiment, or POST /api/admin/experiments. The engine is gated on experiments.engine."));
+          m.appendChild(e); return;
+        }
+        var g=el("div","grid");
+        list.forEach(function(x){
+          var c=el("div","card");
+          c.appendChild(el("h3",null,x.key+" v"+x.version));
+          c.appendChild(el("div","sub",x.layer+" · "+x.primary_metric));
+          var st=el("span", x.status==="running"?"pill ok":"pill", x.status);
+          c.appendChild(st); g.appendChild(c);
+        });
+        m.appendChild(g);
+      }).catch(function(){ clear(m); });
+  }
+
+  function setTab(r){
+    if(r!=="journeys") journeyAnchor=null;   // don't leak the anchor across views
+    active=r;
+    Array.prototype.forEach.call($("tabs").children,function(t){
+      t.classList.toggle("on",t.dataset.r===r); });
+    var c=$("csv");
+    c.href="/api/admin/analytics/"+r+qs()+"&format=csv";
+    c.style.display=(r==="health"||r==="experiments"||r==="overview")?"none":"inline";
+    load();
+  }
+  function setRange(days){
+    var end=new Date(), start=new Date(end.getTime()-(days-1)*864e5);
+    $("end").value=end.toISOString().slice(0,10);
+    $("start").value=start.toISOString().slice(0,10);
+    Array.prototype.forEach.call($("range").children,function(btn){
+      btn.classList.toggle("on",btn.dataset.days===String(days)); });
+  }
+  function showApp(){
+    $("gate").classList.add("hidden"); $("app").classList.remove("hidden");
+    var t=$("tabs"); clear(t);
+    TABS.forEach(function(p){ var d=el("div","tab",p[1]); d.dataset.r=p[0];
+      d.onclick=function(){setTab(p[0]);}; t.appendChild(d); });
+    setRange(28); setTab("overview");
+  }
+  function signOut(msg){ sessionStorage.removeItem(SS);
+    $("app").classList.add("hidden"); $("gate").classList.remove("hidden");
+    if(msg)$("gate-err").textContent=msg; }
+
+  $("go").onclick=function(){
+    var v=$("secret").value.trim();
+    if(!v){$("gate-err").textContent="Enter the secret.";return;}
+    sessionStorage.setItem(SS,v);
+    fetch("/api/admin/analytics/health",{headers:{"X-Cron-Secret":v}}).then(function(r){
+      if(r.status>=400){ sessionStorage.removeItem(SS); $("gate-err").textContent="Secret rejected."; return; }
+      showApp();
+    }).catch(function(){ $("gate-err").textContent="Network error."; });
+  };
+  $("secret").addEventListener("keydown",function(e){ if(e.key==="Enter")$("go").click(); });
+  $("reload").onclick=load;
+  $("out").onclick=function(){signOut("");};
+  Array.prototype.forEach.call(document.querySelectorAll("#range button"),function(b){
+    b.onclick=function(){ setRange(Number(b.dataset.days)); load(); }; });
+  if(secret()) showApp();
+})();
+</script>
 </body>
 </html>

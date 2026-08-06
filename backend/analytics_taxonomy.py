@@ -134,7 +134,13 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "client_error":      frozenset({"screen", "error_kind", "message", "fatal"}),
     # route is NORMALIZED client-side (query stripped, id runs → ':id') so
     # cardinality stays bounded and no user identifiers ride in props.
-    "api_request_failed": frozenset({"route", "method", "status", "ms", "timeout"}),
+    # `bg` (2026-08-05): true when the request spanned a foreground exit, so
+    # its wall-clock duration is meaningless (prod showed several routes
+    # sharing one 992310ms / 3906711ms value — the device slept mid-request).
+    # `ms` is OMITTED entirely on untrustworthy samples, so latency analysis
+    # filters on "ms present", and `bg` explains why a sample is missing.
+    "api_request_failed": frozenset({"route", "method", "status", "ms",
+                                     "timeout", "bg"}),
     "screen_left":        frozenset({"screen", "dwell_ms", "reason"}),
     # Pre-auth funnel
     "signin_attempted":  frozenset({"method", "has_league_url"}),

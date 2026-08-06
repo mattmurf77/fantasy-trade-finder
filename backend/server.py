@@ -6730,6 +6730,7 @@ def analytics_report_route(report):
             include_demo=request.args.get("include_demo") in ("1", "true", "yes"),
             fmt=fmt,
             segment=request.args.get("segment"),
+            anchor=request.args.get("anchor"),
         )
     except aq.BadParam as e:
         code = "unknown_report" if str(e) == "unknown_report" else "bad_param"
@@ -6739,6 +6740,58 @@ def analytics_report_route(report):
             result, mimetype="text/csv",
             headers={"Content-Disposition": f'attachment; filename="{report}.csv"'})
     return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# Saved segments (Fullstory-style cohorts). CRON-gated. The definition is a
+# small closed grammar validated in analytics_queries.evaluate_segment — a bad
+# op/event/platform is a 400, never a 500 and never raw SQL.
+# ---------------------------------------------------------------------------
+
+@app.route("/api/admin/segments", methods=["GET", "POST"])
+def admin_segments_route():
+    _require_cron_auth()
+    from . import analytics_queries as aq
+    from . import database as _db
+    from sqlalchemy import insert as _ins, select as _sel
+    T = _db.analytics_segments_table
+    if request.method == "GET":
+        with _db.ro_engine.connect() as conn:
+            rows = conn.execute(_sel(T).order_by(T.c.created_at.desc())).mappings().all()
+        return jsonify({"segments": [
+            {"id": r["id"], "name": r["name"],
+             "definition": json.loads(r["definition_json"] or "{}"),
+             "created_at": r["created_at"]} for r in rows]})
+    body = request.get_json(force=True) or {}
+    name = (body.get("name") or "").strip()
+    definition = body.get("definition") or {}
+    if not name or not isinstance(definition, dict) or not definition:
+        return jsonify({"error": "bad_param",
+                        "detail": "name and a non-empty definition are required"}), 400
+    bad = [k for k in definition if k not in aq.SEGMENT_OPS]
+    if bad:
+        return jsonify({"error": "bad_param",
+                        "detail": f"unknown segment op(s): {bad}; "
+                                  f"allowed: {list(aq.SEGMENT_OPS)}"}), 400
+    try:
+        with _db.engine.begin() as conn:
+            conn.execute(_ins(T).values(
+                name=name, definition_json=json.dumps(definition),
+                created_at=_db._now()))
+    except Exception as e:
+        return jsonify({"error": "conflict", "detail": str(e)[:200]}), 409
+    return jsonify({"ok": True, "name": name, "definition": definition}), 201
+
+
+@app.route("/api/admin/segments/<int:seg_id>", methods=["DELETE"])
+def admin_segment_delete_route(seg_id):
+    _require_cron_auth()
+    from . import database as _db
+    from sqlalchemy import delete as _del
+    with _db.engine.begin() as conn:
+        conn.execute(_del(_db.analytics_segments_table).where(
+            _db.analytics_segments_table.c.id == seg_id))
+    return jsonify({"ok": True, "deleted": seg_id})
 
 
 # ---------------------------------------------------------------------------

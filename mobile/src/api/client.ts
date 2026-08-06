@@ -9,7 +9,7 @@
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as SecureStore from 'expo-secure-store';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 const SECURE_TOKEN_KEY = 'ftf.sessionToken';
 // Survives app deletion (Keychain default). Used to prefill SignInScreen
@@ -61,6 +61,16 @@ const _CLIENT_HEADERS: Record<string, string> = (() => {
   }
   return h;
 })();
+
+/** The per-launch client-info headers (X-Device / X-OS-Version / X-App-Version
+ *  / X-User-TZ). `apiRequest` attaches these automatically, but the analytics
+ *  SDK sends its batches with a raw `fetch` (it must NOT inherit apiRequest's
+ *  401 handling, which clears the session token), so it needs them explicitly.
+ *  Without this the backend can't derive platform/app_version/os_version and
+ *  every client event lands with those columns NULL. */
+export function getClientHeaders(): Record<string, string> {
+  return { ..._CLIENT_HEADERS };
+}
 
 export function getBaseUrl(): string {
   // Expo puts values from app.json's `extra` here at build time; fall back
@@ -227,6 +237,25 @@ const MAX_RETRIES = 2;
 const RETRY_BASE_MS = 400;
 const RETRY_FACTOR = 3; // 400ms → 1200ms
 
+// ── session_not_initialized retry (prod analytics 2026-08-05) ───────────────
+// Sign-in mints a session and navigates to Main BEFORE /api/session/init has
+// finished loading league data, so a session's first league-backed reads come
+// back 409 session_not_initialized — prod's top failure, always at seq=3
+// (/api/league/format-stats 14×, /api/league/asset-prefs 4×). The 409 is the
+// correct server answer; the client bug is that it gave up on it, leaving the
+// user on a screen with silently missing league data. A short bounded wait
+// rides out the gap instead of surfacing a race as a failure.
+//
+// Matched on the ERROR CODE, never the bare 409 status: sleeper_conflict,
+// merge_choice_required, duplicate match decisions and the MFL/Sleeper link
+// conflicts are all genuine conflicts the caller must see immediately.
+//
+// Unlike the GET-only gateway retry above this applies to every method, and
+// that is safe: the guard raises BEFORE the route handler runs, so the request
+// never reached business logic and nothing can be double-booked.
+const SESSION_INIT_ERROR = 'session_not_initialized';
+const SESSION_INIT_BACKOFF_MS = [400, 1200]; // 2 retries, ~1.6s of waiting
+
 // User-facing copy for a deadline abort (FR-4).
 const TIMEOUT_MESSAGE = 'Server is waking up — please retry.';
 
@@ -261,11 +290,67 @@ function _normalizeRoute(path: string): string {
   return p.slice(0, 80);
 }
 
-function _reportApiFailure(path: string, method: string, err: unknown, ms: number): void {
+// ── Trustworthy latency (prod analytics 2026-08-05) ─────────────────────────
+// `ms` was a Date.now() delta, i.e. WALL CLOCK — so a request in flight when the
+// device slept reported the nap as latency. Prod shows the tell plainly: several
+// DIFFERENT routes reporting the identical 992310ms (16.5 min) and 3906711ms
+// (65 min) at the same timestamp. Those samples make p50/p90 and any timeout
+// analysis meaningless, so two defences:
+//
+//   1. measure with performance.now() where the runtime has it — monotonic, so
+//      it also can't be skewed by an NTP clock correction mid-request;
+//   2. notice when the app left the foreground during a request and mark the
+//      sample instead of reporting a fabricated duration.
+//
+// Neither is sufficient alone (a suspended JS timer can freeze either clock and
+// the wake-up delta still lands in one bucket), so a duration is additionally
+// discarded above MAX_PLAUSIBLE_MS: no request here can legitimately outlive its
+// own deadline, which is 30s at the very most.
+const MAX_PLAUSIBLE_MS = SLOW_TIMEOUT_MS * 2;
+
+const _perf = (globalThis as { performance?: { now?: () => number } }).performance;
+function _clockMs(): number {
+  try {
+    return typeof _perf?.now === 'function' ? _perf.now() : Date.now();
+  } catch {
+    return Date.now(); // a clock probe must never be able to fail a request
+  }
+}
+
+// Bumped on every transition away from 'active'. A request samples the counter
+// before and after itself; a change means it spanned a background/inactive
+// window and its measured duration is fiction. Registered ONCE at module scope
+// and never removed — module lifetime, so there is no per-request listener to
+// leak (same pattern as the analytics SDK's own listener in events.ts).
+// 'inactive' counts as well as 'background': the iOS app-switcher and system
+// prompts also suspend JS, and over-flagging one sample is far cheaper than
+// letting a 65-minute phantom into the latency distribution.
+let _leftForegroundCount = 0;
+try {
+  AppState.addEventListener('change', (next) => {
+    if (next !== 'active') _leftForegroundCount += 1;
+  });
+} catch {
+  /* AppState unavailable (node test harness) — samples just never get flagged */
+}
+
+function _reportApiFailure(
+  path: string,
+  method: string,
+  err: unknown,
+  ms: number,
+  spannedBackground: boolean,
+): void {
   try {
     if (path.includes('/api/events')) return;
     if ((err as any)?.name === 'AbortError') return;
     const isApi = err instanceof ApiError;
+    // `bg` is the honest dimension (did this request span a foreground exit),
+    // while `ms` is OMITTED whenever the number can't be trusted — background
+    // span or an implausible magnitude. That way the analytics side excludes
+    // junk with a plain "ms present" predicate and doesn't have to know the
+    // flag exists, and `bg` remains available to explain the missing samples.
+    const untrusted = spannedBackground || !(ms >= 0 && ms <= MAX_PLAUSIBLE_MS);
     // Lazy require — events.ts imports getDeviceId from this module, so a
     // top-level import here would be a cycle. track() self-gates on the
     // analytics.client_events flag and never throws.
@@ -275,7 +360,8 @@ function _reportApiFailure(path: string, method: string, err: unknown, ms: numbe
       route: _normalizeRoute(path),
       method,
       status: isApi ? (err as ApiError).status : 0,
-      ms,
+      ...(untrusted ? {} : { ms: Math.round(ms) }),
+      bg: spannedBackground,
       timeout: isApi ? (err as ApiError).isTimeout : false,
     });
   } catch {
@@ -287,11 +373,18 @@ export async function apiRequest<T = unknown>(
   path: string,
   opts: RequestOptions = {},
 ): Promise<T> {
-  const startedAt = Date.now();
+  const startedAt = _clockMs();
+  const foregroundEpoch = _leftForegroundCount;
   try {
     return await _apiRequestInner<T>(path, opts);
   } catch (err) {
-    _reportApiFailure(path, opts.method || 'GET', err, Date.now() - startedAt);
+    _reportApiFailure(
+      path,
+      opts.method || 'GET',
+      err,
+      _clockMs() - startedAt,
+      _leftForegroundCount !== foregroundEpoch,
+    );
     throw err;
   }
 }
@@ -349,7 +442,13 @@ async function _apiRequestInner<T = unknown>(
     method === 'GET' &&
     !NO_RETRY_PATHS.some((p) => path.includes(p));
 
-  let attempt = 0;
+  let attempt = 0; // transient gateway / network retries (INIT-12b)
+  // session_not_initialized gets its OWN budget so a startup-race wait can't
+  // eat the gateway retries (or vice versa) when both happen to a request.
+  let initAttempt = 0;
+  // Set when a retry is scheduled by a non-gateway path, so the shared backoff
+  // tail below uses that ladder instead of the INIT-12b one.
+  let nextDelayMs: number | null = null;
   let lastError: unknown;
 
   const fetchOnce = async (): Promise<Response> => {
@@ -378,7 +477,9 @@ async function _apiRequestInner<T = unknown>(
 
   try {
     // Retry loop — executes at least once (attempt 0), then up to MAX_RETRIES
-    // additional times for eligible requests that hit transient errors.
+    // additional times for eligible requests that hit transient errors, plus up
+    // to SESSION_INIT_BACKOFF_MS.length more for the startup-race 409. Both
+    // budgets are finite and the request deadline still caps total wall time.
     while (true) {
       let res: Response;
       let networkError = false;
@@ -446,17 +547,37 @@ async function _apiRequestInner<T = unknown>(
                 /* listener errors must never mask the API error */
               }
             }
-            throw apiErr;
+            // League data is still loading (see SESSION_INIT_BACKOFF_MS) —
+            // fall through to the backoff tail and ask again. Once that budget
+            // is spent the error surfaces exactly as it does today, so the
+            // worst case is unchanged and the common case now succeeds.
+            if (
+              res!.status === 409 &&
+              parsed?.error === SESSION_INIT_ERROR &&
+              initAttempt < SESSION_INIT_BACKOFF_MS.length
+            ) {
+              lastError = apiErr;
+              nextDelayMs = SESSION_INIT_BACKOFF_MS[initAttempt];
+              initAttempt += 1;
+            } else {
+              throw apiErr;
+            }
+          } else {
+            return parsed as T;
           }
-
-          return parsed as T;
         }
       }
 
       // Back off before the next attempt. Jitter ±20% to spread retried
       // requests across the backoff window and avoid thundering-herd.
-      attempt += 1;
-      const baseMs = attempt === 1 ? RETRY_BASE_MS : RETRY_BASE_MS * RETRY_FACTOR;
+      let baseMs: number;
+      if (nextDelayMs !== null) {
+        baseMs = nextDelayMs;
+        nextDelayMs = null;
+      } else {
+        attempt += 1;
+        baseMs = attempt === 1 ? RETRY_BASE_MS : RETRY_BASE_MS * RETRY_FACTOR;
+      }
       const jitter = baseMs * 0.2 * (Math.random() * 2 - 1);
       const delay = Math.round(baseMs + jitter);
 

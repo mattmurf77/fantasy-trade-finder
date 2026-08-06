@@ -1034,6 +1034,19 @@ identity_links_table = Table("identity_links", metadata,
     Index("ix_identity_links_user", "sleeper_user_id"),
 )
 
+# ── Saved analytics segments (Fullstory-style cohorts) ─────────────────
+# A named filter over users; evaluated live per query window by
+# analytics_queries.evaluate_segment. The definition is a small closed
+# grammar (did / did_not / platform / min_events) — every operand maps to a
+# code-controlled SQL fragment, so no user string reaches SQL unparameterized.
+analytics_segments_table = Table("analytics_segments", metadata,
+    Column("id",              Integer, primary_key=True, autoincrement=True),
+    Column("name",            String, nullable=False),
+    Column("definition_json", Text,   nullable=False),
+    Column("created_at",      String, nullable=False),
+    UniqueConstraint("name", name="uq_analytics_segment_name"),
+)
+
 # ── Experiment engine (analytics platform P3, LLD §3.2) ────────────────
 # Layered A/B + multivariate. All append-only except experiments.status.
 # The layer salt is minted once per layer and NEVER rotated while any
