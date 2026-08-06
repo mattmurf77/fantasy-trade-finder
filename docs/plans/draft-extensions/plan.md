@@ -235,3 +235,19 @@ S-2 (optional) ──► M12 go/no-go (recommend: no)
 - **D1 restated:** "≤3 taps AND no navigation away" (long-press → Set my value → rung is already 3 gestures, leaving none for a confirm step).
 - **The Acquire strip already scrolls** (≈402pt content vs ≈361pt usable) — state it plainly; it is the reason no new chip may be appended, not a hypothetical.
 - **Predicate docs and `mflBound`** were corrected in `dc32c2a` (required arg; two registry files refreshed).
+
+---
+
+## Operator decisions — ESPN pick assignment (2026-08-06). BINDING.
+
+1. **Draft order default: LINEAR** (user-toggleable to snake; the toggle changes slot numbering only, never ownership).
+2. **Rounds default: 4, and USER-SETTABLE.** Not a fixed constant — expose it in the assignment setup, clamped 1–`ROOKIE_MAX_ROUNDS` (8). The conservation bound (§6.2) depends on that clamp, so it is enforced server-side, not just in the UI.
+3. **Future seasons ARE included: current + 3** (matching Sleeper's `seasons_ahead=3`). Consequences the build must handle, since this is ~4× the prior grid:
+   - Seeder loops `range(season, season+4)` — a loop bound, effectively free.
+   - **UX is NOT free.** A 12-team × 4-round × 4-season grid is ~192 slots. The screen must default to the **current season** with the other three seasons collapsed behind season tabs/accordions; the pristine-seed default means users still touch only traded picks, but the "confirm the board" review step must be **per-season**, not one 192-row scroll.
+   - Pricing already handles it: `pick_pool_value(round, years_out, format)` is the shipped function and `years_out` discounts are existing behavior. No new value logic.
+   - This is where most dynasty pick value lives, so it is also where a wrong assignment costs the most — the provenance label and one-action correction matter more here than in the current season.
+4. **Assigned picks behave EXACTLY like any other league's picks — full engine parity.** All seven read sites light up, including `_roster_eveners` (S4) and generated suggestions (S3). **This overrides both lenses' recommendation to hold S3/S4 behind measured gates.**
+   - **Staging survives as a BUILD SEQUENCE only, not as release gates:** implement and golden-diff S1 → S2 → S3 → S4 in that order within the wave so each site is verified independently, but all four land together behind `picks.assign_tradeable`.
+   - The adoption / contested-rate / offline-integrity thresholds in §6.8 remain as **monitoring and rollback triggers**, not as ship gates.
+   - Residual risk (§6.9 item 1) is **accepted knowingly by the operator**: a leaguemate's assignment can change what FTF recommends to you, including active "ask for their 2027 1st" sweeteners. Containment is unchanged — conservation bound, contested-⇒-unpriced, provenance label on every priced surface, one-action correction, and `picks.assign_tradeable` as a single kill switch that never destroys entered data.
