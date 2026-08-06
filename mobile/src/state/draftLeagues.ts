@@ -53,7 +53,7 @@ let cached: QualifyingDraftLeague[] = [];
  *  needs to ask the same question of a league it already holds. */
 export function leagueQualifiesForDraftTab(
   lg: LeagueSummary,
-  mflBound: boolean = false,
+  mflBound: boolean,  // REQUIRED: omitting it would silently drop MFL leagues
 ): boolean {
   if (lg.draft_status !== 'not_drafted' || lg.draft_status_confidence !== 'high') {
     return false;
