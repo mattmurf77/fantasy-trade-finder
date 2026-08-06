@@ -85,6 +85,12 @@ export interface LeagueSummary {
   // local/ESPN leagues don't carry it. Onboarding item 10 (F12): redraft
   // leagues get a "Dynasty values shown" label and a segment tag in events.
   settings_type?: number;
+  // rookie-draft placement (flag `draft.room`) — #207's cached per-league
+  // verdict, stamped by GET /api/sleeper/leagues/<user_id>. Absent with the
+  // flag off, and null for a league we've never synced. Consumed ONLY by
+  // state/draftLeagues.ts (the seasonal Draft tab's predicate).
+  draft_status?: 'drafted' | 'not_drafted' | 'unknown' | null;
+  draft_status_confidence?: 'high' | 'medium' | 'low' | null;
 }
 
 export interface SessionInfo {

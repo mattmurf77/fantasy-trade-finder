@@ -104,6 +104,15 @@ const V2_SCREENS = {
   // gates the League tab's ENTRY TILE, not the route, and a link that
   // 404s at the API renders the room's honest error state rather than a
   // dead path.
+  //
+  // PLACEMENT WAVE (option A′): `DraftRoom` is now registered in TWO places
+  // — here on the root stack, and inside the seasonal Draft tab's stack.
+  // This entry stays the ONE canonical URL and always resolves to the
+  // ROOT-stack registration, so `app/league/draft-room` behaves identically
+  // whether the tab is present or hidden: it pushes the room over the tabs
+  // and Back returns where the user was. The tab's copy deliberately has NO
+  // path of its own — two paths for one screen is how a link starts
+  // resolving differently depending on the season.
   DraftRoom: 'app/league/draft-room',
   Main: {
     path: 'app',

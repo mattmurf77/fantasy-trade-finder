@@ -18,6 +18,11 @@ export async function getLeagues(userId: string): Promise<LeagueSummary[]> {
     // Sleeper settings.type (0 redraft / 1 keeper / 2 dynasty) — F12
     // redraft labeling + event segment tag. Absent on local leagues.
     settings_type: typeof lg.settings?.type === 'number' ? lg.settings.type : undefined,
+    // rookie-draft placement (flag `draft.room`, server-side): #207's cached
+    // per-league draft verdict. Undefined with the flag off — the Draft tab's
+    // predicate (state/draftLeagues.ts) then finds nothing that qualifies.
+    draft_status: lg.draft_status ?? null,
+    draft_status_confidence: lg.draft_status_confidence ?? null,
   }));
 }
 

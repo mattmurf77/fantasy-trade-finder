@@ -12265,6 +12265,32 @@ def sleeper_leagues(user_id):
 
     if not sleeper_data:
         log.error("  no leagues found for user %s", user_id)
+
+    # rookie-draft placement (flag `draft.room`) — the ONE additive field the
+    # seasonal Draft tab needs. The tab bar is global while #207's draft
+    # verdict is per-league, so the client has to evaluate "does ANY linked
+    # league have a current-season rookie draft that hasn't run" over the
+    # whole list, at first mount, without a round-trip. This route is already
+    # the sole source of that list (mobile useSession.leagues), so the verdict
+    # rides along here instead of on a new route.
+    #
+    # Cached columns only — no detection, no platform read (the hourly tick +
+    # session_init's sync path own refresh). A league we've never synced has
+    # no row, so both fields come back null and it simply doesn't qualify.
+    # Flag OFF ⇒ this block is skipped and the payload is byte-identical.
+    if is_enabled("draft.room"):
+        for lg in sleeper_data:
+            if not isinstance(lg, dict):
+                continue
+            try:
+                ctx = get_league_draft_context(str(lg.get("league_id") or ""))
+            except Exception as e:
+                log.warning("  draft-status stamp failed for %s: %s",
+                            lg.get("league_id"), e)
+                ctx = None
+            lg["draft_status"] = (ctx or {}).get("status")
+            lg["draft_status_confidence"] = (ctx or {}).get("confidence")
+
     return jsonify(sleeper_data)
 
 

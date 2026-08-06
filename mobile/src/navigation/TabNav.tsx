@@ -10,7 +10,11 @@ import { getNextTrio, getRankings, getTiersStatus } from '../api/rankings';
 import { getLikedTrades, getAllMatches } from '../api/trades';
 import { useSession } from '../state/useSession';
 import { nextQuicksetPosition } from '../state/quicksetProgress';
-import { onboardingEnabled, useFlag } from '../state/useFeatureFlags';
+import { onboardingEnabled, useFeatureFlags, useFlag } from '../state/useFeatureFlags';
+import {
+  qualifyingDraftLeagues,
+  type QualifyingDraftLeague,
+} from '../state/draftLeagues';
 import { requestScrollToTop } from './scrollToTop';
 import { getOnboardingState } from '../state/useOnboardingState';
 import {
@@ -38,6 +42,11 @@ import TradesScreen from '../screens/TradesScreen';
 import PortfolioScreen from '../screens/PortfolioScreen';
 import TradeCalculatorScreen from '../screens/TradeCalculatorScreen';
 import MatchesScreen from '../screens/MatchesScreen';
+// rookie-draft placement (operator decision 2026-08-06, option A′) — the
+// SAME screen the root stack registers. Dual registration is deliberate:
+// the root-stack route is what `app/league/draft-room` resolves to, so a
+// deep link behaves identically whether or not the seasonal tab exists.
+import DraftRoomScreen from '../screens/DraftRoomScreen';
 import LeagueScreen from '../screens/LeagueScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import TopBar from '../components/TopBar';
@@ -458,6 +467,96 @@ function LeagueStackNav() {
   );
 }
 
+// ── rookie-draft: the seasonal Draft tab (option A′) ─────────────────────
+// Operator decision "draft-surface placement" (2026-08-06): a 5th bottom
+// tab that exists ONLY while a linked league has a current-season rookie
+// draft that hasn't run, driven by #207's shipped per-league verdicts. The
+// predicate itself lives in `state/draftLeagues.ts` (why `not_drafted` +
+// `high` and nothing else is argued there).
+//
+// Multi-league rule (plan §"Operator decision", differing from the mock's
+// active-league suggestion): the tab bar is global while draft status is
+// per-league, so the tab appears when ANY linked league qualifies and lands
+// on THAT league's room; with more than one, it lands on a chooser. The
+// room takes a `leagueId` param rather than switching the active league —
+// reading one league's board must not reset rankings, deck and format.
+//
+// Everything here is decided ONCE at mount (see `draftTab` in TabNav) so
+// the navigator's route array never changes mid-session: `initialRouteName`,
+// #244's completion-aware Rank launch routing and #245/#246's Acquire
+// semantics are all first-mount-only contracts that a mid-session tab
+// insertion would violate.
+const DraftStack = createNativeStackNavigator();
+
+function DraftLeagueChooserScreen({ navigation }: any) {
+  // Read at render, not frozen: this list only changes on a cold start
+  // (refreshDraftLeagues persists for the NEXT launch), so there is nothing
+  // to freeze against — and the chooser is the tab's root either way.
+  const leagues = qualifyingDraftLeagues();
+  return (
+    <View style={styles.chooserWrap}>
+      <Text style={styles.chooserIntro}>
+        {leagues.length} of your leagues have a rookie draft that hasn't run
+        yet.
+      </Text>
+      {leagues.map((lg: QualifyingDraftLeague) => (
+        <Pressable
+          key={lg.league_id}
+          testID={`draft-chooser.league.${lg.league_id}`}
+          accessibilityRole="button"
+          accessibilityLabel={lg.name}
+          onPress={() =>
+            navigation.navigate('DraftRoom', { leagueId: lg.league_id, inTabs: true })
+          }
+          style={({ pressed }) => [
+            styles.chooserRow,
+            pressed && { backgroundColor: ink.ink3 },
+          ]}
+        >
+          <Text style={styles.chooserName} numberOfLines={1}>
+            {lg.name}
+          </Text>
+          <Icon name="chevron-right" size={16} color={chalk.dim} />
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+function DraftStackNav() {
+  // Frozen at mount for the same reason the tab's presence is: the shape of
+  // this stack must not change under a user who is standing in it.
+  const [leagues] = useState(() => qualifyingDraftLeagues());
+  const single = leagues.length === 1 ? leagues[0] : null;
+  return (
+    <DraftStack.Navigator screenOptions={{ headerShown: false }}>
+      {single ? null : (
+        <DraftStack.Screen
+          name="DraftLeaguePicker"
+          component={DraftLeagueChooserScreen}
+          options={chalklineHeader('Rookie drafts')}
+        />
+      )}
+      <DraftStack.Screen
+        name="DraftRoom"
+        component={DraftRoomScreen}
+        // `inTabs` suppresses the screen's OWN FeedbackFAB: as a tab-stack
+        // screen it is already covered by RootNav's global mount, and two
+        // FABs is the #196/#197 bug. The root-stack registration passes
+        // nothing, so the pushed room keeps its local FAB unchanged.
+        initialParams={
+          single ? { leagueId: single.league_id, inTabs: true } : { inTabs: true }
+        }
+        options={
+          single
+            ? chalklineHeader('Rookie draft')
+            : subScreenOptions('Rookie draft', 'DraftLeaguePicker')
+        }
+      />
+    </DraftStack.Navigator>
+  );
+}
+
 // Chalkline tab icons — stroke SVG set from src/components/chalkline. The
 // navigator passes the active/inactive tint (ice / chalk-dim) as `color`.
 const tabIcon = (name: IconName) =>
@@ -508,6 +607,28 @@ export default function TabNav() {
     !getOnboardingState().firstSwipeDone
       ? 'Trades'
       : 'Rank',
+  );
+
+  // rookie-draft placement, option A′ — the seasonal Draft tab. Decided
+  // ONCE at mount, exactly like `initialTab` above and #244's Rank launch
+  // routing: conditionally rendering a <Tab.Screen> rewrites the
+  // navigator's route array, which reshuffles indices and can reset nested
+  // stack state, so the bar may change at most once per launch.
+  //
+  // The flag is read IMPERATIVELY (not via useFlag) on purpose: a
+  // mid-session flag revalidation must not be able to insert or remove a
+  // tab under the user's thumb. Flag off ⇒ `false` ⇒ four tabs, and the
+  // whole subtree below is never constructed.
+  //
+  // Everything else about this navigator is unchanged whether the tab is
+  // present or absent: `initialRouteName` still resolves to Rank/Trades by
+  // name (never index), the Rank stack's #244 completion-aware launch
+  // routing lives inside RankStackNav, and #245/#246's Acquire semantics
+  // live inside TradesStackNav. Adding a sibling touches none of them.
+  const [showDraftTab] = useState(
+    () =>
+      !!useFeatureFlags.getState().flags['draft.room'] &&
+      qualifyingDraftLeagues().length > 0,
   );
 
   return (
@@ -608,6 +729,32 @@ export default function TabNav() {
             },
           })}
         />
+        {/* rookie-draft placement, option A′ — third in the bar, matching
+            the approved mock's A′1 frame (Rank · Acquire · Draft · Matches ·
+            League). No flare dot: the tab's PRESENCE already means "a draft
+            is pending", and Sleeper exposes no trustworthy start time, so
+            there is no countdown or urgency signal to honestly render. */}
+        {showDraftTab ? (
+          <Tab.Screen
+            name="Draft"
+            component={DraftStackNav}
+            options={{
+              tabBarIcon: tabIcon('flag'),
+              tabBarLabel: 'Draft',
+              tabBarAccessibilityLabel: 'Draft',
+              tabBarButtonTestID: 'tab.draft',
+            }}
+            listeners={({ navigation, route }) => ({
+              // Same focused-re-tap contract as the other stack tabs
+              // (PRD 01-05): pop the chooser→room push back to the root.
+              tabPress: () => {
+                if (retapOn && navigation.isFocused()) {
+                  popNestedToTop(navigation, route);
+                }
+              },
+            })}
+          />
+        ) : null}
         <Tab.Screen
           name="Matches"
           component={MatchesScreen}
@@ -876,6 +1023,22 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: chalk.base,
   },
+
+  // rookie-draft: the >1-qualifying-league chooser (the tab's stack root).
+  chooserWrap: { flex: 1, backgroundColor: ink.ink0, padding: space.lg, gap: space.sm },
+  chooserIntro: { ...type.bodySm, marginBottom: space.xs },
+  chooserRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    minHeight: 52,
+    paddingHorizontal: space.md,
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+  },
+  chooserName: { ...type.title, flex: 1 },
 
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: scrim },
   sheet: {

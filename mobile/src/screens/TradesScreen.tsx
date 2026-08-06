@@ -432,6 +432,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // switching home. Flag off ⇒ every value here is undefined and this
   // screen behaves exactly as the classic standalone Trades home.
   const finderHubOn = useFlag('trades.finder_hub');
+  // rookie-draft placement, option B — gates the mode strip's leading Draft
+  // chip (the room's permanent home). Off ⇒ no chip, strip unchanged.
+  const draftRoomOn = useFlag('draft.room');
   const finderMode: 'guided' | 'team' | 'player' | undefined = finderHubOn
     ? route?.params?.mode
     : undefined;
@@ -3084,6 +3087,15 @@ export default function TradesScreen({ navigation, route }: any) {
             onSwitch={switchFinderMode}
             onCalculator={() => navigation?.navigate?.('TradeCalculator')}
             onFreeAgents={() => navigation?.navigate?.('FreeAgents')}
+            // rookie-draft placement, option B (operator decision
+            // 2026-08-06): the Draft chip is the draft's PERMANENT home and
+            // LEADS the strip. Passing the handler is what creates the chip,
+            // so `draft.room` off ⇒ five chips exactly as today.
+            onDraft={
+              draftRoomOn
+                ? () => navigation?.navigate?.('DraftRoom')
+                : undefined
+            }
             showHint={deck.length === 0}
           />
         ) : null}

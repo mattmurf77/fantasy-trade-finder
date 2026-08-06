@@ -88,7 +88,7 @@ Account-auth plan P2 + P2.6 account-first (docs/plans/account-auth-plan-2026-07-
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/sleeper/user/<username>` | Resolve Sleeper user |
-| GET | `/api/sleeper/leagues/<user_id>` | List user's leagues |
+| GET | `/api/sleeper/leagues/<user_id>` | List user's leagues. **Behind `draft.room`** each row is additively stamped with `draft_status` (`drafted`/`not_drafted`/`unknown`/null) + `draft_status_confidence` (`high`/`medium`/`low`/null) read from the cached #207 `leagues` columns — no detection, no platform call; a league with no row gets explicit nulls. This is the sole client signal for the seasonal Draft tab (per-league verdict vs a global tab bar); flag off ⇒ neither key is present and the payload is byte-identical |
 | GET | `/api/sleeper/rosters/<league_id>` | League rosters. Local (non-numeric id) and platform-imported (ESPN/MFL/Fleaflicker — numeric native id, `leagues.platform` set) leagues are served from the DB `league_members` snapshot instead of Sleeper (#149/#150) |
 | GET | `/api/sleeper/league_users/<league_id>` | League members. Same local/platform-imported DB split as rosters |
 | GET | `/api/sleeper/players` | Bulk player payload |

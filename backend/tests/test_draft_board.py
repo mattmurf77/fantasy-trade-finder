@@ -1130,3 +1130,106 @@ def test_m5_mfl_binding_is_hermetic(client, session, monkeypatch, mfl_league):
     finally:
         ff._flags_cache = saved
         test_support.counters.update(before)
+
+
+# ---------------------------------------------------------------------------
+# Placement wave (operator decision "draft-surface placement", 2026-08-06)
+#
+# The seasonal Draft tab is global while #207's verdict is per-league, so the
+# ONE additive server field it needs rides on the route that already
+# enumerates the user's leagues. These pin the two properties the tab's
+# correctness rests on: the field appears with `draft.room` ON, and the
+# payload is byte-identical with it OFF.
+# ---------------------------------------------------------------------------
+
+LEAGUES_ROUTE = "/api/sleeper/leagues/{}".format(OPERATOR)
+
+
+@pytest.fixture()
+def _leagues_stub(monkeypatch):
+    """Two leagues from Sleeper, no local ones, and a canned #207 verdict
+    for each. Nothing here touches the network or the players table."""
+    monkeypatch.setattr(
+        server, "_sleeper_get",
+        lambda url: [{"league_id": LAKEVIEW_LEAGUE, "name": "Lakeview"},
+                     {"league_id": FFV3_LEAGUE, "name": "FFv3"}])
+    monkeypatch.setattr(server, "load_local_leagues_for_user", lambda uid: [])
+    ctxs = {
+        LAKEVIEW_LEAGUE: {"status": "not_drafted", "confidence": "high"},
+        FFV3_LEAGUE:     {"status": "drafted", "confidence": "high"},
+    }
+    monkeypatch.setattr(server, "get_league_draft_context", ctxs.get)
+
+
+def test_placement_leagues_payload_is_byte_identical_with_the_flag_off(
+    client, _leagues_stub,
+):
+    """Flag off ⇒ the stamping block is skipped entirely: no field, no DB
+    read, and the response is exactly what shipped before this wave."""
+    saved = ff._flags_cache
+    try:
+        _pin_flags()
+        off = client.get(LEAGUES_ROUTE)
+        assert off.status_code == 200
+        assert all("draft_status" not in lg for lg in off.get_json())
+    finally:
+        ff._flags_cache = saved
+
+
+def test_placement_leagues_payload_carries_the_207_verdict_with_the_flag_on(
+    client, _leagues_stub,
+):
+    saved = _pin_flags(**{"draft.room": True})
+    try:
+        rows = {lg["league_id"]: lg for lg in client.get(LEAGUES_ROUTE).get_json()}
+    finally:
+        ff._flags_cache = saved
+    # The qualifying league: a current-season rookie-shaped draft that has
+    # not run. `not_drafted` + `high` is the ONLY combination the client's
+    # predicate accepts (see mobile/src/state/draftLeagues.ts).
+    assert rows[LAKEVIEW_LEAGUE]["draft_status"] == "not_drafted"
+    assert rows[LAKEVIEW_LEAGUE]["draft_status_confidence"] == "high"
+    # A drafted league is stamped honestly and simply does not qualify.
+    assert rows[FFV3_LEAGUE]["draft_status"] == "drafted"
+
+
+def test_placement_a_league_with_no_row_is_stamped_null_not_omitted(
+    client, monkeypatch,
+):
+    """A league we have never synced has no #207 row. It must come back with
+    explicit nulls rather than a missing key — the client reads the field
+    unconditionally, and an absent key would be indistinguishable from the
+    flag being off."""
+    monkeypatch.setattr(server, "_sleeper_get",
+                        lambda url: [{"league_id": EMPTY_LEAGUE, "name": "New"}])
+    monkeypatch.setattr(server, "load_local_leagues_for_user", lambda uid: [])
+    monkeypatch.setattr(server, "get_league_draft_context", lambda lid: None)
+    saved = _pin_flags(**{"draft.room": True})
+    try:
+        row = client.get(LEAGUES_ROUTE).get_json()[0]
+    finally:
+        ff._flags_cache = saved
+    assert row["draft_status"] is None
+    assert row["draft_status_confidence"] is None
+
+
+def test_placement_a_draft_context_failure_never_breaks_the_league_list(
+    client, monkeypatch,
+):
+    """The league list is a sign-in-critical payload. A verdict lookup that
+    raises degrades to nulls; it never 500s the picker."""
+    monkeypatch.setattr(server, "_sleeper_get",
+                        lambda url: [{"league_id": LAKEVIEW_LEAGUE, "name": "Lakeview"}])
+    monkeypatch.setattr(server, "load_local_leagues_for_user", lambda uid: [])
+
+    def _boom(_lid):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(server, "get_league_draft_context", _boom)
+    saved = _pin_flags(**{"draft.room": True})
+    try:
+        resp = client.get(LEAGUES_ROUTE)
+    finally:
+        ff._flags_cache = saved
+    assert resp.status_code == 200
+    assert resp.get_json()[0]["draft_status"] is None
