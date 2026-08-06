@@ -49,11 +49,16 @@ Deviations from the LLD, recorded here rather than silently:
    crosswalk would silently under-count. Absent the map the list is suppressed
    honestly (``undrafted_suppressed: true``) rather than computed wrongly.
    M5 wires the crosswalk that lifts this.
+4. **M6's `BoardRequest.scoring` defaults to the app default**, not the
+   league's own scoring format. The M3 route does not resolve a format, and
+   the field is inert while `picks.slot_values` is off; the route wave can
+   pass the league format when it lands. Recorded in `build-m6.md`.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from collections import deque
@@ -61,7 +66,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 
-from . import draft_status
+from . import data_loader, draft_status
+from .feature_flags import is_enabled
 
 log = logging.getLogger(__name__)
 
@@ -101,10 +107,11 @@ NOTICE_MFL_RECONNECT = "mfl_reconnect"
 _NOTICE_MESSAGES = {
     NOTICE_ORDER_NOT_SET: "The draft order is not set yet — showing who owns each round.",
     NOTICE_STARTUP_DRAFT: "Startup draft — rookie list hidden.",
-    # States what is NOT available rather than what is: MFL renders here but is
-    # deliberately unbound until M5, so naming it as supported contradicts the
-    # `unavailable` board this notice rides on. (The mobile room overrides this
-    # per code; this is the payload fallback every other consumer reads.)
+    # States what is NOT available rather than what is. This notice rides on an
+    # `unavailable` board, so naming a platform as supported contradicts the very
+    # payload it appears in — and it fires for MFL whenever `draft.mfl` is off,
+    # which is the shipped default. (The mobile room overrides copy per code;
+    # this is the payload fallback every other consumer reads.)
     NOTICE_PLATFORM_UNSUPPORTED: "Draft rooms aren't available for this platform yet.",
     NOTICE_CLASS_NOT_LOADED: "This rookie class has not loaded yet.",
     NOTICE_MFL_RECONNECT: "Reconnect MyFantasyLeague to refresh this draft.",
@@ -185,6 +192,12 @@ class BoardRequest:
     rostered_ids: Sequence[str] | None = None
     #: Platform draft-room URL. Never a write (D9).
     deep_link: str | None = None
+    #: M6 — which DynastyProcess column the display-only slot values read
+    #: (``"1qb_ppr"`` / ``"sf_tep"``). Defaults to the app default rather than
+    #: the league's own format because the M3 route does not resolve a format
+    #: today; the route wave can pass the league's format once it does, and
+    #: the field is inert while `picks.slot_values` is off. See build-m6.md.
+    scoring: str = data_loader.DEFAULT_SCORING
 
 
 class Fetchers(Protocol):
@@ -753,6 +766,78 @@ def _order_from(detail: dict, traded: list, rosters: list, users: list,
     return _cap_order(order), ORDER_ASSIGNED
 
 
+# ---------------------------------------------------------------------------
+# Slot values — DISPLAY ONLY (M6, plan §M6 / lld §4.7 / KD-9)
+# ---------------------------------------------------------------------------
+# One optional field on `order[]` entries, behind `picks.slot_values`. Nothing
+# in the trade engine, `pick_values.GENERIC_PICK_SEEDS`, the tier ladder or the
+# tier bands reads it: DP's current-year slot curve is much steeper than our
+# shipped ladder (1.01 ≈ Elo 1817 vs "Early 1st" 1720), so engine adoption is
+# the separate M6b repricing wave (plan O2), not this one.
+
+#: DynastyProcess publishes ONE slot curve, and it is a 12-team curve
+#: ("… 1.12", "… 2.01"). Any other league size is mapped onto it (O3).
+SLOT_VALUE_BASIS_TEAMS = 12
+
+
+def _basis_slot(slot: int, teams: int) -> int:
+    """Map a slot in a `teams`-team draft onto the 12-team curve by PERCENTILE
+    WITHIN THE ROUND (plan O3, "percentile map, labeled approximation").
+
+    Slot *s* of *T* sits at percentile ``(s - 1) / (T - 1)`` of its round; the
+    returned 12-team slot is the nearest one at the same percentile. The ENDS
+    are anchored deliberately: pick 1 of a 10-team round is still the first
+    pick of that round and prices as ``1.01``, and the last is the last. A
+    midpoint-of-band map would price the 1.01 of a small league below DP's
+    1.01, which is simply wrong.
+
+    At ``T == 12`` this is the identity — a 12-team league is priced EXACTLY
+    and its payload carries no `slot_value_approx` marker.
+    """
+    if teams == SLOT_VALUE_BASIS_TEAMS:
+        return slot
+    if teams <= 1:
+        return 1
+    percentile = (slot - 1) / (teams - 1)
+    target = 1 + percentile * (SLOT_VALUE_BASIS_TEAMS - 1)
+    basis = math.floor(target + 0.5)                      # nearest; no bankers' rounding
+    return max(1, min(SLOT_VALUE_BASIS_TEAMS, basis))
+
+
+def _annotate_slot_values(order: list[dict], season: int, teams: int | None,
+                          scoring: str) -> bool:
+    """Add `slot_value` (seed-Elo space) to the order entries we can price.
+
+    Returns whether the payload should carry `slot_value_approx: true`.
+
+    **Omit-when-absent is the contract** (lld §2.1): flag off, read failed, an
+    order with no resolved slots, or a round DP does not publish ⇒ the
+    `slot_value` key is simply not written. It is NEVER set to ``None`` — a
+    null would read as "this pick is worthless" on every client.
+    """
+    if not is_enabled("picks.slot_values"):
+        return False
+    try:
+        prices = data_loader.load_pick_slot_values(scoring)
+    except Exception:                                   # load is fail-soft, but never trust
+        log.exception("slot-value read failed — rendering board without the axis")
+        return False
+    if not prices or not teams:
+        return False
+
+    priced = False
+    for entry in order:
+        slot, round_no = entry.get("slot"), entry.get("round")
+        if not slot or not round_no:
+            continue                                    # order_confidence != "assigned"
+        value = prices.get(data_loader.pick_slot_label(
+            season, round_no, _basis_slot(int(slot), int(teams))))
+        if value is not None:
+            entry["slot_value"] = value
+            priced = True
+    return priced and int(teams) != SLOT_VALUE_BASIS_TEAMS
+
+
 def _cap_order(order: list[dict]) -> list[dict]:
     if len(order) > _ORDER_CAP:
         log.warning("draft-board order truncated at %d entries (had %d)",
@@ -1025,9 +1110,14 @@ def _payload(req: BoardRequest, platform: str, *, state: str, kind: str,
              undrafted: list[dict], undrafted_suppressed: bool,
              entry: "_Entry", notice: dict | None,
              deep_link: str | None) -> dict:
+    # M6 — the display-only slot-value axis. Annotated HERE, before `my_picks`
+    # is sliced, so the two render paths (Sleeper + MFL) cannot drift and
+    # `my_picks` carries the same entries as `order`.
+    approx = _annotate_slot_values(order, season, teams, req.scoring)
+
     my_picks = ([o for o in order if o.get("owner_user_id") == req.user_id]
                 if req.user_id else [])
-    return {
+    payload = {
         "schema": SCHEMA,
         "league_id": str(req.league_id),
         "platform": platform,
@@ -1050,6 +1140,11 @@ def _payload(req: BoardRequest, platform: str, *, state: str, kind: str,
         "notice": notice,
         "deep_link": deep_link,
     }
+    if approx:
+        # Present ONLY when the slot prices actually shipped AND the league is
+        # not 12-team. A 12-team board is exact and must carry no marker.
+        payload["slot_value_approx"] = True
+    return payload
 
 
 def unsupported_board(req: BoardRequest) -> dict:

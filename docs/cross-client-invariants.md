@@ -309,6 +309,22 @@ Anchor values are position-uniform on purpose (uniform valuation across position
 
 ---
 
+## Draft-pick slot values are DISPLAY ONLY — they are not the ladder
+
+**`order[].slot_value` on `GET /api/draft/board` is a second, independent pricing of draft picks, and nothing values an asset with it** (rookie-draft M6, flag `picks.slot_values`, default off).
+
+It comes from DynastyProcess's *combined* `files/values.csv` — the `pos == "PICK"` rows, which price individual slots (`"2026 Pick 1.01"` … `"2026 Pick 5.12"`) plus the future-year rungs — mapped into seed-Elo space through the same `data_loader.seed_elo_for_value` the player seeds use, so the number is directly comparable to a player's Elo *on screen*. That is the whole of its contract.
+
+**What it is NOT.** It is not `GENERIC_PICK_SEEDS`, not `pick_pool_value`, not a tier-band floor, and not an input to the trade engine, the suggestion pool, `/api/trade/evaluate` or any anchor. The two scales genuinely disagree: DP's current-year slot curve is far steeper than our shipped ladder — **1.01 ≈ Elo 1817 against "Early 1st" 1720, and 1.12 ≈ 1461 against "Late 1st" 1580** (1QB, 2026-08-06 snapshot). Adopting it in the engine is a repricing decision with its own calibration wave and user toggle (plan O2 → M6b), not a data plumb. A client that renders a slot value next to a ladder value must label which is which.
+
+**Approximation marker.** DP publishes ONE slot curve and it is a **12-team** curve. A 12-team league is priced exactly and the payload carries **no** `slot_value_approx` key; any other league size is mapped onto the 12-team curve by within-round percentile with both ends anchored (slot 1 → `x.01`, slot T → `x.12`) and the payload carries `slot_value_approx: true`. Clients must label an approximated axis.
+
+**Omit-when-absent.** With the flag off, the read failed, the order unresolved (`slot: null`), or the round/season unpublished by DP, the `slot_value` key is **absent entirely** — never `null`, never `0`. A null would render as "this pick is worthless".
+
+**Locations:** `backend/data_loader.py` (`PICK_VALUES_URL`, `load_pick_slot_values`, `pick_slot_label`) · `backend/draft_board_service.py` (`_annotate_slot_values`, `_basis_slot`, `SLOT_VALUE_BASIS_TEAMS`) · flag `picks.slot_values` in `backend/feature_flags.py` · test seam `FTF_DP_PICK_VALUES_FILE` ([config-reference](config-reference.md)). Tests: `backend/tests/test_slot_values.py` (T-M6-01/02/03, including a per-module assertion that `trade_service`, `trade_optimizer`, `pick_values` and `ranking_service` never read the map).
+
+---
+
 ## Rookie predicate
 
 **There is exactly ONE test for "is this player in season N's rookie class".** Anything that scopes, filters, counts or labels rookies — server, client, script or report — resolves to it:

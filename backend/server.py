@@ -469,11 +469,14 @@ _SLEEPER_FIXTURES_DIR = os.environ.get("FTF_SLEEPER_FIXTURES_DIR")
 _SLEEPER_RECORD       = os.environ.get("FTF_SLEEPER_RECORD") == "1"
 
 if _TEST_MODE and not (_SLEEPER_FIXTURES_DIR and _players_cache_override
-                       and os.environ.get("FTF_DP_VALUES_FILE")):
+                       and os.environ.get("FTF_DP_VALUES_FILE")
+                       and os.environ.get("FTF_DP_PICK_VALUES_FILE")):
     raise SystemExit(
-        "FTF_TEST_MODE=1 requires FTF_SLEEPER_FIXTURES_DIR, FTF_PLAYERS_CACHE_FILE and "
-        "FTF_DP_VALUES_FILE — a test-mode backend that can reach live Sleeper/DynastyProcess "
-        "or write the real players cache is a rails hole (prd.md R-12).")
+        "FTF_TEST_MODE=1 requires FTF_SLEEPER_FIXTURES_DIR, FTF_PLAYERS_CACHE_FILE, "
+        "FTF_DP_VALUES_FILE and FTF_DP_PICK_VALUES_FILE — a test-mode backend that can "
+        "reach live Sleeper/DynastyProcess or write the real players cache is a rails "
+        "hole (prd.md R-12). FTF_DP_PICK_VALUES_FILE pins DynastyProcess's SECOND remote "
+        "file, files/values.csv (rookie-draft M6 slot values, T-M6-01).")
 if _SLEEPER_RECORD and _TEST_MODE:
     raise SystemExit("FTF_SLEEPER_RECORD is deliberately live — it cannot run with FTF_TEST_MODE=1.")
 if _SLEEPER_RECORD and _SLEEPER_FIXTURES_DIR and any(
@@ -9853,15 +9856,134 @@ def _fetch_sleeper_drafts(league_id: str) -> list[dict]:
 # Two properties belong to this shim rather than to the service:
 #   * `draft.room` OFF ⇒ 404 feature_disabled, before any session or league
 #     work (the espn.link / mfl.link convention).
-#   * Only Sleeper is BOUND in this wave. MFL rendering exists in the
-#     service and is tested, but M5 owns its wiring behind `draft.mfl`;
-#     until then every non-Sleeper league gets the honest
-#     platform_unsupported state instead of a half-wired MFL read.
+#   * Platform BINDING. Sleeper landed in M3; MFL is bound here in M5 behind
+#     `draft.mfl` (default OFF). With `draft.mfl` off, an MFL league gets the
+#     same honest platform_unsupported payload M3 shipped — byte-identical,
+#     and with ZERO MFL reads attempted. Everything else (ESPN, Fleaflicker)
+#     stays unsupported: neither has a verified pick model (plan §2).
 #
 # `_sleeper_get` is passed as the fetcher transport, which buys fixture
 # replay for free (FTF_SLEEPER_FIXTURES_DIR, A-7), and `_rookie_player_ids`
 # is passed as the rookie predicate so the board shares the process-wide
 # (season, pool-generation) memo instead of re-querying per request.
+
+
+# LLD-vs-operator-decisions conflicts hit by M5 (the lld predates the
+# 2026-08-06 operator block; both are also recorded in
+# docs/plans/rookie-draft/build-m5.md §6, which is the fuller writeup):
+#
+#   C-1  The ≤3-upstream-fetches-per-rolling-60s-per-draft budget in
+#        draft_board_service is a PER-PROCESS guarantee, and plan §6 warns:
+#        "if O8 upgrades to multi-worker, ≤3 req/min/draft multiplies by
+#        worker count — restate the budget then". O8 was decided as UPGRADE
+#        RENDER, so that warning is now live and UNRESOLVED: with N workers
+#        MFL sees up to 3N req/min/draft, against a platform that asks for
+#        >=1s between requests. M5 changes nothing here on purpose — the
+#        budget is the service's, and restating it is an operator task at
+#        upgrade time, not a side effect of wiring MFL.
+#   C-2  lld §8 records O10 as "YES, generic pick rungs under rookie scope".
+#        The operator decided NO — players only. M5 is unaffected (the board's
+#        undrafted list is sourced from players.rookie_year, never from the
+#        pick pool), but the lld line is wrong and M2 must not follow it.
+
+
+def _mfl_draft_opener():
+    """The MFL transport for the Draft Room — ``None`` in production.
+
+    MFL has no `FTF_SLEEPER_FIXTURES_DIR`-style env seam, so `mfl_service`
+    takes an injected `_opener` instead (`mfl_service._fetch_one`). Returning
+    it from a function rather than reading a module constant makes this a
+    one-line monkeypatch seam for the route-level M5 tests, which is what
+    lld §4.6's RB-3 ("thread `_opener` down to `fetch_draft_results`, or M5
+    cannot be tested against the committed corpora") requires. `None` ⇒
+    `urllib.request.urlopen`, i.e. today's production behavior.
+    """
+    return None
+
+
+def _mfl_board_binding(league_id: str, sess) -> dict | None:
+    """Resolve everything `build_board` needs to read an MFL league, or None.
+
+    Returns ``{"request_fields": {...BoardRequest MFL kwargs...},
+    "cookie": str|None}``. `None` means "this league cannot be read as MFL",
+    and the caller degrades to the same `platform_unsupported` payload the
+    flag-off path serves — never a half-wired read, never a fabricated board.
+
+    Resolution reuses the EXISTING MFL scheme, no second one:
+      * host + year  ← `leagues.platform_host` / `platform_season`, the same
+        columns `_draft_status_for_league` and `_refresh_mfl_future_picks`
+        read. **`mfl_service.resolve_host` is deliberately NOT called as a
+        fallback** — it is a second network round-trip, and a league with no
+        stored host was never imported through the MFL path, so there is
+        nothing to read. That keeps this binding at exactly ONE MFL export
+        call per refresh cycle, which is why `_REQUEST_SPACING_SECONDS`
+        (the ≥1 s gap MFL asks for between calls) has nothing to space here.
+        If a future change adds a second export to this path, it must space
+        the calls the way `fetch_league_bundle` does.
+      * cookie ← `_mfl_cookie_for` (encrypted row first, in-memory session
+        fallback). Public leagues need none; a private league whose cookie
+        expired raises `MflAuthError` inside the service, which is what
+        produces `notice.mfl_reconnect` + `stale:true` instead of a live-
+        looking board.
+      * franchise → user ← the SAME synthetic-id scheme every other MFL
+        surface uses (`_mfl_member_id`: `mfl:<league>.f<franchise>`), with
+        the linking user's own franchise (`platform_my_team`) mapped to
+        their real user id so `my_picks` resolves.
+      * MFL player id → our id ← the EXISTING shared DP crosswalk
+        (`_shared_crosswalk().by_mfl_sleeper`). This is load-bearing:
+        `draft_board_service._render_mfl` SUPPRESSES the undrafted list
+        entirely when the map is missing, because subtracting MFL-space
+        pick ids from our rookie ids would silently under-count. A crosswalk
+        failure therefore degrades to an honestly-suppressed list, never a
+        wrong one.
+      * rostered ids ← `league_members.player_ids`, already crosswalked into
+        our id space at import time (MFL rosters are not re-fetched here).
+    """
+    from .database import get_platform_league
+
+    lid = str(league_id)
+    row = get_platform_league(lid, "mfl") or {}
+    host = str(row.get("platform_host") or "").strip()
+    if not host:
+        return None
+    try:
+        year = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
+    except (TypeError, ValueError):
+        year = _MFL_DEFAULT_YEAR
+
+    try:
+        members = load_league_members(lid)
+    except Exception:
+        members = []
+    prefix = _mfl_member_id(lid, "")
+    franchise_to_user: dict[str, str] = {}
+    rostered: list[str] = []
+    for m in members:
+        uid = str(m.get("user_id") or "")
+        rostered.extend(str(p) for p in (m.get("player_ids") or []) if p)
+        if uid.startswith(prefix):
+            franchise_to_user[uid[len(prefix):]] = uid
+    my_team = str(row.get("platform_my_team") or "")
+    link_user = str(row.get("user_id") or "")
+    if my_team and link_user:
+        franchise_to_user[my_team] = link_user
+
+    try:
+        player_ids = _shared_crosswalk().by_mfl_sleeper
+    except Exception as e:                       # never a 5xx (lld §2.1)
+        log.warning("draft-board: MFL crosswalk unavailable for %s: %s", lid, e)
+        player_ids = {}
+
+    return {
+        "request_fields": {
+            "mfl_host":              host,
+            "mfl_year":              year,
+            "mfl_franchise_to_user": franchise_to_user,
+            "mfl_player_ids":        player_ids,
+            "rostered_ids":          rostered,
+        },
+        "cookie": _mfl_cookie_for(sess, str(sess.get("user_id") or "")),
+    }
 
 @app.route("/api/draft/board")
 @_gate_unverified_read
@@ -9877,6 +9999,23 @@ def draft_board_route():
     An upstream failure is NEVER a 5xx: it surfaces inside a 200 as
     `state`/`degraded`/`stale`, with `as_of` always present so the client
     can say how old the board is.
+
+    Platforms: Sleeper (M3, unflagged beyond `draft.room`) and MFL (M5,
+    behind `draft.mfl`, default OFF — off means the honest
+    `platform_unsupported` payload and zero MFL reads). MFL's board comes
+    from `TYPE=draftResults`, whose pre-populated grid carries a franchise
+    on EVERY pick, made or not — so MFL's pre-draft ownership is strictly
+    better than Sleeper's (D8). An expired MFL cookie serves the stored
+    snapshot with `notice.mfl_reconnect` + `stale:true`, never stale-as-live.
+
+    **MFL LIVE MODE IS RELEASE-GATED, not built off.** A drafting MFL league
+    correctly reports `state:"live"` here, but MFL's mid-draft update
+    latency is UNVERIFIED (plan §M5): nobody has measured how long after a
+    pick MFL's export reflects it. Until the timed probe in
+    docs/plans/rookie-draft/build-m5.md passes, MFL ships upcoming + manual
+    refresh — which is what `draft.live_poll` (a SEPARATE flag, also OFF)
+    already enforces, since it is the only recurring fetch in the system.
+    Flipping `draft.mfl` on does NOT start any poll.
 
     Query params:
       league_id — optional, defaults to the session league.
@@ -9934,6 +10073,15 @@ def draft_board_route():
         board_elo = {rp.player.id: rp.elo
                      for rp in sess["service"].get_rankings(position=None).rankings}
 
+    # M5 — MFL binding. Resolved BEFORE the (frozen) BoardRequest is built so
+    # it is constructed once, MFL fields already in place. `draft.mfl` OFF ⇒
+    # this block is skipped entirely: no database read of the MFL league row,
+    # no crosswalk load, no MFL export call, and the payload below is the
+    # byte-identical `platform_unsupported` M3 shipped.
+    mfl_bind = None
+    if platform == dbs.MFL and is_enabled("draft.mfl"):
+        mfl_bind = _mfl_board_binding(league_id, sess)
+
     req = dbs.BoardRequest(
         league_id     = str(league_id),
         platform      = platform,
@@ -9942,7 +10090,16 @@ def draft_board_route():
         basis         = basis,
         board_elo     = board_elo,
         consensus_elo = consensus_seed,
+        **(mfl_bind["request_fields"] if mfl_bind else {}),
     )
+    if mfl_bind is not None:
+        # No `sleeper_get`: the MFL path never touches Sleeper, and leaving it
+        # unbound makes a stray Sleeper read raise instead of going live.
+        return jsonify(dbs.build_board(req, dbs.PlatformFetchers(
+            rookie_ids_fn = _rookie_player_ids,
+            mfl_opener    = _mfl_draft_opener(),
+            mfl_cookie    = mfl_bind["cookie"])))
+
     if platform != dbs.SLEEPER:
         return jsonify(dbs.unsupported_board(req))
 

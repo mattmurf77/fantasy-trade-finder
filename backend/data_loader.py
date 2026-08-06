@@ -6,6 +6,9 @@ dynasty trade value onto an initial Elo rating.
 
 Source: https://github.com/dynastyprocess/data
 File:   files/values-players.csv
+        files/values.csv — the combined file, read ONLY for its `pos == "PICK"`
+        rows (per-slot draft-pick market prices, display-only; see
+        load_pick_slot_values near the bottom of this module).
 
 CSV columns used:
   player      — player name (string)
@@ -59,6 +62,16 @@ from typing import Optional
 
 VALUES_URL = (
     "https://raw.githubusercontent.com/dynastyprocess/data/master/files/values-players.csv"
+)
+
+# Rookie-draft M6 — DynastyProcess's *combined* file. Same columns as
+# values-players.csv, but it additionally carries `pos == "PICK"` rows: the
+# per-slot current-year curve ("2026 Pick 1.01" … "2026 Pick 5.12") and the
+# future-year rungs ("2027 Early 1st", "2028 2nd", …). This is a SECOND remote
+# file, so it has its own hermetic seam (FTF_DP_PICK_VALUES_FILE) —
+# see load_pick_slot_values below.
+PICK_VALUES_URL = (
+    "https://raw.githubusercontent.com/dynastyprocess/data/master/files/values.csv"
 )
 
 ELO_MIN   = 1200.0     # seed Elo at DP value 0 (the affine map's low anchor)
@@ -563,6 +576,127 @@ def _fetch_dynasty_process(
     fmt_key = DP_PARAM_TO_FORMAT.get(scoring, scoring)
     elo_map, value_map = _apply_consensus_blend(fmt_key, elo_map, value_map, pos_map)
     return elo_map, value_map, pos_map
+
+
+# ---------------------------------------------------------------------------
+# Draft-pick market prices — DISPLAY ONLY (rookie-draft M6)
+# ---------------------------------------------------------------------------
+# DynastyProcess's combined `files/values.csv` prices individual draft SLOTS
+# ("2026 Pick 1.01") as well as the year rungs we already model. The values are
+# on the SAME 0-10000 scale as the player rows, so seed_elo_for_value maps them
+# into our Elo space unchanged.
+#
+# Bound (plan KD-9 / hld §2.2): these prices are served on the Draft Room
+# board's `order[]` entries and NOWHERE ELSE. `pick_values.GENERIC_PICK_SEEDS`,
+# the tier ladder, the tier bands and the trade engine do not read this map —
+# DP's current-year slot curve is far steeper than our shipped ladder, so
+# adopting it in the engine is a repricing decision, not a data plumb.
+#
+# ⚠️  LLD-vs-OPERATOR-DECISION CONFLICT (hld KD-9 / lld §4.7 predate the
+# 2026-08-06 operator block at the bottom of plan.md). KD-9 records engine
+# adoption as *rejected*; operator decision **O2 REVERSES that** — market slot
+# values ARE going into the trade engine, behind a #214-style user toggle, in a
+# dedicated calibration wave (M6b). What survives unchanged is THIS wave's
+# bound: M6 ships the display axis only, and M6b is the only thing allowed to
+# widen it. Do not read "display-only" here as "the engine will never see
+# this"; read it as "not yet, and not from this code path".
+#
+# Fail-soft, like every other consensus source here: any failure returns {} and
+# the board simply renders without the slot-value axis.
+
+_PICK_VALUES_TTL_SECONDS = 24 * 3600     # one polite fetch per day, like the DP CSV
+_pick_values_lock = threading.Lock()
+# {internal format key: {DP pick label: seed Elo}} — both formats parsed from
+# the single fetch, so a superflex board costs no extra egress.
+_pick_values_cache: dict[str, dict[str, float]] | None = None
+_pick_values_fetched_at: float = 0.0
+
+def pick_slot_label(season, round_no, slot) -> str:
+    """The DP label for one draft slot: ``pick_slot_label(2026, 1, 1)`` →
+    ``"2026 Pick 1.01"``. DP zero-pads the slot to two digits."""
+    return f"{int(season)} Pick {int(round_no)}.{int(slot):02d}"
+
+
+def _fetch_pick_values_csv(timeout: int = 10) -> str:
+    """Fetch DP's combined values.csv (or the test-seam file).
+
+    Hermetic-run rules mirror the values-players.csv seam, and are STRICTER
+    than KTC's: `values.csv` is a second live egress, so under FTF_TEST_MODE
+    the override is mandatory rather than "absent means off". `backend/server`
+    refuses to start in test mode without it (T-M6-01), so reaching this
+    function's network branch from a test run is impossible by construction.
+    """
+    _pick_file = os.environ.get("FTF_DP_PICK_VALUES_FILE")
+    if os.environ.get("FTF_TEST_MODE") == "1" and not _pick_file:
+        raise RuntimeError(
+            "FTF_TEST_MODE=1 requires FTF_DP_PICK_VALUES_FILE "
+            "(hermetic DynastyProcess pick values)")
+    if _pick_file:
+        return pathlib.Path(_pick_file).read_text()  # missing file = loud, by design
+    req = urllib.request.Request(
+        PICK_VALUES_URL, headers={"User-Agent": "FantasyTradeFinder/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8")
+
+
+def _parse_pick_values(raw: str) -> dict[str, dict[str, float]]:
+    """Parse `pos == "PICK"` rows into {format: {label: seed Elo}}.
+
+    Rows with a non-positive or unparseable value in a format are omitted from
+    THAT format only — a missing price must never render as a 0-value pick.
+    """
+    out: dict[str, dict[str, float]] = {fmt: {} for fmt in SCORING_FORMATS}
+    reader = csv.DictReader(io.StringIO(raw))
+    for row in reader:
+        if (row.get("pos") or "").strip().upper() != "PICK":
+            continue
+        label = (row.get("player") or "").strip()
+        if not label:
+            continue
+        for fmt, dp_suffix in DP_SCORING_PARAM.items():
+            try:
+                value = float((row.get(f"value_{dp_suffix}") or "0").strip())
+            except ValueError:
+                continue
+            if value > 0:
+                out[fmt][label] = round(seed_elo_for_value(value), 1)
+    return out
+
+
+def load_pick_slot_values(scoring: str = DEFAULT_SCORING) -> dict[str, float]:
+    """``{"2026 Pick 1.01": 1816.5, "2027 Early 1st": 1718.6, …}`` in seed-Elo
+    space, for one scoring format.
+
+    Accepts either an internal format key (``"1qb_ppr"`` / ``"sf_tep"``) or
+    DP's own column suffix (``"1qb"`` / ``"2qb"``). 24 h in-memory TTL, shared
+    by both formats. **Never raises**: any fetch/parse failure returns ``{}``
+    (and caches that emptiness for the TTL, so a broken endpoint is not
+    re-hammered by every board render), which the Draft Room renders as "no
+    slot-value axis" rather than an error.
+    """
+    global _pick_values_cache, _pick_values_fetched_at
+    fmt = DP_PARAM_TO_FORMAT.get(scoring, scoring)
+    with _pick_values_lock:
+        now = time.time()
+        if (_pick_values_cache is None
+                or (now - _pick_values_fetched_at) >= _PICK_VALUES_TTL_SECONDS):
+            try:
+                _pick_values_cache = _parse_pick_values(_fetch_pick_values_csv())
+                print(f"✅ Loaded {len(_pick_values_cache.get(DEFAULT_SCORING, {}))} "
+                      f"DynastyProcess pick prices (display-only)")
+            except Exception as e:
+                print(f"⚠️  DynastyProcess pick values unavailable ({e}) — "
+                      f"draft board renders without slot values")
+                _pick_values_cache = {}
+            _pick_values_fetched_at = now
+        return dict(_pick_values_cache.get(fmt, {}))
+
+
+def reset_pick_values_cache() -> None:
+    """Drop the pick-price TTL cache. Tests only — no production caller."""
+    global _pick_values_cache, _pick_values_fetched_at
+    with _pick_values_lock:
+        _pick_values_cache, _pick_values_fetched_at = None, 0.0
 
 
 def seed_elo_for_players(

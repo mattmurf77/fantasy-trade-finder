@@ -144,7 +144,8 @@ def test_bad_injection_specs_rejected(client):
 def _run_child(code: str, env_extra: dict, tmp_path: Path) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     for k in ("FTF_TEST_MODE", "FTF_SLEEPER_FIXTURES_DIR", "FTF_SLEEPER_RECORD",
-              "FTF_PLAYERS_CACHE_FILE", "FTF_DP_VALUES_FILE", "FTF_TEST_PROFILE",
+              "FTF_PLAYERS_CACHE_FILE", "FTF_DP_VALUES_FILE",
+              "FTF_DP_PICK_VALUES_FILE", "FTF_TEST_PROFILE",
               "DATABASE_URL"):
         env.pop(k, None)
     env["DATABASE_URL"] = f"sqlite:///{tmp_path / 'scratch.db'}"
@@ -169,15 +170,25 @@ def _dp_file(tmp_path: Path) -> Path:
     return f
 
 
+def _dp_pick_file(tmp_path: Path) -> Path:
+    """DP-shaped PICK rows for the M6 seam (FTF_DP_PICK_VALUES_FILE)."""
+    f = tmp_path / "dp-pick-values.csv"
+    f.write_text("player,pos,value_1qb,value_2qb\n"
+                 "2026 Pick 1.01,PICK,5633,7225\n"
+                 "2026 Pick 1.02,PICK,4610,5878\n")
+    return f
+
+
 def _test_env(tmp_path: Path) -> dict:
-    """The full, valid test-mode env triple + DP file."""
+    """The full, valid test-mode env triple + both DP files."""
     cache = tmp_path / "players-cache.json"
     if not cache.exists():
         cache.write_text("{}")
     return {"FTF_TEST_MODE": "1",
             "FTF_SLEEPER_FIXTURES_DIR": str(_fixtures_dir(tmp_path)),
             "FTF_PLAYERS_CACHE_FILE": str(cache),
-            "FTF_DP_VALUES_FILE": str(_dp_file(tmp_path))}
+            "FTF_DP_VALUES_FILE": str(_dp_file(tmp_path)),
+            "FTF_DP_PICK_VALUES_FILE": str(_dp_pick_file(tmp_path))}
 
 
 def test_inertness_without_env(tmp_path):
@@ -203,13 +214,20 @@ def test_inertness_without_env(tmp_path):
     ({"FTF_TEST_MODE": "1", "FTF_SLEEPER_FIXTURES_DIR": "{fx}"}, "test mode without cache override"),
     ({"FTF_TEST_MODE": "1", "FTF_SLEEPER_FIXTURES_DIR": "{fx}",
       "FTF_PLAYERS_CACHE_FILE": "{cache}"}, "test mode without DP values file"),
+    # T-M6-01 — values.csv is a SECOND DynastyProcess egress; test mode must
+    # not be able to reach it either.
+    ({"FTF_TEST_MODE": "1", "FTF_SLEEPER_FIXTURES_DIR": "{fx}",
+      "FTF_PLAYERS_CACHE_FILE": "{cache}", "FTF_DP_VALUES_FILE": "{dp}"},
+     "test mode without DP PICK values file"),
     ({"FTF_TEST_MODE": "1", "FTF_SLEEPER_FIXTURES_DIR": "{fx}",
       "FTF_PLAYERS_CACHE_FILE": "{cache}", "FTF_DP_VALUES_FILE": "{dp}",
+      "FTF_DP_PICK_VALUES_FILE": "{dp_picks}",
       "FTF_SLEEPER_RECORD": "1"}, "record under test mode"),
 ])
 def test_startup_aborts(tmp_path, env, why):
     fx = _fixtures_dir(tmp_path)
-    env = {k: v.format(fx=fx, cache=tmp_path / "cache.json", dp=_dp_file(tmp_path))
+    env = {k: v.format(fx=fx, cache=tmp_path / "cache.json", dp=_dp_file(tmp_path),
+                       dp_picks=_dp_pick_file(tmp_path))
            for k, v in env.items()}
     r = _run_child("import backend.server", env, tmp_path)
     assert r.returncode != 0, why

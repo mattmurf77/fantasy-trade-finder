@@ -17,8 +17,9 @@ fetchers, so the corpora reach it directly.
   T-M3-10  startup-shaped -> kind startup, suppressed, notice
   T-M3-11  breaker: 3 failures -> open, zero upstream for 120 s; one success closes
   T-M3-12  budget: a 4th cycle inside 60 s -> degraded.budget_exceeded
-  T-M5-*   MFL grids through the injected `_opener` seam
+  T-M5-01..05  MFL grids through the injected `_opener` seam (the RENDERER)
   T-M3-13  route shim: flag off -> 404 feature_disabled, no other route moves
+  T-M5-06..10  route shim: the MFL BINDING behind `draft.mfl` (the WIRING)
 
 The T-M3-13 block at the bottom is the only part that needs Flask: it drives
 `GET /api/draft/board` to pin what belongs to the shim rather than to the
@@ -856,3 +857,276 @@ def test_route_serves_a_schema_1_board_from_the_corpus(
     assert payload["deep_link"].startswith("https://sleeper.com/draft/nfl/")
     # D9 — the terminal CTA is a link; the route wrote nothing anywhere.
     assert payload["my_picks"], "the operator owns picks in this corpus"
+
+
+# ---------------------------------------------------------------------------
+# T-M5-06..10 — the MFL BINDING in the route shim (rookie-draft M5, lld §4.6)
+#
+# T-M5-01..05 above drive `build_board` directly and already prove the MFL
+# RENDERER. What they cannot prove is the production wiring, which is this
+# route's job and nothing else's:
+#
+#   T-M5-06  `draft.mfl` OFF -> the byte-identical pre-M5 platform_unsupported
+#            payload, and ZERO MFL reads attempted (row, crosswalk, export)
+#   T-M5-07  `draft.mfl` ON  -> a real board from the committed grid, driven
+#            entirely through the injected `_opener` (RB-3, zero live egress)
+#   T-M5-08  the crosswalk is actually injected -> the undrafted list is
+#            POPULATED with an exact count; without it, honestly suppressed
+#   T-M5-09  auth failure -> notice.mfl_reconnect + stale:true, never live
+#   T-M5-10  `draft.mfl` ON changes no Sleeper league's response (D10)
+#
+# MFL has no fixtures-dir env seam, so the transport is injected through
+# `server._mfl_draft_opener()` — the one-line seam the route exposes for
+# exactly this.
+# ---------------------------------------------------------------------------
+
+MFL_CORPUS = "mfl-complete"
+MFL_LEAGUE = mfl_manifest(MFL_CORPUS)["league_id"]
+MFL_HOST = mfl_manifest(MFL_CORPUS)["host"]
+# The first three players taken in the mfl-complete grid, in MFL id space.
+MFL_TAKEN = ["17472", "17473", "17497"]
+FROZEN_AS_OF = "2026-08-06T00:00:00+00:00"
+
+
+@pytest.fixture()
+def mfl_league(monkeypatch):
+    """An MFL league linked exactly the way the MFL import path links one.
+
+    Returns the mutable call log of MFL export URLs, so a test can assert
+    that a flag-off request attempts *nothing*.
+    """
+    from backend import database as db
+
+    calls: list[str] = []
+    monkeypatch.setattr(server, "get_league_draft_context",
+                        lambda lid: {"platform": "mfl", "season": 2026})
+    monkeypatch.setattr(db, "get_platform_league", lambda lid, plat: {
+        "sleeper_league_id": MFL_LEAGUE, "platform": "mfl",
+        "platform_host": MFL_HOST, "platform_season": 2026,
+        "platform_my_team": "0007", "user_id": OPERATOR,
+    })
+    monkeypatch.setattr(server, "load_league_members", lambda lid: [
+        {"user_id": OPERATOR, "player_ids": []},
+        {"user_id": f"mfl:{MFL_LEAGUE}.f0010", "player_ids": ["ours-rostered"]},
+    ])
+    monkeypatch.setattr(server, "_mfl_cookie_for", lambda sess, uid: None)
+    monkeypatch.setattr(server, "_mfl_draft_opener",
+                        lambda: mfl_opener(MFL_CORPUS, calls=calls))
+    monkeypatch.setattr(dbs, "_now_iso", lambda: FROZEN_AS_OF)
+    return calls
+
+
+def _xwalk(mapping):
+    class _X:
+        by_mfl_sleeper = mapping
+    return _X()
+
+
+def _mfl_flags(**extra):
+    return _pin_flags(**{"draft.room": True, **extra})
+
+
+def test_m5_06_flag_off_is_todays_payload_byte_for_byte_and_reads_nothing(
+        client, session, monkeypatch, mfl_league):
+    """The flag-off MFL response must be the payload M3 shipped, to the byte —
+    and must not touch MFL at all on the way there.
+
+    'Byte-identical to today' is asserted against a flag cache that does not
+    CONTAIN `draft.mfl`, which is literally the pre-M5 build (`is_enabled`
+    returns False for an unknown key). `as_of` is frozen so the comparison is
+    exact rather than modulo a timestamp.
+    """
+    from backend import database as db
+
+    def _explode(*a, **kw):
+        raise AssertionError("flag off must attempt no MFL read")
+
+    monkeypatch.setattr(db, "get_platform_league", _explode)
+    monkeypatch.setattr(server, "_shared_crosswalk", _explode)
+
+    saved = ff._flags_cache
+    try:
+        # The pre-M5 build: the key does not exist at all.
+        pre_m5 = {k: v for k, v in ff.DEFAULT_FLAGS.items() if k != "draft.mfl"}
+        ff._flags_cache = {**pre_m5, "draft.room": True}
+        before = _get(client, league_id=MFL_LEAGUE)
+        # This build, flag off.
+        _mfl_flags(**{"draft.mfl": False})
+        after = _get(client, league_id=MFL_LEAGUE)
+    finally:
+        ff._flags_cache = saved
+
+    assert before.status_code == after.status_code == 200
+    assert before.get_data() == after.get_data()
+    payload = after.get_json()
+    assert payload["platform"] == "mfl"
+    assert payload["state"] == "unavailable"
+    assert payload["notice"]["code"] == "platform_unsupported"
+    assert mfl_league == [], "flag off attempted an MFL export call"
+
+
+def test_m5_07_flag_on_renders_a_real_board_through_the_injected_opener(
+        client, session, monkeypatch, mfl_league):
+    man = mfl_manifest(MFL_CORPUS)
+    monkeypatch.setattr(server, "_shared_crosswalk", lambda: _xwalk({}))
+
+    saved = _mfl_flags(**{"draft.mfl": True})
+    try:
+        resp = _get(client, league_id=MFL_LEAGUE)
+    finally:
+        ff._flags_cache = saved
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert set(payload) == EXPECTED_KEYS
+    assert payload["schema"] == 1
+    assert payload["platform"] == "mfl"
+    assert payload["league_id"] == MFL_LEAGUE
+    assert payload["state"] == "complete"
+    assert payload["kind"] == "rookie"
+    assert payload["order_confidence"] == "assigned"
+    assert len(payload["order"]) == man["total"]
+    assert len(payload["picks"]) == man["made"]
+    assert payload["as_of"] == FROZEN_AS_OF        # `as_of` is ALWAYS surfaced
+    assert payload["stale"] is False
+    assert payload["degraded"] is None
+    # `platform_my_team` = franchise 0007 = the operator, so my_picks resolves
+    # through the synthetic-id scheme rather than being empty.
+    assert payload["my_picks"], "franchise 0007 belongs to the session user"
+    assert all(o["owner_user_id"] == OPERATOR for o in payload["my_picks"])
+    # Exactly ONE MFL export call: nothing in this path needs the >=1s spacing
+    # `_REQUEST_SPACING_SECONDS` exists for.
+    assert len(mfl_league) == 1 and "TYPE=draftResults" in mfl_league[0]
+
+
+def test_m5_08_the_crosswalk_is_injected_so_undrafted_is_counted_not_suppressed(
+        client, session, monkeypatch, mfl_league):
+    """The MFL player-id crosswalk is load-bearing.
+
+    `_render_mfl` suppresses `undrafted` outright when `mfl_player_ids` is
+    missing, because subtracting MFL-space ids from our rookie ids would
+    silently UNDER-COUNT. The count is asserted exactly, so a half-wired
+    crosswalk fails loudly instead of quietly shrinking the list.
+    """
+    from backend import database as db
+
+    rookies = {"ours-1", "ours-2", "ours-3", "ours-4", "ours-rostered"}
+    monkeypatch.setattr(server, "_rookie_player_ids", lambda season: set(rookies))
+    monkeypatch.setattr(db, "load_players_by_ids", lambda ids: {
+        p: _player_row(p, p.title()) for p in ids})
+    # ours-1..3 were taken in the grid; ours-rostered sits on a roster;
+    # ours-4 is the only one genuinely still available.
+    monkeypatch.setattr(server, "_shared_crosswalk",
+                        lambda: _xwalk(dict(zip(MFL_TAKEN,
+                                                ["ours-1", "ours-2", "ours-3"]))))
+
+    saved = _mfl_flags(**{"draft.mfl": True})
+    try:
+        resp = _get(client, league_id=MFL_LEAGUE)
+    finally:
+        ff._flags_cache = saved
+
+    payload = resp.get_json()
+    assert payload["undrafted_suppressed"] is False
+    assert [u["player_id"] for u in payload["undrafted"]] == ["ours-4"]
+    assert len(payload["undrafted"]) == 1
+    # The crosswalk really did move the picks into our id space.
+    assert {p["player_id"] for p in payload["picks"]} >= {"ours-1", "ours-2", "ours-3"}
+
+
+def test_m5_08b_a_missing_crosswalk_suppresses_honestly_rather_than_undercounting(
+        client, session, monkeypatch, mfl_league):
+    """The contrast case that makes T-M5-08 meaningful."""
+    def _boom():
+        raise RuntimeError("DP crosswalk unavailable")
+
+    monkeypatch.setattr(server, "_rookie_player_ids",
+                        lambda season: {"ours-1", "ours-4"})
+    monkeypatch.setattr(server, "_shared_crosswalk", _boom)
+
+    saved = _mfl_flags(**{"draft.mfl": True})
+    try:
+        payload = _get(client, league_id=MFL_LEAGUE).get_json()
+    finally:
+        ff._flags_cache = saved
+
+    assert payload["undrafted"] == []
+    assert payload["undrafted_suppressed"] is True
+    assert payload["state"] == "complete"          # the rest of the board is fine
+
+
+def test_m5_09_auth_failure_serves_the_snapshot_never_stale_as_live(
+        client, session, monkeypatch, mfl_league):
+    """An expired MFL cookie must never produce a live-looking board."""
+    def refusing():
+        def _opener(req, timeout=None):
+            raise urllib.error.HTTPError(getattr(req, "full_url", ""), 401,
+                                         "unauthorized", None, None)
+        return _opener
+
+    monkeypatch.setattr(server, "_mfl_draft_opener", refusing)
+    monkeypatch.setattr(server, "_shared_crosswalk", lambda: _xwalk({}))
+
+    saved = _mfl_flags(**{"draft.mfl": True})
+    try:
+        resp = _get(client, league_id=MFL_LEAGUE)
+    finally:
+        ff._flags_cache = saved
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["state"] == "unavailable"       # never "live", never "complete"
+    assert payload["stale"] is True
+    assert payload["degraded"]["reason"] == "auth_expired"
+    assert payload["notice"]["code"] == "mfl_reconnect"
+    assert payload["picks"] == [] and payload["order"] == []
+    assert payload["as_of"]                        # age is always surfaced
+
+
+def test_m5_10_flag_on_changes_no_sleeper_response(
+        client, session, monkeypatch, tmp_path):
+    """D10: `draft.mfl` is inert for every Sleeper league, on or off."""
+    DraftReplay("lakeview-complete", tmp_path).install(monkeypatch, server)
+    monkeypatch.setattr(server, "get_league_draft_context",
+                        lambda lid: {"platform": "sleeper", "season": 2026})
+    monkeypatch.setattr(dbs, "_now_iso", lambda: FROZEN_AS_OF)
+    monkeypatch.setattr(server, "_mfl_draft_opener",
+                        lambda: (_ for _ in ()).throw(
+                            AssertionError("a Sleeper league must not bind MFL")))
+
+    saved = ff._flags_cache
+    try:
+        _mfl_flags(**{"draft.mfl": False})
+        off = _get(client, basis="my_board")
+        dbs.reset_cache()
+        _mfl_flags(**{"draft.mfl": True})
+        on = _get(client, basis="my_board")
+    finally:
+        ff._flags_cache = saved
+
+    assert off.status_code == on.status_code == 200
+    assert off.get_data() == on.get_data()
+    assert off.get_json()["platform"] == "sleeper"
+
+
+def test_m5_mfl_binding_is_hermetic(client, session, monkeypatch, mfl_league):
+    """No Sleeper egress and no live MFL egress on the MFL path.
+
+    The route deliberately leaves `sleeper_get` unbound for MFL, so a stray
+    Sleeper read would raise rather than reach the network; and the MFL
+    transport is the corpus opener, so the only URL touched is the fixture's.
+    """
+    from backend import test_support
+
+    monkeypatch.setattr(server, "_shared_crosswalk", lambda: _xwalk({}))
+    before = dict(test_support.counters)
+    for key in test_support.counters:
+        test_support.counters[key] = 0
+    saved = _mfl_flags(**{"draft.mfl": True})
+    try:
+        payload = _get(client, league_id=MFL_LEAGUE).get_json()
+        assert payload["state"] == "complete"
+        assert test_support.counters["sleeper_live_egress_attempts"] == 0
+    finally:
+        ff._flags_cache = saved
+        test_support.counters.update(before)
