@@ -194,8 +194,14 @@ export async function getRankings(
 export async function reorderRankings(
   position: Position | null,
   orderedIds: string[],
-  via?: 'quickrank',   // marks Quick Rank saves so the backend fires
-                       // quickrank_completed (analytics FR-20, server.py)
+  // `quickrank` marks Quick Rank saves so the backend fires
+  // quickrank_completed (analytics FR-20, server.py). `rookie_ranks` is the
+  // forensic tag on the consolidated rookie board's drags — request-only
+  // today (the route branches on `quickrank` alone and ignores every other
+  // value, so the response is byte-identical), but it keeps a scoped edit
+  // identifiable in request logs and matches the `via:'rookie_*'` vocabulary
+  // the tiers lane already uses.
+  via?: 'quickrank' | 'rookie_ranks',
 ) {
   return api.post<{ ok: true; count: number; scoring_format: string }>(
     '/api/rankings/reorder',

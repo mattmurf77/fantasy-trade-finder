@@ -1154,10 +1154,16 @@ def test_m5_mfl_binding_is_hermetic(client, session, monkeypatch, mfl_league):
 # Placement wave (operator decision "draft-surface placement", 2026-08-06)
 #
 # The seasonal Draft tab is global while #207's verdict is per-league, so the
-# ONE additive server field it needs rides on the route that already
-# enumerates the user's leagues. These pin the two properties the tab's
-# correctness rests on: the field appears with `draft.room` ON, and the
-# payload is byte-identical with it OFF.
+# ONE additive server field it needed rode on the route that already
+# enumerates the user's leagues. These pin the two properties it rests on: the
+# field appears with `draft.room` ON, and the payload is byte-identical with
+# it OFF.
+#
+# NOTE (2026-08-06, later the same day): the tab no longer reads this field —
+# the operator replaced the per-league predicate with the seasonal `draft.tab`
+# switch (see backend/tests/test_rookie_ranks_editable.py). The field is kept
+# and still tested because the server contract shipped; delete it and these
+# tests together if nothing adopts it.
 # ---------------------------------------------------------------------------
 
 LEAGUES_ROUTE = "/api/sleeper/leagues/{}".format(OPERATOR)
@@ -1203,8 +1209,12 @@ def test_placement_leagues_payload_carries_the_207_verdict_with_the_flag_on(
     finally:
         ff._flags_cache = saved
     # The qualifying league: a current-season rookie-shaped draft that has
-    # not run. `not_drafted` + `high` is the ONLY combination the client's
-    # predicate accepts (see mobile/src/state/draftLeagues.ts).
+    # not run. `not_drafted` + `high` was the ONLY combination the mobile
+    # Draft tab's predicate accepted, until the operator replaced that
+    # predicate with the seasonal `draft.tab` switch on 2026-08-06
+    # (mobile/src/state/draftLeagues.ts deleted). The FIELD still ships and
+    # is still stamped honestly — these assertions pin the server contract,
+    # which now has no client consumer.
     assert rows[LAKEVIEW_LEAGUE]["draft_status"] == "not_drafted"
     assert rows[LAKEVIEW_LEAGUE]["draft_status_confidence"] == "high"
     # A drafted league is stamped honestly and simply does not qualify.

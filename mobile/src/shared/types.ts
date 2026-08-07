@@ -87,8 +87,10 @@ export interface LeagueSummary {
   settings_type?: number;
   // rookie-draft placement (flag `draft.room`) — #207's cached per-league
   // verdict, stamped by GET /api/sleeper/leagues/<user_id>. Absent with the
-  // flag off, and null for a league we've never synced. Consumed ONLY by
-  // state/draftLeagues.ts (the seasonal Draft tab's predicate).
+  // flag off, and null for a league we've never synced. NO CLIENT CONSUMER
+  // as of 2026-08-06: the Draft tab's per-league predicate was retired for
+  // the seasonal `draft.tab` switch. Kept because the server field ships
+  // and the mapping is free; delete both together if it stays unread.
   draft_status?: 'drafted' | 'not_drafted' | 'unknown' | null;
   draft_status_confidence?: 'high' | 'medium' | 'low' | null;
 }

@@ -11,10 +11,6 @@ import { getLikedTrades, getAllMatches } from '../api/trades';
 import { useSession } from '../state/useSession';
 import { nextQuicksetPosition } from '../state/quicksetProgress';
 import { onboardingEnabled, useFeatureFlags, useFlag } from '../state/useFeatureFlags';
-import {
-  qualifyingDraftLeagues,
-  type QualifyingDraftLeague,
-} from '../state/draftLeagues';
 import { requestScrollToTop } from './scrollToTop';
 import { getOnboardingState } from '../state/useOnboardingState';
 import {
@@ -467,91 +463,46 @@ function LeagueStackNav() {
   );
 }
 
-// ── rookie-draft: the seasonal Draft tab (option A′) ─────────────────────
-// Operator decision "draft-surface placement" (2026-08-06): a 5th bottom
-// tab that exists ONLY while a linked league has a current-season rookie
-// draft that hasn't run, driven by #207's shipped per-league verdicts. The
-// predicate itself lives in `state/draftLeagues.ts` (why `not_drafted` +
-// `high` and nothing else is argued there).
+// ── The seasonal Draft tab ───────────────────────────────────────────────
+// Operator decision (2026-08-06, verbatim): "On the Draft tab - it should
+// literally just be set to seasonal. So a flag we turn on and off to display
+// the tab. Right now it should be on for all."
 //
-// Multi-league rule (plan §"Operator decision", differing from the mock's
-// active-league suggestion): the tab bar is global while draft status is
-// per-league, so the tab appears when ANY linked league qualifies and lands
-// on THAT league's room; with more than one, it lands on a chooser. The
-// room takes a `leagueId` param rather than switching the active league —
-// reading one league's board must not reset rankings, deck and format.
+// So: `draft.tab` and NOTHING else. No league qualification, no AsyncStorage
+// snapshot, no confidence check, no platform check. The tab shipped gated on
+// a per-league predicate fed by a snapshot that only converged on the NEXT
+// launch, and the operator hit exactly the failure that design permits — two
+// leagues genuinely qualified (verified server-side) and the tab still did
+// not appear, because the snapshot was empty on that build's first run. An
+// operator-flipped seasonal switch removes the launch lag entirely.
 //
-// Everything here is decided ONCE at mount (see `draftTab` in TabNav) so
-// the navigator's route array never changes mid-session: `initialRouteName`,
-// #244's completion-aware Rank launch routing and #245/#246's Acquire
-// semantics are all first-mount-only contracts that a mid-session tab
-// insertion would violate.
+// DESTINATION: the ACTIVE league's Draft Room — no `leagueId` override and
+// no chooser, because with the tab always on there is nothing to choose
+// between. `DraftRoomScreen` renders every state honestly (drafted ⇒ recap,
+// not-drafted ⇒ upcoming, ESPN ⇒ unsupported, no league ⇒ its no-league
+// state), so a non-drafting league lands somewhere truthful rather than
+// somewhere empty.
+//
+// The tab's PRESENCE is still decided ONCE at mount (see `showDraftTab` in
+// TabNav): `initialRouteName`, #244's completion-aware Rank launch routing
+// and #245/#246's Acquire semantics are all first-mount-only contracts that
+// a mid-session tab insertion would violate.
 const DraftStack = createNativeStackNavigator();
 
-function DraftLeagueChooserScreen({ navigation }: any) {
-  // Read at render, not frozen: this list only changes on a cold start
-  // (refreshDraftLeagues persists for the NEXT launch), so there is nothing
-  // to freeze against — and the chooser is the tab's root either way.
-  const leagues = qualifyingDraftLeagues();
-  return (
-    <View style={styles.chooserWrap}>
-      <Text style={styles.chooserIntro}>
-        {leagues.length} of your leagues have a rookie draft that hasn't run
-        yet.
-      </Text>
-      {leagues.map((lg: QualifyingDraftLeague) => (
-        <Pressable
-          key={lg.league_id}
-          testID={`draft-chooser.league.${lg.league_id}`}
-          accessibilityRole="button"
-          accessibilityLabel={lg.name}
-          onPress={() =>
-            navigation.navigate('DraftRoom', { leagueId: lg.league_id, inTabs: true })
-          }
-          style={({ pressed }) => [
-            styles.chooserRow,
-            pressed && { backgroundColor: ink.ink3 },
-          ]}
-        >
-          <Text style={styles.chooserName} numberOfLines={1}>
-            {lg.name}
-          </Text>
-          <Icon name="chevron-right" size={16} color={chalk.dim} />
-        </Pressable>
-      ))}
-    </View>
-  );
-}
-
 function DraftStackNav() {
-  // Frozen at mount for the same reason the tab's presence is: the shape of
-  // this stack must not change under a user who is standing in it.
-  const [leagues] = useState(() => qualifyingDraftLeagues());
-  const single = leagues.length === 1 ? leagues[0] : null;
   return (
     <DraftStack.Navigator screenOptions={{ headerShown: false }}>
-      {single ? null : (
-        <DraftStack.Screen
-          name="DraftLeaguePicker"
-          component={DraftLeagueChooserScreen}
-          options={chalklineHeader('Rookie drafts')}
-        />
-      )}
       <DraftStack.Screen
         name="DraftRoom"
         component={DraftRoomScreen}
-        // `inTabs` suppresses the screen's OWN FeedbackFAB: as a tab-stack
-        // screen it is already covered by RootNav's global mount, and two
-        // FABs is the #196/#197 bug. The root-stack registration passes
-        // nothing, so the pushed room keeps its local FAB unchanged.
-        initialParams={
-          single ? { leagueId: single.league_id, inTabs: true } : { inTabs: true }
-        }
-        options={
-          single
-            ? chalklineHeader('Rookie draft')
-            : subScreenOptions('Rookie draft', 'DraftLeaguePicker')
-        }
+        // No `leagueId`: the room reads the session's active league, which is
+        // what an always-on tab should show. `inTabs` suppresses the screen's
+        // OWN FeedbackFAB — as a tab-stack screen it is already covered by
+        // RootNav's global mount, and two FABs is the #196/#197 bug. The
+        // root-stack registration passes nothing, so the pushed room keeps
+        // its local FAB unchanged.
+        initialParams={{ inTabs: true }}
+        options={chalklineHeader('Rookie draft')}
       />
     </DraftStack.Navigator>
   );
@@ -609,9 +560,12 @@ export default function TabNav() {
       : 'Rank',
   );
 
-  // rookie-draft placement, option A′ — the seasonal Draft tab. Decided
-  // ONCE at mount, exactly like `initialTab` above and #244's Rank launch
-  // routing: conditionally rendering a <Tab.Screen> rewrites the
+  // The seasonal Draft tab — ONE FLAG, nothing else (operator decision
+  // 2026-08-06: "a flag we turn on and off to display the tab"). No league
+  // qualification, no snapshot, no confidence check, no platform check.
+  //
+  // Decided ONCE at mount, exactly like `initialTab` above and #244's Rank
+  // launch routing: conditionally rendering a <Tab.Screen> rewrites the
   // navigator's route array, which reshuffles indices and can reset nested
   // stack state, so the bar may change at most once per launch.
   //
@@ -626,9 +580,7 @@ export default function TabNav() {
   // routing lives inside RankStackNav, and #245/#246's Acquire semantics
   // live inside TradesStackNav. Adding a sibling touches none of them.
   const [showDraftTab] = useState(
-    () =>
-      !!useFeatureFlags.getState().flags['draft.room'] &&
-      qualifyingDraftLeagues().length > 0,
+    () => !!useFeatureFlags.getState().flags['draft.tab'],
   );
 
   return (
@@ -729,11 +681,10 @@ export default function TabNav() {
             },
           })}
         />
-        {/* rookie-draft placement, option A′ — third in the bar, matching
-            the approved mock's A′1 frame (Rank · Acquire · Draft · Matches ·
-            League). No flare dot: the tab's PRESENCE already means "a draft
-            is pending", and Sleeper exposes no trustworthy start time, so
-            there is no countdown or urgency signal to honestly render. */}
+        {/* The seasonal Draft tab — third in the bar, matching the approved
+            mock's A′1 frame (Rank · Acquire · Draft · Matches · League). No
+            flare dot: Sleeper exposes no trustworthy start time, so there is
+            no countdown or urgency signal to honestly render. */}
         {showDraftTab ? (
           <Tab.Screen
             name="Draft"
@@ -746,7 +697,7 @@ export default function TabNav() {
             }}
             listeners={({ navigation, route }) => ({
               // Same focused-re-tap contract as the other stack tabs
-              // (PRD 01-05): pop the chooser→room push back to the root.
+              // (PRD 01-05): pop back to the stack root.
               tabPress: () => {
                 if (retapOn && navigation.isFocused()) {
                   popNestedToTop(navigation, route);
@@ -1024,23 +975,7 @@ const styles = StyleSheet.create({
     color: chalk.base,
   },
 
-  // rookie-draft: the >1-qualifying-league chooser (the tab's stack root).
-  chooserWrap: { flex: 1, backgroundColor: ink.ink0, padding: space.lg, gap: space.sm },
-  chooserIntro: { ...type.bodySm, marginBottom: space.xs },
-  chooserRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    minHeight: 52,
-    paddingHorizontal: space.md,
-    backgroundColor: ink.ink1,
-    borderWidth: 1,
-    borderColor: ink.line,
-    borderRadius: radii.sm,
-  },
-  chooserName: { ...type.title, flex: 1 },
-
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: scrim },
+  backdrop:{ ...StyleSheet.absoluteFillObject, backgroundColor: scrim },
   sheet: {
     position: 'absolute',
     left: 0, right: 0, bottom: 0,

@@ -444,6 +444,24 @@ FLAG_KEYS: tuple[str, ...] = (
     # create route answers the typed-empty `{"empty": true, "reason":
     # "cpu_model_unvalidated"}` rather than serving unvalidated bots.
     "draft.mock",
+    # THE SEASONAL ON/OFF SWITCH FOR THE DRAFT TAB (operator decision,
+    # 2026-08-06: "it should literally just be set to seasonal — a flag we
+    # turn on and off to display the tab"). Client-only: no route reads it.
+    # ON  ⇒ mobile's bottom bar carries the Draft tab (third: Rank · Acquire
+    #        · Draft · Matches · League), landing on the ACTIVE league's
+    #        Draft Room.
+    # OFF ⇒ four tabs. `DraftRoom` stays reachable through the root stack
+    #        (the League tile, the Acquire mode strip's Draft chip) and the
+    #        canonical deep link `app/league/draft-room` either way.
+    # This REPLACES the per-league qualification predicate the tab shipped
+    # with (`draft_status == 'not_drafted' && confidence == 'high'` over an
+    # AsyncStorage snapshot). That predicate hid the tab from operators whose
+    # leagues genuinely qualified, because the snapshot only converged on the
+    # NEXT launch. The Draft Room renders every state honestly (drafted ⇒
+    # recap, not-drafted ⇒ upcoming, ESPN ⇒ unsupported, no league ⇒ its
+    # no-league state), so an always-on tab always lands somewhere truthful.
+    # The operator flips this by hand each year — it is not computed.
+    "draft.tab",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

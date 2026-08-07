@@ -37,10 +37,6 @@ import {
   hydrateQuicksetProgress,
   refreshQuicksetProgress,
 } from './src/state/quicksetProgress';
-import {
-  hydrateDraftLeagues,
-  refreshDraftLeagues,
-} from './src/state/draftLeagues';
 import { queryClient } from './src/state/queryClient';
 import { initSentry, wrap as sentryWrap } from './src/observability/sentry';
 import { getTierConfig } from './src/api/rankings';
@@ -102,10 +98,6 @@ function App() {
       // reads per-position quick-tiers completion at mount and must not
       // race hydration.
       hydrateQuicksetProgress(),
-      // rookie-draft placement — the seasonal Draft tab's snapshot, same
-      // reasoning as the line above: TabNav decides its route array at
-      // first mount and must not race this local read.
-      hydrateDraftLeagues(),
     ])
       .catch(() => { /* all legs are best-effort */ })
       .finally(() => {
@@ -123,10 +115,6 @@ function App() {
           .revalidateSession()
           .then(() => {
             void refreshQuicksetProgress();
-            // rookie-draft placement: same next-launch contract — a draft
-            // that starts or finishes today moves the tab bar on the next
-            // cold start, never mid-session.
-            void refreshDraftLeagues();
           });
         // Analytics (tracking plan v2): restore the offline event queue,
         // then record the cold open. Fired AFTER loadCachedFlags so the
