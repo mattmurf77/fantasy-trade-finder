@@ -22,7 +22,9 @@ Spec: ``docs/plans/draft-extensions/plan.md`` §5 · ``lld.md`` §2.3/§3.3/§4.
   T-W2-15  ONE consensus definition: the pool IS _undrafted(basis=consensus)
   T-W2-16  THE CALIBRATION GATE — fit on rounds 1-2, hold out 3-4, both bars,
            then `mfl-complete` with NO refit. Re-run in W2b against the
-           two-parameter mixture; still records a FAILURE (1 bar of 4).
+           two-parameter mixture, and again in W2c against a re-derived
+           consensus snapshot with the model and the gate FROZEN; still
+           records a FAILURE (both mean bars; both KS bars pass).
   T-W2-17  corpus shape check before any corpus is used for calibration
 
 T-W2-18 is a mobile Jest test and belongs to W2b.
@@ -265,9 +267,8 @@ def test_w2_04b_the_candidate_window_truncates_the_tail_and_is_not_fitted():
     state = make_state(ctx, owners=["a", "b"], user="zz", rounds=8,
                        bpa_prob=0.0, decay=0.999)
     run(state, ctx)
-    pool_ids = [r["player_id"] for r in mds.consensus_pool(ctx)]
     assert max(mds.reach_series([p["player_id"] for p in state["picks"]],
-                                pool_ids)) < window
+                                mds.consensus_pool(ctx))) < window
 
 
 def test_w2_04b_the_reach_branch_is_persona_independent():
@@ -909,6 +910,19 @@ def _fixture_pool() -> dict:
     return json.loads((FIXTURES / "player_pool_2026.json").read_text())["players"]
 
 
+def _rookie_universe() -> dict:
+    """The 2026 prospect class — `rookie_universe_2026.json` (W2c).
+
+    W2a/W2b ranked the corpora against `player_pool_2026.json`, which is a
+    *UI-seeder* cut: top-N per POSITION across all players by `value_1qb`, so
+    it keeps 56 of these 290 prospects and floors their deep tail at repeated
+    DP values. A rookie draft's late picks were therefore measured against a
+    censored board whose tail order was a `search_rank` tiebreak. This fixture
+    is the whole prospect class; the VALUES come from the live snapshot below.
+    """
+    return json.loads((FIXTURES / "rookie_universe_2026.json").read_text())["players"]
+
+
 def _mfl_to_sleeper() -> dict[str, str]:
     out: dict[str, str] = {}
     with open(FIXTURES / "dp_playerids_snapshot_2026-07-11.csv") as fh:
@@ -919,25 +933,65 @@ def _mfl_to_sleeper() -> dict[str, str]:
     return out
 
 
-def _rookie_ctx(pool: dict, value_col: str, *, pre_rostered=frozenset(),
-                lineup=STANDARD_LINEUP) -> mds.MockContext:
-    """A `MockContext` whose consensus is the committed DP snapshot.
+_BLENDED_CACHE: dict[str, dict[str, float]] = {}
 
-    The values run through the SHIPPED `seed_elo_for_value`, and the ordering
-    through the SHIPPED `_undrafted` — so the calibration ranks players the
-    way the product does. It is a *hermetic* consensus (the trimmed fixture
-    pool, no live KTC blend); the artifact records that limitation.
+
+def _blended_values(fmt: str) -> dict[str, float]:
+    """{normalised name: consensus value} for `fmt`, from the LIVE snapshot.
+
+    The W2c correction. Inputs are `ktc_blend_pipeline_2026-07-17.json` — the
+    untrimmed 2026-07-17 DynastyProcess `values-players.csv` (633 players per
+    format) plus the 441 matched KeepTradeCut rows — and the arithmetic is the
+    SHIPPED `data_loader._apply_consensus_blend` at the shipped default weight,
+    so this is the same consensus `_get_universal_pool` serves the product, not
+    a second opinion. `_blend_config` is pinned rather than read from
+    `model_config` so the gate cannot move when an operator retunes the blend.
     """
+    if fmt not in _BLENDED_CACHE:
+        import backend.data_loader as dl
+        pipe = json.loads((FIXTURES / "ktc_blend_pipeline_2026-07-17.json").read_text())
+        value_map = {k: float(v) for k, v in pipe["dp"][fmt].items()}
+        elo_map = {k: round(seed_elo_for_value(v), 1) for k, v in value_map.items()}
+        ktc, cfg = dl._ktc_consensus, dl._blend_config
+        dl._ktc_consensus = lambda: pipe["ktc"]
+        dl._blend_config = lambda: (dl.KTC_BLEND_WEIGHT_DEFAULT, dl.TEP_TE_UPLIFT_DEFAULT)
+        try:
+            _elo, blended = dl._apply_consensus_blend(
+                fmt, elo_map, value_map, dict(pipe["dp_pos"]))
+        finally:
+            dl._ktc_consensus, dl._blend_config = ktc, cfg
+        _BLENDED_CACHE[fmt] = blended
+    return _BLENDED_CACHE[fmt]
+
+
+def _rookie_ctx(fmt: str, *, pre_rostered=frozenset(),
+                lineup=STANDARD_LINEUP) -> mds.MockContext:
+    """A `MockContext` whose consensus is the live-shaped snapshot (W2c).
+
+    Membership is the full prospect class RESTRICTED TO THE PLAYERS THE
+    CONSENSUS VALUES — the name join is `normalise_name(full_name) in values`,
+    which is `server.build_universal_pool`'s join verbatim. A prospect the
+    consensus prices at nothing carries no opinion to reach past, so his rank
+    inside the unvalued block would be alphabetical order rather than a
+    reach; `reach_report` counts every such pick as `skipped` and the artifact
+    reports the count.
+
+    Values run through the SHIPPED `_apply_consensus_blend` +
+    `seed_elo_for_value`, and the ordering through the SHIPPED `_undrafted`,
+    so the calibration ranks players exactly the way the product does.
+    """
+    from backend.data_loader import normalise_name, DP_TO_SLEEPER_NAME
+    values = _blended_values(fmt)
     rows, elo = {}, {}
-    for pid, row in pool.items():
-        if row.get("years_exp") != 0:
+    for pid, row in _rookie_universe().items():
+        name = normalise_name(row.get("full_name") or "")
+        value = values.get(DP_TO_SLEEPER_NAME.get(name, name))
+        if not value or value <= 0:
             continue
-        value = float(row.get(value_col) or 0.0)
         rows[pid] = {"full_name": row.get("full_name"), "position": row.get("position"),
                      "team": row.get("team"), "rookie_year": "2026",
                      "search_rank": row.get("search_rank")}
-        if value > 0:
-            elo[pid] = seed_elo_for_value(value)
+        elo[pid] = seed_elo_for_value(value)
     return mds.MockContext(
         league_id="calibration", season=2026, consensus_elo=elo,
         rookie_ids=frozenset(rows), player_rows=rows,
@@ -957,17 +1011,16 @@ def _lakeview_corpus():
     rostered = {str(x) for r in rosters for x in (r.get("players") or [])}
     pre_rostered = rostered - drafted_set
 
-    pool_rows = _fixture_pool()
-    ctx = _rookie_ctx(pool_rows, "dp_value_2qb", pre_rostered=pre_rostered,
-                      lineup=lineup)
+    ctx = _rookie_ctx("sf_tep", pre_rostered=pre_rostered, lineup=lineup)
     pool = mds.consensus_pool(ctx)
     owners = [str(p["roster_id"]) for p in
               sorted(picks, key=lambda p: int(p["pick_no"]))]
+    positions = {pid: {"position": row.get("position")}
+                 for pid, row in _fixture_pool().items()}
     viable0 = {
         str(r["roster_id"]): mds.positional_needs(
             [str(p) for p in (r.get("players") or []) if str(p) not in drafted_set],
-            lineup, ctx.consensus_elo,
-            {pid: {"position": row.get("position")} for pid, row in pool_rows.items()})
+            lineup, ctx.consensus_elo, positions)
         for r in rosters
     }
     return ctx, pool, drafted, owners, viable0, mds.slot_targets(lineup)
@@ -985,8 +1038,7 @@ def _mfl_corpus(name: str):
         made += [r for r in rows if str(r.get("player", "")).strip()]
     made.sort(key=lambda r: (int(r["round"]), int(r["pick"])))
     xwalk = _mfl_to_sleeper()
-    pool_rows = _fixture_pool()
-    ctx = _rookie_ctx(pool_rows, "dp_value_1qb")
+    ctx = _rookie_ctx("1qb_ppr")
     pool = mds.consensus_pool(ctx)
     drafted = [xwalk.get(str(r["player"])) for r in made]
     drafted = [d for d in drafted if d]
@@ -1034,7 +1086,8 @@ def _fit_and_validate():
     """Run the lld §4.2.3 procedure end to end. Returns the report dict."""
     ctx, pool, drafted, owners, viable0, targets = _lakeview_corpus()
     pool_ids = [r["player_id"] for r in pool]
-    observed = mds.reach_series(drafted, pool_ids)
+    report = mds.reach_report(drafted, pool)
+    observed = report["series"]
 
     # Restrict the turn order to the retained sub-universe so the simulated
     # sequence and the observed one index the same picks.
@@ -1072,7 +1125,8 @@ def _fit_and_validate():
     # Independent corpus, NO refit.
     mctx, mpool, mdrafted, mowners, _rounds = _mfl_corpus("mfl-complete")
     mpool_ids = [r["player_id"] for r in mpool]
-    mobs = mds.reach_series(mdrafted, mpool_ids)
+    mreport = mds.reach_report(mdrafted, mpool)
+    mobs = mreport["series"]
     mkept = [mowners[i] for i, pid in enumerate(mdrafted) if pid in set(mpool_ids)]
     mviable = {o: {p: 0 for p in ("QB", "RB", "WR", "TE")} for o in set(mkept)}
     msim = []
@@ -1088,6 +1142,9 @@ def _fit_and_validate():
     return {
         "n": n, "fit_n": cut, "hold_n": n - cut,
         "observed": observed,
+        "pool_n": len(pool), "mfl_pool_n": len(mpool),
+        "skipped": report["skipped"], "tied": report["tied"],
+        "mfl_skipped": mreport["skipped"], "mfl_tied": mreport["tied"],
         "fit_mean": statistics.mean(abs(x) for x in fit_obs),
         "hold_mean": statistics.mean(abs(x) for x in hold_obs),
         "grid": {f"{b}/{d}": w for (b, d), w in grid.items()},
@@ -1129,70 +1186,112 @@ def test_w2_16_the_w2a_model_form_could_not_have_passed():
     The single-parameter model's reachable support was bounded by roughly
     `max_reach + jitter` slots: a candidate at rank r could only win when
     `r - bonus - jitter < 1`, with jitter capped by the top of its grid (3.00).
-    The corpus puts 15 %+ of real picks beyond that bound, so no value of that
-    parameter reproduced the shape. This is why W2b re-specced the FAMILY
-    rather than re-tuning — if the observed tail ever moves enough to make the
-    old form viable, this test goes red and the history needs re-deriving.
+    Picks beyond that bound have probability EXACTLY ZERO under it, so no value
+    of that parameter reproduced the shape. This is why W2b re-specced the
+    FAMILY rather than re-tuning — if the observed tail ever thins to nothing,
+    this test goes red and the history needs re-deriving.
+
+    **The fraction was re-derived in W2c** and the threshold with it. On the
+    W2b snapshot the corpus put 15 %+ of picks past the bound; on the corrected
+    snapshot (artifact 08c §2) it is 11 % — 5 of 45 — because the corrected
+    consensus moves several mid-round picks up the board. The structural
+    argument is unchanged and does not turn on the exact fraction: a model that
+    assigns zero probability to 1 pick in 9 cannot be the data-generating one.
     """
     ctx, pool, drafted, _owners, _v, _t = _lakeview_corpus()
-    observed = mds.reach_series(drafted, [r["player_id"] for r in pool])
+    observed = mds.reach_series(drafted, pool)
     beyond = [d for d in observed if d > FIXED_MAX_REACH + 3.00]
-    assert len(beyond) / len(observed) > 0.15, (
+    assert len(beyond) / len(observed) > 0.05, (
         "the observed tail moved — re-derive the structural argument")
 
 
-def test_w2_16_the_residual_failure_is_a_corpus_disagreement_not_a_model_form():
-    """W2b's verdict, pinned the same way W2a's was.
+def test_w2_16_the_mean_bars_became_jointly_satisfiable_under_the_corrected_snapshot():
+    """W2c's headline finding, pinned the way W2a's and W2b's were.
 
-    The mixture passes the Lakeview hold-out on both bars and `mfl-complete` on
-    KS; the one bar it fails is `mfl-complete`'s paired mean. That bar is not
-    reachable by ANY corpus-invariant noise model: the two corpora's OWN
-    observed mean |d| differ by more than twice the ±1.0 bar, before a model is
-    involved at all. A single parameter set whose simulated mean lands inside
-    ±1.0 of one is necessarily outside ±1.0 of the other.
+    W2b's residual failure rested on an arithmetic claim: the Lakeview hold-out
+    and `mfl-complete` disagreed by 2.71 slots — more than twice the ±1.0 bar —
+    so the two mean bars asked for simulated means in DISJOINT intervals and no
+    corpus-invariant model could satisfy both. The corrected snapshot dissolves
+    that claim: the same two blocks now disagree by ~1.65 slots, so the windows
+    OVERLAP and a jointly-satisfying simulated mean exists.
 
-    This is deliberately NOT an argument for widening the bar — it is the
-    evidence the operator needs to decide whether the bar is testing the model
-    or the corpora. See the artifact §6.
+    That is why W2c's verdict is still FAILED but for a different reason (both
+    mean bars, not one): the failure is now that the FIT block disagrees with
+    the blocks it is validated against — see the drift test below. If this test
+    ever goes red the 08c artifact's §6 argument has to be re-derived.
     """
     _c1, pool, drafted, _o, _v, _t = _lakeview_corpus()
-    lakeview = mds.reach_series(drafted, [r["player_id"] for r in pool])
+    lakeview = mds.reach_series(drafted, pool)
+    ids = [r["player_id"] for r in pool]
+    cut = sum(1 for i, pid in enumerate(drafted) if pid in set(ids) and i < 24)
+    hold = statistics.mean(lakeview[cut:])
     _c2, mpool, mdrafted, _mo, _r = _mfl_corpus("mfl-complete")
-    mfl = mds.reach_series(mdrafted, [r["player_id"] for r in mpool])
-    spread = abs(statistics.mean(mfl) - statistics.mean(lakeview))
-    assert spread > 2 * MEAN_BAR, (
-        f"the corpora agree to within {spread:.2f} slots now — the residual "
-        "failure may have become a model-form failure again; re-derive it")
-
-    # …and the driver is a handful of picks inside a block of consensus-TIED
-    # deep-tail players, where "reach" is measuring a tiebreak, not a decision.
-    values = {r["player_id"]: r.get("value") for r in mpool}
-    tail = [pid for pid in mdrafted if pid in values]
-    ties = collections.Counter(values[pid] for pid in tail if values[pid])
-    assert max(ties.values()) > 1, "no tied consensus values in the MFL corpus"
+    mfl = statistics.mean(mds.reach_series(mdrafted, mpool))
+    spread = abs(mfl - hold)
+    assert spread < 2 * MEAN_BAR, (
+        f"the two validation blocks disagree by {spread:.2f} slots again — the "
+        "mean bars are back to being jointly UNSATISFIABLE, which is a "
+        "different verdict from the one 08c records")
+    lo, hi = max(hold, mfl) - MEAN_BAR, min(hold, mfl) + MEAN_BAR
+    assert lo <= hi, "the jointly-satisfying window is empty"
 
 
-def test_w2_16_the_observable_is_stationary_across_the_split():
+def test_w2_16_the_observable_drifts_with_draft_depth():
     """The fit/hold-out split is only meaningful if the observable does not
     drift between blocks — otherwise the ±1.0 hold-out bar is unreachable by
-    ANY single-parameter model and the gate tests the split, not the model.
+    ANY model fitted on the fit block, and the gate tests the split.
 
-    This is why `reach_series` reads the LLD's `d_i` as a remaining-pool rank
-    (see its docstring). Measured on `lakeview-complete` across the procedure's
-    own rounds-1-2 / rounds-3-4 split, the remaining-pool observable drifts
-    ~0.3 slots; the static-rank reading of the same clause drifts ~2.9.
+    **This is the W2c finding, and it is a FAILURE being pinned, not a property
+    being asserted.** Under W2b's trimmed snapshot the drift measured ~0.3
+    slots — but only because a 50-player universe censored every deep reach at
+    9 slots. The corrected snapshot uncensors them and the same split drifts
+    ~2.0: `d` is a RANK distance, so as a draft descends into the flat part of
+    the value curve the same disagreement costs many more slots. Rounds 1-2 sit
+    on the steep part, which is exactly the block the procedure fits.
+
+    The remaining-pool reading of the LLD's `d_i` is still the better of the
+    two readings (see `reach_report`'s docstring) — the static-rank reading
+    drifts harder still, and that comparison is what this test keeps alive.
     """
     ctx, pool, drafted, _o, _v, _t = _lakeview_corpus()
     ids = [r["player_id"] for r in pool]
-    observed = mds.reach_series(drafted, ids)
+    observed = mds.reach_series(drafted, pool)
     cut = sum(1 for i, pid in enumerate(drafted) if pid in set(ids) and i < 24)
     drift = abs(statistics.mean(observed[:cut]) - statistics.mean(observed[cut:]))
-    assert drift <= MEAN_BAR, f"the observable drifts {drift:.2f} slots across the split"
+    assert drift > MEAN_BAR, (
+        f"the observable now drifts only {drift:.2f} slots across the split — "
+        "08c's diagnosis of the mean-bar failure needs re-deriving")
 
     static_rank = {pid: i + 1 for i, pid in enumerate(ids)}
     kept = [pid for pid in drafted if pid in static_rank]
     alt = [abs(static_rank[pid] - (i + 1)) for i, pid in enumerate(kept)]
     alt_drift = abs(statistics.mean(alt[:cut]) - statistics.mean(alt[cut:]))
-    assert alt_drift > MEAN_BAR > drift, (
+    assert alt_drift > drift, (
         "the two readings of the LLD's d_i no longer differ in stationarity — "
-        "re-derive the choice recorded in reach_series' docstring")
+        "re-derive the choice recorded in reach_report's docstring")
+
+
+def test_w2_16_the_mean_bar_is_tighter_than_the_statistic_it_tests():
+    """The other half of the W2c diagnosis: at these sample sizes the ±1.0 bar
+    is smaller than the STANDARD ERROR of the mean it bounds, because the
+    corrected snapshot's `|d|` is heavy-tailed (one pick at 29.5 on a 22-pick
+    block; one at 51.5 on a 28-pick corpus).
+
+    A perfectly-specified model would therefore fail the mean bar a large share
+    of the time on sampling noise alone. Recorded so the operator can see that
+    "more corpora" is not a nice-to-have but the precondition for the bar to
+    mean anything.
+    """
+    _c1, pool, drafted, _o, _v, _t = _lakeview_corpus()
+    observed = mds.reach_series(drafted, pool)
+    ids = [r["player_id"] for r in pool]
+    cut = sum(1 for i, pid in enumerate(drafted) if pid in set(ids) and i < 24)
+    hold = observed[cut:]
+    _c2, mpool, mdrafted, _mo, _r = _mfl_corpus("mfl-complete")
+    mfl = mds.reach_series(mdrafted, mpool)
+    for name, block in (("lakeview hold-out", hold), ("mfl-complete", mfl)):
+        se = statistics.stdev(block) / math.sqrt(len(block))
+        assert se > MEAN_BAR, (
+            f"{name}'s mean is now estimated to +/-{se:.2f}, inside the "
+            f"+/-{MEAN_BAR} bar — the bar has become estimable and 08c §6's "
+            "power argument needs re-deriving")

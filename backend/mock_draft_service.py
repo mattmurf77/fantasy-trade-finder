@@ -22,11 +22,12 @@ re-sorts the *user's* undrafted list only and never reaches a CPU decision.
 :data:`CPU_MODEL_VALIDATED` and :data:`CALIBRATION_ARTIFACT`. W2a's
 single-parameter uniform-jitter model failed the gate on a model-FORM ground;
 W2b re-specced it as the two-parameter mixture in :func:`cpu_pick` and re-ran
-the same gate unchanged. The re-fit **still FAILS**, on one bar of four
-instead of four of four, so :func:`advance_cpu` remains unreachable from the
-routes; the engine, its tests and the harness that produced the verdict all
-ship so the verdict is reproducible and a further re-spec can be re-gated
-without a rebuild.
+the same gate unchanged; W2c left the model and the gate FROZEN and re-derived
+the calibration CONSENSUS instead — the live-shaped, untrimmed value snapshot
+the corrected observable needed. The re-fit **still FAILS**, so
+:func:`advance_cpu` remains unreachable from the routes; the engine, its tests
+and the harness that produced the verdict all ship so the verdict is
+reproducible and the next attempt can be re-gated without a rebuild.
 
 **INV-10 — deterministic and self-contained.** Same ``rng_seed`` ⇒ a
 byte-identical draft; zero platform egress after creation (this module
@@ -80,10 +81,11 @@ MOCK_MAX_REACH_DEFAULT = 3.0
 #: ``mock_bpa_prob`` = P(this pick is the strict board pick, no idiosyncrasy).
 #: ``mock_reach_decay`` = the per-slot survival ratio of the reach branch:
 #: reaching one slot further is ``decay`` times as likely. The values below are
-#: the W2b fit on ``lakeview-complete`` rounds 1-2 — recorded, but NOT
-#: validated: see :data:`CPU_MODEL_VALIDATED`.
-MOCK_BPA_PROB_DEFAULT = 0.50
-MOCK_REACH_DECAY_DEFAULT = 0.95
+#: the **W2c** fit on ``lakeview-complete`` rounds 1-2 against the corrected
+#: consensus snapshot (W2b's, against the trimmed one, was 0.50 / 0.95) —
+#: recorded, but NOT validated: see :data:`CPU_MODEL_VALIDATED`.
+MOCK_BPA_PROB_DEFAULT = 0.20
+MOCK_REACH_DECAY_DEFAULT = 0.70
 
 _DEFAULT_CFG: dict[str, float] = {
     "mock_max_reach_slots": MOCK_MAX_REACH_DEFAULT,
@@ -118,7 +120,7 @@ DEFAULT_ROUNDS = 4
 # ---------------------------------------------------------------------------
 # THE CALIBRATION GATE (I-10)
 # ---------------------------------------------------------------------------
-# `docs/plans/draft-extensions/mock-calibration-2026-08b.md` is a GATE, not a
+# `docs/plans/draft-extensions/mock-calibration-2026-08c.md` is a GATE, not a
 # report (plan §5, lld §4.2.3).
 #
 # W2a: the specified single-parameter model — argmin over
@@ -126,13 +128,24 @@ DEFAULT_ROUNDS = 4
 # was a model-FORM failure: its reachable support is bounded by roughly
 # `max_reach + jitter` slots while 21 % of real picks reach 6-9.
 #
-# W2b (this file): re-specced to the two-parameter mixture in `cpu_pick` and
-# re-ran the SAME gate, unchanged. It now passes the Lakeview hold-out on both
-# bars and the independent `mfl-complete` corpus on KS — three of four — and
-# fails `mfl-complete`'s paired-mean bar. The residual is NOT a model-form
-# failure: the two corpora's observed mean |d| differ by 2.7 slots, 2.7x the
-# +/-1.0 bar itself, so no corpus-invariant noise model can satisfy both mean
-# bars at once. See the artifact §6 before touching anything.
+# W2b: re-specced to the two-parameter mixture in `cpu_pick` and re-ran the
+# SAME gate, unchanged. Three of four bars passed; `mfl-complete`'s paired-mean
+# bar failed, and the recorded cause was the CONSENSUS SNAPSHOT — a trimmed
+# fixture whose deep tail was floored at repeated DP values, so `d` there was
+# measuring a `search_rank` tiebreak rather than a reach.
+#
+# W2c (this file): the model, both bars, alpha, the split and the corpora are
+# all UNCHANGED. What changed is the snapshot the observable is measured
+# against — the full 2026 prospect class priced by the live, KTC-blended
+# DynastyProcess snapshot through the shipped blend — plus an explicit
+# average-rank rule for the ties that remain (`_block_rank`). Verdict: still
+# FAILED, now on BOTH paired-mean bars while BOTH KS bars pass. The correction
+# dissolved W2b's "the corpora are irreconcilable" argument (the two validation
+# blocks now agree to 1.65 slots, so a jointly-satisfying simulated mean
+# EXISTS) and replaced it with a sharper one: the observable drifts 2.0 slots
+# between the fit block and the hold-out block, so the procedure fits the two
+# shallowest rounds and validates on deeper ones. Read the artifact §6-§7
+# before touching anything.
 #
 # Per the plan's W2 abort criterion the CPU-bot mock therefore stays CUT: the
 # routes refuse to generate CPU picks while this stays False, returning the
@@ -142,7 +155,7 @@ DEFAULT_ROUNDS = 4
 # re-specced model — flipping it is the exact "fit on the validation set"
 # failure the amendment exists to prevent.
 CPU_MODEL_VALIDATED = False
-CALIBRATION_ARTIFACT = "docs/plans/draft-extensions/mock-calibration-2026-08b.md"
+CALIBRATION_ARTIFACT = "docs/plans/draft-extensions/mock-calibration-2026-08c.md"
 
 
 class MockDraftError(Exception):
@@ -817,14 +830,38 @@ def loads(row: Mapping[str, Any]) -> dict:
 # `simulate_reaches` drives the SHIPPED `cpu_pick`. The statistics (KS,
 # Wasserstein, the grid search) live in `backend/tests/test_mock_draft.py`.
 
-def reach_series(drafted_ids: Sequence[str],
-                 pool_order: Sequence[str]) -> list[int]:
-    """The empirical reach ``d_i`` for one recorded draft.
+def _block_rank(rows: Sequence[Mapping[str, Any]], index: int) -> tuple[float, bool]:
+    """``(d, was_tied)`` for the row at ``index`` — the AVERAGE 0-based rank of
+    the consensus-tied block it belongs to (W2c).
+
+    The pool is already in consensus order, so a tied block is the maximal run
+    of neighbours carrying the same ``value``; no ordering happens here
+    (amendment 1's no-``sorted`` rule). Inside such a block the shipped
+    ``_undrafted`` tiebreak (``search_rank`` then name) decides who is "first",
+    which is not an opinion the consensus holds — so charging a drafter the
+    full depth of a block he could not have been told apart is measuring the
+    tiebreak. Averaging the block is the symmetric alternative: it is applied
+    identically to the OBSERVED series here and to the SIMULATED series in
+    :func:`simulate_reaches`, keeps every pick (nothing is dropped), and is a
+    no-op the moment the values separate.
+    """
+    value = rows[index].get("value")
+    lo = hi = int(index)
+    while lo > 0 and rows[lo - 1].get("value") == value:
+        lo -= 1
+    while hi + 1 < len(rows) and rows[hi + 1].get("value") == value:
+        hi += 1
+    return (lo + hi) / 2.0, hi > lo
+
+
+def reach_report(drafted_ids: Sequence[str],
+                 pool_rows: Sequence[Mapping[str, Any]]) -> dict:
+    """``{series, skipped, tied}`` — the empirical reach for one recorded draft.
 
     ``d_i`` = how many better-valued AVAILABLE players the pick passed over —
     i.e. the player's 1-based consensus rank in the pool *as it stood at that
-    pick*, minus 1. ``d_i > 0`` is a reach; ``d_i == 0`` is best-player-
-    available.
+    pick*, minus 1, averaged over any consensus-tied block (:func:`_block_rank`).
+    ``d_i > 0`` is a reach; ``d_i == 0`` is best-player-available.
 
     **Deviation from lld §4.2.3, deliberate and recorded in the artifact.**
     The LLD writes ``d_i = consensus_rank_at_pick - i`` *and* says the rank is
@@ -832,29 +869,41 @@ def reach_series(drafted_ids: Sequence[str],
     contradict each other: over a remaining pool the BPA pick always ranks 1,
     so ``rank - i`` would read ``1 - i`` and a pure-BPA draft would score a
     huge "fall". Read the other way (a rank frozen over the pre-draft pool)
-    the observable is non-stationary — measured on `lakeview-complete` it runs
-    mean |d| 2.67 in rounds 1-2 against 5.79 in rounds 3-4, which no
-    single-parameter model can bridge inside the ±1.0 hold-out bar *by
-    construction*. The remaining-pool reading is stationary on the same corpus
-    (2.54 vs 2.47), so it is the one that can actually falsify a noise model,
-    which is the whole point of the amendment.
+    the observable drifts far harder across the fit/hold-out split than the
+    remaining-pool reading does, which no noise model can bridge inside the
+    ±1.0 hold-out bar *by construction*. The remaining-pool reading is the one
+    that can actually falsify a noise model, which is the whole point of the
+    amendment; both drifts are re-measured by
+    ``test_w2_16_the_observable_is_stationary_across_the_split``.
 
-    Picks of players outside ``pool_order`` are skipped; the ranking and the
-    sequence are then restricted to the same sub-universe, which leaves ``d``
-    self-consistent.
+    Picks of players outside ``pool_rows`` are skipped and COUNTED (``skipped``)
+    rather than silently dropped: a rookie the consensus does not value carries
+    no opinion to reach past, so his ``d`` would be alphabetical order. The
+    ranking and the sequence are then restricted to the same sub-universe,
+    which leaves ``d`` self-consistent.
     """
-    available = list(pool_order)
-    index = {pid: i for i, pid in enumerate(available)}
-    out: list[int] = []
+    available = [dict(r) for r in pool_rows]
+    index = {str(r["player_id"]): i for i, r in enumerate(available)}
+    out: list[float] = []
+    skipped = tied = 0
     for pid in drafted_ids:
         pid = str(pid)
         if pid not in index:
+            skipped += 1
             continue
-        position = available.index(pid)
-        out.append(position)
+        position = index[pid]
+        d, was_tied = _block_rank(available, position)
+        out.append(d)
+        tied += int(was_tied)
         available.pop(position)
-        index = {p: i for i, p in enumerate(available)}
-    return out
+        index = {str(r["player_id"]): i for i, r in enumerate(available)}
+    return {"series": out, "skipped": skipped, "tied": tied}
+
+
+def reach_series(drafted_ids: Sequence[str],
+                 pool_rows: Sequence[Mapping[str, Any]]) -> list[float]:
+    """:func:`reach_report`'s series alone."""
+    return reach_report(drafted_ids, pool_rows)["series"]
 
 
 def simulate_reaches(pool_rows: Sequence[Mapping[str, Any]],
@@ -863,7 +912,7 @@ def simulate_reaches(pool_rows: Sequence[Mapping[str, Any]],
                      viable_by_owner: Mapping[str, Mapping[str, int]],
                      targets: Mapping[str, tuple[int, int]],
                      *, bpa_prob: float, reach_decay: float, max_reach: float,
-                     seed: int) -> list[int]:
+                     seed: int) -> list[float]:
     """One seeded replay of a recorded draft through the SHIPPED
     :func:`cpu_pick`, returning the simulated reach series.
 
@@ -875,7 +924,7 @@ def simulate_reaches(pool_rows: Sequence[Mapping[str, Any]],
     available = list(pool_rows)             # read-only: never mutated in place
     viable = {o: dict(v) for o, v in viable_by_owner.items()}
     window = candidate_window(max_reach)
-    out: list[int] = []
+    out: list[float] = []
     for pick_no, owner in enumerate(owners_by_pick, start=1):
         if not available:
             break
@@ -890,7 +939,11 @@ def simulate_reaches(pool_rows: Sequence[Mapping[str, Any]],
         # The pick is always inside the window, so the scan is O(K), not O(n).
         position = next(i for i, r in enumerate(head)
                         if str(r["player_id"]) == chosen)
-        out.append(position)
+        # Tied blocks are averaged exactly as on the observed side (W2c). The
+        # block is read over `available`, not `head`, because a block can
+        # straddle the window edge — and the observed series reads the whole
+        # remaining pool too.
+        out.append(_block_rank(available, position)[0])
         pos = str(available[position].get("position") or "").upper()
         if owner in viable and pos in viable[owner]:
             viable[owner][pos] += 1

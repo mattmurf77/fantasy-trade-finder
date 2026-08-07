@@ -1,0 +1,1748 @@
+{
+ "_comment": "The 2026 rookie prospect class, for the mock-draft CPU calibration (draft-extensions W2c). Recorded 2026-08-06 from data/.sleeper_players_cache.json \u2014 the Sleeper players/nfl bulk dump of 2026-04-11, the same dump player_pool_2026.json was cut from \u2014 by keeping every QB/RB/WR/TE row with years_exp == 0 and trimming the fields to the four the consensus ordering reads. `team` is null on almost every row because the dump predates the NFL draft; the calibration harness supplies rookie_year=2026 itself rather than leaning on the years_exp+team fallback in draft_status.is_rookie_row. WHY THIS EXISTS: player_pool_2026.json is a UI-seeder cut (top-N per position across ALL players by value_1qb), which keeps only 56 of these prospects and floors their deep tail at repeated DP values \u2014 so a rookie draft's late picks were measured against a censored, tie-blocked board. See docs/plans/draft-extensions/mock-calibration-2026-08c.md. Values are NOT recorded here: they come from ktc_blend_pipeline_2026-07-17.json through the shipped data_loader blend, so the calibration consensus and the product's consensus cannot drift apart.",
+ "season": 2026,
+ "source": "data/.sleeper_players_cache.json (Sleeper players/nfl bulk, 2026-04-11)",
+ "predicate": "years_exp == 0 and position in {QB,RB,WR,TE}",
+ "players": {
+  "7": {
+   "full_name": "Kurt Warner",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "456": {
+   "full_name": "Deon Butler",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "2971": {
+   "full_name": "Anthony Ezeakunne",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3019": {
+   "full_name": "James Butler",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3649": {
+   "full_name": "Michael Cooper",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3672": {
+   "full_name": "David Richards",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3684": {
+   "full_name": "Derek Keaton",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3686": {
+   "full_name": "Joe Sommers",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3690": {
+   "full_name": "Antwane Grant",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3711": {
+   "full_name": "Quinshad Davis",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3712": {
+   "full_name": "Adam Fuehne",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3759": {
+   "full_name": "Gabe Hughes",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3799": {
+   "full_name": "David Glidden",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3804": {
+   "full_name": "Darrin Peterson",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3856": {
+   "full_name": "Braxton Deaver",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3858": {
+   "full_name": "Miles Shuler",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3861": {
+   "full_name": "Kieren Duncan",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3863": {
+   "full_name": "Joe Licata",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3866": {
+   "full_name": "Joe Hansley",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3873": {
+   "full_name": "Ben Roberts",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3877": {
+   "full_name": "Kelsey Young",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3887": {
+   "full_name": "Ben McCord",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3892": {
+   "full_name": "Jarvis Turner",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3896": {
+   "full_name": "Benson Browne",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3897": {
+   "full_name": "Paul Lang",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3901": {
+   "full_name": "Brandon Johnson",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3905": {
+   "full_name": "Mandel Dixon",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3911": {
+   "full_name": "Rashaun Simonise",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3918": {
+   "full_name": "TJ Thorpe",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3922": {
+   "full_name": "Montario Hunter",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3923": {
+   "full_name": "Franky Okafor",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3924": {
+   "full_name": "Clayton Echard",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3929": {
+   "full_name": "Terry Williams",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3935": {
+   "full_name": "Alex Chisum",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3940": {
+   "full_name": "Chase Price",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3945": {
+   "full_name": "Darius White",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3948": {
+   "full_name": "Andrew Opoku",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3951": {
+   "full_name": "Justin Berger",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "3953": {
+   "full_name": "Austin Trainor",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "4723": {
+   "full_name": "Justin Thomas",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "4784": {
+   "full_name": "Levonte Whitfield",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "4825": {
+   "full_name": "Freddie Brown",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "4909": {
+   "full_name": "Duce Staley",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "4928": {
+   "full_name": "Anas Hasic",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "4941": {
+   "full_name": "Dontre Wilson",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5109": {
+   "full_name": "Duplicate Player",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5208": {
+   "full_name": "Matt Linehan",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5216": {
+   "full_name": "Ervin Philips",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5258": {
+   "full_name": "Damon Gibson",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5270": {
+   "full_name": "Riley Ferguson",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5281": {
+   "full_name": "Troy Williams",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5282": {
+   "full_name": "Duplicate Player",
+   "position": "WR",
+   "team": "CHI",
+   "search_rank": 9999999
+  },
+  "5287": {
+   "full_name": "Brian Bridgewater",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5291": {
+   "full_name": "J.t. Luper",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5352": {
+   "full_name": "Ryan Green",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5356": {
+   "full_name": "Jeremiah Briscoe",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5357": {
+   "full_name": "Kent Shelby",
+   "position": "WR",
+   "team": null,
+   "search_rank": 970
+  },
+  "5396": {
+   "full_name": "Sergio Bailey II",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5814": {
+   "full_name": "Frank Stephens",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5817": {
+   "full_name": "Byron Leftwich",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5833": {
+   "full_name": "Kevin O'Connell",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "5834": {
+   "full_name": "Sean Ryan",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "6091": {
+   "full_name": "Jovon Durante",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "6106": {
+   "full_name": "Taiwan Deal",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "6240": {
+   "full_name": "Ron'quavion Tarver",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "6313": {
+   "full_name": "Duplicate Player",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "6393": {
+   "full_name": "Elkanah Dillon",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "6428": {
+   "full_name": "Taylor Cornelius",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "6643": {
+   "full_name": "Charles Holland",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "6691": {
+   "full_name": "Ray Gene smith",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "6738": {
+   "full_name": "Cedric Benson",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "6779": {
+   "full_name": "Jordan Harris",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "6978": {
+   "full_name": "Reggie Corbin",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "7073": {
+   "full_name": "Jake Bentley",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "7074": {
+   "full_name": "A.J. Hines",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "7096": {
+   "full_name": "Kaleb Barker",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "7097": {
+   "full_name": "Tra Barnett",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "7099": {
+   "full_name": "Tom Flacco",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "7102": {
+   "full_name": "Mason Fine",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "7104": {
+   "full_name": "Shannon Brooks",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "7108": {
+   "full_name": "Hasise Dubois",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "7110": {
+   "full_name": "Kelly Bryant",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "7393": {
+   "full_name": "Sirgeo Hoffman",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "7517": {
+   "full_name": "Duplicate Player",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "7524": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "7544": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "7557": {
+   "full_name": "Player Invalid",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "7566": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "7570": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "7604": {
+   "full_name": "Tamorrion Terry",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "8113": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "8124": {
+   "full_name": "Player Invalid",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "8128": {
+   "full_name": "Player Invalid",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "8133": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "8141": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "8156": {
+   "full_name": "Player Invalid",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "8163": {
+   "full_name": "Player Invalid",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "8216": {
+   "full_name": "Player Invalid",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "8231": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "8237": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "8244": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "8256": {
+   "full_name": "Player Invalid",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "8257": {
+   "full_name": "Player Invalid",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "8417": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "8422": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "8425": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "8426": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "8427": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "8430": {
+   "full_name": "Player Invalid",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "8432": {
+   "full_name": "Player Invalid",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "8434": {
+   "full_name": "Player Invalid",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "8440": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "11572": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "11578": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "11585": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "11587": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "11591": {
+   "full_name": "Player Invalid",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "11594": {
+   "full_name": "Player Invalid",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "11602": {
+   "full_name": "Player Invalid",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "11609": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "11611": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "11612": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "11613": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "11614": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "11622": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "11634": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "11639": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "12454": {
+   "full_name": "Player Invalid",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "12456": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "12458": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "12459": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "12461": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "12463": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "12464": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "12465": {
+   "full_name": "Player Invalid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "12466": {
+   "full_name": "Player Invalid",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "12468": {
+   "full_name": "Player Invalid",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "12786": {
+   "full_name": "Anthony Landphere",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "12834": {
+   "full_name": "Jimmy Bell",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "12913": {
+   "full_name": "J.J. Jones",
+   "position": "WR",
+   "team": null,
+   "search_rank": 999
+  },
+  "12966": {
+   "full_name": "Moose Muhammad",
+   "position": "WR",
+   "team": null,
+   "search_rank": 351
+  },
+  "12976": {
+   "full_name": "DeMeer Blankumsee",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "13014": {
+   "full_name": "Pat Conroy",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "13017": {
+   "full_name": "Hajj-Malik Williams",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "13022": {
+   "full_name": "Sone Ntoh",
+   "position": "RB",
+   "team": null,
+   "search_rank": 999
+  },
+  "13085": {
+   "full_name": "Kole Taylor",
+   "position": "TE",
+   "team": null,
+   "search_rank": 999
+  },
+  "13100": {
+   "full_name": "Eli Wilson",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "13108": {
+   "full_name": "Julian Fleming",
+   "position": "WR",
+   "team": null,
+   "search_rank": 999
+  },
+  "13113": {
+   "full_name": "Dante Wright",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "13117": {
+   "full_name": "Qualan Jones",
+   "position": "RB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "13119": {
+   "full_name": "Collin Schlee",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "13136": {
+   "full_name": "Redd Douglas",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "13152": {
+   "full_name": "Justin Lockhart",
+   "position": "WR",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "13158": {
+   "full_name": "Sam Pitz",
+   "position": "TE",
+   "team": null,
+   "search_rank": 999
+  },
+  "13160": {
+   "full_name": "Reggie Brown",
+   "position": "TE",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "13161": {
+   "full_name": "Zakhari Franklin",
+   "position": "WR",
+   "team": null,
+   "search_rank": 368
+  },
+  "13175": {
+   "full_name": "Kinkead Dent",
+   "position": "QB",
+   "team": null,
+   "search_rank": 9999999
+  },
+  "13205": {
+   "full_name": "Luke Deal",
+   "position": "TE",
+   "team": null,
+   "search_rank": 999
+  },
+  "13221": {
+   "full_name": "Brett Gabbert",
+   "position": "QB",
+   "team": null,
+   "search_rank": 999
+  },
+  "13222": {
+   "full_name": "Montana Lemonious-Craig",
+   "position": "WR",
+   "team": null,
+   "search_rank": 330
+  },
+  "13268": {
+   "full_name": "Elijah Sarratt",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13269": {
+   "full_name": "Fernando Mendoza",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13270": {
+   "full_name": "CJ Daniels",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13271": {
+   "full_name": "Mark Fletcher",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13272": {
+   "full_name": "Carson Beck",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13273": {
+   "full_name": "Josh Cuevas",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13274": {
+   "full_name": "Germie Bernard",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13275": {
+   "full_name": "Ty Simpson",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13276": {
+   "full_name": "Omar Cooper",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13277": {
+   "full_name": "CJ Donaldson",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13278": {
+   "full_name": "Max Klare",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13279": {
+   "full_name": "Carnell Tate",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13280": {
+   "full_name": "Chamon Metayer",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13281": {
+   "full_name": "Jordyn Tyson",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13282": {
+   "full_name": "Jack Endries",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13283": {
+   "full_name": "Hollywood Smothers",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13284": {
+   "full_name": "Dylan Devezin",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13285": {
+   "full_name": "Malachi Fields",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13286": {
+   "full_name": "Jadarian Price",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13287": {
+   "full_name": "Jeremiyah Love",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13288": {
+   "full_name": "Nicholas Singleton",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13289": {
+   "full_name": "Drew Allar",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13290": {
+   "full_name": "Jalen Moss",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13291": {
+   "full_name": "Kejon Owens",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13292": {
+   "full_name": "Lake McRee",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13293": {
+   "full_name": "Ja'Kobi Lane",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13294": {
+   "full_name": "Makai Lemon",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13295": {
+   "full_name": "Behren Morton",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13296": {
+   "full_name": "Caleb Douglas",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13297": {
+   "full_name": "Reggie Virgil",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13298": {
+   "full_name": "KC Concepcion",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13299": {
+   "full_name": "Nate Boerkircher",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13300": {
+   "full_name": "Le'Veon Moss",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13301": {
+   "full_name": "Antonio Williams",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13302": {
+   "full_name": "Adam Randall",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13303": {
+   "full_name": "Cade Klubnik",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13304": {
+   "full_name": "O'Mega Blake",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13305": {
+   "full_name": "Mike Washington",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13306": {
+   "full_name": "Taylen Green",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13307": {
+   "full_name": "Marlin Klein",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13308": {
+   "full_name": "Bauer Sharp",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13309": {
+   "full_name": "Aaron Anderson",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13310": {
+   "full_name": "Miller Moss",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13311": {
+   "full_name": "Chris Bell",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13312": {
+   "full_name": "Josh Kattus",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13313": {
+   "full_name": "Emmanuel Henderson",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13314": {
+   "full_name": "Luke Altmyer",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13315": {
+   "full_name": "Dean Connors",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13316": {
+   "full_name": "Eric Rivers",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13317": {
+   "full_name": "Ted Hurst",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13318": {
+   "full_name": "Noah Thomas",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13319": {
+   "full_name": "Oscar Delp",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13320": {
+   "full_name": "Zachariah Branch",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13321": {
+   "full_name": "Dan Villari",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13322": {
+   "full_name": "Sam Roush",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13323": {
+   "full_name": "Rahsul Faison",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13324": {
+   "full_name": "Matthew Hibner",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13325": {
+   "full_name": "Jordan Hudson",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13326": {
+   "full_name": "DT Sheffield",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13327": {
+   "full_name": "Desmond Reid",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13328": {
+   "full_name": "Anthony Hankerson",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13329": {
+   "full_name": "Malik Benson",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13330": {
+   "full_name": "Kenyon Sadiq",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13331": {
+   "full_name": "Dae'Quan Wright",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13332": {
+   "full_name": "Player Invalid",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13333": {
+   "full_name": "Deion Burks",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13334": {
+   "full_name": "C.J. Charleston",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13335": {
+   "full_name": "Cole Payton",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13336": {
+   "full_name": "Dane Key",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13337": {
+   "full_name": "Emmett Johnson",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13338": {
+   "full_name": "Kevin Coleman",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13339": {
+   "full_name": "Davon Booth",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13342": {
+   "full_name": "John Michael Gyllenborg",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13343": {
+   "full_name": "Vinny Anthony",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13344": {
+   "full_name": "Preston Fox",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13345": {
+   "full_name": "Jonah Coleman",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13346": {
+   "full_name": "Denzel Boston",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13347": {
+   "full_name": "Demond Claiborne",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13348": {
+   "full_name": "J'Mari Taylor",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13349": {
+   "full_name": "Eli Stowers",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13350": {
+   "full_name": "Joe Fagnano",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13351": {
+   "full_name": "Junior Vandeross",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13352": {
+   "full_name": "Lincoln Pare",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13353": {
+   "full_name": "Chris Brazzell",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13354": {
+   "full_name": "Eric McAlister",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13355": {
+   "full_name": "DJ Rogers",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13356": {
+   "full_name": "Trebor Pena",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13357": {
+   "full_name": "Lance Mason",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13380": {
+   "full_name": "Brenen Thompson",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13392": {
+   "full_name": "Jeff Caldwell",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13394": {
+   "full_name": "Josh Cameron",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13400": {
+   "full_name": "Justin Joly",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13401": {
+   "full_name": "Michael Trigg",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13402": {
+   "full_name": "Skyler Bell",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13403": {
+   "full_name": "Jam Miller",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13404": {
+   "full_name": "Garrett Nussmeier",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13405": {
+   "full_name": "Kaytron Allen",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13407": {
+   "full_name": "Carson Towt",
+   "position": "TE",
+   "team": "IND",
+   "search_rank": 9999999
+  },
+  "13408": {
+   "full_name": "Tanner Koziol",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13409": {
+   "full_name": "Donaven McCulley",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13410": {
+   "full_name": "Chase Roberts",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13411": {
+   "full_name": "Zavion Thomas",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13412": {
+   "full_name": "Kendrick Law",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13413": {
+   "full_name": "Cyrus Allen",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13414": {
+   "full_name": "Kaelon Black",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13415": {
+   "full_name": "Haynes King",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13416": {
+   "full_name": "Roman Hemby",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13417": {
+   "full_name": "De'Zhaun Stribling",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13418": {
+   "full_name": "Robert Henry",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13419": {
+   "full_name": "Jaydn Ott",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13420": {
+   "full_name": "Bryce Lance",
+   "position": "WR",
+   "team": null,
+   "search_rank": null
+  },
+  "13421": {
+   "full_name": "Eli Raridon",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13422": {
+   "full_name": "Jaren Kanak",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13423": {
+   "full_name": "Eli Heidenreich",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13424": {
+   "full_name": "Seth McGowan",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13425": {
+   "full_name": "Jalon Daniels",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13426": {
+   "full_name": "Sawyer Robertson",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13427": {
+   "full_name": "Diego Pavia",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13428": {
+   "full_name": "Joey Aguilar",
+   "position": "QB",
+   "team": null,
+   "search_rank": null
+  },
+  "13429": {
+   "full_name": "Seydou Traore",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13430": {
+   "full_name": "RJ Maryland",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13431": {
+   "full_name": "Miles Kitselman",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13432": {
+   "full_name": "Khalil Dinkins",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13433": {
+   "full_name": "Riley Nowakowski",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13434": {
+   "full_name": "Will Kacmarek",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13435": {
+   "full_name": "Joe Royer",
+   "position": "TE",
+   "team": null,
+   "search_rank": null
+  },
+  "13436": {
+   "full_name": "Kentrel Bullock",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13437": {
+   "full_name": "Noah Whittington",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13438": {
+   "full_name": "DeaMonte Trayanum",
+   "position": "RB",
+   "team": null,
+   "search_rank": null
+  },
+  "13440": {
+   "full_name": "Damien Alford",
+   "position": "WR",
+   "team": "NO",
+   "search_rank": 9999999
+  }
+ }
+}
