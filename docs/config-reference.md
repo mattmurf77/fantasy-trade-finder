@@ -493,13 +493,34 @@ Read through `mock_draft_service._c`, which overlays `database.get_config()` on 
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mock_max_reach_slots` | 3.0 | Structural cap on how many consensus rank slots a positional **need** can pull a player up: `need_bonus ≤ outlook_alpha(persona) × severity × this`. A **product cap, not a fitted parameter** — fitting it alongside the noise is unidentifiable at the corpus sizes available. |
+| `mock_max_reach_slots` | 3.0 | Structural cap on how many consensus rank slots a positional **need** can pull a player up: `need_bonus ≤ outlook_alpha(persona) × severity × this`. A **product cap, not a fitted parameter** — fitting it alongside the noise is unidentifiable at the corpus sizes available. **W2e narrowed its role to the need term only:** it is no longer any part of the support bound on a reach (that is the round-tiered policy below), and the round cap dominates it because the need term is scored over the already-truncated candidate set. |
 | `mock_bpa_prob` | 0.10 | First of the **two** fitted parameters of the W2b mixture (re-fitted in W2d on the interleaved fit block; W2c's was 0.20, W2b's 0.50): the probability that a CPU pick is the strict board pick (`argmin(rank − need_bonus)`, no idiosyncrasy). The complement takes the reach branch below. |
-| `mock_reach_decay` | 0.70 | Second fitted parameter (unmoved by the W2d re-fit; W2b's was 0.95): the reach branch's per-slot survival ratio — reaching one slot further is `this` times as likely, i.e. `P(reach = d) ∝ this ᵈ`, truncated at the candidate window. Implemented as a per-candidate `Gumbel(0, −1/ln(this))` draw, which by the Gumbel-max identity makes the reach depth exactly geometric. |
+| `mock_reach_decay` | 0.70 | Second fitted parameter (unmoved by the W2d re-fit; W2b's was 0.95): the reach branch's per-slot survival ratio — reaching one slot further is `this` times as likely, i.e. `P(reach = d) ∝ this ᵈ`, truncated at the round's reach cap. Implemented as a per-candidate `Gumbel(0, −1/ln(this))` draw, which by the Gumbel-max identity makes the reach depth exactly geometric. |
 
-⚠️ **The two defaults above are the recorded W2c fit, but the model is NOT validated.** W2c re-derived the calibration consensus from the full, live-shaped (KTC-blended) value snapshot with the model and the gate frozen, and re-fitted: both KS bars now pass and both paired-mean bars fail, so `CPU_MODEL_VALIDATED` is `False` and the CPU-bot mock stays cut. Read [mock-calibration-2026-08c.md](plans/draft-extensions/mock-calibration-2026-08c.md) — especially §6, on why the failure is now the fit/hold-out depth drift rather than a corpus disagreement — before touching either key.
+⚠️ **The two defaults above are the recorded W2d fit, but the model is NOT validated — and W2e moved the support bound underneath them without re-fitting.** They were fitted when a single global candidate window truncated every reach at 11.5 slots; since W2e that truncation is the round-tiered policy below. `CPU_MODEL_VALIDATED` is `False`, the CPU-bot mock stays cut, and **a deliberate re-fit + re-gate is owed before either value means anything.** Read [mock-calibration-2026-08d.md](plans/draft-extensions/mock-calibration-2026-08d.md) — especially §6, on why the residual localised in the support bound — and [build-w2e.md](plans/draft-extensions/build-w2e.md) before touching either key.
 
-The CPU **candidate window** `K` is *not* a `model_config` key and is not fitted: it is the module constant `mock_draft_service.MOCK_CANDIDATE_WINDOW = 12`, a product cap on how deep a bot may reach, which truncates the geometric tail. The W2b artifact §5 showed the verdict is invariant to it across `K ∈ 8…20`; W2c did not re-touch it. ⚠️ **W2d found it is now the binding constraint on the gate** ([08d §6](plans/draft-extensions/mock-calibration-2026-08d.md)): because a CPU only ever scans the first `K` candidates, every simulated reach is bounded at 11.5 slots, while 7 of the 102 validation picks reach 13–51.5 and carry the whole paired-mean gap. W2d deliberately left it alone — retuning a product cap against the validation blocks is the fit-on-the-validation-set move amendment 2 exists to prevent — so **`K` is a product decision for the operator, to be taken on its own terms and only then re-gated.**
+#### The round-tiered reach policy (W2e) — product policy, not a tuning constant
+
+How deep, and how often, a CPU drafter may deviate from the consensus board. **The operator's rule, verbatim:** *"For the first round, I expect no more than reaching 3 picks (and no more than 3 times a round). For the second round 5 picks (and only 2 times a round). For the third and fourth 15 picks (limit of 5 times a round)."*
+
+| Round | Max reach (consensus slots) | Max reaching picks per round, **league-wide** |
+|---|---|---|
+| 1 | 3 | 3 |
+| 2 | 5 | 2 |
+| 3, 4, and every later round | 15 | 5 |
+
+Held in `mock_draft_service` as `MOCK_REACH_CAP_BY_ROUND` / `MOCK_REACH_CAP_LATE` and `MOCK_REACH_BUDGET_BY_ROUND` / `MOCK_REACH_BUDGET_LATE`, read through `round_reach_cap(round)` / `round_reach_budget(round)`.
+
+**It is deliberately NOT a `model_config` key and NOT operator-tunable at runtime**, even though it sits beside three keys that are. It is the model's *support bound*: a row in `model_config` could silently invalidate the calibration verdict the gate records, and a support bound that moves without a re-gate is exactly the failure amendment 2 exists to prevent. Changing either table is a **product decision that requires a re-gate**.
+
+Semantics, as implemented:
+
+- **Reach** — a pick whose 0-based position in the remaining consensus pool is ≥ 1, i.e. it passed over at least one better-valued available player. A pick at best-player-available is never a reach.
+- **The cap truncates** the candidate set for that round, so the geometric reach law is truncated at the round's cap. A CPU can never reach further than its round's cap, at any parameter.
+- **The budget is per round and shared across every CPU team** (not per team). Once a round has spent it, every remaining CPU pick in that round is **strict best-available — the need term included**, because that is what "strict best available" means. It is consumed in pick order and re-derived from the persisted picks on resume, so a replayed mock spends it identically and `INV-10` (same seed ⇒ byte-identical draft) still holds.
+- **The user is outside it.** A human's own reach neither consumes the budget nor is constrained by it; the policy describes how the bots draft.
+
+The CPU **candidate window** `K` (`mock_draft_service.MOCK_CANDIDATE_WINDOW`) is *not* a `model_config` key either, and since W2e it is a **performance bound only** — the width of the pool head a CPU scans, so the scan is `O(K)` rather than `O(pool)`. W2d found that at `K = 12` it was doubling as the *binding* support bound ([08d §6](plans/draft-extensions/mock-calibration-2026-08d.md)); W2e replaced it in that role with the round tier above and widened it **12 → 24**, comfortably clear of the deepest round cap (15, needing 16 candidates), so it never binds the distribution at any round. Pinned by `test_w2_04b_the_candidate_window_is_never_the_binding_constraint`.
 
 The persona weight itself is **not** a new key — it is `outlook_alpha(persona_outlook)`, the existing `outlook_alpha_*` map above, reused verbatim.
 

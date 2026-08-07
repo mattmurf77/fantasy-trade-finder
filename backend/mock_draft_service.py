@@ -25,8 +25,11 @@ W2b re-specced it as the two-parameter mixture in :func:`cpu_pick` and re-ran
 the same gate unchanged; W2c left the model and the gate FROZEN and re-derived
 the calibration CONSENSUS instead; W2d took the operator's pre-registered
 decision to re-balance the fit/hold-out SPLIT for draft depth and to add a
-third validation corpus, with the model still frozen. The re-fit **still
-FAILS**, so :func:`advance_cpu` remains unreachable from the routes; the
+third validation corpus, with the model still frozen; W2e took the operator's
+PRODUCT decision on how deep and how often a bot may reach and replaced the
+single global cap with the round-tiered policy below, **without re-fitting or
+re-gating**. The last recorded verdict is **STILL A FAILURE**, so
+:func:`advance_cpu` remains unreachable from the routes; the
 engine, its tests and the harness that produced the verdict all ship so the
 verdict is reproducible and the next attempt can be re-gated without a rebuild.
 
@@ -85,6 +88,11 @@ MOCK_MIN_TEAMS = 4
 #: Product cap on how many consensus slots a *need* can pull a player up. NOT
 #: a fitted parameter — fitting it alongside the noise is unidentifiable at
 #: n = 23 (lld §4.2.3 step 2).
+#:
+#: **W2e narrowed its role.** It scales the NEED term and nothing else. It is no
+#: longer any part of the support bound on a reach — that is the round-tiered
+#: :func:`round_reach_cap` — and the round cap dominates it, since the need term
+#: is scored over the already-truncated candidate set.
 MOCK_MAX_REACH_DEFAULT = 3.0
 
 #: THE two fitted parameters of the W2b mixture (see :func:`cpu_pick`).
@@ -95,6 +103,13 @@ MOCK_MAX_REACH_DEFAULT = 3.0
 #: same corrected snapshot but the round-based split, was 0.20 / 0.70; W2b, on
 #: the trimmed snapshot, 0.50 / 0.95) — recorded, but NOT validated: see
 #: :data:`CPU_MODEL_VALIDATED`.
+#:
+#: **W2e did NOT re-fit them.** W2e installed the operator's round-tiered reach
+#: policy below and stopped there, deliberately: re-fitting and re-gating is a
+#: separate, later decision. So these two remain the values fitted under the OLD
+#: global support bound, and a re-fit is owed before they mean anything. Nothing
+#: ships on them meanwhile — :data:`CPU_MODEL_VALIDATED` is ``False`` and the
+#: routes refuse to generate CPU picks at all.
 MOCK_BPA_PROB_DEFAULT = 0.10
 MOCK_REACH_DECAY_DEFAULT = 0.70
 
@@ -104,26 +119,74 @@ _DEFAULT_CFG: dict[str, float] = {
     "mock_reach_decay": MOCK_REACH_DECAY_DEFAULT,
 }
 
-#: Candidate window ``K`` — the deepest a CPU may reach, in consensus slots.
-#: A PRODUCT CAP, never a fitted parameter (W2b brief): the mixture's reach
-#: branch is truncated BY it rather than fitted TO it. Set once, from the FIT
-#: block alone — ``lakeview-complete`` rounds 1-2 reach at most 9 slots, so a
-#: window under 10 could not represent the fit data at all — rounded up to 12.
-#: Beyond ~a dozen slots a bot's pick stops reading as conviction and starts
-#: reading as broken, which is the product half of the same number.
+# ── THE ROUND-TIERED REACH POLICY (W2e) ──────────────────────────────────
+# The operator's product rule, verbatim:
+#
+#   "For the first round, I expect no more than reaching 3 picks (and no more
+#    than 3 times a round). For the second round 5 picks (and only 2 times a
+#    round). For the third and fourth 15 picks (limit of 5 times a round)."
+#
+# This is PRODUCT POLICY — "how deep, and how often, may a bot deviate from the
+# board before it reads as broken" — decided on its own terms by the operator
+# and only THEN re-gated (artifact 08d §8 option A). It is deliberately not a
+# fitted parameter and deliberately not a ``model_config`` row: a support bound
+# an operator could retune from the DB would silently invalidate the calibration
+# verdict the gate records. Changing either table is a product decision that
+# requires a re-gate. Documented in ``docs/config-reference.md``.
+#
+# W2e semantics, stated once (artifact 08e §2 argues each one):
+#  * A **reach** is a pick whose 0-based position in the remaining consensus
+#    pool is >= 1 — i.e. the pick passed over at least one better-valued
+#    available player. A pick at best-player-available is never a reach.
+#  * The **cap** truncates the candidate set for that round, so the reach
+#    branch is a geometric law truncated at the round's cap rather than at the
+#    old global window. A CPU can NEVER reach further than its round's cap.
+#  * The **budget** is per round and shared across every CPU team in the league
+#    (not per team). Once a round has spent it, every remaining CPU pick in that
+#    round is strict best-available — the need term included, because "strict
+#    best available" is what the rule says. It is consumed in pick order, so it
+#    is a pure function of the seeded RNG and replay stays exact.
+#  * The USER's picks neither consume the budget nor are constrained by it: the
+#    policy describes how the bots draft, and a human reaching in round 1 should
+#    not force the field to BPA for the rest of it.
+
+#: Round -> the deepest a CPU may reach in that round, in consensus slots.
+MOCK_REACH_CAP_BY_ROUND: dict[int, int] = {1: 3, 2: 5}
+#: Rounds 3, 4 and every later round.
+MOCK_REACH_CAP_LATE = 15
+
+#: Round -> how many reaching picks that round allows, LEAGUE-WIDE.
+MOCK_REACH_BUDGET_BY_ROUND: dict[int, int] = {1: 3, 2: 2}
+#: Rounds 3, 4 and every later round.
+MOCK_REACH_BUDGET_LATE = 5
+
+
+def round_reach_cap(round_no: int) -> int:
+    """The deepest reach allowed in ``round_no`` (product policy, W2e)."""
+    return MOCK_REACH_CAP_BY_ROUND.get(int(round_no), MOCK_REACH_CAP_LATE)
+
+
+def round_reach_budget(round_no: int) -> int:
+    """How many reaching picks ``round_no`` allows, league-wide (W2e)."""
+    return MOCK_REACH_BUDGET_BY_ROUND.get(int(round_no), MOCK_REACH_BUDGET_LATE)
+
+
+#: Candidate window ``K`` — a PERFORMANCE bound, and nothing else since W2e.
 #:
-#: **W2d finding — this is now the binding constraint on the gate.** Because
-#: :func:`cpu_pick` only ever scans ``available[:candidate_window(...)]``, every
-#: simulated ``d`` is bounded by ``K - 1`` (11, or 11.5 once a tied block is
-#: averaged). 7 of the 102 picks in the three validation blocks reach 13 to 51.5
-#: slots — probability EXACTLY zero under the shipped model — and they carry
-#: 1.34 / 4.04 / 1.24 slots of those blocks' observed means, which is the whole
-#: paired-mean gap. It is left ALONE: retuning a product cap against the
-#: validation blocks is the fit-on-the-validation-set move amendment 2 exists to
-#: prevent. Pinned by
-#: ``test_w2_16_the_candidate_window_cannot_produce_the_deepest_observed_reaches``
-#: and argued in artifact 08d §6.
-MOCK_CANDIDATE_WINDOW = 12
+#: It is the width of the head of the pool :func:`cpu_pick` scans, so the scan
+#: is O(K) rather than O(pool). Until W2e it was ALSO the support bound on a
+#: reach, and W2d's finding was that at ``K = 12`` it was the BINDING one: every
+#: simulated ``d`` was bounded at 11.5 while 7 of 102 validation picks reached
+#: 13 to 51.5 slots, probability exactly zero. W2e replaces it in that role with
+#: the round-tiered cap above, which is a stated product rule rather than a
+#: constant nobody chose deliberately.
+#:
+#: It is therefore set WIDE ENOUGH THAT IT NEVER BINDS: the deepest round cap is
+#: :data:`MOCK_REACH_CAP_LATE` = 15, which needs 16 candidates, and 24 leaves 8
+#: slots of headroom so the round tier is always the constraint that bites.
+#: Pinned by ``test_w2_04b_the_candidate_window_is_never_the_binding_constraint``,
+#: which asserts the slack at EVERY round the engine can draft.
+MOCK_CANDIDATE_WINDOW = 24
 
 #: "Worth a 3rd or better" — the `third` tier floor from
 #: ``docs/cross-client-invariants.md``. A roster-clogging body below this does
@@ -182,11 +245,33 @@ DEFAULT_ROUNDS = 4
 # all three paired-mean bars fail (1.648 / 3.605 / 2.026). The re-balance did
 # what it was meant to — the depth drift is gone and the observable's residual
 # 1.44-slot block difference is ~1.1 SE of sampling noise — and it exposed the
-# next layer: `MOCK_CANDIDATE_WINDOW` bounds every simulated `d` at 11.5, while
-# 7 of the 102 validation picks reach 13 to 51.5 slots. Those out-of-support
-# picks carry 1.34 / 4.04 / 1.24 slots of the three blocks' observed means,
-# i.e. they ARE the gap. `K` is a PRODUCT CAP and deliberately not fitted, so
-# W2d does not touch it. Read artifact 08d §6-§7 before touching anything.
+# next layer: `MOCK_CANDIDATE_WINDOW` bounded every simulated `d` at 11.5, while
+# 7 of the 102 validation picks reached 13 to 51.5 slots. Those out-of-support
+# picks carried 1.34 / 4.04 / 1.24 slots of the three blocks' observed means,
+# i.e. they WERE the gap. `K` is a PRODUCT CAP and deliberately not fitted, so
+# W2d did not touch it and asked the operator to decide it.
+#
+# W2e (this file): the operator decided `K` on product grounds, as artifact 08d
+# §8 option A asked. The single global cap is REPLACED as the support bound by
+# the ROUND-TIERED REACH POLICY above — reach at most 3 / 5 / 15 slots in rounds
+# 1 / 2 / 3+, at most 3 / 2 / 5 times per round league-wide — and
+# `MOCK_CANDIDATE_WINDOW` is demoted to a pure performance bound, widened 12 ->
+# 24 so it never binds the distribution at any round.
+#
+# **W2e installed the policy and STOPPED THERE, deliberately.** It did NOT
+# re-fit the two parameters and did NOT re-run the gate; that is a separate,
+# later decision (build-w2e.md §1). Two consequences to hold in mind:
+#
+#   * 08d's verdict TABLE still records the last run of the gate, but its §6
+#     diagnosis — "the residual is the candidate window's support bound" — is
+#     the finding W2e's policy ACTS ON, so the numbers beside it are no longer
+#     reproducible against this engine. A re-gate is owed before any of them
+#     is quoted again.
+#   * `MOCK_BPA_PROB_DEFAULT` / `MOCK_REACH_DECAY_DEFAULT` were fitted under the
+#     OLD support and are left untouched for the same reason.
+#
+# Neither matters for what ships: the verdict is still FAILED, so this stays
+# False and the routes still refuse.
 #
 # Per the plan's W2 abort criterion the CPU-bot mock therefore stays CUT: the
 # routes refuse to generate CPU picks while this stays False, returning the
@@ -496,7 +581,8 @@ def cpu_pick(candidates_ranked: Sequence[Mapping[str, Any]],
              *,
              max_reach: float = MOCK_MAX_REACH_DEFAULT,
              bpa_prob: float = MOCK_BPA_PROB_DEFAULT,
-             reach_decay: float = MOCK_REACH_DECAY_DEFAULT) -> str:
+             reach_decay: float = MOCK_REACH_DECAY_DEFAULT,
+             reach_cap: int | None = None) -> str:
     """One CPU pick — ``argmin(rank - need_bonus - reach_noise)``.
 
     ``candidates_ranked`` is the head of the consensus pool, 1-based by list
@@ -526,12 +612,19 @@ def cpu_pick(candidates_ranked: Sequence[Mapping[str, Any]],
     asks for, obtained without leaving the shipped per-candidate additive-noise
     code shape and without a second ordering of the pool (amendment 1).
 
-    The two parameters are ``bpa_prob`` and ``reach_decay``. The candidate
-    window ``K`` (:data:`MOCK_CANDIDATE_WINDOW`) truncates the geometric tail
-    and is deliberately NOT fitted.
+    The two parameters are ``bpa_prob`` and ``reach_decay``. **``reach_cap``
+    (W2e) truncates the geometric tail** and is deliberately NOT fitted: it is
+    the caller's round-tiered product cap (:func:`round_reach_cap`), passed in
+    per pick because it depends on the round. ``reach_cap=0`` collapses the
+    candidate set to the board pick, which is how the round's spent frequency
+    budget expresses "strict best available" — the need term included, since it
+    too is scored over the truncated set. ``None`` leaves the scan untruncated,
+    which is what the unit tests of the noise law itself use.
     """
     if not candidates_ranked:
         raise PlayerUnavailable("no candidates")
+    if reach_cap is not None:
+        candidates_ranked = candidates_ranked[:max(0, int(reach_cap)) + 1]
     weight = need_weight(persona_outlook)
     scale = _decay_to_scale(reach_decay)
     # ONE Bernoulli per pick, drawn first so the branch (and therefore the
@@ -550,10 +643,11 @@ def cpu_pick(candidates_ranked: Sequence[Mapping[str, Any]],
 
 
 def candidate_window(max_reach: float) -> int:
-    """``K`` — the scan width, and the product cap on a CPU reach.
+    """``K`` — the scan width. A PERFORMANCE bound only since W2e.
 
     :data:`MOCK_CANDIDATE_WINDOW`, floored so the *need* term can always reach
-    its own ``max_reach`` cap even if the window is retuned downwards.
+    its own ``max_reach`` cap even if the window is retuned downwards. The
+    binding cap on a reach is :func:`round_reach_cap`, not this.
     """
     return max(MOCK_CANDIDATE_WINDOW, int(math.ceil(float(max_reach))) + 1)
 
@@ -753,6 +847,35 @@ def _severities(ctx: MockContext, state: Mapping[str, Any],
     return {pos: severity(viable, targets, pos) for pos in _POSITIONS}
 
 
+def reaches_spent(state: Mapping[str, Any],
+                  pool_rows: Sequence[Mapping[str, Any]],
+                  round_no: int) -> int:
+    """How much of ``round_no``'s frequency budget the recorded CPU picks used.
+
+    Re-derived from the persisted picks rather than carried in memory, for the
+    same reason ``_team_viable`` is (T-W2-11): a mock resumed from its row must
+    see the same budget state as one that never stopped, or the seeded replay
+    stops being exact. The remaining pool at pick *j* is the frozen pre-draft
+    pool minus picks ``0..j-1``, so every pick's depth is reconstructible from
+    the row alone.
+
+    USER picks are skipped: the budget governs the bots (W2e semantics).
+    """
+    remaining = [str(r["player_id"]) for r in pool_rows]
+    index = {pid: i for i, pid in enumerate(remaining)}
+    spent = 0
+    for pick in state.get("picks") or ():
+        position = index.get(str(pick["player_id"]))
+        if position is None:
+            continue
+        if (position > 0 and pick.get("by") == BY_CPU
+                and int(pick.get("round") or 0) == int(round_no)):
+            spent += 1
+        remaining.pop(position)
+        index = {pid: i for i, pid in enumerate(remaining)}
+    return spent
+
+
 def advance_cpu(state: dict, ctx: MockContext,
                 pool: Sequence[Mapping[str, Any]] | None = None,
                 *, allow_unvalidated_model: bool = False) -> dict:
@@ -762,6 +885,12 @@ def advance_cpu(state: dict, ctx: MockContext,
     False unless the caller explicitly opts in — the routes never do, the
     calibration harness and the engine tests do. That is the plan's W2 abort
     criterion expressed in code rather than only in prose.
+
+    **W2e — the round-tiered reach policy is enforced here**, because it is the
+    engine that knows the round and the league-wide history; :func:`cpu_pick`
+    only knows the cap it is handed. The round's budget is re-derived from the
+    row on entry (and reset when the loop crosses a round boundary), so a
+    resumed mock and a continuous one spend it identically.
     """
     if not CPU_MODEL_VALIDATED and not allow_unvalidated_model:
         raise CalibrationGateClosed(CALIBRATION_ARTIFACT)
@@ -772,6 +901,8 @@ def advance_cpu(state: dict, ctx: MockContext,
     reach_decay = float(noise.get("reach_decay", MOCK_REACH_DECAY_DEFAULT))
     window = candidate_window(max_reach)
     rows = pool if pool is not None else consensus_pool(ctx)
+    round_no: int | None = None
+    spent = 0
 
     while True:
         slot = next_pick(state)
@@ -784,14 +915,21 @@ def advance_cpu(state: dict, ctx: MockContext,
         if not available:
             state["status"] = STATUS_COMPLETE
             return state
+        if round_no != int(slot["round"]):
+            round_no = int(slot["round"])
+            spent = reaches_spent(state, rows, round_no)
         owner = slot["roster_id"]
         persona = (state["settings"].get("personas") or {}).get(
             str(owner), {"outlook": DEFAULT_OUTLOOK})
+        # Budget spent => strict best-available for the rest of the round.
+        cap = round_reach_cap(round_no) if spent < round_reach_budget(round_no) else 0
         player_id = cpu_pick(available[:window], persona.get("outlook"),
                              _severities(ctx, state, str(owner)),
                              _pick_rng(state, slot["pick_no"]),
                              max_reach=max_reach, bpa_prob=bpa_prob,
-                             reach_decay=reach_decay)
+                             reach_decay=reach_decay, reach_cap=cap)
+        if str(available[0]["player_id"]) != str(player_id):
+            spent += 1                      # this pick was a reach
         _append(state, slot, player_id, BY_CPU)
 
 
@@ -1060,33 +1198,50 @@ def simulate_reaches(pool_rows: Sequence[Mapping[str, Any]],
                      viable_by_owner: Mapping[str, Mapping[str, int]],
                      targets: Mapping[str, tuple[int, int]],
                      *, bpa_prob: float, reach_decay: float, max_reach: float,
-                     seed: int) -> list[float]:
+                     seed: int,
+                     rounds_by_pick: Sequence[int]) -> list[float]:
     """One seeded replay of a recorded draft through the SHIPPED
     :func:`cpu_pick`, returning the simulated reach series.
 
     Same observable as :func:`reach_series`, same pool, same turn order — the
     only thing that changes is who chooses. That is what makes the two
     distributions comparable.
+
+    ``rounds_by_pick`` is the recorded ROUND of each pick in the sequence, and
+    it is required rather than derived (W2e): the sequence is restricted to the
+    picks the consensus prices, so the round is not ``i // teams`` and only the
+    corpus knows it. The round-tiered cap and the league-wide frequency budget
+    are applied exactly as :func:`advance_cpu` applies them — one forward pass,
+    budget consumed in pick order — so the simulator and the product cannot
+    diverge on the policy any more than they can on the noise law.
     """
     rng_root = random.Random(seed)
     available = list(pool_rows)             # read-only: never mutated in place
     viable = {o: dict(v) for o, v in viable_by_owner.items()}
     window = candidate_window(max_reach)
+    round_no: int | None = None
+    spent = 0
     out: list[float] = []
-    for pick_no, owner in enumerate(owners_by_pick, start=1):
+    for pick_no, (owner, pick_round) in enumerate(
+            zip(owners_by_pick, rounds_by_pick), start=1):
         if not available:
             break
         owner = str(owner)
+        if round_no != int(pick_round):
+            round_no, spent = int(pick_round), 0
         needs = {pos: severity(viable.get(owner, {}), targets, pos)
                  for pos in _POSITIONS}
         rng = random.Random(rng_root.randrange(2 ** 31) * 10_007 + pick_no)
         head = available[:window]
+        cap = round_reach_cap(round_no) if spent < round_reach_budget(round_no) else 0
         chosen = cpu_pick(head, personas.get(owner, DEFAULT_OUTLOOK),
                           needs, rng, max_reach=max_reach, bpa_prob=bpa_prob,
-                          reach_decay=reach_decay)
+                          reach_decay=reach_decay, reach_cap=cap)
         # The pick is always inside the window, so the scan is O(K), not O(n).
         position = next(i for i, r in enumerate(head)
                         if str(r["player_id"]) == chosen)
+        if position > 0:
+            spent += 1                      # this pick was a reach
         # Tied blocks are averaged exactly as on the observed side (W2c). The
         # block is read over `available`, not `head`, because a block can
         # straddle the window edge — and the observed series reads the whole

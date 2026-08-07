@@ -30,6 +30,10 @@ Spec: ``docs/plans/draft-extensions/plan.md`` §5 · ``lld.md`` §2.3/§3.3/§4.
   T-W2-17  corpus shape check before any corpus is used for calibration
   T-W2-19  the split's PRECONDITION (W2d) — fit and hold-out see comparable
            draft depth, asserted before the gate consumes the partition
+  T-W2-21  the ROUND-TIERED REACH POLICY (W2e) — the operator's product rule on
+           how deep and how often a CPU may reach: the caps truncate, the
+           per-round league-wide budget exhausts into strict best-available, the
+           user is outside it, and a resume from the row spends it identically
 
 T-W2-18 is a mobile Jest test and belongs to W2b.
 
@@ -258,21 +262,211 @@ def test_w2_04b_the_reach_branch_is_geometric_in_reach_decay():
                 f"decay={decay}: P({d+1})/P({d}) = {ratio:.3f}")
 
 
-def test_w2_04b_the_candidate_window_truncates_the_tail_and_is_not_fitted():
-    """`K` is a product cap applied by the ENGINE, not by the scoring function:
-    no CPU pick can land beyond it at ANY parameter, including the degenerate
-    flat branch on a board 6x wider than the window."""
+def test_w2_04b_the_candidate_window_is_never_the_binding_constraint():
+    """**W2e** — `K` is a PERFORMANCE bound and nothing else.
+
+    Until W2e the candidate window doubled as the support bound on a reach, and
+    W2d's finding was that at `K = 12` it was the BINDING one: every simulated
+    `d` stopped at 11.5 while real picks reached 51.5. W2e replaces it in that
+    role with the operator's round-tiered cap, and the brief requires the window
+    to be wide enough that it never binds *at any round*. That is asserted here,
+    round by round, rather than argued in a comment.
+
+    The reach branch itself is unchanged: unwindowed and uncapped it still runs
+    far past `K`, so the truncation is real work — it is just done by the round
+    tier now.
+    """
     window = mds.candidate_window(mds.MOCK_MAX_REACH_DEFAULT)
     assert window == mds.MOCK_CANDIDATE_WINDOW
-    # Unwindowed, the flat branch reaches far past K — so the cap is real work.
+
+    # Every round the engine can draft: the round's cap needs `cap + 1`
+    # candidates, and the window must leave slack on top of that.
+    for rnd in range(1, mds._ROOKIE_MAX_ROUNDS + 1):
+        cap = mds.round_reach_cap(rnd)
+        assert cap + 1 < window, (
+            f"round {rnd}'s cap of {cap} needs {cap + 1} candidates but the "
+            f"window is {window} — the window is binding again, which is the "
+            "W2d failure W2e exists to remove")
+    assert window >= max(mds.round_reach_cap(r)
+                         for r in range(1, mds._ROOKIE_MAX_ROUNDS + 1)) + 2
+
+    # Uncapped, the flat branch reaches far past K — the truncation is real.
     assert max(_reach_draws(bpa_prob=0.0, decay=0.999, n=2000, width=72)) > window
 
+    # And through the ENGINE the binding bound is the round cap, not the window.
     ctx = make_ctx(players=linear_players(80))
     state = make_state(ctx, owners=["a", "b"], user="zz", rounds=8,
                        bpa_prob=0.0, decay=0.999)
     run(state, ctx)
-    assert max(mds.reach_series([p["player_id"] for p in state["picks"]],
-                                mds.consensus_pool(ctx))) < window
+    pool = mds.consensus_pool(ctx)
+    deepest = max(mds.reach_series([p["player_id"] for p in state["picks"]], pool))
+    assert deepest <= mds.round_reach_cap(3), (
+        f"a CPU reached {deepest} slots, past the deepest round cap "
+        f"{mds.round_reach_cap(3)} — the round tier is not binding")
+
+
+# ---------------------------------------------------------------------------
+# T-W2-21 — THE ROUND-TIERED REACH POLICY (W2e), asserted as behaviour
+# ---------------------------------------------------------------------------
+
+def _engine_reaches(*, rounds=4, teams=6, decay=0.99, bpa_prob=0.0, seed=7):
+    """`[(round, depth)]` for a full CPU-only draft through `advance_cpu`.
+
+    Depth is the pick's 0-based position in the pool as it stood at that pick —
+    the RAW index the policy is enforced on, before the tie-averaging the
+    calibration observable applies on top.
+    """
+    ctx = make_ctx(players=linear_players(teams * rounds + 40))
+    state = make_state(ctx, owners=[f"o{i}" for i in range(teams)], user="zz",
+                       rounds=rounds, bpa_prob=bpa_prob, decay=decay, seed=seed)
+    run(state, ctx)
+    remaining = [str(r["player_id"]) for r in mds.consensus_pool(ctx)]
+    out = []
+    for pick in state["picks"]:
+        position = remaining.index(str(pick["player_id"]))
+        out.append((int(pick["round"]), position))
+        remaining.pop(position)
+    return out
+
+
+def test_w2_21_the_policy_table_is_the_operators_rule_verbatim():
+    """The operator's words, transcribed once so a drift shows up as a diff.
+
+    "For the first round, I expect no more than reaching 3 picks (and no more
+    than 3 times a round). For the second round 5 picks (and only 2 times a
+    round). For the third and fourth 15 picks (limit of 5 times a round)."
+    """
+    assert [mds.round_reach_cap(r) for r in (1, 2, 3, 4)] == [3, 5, 15, 15]
+    assert [mds.round_reach_budget(r) for r in (1, 2, 3, 4)] == [3, 2, 5, 5]
+    # "and any later round" — rounds 5-8 inherit the round-3/4 tier.
+    for rnd in range(5, mds._ROOKIE_MAX_ROUNDS + 1):
+        assert mds.round_reach_cap(rnd) == mds.round_reach_cap(3)
+        assert mds.round_reach_budget(rnd) == mds.round_reach_budget(3)
+
+
+def test_w2_21_no_cpu_ever_reaches_further_than_its_rounds_cap():
+    """The cap TRUNCATES the noise draw, so the reach law has no mass beyond it.
+
+    Run at `bpa_prob = 0` and `decay = 0.99` — the flattest, heaviest-tailed
+    corner of the fitted grid, where an untruncated draw would routinely land
+    20+ slots deep — over many seeds, so this is a support claim rather than a
+    lucky sample.
+    """
+    for seed in range(40):
+        for rnd, depth in _engine_reaches(rounds=6, decay=0.99, seed=seed):
+            assert depth <= mds.round_reach_cap(rnd), (
+                f"seed {seed}: a round-{rnd} pick reached {depth} slots, past "
+                f"the round's cap of {mds.round_reach_cap(rnd)}")
+
+
+def test_w2_21_a_round_never_spends_more_than_its_frequency_budget():
+    """The budget is per round and LEAGUE-WIDE, not per team."""
+    for seed in range(40):
+        spent = collections.Counter()
+        for rnd, depth in _engine_reaches(rounds=6, decay=0.99, seed=seed):
+            if depth > 0:
+                spent[rnd] += 1
+        for rnd, count in spent.items():
+            assert count <= mds.round_reach_budget(rnd), (
+                f"seed {seed}: round {rnd} took {count} reaching picks against "
+                f"a budget of {mds.round_reach_budget(rnd)}")
+
+
+def test_w2_21_the_budget_forces_strict_bpa_once_it_is_spent():
+    """Spent budget ⇒ strict best-available, the NEED term included.
+
+    "Strict best available" is the operator's phrase, and a need-driven pick is
+    a reach by the same `d_i` that counts every other one, so letting the need
+    term keep pulling would leak past the budget it is meant to enforce.
+    """
+    board = _candidates(["WR", "RB", "WR", "WR"])
+    needs = {"RB": 1.0, "WR": 0.0}
+    # Uncapped, a championship team takes the needed RB one slot early…
+    assert mds.cpu_pick(board, "championship", needs, random.Random(0),
+                        max_reach=3.0, **NEED_ONLY) == "p2"
+    # …and with the round's budget spent it takes the board pick instead.
+    assert mds.cpu_pick(board, "championship", needs, random.Random(0),
+                        max_reach=3.0, reach_cap=0, **NEED_ONLY) == "p1"
+
+
+def test_w2_21_the_budget_is_shared_across_teams_not_held_per_team():
+    """A single round-1 budget of 3 across a 12-team field, not 3 per team."""
+    for seed in range(15):
+        rounds = _engine_reaches(rounds=2, teams=12, decay=0.99, seed=seed)
+        first = [d for r, d in rounds if r == 1]
+        assert sum(1 for d in first if d > 0) <= 3
+        # …and it really is a whole round of picks being governed.
+        assert len(first) == 12
+
+
+def test_w2_21_the_budget_survives_a_resume_from_the_row():
+    """T-W2-11's property, extended to the budget (the resume-safety claim).
+
+    The budget is re-derived from the persisted picks rather than carried in
+    memory, so a mock that stopped at the user's pick and resumed must spend it
+    exactly as one that never stopped. Asserted through a real user turn in the
+    middle of round 1, which is where an in-memory counter would diverge.
+    """
+    ctx = make_ctx(players=linear_players(60))
+    owners = [f"o{i}" for i in range(6)]
+
+    def play(resume: bool) -> list[dict]:
+        state = make_state(ctx, owners=owners, user="o3", rounds=3,
+                           bpa_prob=0.0, decay=0.99, seed=5)
+        pool = mds.consensus_pool(ctx)
+        mds.advance_cpu(state, ctx, pool, allow_unvalidated_model=True)
+        while mds.next_pick(state) is not None:
+            if resume:                       # round-trip through the row
+                settings_json, picks_json = mds.dumps(state)
+                state = mds.loads({"id": state["id"], "user_id": state["user_id"],
+                                   "league_id": state["league_id"],
+                                   "season": state["season"], "status": state["status"],
+                                   "settings": settings_json, "picks": picks_json,
+                                   "rng_seed": state["rng_seed"]})
+            available = mds._available(ctx, state, pool)
+            mds.apply_user_pick(state, ctx, available[0]["player_id"], pool)
+        return state["picks"]
+
+    assert play(False) == play(True)
+    # And the resumed run still honours the budget, which is the point.
+    remaining = [str(r["player_id"]) for r in mds.consensus_pool(ctx)]
+    spent = collections.Counter()
+    for pick in play(True):
+        position = remaining.index(str(pick["player_id"]))
+        if position > 0 and pick["by"] == mds.BY_CPU:
+            spent[int(pick["round"])] += 1
+        remaining.pop(position)
+    for rnd, count in spent.items():
+        assert count <= mds.round_reach_budget(rnd)
+
+
+def test_w2_21_a_user_reach_neither_spends_nor_is_bound_by_the_budget():
+    """The stated reading: the policy governs the BOTS.
+
+    A human who reaches 30 slots in round 1 is exercising the product, not
+    breaking the model, and should not force the whole field to BPA for the
+    rest of the round. Both halves are asserted: the user's own deep pick is
+    accepted, and the CPU field afterwards still has its full budget.
+    """
+    ctx = make_ctx(players=linear_players(60))
+    state = make_state(ctx, owners=[f"o{i}" for i in range(6)], user="o0",
+                       rounds=2, bpa_prob=0.0, decay=0.99, seed=3)
+    pool = mds.consensus_pool(ctx)
+    mds.advance_cpu(state, ctx, pool, allow_unvalidated_model=True)
+    slot = mds.next_pick(state)
+    assert slot["is_user"] and slot["round"] == 1
+    deep = mds._available(ctx, state, pool)[30]["player_id"]
+    mds.apply_user_pick(state, ctx, deep, pool)          # a 30-slot user reach
+
+    remaining = [str(r["player_id"]) for r in pool]
+    spent = collections.Counter()
+    for pick in state["picks"]:
+        position = remaining.index(str(pick["player_id"]))
+        if position > 0 and pick["by"] == mds.BY_CPU:
+            spent[int(pick["round"])] += 1
+        remaining.pop(position)
+    assert spent[1] <= mds.round_reach_budget(1)
+    assert deep in {p["player_id"] for p in state["picks"]}
 
 
 def test_w2_04b_the_reach_branch_is_persona_independent():
@@ -1305,7 +1499,12 @@ def _rookie_ctx(fmt: str, *, pre_rostered=frozenset(),
 
 
 def _lakeview_corpus():
-    """`(ctx, pool, drafted_ids, owners_by_pick, viable0, targets)`."""
+    """`(ctx, pool, drafted_ids, owners_by_pick, rounds_by_pick, viable0, targets)`.
+
+    `rounds_by_pick` is W2e's addition: the round-tiered reach policy needs the
+    RECORDED round of each pick, and once the sequence is restricted to the
+    picks the consensus prices it is no longer `i // teams`.
+    """
     root = FIXTURES / "draft" / "lakeview-complete"
     picks = json.loads((root / "draft" / LAKEVIEW_DRAFT / "picks.json").read_text())
     rosters = json.loads((root / "league" / LAKEVIEW_LEAGUE / "rosters.json").read_text())
@@ -1319,8 +1518,9 @@ def _lakeview_corpus():
 
     ctx = _rookie_ctx("sf_tep", pre_rostered=pre_rostered, lineup=lineup)
     pool = mds.consensus_pool(ctx)
-    owners = [str(p["roster_id"]) for p in
-              sorted(picks, key=lambda p: int(p["pick_no"]))]
+    ordered = sorted(picks, key=lambda p: int(p["pick_no"]))
+    owners = [str(p["roster_id"]) for p in ordered]
+    rounds = [int(p["round"]) for p in ordered]
     positions = {pid: {"position": row.get("position")}
                  for pid, row in _fixture_pool().items()}
     viable0 = {
@@ -1329,10 +1529,21 @@ def _lakeview_corpus():
             lineup, ctx.consensus_elo, positions)
         for r in rosters
     }
-    return ctx, pool, drafted, owners, viable0, mds.slot_targets(lineup)
+    return ctx, pool, drafted, owners, rounds, viable0, mds.slot_targets(lineup)
 
 
 def _mfl_corpus(name: str):
+    """`(ctx, pool, drafted_ids, owners_by_pick, rounds_by_pick)`.
+
+    All three per-pick lists are built from the SAME filtered row list, so they
+    are aligned. (W2d's version filtered `drafted` by crosswalk coverage but
+    built `owners` from the unfiltered rows, so the two ran out of step by one
+    position per unmapped MFL id — 6 on `mfl-partial`, 1 on `mfl-complete`. The
+    misalignment fed the wrong team's needs into the simulated pick; it is
+    corrected here because W2e adds a third parallel list and a known
+    misalignment beside an aligned one would be worse than the bug. Recorded as
+    a deviation in build-w2e.md.)
+    """
     from backend.tests.support.draft_replay import mfl_corpus
     raw = mfl_corpus(name)
     unit = raw["draftResults"]["draftUnit"]
@@ -1346,10 +1557,11 @@ def _mfl_corpus(name: str):
     xwalk = _mfl_to_sleeper()
     ctx = _rookie_ctx("1qb_ppr")
     pool = mds.consensus_pool(ctx)
-    drafted = [xwalk.get(str(r["player"])) for r in made]
-    drafted = [d for d in drafted if d]
-    owners = [str(r["franchise"]) for r in made]
-    rounds = sorted({int(r["round"]) for r in made})
+    crosswalked = [(xwalk[str(r["player"])], str(r["franchise"]), int(r["round"]))
+                   for r in made if xwalk.get(str(r["player"]))]
+    drafted = [row[0] for row in crosswalked]
+    owners = [row[1] for row in crosswalked]
+    rounds = [row[2] for row in crosswalked]
     return ctx, pool, drafted, owners, rounds
 
 
@@ -1381,7 +1593,7 @@ def test_w2_17_corpus_shape_is_checked_before_calibration_use():
 
 def test_w2_17_lakeview_is_a_four_round_rookie_draft():
     from backend.draft_status import ROOKIE_MAX_ROUNDS
-    _ctx, _pool, drafted, owners, _v, _t = _lakeview_corpus()
+    _ctx, _pool, drafted, owners, _rounds, _v, _t = _lakeview_corpus()
     assert len(drafted) == 48 and len(owners) == 48
     assert 48 // len(set(owners)) <= ROOKIE_MAX_ROUNDS
 
@@ -1389,13 +1601,15 @@ def test_w2_17_lakeview_is_a_four_round_rookie_draft():
 # ── T-W2-16 — the gate itself ────────────────────────────────────────────
 
 def _lakeview_blocks():
-    """`(corpus…, report, observed, kept, owners_kept, fit_idx, hold_idx)`.
+    """`(corpus…, report, observed, kept, owners_kept, rounds_kept,
+    fit_idx, hold_idx)`.
 
     The split itself, computed once, so the gate and its precondition test read
     the same partition. `kept[j]` is the 0-based DRAFT POSITION of retained pick
-    `j` — the depth coordinate T-W2-19 balances on.
+    `j` — the depth coordinate T-W2-19 balances on. `rounds_kept[j]` is its
+    RECORDED round, which W2e's policy needs.
     """
-    ctx, pool, drafted, owners, viable0, targets = _lakeview_corpus()
+    ctx, pool, drafted, owners, rounds, viable0, targets = _lakeview_corpus()
     pool_ids = set(r["player_id"] for r in pool)
     report = mds.reach_report(drafted, pool)
     observed = report["series"]
@@ -1403,18 +1617,21 @@ def _lakeview_blocks():
     # sequence and the observed one index the same picks.
     kept = [i for i, pid in enumerate(drafted) if pid in pool_ids]
     owners_kept = [owners[i] for i in kept]
+    rounds_kept = [rounds[i] for i in kept]
     fit_idx, hold_idx = _interleaved_split(len(observed))
     return (ctx, pool, drafted, owners, viable0, targets,
-            report, observed, kept, owners_kept, fit_idx, hold_idx)
+            report, observed, kept, owners_kept, rounds_kept, fit_idx, hold_idx)
 
 
 def _independent_block(name: str, fitted: tuple[float, float]) -> dict:
     """One independent corpus, validated at `fitted` with NO refit."""
-    _mctx, mpool, mdrafted, mowners, _rounds = _mfl_corpus(name)
+    _mctx, mpool, mdrafted, mowners, mrounds = _mfl_corpus(name)
     mpool_ids = set(r["player_id"] for r in mpool)
     mreport = mds.reach_report(mdrafted, mpool)
     mobs = mreport["series"]
-    mkept = [mowners[i] for i, pid in enumerate(mdrafted) if pid in mpool_ids]
+    retained = [i for i, pid in enumerate(mdrafted) if pid in mpool_ids]
+    mkept = [mowners[i] for i in retained]
+    mrounds_kept = [mrounds[i] for i in retained]
     mviable = {o: {p: 0 for p in ("QB", "RB", "WR", "TE")} for o in set(mkept)}
     msim: list[float] = []
     for seed in range(VALIDATE_SIMS):
@@ -1422,7 +1639,8 @@ def _independent_block(name: str, fitted: tuple[float, float]) -> dict:
                                      {o: mds.DEFAULT_OUTLOOK for o in mkept},
                                      mviable, mds.slot_targets(STANDARD_LINEUP),
                                      bpa_prob=fitted[0], reach_decay=fitted[1],
-                                     max_reach=FIXED_MAX_REACH, seed=seed)
+                                     max_reach=FIXED_MAX_REACH, seed=seed,
+                                     rounds_by_pick=mrounds_kept)
     d, p = _ks_two_sample([abs(x) for x in msim], [abs(x) for x in mobs])
     delta = abs(statistics.mean(abs(x) for x in msim)
                 - statistics.mean(abs(x) for x in mobs))
@@ -1431,7 +1649,7 @@ def _independent_block(name: str, fitted: tuple[float, float]) -> dict:
         "n": len(mobs), "pool_n": len(mpool),
         "skipped": mreport["skipped"], "tied": mreport["tied"],
         "obs_mean": obs_mean,
-        "obs_sd": statistics.stdev(mobs), "rounds": sorted(_rounds),
+        "obs_sd": statistics.stdev(mobs), "rounds": sorted(set(mrounds_kept)),
         "obs_se": statistics.stdev(mobs) / math.sqrt(len(mobs)),
         "sim_mean": statistics.mean(abs(x) for x in msim),
         "ks_d": d, "ks_p": p, "delta": delta,
@@ -1443,12 +1661,20 @@ def _fit_and_validate():
     """Run the lld §4.2.3 procedure end to end. Returns the report dict.
 
     **W2d changed the SPLIT and added a corpus** (build-w2d.md §1, pre-registered
-    in its own commit). Everything else — the model family, both bars, α, the
-    ±1.0 constant, the tie rule, the unvalued-pick rule and the `d_i` definition
-    — is frozen; the two parameters are re-fitted, which is what a re-run means.
+    in its own commit). Everything the gate is made of — both bars, α, the ±1.0
+    constant, the split, the corpora, the tie rule, the unvalued-pick rule and
+    the `d_i` definition — is unchanged since.
+
+    ⚠️ **W2e changed the model's SUPPORT BOUND under this harness and did not
+    re-run it** (build-w2e.md §1): the simulator now obeys the operator's
+    round-tiered reach policy, so the numbers this returns are no longer the
+    ones artifact 08d records. `test_w2_16_calibration_gate` still holds,
+    because the verdict it pins is the boolean and that is still `False` — but a
+    deliberate re-fit and re-gate is owed before any figure from here is
+    published again.
     """
-    (_ctx, pool, _drafted, _owners, viable0, targets,
-     report, observed, kept, owners_kept, fit_idx, hold_idx) = _lakeview_blocks()
+    (_ctx, pool, _drafted, _owners, viable0, targets, report, observed,
+     kept, owners_kept, rounds_kept, fit_idx, hold_idx) = _lakeview_blocks()
     n = len(observed)
 
     fit_obs = [observed[j] for j in fit_idx]
@@ -1466,7 +1692,8 @@ def _fit_and_validate():
         for seed in range(sims):
             series = mds.simulate_reaches(pool, owners_kept, personas, viable0,
                                           targets, bpa_prob=bpa, reach_decay=decay,
-                                          max_reach=FIXED_MAX_REACH, seed=seed)
+                                          max_reach=FIXED_MAX_REACH, seed=seed,
+                                          rounds_by_pick=rounds_kept)
             out += [series[j] for j in idx if j < len(series)]
         return out
 
@@ -1529,7 +1756,7 @@ def test_w2_19_the_split_balances_draft_depth_before_the_fit_consumes_it():
     turning the suite red.
     """
     (_c, _p, _d, owners, _v, _t, _r, observed, kept,
-     _ok, fit_idx, hold_idx) = _lakeview_blocks()
+     _ok, _rk, fit_idx, hold_idx) = _lakeview_blocks()
 
     assert set(fit_idx) | set(hold_idx) == set(range(len(observed)))
     assert not (set(fit_idx) & set(hold_idx)), "a pick is in both blocks"
@@ -1589,7 +1816,7 @@ def test_w2_16_the_w2a_model_form_could_not_have_passed():
     argument is unchanged and does not turn on the exact fraction: a model that
     assigns zero probability to 1 pick in 9 cannot be the data-generating one.
     """
-    ctx, pool, drafted, _owners, _v, _t = _lakeview_corpus()
+    ctx, pool, drafted, _owners, _rounds, _v, _t = _lakeview_corpus()
     observed = mds.reach_series(drafted, pool)
     beyond = [d for d in observed if d > FIXED_MAX_REACH + 3.00]
     assert len(beyond) / len(observed) > 0.05, (
@@ -1598,7 +1825,8 @@ def test_w2_16_the_w2a_model_form_could_not_have_passed():
 
 def _validation_block_means() -> dict[str, list[float]]:
     """The THREE validation blocks under W2d's split, observed side only."""
-    (_c, _p, _d, _o, _v, _t, _r, observed, _k, _ok, _fi, hold_idx) = _lakeview_blocks()
+    (_c, _p, _d, _o, _v, _t, _r, observed,
+     _k, _ok, _rk, _fi, hold_idx) = _lakeview_blocks()
     out = {"lakeview hold-out": [observed[j] for j in hold_idx]}
     for name in INDEPENDENT_CORPORA:
         _x, mpool, mdrafted, _mo, _rr = _mfl_corpus(name)
@@ -1655,7 +1883,7 @@ def test_w2_19_the_rebalanced_split_removes_the_depth_drift():
     than letting a stale claim sit in a docstring.
     """
     (_c, pool, drafted, _o, _v, _t, _r, observed, kept,
-     _ok, fit_idx, hold_idx) = _lakeview_blocks()
+     _ok, _rk, fit_idx, hold_idx) = _lakeview_blocks()
     ids = [r["player_id"] for r in pool]
     cut = sum(1 for i in kept if i < 24)          # the W2c round-based boundary
 
@@ -1724,41 +1952,3 @@ def test_w2_16_the_mean_bar_is_measurable_on_one_block_of_three():
         f"outside the +/-{MEAN_BAR} bar — W2d's claim that the bar is "
         "measurable on at least one block no longer holds, and the verdict's "
         "reasoning depends on it")
-
-
-def test_w2_16_the_candidate_window_cannot_produce_the_deepest_observed_reaches():
-    """W2d's headline finding — where the residual failure actually lives now.
-
-    `cpu_pick` only ever scans `available[:candidate_window(max_reach)]`, so
-    every simulated `d` is bounded by `MOCK_CANDIDATE_WINDOW - 1` (11, or 11.5
-    once a tied block is averaged). The corpora contain picks well beyond that —
-    29.5 on the Lakeview hold-out, 13 / 15 / 33.5 / 51.5 on `mfl-complete`,
-    18 twice on `mfl-partial`. Those picks have probability EXACTLY ZERO under
-    the shipped model, and they carry most of each block's observed mean: drop
-    them and the three paired-mean deltas fall by 1.34 / 4.04 / 1.24 slots.
-
-    This is the SAME structural shape as W2a's failure — a model whose support
-    excludes observed data — except it now lives in the product cap `K` rather
-    than in the noise family. **`K` is deliberately NOT a fitted parameter**
-    (lld §4.2.3, the W2b brief), so W2d does not touch it: retuning a product
-    cap against the validation blocks is precisely the fit-on-the-validation-set
-    move amendment 2 exists to prevent. It is recorded here, and in artifact
-    08d §6, as evidence for the operator.
-    """
-    bound = mds.MOCK_CANDIDATE_WINDOW - 1
-    blocks = _validation_block_means()
-    beyond_total = sum(1 for b in blocks.values() for d in b if d > bound)
-    n_total = sum(len(b) for b in blocks.values())
-    assert beyond_total > 0, (
-        "no observed pick now reaches past the candidate window — 08d §6's "
-        "support argument needs re-deriving")
-    assert beyond_total / n_total > 0.05, (
-        f"only {beyond_total}/{n_total} observed picks land outside the "
-        "model's support — the argument no longer carries the mean gap")
-
-    # And the gap they carry is the size of the failure, per block.
-    for name, block in blocks.items():
-        carried = sum(d for d in block if d > bound) / len(block)
-        assert carried > 0.5, (
-            f"{name}'s out-of-support picks carry only {carried:.2f} slots of "
-            "its observed mean — re-derive 08d §6")
