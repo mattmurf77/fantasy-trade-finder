@@ -20,12 +20,16 @@ Spec: ``docs/plans/draft-extensions/plan.md`` §5 · ``lld.md`` §2.3/§3.3/§4.
   T-W2-13  ZERO platform egress after creation (fixture-seam counters)
   T-W2-14  CPU basis is consensus: a divergent user board changes nothing
   T-W2-15  ONE consensus definition: the pool IS _undrafted(basis=consensus)
-  T-W2-16  THE CALIBRATION GATE — fit on rounds 1-2, hold out 3-4, both bars,
-           then `mfl-complete` with NO refit. Re-run in W2b against the
-           two-parameter mixture, and again in W2c against a re-derived
-           consensus snapshot with the model and the gate FROZEN; still
-           records a FAILURE (both mean bars; both KS bars pass).
+  T-W2-16  THE CALIBRATION GATE — fit on Lakeview's interleaved fit block,
+           hold out the interleaved complement, both bars, then `mfl-complete`
+           AND `mfl-partial` with NO refit: six bars. Re-run in W2b against the
+           two-parameter mixture, in W2c against a re-derived consensus
+           snapshot, and in W2d against a depth-re-balanced split plus a third
+           corpus; still records a FAILURE (all three mean bars; all three KS
+           bars pass)
   T-W2-17  corpus shape check before any corpus is used for calibration
+  T-W2-19  the split's PRECONDITION (W2d) — fit and hold-out see comparable
+           draft depth, asserted before the gate consumes the partition
 
 T-W2-18 is a mobile Jest test and belongs to W2b.
 
@@ -831,6 +835,274 @@ def test_pick_and_abandon_reject_a_mock_that_is_not_the_callers(
 
 
 # ---------------------------------------------------------------------------
+# T-W2-20 — W2d, the three blocking create-contract gaps (build-w2d.md §3)
+# ---------------------------------------------------------------------------
+
+def test_w2_20_g1_the_create_route_passes_all_four_resolution_inputs():
+    """G1 — the gap itself, asserted against the ROUTE's source, not a mock.
+
+    The engine has always accepted `order`, `order_source`, `ownership` and
+    `personas`; the create route passed none of them, so every mock was
+    randomized-order, every traded pick was silently discarded and every CPU
+    team was `{outlook: "not_sure"}`. This reads the route's own call site, so
+    it fails if a future edit drops one again.
+    """
+    src = pathlib.Path(server.__file__).read_text()
+    body = src[src.index("def mock_draft_route"):]
+    body = body[:body.index("\n@app.route")]
+    call = body[body.index("settings = mds.build_settings"):]
+    call = call[:call.index("state = mds.new_state")]
+    for kwarg in ("order=", "order_source=", "traded_slots=", "personas="):
+        assert kwarg in call, f"the create route no longer passes {kwarg}"
+
+
+def test_w2_20_g1_the_real_order_and_traded_picks_come_off_the_lakeview_corpus(
+        flag_on, session, tmp_path, monkeypatch):
+    """G1 end to end against the recorded league, not a synthetic one.
+
+    `lakeview-complete` is the corpus with a populated `draft_order`, a
+    NON-identity `slot_to_roster_id` and 55 league `traded_picks` — exactly the
+    material the create route was throwing away.
+    """
+    from backend.tests.support.draft_replay import DraftReplay
+    dbs.reset_cache()
+    DraftReplay("lakeview-complete", tmp_path).install(monkeypatch, server)
+    try:
+        real = server._mock_real_draft(session, LAKEVIEW_LEAGUE, 2026)
+    finally:
+        dbs.reset_cache()
+
+    assert real["order_source"] == mds.ORDER_SOURCE_ASSIGNED
+    assert real["type"] == mds.TYPE_LINEAR          # prefills the setup toggle
+    assert real["order"] and len(real["order"]) == len(set(real["order"])) == 12
+    # Traded picks survive as `(round, slot) -> current owner`, keyed inside the
+    # draft's own rounds, and every one of them actually changes hands.
+    assert real["traded_slots"], "55 recorded traded picks were all discarded"
+    assert all(1 <= r <= 4 and 1 <= s <= 12 for r, s in real["traded_slots"])
+    slot_owner = {i + 1: u for i, u in enumerate(real["order"])}
+    assert any(new != slot_owner[s] for (_r, s), new in real["traded_slots"].items())
+
+    # …and they reach `settings.ownership` through the engine's translation.
+    ctx = make_ctx(players=linear_players(60))
+    settings = mds.build_settings(
+        ctx, owners=real["order"], user_owner_id=real["order"][0], rounds=4,
+        draft_type=real["type"], order=real["order"],
+        order_source=real["order_source"], traded_slots=real["traded_slots"],
+        rng=random.Random(1))
+    assert settings["order_source"] == "assigned"
+    assert len(settings["ownership"]) == len(real["traded_slots"])
+
+
+def test_w2_20_g1_a_non_sleeper_league_stays_randomized_rather_than_guessing(
+        flag_on, session, monkeypatch):
+    """MFL's grid states the CURRENT owner and never the original, so it cannot
+    tell a slot order from an ownership overlay. Reading it would produce an
+    "order" that is really a trade log — so the mock stays randomized and says
+    so, which is KD-6 applied to a second platform."""
+    monkeypatch.setattr(server, "get_league_draft_context",
+                        lambda lid: {"platform": "mfl", "season": 2026})
+    real = server._mock_real_draft(session, "mfl-league", 2026)
+    assert real == {"order": None, "order_source": mds.ORDER_SOURCE_RANDOMIZED,
+                    "traded_slots": {}, "type": None}
+
+
+def test_w2_20_g1_traded_slots_become_pick_ownership_and_move_the_clock():
+    """A traded pick has to survive into `settings.ownership`, or the mock
+    silently gives it back to the slot's original owner.
+
+    The platform states a trade as `(round, slot) -> new owner` — that is all
+    Sleeper's `traded_picks` export and MFL's grid carry — while the persisted
+    shape is `{pick_no: owner}`, and the overall pick number depends on THIS
+    mock's rounds/teams/type. `build_settings` owns that translation.
+    """
+    ctx = make_ctx(players=linear_players(8))
+    settings = mds.build_settings(
+        ctx, owners=["a", "b", "c"], user_owner_id="a", rounds=2,
+        draft_type=mds.TYPE_SNAKE, order=["a", "b", "c"],
+        order_source=mds.ORDER_SOURCE_ASSIGNED,
+        traded_slots={(2, 3): "a"}, rng=random.Random(1))
+    # Snake: round 2 runs 3,2,1, so slot 3 in round 2 is overall pick 4.
+    assert settings["ownership"] == {"4": "a"}
+    state = mds.new_state(ctx, settings, 7)
+    state["picks"] = [{"pick_no": i, "round": 1, "slot": i, "roster_id": "x",
+                       "player_id": f"p{i}", "by": "cpu"} for i in (1, 2, 3)]
+    assert mds.next_pick(state)["roster_id"] == "a"      # not "c"
+
+    # An explicit `ownership` entry still wins — the persisted shape is the
+    # one a resumed row replays from.
+    override = mds.build_settings(
+        ctx, owners=["a", "b", "c"], user_owner_id="a", rounds=2,
+        draft_type=mds.TYPE_SNAKE, traded_slots={(2, 3): "a"},
+        ownership={4: "b"}, rng=random.Random(1))
+    assert override["ownership"] == {"4": "b"}
+
+
+def test_w2_20_g1_a_randomized_order_is_still_labelled_randomized():
+    """The honest degradation survives the fix: no assigned order upstream ⇒
+    a seeded shuffle that SAYS it is a shuffle, so the client can disclose it
+    rather than imply a real draft order (KD-6)."""
+    ctx = make_ctx(players=linear_players(8))
+    settings = mds.build_settings(ctx, owners=["a", "b", "c"], user_owner_id="a",
+                                  order=None,
+                                  order_source=mds.ORDER_SOURCE_ASSIGNED,
+                                  rng=random.Random(3))
+    assert settings["order_source"] == mds.ORDER_SOURCE_RANDOMIZED
+    assert sorted(settings["order"]) == ["a", "b", "c"]
+
+
+def test_w2_20_g1_personas_resolve_declared_then_inferred_then_default(
+        session, monkeypatch):
+    """G1's fourth input. Without it every CPU team was `{outlook:"not_sure"}`,
+    which pins `need_weight` at one alpha for the whole field and makes the
+    entire `outlook_alpha` persona mechanism inert — every bot drafting with
+    identical need pressure, which is the opposite of what personas are for."""
+    pool = [Player(id="v1", name="Vet", position="RB", team="ARI", age=31),
+            Player(id="y1", name="Kid", position="WR", team="ARI", age=22)]
+    for p in pool:
+        p.elo = 1700.0
+    session["players"] = pool
+    session["league"].members = [
+        LeagueMember(user_id="declared-guy", username="d", roster=["v1"],
+                     elo_ratings={}),
+        LeagueMember(user_id="inferred-guy", username="i", roster=["v1", "y1"],
+                     elo_ratings={}),
+        LeagueMember(user_id="empty-guy", username="e", roster=[], elo_ratings={}),
+    ]
+    monkeypatch.setattr(
+        server, "load_league_preference",
+        lambda user_id, league_id: ({"team_outlook": "championship"}
+                                    if user_id == "declared-guy" else None))
+    monkeypatch.setattr(server, "_user_pick_share", lambda uid, lid: 0.0)
+
+    personas = server._mock_personas(LAKEVIEW_LEAGUE, session)
+    assert personas["declared-guy"] == {"outlook": "championship",
+                                        "source": mds.PERSONA_DECLARED}
+    assert personas["inferred-guy"]["source"] == mds.PERSONA_INFERRED
+    # Inference never reaches an extreme label (T-W2-07), so no inferred bot
+    # can become a 1.0 or 0.1 drafter.
+    assert personas["inferred-guy"]["outlook"] in {"contender", "rebuilder",
+                                                   "not_sure"}
+    # An empty roster carries no opinion — omitted, and `build_settings` fills
+    # the default rather than this inventing one.
+    assert "empty-guy" not in personas
+    ctx = make_ctx(players=linear_players(8))
+    settings = mds.build_settings(ctx, owners=[m.user_id for m in
+                                               session["league"].members],
+                                  user_owner_id="declared-guy",
+                                  personas=personas, rng=random.Random(1))
+    assert settings["personas"]["empty-guy"] == {"outlook": "not_sure",
+                                                 "source": "default"}
+    assert len({p["outlook"] for p in settings["personas"].values()}) > 1
+
+
+def test_w2_20_g2_the_capability_probe_answers_without_starting_a_mock(
+        client, flag_on, session):
+    """G2 — `cpu_model_unvalidated` / `class_not_loaded` were discoverable only
+    by POSTing a create, so the only honest UI was an enabled button that
+    failed. GET now says so up front."""
+    resp = client.get(f"{ROUTE}?league_id={LAKEVIEW_LEAGUE}",
+                      headers={"X-Session-Token": ROUTE_TOKEN})
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["empty"] is True and payload["reason"] == "no_active_mock"
+    cap = payload["capability"]
+    assert set(cap) == {"can_start", "reason", "teams", "min_teams",
+                        "rounds_default", "rounds_max", "type", "order_source"}
+    assert cap["can_start"] is False
+    # The gate is closed, and the session league has 1 member: the probe must
+    # report the SAME first refusal the create route would.
+    assert cap["reason"] == mds.REASON_CPU_MODEL_UNVALIDATED
+    assert cap["min_teams"] == mds.MOCK_MIN_TEAMS
+    assert (cap["rounds_default"], cap["rounds_max"]) == (mds.DEFAULT_ROUNDS, 8)
+
+
+def test_w2_20_g2_the_probe_and_the_create_route_share_one_refusal_ladder():
+    """The probe may never say something the create route then contradicts."""
+    ctx = make_ctx(players=linear_players(8))
+    empty = mds.MockContext(league_id="L", season=2026, consensus_elo={},
+                            rookie_ids=frozenset(), player_rows={})
+    twelve = [f"o{i}" for i in range(12)]
+    assert mds.start_refusal(empty, twelve) == mds.REASON_CLASS_NOT_LOADED
+    assert mds.capability(empty, twelve)["reason"] == mds.REASON_CLASS_NOT_LOADED
+    # Class loaded, gate closed ⇒ the gate is what a full-size league hears.
+    assert mds.start_refusal(ctx, twelve) == mds.REASON_CPU_MODEL_UNVALIDATED
+    for owners in ([], ["a"], ["a", "b", "c"]):
+        assert mds.capability(ctx, owners)["can_start"] is False
+
+
+def test_w2_20_g2_a_two_team_league_is_refused_as_too_small():
+    """`teams` was `len(owners)` with no floor, so a 2-team league got a
+    2-team "mock". Asserted against a VALIDATED gate so the refusal is the
+    league-size one and not the calibration one hiding it."""
+    ctx = make_ctx(players=linear_players(8))
+    saved = mds.CPU_MODEL_VALIDATED
+    mds.CPU_MODEL_VALIDATED = True
+    try:
+        assert mds.start_refusal(ctx, ["a", "b"]) == mds.REASON_LEAGUE_TOO_SMALL
+        cap = mds.capability(ctx, ["a", "b"])
+        assert cap["can_start"] is False and cap["teams"] == 2
+        # Duplicated owner ids do not inflate the count past the floor.
+        assert mds.start_refusal(ctx, ["a"] * 12) == mds.REASON_LEAGUE_TOO_SMALL
+        assert mds.start_refusal(ctx, [f"o{i}" for i in
+                                       range(mds.MOCK_MIN_TEAMS)]) is None
+    finally:
+        mds.CPU_MODEL_VALIDATED = saved
+
+
+def test_w2_20_g2_the_capability_echoes_the_shape_a_setup_sheet_prefills():
+    ctx = make_ctx(players=linear_players(8))
+    cap = mds.capability(ctx, [f"o{i}" for i in range(12)],
+                         draft_type=mds.TYPE_SNAKE,
+                         order_source=mds.ORDER_SOURCE_ASSIGNED)
+    assert cap["type"] == "snake" and cap["order_source"] == "assigned"
+    # Never a guess: an unrecognised shape is null, not defaulted to linear.
+    assert mds.capability(ctx, ["a"], draft_type="auction")["type"] is None
+
+
+def test_w2_20_g3_picks_carry_the_consensus_rank_and_a_signed_delta():
+    """G3 — the recap's "+3 / -1 vs consensus" column was not computable: the
+    client saw no rank on a pick and never saw the full class ordering.
+
+    The rank is taken against the FROZEN pre-draft pool, so a pick's delta does
+    not move as later picks come off the board, and the sign follows the ADP
+    convention: positive = went later than the consensus said (value).
+    """
+    ctx = make_ctx(players=linear_players(8))
+    # No participating user ⇒ the whole draft is CPU. `bpa_prob=1` and a zeroed
+    # need bonus make it a strict board draft, which is the case with a known
+    # answer: every pick is the best player left.
+    state = make_state(ctx, owners=["a", "b"], user="nobody", rounds=2,
+                       bpa_prob=1.0, reach=0.0)
+    run(state, ctx)
+    payload = mds.state_payload(state, ctx)
+    assert payload["settings_echo"]["consensus_pool_size"] == 8
+    assert len(payload["picks"]) == 4
+    for pick in payload["picks"]:
+        assert pick["valued"] is True and pick["consensus_rank"] is not None
+        assert pick["consensus_delta"] == pick["consensus_rank"] - pick["pick_no"]
+    # A strict board draft takes the pool in order, so every delta is exactly 0.
+    assert {p["consensus_delta"] for p in payload["picks"]} == {0}
+
+
+def test_w2_20_g3_an_unvalued_pick_reports_a_null_rank_not_a_zero():
+    """D7 keeps unvalued rookies on the board; they still rank (they sort
+    last), and a player the pool cannot place at all reports `null` — the
+    recap must render "no consensus value", never a delta of 0."""
+    ctx = make_ctx(players=linear_players(4) + [("z9", "WR", None)])
+    state = make_state(ctx, owners=["a", "b"], user="a", rounds=1)
+    state["picks"] = [{"pick_no": 1, "round": 1, "slot": 1, "roster_id": "a",
+                       "player_id": "z9", "by": "user"}]
+    entry = mds.state_payload(state, ctx)["picks"][0]
+    assert entry["valued"] is False
+    assert entry["consensus_rank"] == 5 and entry["consensus_delta"] == 4
+
+    state["picks"] = [{"pick_no": 1, "round": 1, "slot": 1, "roster_id": "a",
+                       "player_id": "not-in-the-pool", "by": "user"}]
+    entry = mds.state_payload(state, ctx)["picks"][0]
+    assert entry["consensus_rank"] is None and entry["consensus_delta"] is None
+
+
+# ---------------------------------------------------------------------------
 # T-W2-11 (persistence half) — the store round-trips and enforces one active
 # ---------------------------------------------------------------------------
 
@@ -874,6 +1146,40 @@ FIT_SIMS = 1000         # per grid point (lld §4.2.3 step 2)
 VALIDATE_SIMS = 1000
 KS_ALPHA = 0.05
 MEAN_BAR = 1.0
+
+#: W2d — the INDEPENDENT validation corpora, each carrying BOTH bars with NO
+#: refit. `mfl-partial` is the corpus W2d added (build-w2d.md §1.3): single
+#: `draftUnit`, rookie-shaped, 36 made picks, shape-checked by T-W2-17 since M1
+#: and unused until now. Adding it makes the gate six bars where W2c had four,
+#: which can only make it harder to pass.
+INDEPENDENT_CORPORA = ("mfl-complete", "mfl-partial")
+
+#: W2d — the re-balanced fit/hold-out split, PRE-REGISTERED in build-w2d.md §1
+#: and committed before the harness was touched.
+#:
+#: W2c's split was Lakeview rounds 1-2 (fit) vs rounds 3-4 (hold-out), and its
+#: recorded cause of failure was that split: the observable drifted 2.017 slots
+#: between the two blocks *before any model*, because `d` is a RANK distance and
+#: the consensus value curve flattens in the tail, so the fit block was
+#: systematically the shallowest part of the draft. Alternating the retained
+#: picks pairs every fit pick with its immediate neighbour, so the two blocks'
+#: DEPTH distributions match at the granularity of a single pick — the finest
+#: balance available, and finer than any round-stratified sample could give.
+#: It is also deterministic: no RNG, nothing to re-roll.
+#:
+#: T-W2-19 asserts the balance BEFORE the fit consumes the split, so it can
+#: never silently re-skew.
+SPLIT_DEPTH_TOLERANCE = 1.0     # picks, in the same units as MEAN_BAR
+
+
+def _interleaved_split(n: int) -> tuple[list[int], list[int]]:
+    """`(fit_indices, holdout_indices)` over `0..n-1` — W2d's split rule.
+
+    Even retained-pick indices fit; odd ones are held out. Declared once here
+    so the gate, the precondition test and the diagnostics cannot drift.
+    """
+    return ([j for j in range(n) if j % 2 == 0],
+            [j for j in range(n) if j % 2 == 1])
 
 
 def _wasserstein1(a, b) -> float:
@@ -1082,71 +1388,117 @@ def test_w2_17_lakeview_is_a_four_round_rookie_draft():
 
 # ── T-W2-16 — the gate itself ────────────────────────────────────────────
 
-def _fit_and_validate():
-    """Run the lld §4.2.3 procedure end to end. Returns the report dict."""
+def _lakeview_blocks():
+    """`(corpus…, report, observed, kept, owners_kept, fit_idx, hold_idx)`.
+
+    The split itself, computed once, so the gate and its precondition test read
+    the same partition. `kept[j]` is the 0-based DRAFT POSITION of retained pick
+    `j` — the depth coordinate T-W2-19 balances on.
+    """
     ctx, pool, drafted, owners, viable0, targets = _lakeview_corpus()
-    pool_ids = [r["player_id"] for r in pool]
+    pool_ids = set(r["player_id"] for r in pool)
     report = mds.reach_report(drafted, pool)
     observed = report["series"]
-
     # Restrict the turn order to the retained sub-universe so the simulated
     # sequence and the observed one index the same picks.
-    kept = [i for i, pid in enumerate(drafted) if pid in set(pool_ids)]
+    kept = [i for i, pid in enumerate(drafted) if pid in pool_ids]
     owners_kept = [owners[i] for i in kept]
-    n = len(observed)
-    cut = sum(1 for i in kept if i < 24)          # rounds 1-2 of the retained picks
+    fit_idx, hold_idx = _interleaved_split(len(observed))
+    return (ctx, pool, drafted, owners, viable0, targets,
+            report, observed, kept, owners_kept, fit_idx, hold_idx)
 
-    fit_obs, hold_obs = observed[:cut], observed[cut:]
+
+def _independent_block(name: str, fitted: tuple[float, float]) -> dict:
+    """One independent corpus, validated at `fitted` with NO refit."""
+    _mctx, mpool, mdrafted, mowners, _rounds = _mfl_corpus(name)
+    mpool_ids = set(r["player_id"] for r in mpool)
+    mreport = mds.reach_report(mdrafted, mpool)
+    mobs = mreport["series"]
+    mkept = [mowners[i] for i, pid in enumerate(mdrafted) if pid in mpool_ids]
+    mviable = {o: {p: 0 for p in ("QB", "RB", "WR", "TE")} for o in set(mkept)}
+    msim: list[float] = []
+    for seed in range(VALIDATE_SIMS):
+        msim += mds.simulate_reaches(mpool, mkept,
+                                     {o: mds.DEFAULT_OUTLOOK for o in mkept},
+                                     mviable, mds.slot_targets(STANDARD_LINEUP),
+                                     bpa_prob=fitted[0], reach_decay=fitted[1],
+                                     max_reach=FIXED_MAX_REACH, seed=seed)
+    d, p = _ks_two_sample([abs(x) for x in msim], [abs(x) for x in mobs])
+    delta = abs(statistics.mean(abs(x) for x in msim)
+                - statistics.mean(abs(x) for x in mobs))
+    obs_mean = statistics.mean(abs(x) for x in mobs)
+    return {
+        "n": len(mobs), "pool_n": len(mpool),
+        "skipped": mreport["skipped"], "tied": mreport["tied"],
+        "obs_mean": obs_mean,
+        "obs_sd": statistics.stdev(mobs), "rounds": sorted(_rounds),
+        "obs_se": statistics.stdev(mobs) / math.sqrt(len(mobs)),
+        "sim_mean": statistics.mean(abs(x) for x in msim),
+        "ks_d": d, "ks_p": p, "delta": delta,
+        "pass": p >= KS_ALPHA and delta <= MEAN_BAR,
+    }
+
+
+def _fit_and_validate():
+    """Run the lld §4.2.3 procedure end to end. Returns the report dict.
+
+    **W2d changed the SPLIT and added a corpus** (build-w2d.md §1, pre-registered
+    in its own commit). Everything else — the model family, both bars, α, the
+    ±1.0 constant, the tie rule, the unvalued-pick rule and the `d_i` definition
+    — is frozen; the two parameters are re-fitted, which is what a re-run means.
+    """
+    (_ctx, pool, _drafted, _owners, viable0, targets,
+     report, observed, kept, owners_kept, fit_idx, hold_idx) = _lakeview_blocks()
+    n = len(observed)
+
+    fit_obs = [observed[j] for j in fit_idx]
+    hold_obs = [observed[j] for j in hold_idx]
     personas = {o: mds.DEFAULT_OUTLOOK for o in set(owners_kept)}
 
-    def sim(params, sims, count, owners_slice, viable_seed):
+    def sim(params, sims, idx):
+        """Simulate the WHOLE retained draft, then take the same indices the
+        observed block takes. Under an interleaved split the blocks are not
+        prefixes, so the simulated side has to be selected the same way — which
+        also makes the simulated block's depth profile identical to the
+        observed one's by construction."""
         bpa, decay = params
         out = []
         for seed in range(sims):
-            out += mds.simulate_reaches(pool, owners_slice, personas, viable_seed,
-                                        targets, bpa_prob=bpa, reach_decay=decay,
-                                        max_reach=FIXED_MAX_REACH, seed=seed)[:count]
+            series = mds.simulate_reaches(pool, owners_kept, personas, viable0,
+                                          targets, bpa_prob=bpa, reach_decay=decay,
+                                          max_reach=FIXED_MAX_REACH, seed=seed)
+            out += [series[j] for j in idx if j < len(series)]
         return out
 
     grid = {}
     for bpa in BPA_GRID:
         for decay in DECAY_GRID:
-            sample = sim((bpa, decay), FIT_SIMS, cut, owners_kept[:cut], viable0)
+            sample = sim((bpa, decay), FIT_SIMS, fit_idx)
             grid[(bpa, decay)] = _wasserstein1([abs(x) for x in sample],
                                                [abs(x) for x in fit_obs])
     fitted = min(grid, key=grid.get)
 
-    hold_sim = sim(fitted, VALIDATE_SIMS, n - cut, owners_kept, viable0)
+    hold_sim = sim(fitted, VALIDATE_SIMS, hold_idx)
     hold_d, hold_p = _ks_two_sample([abs(x) for x in hold_sim],
                                     [abs(x) for x in hold_obs])
     hold_delta = abs(statistics.mean(abs(x) for x in hold_sim)
                      - statistics.mean(abs(x) for x in hold_obs))
 
-    # Independent corpus, NO refit.
-    mctx, mpool, mdrafted, mowners, _rounds = _mfl_corpus("mfl-complete")
-    mpool_ids = [r["player_id"] for r in mpool]
-    mreport = mds.reach_report(mdrafted, mpool)
-    mobs = mreport["series"]
-    mkept = [mowners[i] for i, pid in enumerate(mdrafted) if pid in set(mpool_ids)]
-    mviable = {o: {p: 0 for p in ("QB", "RB", "WR", "TE")} for o in set(mkept)}
-    msim = []
-    for seed in range(VALIDATE_SIMS):
-        msim += mds.simulate_reaches(mpool, mkept, {o: mds.DEFAULT_OUTLOOK for o in mkept},
-                                     mviable, mds.slot_targets(STANDARD_LINEUP),
-                                     bpa_prob=fitted[0], reach_decay=fitted[1],
-                                     max_reach=FIXED_MAX_REACH, seed=seed)
-    mfl_d, mfl_p = _ks_two_sample([abs(x) for x in msim], [abs(x) for x in mobs])
-    mfl_delta = abs(statistics.mean(abs(x) for x in msim)
-                    - statistics.mean(abs(x) for x in mobs))
+    independent = {name: _independent_block(name, fitted)
+                   for name in INDEPENDENT_CORPORA}
 
-    return {
-        "n": n, "fit_n": cut, "hold_n": n - cut,
+    out = {
+        "split": "interleaved (W2d, build-w2d.md §1.1)",
+        "n": n, "fit_n": len(fit_idx), "hold_n": len(hold_idx),
         "observed": observed,
-        "pool_n": len(pool), "mfl_pool_n": len(mpool),
+        "pool_n": len(pool),
         "skipped": report["skipped"], "tied": report["tied"],
-        "mfl_skipped": mreport["skipped"], "mfl_tied": mreport["tied"],
+        "fit_depth_mean": statistics.mean(kept[j] + 1 for j in fit_idx),
+        "hold_depth_mean": statistics.mean(kept[j] + 1 for j in hold_idx),
         "fit_mean": statistics.mean(abs(x) for x in fit_obs),
         "hold_mean": statistics.mean(abs(x) for x in hold_obs),
+        "hold_sd": statistics.stdev(hold_obs),
+        "hold_se": statistics.stdev(hold_obs) / math.sqrt(len(hold_obs)),
         "grid": {f"{b}/{d}": w for (b, d), w in grid.items()},
         "grid_best_w1": grid[fitted], "grid_worst_w1": max(grid.values()),
         "fitted_bpa_prob": fitted[0], "fitted_reach_decay": fitted[1],
@@ -1155,12 +1507,49 @@ def _fit_and_validate():
         "hold_sim_mean": statistics.mean(abs(x) for x in hold_sim),
         "hold_ks_d": hold_d, "hold_ks_p": hold_p, "hold_delta": hold_delta,
         "hold_pass": hold_p >= KS_ALPHA and hold_delta <= MEAN_BAR,
-        "mfl_n": len(mobs),
-        "mfl_obs_mean": statistics.mean(abs(x) for x in mobs),
-        "mfl_sim_mean": statistics.mean(abs(x) for x in msim),
-        "mfl_ks_d": mfl_d, "mfl_ks_p": mfl_p, "mfl_delta": mfl_delta,
-        "mfl_pass": mfl_p >= KS_ALPHA and mfl_delta <= MEAN_BAR,
+        "independent": independent,
     }
+    out["all_pass"] = out["hold_pass"] and all(b["pass"] for b in independent.values())
+    return out
+
+
+def test_w2_19_the_split_balances_draft_depth_before_the_fit_consumes_it():
+    """T-W2-19 — W2d's PRECONDITION on the split, so it can never re-skew.
+
+    W2c's recorded cause of failure was the split itself: fitting on Lakeview
+    rounds 1-2 and validating on rounds 3-4 put the two blocks 2.017 slots apart
+    in the observable *before any model*, because `d` is a RANK distance and the
+    consensus value curve flattens in the tail, so round 4 prices the same human
+    disagreement at 20+ slots where round 1 prices it at 1-2.
+
+    The fix is a split whose two blocks see comparable draft DEPTH. This test
+    states that as a bar, in picks — the same unit `MEAN_BAR` is denominated in
+    — and it runs BEFORE the gate consumes the partition, so a re-recorded
+    corpus or a changed `skipped` set cannot silently re-skew the split without
+    turning the suite red.
+    """
+    (_c, _p, _d, owners, _v, _t, _r, observed, kept,
+     _ok, fit_idx, hold_idx) = _lakeview_blocks()
+
+    assert set(fit_idx) | set(hold_idx) == set(range(len(observed)))
+    assert not (set(fit_idx) & set(hold_idx)), "a pick is in both blocks"
+
+    fit_depth = statistics.mean(kept[j] + 1 for j in fit_idx)
+    hold_depth = statistics.mean(kept[j] + 1 for j in hold_idx)
+    assert abs(fit_depth - hold_depth) <= SPLIT_DEPTH_TOLERANCE, (
+        f"the split re-skewed: fit block sits at mean draft position "
+        f"{fit_depth:.2f}, hold-out at {hold_depth:.2f} — more than "
+        f"{SPLIT_DEPTH_TOLERANCE} picks apart, which is what W2c's split did "
+        "and what build-w2d.md §1 exists to prevent")
+
+    # Round balance — no round may be fit-only or hold-out-only.
+    teams = len(set(owners))
+    rounds_fit = collections.Counter(kept[j] // teams + 1 for j in fit_idx)
+    rounds_hold = collections.Counter(kept[j] // teams + 1 for j in hold_idx)
+    for rnd in set(rounds_fit) | set(rounds_hold):
+        assert abs(rounds_fit[rnd] - rounds_hold[rnd]) <= 1, (
+            f"round {rnd} splits {rounds_fit[rnd]}/{rounds_hold[rnd]} between "
+            "the blocks — the split is no longer round-balanced")
 
 
 def test_w2_16_calibration_gate():
@@ -1169,11 +1558,13 @@ def test_w2_16_calibration_gate():
     While the verdict is FAILED this asserts the failure is still real — if a
     future change made the model pass, this test goes red and forces someone
     to re-publish the artifact and flip `CPU_MODEL_VALIDATED` deliberately
-    rather than by accident. Once the verdict is PASSED it asserts both bars
-    on both corpora. Either way the gate is never silently satisfied.
+    rather than by accident. Once the verdict is PASSED it asserts both bars on
+    all THREE validation blocks — the Lakeview hold-out plus the two
+    independent MFL corpora, six bars in total (W2d added `mfl-partial`).
+    Either way the gate is never silently satisfied.
     """
     report = _fit_and_validate()
-    passed = report["hold_pass"] and report["mfl_pass"]
+    passed = report["all_pass"]
     assert passed is mds.CPU_MODEL_VALIDATED, (
         "the calibration verdict moved — re-run the harness, re-publish "
         f"{mds.CALIBRATION_ARTIFACT}, and change CPU_MODEL_VALIDATED "
@@ -1205,93 +1596,169 @@ def test_w2_16_the_w2a_model_form_could_not_have_passed():
         "the observed tail moved — re-derive the structural argument")
 
 
-def test_w2_16_the_mean_bars_became_jointly_satisfiable_under_the_corrected_snapshot():
-    """W2c's headline finding, pinned the way W2a's and W2b's were.
+def _validation_block_means() -> dict[str, list[float]]:
+    """The THREE validation blocks under W2d's split, observed side only."""
+    (_c, _p, _d, _o, _v, _t, _r, observed, _k, _ok, _fi, hold_idx) = _lakeview_blocks()
+    out = {"lakeview hold-out": [observed[j] for j in hold_idx]}
+    for name in INDEPENDENT_CORPORA:
+        _x, mpool, mdrafted, _mo, _rr = _mfl_corpus(name)
+        out[name] = mds.reach_series(mdrafted, mpool)
+    return out
+
+
+def test_w2_16_the_mean_bars_are_still_jointly_satisfiable_across_three_blocks():
+    """W2c's headline finding, re-checked across W2d's three validation blocks.
 
     W2b's residual failure rested on an arithmetic claim: the Lakeview hold-out
     and `mfl-complete` disagreed by 2.71 slots — more than twice the ±1.0 bar —
-    so the two mean bars asked for simulated means in DISJOINT intervals and no
-    corpus-invariant model could satisfy both. The corrected snapshot dissolves
-    that claim: the same two blocks now disagree by ~1.65 slots, so the windows
-    OVERLAP and a jointly-satisfying simulated mean exists.
+    so the mean bars asked for simulated means in DISJOINT intervals and no
+    corpus-invariant model could satisfy both. W2c's corrected snapshot
+    dissolved that, and W2d re-checks it with a third block (`mfl-partial`) and
+    the re-balanced split: every block's mean must sit within `2 * MEAN_BAR` of
+    every other, or the gate is asking for something no single model can give.
 
-    That is why W2c's verdict is still FAILED but for a different reason (both
-    mean bars, not one): the failure is now that the FIT block disagrees with
-    the blocks it is validated against — see the drift test below. If this test
-    ever goes red the 08c artifact's §6 argument has to be re-derived.
+    The window is now NARROW — the blocks span ~1.95 slots against a 2.00
+    allowance — so this is a live assertion, not a formality. If it goes red the
+    verdict's *reason* changes back to "the corpora are irreconcilable" and the
+    artifact's §6 has to be re-derived.
     """
-    _c1, pool, drafted, _o, _v, _t = _lakeview_corpus()
-    lakeview = mds.reach_series(drafted, pool)
-    ids = [r["player_id"] for r in pool]
-    cut = sum(1 for i, pid in enumerate(drafted) if pid in set(ids) and i < 24)
-    hold = statistics.mean(lakeview[cut:])
-    _c2, mpool, mdrafted, _mo, _r = _mfl_corpus("mfl-complete")
-    mfl = statistics.mean(mds.reach_series(mdrafted, mpool))
-    spread = abs(mfl - hold)
-    assert spread < 2 * MEAN_BAR, (
-        f"the two validation blocks disagree by {spread:.2f} slots again — the "
-        "mean bars are back to being jointly UNSATISFIABLE, which is a "
-        "different verdict from the one 08c records")
-    lo, hi = max(hold, mfl) - MEAN_BAR, min(hold, mfl) + MEAN_BAR
-    assert lo <= hi, "the jointly-satisfying window is empty"
+    blocks = {k: statistics.mean(v) for k, v in _validation_block_means().items()}
+    lo = max(blocks.values()) - MEAN_BAR
+    hi = min(blocks.values()) + MEAN_BAR
+    assert lo <= hi, (
+        f"no simulated mean satisfies every block at once: {blocks} span "
+        f"{max(blocks.values()) - min(blocks.values()):.2f} slots against a "
+        f"{2 * MEAN_BAR} allowance — the mean bars are jointly UNSATISFIABLE "
+        "again, which is a different verdict from the one 08d records")
 
 
-def test_w2_16_the_observable_drifts_with_draft_depth():
-    """The fit/hold-out split is only meaningful if the observable does not
-    drift between blocks — otherwise the ±1.0 hold-out bar is unreachable by
-    ANY model fitted on the fit block, and the gate tests the split.
+def test_w2_19_the_rebalanced_split_removes_the_depth_drift():
+    """W2d's split change, measured against the split it replaced.
 
-    **This is the W2c finding, and it is a FAILURE being pinned, not a property
-    being asserted.** Under W2b's trimmed snapshot the drift measured ~0.3
-    slots — but only because a 50-player universe censored every deep reach at
-    9 slots. The corrected snapshot uncensors them and the same split drifts
-    ~2.0: `d` is a RANK distance, so as a draft descends into the flat part of
-    the value curve the same disagreement costs many more slots. Rounds 1-2 sit
-    on the steep part, which is exactly the block the procedure fits.
+    W2c's recorded cause of failure was the ROUND-based split: fit on Lakeview
+    rounds 1-2, validate on rounds 3-4 put the two blocks 23.4 picks apart in
+    draft depth, and the observable — a RANK distance over a value curve that
+    flattens in the tail — drifted 2.017 slots between them before any model
+    was involved. This test keeps that measurement alive as the justification
+    for the change, and asserts the interleaved split actually fixes it.
 
-    The remaining-pool reading of the LLD's `d_i` is still the better of the
-    two readings (see `reach_report`'s docstring) — the static-rank reading
-    drifts harder still, and that comparison is what this test keeps alive.
+    It also keeps W2a's comparison alive — with a W2d correction. The rejected
+    static-rank reading of the LLD's `d_i` drifts far harder than the
+    remaining-pool reading under the ROUND-based split (3.56 vs 2.02), which is
+    the comparison `reach_report`'s docstring records. Under the INTERLEAVED
+    split the gap closes and reverses (1.16 vs 1.44) — because most of the
+    static-rank reading's excess drift *was* the depth term, and interleaving is
+    exactly what removes it. That does not rehabilitate the static-rank reading
+    (it still cannot falsify a noise model: over a frozen pre-draft pool a pure
+    BPA draft scores a large fall by construction), but the stationarity
+    ARGUMENT for the choice is now split-dependent, and saying so is cheaper
+    than letting a stale claim sit in a docstring.
     """
-    ctx, pool, drafted, _o, _v, _t = _lakeview_corpus()
+    (_c, pool, drafted, _o, _v, _t, _r, observed, kept,
+     _ok, fit_idx, hold_idx) = _lakeview_blocks()
     ids = [r["player_id"] for r in pool]
-    observed = mds.reach_series(drafted, pool)
-    cut = sum(1 for i, pid in enumerate(drafted) if pid in set(ids) and i < 24)
-    drift = abs(statistics.mean(observed[:cut]) - statistics.mean(observed[cut:]))
-    assert drift > MEAN_BAR, (
-        f"the observable now drifts only {drift:.2f} slots across the split — "
-        "08c's diagnosis of the mean-bar failure needs re-deriving")
+    cut = sum(1 for i in kept if i < 24)          # the W2c round-based boundary
+
+    round_depth = abs(statistics.mean(kept[j] + 1 for j in range(cut))
+                      - statistics.mean(kept[j] + 1 for j in range(cut, len(observed))))
+    split_depth = abs(statistics.mean(kept[j] + 1 for j in fit_idx)
+                      - statistics.mean(kept[j] + 1 for j in hold_idx))
+    assert round_depth > 10 * SPLIT_DEPTH_TOLERANCE, (
+        "the round-based split no longer separates the blocks by draft depth — "
+        "W2d's reason for replacing it needs re-deriving")
+    assert split_depth <= SPLIT_DEPTH_TOLERANCE < round_depth
+
+    round_drift = abs(statistics.mean(observed[:cut])
+                      - statistics.mean(observed[cut:]))
+    split_drift = abs(statistics.mean(observed[j] for j in fit_idx)
+                      - statistics.mean(observed[j] for j in hold_idx))
+    assert round_drift > MEAN_BAR, (
+        f"the observable drifts only {round_drift:.2f} slots across the OLD "
+        "round-based split — 08c's diagnosis needs re-deriving")
+    assert split_drift < round_drift, (
+        f"the interleaved split drifts {split_drift:.2f} slots, no better than "
+        f"the round-based {round_drift:.2f} it replaced — the re-balance did "
+        "not do what build-w2d.md §1.1 claimed for it")
 
     static_rank = {pid: i + 1 for i, pid in enumerate(ids)}
-    kept = [pid for pid in drafted if pid in static_rank]
-    alt = [abs(static_rank[pid] - (i + 1)) for i, pid in enumerate(kept)]
-    alt_drift = abs(statistics.mean(alt[:cut]) - statistics.mean(alt[cut:]))
-    assert alt_drift > drift, (
-        "the two readings of the LLD's d_i no longer differ in stationarity — "
-        "re-derive the choice recorded in reach_report's docstring")
+    kept_ids = [pid for pid in drafted if pid in static_rank]
+    alt = [abs(static_rank[pid] - (i + 1)) for i, pid in enumerate(kept_ids)]
+    alt_round_drift = abs(statistics.mean(alt[:cut]) - statistics.mean(alt[cut:]))
+    alt_split_drift = abs(statistics.mean(alt[j] for j in fit_idx)
+                          - statistics.mean(alt[j] for j in hold_idx))
+    assert alt_round_drift > round_drift, (
+        "the two readings of the LLD's d_i no longer differ in stationarity on "
+        "the ROUND-based split — re-derive the choice recorded in "
+        "reach_report's docstring")
+    assert alt_split_drift < alt_round_drift, (
+        "interleaving no longer shrinks the static-rank reading's drift — the "
+        "W2d finding that its excess drift was the DEPTH term needs "
+        "re-deriving")
 
 
-def test_w2_16_the_mean_bar_is_tighter_than_the_statistic_it_tests():
-    """The other half of the W2c diagnosis: at these sample sizes the ±1.0 bar
-    is smaller than the STANDARD ERROR of the mean it bounds, because the
-    corrected snapshot's `|d|` is heavy-tailed (one pick at 29.5 on a 22-pick
-    block; one at 51.5 on a 28-pick corpus).
+def test_w2_16_the_mean_bar_is_measurable_on_one_block_of_three():
+    """The power question the operator asked W2d to answer with numbers.
 
-    A perfectly-specified model would therefore fail the mean bar a large share
-    of the time on sampling noise alone. Recorded so the operator can see that
-    "more corpora" is not a nice-to-have but the precondition for the bar to
-    mean anything.
+    W2c found the ±1.0 mean bar smaller than the STANDARD ERROR of the mean it
+    bounds on BOTH its blocks, so a perfectly-specified model would have failed
+    it on sampling noise a large share of the time. W2d added a corpus, and the
+    answer is now split rather than uniform:
+
+    * `lakeview hold-out` — SE ≈ 1.33, still WIDER than the bar
+    * `mfl-complete`      — SE ≈ 2.15, still wider (one pick at 51.5 on n = 28)
+    * **`mfl-partial`     — SE ≈ 0.95, INSIDE the bar** — the mean bar is
+      genuinely measurable on this block
+
+    That matters for the verdict: the model misses `mfl-partial`'s mean by
+    ~2.1 standard errors, so the paired-mean failure is NOT attributable to
+    sampling noise alone on at least one block. The bar was not widened.
     """
-    _c1, pool, drafted, _o, _v, _t = _lakeview_corpus()
-    observed = mds.reach_series(drafted, pool)
-    ids = [r["player_id"] for r in pool]
-    cut = sum(1 for i, pid in enumerate(drafted) if pid in set(ids) and i < 24)
-    hold = observed[cut:]
-    _c2, mpool, mdrafted, _mo, _r = _mfl_corpus("mfl-complete")
-    mfl = mds.reach_series(mdrafted, mpool)
-    for name, block in (("lakeview hold-out", hold), ("mfl-complete", mfl)):
-        se = statistics.stdev(block) / math.sqrt(len(block))
-        assert se > MEAN_BAR, (
-            f"{name}'s mean is now estimated to +/-{se:.2f}, inside the "
-            f"+/-{MEAN_BAR} bar — the bar has become estimable and 08c §6's "
-            "power argument needs re-deriving")
+    ses = {name: statistics.stdev(b) / math.sqrt(len(b))
+           for name, b in _validation_block_means().items()}
+    for name in ("lakeview hold-out", "mfl-complete"):
+        assert ses[name] > MEAN_BAR, (
+            f"{name}'s mean is now estimated to +/-{ses[name]:.2f}, inside the "
+            f"+/-{MEAN_BAR} bar — 08d §6's power argument needs re-deriving")
+    assert ses["mfl-partial"] <= MEAN_BAR, (
+        f"mfl-partial's mean is estimated to +/-{ses['mfl-partial']:.2f}, "
+        f"outside the +/-{MEAN_BAR} bar — W2d's claim that the bar is "
+        "measurable on at least one block no longer holds, and the verdict's "
+        "reasoning depends on it")
+
+
+def test_w2_16_the_candidate_window_cannot_produce_the_deepest_observed_reaches():
+    """W2d's headline finding — where the residual failure actually lives now.
+
+    `cpu_pick` only ever scans `available[:candidate_window(max_reach)]`, so
+    every simulated `d` is bounded by `MOCK_CANDIDATE_WINDOW - 1` (11, or 11.5
+    once a tied block is averaged). The corpora contain picks well beyond that —
+    29.5 on the Lakeview hold-out, 13 / 15 / 33.5 / 51.5 on `mfl-complete`,
+    18 twice on `mfl-partial`. Those picks have probability EXACTLY ZERO under
+    the shipped model, and they carry most of each block's observed mean: drop
+    them and the three paired-mean deltas fall by 1.34 / 4.04 / 1.24 slots.
+
+    This is the SAME structural shape as W2a's failure — a model whose support
+    excludes observed data — except it now lives in the product cap `K` rather
+    than in the noise family. **`K` is deliberately NOT a fitted parameter**
+    (lld §4.2.3, the W2b brief), so W2d does not touch it: retuning a product
+    cap against the validation blocks is precisely the fit-on-the-validation-set
+    move amendment 2 exists to prevent. It is recorded here, and in artifact
+    08d §6, as evidence for the operator.
+    """
+    bound = mds.MOCK_CANDIDATE_WINDOW - 1
+    blocks = _validation_block_means()
+    beyond_total = sum(1 for b in blocks.values() for d in b if d > bound)
+    n_total = sum(len(b) for b in blocks.values())
+    assert beyond_total > 0, (
+        "no observed pick now reaches past the candidate window — 08d §6's "
+        "support argument needs re-deriving")
+    assert beyond_total / n_total > 0.05, (
+        f"only {beyond_total}/{n_total} observed picks land outside the "
+        "model's support — the argument no longer carries the mean gap")
+
+    # And the gap they carry is the size of the failure, per block.
+    for name, block in blocks.items():
+        carried = sum(d for d in block if d > bound) / len(block)
+        assert carried > 0.5, (
+            f"{name}'s out-of-support picks carry only {carried:.2f} slots of "
+            "its observed mean — re-derive 08d §6")

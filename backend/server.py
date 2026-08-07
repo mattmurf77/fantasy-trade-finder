@@ -10250,6 +10250,25 @@ def draft_board_route():
 #     "cpu_model_unvalidated"}` rather than a board full of bots whose noise
 #     model failed hold-out validation. No closed client enum gains a member —
 #     the new state rides the existing typed-empty contract (plan D10).
+#
+# W2d closed three contract gaps the mock-placement design found. Contract in
+# `docs/plans/draft-extensions/build-w2d.md` §3:
+#
+#   * G1 — the create route dropped `order`, `order_source`, `ownership` and
+#     `personas`, all four of which the engine has always accepted. Every mock
+#     was therefore randomized-order, every TRADED PICK was silently discarded,
+#     and every CPU team was `{outlook: "not_sure"}` — which made the whole
+#     `outlook_alpha` persona mechanism inert. `_mock_real_draft` resolves the
+#     first three from the Draft Room's own board; `_mock_personas` resolves
+#     the fourth from league preferences, falling back to the shipped
+#     `infer_team_outlook`.
+#   * G2 — `cpu_model_unvalidated` / `class_not_loaded` were discoverable only
+#     by POSTing a create, so the only honest UI was an enabled button that
+#     failed. `GET` now carries a `capability` object off ONE shared refusal
+#     ladder (`mds.start_refusal`), answered without a platform read.
+#   * G3 — `picks[]` carried no rank, so the recap could not compute a delta.
+#     Entries now carry `consensus_rank` / `consensus_delta` / `valued` against
+#     the frozen PRE-DRAFT pool.
 # ---------------------------------------------------------------------------
 
 _MOCK_DEFAULT_LINEUP = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX"]
@@ -10324,6 +10343,135 @@ def _mock_context_from_row(sess: dict, state: dict):
     )
 
 
+def _mock_capability(sess: dict, league_id: str, season: int) -> dict:
+    """W2d/G2 — the cheap probe behind `GET /api/mock-draft`.
+
+    Deliberately NOT `_mock_league_context`: that resolves the lineup template
+    (a league-meta read) and every rookie's player row, which is the cost of
+    STARTING a mock, not of asking whether you may. This builds the minimum the
+    refusal ladder actually reads — the rookie-id set and the member list — so
+    the probe stays a DB read and keeps the GET path's zero-egress property.
+    """
+    from . import mock_draft_service as mds
+
+    g_league = sess.get("league")
+    members = list(getattr(g_league, "members", []) or [])
+    ctx = mds.MockContext(
+        league_id=str(league_id), season=int(season), consensus_elo={},
+        rookie_ids=frozenset(_rookie_player_ids(int(season))), player_rows={})
+    return mds.capability(ctx, [str(m.user_id) for m in members])
+
+
+def _mock_real_draft(sess: dict, league_id: str, season: int) -> dict:
+    """W2d/G1 — order, order_source, traded picks and shape from the league's
+    REAL draft, via the very board the Draft Room renders.
+
+    Before this the create route passed none of the four resolution inputs the
+    engine accepts, so every mock was randomized-order and every traded pick was
+    silently discarded. The source here is `draft_board_service.build_board` —
+    literally the Draft Room's, cached, single-flight, budgeted and
+    breaker-guarded — so the mock's order and the room's order cannot disagree
+    and the mock costs no read the room has not already paid for.
+
+    Returns `{order, order_source, traded_slots, type}`. `build_board` never
+    raises, and every field degrades to the honest empty: no `draft_order` on
+    the platform ⇒ no `order`, which makes `build_settings` fall back to the
+    seeded shuffle and LABEL it `randomized` (KD-6). Never an invented order.
+    """
+    from . import draft_board_service as dbs
+    from . import mock_draft_service as mds
+
+    out = {"order": None, "order_source": mds.ORDER_SOURCE_RANDOMIZED,
+           "traded_slots": {}, "type": None}
+    g_league = sess.get("league")
+    platform = str(getattr(g_league, "platform", "sleeper") or "sleeper").lower()
+    ctx = get_league_draft_context(league_id)
+    if ctx:
+        platform = str(ctx.get("platform") or platform).lower()
+    if platform != dbs.SLEEPER or not is_enabled("draft.room"):
+        # MFL's grid states the CURRENT owner but never the original, so it
+        # cannot distinguish "slot order" from "traded pick" — reading it would
+        # produce an order that is really an ownership overlay. Non-Sleeper
+        # leagues therefore stay randomized-and-labelled, honestly.
+        return out
+
+    _pool, consensus_seed = _get_universal_pool(_active_format(sess))
+    board = dbs.build_board(
+        dbs.BoardRequest(league_id=str(league_id), platform=dbs.SLEEPER,
+                         season=int(season), user_id=sess.get("user_id"),
+                         consensus_elo=consensus_seed,
+                         scoring=_active_format(sess)),
+        dbs.PlatformFetchers(sleeper_get=_sleeper_get,
+                             rookie_ids_fn=_rookie_player_ids))
+    out["type"] = board.get("type")
+    rows = board.get("order") or []
+    if board.get("order_confidence") != dbs.ORDER_ASSIGNED:
+        return out
+
+    # Slot order comes from ROUND 1's ORIGINAL owners: `original_user_id` is who
+    # owns the draft slot, and a traded pick is an overlay on top of it, not a
+    # different slot. Reading `owner_user_id` here would bake one round's trade
+    # into every round.
+    by_slot: dict[int, str] = {}
+    for row in rows:
+        slot, rnd = row.get("slot"), row.get("round")
+        if slot and int(rnd or 0) == 1 and row.get("original_user_id"):
+            by_slot[int(slot)] = str(row["original_user_id"])
+        if slot and row.get("is_traded") and row.get("owner_user_id"):
+            out["traded_slots"][(int(rnd or 0), int(slot))] = str(row["owner_user_id"])
+    if by_slot and set(by_slot) == set(range(1, len(by_slot) + 1)):
+        out["order"] = [by_slot[i] for i in range(1, len(by_slot) + 1)]
+        out["order_source"] = mds.ORDER_SOURCE_ASSIGNED
+    else:
+        # A partial slot map is not an order. Drop the overlay with it: a
+        # traded pick is meaningless without the slots it trades between.
+        out["traded_slots"] = {}
+    return out
+
+
+def _mock_personas(league_id: str, sess: dict) -> dict[str, dict[str, str]]:
+    """W2d/G1 — `{user_id: {outlook, source}}` for every league member.
+
+    `declared` > `inferred` > `default`, the precedence T-W2-07 already pins.
+    Without this every CPU team was `{outlook: "not_sure"}`, which pins
+    `need_weight` at the `not_sure` alpha for the whole field and makes the
+    entire `outlook_alpha` persona mechanism inert — every bot drafted with
+    identical need pressure.
+
+    Deliberately NOT gated on `trade.outlook_infer`: that flag exists to keep
+    per-member DB reads off the TRADE generate path's hot loop, and this is a
+    once-per-mock resolution already behind `draft.mock`. `infer_team_outlook`
+    is a pure function and never returns an extreme label (T-W2-07), so an
+    inferred persona can never become a 1.0 or 0.1 drafter.
+    """
+    from . import mock_draft_service as mds
+    from .trade_service import infer_team_outlook
+
+    g_league = sess.get("league")
+    members = list(getattr(g_league, "members", []) or [])
+    players = {p.id: p for p in (sess.get("players") or [])}
+    num_teams = len(members) or 12
+    out: dict[str, dict[str, str]] = {}
+    for m in members:
+        uid = str(m.user_id)
+        declared = None
+        try:
+            prefs = load_league_preference(user_id=uid, league_id=str(league_id))
+            declared = (prefs or {}).get("team_outlook")
+        except Exception:                       # pragma: no cover - DB optional
+            log.exception("mock persona: preference read failed user=%s", uid)
+        if declared:
+            out[uid] = {"outlook": str(declared), "source": mds.PERSONA_DECLARED}
+            continue
+        roster = [str(p) for p in (m.roster or [])]
+        if not roster or not players:
+            continue                            # build_settings fills the default
+        outlook, _score, _signals = infer_team_outlook(
+            roster, players, _user_pick_share(uid, str(league_id)), num_teams)
+        out[uid] = {"outlook": str(outlook), "source": mds.PERSONA_INFERRED}
+    return out
+
+
 def _mock_resolve_league(sess: dict, league_id: str):
     """`(league_id, season)` or a Flask error tuple — the board route's rule."""
     if not league_id:
@@ -10380,7 +10528,15 @@ def mock_draft_route():
             return jsonify({"error": "bad_basis"}), 400
         row = load_current_mock_draft(user_id, league_id)
         if row is None:
-            return jsonify(mds.empty_payload("no_active_mock"))
+            # G2 — the capability probe. Answered from the DB and the process
+            # pool only, exactly like every other GET on this route, so a client
+            # can render a DISABLED entry state without POSTing a create and
+            # without this read costing a platform call. `type`/`order_source`
+            # are deliberately absent here: resolving them needs the board, and
+            # the client already holds it (`GET /api/draft/board` now carries
+            # `type`) — see docs/plans/draft-extensions/build-w2d.md §3.
+            return jsonify(mds.empty_payload(
+                mds.REASON_NO_ACTIVE_MOCK, _mock_capability(sess, league_id, season)))
         state = mds.loads(row)
         ctx = _mock_context_from_row(sess, state)
         board_elo = None
@@ -10401,12 +10557,16 @@ def mock_draft_route():
         return jsonify({"error": "not_rookie_draft"}), 400
 
     ctx, owners = _mock_league_context(sess, league_id, season)
-    if not mds.class_loaded(ctx):
-        return jsonify(mds.empty_payload(mds.REASON_CLASS_NOT_LOADED))
-    if not mds.CPU_MODEL_VALIDATED:
-        # W2's abort criterion (plan §5). The engine, its tests and the
-        # calibration harness all ship; the bots do not.
-        return jsonify(mds.empty_payload(mds.REASON_CPU_MODEL_UNVALIDATED))
+    # ONE refusal ladder, shared with the G2 capability probe, so a client that
+    # rendered an enabled button can never be told something the probe did not
+    # already say. W2's abort criterion (plan §5) is the first rung: the engine,
+    # its tests and the calibration harness all ship; the bots do not.
+    # The typed-empty body stays byte-identical to M2's — the `reason` IS the
+    # information here, and a client that got this far already read the G2
+    # probe. `capability` rides the GET only.
+    refusal = mds.start_refusal(ctx, owners)
+    if refusal is not None:
+        return jsonify(mds.empty_payload(refusal))
 
     rng_seed = body.get("rng_seed")
     try:
@@ -10414,9 +10574,18 @@ def mock_draft_route():
     except (TypeError, ValueError):
         rng_seed = random.randrange(2 ** 31)
 
+    # G1 — the four resolution inputs the engine has always accepted and the
+    # route never passed. `real` degrades to a randomized-and-labelled order
+    # when the platform has no assigned one; `order_source` rides the payload
+    # so the client can DISCLOSE that rather than imply a real order.
+    real = _mock_real_draft(sess, league_id, season)
     settings = mds.build_settings(
         ctx, owners=owners, user_owner_id=user_id, rounds=rounds,
-        draft_type=body.get("type"), rng=random.Random(rng_seed))
+        draft_type=body.get("type") or real["type"],
+        order=real["order"], order_source=real["order_source"],
+        traded_slots=real["traded_slots"],
+        personas=_mock_personas(league_id, sess),
+        rng=random.Random(rng_seed))
     state = mds.new_state(ctx, settings, rng_seed, user_id=user_id)
     mds.advance_cpu(state, ctx)
     settings_json, picks_json = mds.dumps(state)

@@ -111,7 +111,7 @@ def board(corpus, tmp_path, monkeypatch, *, league_id, k=None, get=None,
 
 EXPECTED_KEYS = {
     "schema", "league_id", "platform", "state", "kind", "season", "rounds",
-    "teams", "order_confidence", "order", "picks", "undrafted",
+    "teams", "order_confidence", "type", "order", "picks", "undrafted",
     "undrafted_basis", "undrafted_suppressed", "my_picks", "as_of", "stale",
     "degraded", "notice", "deep_link",
 }
@@ -152,6 +152,11 @@ def test_payload_is_schema_1_field_for_field(slot_values_off, tmp_path, monkeypa
     assert payload["state"] in {"upcoming", "live", "complete", "unavailable"}
     assert payload["kind"] in {"rookie", "startup", "unknown"}
     assert payload["order_confidence"] in {"assigned", "unset", "unknown"}
+    # W2d — the linear/snake shape, so a mock-setup toggle can prefill instead
+    # of defaulting to linear and silently renumbering every pick. `null` when
+    # the platform states no shape we recognise; never a guess.
+    assert payload["type"] in {"linear", "snake", None}
+    assert payload["type"] == "linear"          # lakeview-complete's detail
 
 
 def test_basis_is_echoed_and_defaults_to_consensus(tmp_path, monkeypatch):

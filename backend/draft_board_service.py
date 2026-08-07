@@ -86,6 +86,17 @@ KIND_ROOKIE = "rookie"
 KIND_STARTUP = "startup"
 KIND_UNKNOWN = "unknown"
 
+#: Draft SHAPE, for a client that has to prefill a linear/snake toggle. A
+#: closed vocabulary shared with `mock_draft_service.TYPE_*`; `None` whenever the
+#: platform does not state it, because an invented shape renumbers picks.
+TYPE_LINEAR = "linear"
+TYPE_SNAKE = "snake"
+
+#: MFL states the shape as a draft-order rule rather than a name. `SAME` repeats
+#: the round-1 order every round (linear); `REVERSE` alternates it (snake).
+#: Anything else is left unmapped rather than guessed.
+_MFL_DRAFT_TYPE = {"SAME": TYPE_LINEAR, "REVERSE": TYPE_SNAKE}
+
 ORDER_ASSIGNED = "assigned"
 ORDER_UNSET = "unset"
 ORDER_UNKNOWN = "unknown"
@@ -998,6 +1009,7 @@ def _render_sleeper(req: BoardRequest, entry: "_Entry", fetchers: Fetchers) -> d
         notice=_notice(notice_code),
         deep_link=req.deep_link or (f"https://sleeper.com/draft/nfl/{entry.draft_id}"
                                     if entry.draft_id else None),
+        draft_type=str(detail.get("type") or "").strip().lower() or None,
     )
 
 
@@ -1091,8 +1103,11 @@ def _render_mfl(req: BoardRequest, entry: "_Entry", fetchers: Fetchers) -> dict:
             notice_code = NOTICE_CLASS_NOT_LOADED
 
     static_url = None
+    draft_type = None
     for unit in _mfl_units(raw):
         static_url = unit.get("static_url") or static_url
+        draft_type = _MFL_DRAFT_TYPE.get(
+            str(unit.get("draftType") or "").strip().upper()) or draft_type
 
     return _payload(
         req, MFL, state=entry.state, kind=kind, season=season, rounds=rounds,
@@ -1100,7 +1115,7 @@ def _render_mfl(req: BoardRequest, entry: "_Entry", fetchers: Fetchers) -> dict:
         order_confidence=ORDER_ASSIGNED if assigned else ORDER_UNKNOWN,
         picks=picks, undrafted=undrafted, undrafted_suppressed=suppressed,
         entry=entry, notice=_notice(notice_code),
-        deep_link=req.deep_link or static_url,
+        deep_link=req.deep_link or static_url, draft_type=draft_type,
     )
 
 
@@ -1109,7 +1124,7 @@ def _payload(req: BoardRequest, platform: str, *, state: str, kind: str,
              order: list[dict], order_confidence: str, picks: list[dict],
              undrafted: list[dict], undrafted_suppressed: bool,
              entry: "_Entry", notice: dict | None,
-             deep_link: str | None) -> dict:
+             deep_link: str | None, draft_type: str | None = None) -> dict:
     # M6 — the display-only slot-value axis. Annotated HERE, before `my_picks`
     # is sliced, so the two render paths (Sleeper + MFL) cannot drift and
     # `my_picks` carries the same entries as `order`.
@@ -1127,6 +1142,11 @@ def _payload(req: BoardRequest, platform: str, *, state: str, kind: str,
         "rounds": rounds,
         "teams": teams,
         "order_confidence": order_confidence,
+        # W2d/G-extra: the linear-vs-snake shape, so a client building a mock
+        # off this league can PREFILL its setup toggle instead of defaulting to
+        # linear and silently renumbering every pick. `null` = the platform did
+        # not state a shape we recognise; never a guess.
+        "type": draft_type if draft_type in (TYPE_LINEAR, TYPE_SNAKE) else None,
         "order": order,
         "picks": picks,
         "undrafted": undrafted,

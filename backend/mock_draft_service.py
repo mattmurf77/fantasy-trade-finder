@@ -23,11 +23,12 @@ re-sorts the *user's* undrafted list only and never reaches a CPU decision.
 single-parameter uniform-jitter model failed the gate on a model-FORM ground;
 W2b re-specced it as the two-parameter mixture in :func:`cpu_pick` and re-ran
 the same gate unchanged; W2c left the model and the gate FROZEN and re-derived
-the calibration CONSENSUS instead — the live-shaped, untrimmed value snapshot
-the corrected observable needed. The re-fit **still FAILS**, so
-:func:`advance_cpu` remains unreachable from the routes; the engine, its tests
-and the harness that produced the verdict all ship so the verdict is
-reproducible and the next attempt can be re-gated without a rebuild.
+the calibration CONSENSUS instead; W2d took the operator's pre-registered
+decision to re-balance the fit/hold-out SPLIT for draft depth and to add a
+third validation corpus, with the model still frozen. The re-fit **still
+FAILS**, so :func:`advance_cpu` remains unreachable from the routes; the
+engine, its tests and the harness that produced the verdict all ship so the
+verdict is reproducible and the next attempt can be re-gated without a rebuild.
 
 **INV-10 — deterministic and self-contained.** Same ``rng_seed`` ⇒ a
 byte-identical draft; zero platform egress after creation (this module
@@ -70,6 +71,15 @@ DEFAULT_OUTLOOK = "not_sure"
 #: rather than a new member of any closed client enum (plan D10).
 REASON_CLASS_NOT_LOADED = "class_not_loaded"
 REASON_CPU_MODEL_UNVALIDATED = "cpu_model_unvalidated"
+REASON_NO_ACTIVE_MOCK = "no_active_mock"
+#: W2d/G-extra. ``teams`` was ``len(owners)`` with no floor, so a 2-team league
+#: got a 2-team "mock" whose every round is a coin flip between two rosters.
+REASON_LEAGUE_TOO_SMALL = "league_too_small"
+
+#: The smallest league a mock says anything about. Below this the CPU field is
+#: too thin for a reach to mean anything — with 3 opponents the pool barely
+#: moves between your picks, so the exercise stops being a draft simulation.
+MOCK_MIN_TEAMS = 4
 
 # ── Tunables (``model_config``; see docs/config-reference.md) ─────────────
 #: Product cap on how many consensus slots a *need* can pull a player up. NOT
@@ -81,10 +91,11 @@ MOCK_MAX_REACH_DEFAULT = 3.0
 #: ``mock_bpa_prob`` = P(this pick is the strict board pick, no idiosyncrasy).
 #: ``mock_reach_decay`` = the per-slot survival ratio of the reach branch:
 #: reaching one slot further is ``decay`` times as likely. The values below are
-#: the **W2c** fit on ``lakeview-complete`` rounds 1-2 against the corrected
-#: consensus snapshot (W2b's, against the trimmed one, was 0.50 / 0.95) —
-#: recorded, but NOT validated: see :data:`CPU_MODEL_VALIDATED`.
-MOCK_BPA_PROB_DEFAULT = 0.20
+#: the **W2d** fit on ``lakeview-complete``'s interleaved FIT block (W2c, on the
+#: same corrected snapshot but the round-based split, was 0.20 / 0.70; W2b, on
+#: the trimmed snapshot, 0.50 / 0.95) — recorded, but NOT validated: see
+#: :data:`CPU_MODEL_VALIDATED`.
+MOCK_BPA_PROB_DEFAULT = 0.10
 MOCK_REACH_DECAY_DEFAULT = 0.70
 
 _DEFAULT_CFG: dict[str, float] = {
@@ -100,6 +111,18 @@ _DEFAULT_CFG: dict[str, float] = {
 #: window under 10 could not represent the fit data at all — rounded up to 12.
 #: Beyond ~a dozen slots a bot's pick stops reading as conviction and starts
 #: reading as broken, which is the product half of the same number.
+#:
+#: **W2d finding — this is now the binding constraint on the gate.** Because
+#: :func:`cpu_pick` only ever scans ``available[:candidate_window(...)]``, every
+#: simulated ``d`` is bounded by ``K - 1`` (11, or 11.5 once a tied block is
+#: averaged). 7 of the 102 picks in the three validation blocks reach 13 to 51.5
+#: slots — probability EXACTLY zero under the shipped model — and they carry
+#: 1.34 / 4.04 / 1.24 slots of those blocks' observed means, which is the whole
+#: paired-mean gap. It is left ALONE: retuning a product cap against the
+#: validation blocks is the fit-on-the-validation-set move amendment 2 exists to
+#: prevent. Pinned by
+#: ``test_w2_16_the_candidate_window_cannot_produce_the_deepest_observed_reaches``
+#: and argued in artifact 08d §6.
 MOCK_CANDIDATE_WINDOW = 12
 
 #: "Worth a 3rd or better" — the `third` tier floor from
@@ -120,7 +143,7 @@ DEFAULT_ROUNDS = 4
 # ---------------------------------------------------------------------------
 # THE CALIBRATION GATE (I-10)
 # ---------------------------------------------------------------------------
-# `docs/plans/draft-extensions/mock-calibration-2026-08c.md` is a GATE, not a
+# `docs/plans/draft-extensions/mock-calibration-2026-08d.md` is a GATE, not a
 # report (plan §5, lld §4.2.3).
 #
 # W2a: the specified single-parameter model — argmin over
@@ -134,18 +157,36 @@ DEFAULT_ROUNDS = 4
 # fixture whose deep tail was floored at repeated DP values, so `d` there was
 # measuring a `search_rank` tiebreak rather than a reach.
 #
-# W2c (this file): the model, both bars, alpha, the split and the corpora are
-# all UNCHANGED. What changed is the snapshot the observable is measured
-# against — the full 2026 prospect class priced by the live, KTC-blended
-# DynastyProcess snapshot through the shipped blend — plus an explicit
-# average-rank rule for the ties that remain (`_block_rank`). Verdict: still
-# FAILED, now on BOTH paired-mean bars while BOTH KS bars pass. The correction
-# dissolved W2b's "the corpora are irreconcilable" argument (the two validation
-# blocks now agree to 1.65 slots, so a jointly-satisfying simulated mean
-# EXISTS) and replaced it with a sharper one: the observable drifts 2.0 slots
-# between the fit block and the hold-out block, so the procedure fits the two
-# shallowest rounds and validates on deeper ones. Read the artifact §6-§7
-# before touching anything.
+# W2c: the model, both bars, alpha, the split and the corpora were all
+# UNCHANGED; what changed was the snapshot the observable is measured against —
+# the full 2026 prospect class priced by the live, KTC-blended DynastyProcess
+# snapshot through the shipped blend — plus an explicit average-rank rule for
+# the ties that remain (`_block_rank`). Verdict: still FAILED, on BOTH
+# paired-mean bars while both KS bars passed, and the recorded cause was the
+# SPLIT: the observable drifted 2.017 slots between the fit block (rounds 1-2)
+# and the hold-out (rounds 3-4) before any model, because `d` is a rank
+# distance over a value curve that flattens in the tail.
+#
+# W2d (this file): the operator's decision, PRE-REGISTERED in build-w2d.md §1
+# and committed before the harness moved. Two changes, both to the gate and
+# both recorded in advance: (1) the split is now an alternating INTERLEAVE over
+# the retained picks, so the fit and hold-out blocks see the same draft depth
+# (23.61 vs 23.64 mean pick position, against 12.17 vs 35.59 before) — pinned
+# as a precondition by T-W2-19 so it can never silently re-skew; (2) the corpus
+# `mfl-partial` joins as a THIRD independent validation block with both bars and
+# no refit, taking the gate from four bars to six. The model family, both bars,
+# alpha, the +/-1.0 constant, the tie rule and `d_i` are FROZEN; only the two
+# parameters were re-fitted.
+#
+# Verdict: still FAILED. All THREE KS bars pass (p = 0.317 / 0.546 / 0.108);
+# all three paired-mean bars fail (1.648 / 3.605 / 2.026). The re-balance did
+# what it was meant to — the depth drift is gone and the observable's residual
+# 1.44-slot block difference is ~1.1 SE of sampling noise — and it exposed the
+# next layer: `MOCK_CANDIDATE_WINDOW` bounds every simulated `d` at 11.5, while
+# 7 of the 102 validation picks reach 13 to 51.5 slots. Those out-of-support
+# picks carry 1.34 / 4.04 / 1.24 slots of the three blocks' observed means,
+# i.e. they ARE the gap. `K` is a PRODUCT CAP and deliberately not fitted, so
+# W2d does not touch it. Read artifact 08d §6-§7 before touching anything.
 #
 # Per the plan's W2 abort criterion the CPU-bot mock therefore stays CUT: the
 # routes refuse to generate CPU picks while this stays False, returning the
@@ -155,7 +196,7 @@ DEFAULT_ROUNDS = 4
 # re-specced model — flipping it is the exact "fit on the validation set"
 # failure the amendment exists to prevent.
 CPU_MODEL_VALIDATED = False
-CALIBRATION_ARTIFACT = "docs/plans/draft-extensions/mock-calibration-2026-08c.md"
+CALIBRATION_ARTIFACT = "docs/plans/draft-extensions/mock-calibration-2026-08d.md"
 
 
 class MockDraftError(Exception):
@@ -278,6 +319,58 @@ def consensus_pool(ctx: MockContext) -> list[dict]:
 def class_loaded(ctx: MockContext) -> bool:
     """False ⇒ the caller owes a typed-empty ``class_not_loaded`` (M2)."""
     return bool(ctx.rookie_ids)
+
+
+def start_refusal(ctx: MockContext, owners: Sequence[str]) -> str | None:
+    """The reason a mock cannot start right now, or ``None`` — **interface G2**.
+
+    ONE ordering of the refusals, so the capability probe a client renders a
+    disabled button from and the create route it eventually POSTs to can never
+    disagree. The order is the SHIPPED route's, preserved deliberately:
+    ``class_not_loaded`` outranks ``cpu_model_unvalidated`` because it is the
+    transient, seasonal, self-resolving state and is the more useful thing to
+    say when both hold. ``league_too_small`` is last because it is the only one
+    the user can do nothing about.
+    """
+    if not class_loaded(ctx):
+        return REASON_CLASS_NOT_LOADED
+    if not CPU_MODEL_VALIDATED:
+        return REASON_CPU_MODEL_UNVALIDATED
+    if len({str(o) for o in owners or ()}) < MOCK_MIN_TEAMS:
+        return REASON_LEAGUE_TOO_SMALL
+    return None
+
+
+def capability(ctx: MockContext, owners: Sequence[str],
+               *, draft_type: str | None = None,
+               order_source: str | None = None) -> dict:
+    """**Interface G2** — what a client needs to render the mock entry point
+    WITHOUT POSTing a create first.
+
+    Before this, ``cpu_model_unvalidated`` and ``class_not_loaded`` were only
+    discoverable by starting a mock and reading the typed-empty back, so the
+    only honest UI was an enabled button that failed. This rides
+    ``GET /api/mock-draft`` — no new route, no new closed enum: ``reason``
+    carries the same strings the typed-empty already uses.
+
+    ``draft_type`` / ``order_source`` are what the create route WOULD resolve
+    from the league's real draft, so a setup sheet can prefill its
+    linear/snake toggle and disclose a randomized order before the user
+    commits — the same disclosure the created mock echoes back.
+    """
+    reason = start_refusal(ctx, owners)
+    return {
+        "can_start": reason is None,
+        "reason": reason,
+        "teams": len({str(o) for o in owners or ()}),
+        "min_teams": MOCK_MIN_TEAMS,
+        "rounds_default": DEFAULT_ROUNDS,
+        "rounds_max": _ROOKIE_MAX_ROUNDS,
+        "type": draft_type if draft_type in (TYPE_LINEAR, TYPE_SNAKE) else None,
+        "order_source": (order_source
+                         if order_source in (ORDER_SOURCE_ASSIGNED,
+                                             ORDER_SOURCE_RANDOMIZED) else None),
+    }
 
 
 def _reranked(rows: Sequence[Mapping[str, Any]]) -> list[dict]:
@@ -521,6 +614,7 @@ def build_settings(ctx: MockContext,
                    order: Sequence[str] | None = None,
                    order_source: str = ORDER_SOURCE_RANDOMIZED,
                    ownership: Mapping[Any, str] | None = None,
+                   traded_slots: Mapping[Any, str] | None = None,
                    personas: Mapping[str, Mapping[str, str]] | None = None,
                    rng: random.Random | None = None,
                    config_overrides: Mapping[str, float] | None = None,
@@ -531,6 +625,15 @@ def build_settings(ctx: MockContext,
     — never an invented "real" order (KD-6). ``rounds`` is clamped to
     ``1..ROOKIE_MAX_ROUNDS``. The fitted noise parameters are snapshotted so a
     resumed mock replays identically even if ``model_config`` is retuned.
+
+    **Two ways to state traded picks (W2d/G1), because the two callers hold
+    different keys.** ``ownership`` is the persisted shape — ``{pick_no:
+    user_id}`` — and is what a test or a replayed row supplies. ``traded_slots``
+    is the PLATFORM shape — ``{(round, slot): user_id}`` — because that is all
+    Sleeper's ``traded_picks`` export and MFL's grid actually state; the overall
+    pick number depends on this mock's own ``rounds``/``teams``/``type``, which
+    only this function knows. ``traded_slots`` is translated through the slot
+    table built just above, and an explicit ``ownership`` entry wins over it.
     """
     owners = [str(o) for o in owners]
     teams = len(owners)
@@ -551,14 +654,24 @@ def build_settings(ctx: MockContext,
                       or {"outlook": DEFAULT_OUTLOOK, "source": PERSONA_DEFAULT}))
         for o in owners
     }
+    slots = pick_slots(rounds, teams, draft_type)
+    resolved_ownership: dict[str, str] = {}
+    if traded_slots:
+        by_slot = {(int(row["round"]), int(row["slot"])): row["pick_no"]
+                   for row in slots}
+        for key, new_owner in traded_slots.items():
+            pick_no = by_slot.get((int(key[0]), int(key[1])))
+            if pick_no is not None and new_owner:
+                resolved_ownership[str(pick_no)] = str(new_owner)
+    resolved_ownership.update({str(k): str(v) for k, v in (ownership or {}).items()})
     return {
         "rounds": rounds,
         "type": draft_type,
         "teams": teams,
         "order": resolved_order,
         "order_source": resolved_source,
-        "slots": pick_slots(rounds, teams, draft_type),
-        "ownership": {str(k): str(v) for k, v in (ownership or {}).items()},
+        "slots": slots,
+        "ownership": resolved_ownership,
         "personas": resolved_personas,
         "user_owner_id": str(user_owner_id),
         "lineup_slots": list(ctx.lineup_slots),
@@ -727,13 +840,16 @@ def state_payload(state: Mapping[str, Any], ctx: MockContext,
     """
     settings = state["settings"]
     taken = {str(p["player_id"]) for p in (state.get("picks") or [])}
+    # ONE pre-draft pool read, reused for the undrafted list AND for the
+    # consensus ranks below, so the two cannot disagree about the ordering.
+    pool = consensus_pool(ctx)
     if basis == dbs.BASIS_MY_BOARD:
         rows, _ = dbs._undrafted(int(ctx.season), taken, set(ctx.rostered_ids),
                                  dbs.BASIS_MY_BOARD, board_elo,
                                  ctx.consensus_elo, ctx.fetchers())
         undrafted = rows
     else:
-        undrafted = _available(ctx, state)
+        undrafted = _available(ctx, state, pool)
 
     user_owner = str(settings.get("user_owner_id") or "")
     slot = next_pick(state)
@@ -751,9 +867,17 @@ def state_payload(state: Mapping[str, Any], ctx: MockContext,
             "is_traded": bool((settings.get("ownership") or {}).get(str(row["pick_no"]))),
         })
 
+    # **Interface G3** — the recap's "+3 / -1 vs consensus" column.
+    # `rank` here is the player's 1-based position in the PRE-DRAFT consensus
+    # pool, frozen for the whole mock, so a pick's delta does not move as later
+    # picks come off the board. Everything the column needs travels on the pick
+    # itself; the client never has to hold the full class ordering.
+    pre_draft = {str(r["player_id"]): r for r in pool}
     picks = []
     for pick in state.get("picks") or ():
         row = ctx.player_rows.get(str(pick["player_id"])) or {}
+        seed = pre_draft.get(str(pick["player_id"])) or {}
+        rank = seed.get("rank")
         picks.append({
             "round": pick["round"],
             "pick_no": pick["pick_no"],
@@ -765,6 +889,17 @@ def state_payload(state: Mapping[str, Any], ctx: MockContext,
             "picked_by_user_id": pick["roster_id"],
             "picked_at": None,
             "by": pick["by"],
+            # null when the consensus does not price him (D7's `valued:false`
+            # rows sort last but still rank) or when he fell outside the
+            # board's undrafted cap. A null rank means "no delta to show",
+            # never zero.
+            "consensus_rank": rank,
+            # Signed in the ADP convention: POSITIVE = went LATER than the
+            # consensus said, i.e. value; NEGATIVE = a reach. `+3` reads "the
+            # consensus had him 3 slots earlier than where he actually went".
+            "consensus_delta": (int(rank) - int(pick["pick_no"])
+                                if rank is not None else None),
+            "valued": bool(seed.get("valued")) if seed else False,
         })
 
     return {
@@ -786,15 +921,25 @@ def state_payload(state: Mapping[str, Any], ctx: MockContext,
             "order_source": settings.get("order_source"),
             "personas": settings.get("personas"),
             "noise": settings.get("noise"),
+            # G3 — the denominator for "12th of 79 on the consensus board".
+            "consensus_pool_size": len(pool),
         },
         "notice": dbs._notice(notice_code),
     }
 
 
-def empty_payload(reason: str) -> dict:
+def empty_payload(reason: str, capability_info: Mapping[str, Any] | None = None) -> dict:
     """M2's typed-empty contract — the only place a new state may appear
-    without touching a closed client enum (plan D10)."""
-    return {"schema": SCHEMA, "empty": True, "reason": reason}
+    without touching a closed client enum (plan D10).
+
+    ``capability_info`` (W2d/G2) rides along so a client that reads
+    ``no_active_mock`` learns in the SAME response whether starting one is even
+    possible, instead of having to POST a create to find out.
+    """
+    out: dict[str, Any] = {"schema": SCHEMA, "empty": True, "reason": reason}
+    if capability_info is not None:
+        out["capability"] = dict(capability_info)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -868,13 +1013,16 @@ def reach_report(drafted_ids: Sequence[str],
     taken over the pool with drafted players removed. Those two clauses
     contradict each other: over a remaining pool the BPA pick always ranks 1,
     so ``rank - i`` would read ``1 - i`` and a pure-BPA draft would score a
-    huge "fall". Read the other way (a rank frozen over the pre-draft pool)
-    the observable drifts far harder across the fit/hold-out split than the
-    remaining-pool reading does, which no noise model can bridge inside the
-    ±1.0 hold-out bar *by construction*. The remaining-pool reading is the one
-    that can actually falsify a noise model, which is the whole point of the
-    amendment; both drifts are re-measured by
-    ``test_w2_16_the_observable_is_stationary_across_the_split``.
+    huge "fall". Read the other way (a rank frozen over the pre-draft pool) it
+    is that same construction that makes the reading useless: a pure-BPA draft
+    scores a large fall no matter what the drafter did, so it cannot falsify a
+    noise model — which is the whole point of the amendment. Both readings'
+    drift across the split is re-measured by
+    ``test_w2_19_the_rebalanced_split_removes_the_depth_drift``, which also
+    carries the W2d correction: the static-rank reading drifts far harder than
+    this one under the round-based split (3.56 vs 2.02) but slightly LESS under
+    W2d's depth-balanced split (1.16 vs 1.44), because most of its excess drift
+    WAS the depth term the re-balance removes.
 
     Picks of players outside ``pool_rows`` are skipped and COUNTED (``skipped``)
     rather than silently dropped: a rookie the consensus does not value carries
