@@ -314,12 +314,20 @@ def test_rank_inline_flag_is_registered_and_defaults_off():
     assert feature_flags.DEFAULT_FLAGS["draft.rank_inline"] is False
 
 
-def test_rank_inline_flag_ships_off_in_config_and_the_release_fixture():
+def test_rank_inline_flag_is_registered_and_mirrored():
+    """The flag exists in BOTH files and they agree.
+
+    This asserted `is False` when W1 landed dark. The operator flipped it ON
+    (2026-08-06) after reporting they could not rank rookies from the draft
+    page, and W1's code was already in build 82 — so a ship-off assertion is
+    now wrong. What must stay true is the 4-touch mirror: the two files never
+    disagree, or `is_enabled` and the release fixture diverge.
+    """
     features = json.loads((REPO / "config/features.json").read_text())
     release = json.loads(
         (REPO / "backend/tests/fixtures/flags/release.json").read_text())
-    assert features["draft.rank_inline"] is False
-    assert release["draft.rank_inline"] is False
+    assert "draft.rank_inline" in features
+    assert features["draft.rank_inline"] == release["draft.rank_inline"]
 
 
 def test_flag_off_leaves_the_undrafted_rows_inert():

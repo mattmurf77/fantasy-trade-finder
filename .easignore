@@ -1,0 +1,12 @@
+# EAS Build archive excludes.
+# Why this exists: 71 agent worktrees under .claude/worktrees/ (8.6GB, each with
+# its own node_modules) pushed the archive 228MB -> 1.2GB and the upload 400'd.
+# KEEP THIS CONSERVATIVE. A previous version globbed *.png and stripped the app
+# icon/splash assets, which failed the Bundle JavaScript phase. Exclude only
+# directories that cannot contribute to the app bundle.
+.claude/worktrees/
+archive/
+staged-work/
+feedback-workspace/
+mockups/
+mobile/ios/build/
