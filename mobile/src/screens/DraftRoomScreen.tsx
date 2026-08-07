@@ -44,6 +44,29 @@
 // Flag OFF ⇒ rows are the inert Views they are today: no long-press, no
 // a11y action, no menu, no sheet, no nudge. The per-player testIDs ship
 // UNFLAGGED — they are inert, and they are what makes the flag testable.
+//
+// ── draft-extensions W2 (flag `draft.mock`, lands OFF) ──────────────────
+// Placement option C, chosen by the operator over the design pass's
+// recommendation: a `Real draft | Mock` segmented control at the top of the
+// room. C's real advantage is that `state_payload()` returns the board's
+// entry shapes verbatim, so the Mock side reuses the SAME row components
+// (now shared, `components/draft/DraftRows`) instead of a parallel set.
+//
+// C's real risk is the one the design pass named: this screen PRINTS the
+// no-platform-writes guarantee on itself, and a mode switch above that
+// sentence could make it read as a promise about a board that takes picks.
+// Three obligations answer it, and they are load-bearing, not polish:
+//
+//   1. In Mock mode the pinned `MockRail` sits above the scroll, so the
+//      word MOCK is on screen at every scroll position.
+//   2. In Mock mode the platform deep link AND its "never drafts for you"
+//      note are NOT RENDERED — along with the status bar and Refresh, which
+//      describe the REAL draft and would be lies over a simulation.
+//   3. The mock's session lives on a pushed `MockDraftScreen`, which
+//      carries the same rail. Only the ENTRY is in the room.
+//
+// Flag off ⇒ no toggle, no query, no mock state at all: this file renders
+// byte-identically to what shipped.
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
@@ -58,14 +81,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   chalk,
   flare,
   ice,
   ink,
-  position as positionColor,
   radii,
   semantic,
   space,
@@ -79,6 +101,20 @@ import PlayerContextMenu, {
 import AnchorSheet, { type AnchorTarget } from '../components/AnchorSheet';
 import Toast from '../components/Toast';
 import {
+  BasisChip,
+  MY_BOARD_FALLBACK_COPY,
+  NO_CONSENSUS_VALUE_COPY,
+  draftRow,
+  positionOf,
+  slotLabel,
+} from '../components/draft/DraftRows';
+import { DraftModeToggle, MockRail, type DraftMode } from '../components/draft/MockChrome';
+import MockEntryPanel, {
+  MOCK_MIN_TEAMS,
+  type MockBlock,
+} from '../components/draft/MockEntryPanel';
+import MockSetupSheet, { type MockSetupResult } from '../components/draft/MockSetupSheet';
+import {
   DraftSchemaError,
   getDraftBoard,
   type DraftBasis,
@@ -87,6 +123,12 @@ import {
   type DraftPick,
   type UndraftedRow,
 } from '../api/draft';
+import {
+  createMockDraft,
+  getMockDraft,
+  isMockEmpty,
+  type MockDraftState,
+} from '../api/mockDraft';
 import { setAssetPref } from '../api/league';
 import { track } from '../api/events';
 import { readErrorCopy } from '../utils/verification';
@@ -114,6 +156,8 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   // the active league exactly as before.
   const paramLeagueId: string | undefined = route?.params?.leagueId;
   const sessionLeagueId = useSession((s) => s.league?.league_id);
+  const sessionLeagueName = useSession((s) => s.league?.league_name);
+  const sessionUsername = useSession((s) => s.user?.display_name || s.user?.username);
   const leagueId = paramLeagueId ?? sessionLeagueId;
   // Set only by the seasonal Draft tab's registration — see Shell.
   const inTabs: boolean = !!route?.params?.inTabs;
@@ -132,6 +176,15 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   // renders its own "not available yet" state when it's off, and an entry
   // point into that state would be a dead end.
   const rookieScopeOn = useFlag('ranks.rookie_subset');
+  // W2 — the `Real draft | Mock` switch. Off ⇒ no toggle, no query, and
+  // every mock branch below is unreachable.
+  const mockOn = useFlag('draft.mock');
+  const [mode, setMode] = useState<DraftMode>('real');
+  const mockMode = mockOn && mode === 'mock';
+  const [setupOpen, setSetupOpen] = useState(false);
+  // The POST-only refusal (gap G2). GET can't tell us in advance, so we
+  // remember what the create route said and stop offering the button.
+  const [postRefusal, setPostRefusal] = useState<string | null>(null);
   const isFocused = useIsFocused();
   const appActive = useAppActive();
 
@@ -165,6 +218,120 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   const onRefresh = useCallback(() => {
     query.refetch();
   }, [query]);
+
+  // ── W2 mock entry ─────────────────────────────────────────────────────
+  // Fetched ONLY while the Mock side is selected: with the flag on but the
+  // user in Real mode this screen makes exactly the requests it always did.
+  // No polling — a mock changes only when its owner acts.
+  const mockQuery = useQuery({
+    queryKey: ['mock-draft', leagueId, 'consensus'],
+    queryFn: () => getMockDraft(leagueId as string, 'consensus'),
+    enabled: !!leagueId && mockMode,
+    staleTime: Infinity,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+  });
+  const mockRes = mockQuery.data;
+  const activeMock: MockDraftState | null =
+    mockRes && !isMockEmpty(mockRes) ? (mockRes as MockDraftState) : null;
+
+  const createMock = useMutation({
+    mutationFn: (setup: MockSetupResult) =>
+      createMockDraft({ leagueId: leagueId as string, rounds: setup.rounds, type: setup.type }),
+    onSuccess: (res) => {
+      if (isMockEmpty(res)) {
+        // A typed-empty refusal is not an error — it is the honest state
+        // arriving late (gap G2). Close the sheet and mute the card.
+        setPostRefusal(res.reason);
+        setSetupOpen(false);
+        queryClient.setQueryData(['mock-draft', leagueId, 'consensus'], res);
+        return;
+      }
+      setSetupOpen(false);
+      queryClient.setQueryData(['mock-draft', leagueId, 'consensus'], res);
+      navigation?.navigate?.('MockDraft', { leagueId });
+    },
+  });
+
+  // Which refusal (if any) the card must state instead of offering Start.
+  // Order matters: the server's own answer wins over anything derived.
+  const mockBlock: MockBlock | null = useMemo(() => {
+    if (!board) return null;
+    if (postRefusal === 'cpu_model_unvalidated') {
+      return {
+        testID: 'mock-entry.blocked.cpu_model_unvalidated',
+        title: 'Mock draft',
+        body: "Not ready yet. Our computer drafters don't pick closely enough to real drafters, and we'd rather ship nothing than ship bots we can't stand behind.",
+        cta: 'Not available yet',
+      };
+    }
+    if (postRefusal === 'class_not_loaded' || board.notice?.code === 'class_not_loaded') {
+      // The room's "Show last year's class" toggle deliberately does NOT
+      // arm this card: the mock pool has no season override (gap G7), so an
+      // armed button would fail on tap.
+      return {
+        testID: 'mock-entry.blocked.class_not_loaded',
+        title: 'Mock draft',
+        body: `The ${board.season} rookie class loads after the NFL draft (late April). There's nobody to draft yet.`,
+        cta: 'Available in late April',
+      };
+    }
+    if (board.kind === 'startup') {
+      return {
+        testID: 'mock-entry.blocked.startup_draft',
+        title: 'Mock draft',
+        body: "This looks like a startup draft, not a rookie draft — mocks only cover rookie classes.",
+        cta: 'Rookie drafts only',
+      };
+    }
+    if (board.teams != null && board.teams < MOCK_MIN_TEAMS) {
+      return {
+        testID: 'mock-entry.blocked.league_too_small',
+        title: 'Mock draft',
+        body: `This league has ${board.teams} teams. A mock needs at least ${MOCK_MIN_TEAMS} for the computer drafters to tell you anything useful — with fewer, you'd see almost the whole class.`,
+        cta: `Needs ${MOCK_MIN_TEAMS}+ teams`,
+      };
+    }
+    if (board.state === 'live') {
+      // Correctness, not taste: the pool is snapshotted at creation and
+      // INV-10 forbids any later platform read, so a mock started mid-draft
+      // offers players who were taken twenty minutes ago and never catches up.
+      return {
+        testID: 'mock-entry.blocked.live',
+        title: 'Mock draft',
+        body: "Your real draft is running. A mock started now would keep offering players your league has already taken, so we don't offer one mid-draft.",
+        cta: 'Not during a live draft',
+      };
+    }
+    if (board.state === 'complete') {
+      return {
+        testID: 'mock-entry.blocked.complete',
+        title: 'Mock draft',
+        body: 'This class has already been drafted — everyone is on a roster, so there is nothing left to mock.',
+        cta: 'This class is drafted',
+      };
+    }
+    return null;
+  }, [board, postRefusal]);
+
+  const mockMeta = useMemo(() => {
+    if (!board) return null;
+    return [
+      `${board.rounds ?? 4} rounds`,
+      board.teams != null ? `${board.teams} teams` : null,
+      'linear',
+      board.order_confidence === 'assigned' ? 'your league’s order' : 'order randomized',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }, [board]);
+
+  // Read-only on purpose: `user_owner_id` IS the session user and drafting
+  // for another team is out of v1 (the engine has no such call).
+  const mockTeamLabel = useMemo(
+    () => [sessionUsername, sessionLeagueName].filter(Boolean).join(' — ') || 'Your team',
+    [sessionUsername, sessionLeagueName],
+  );
 
   // ── W1 row actions ────────────────────────────────────────────────────
   // menuTarget is only ever set while `draft.rank_inline` is on, so both
@@ -346,69 +513,116 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
 
   return (
     <Shell
-      refreshing={query.isFetching && !query.isLoading}
-      onRefresh={onRefresh}
+      // In Mock mode there is nothing to pull-to-refresh: the mock is not a
+      // read of the platform, and offering Refresh over it would suggest it
+      // was.
+      refreshing={!mockMode && query.isFetching && !query.isLoading}
+      onRefresh={mockMode ? undefined : onRefresh}
       inTabs={inTabs}
+      header={
+        mockOn ? (
+          <>
+            {/* No track() here on purpose. `backend/analytics_taxonomy.py`
+                is DEFAULT-DENY and carries no mock events, and this wave
+                owns mobile/ only — firing `draft_room_mode_switched` would
+                be dropped server-side while reading like live
+                instrumentation. Register the events, then add the calls. */}
+            <DraftModeToggle mode={mode} onMode={setMode} />
+            {/* Pinned, so the marker survives every scroll position. */}
+            {mockMode ? (
+              <View style={styles.mockRailWrap}>
+                <MockRail />
+              </View>
+            ) : null}
+          </>
+        ) : null
+      }
     >
-      <StatusBar board={board} onRefresh={onRefresh} busy={query.isFetching} />
-      {rookieScopeOn ? (
-        <RankRookiesRow
-          onPress={() => {
-            // D0 — the bridge row shipped emitting NOTHING. This is the
-            // first analytics the Draft Room has ever had.
-            track(
-              'draft_room_rank_rookies_tapped',
-              { state: board.state, from: 'draft_room' },
-              'DraftRoom',
-            );
-            goToRookieRanks();
-          }}
+      {mockMode ? (
+        <MockEntryPanel
+          loading={mockQuery.isLoading}
+          errorText={
+            mockQuery.isError
+              ? readErrorCopy(mockQuery.error, "Couldn't check for a mock draft.")
+              : createMock.isError
+                ? readErrorCopy(createMock.error, "Couldn't start a mock draft.")
+                : null
+          }
+          block={mockBlock}
+          meta={mockMeta}
+          {...mockEntryContent({
+            activeMock,
+            onStart: () => setSetupOpen(true),
+            onResume: () => navigation?.navigate?.('MockDraft', { leagueId }),
+          })}
         />
-      ) : null}
-      {board.notice ? (
-        <Notice
-          board={board}
-          showLastYear={showLastYear}
-          onToggleLastYear={() => setShowLastYear((v) => !v)}
-        />
-      ) : null}
-
-      {board.state === 'unavailable' ? (
-        <View style={styles.centerFill}>
-          <Text testID="draft-room.unavailable-text" style={styles.emptyBody}>
-            {board.notice
-              ? 'Nothing to show here yet.'
-              : "We couldn't reach this league's draft. Pull to refresh."}
-          </Text>
-        </View>
       ) : (
         <>
-          <MyPicksSection board={board} />
-          <BoardSection board={board} />
-          <UndraftedSection
-            board={board}
-            basis={basis}
-            onBasis={setBasis}
-            showLastYear={showLastYear}
-            onRowMenu={rowActionsOn ? onRowMenu : undefined}
+        <StatusBar board={board} onRefresh={onRefresh} busy={query.isFetching} />
+        {rookieScopeOn ? (
+          <RankRookiesRow
+            onPress={() => {
+              // D0 — the bridge row shipped emitting NOTHING. This is the
+              // first analytics the Draft Room has ever had.
+              track(
+                'draft_room_rank_rookies_tapped',
+                { state: board.state, from: 'draft_room' },
+                'DraftRoom',
+              );
+              goToRookieRanks();
+            }}
           />
+        ) : null}
+        {board.notice ? (
+          <Notice
+            board={board}
+            showLastYear={showLastYear}
+            onToggleLastYear={() => setShowLastYear((v) => !v)}
+          />
+        ) : null}
+
+        {board.state === 'unavailable' ? (
+          <View style={styles.centerFill}>
+            <Text testID="draft-room.unavailable-text" style={styles.emptyBody}>
+              {board.notice
+                ? 'Nothing to show here yet.'
+                : "We couldn't reach this league's draft. Pull to refresh."}
+            </Text>
+          </View>
+        ) : (
+          <>
+            <MyPicksSection board={board} />
+            <BoardSection board={board} />
+            <UndraftedSection
+              board={board}
+              basis={basis}
+              onBasis={setBasis}
+              showLastYear={showLastYear}
+              onRowMenu={rowActionsOn ? onRowMenu : undefined}
+            />
+          </>
+        )}
+
+        {/* The platform deep link and the D9 guarantee below it render ONLY
+            in Real mode. Printing "Fantasy Trade Finder never drafts for you"
+            on a surface that is currently taking mock picks is the exact
+            ambiguity the design pass warned option C could create. */}
+        {board.deep_link ? (
+          <View style={styles.ctaWrap}>
+            <Button
+              testID="draft-room.deep-link"
+              label="Open the draft room"
+              variant="primary"
+              onPress={() => Linking.openURL(board.deep_link as string)}
+            />
+            <Text style={styles.ctaNote}>
+              Picks are made on the platform — Fantasy Trade Finder never drafts
+              for you.
+            </Text>
+          </View>
+        ) : null}
         </>
       )}
-
-      {board.deep_link ? (
-        <View style={styles.ctaWrap}>
-          <Button
-            testID="draft-room.deep-link"
-            label="Open the draft room"
-            variant="primary"
-            onPress={() => Linking.openURL(board.deep_link as string)}
-          />
-          <Text style={styles.ctaNote}>
-            Picks are made on the platform — Fantasy Trade Finder never drafts
-            for you.
-          </Text>
-        </View>
-      ) : null}
 
       {/* W1 — both sheets are unreachable with `draft.rank_inline` off:
           their targets are only ever set by the flag-gated row handler. */}
@@ -431,8 +645,66 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
         tone={toast?.tone}
         onDismiss={() => setToast(null)}
       />
+      {mockOn ? (
+        <MockSetupSheet
+          visible={setupOpen}
+          teamLabel={mockTeamLabel}
+          teams={board.teams}
+          defaultRounds={board.rounds}
+          orderAssigned={board.order_confidence === 'assigned'}
+          busy={createMock.isPending}
+          error={
+            createMock.isError
+              ? readErrorCopy(createMock.error, "Couldn't start a mock draft.")
+              : null
+          }
+          onClose={() => setSetupOpen(false)}
+          onStart={(setup) => createMock.mutate(setup)}
+        />
+      ) : null}
     </Shell>
   );
+}
+
+/** The Mock card's words for each reachable state. Split out so the render
+ *  stays a single expression and the copy is greppable. */
+function mockEntryContent({
+  activeMock,
+  onStart,
+  onResume,
+}: {
+  activeMock: MockDraftState | null;
+  onStart: () => void;
+  onResume: () => void;
+}) {
+  if (activeMock?.status === 'active') {
+    const clock = activeMock.on_the_clock;
+    const at = clock
+      ? `${clock.round}.${String(clock.slot).padStart(2, '0')}`
+      : '—';
+    return {
+      headline: 'Mock in progress',
+      body: `You're on the clock at ${at} — ${activeMock.picks.length} of ${activeMock.order.length} picks made.`,
+      primary: { label: 'Resume', onPress: onResume, testID: 'mock-entry.resume' },
+      // "Start over" is one POST: the create route abandons any prior
+      // active row for this user + league in the same transaction, so
+      // there is no separate discard call to get wrong.
+      secondary: { label: 'Start over', onPress: onStart, testID: 'mock-entry.start-over' },
+    };
+  }
+  if (activeMock?.status === 'complete') {
+    return {
+      headline: 'Mock complete',
+      body: `${activeMock.picks.length} picks. Your league was never touched.`,
+      primary: { label: 'View recap', onPress: onResume, testID: 'mock-entry.recap' },
+      secondary: { label: 'Run it back', onPress: onStart, testID: 'mock-entry.run-it-back' },
+    };
+  }
+  return {
+    headline: 'No mock running',
+    body: 'Start one and computer versions of your leaguemates draft against you. They pick for their own rosters — you pick for yours, and nothing is written to your league.',
+    primary: { label: 'Start a mock', onPress: onStart, testID: 'mock-entry.start' },
+  };
 }
 
 /** UndraftedRow → the shared menu's Player shape (header disclosure only). */
@@ -452,6 +724,7 @@ function Shell({
   refreshing,
   onRefresh,
   inTabs = false,
+  header,
 }: {
   children: React.ReactNode;
   refreshing?: boolean;
@@ -460,9 +733,14 @@ function Shell({
    *  RootNav's global FAB already covers the screen — mounting our own
    *  would double it (#196/#197). The root-stack push passes nothing. */
   inTabs?: boolean;
+  /** W2 — PINNED above the scroll. The mode switch and, in Mock mode, the
+   *  mode marker: both have to stay on screen at every scroll position,
+   *  which is the whole reason they are not `children`. */
+  header?: React.ReactNode;
 }) {
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      {header}
       <ScrollView
         testID="draft-room.scroll"
         contentContainerStyle={styles.scrollContent}
@@ -678,7 +956,7 @@ function BoardSection({ board }: { board: DraftBoard }) {
       <View style={styles.section}>
         <TickLabel>Picks</TickLabel>
         {board.picks.map((p) => (
-          <PickRow key={`${p.round}-${p.pick_no}`} pick={p} label={pickLabel(p)} />
+          <PickRow key={`${p.round}-${p.pick_no}`} pick={p} label={slotLabel(p)} />
         ))}
       </View>
     );
@@ -698,20 +976,20 @@ function BoardSection({ board }: { board: DraftBoard }) {
             // qualifier is the SLOT (round + slot, or `r` when the platform
             // has not published an order), a stable domain id — never `i`.
             testID={`draft-room.order-row.${slot.round}-${slot.slot ?? 'r'}`}
-            style={styles.orderRow}
+            style={draftRow.orderRow}
           >
-            <Text style={styles.slotCell}>{slotLabel(slot)}</Text>
-            <View style={styles.orderMain}>
-              <Text style={styles.ownerText} numberOfLines={1}>
+            <Text style={draftRow.slotCell}>{slotLabel(slot)}</Text>
+            <View style={draftRow.orderMain}>
+              <Text style={draftRow.ownerText} numberOfLines={1}>
                 {slot.owner_username ?? slot.owner_user_id ?? 'Unassigned'}
                 {slot.is_traded ? (
-                  <Text style={styles.tradedTag}>
+                  <Text style={draftRow.tradedTag}>
                     {'  '}from {slot.original_username ?? '—'}
                   </Text>
                 ) : null}
               </Text>
               {pick ? (
-                <Text style={styles.pickedText} numberOfLines={1}>
+                <Text style={draftRow.pickedText} numberOfLines={1}>
                   <Text style={{ color: positionOf(pick.position) }}>
                     {pick.position || '—'}
                   </Text>{' '}
@@ -719,7 +997,7 @@ function BoardSection({ board }: { board: DraftBoard }) {
                   {pick.team ? ` · ${pick.team}` : ''}
                 </Text>
               ) : (
-                <Text style={styles.onTheClock}>Not made yet</Text>
+                <Text style={draftRow.onTheClock}>Not made yet</Text>
               )}
             </View>
           </View>
@@ -732,10 +1010,10 @@ function BoardSection({ board }: { board: DraftBoard }) {
 function PickRow({ pick, label }: { pick: DraftPick; label: string }) {
   return (
     // D0 — `pick_no` is unique within a draft and stable across refetches.
-    <View testID={`draft-room.pick-row.${pick.pick_no}`} style={styles.orderRow}>
-      <Text style={styles.slotCell}>{label}</Text>
-      <View style={styles.orderMain}>
-        <Text style={styles.pickedText} numberOfLines={1}>
+    <View testID={`draft-room.pick-row.${pick.pick_no}`} style={draftRow.orderRow}>
+      <Text style={draftRow.slotCell}>{label}</Text>
+      <View style={draftRow.orderMain}>
+        <Text style={draftRow.pickedText} numberOfLines={1}>
           <Text style={{ color: positionOf(pick.position) }}>
             {pick.position || '—'}
           </Text>{' '}
@@ -795,7 +1073,7 @@ function UndraftedSection({
   return (
     <View style={styles.section}>
       <TickLabel>Still on the board</TickLabel>
-      <View style={styles.basisRow}>
+      <View style={draftRow.basisRow}>
         <BasisChip
           testID="draft-room.basis.consensus"
           label="Consensus"
@@ -809,18 +1087,13 @@ function UndraftedSection({
           onPress={() => onBasis('my_board')}
         />
       </View>
-      {/* FreeAgents-style fallback notice — say which numbers these are. */}
+      {/* FreeAgents-style fallback notice — say which numbers these are.
+          The strings live in DraftRows so the mock says the same thing. */}
       {basis === 'my_board' ? (
-        <Text style={styles.fallbackNote}>
-          Ordered by your board. Anyone you haven’t ranked falls back to the
-          consensus value.
-        </Text>
+        <Text style={draftRow.fallbackNote}>{MY_BOARD_FALLBACK_COPY}</Text>
       ) : null}
       {anyUnvalued ? (
-        <Text style={styles.fallbackNote}>
-          Some rookies have no consensus value yet. They’re listed last rather
-          than hidden — a prospect with no price is still on the board.
-        </Text>
+        <Text style={draftRow.fallbackNote}>{NO_CONSENSUS_VALUE_COPY}</Text>
       ) : null}
       {nudgeOn ? (
         <Text testID="draft-room.coverage-nudge" style={styles.coverageNudge}>
@@ -841,44 +1114,77 @@ function UndraftedSection({
   );
 }
 
-function UndraftedRowView({
+/** The undrafted rookie row — W1's row, EXPORTED in W2.
+ *
+ *  It stays in this file on purpose. `backend/tests/test_draft_extensions_w1.py`
+ *  pins W1's client-side kill switch and its per-player testID to THIS
+ *  source file, and this wave owns `mobile/` only, so the tidier home
+ *  (`components/draft/DraftRows`, where the styles and basis chips did go)
+ *  would have broken a green backend test it may not edit. The mock imports
+ *  this component rather than copying it, so there is still exactly one
+ *  undrafted row in the app — which is the property that actually matters.
+ */
+export function UndraftedRowView({
   row,
   onMenu,
+  onPress,
+  selected = false,
+  actionLabel,
+  testID: testIDOverride,
 }: {
   row: UndraftedRow;
+  /** W1 (`draft.rank_inline`) — undefined keeps the row inert. */
   onMenu?: (row: UndraftedRow) => void;
+  /** W2, mock only — selects the row for the confirm bar. */
+  onPress?: (row: UndraftedRow) => void;
+  selected?: boolean;
+  /** W2, mock only — the trailing affordance on the selected row. */
+  actionLabel?: string;
+  /** W2, mock only — the mock surface namespaces its own rows
+   *  (`mock-draft.undrafted-row.<player_id>`). The room never passes it,
+   *  so the room's id is the literal default below. */
+  testID?: string;
 }) {
   // Per-player testID (D0). The shipped id was shared across every row,
   // which is why this flow was untestable; the qualifier is the stable
   // domain id per mobile/src/components/CLAUDE.md — never a list index.
-  const testID = `draft-room.undrafted-row.${row.player_id}`;
+  const testID = testIDOverride ?? `draft-room.undrafted-row.${row.player_id}`;
   const body = (
     <>
-      <Text style={styles.rankCell}>{row.rank}</Text>
-      <View style={styles.orderMain}>
-        <Text style={styles.playerName} numberOfLines={1}>
+      <Text style={draftRow.rankCell}>{row.rank}</Text>
+      <View style={draftRow.orderMain}>
+        <Text style={draftRow.playerName} numberOfLines={1}>
           {row.name || row.player_id}
         </Text>
-        <Text style={styles.playerMeta} numberOfLines={1}>
+        <Text style={draftRow.playerMeta} numberOfLines={1}>
           <Text style={{ color: positionOf(row.position) }}>
             {row.position || '—'}
           </Text>
           {row.team ? ` · ${row.team}` : ''}
         </Text>
       </View>
-      <Text style={row.valued ? styles.valueCell : styles.noValueCell}>
-        {row.valued ? Math.round(row.value as number) : 'No value'}
-      </Text>
+      {actionLabel && selected ? (
+        <Text style={draftRow.rowAction}>{actionLabel}</Text>
+      ) : (
+        <Text style={row.valued ? draftRow.valueCell : draftRow.noValueCell}>
+          {row.valued ? Math.round(row.value as number) : 'No value'}
+        </Text>
+      )}
     </>
   );
 
   // Flag off ⇒ the exact inert View this row shipped as.
   if (!onMenu) {
-    return (
-      <View testID={testID} style={styles.undraftedRow}>
-        {body}
-      </View>
-    );
+    // W2 keeps that guard verbatim and nests its own: a mock row is the
+    // only OTHER thing that can make a row live, and it never reaches the
+    // room (which passes no `onPress`).
+    if (!onPress) {
+      return (
+        <View testID={testID} style={draftRow.undraftedRow}>
+          {body}
+        </View>
+      );
+    }
   }
 
   // Long-press + an `accessibilityActions` custom action — the shipped
@@ -894,14 +1200,19 @@ function UndraftedRowView({
       accessibilityLabel={`${row.name || row.player_id}, ${row.position || ''}${
         row.valued ? '' : ', no value on your board'
       }`}
-      accessibilityHint="Hold for player options"
-      accessibilityActions={[{ name: 'menu', label: 'Player options' }]}
+      accessibilityHint={
+        onPress ? 'Select this rookie, then confirm the pick' : 'Hold for player options'
+      }
+      accessibilityState={onPress ? { selected } : undefined}
+      accessibilityActions={onMenu ? [{ name: 'menu', label: 'Player options' }] : undefined}
       onAccessibilityAction={(e) => {
-        if (e.nativeEvent.actionName === 'menu') onMenu(row);
+        if (e.nativeEvent.actionName === 'menu' && onMenu) onMenu(row);
       }}
-      onLongPress={() => onMenu(row)}
+      onPress={onPress ? () => onPress(row) : undefined}
+      onLongPress={onMenu ? () => onMenu(row) : undefined}
       style={({ pressed }) => [
-        styles.undraftedRow,
+        draftRow.undraftedRow,
+        selected && draftRow.undraftedRowSelected,
         pressed && { backgroundColor: ink.ink1 },
       ]}
     >
@@ -910,57 +1221,10 @@ function UndraftedRowView({
   );
 }
 
-function BasisChip({
-  label,
-  active,
-  onPress,
-  testID,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-  testID: string;
-}) {
-  return (
-    <Pressable
-      testID={testID}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityState={{ selected: active }}
-      style={({ pressed }) => [
-        styles.basisChip,
-        active && styles.basisChipActive,
-        pressed && { backgroundColor: ink.ink3 },
-      ]}
-    >
-      <Text style={[type.label, active ? styles.basisChipTextActive : null]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 // ── helpers ──────────────────────────────────────────────────────────────
-
-function slotLabel(slot: DraftOrderSlot): string {
-  if (slot.slot == null) return `R${slot.round}`;
-  return `${slot.round}.${String(slot.slot).padStart(2, '0')}`;
-}
-
-function pickLabel(pick: DraftPick): string {
-  if (pick.slot == null) return `R${pick.round}`;
-  return `${pick.round}.${String(pick.slot).padStart(2, '0')}`;
-}
-
-function positionOf(pos: string): string {
-  switch ((pos || '').toUpperCase()) {
-    case 'QB': return positionColor.qb;
-    case 'RB': return positionColor.rb;
-    case 'WR': return positionColor.wr;
-    case 'TE': return positionColor.te;
-    default:   return chalk.dim;
-  }
-}
+// `BasisChip`, `positionOf`, `slotLabel`, the row styles and the fallback
+// copy moved to `components/draft/DraftRows` in W2 — unchanged, but now
+// shared with the mock surface so the two lists cannot drift apart.
 
 /** Relative age, so a stale board reads as stale at a glance. */
 function formatAsOf(iso: string): string {
@@ -1049,41 +1313,7 @@ const styles = StyleSheet.create({
   myPickLabel: { ...type.data, color: chalk.base },
   myPickFrom: { ...type.bodySm, fontSize: 11, color: chalk.faint },
 
-  orderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    borderBottomWidth: 1,
-    borderBottomColor: ink.line,
-    paddingVertical: space.sm,
-  },
-  slotCell: { ...type.data, color: chalk.dim, width: 48 },
-  orderMain: { flex: 1, gap: 2 },
-  ownerText: { ...type.bodySm, color: chalk.base },
-  tradedTag: { ...type.bodySm, fontSize: 11, color: chalk.faint },
-  pickedText: { ...type.bodySm, color: chalk.dim },
-  onTheClock: { ...type.bodySm, color: chalk.faint },
-
-  basisRow: { flexDirection: 'row', gap: space.sm },
-  basisChip: {
-    borderWidth: 1,
-    borderColor: ink.lineStrong,
-    borderRadius: radii.sm,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-  },
-  basisChipActive: { backgroundColor: ink.ink3, borderColor: ice.base },
-  basisChipTextActive: { color: chalk.base },
-  fallbackNote: {
-    ...type.bodySm,
-    color: chalk.base,
-    backgroundColor: ink.ink1,
-    borderColor: ink.line,
-    borderWidth: 1,
-    borderRadius: radii.sm,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-  },
+  // The row / basis-chip styles moved to components/draft/DraftRows.
 
   // W1 coverage nudge — flare is the informational-highlight accent
   // (ADR-005); ice stays reserved for actions.
@@ -1098,19 +1328,8 @@ const styles = StyleSheet.create({
     paddingVertical: space.sm,
   },
 
-  undraftedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    borderBottomWidth: 1,
-    borderBottomColor: ink.line,
-    paddingVertical: space.sm,
-  },
-  rankCell: { ...type.data, color: chalk.faint, width: 28 },
-  playerName: { ...type.bodySm, color: chalk.base },
-  playerMeta: { ...type.bodySm, fontSize: 11, color: chalk.faint },
-  valueCell: { ...type.data, color: chalk.base },
-  noValueCell: { ...type.bodySm, fontSize: 11, color: chalk.faint },
+  // W2 — the pinned mode marker sits between the toggle and the scroll.
+  mockRailWrap: { marginTop: space.md },
 
   ctaWrap: { gap: space.sm, marginTop: space.md },
   ctaNote: { ...type.bodySm, color: chalk.faint, textAlign: 'center' },
