@@ -22,6 +22,7 @@ import TestStagesScreen from '../screens/TestStagesScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
 import DraftRoomScreen from '../screens/DraftRoomScreen';
+import MockDraftScreen from '../screens/MockDraftScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import AnalystGuide from '../components/AnalystGuide';
@@ -60,6 +61,12 @@ type AuthStack = {
   // has a pending draft; every other entry point omits it and the room
   // reads the session's active league exactly as before.
   DraftRoom: { leagueId?: string } | undefined;
+  // draft-extensions W2 (flag `draft.mock`) — the mock draft SESSION. The
+  // entry is the room's `Real draft | Mock` switch (placement option C);
+  // the session is pushed here so its flare mode rail owns a whole screen
+  // for the entire time a pick can be made. Same `leagueId` override rule
+  // as DraftRoom.
+  MockDraft: { leagueId?: string } | undefined;
   // Operator QA (flag testing.stage_users): synthetic adoption-stage users.
   TestStages: undefined;
 };
@@ -537,6 +544,33 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerLeft: () => (
               <HeaderBack
                 testID="draft-room.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
+          })}
+        />
+        {/* Mock draft session — pushed from the room's Mock mode (flag
+            `draft.mock`). Registered unconditionally for the same reason as
+            DraftRoom: the FLAG gates the entry, not the route, so an
+            in-flight push survives a flag revalidation. */}
+        <Stack.Screen
+          name="MockDraft"
+          component={MockDraftScreen}
+          options={({ navigation }) => ({
+            headerShown: true,
+            title: 'Mock draft',
+            headerTitle: () => <HeaderTitle>Mock draft</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+            // #151 pattern — see FreeAgents above (RNS#3294).
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="mock-draft.back-btn"
                 onPress={() =>
                   navigation.canGoBack()
                     ? navigation.goBack()
