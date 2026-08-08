@@ -12,6 +12,11 @@ Copy this template into the feature's home:
 
 RULE: every section is answered or explicitly WAIVED with a reason.
 Silence is not a waiver. Waivers are surfaced to the operator before build starts.
+
+EXPRESS LANE: the operator may exempt a change from this template entirely at
+flow start ("quick fix", "just ship it") — see CLAUDE.md §Conventions "Feature
+gates" → "Rigor is an operator decision". No scope.md then; a one-line
+TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
 -->
 
 **Date:** YYYY-MM-DD

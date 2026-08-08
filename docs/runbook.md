@@ -70,7 +70,11 @@ git config core.hooksPath githooks
 ```
 
 Escape hatch (operator decision, deliberately loud): `FTF_SKIP_SIM_GATE=1 git push …`
-— the hook prints that the gate was skipped; record why in TEST_LEDGER.
+— the hook prints that the gate was skipped; record why in TEST_LEDGER. This is
+the intended mechanism for **express-lane** pushes (operator-declared quick
+fixes — CLAUDE.md §Conventions "Feature gates" → "Rigor is an operator
+decision"); a one-line ledger note (`express: <what> — gates skipped by
+operator`) is the whole ceremony.
 
 ### Failure symptom / lever
 

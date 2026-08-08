@@ -85,6 +85,15 @@ specced or explicitly waived (silence is not a waiver — waivers surface to the
 operator at the Phase 0/1 boundary), schema/flags, Maestro delta, docs table,
 sim-gate tier. Light paths mostly waive; the waiver must still be written.
 
+**Express lane (operator-declared at Phase 0 selection, never self-selected):**
+when the operator tags an item "express" / "just ship it", that item skips the
+scope block and the full QA ceremony — Phase 1 collapses to a one-paragraph fix
+note in `status.md`, Phase 2 is one agent, Phase 3 is a single QA agent running
+the repro flow (or an operator-approved skip via `FTF_SKIP_SIM_GATE=1` + the
+one-line TEST_LEDGER note). The two hard gates (selection, ship go/no-go) still
+apply. Bright line per CLAUDE.md: schema/API/flag/analytics changes aren't
+express — flag the mismatch and get a confirming yes before proceeding.
+
 If unsure, escalate to the heavier path — the cost of a thin PRD is two build
 agents implementing different endpoint contracts.
 
