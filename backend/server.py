@@ -18543,6 +18543,7 @@ def market_movers_route():
     top_n = max(1, min(top_n, _MOVERS_MAX_N))
 
     from .database import load_value_movers_window
+    from .trade_service import is_pick_asset
     try:
         as_of, now_vals, then_vals = load_value_movers_window(fmt, days=window_days)
     except Exception as e:
@@ -18562,6 +18563,8 @@ def market_movers_route():
         p = meta.get(pid)
         if now_v is None or p is None:                 # dropped from today's
             continue                                   # snapshot / not in pool
+        if is_pick_asset(p):
+            continue                                   # #261 — picks are never movers
         if not then_v or then_v < _MOVERS_MIN_BASE_VALUE:
             continue                                   # junk-value baseline
         pct = (now_v - then_v) / then_v * 100.0

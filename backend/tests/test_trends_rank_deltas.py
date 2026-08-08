@@ -99,6 +99,48 @@ def test_risers_no_history_for_player_excluded_gracefully():
     assert "c" not in ids
 
 
+def test_pick_assets_never_occupy_a_riser_or_faller_row():
+    """#261 — both pick families are dropped from the ROWS, in every bucket,
+    while the ranks reported for the surviving players stay whole-board."""
+    current = {
+        "a": 1700.0, "b": 1600.0, "c": 1500.0,
+        "generic_pick_1_mid": 1650.0,     # pool rung: real position, team PICK
+        "owned_pick": 1550.0,             # owned-pick pseudo-player
+        "generic_pick_4_late": 1400.0,    # pool rung with NO enrichment row
+    }
+    history = [
+        {"player_id": "a", "elo": 1500.0, "snapshot_at": "t0"},
+        {"player_id": "generic_pick_1_mid", "elo": 1000.0, "snapshot_at": "t0"},
+        {"player_id": "owned_pick", "elo": 1000.0, "snapshot_at": "t0"},
+        {"player_id": "generic_pick_4_late", "elo": 1000.0, "snapshot_at": "t0"},
+    ]
+    players = {
+        **_players(),
+        "generic_pick_1_mid": {"name": "Mid 1st Round Pick",
+                               "position": "RB", "team": "PICK"},
+        "owned_pick": {"name": "2026 Round 1", "position": "PICK",
+                       "team": "PICK"},
+        # generic_pick_4_late deliberately absent → the id-prefix arm is the
+        # only defence for it.
+    }
+
+    out = compute_risers_fallers(current, history, players_by_id=players)
+
+    for bucket in ("ALL", "QB", "RB", "WR", "TE"):
+        ids = {r["player_id"] for r in out["risers"][bucket]
+               + out["fallers"][bucket]}
+        assert not any(i in ("generic_pick_1_mid", "owned_pick", "generic_pick_4_late")
+                       for i in ids), bucket
+    assert {r["player_id"] for r in out["risers"]["ALL"]} == {"a"}
+    assert out["sample_size"] == 1
+
+    # Ranks stay whole-board: picks remain in the rank denominator, so `a`
+    # (1700) is still #1 of six and its RB rank still counts the RB-tabbed rung.
+    a = out["risers"]["ALL"][0]
+    assert a["overall_rank"] == 1
+    assert a["pos_rank"] == 1
+
+
 # ── Consensus gap ───────────────────────────────────────────────────────────
 
 def test_consensus_gap_sells_expose_rank_gap():

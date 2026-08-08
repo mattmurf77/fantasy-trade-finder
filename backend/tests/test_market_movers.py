@@ -189,3 +189,67 @@ def test_single_day_history_is_empty_safe(client):
     assert body["risers"] == [] and body["fallers"] == []
     assert body["as_of"] == TODAY                     # honest: history exists,
                                                       # baseline doesn't yet
+
+
+# ---------------------------------------------------------------------------
+# #261 — draft picks are never movers
+# ---------------------------------------------------------------------------
+
+def test_pick_assets_excluded_and_backfilled(client):
+    """Both pick families are dropped, and dropping them does NOT shorten the
+    list: a top_n=2 request still returns 2 real players."""
+    c, _ = client
+    rows = [
+        # Generic pool rungs — real position (they mix into the trio tabs),
+        # team "PICK". Biggest movers in the set, so a missing filter puts
+        # them at the head of both columns.
+        _snap("generic_pick_1_mid", BASE_DAY, 1000.0),
+        _snap("generic_pick_1_mid", TODAY,    1900.0),   # +90%
+        _snap("generic_pick_2_mid", BASE_DAY, 1000.0),
+        _snap("generic_pick_2_mid", TODAY,     200.0),   # −80%
+        # Owned-pick pseudo-player family — position "PICK".
+        _snap("owned_pick",         BASE_DAY, 1000.0),
+        _snap("owned_pick",         TODAY,    1800.0),   # +80%
+    ]
+    pool = [
+        _player("generic_pick_1_mid", "Mid 1st Round Pick", "RB", "PICK"),
+        _player("generic_pick_2_mid", "Mid 2nd Round Pick", "WR", "PICK"),
+        _player("owned_pick",         "2026 Round 1",       "PICK", "PICK"),
+    ]
+    for i in range(3):                       # 3 real risers + 3 real fallers
+        rows += [_snap(f"up{i}", BASE_DAY, 1000.0),
+                 _snap(f"up{i}", TODAY, 1000.0 + 10 * (i + 1)),
+                 _snap(f"dn{i}", BASE_DAY, 1000.0),
+                 _snap(f"dn{i}", TODAY, 1000.0 - 10 * (i + 1))]
+        pool += [_player(f"up{i}", f"Riser {i}"), _player(f"dn{i}", f"Faller {i}")]
+    record_value_snapshots(rows)
+
+    p1, p2 = _pool(pool)
+    with p1, p2:
+        r     = c.get("/api/market/movers")
+        r_two = c.get("/api/market/movers?top_n=2")
+
+    body = r.get_json()
+    ids = [m["player_id"] for m in body["risers"] + body["fallers"]]
+    assert ids, "sanity: real players still surface"
+    assert not any(i.startswith("generic_pick_") or i == "owned_pick" for i in ids)
+    assert [m["player_id"] for m in body["risers"]] == ["up2", "up1", "up0"]
+    assert [m["player_id"] for m in body["fallers"]] == ["dn2", "dn1", "dn0"]
+
+    # Backfill: the cap applies AFTER the exclusion, so top_n is honored.
+    two = r_two.get_json()
+    assert [m["player_id"] for m in two["risers"]] == ["up2", "up1"]
+    assert [m["player_id"] for m in two["fallers"]] == ["dn2", "dn1"]
+
+
+def test_pick_only_pool_is_empty_safe(client):
+    c, _ = client
+    record_value_snapshots([_snap("generic_pick_1_mid", BASE_DAY, 1000.0),
+                            _snap("generic_pick_1_mid", TODAY,    1900.0)])
+    p1, p2 = _pool([_player("generic_pick_1_mid", "Mid 1st Round Pick",
+                            "RB", "PICK")])
+    with p1, p2:
+        r = c.get("/api/market/movers")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["risers"] == [] and body["fallers"] == []
