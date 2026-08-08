@@ -15,6 +15,8 @@ Reference docs for the project. **Treat these as part of the codebase — keep t
 | `adr/` | You make a non-obvious architectural choice |
 | `feedback/items/<id>-<slug>/` | You produce durable non-code output for a feedback item's fix (PRD, plan, status, QA findings) — see `feedback/items/README.md`; scratch goes to gitignored `feedback-workspace/<id>/` |
 | `references/<site>/<api-name>/` | You reverse-engineer or verify the shape of an **external** API FTF calls (Sleeper, ESPN, MFL, Anthropic, …) — see `references/README.md` (human) / `references/CLAUDE.md` (agent instructions) |
+| `recovery/` | You delete a branch or remove a worktree — record tip sha + evidence link in a dated file **before** deleting; procedure in `recovery/CLAUDE.md` |
+| `templates/feature-scope.md` (copy, don't edit) | You start ANY feature/change touching user-visible behavior, data collection, schema, or API — copy into the feature's home and fill every section (answer or explicit waiver); mandates the HLD/LLD/api-reference rows and the Maestro + sim-gate declarations (root `CLAUDE.md` §Conventions "Feature gates") |
 
 If you can't tell whether a doc needs updating, scan the table above against your diff. If your change touches `backend/database.py`, the data dictionary is in scope; if it touches routes in `backend/server.py`, the API reference is in scope; etc.
 

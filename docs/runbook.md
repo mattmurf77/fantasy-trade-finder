@@ -33,6 +33,53 @@ Port conflicts: macOS AirPlay Receiver uses :5000. Free it: `lsof -ti:5000 | xar
 
 ---
 
+## Pre-ship simulator gate (2026-08-08)
+
+`main` auto-deploys (Render) and feeds EAS → TestFlight, so the Maestro/simulator check
+sits **before merge/push to `main`**. CI cannot run the iOS simulator (no free macOS
+runner), so the run is local and the enforceable artifact is the **evidence**, not the
+execution — the operator keeps the decision, the system keeps the receipts.
+
+### Risk-tier matrix (operator-owned; deviations are decisions, recorded in the feature's scope block)
+
+| Tier | Change class | Required before merge to `main` |
+|---|---|---|
+| 1 | Mobile screen / navigation / state change | Full smoke suite (11 flows) + the feature's own flow, on sim |
+| 2 | Mobile logic touched, no UI change | Feature's flow + affected smoke subset |
+| 3 | Backend route/schema consumed by mobile | Smoke subset that exercises the route |
+| 4 | Backend-only, web-only, docs-only | No sim run; pytest / `tsc --noEmit` (CI covers these) |
+
+### Evidence
+
+After the run, do both:
+1. Append the result to `living-memory/TEST_LEDGER.md` (flows run, pass/fail, sim device, SHA).
+2. Write `qa/sim-runs/last-sim-run.json` (gitignored, per-machine):
+   ```json
+   {"date": "YYYY-MM-DDTHH:MM:SSZ", "sha": "<commit tested>", "tier": 1,
+    "flows": ["smoke/01", "..."], "result": "pass"}
+   ```
+
+### Enforcement
+
+`githooks/pre-push` blocks a push to `main` that includes `mobile/src` changes unless
+`qa/sim-runs/last-sim-run.json` records a passing run on a commit that is an ancestor
+of what's being pushed. Install once per clone:
+
+```bash
+git config core.hooksPath githooks
+```
+
+Escape hatch (operator decision, deliberately loud): `FTF_SKIP_SIM_GATE=1 git push …`
+— the hook prints that the gate was skipped; record why in TEST_LEDGER.
+
+### Failure symptom / lever
+
+- Hook blocks unexpectedly → the marker is stale (different machine, or the sim run
+  predates a rebase). Re-run the required tier; don't reach for the escape hatch first.
+- Hook silent when it should block → `git config core.hooksPath` unset in this clone.
+
+---
+
 ## Database
 
 - **Local:** SQLite at `data/trade_finder.db`. Back up by copying the file.
