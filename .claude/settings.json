@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}\" || exit 0; [ -f living-memory/HANDOFF.md ] || exit 0; { echo \"Session memory (living-memory/) \u2014 read before starting work, write back before you finish. Full contract in CLAUDE.md, Session memory section.\"; echo; awk '/^## Handoff Template/{exit} {print}' living-memory/HANDOFF.md; echo; awk '/^## Queue Hygiene Rules/{exit} {print}' living-memory/NEXT.md; } | jq -Rs '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:.}}' 2>/dev/null || true",
+            "timeout": 10,
+            "statusMessage": "Loading session memory"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}\" || exit 0; sid=$(jq -r '.session_id // \"nosession\"' 2>/dev/null); marker=\"${TMPDIR:-/tmp}/ftf-lm-${sid}\"; [ -f \"$marker\" ] && exit 0; lm=$(ls -t living-memory/*.md 2>/dev/null | head -1); [ -n \"$lm\" ] || exit 0; hit=$(find backend mobile/src web extension config -type f \\( -name \"*.py\" -o -name \"*.ts\" -o -name \"*.tsx\" -o -name \"*.js\" -o -name \"*.html\" \\) -newer \"$lm\" -print -quit 2>/dev/null); [ -n \"$hit\" ] || exit 0; touch \"$marker\"; jq -n --arg f \"$hit\" '{systemMessage:(\"living-memory/ is behind the code (\" + $f + \" is newer than every file in living-memory/). Before wrapping up: log what shipped in CHANGELOG.md and overwrite HANDOFF.md with where you stopped. See CLAUDE.md, Session memory section.\")}' 2>/dev/null || true",
+            "timeout": 15,
+            "statusMessage": "Checking living-memory freshness"
+          }
+        ]
+      }
+    ]
+  }
+}

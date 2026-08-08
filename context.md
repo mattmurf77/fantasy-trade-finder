@@ -88,7 +88,7 @@ The tiered matchup engine shipped: matchup selection prioritizes higher-ranked p
 - **Tests:** `python3 -m pytest backend/tests/ -q` (260+ passing); Maestro UI flows in `mobile/.maestro/`
 - **Deploy:** merge to `main` → Render auto-deploys; `npx eas-cli build --platform ios --profile production --auto-submit` → TestFlight. Active work is on branch `trade-engine-v2`
 - **Secrets:** `secrets.local.env` at project root (gitignored) — `CRON_SECRET` (guards admin + cron surface), `SLEEPER_TOKEN_KEY`, etc. Never paste secrets into chat
-- **Session memory:** `living-memory/` (CHANGELOG, HANDOFF, NEXT, GOTCHAS, OPEN_QUESTIONS) is the session-to-session state; read it at session start
+- **Session memory:** `living-memory/` is the session-to-session state. **Read** HANDOFF + NEXT + the top of CHANGELOG at session start; **write back** at session end (CHANGELOG for what shipped, HANDOFF overwritten with where you stopped, NEXT if priorities moved). The full read-at/write-at contract is in [CLAUDE.md](CLAUDE.md) §Session memory; the format spec is `living-memory/FORMAT.md`
 - **Housekeeping conventions:** stale root artifacts archived under `archive/root-cleanup-2026-07/`; durable feedback-fix outputs at `docs/feedback/items/<id>-<slug>/` (see its README) with gitignored scratch in `feedback-workspace/<id>/`; staged competitor-feature backlog in gitignored `staged-work/`
 
 ## Data Logging
@@ -123,7 +123,7 @@ Still an open branding question (Q-009, no code dependency). Past candidates: a 
 
 ## Open Items / Next Steps
 
-`living-memory/NEXT.md` is the live queue. Current highlights:
+[`living-memory/NEXT.md`](living-memory/NEXT.md) is the live queue and the authoritative version of this section — read it there rather than trusting the snapshot below, which is only refreshed when this file is. Highlights as of the last refresh:
 
 - **Real-match validation** — recruit 1–2 leaguemates to prove the two-sided match loop with real people; watch `/api/admin/engine-metrics` as usage lands
 - **Auth enforcement path** — `auth.accounts` dark pending App Store Connect Sign-in-with-Apple setup; web/extension verification capture is the top gap before flipping `auth.enforce_verified_writes`

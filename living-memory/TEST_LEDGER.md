@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-08](#2026-08-08)
 - [2026-07-04](#2026-07-04)
 - [2026-06-11](#2026-06-11)
 - [2026-05-21](#2026-05-21)
@@ -19,6 +20,24 @@
 - [Verification Discipline](#verification-discipline)
 
 ---
+
+## 2026-08-08
+
+### Suite trajectory, 2026-07-09 → 2026-08-06
+- **252 → 1466.** Reconstructed from commit messages during the living-memory revival pass; each figure is the count the committing session reported. Checkpoints: 272 → 285 → 382 → 521 (accounts P1/P2) → 558 → 632 → 781 (v1.9.0) → 855 (analytics P3/P4) → 937 (teardown W2) → 979 (owned picks) → 998 → 1025 → 1209 → 1336 (deck engine) → 1359 → 1378 → 1405 → 1445 → 1455.
+- **Counts are not strictly monotonic in log order.** Parallel worktree agents committed against different baselines — the 1414/1415 pair on 2026-08-03 is the clearest example. Treat a lower count in a later commit as a branch artifact, not a regression.
+
+### Measured live on 2026-08-08 (this checkout, `teardown-remediation` @ `30492ac`)
+- **`python3 -m pytest backend/tests/ -q` → 1466 passed, 1 skipped, 41.7s.**
+- **`cd mobile && npx tsc --noEmit` → clean, exit 0.**
+- ⚠️ **This is the 62-commits-behind base, not the project's test posture.** The rookie-draft QA handoff cites **1685 passed / 1 skipped on `origin/main` @ `cee4324`**. Quote the origin/main number when describing the project; quote this one only when describing this checkout.
+- The 1466 includes two untracked test files not yet committed: `test_espn_pick_assignment.py` (6 tests), `test_finder_config_consolidated.py` (5 tests).
+
+### Practices worth keeping (observed in this window)
+- **Failing-first is used and stated in commit messages** — `#238` lineup before/after and the `market.movers` work both note tests written failing-first; several 07-25 fixes note the regression shape was "verified failing pre-fix via stash".
+- **Flag-gated waves re-run the suite twice** — once as built, then again with flags ON as a separate gate. The deck-engine waves all did this.
+- **A contrast guard runs in CI-shape** — `mobile/scripts/check-contrast.js` over 13 token pairs, `npm run test:contrast`.
+- **`mobile/scripts/` is gitignored**, so JS regression checks live in `mobile/tests/` instead.
 
 ## 2026-07-04
 

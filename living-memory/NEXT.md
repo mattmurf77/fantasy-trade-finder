@@ -9,43 +9,45 @@
 ---
 
 ## Table of Contents
-- [2026-06-10 — Priority Queue](#2026-06-10--priority-queue)
+- [2026-08-08 — Priority Queue](#2026-08-08--priority-queue)
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
 
-## 2026-06-10 — Priority Queue
+## 2026-08-08 — Priority Queue
 
-*(Refreshed after the trade-engine v2/v3 ship: PR #86 → main → Render live, TestFlight build 14. The 2026-05-21 queue was fully overtaken — iPhone app shipped, pytest baseline exists (125 tests), dup DB archived, Render Starter live.)*
+*(Refreshed during the living-memory revival pass. The 2026-06-10 queue was fully overtaken and is preserved in git history: FB-47 shipped as finder targeting 07-10, the Android `versionName` item was superseded by the bare-workflow native-version fix, engine-threshold tuning was absorbed into the Thompson v2 / deck-engine work of 07-26.)*
 
 ### Immediate
 
-1. **Q-005 — recruit 1–2 league-mates for the real-match validation.** *(operator action)*
-   *Why now:* the two-sided match loop is unproven with real people; pre-season trade churn is the window. In-app invite nudges shipped 2026-06-10 (mobile banner + web coverage button).
+1. **Resolve the two conflicting ESPN pick-assignment designs.** *(needs an author/operator decision, not a merge strategy)*
+   *Why now:* `teardown-remediation` is 62 commits behind `origin/main` and holds uncommitted work that reimplements a problem `origin/main` already shipped differently. Every day this sits, the rebase gets worse. Detail in [`HANDOFF.md`](HANDOFF.md) §What's-half-done #1.
 
-2. **Watch `/api/admin/engine-metrics` as real usage lands.**
-   *Why now:* fairness_threshold / package_adj_gamma tuning is blocked on like/match-rate data by basis and deck position. Endpoint shipped 2026-06-10; check it each session once league-mates start swiping.
+2. **Reconcile the branch topology.** *(follows from #1)*
+   *Why now:* the 4 commits ahead of `origin/main` are already-cherry-picked twins, local `main` is 354 behind, and `feedback-fixes-2026-08-08` has 10 unmerged commits. Nothing in flight is safe to reason about until it's clear which branch is the trunk.
 
 ### Near-term
 
-3. **Align Android `versionName` to 1.3.0 before the next Android build.**
-   *Why now:* iOS marketing version is FIXED (2026-07-06 → 1.3.0, build 21 on TestFlight). The real cause wasn't `appVersionSource=remote` — it's the **committed native `ios/` dir**, which makes `app.json` version ignored (see [GOTCHAS G-012](GOTCHAS.md)). `android/app/build.gradle` `versionName` is the same trap and is likely still stale; fix it the same way when Android next builds.
+3. **Decide `trade.finder_config_consolidated` (flag false).**
+   *Why now:* +716 lines of `TradesScreen.tsx` and a backend filter are sitting uncommitted behind an off flag; docs are already updated as though it shipped.
 
-4. **Tune engine thresholds once metrics show signal.**
-   *Why now:* deferred-by-design at ship time (~20 swipe labels). Revisit the learned acceptance model when trade_impressions volume supports it; Thompson sampling covers the interim.
+4. **Graduate or kill `deck.value_model`.**
+   *Why now:* the F8 replay harness exists and runs nightly — the gate (replay win on both metrics, ESS≥100, calibration deciles ±20%, then interleave) is checkable now rather than theoretical.
+
+5. **Wire up `outlook.odds` or delete it.**
+   *Why now:* `backend/outlook/` and the mobile OddsSection are both built, but the flag is in neither `LAUNCHED_FLAG_DEFAULTS` nor `config/features.json`, so `GET /api/league/outlook` is unreachable dead weight.
 
 ### Medium-term
 
-5. **FB-47 — standalone needs-based trade finder.** Operator request (feedback id 47): pick a player/position to move or acquire → rank league rosters by positional strength → target the weakest/strongest counterparties. Overlaps the shipped consensus-basis cards + pinned-give flow; the genuinely new piece is positional-strength counterparty targeting (`analyze_roster_strengths` already computes the inputs). Needs scoping before build.
+6. **First public App Store release.** Pre-launch checklist is drafted in the untracked `docs/business/ops/`; the app has been TestFlight-only through v1.11.0.
 
-6. **3-team trades client UI** — held by operator decision (2026-06-10) until 2-team matches prove out. Backend is live behind `trade.three_team=false`.
-
-7. **FantasyCalc value-source experiment** — deferred by operator (2026-06-10): keep DynastyProcess seeds; revisit behind a flag only if telemetry shows fairness-calibration complaints. API is free/keyless (no published license — courtesy-contact maintainer if commercializing).
+7. **Worktree/disk hygiene.** ~40+ agent worktrees (8.6 GB) already broke one EAS upload and forced `.easignore`. Needs a purge policy, not another one-off.
 
 ### Reserved
 
 - **Browser-extension Chrome Web Store submission.** Decide distribution strategy first (Q-008).
 - **Mascot naming (Q-009)** — branding, no code dependency.
+- **PR #91** (Depth tier color) — open and stale since 2026-07-04; close or merge.
 
 ---
 
