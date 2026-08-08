@@ -273,14 +273,25 @@ DEFAULT_ROUNDS = 4
 # Neither matters for what ships: the verdict is still FAILED, so this stays
 # False and the routes still refuse.
 #
-# Per the plan's W2 abort criterion the CPU-bot mock therefore stays CUT: the
-# routes refuse to generate CPU picks while this stays False, returning the
-# typed-empty `200 {"empty": true, "reason": "cpu_model_unvalidated"}` that
-# M2's contract already carries. Do NOT flip this to re-enable bots without
-# re-running `test_mock_draft.py::test_w2_16_calibration_gate` green against a
-# re-specced model — flipping it is the exact "fit on the validation set"
-# failure the amendment exists to prevent.
-CPU_MODEL_VALIDATED = False
+# ── OPERATOR OVERRIDE, 2026-08-06 ────────────────────────────────────────────
+# Flipped True by explicit operator instruction ("Flip the mock draft build
+# on"), NOT by the statistical gate passing. Both facts are true and must stay
+# visible together:
+#
+#   * The six-bar gate in `mock-calibration-2026-08d.md` FAILED its paired-mean
+#     bars (all three KS bars passed). The measurements are unchanged and the
+#     artifact is not re-published — nothing was fitted to make this flip.
+#   * The operator subsequently specified CPU reach behaviour directly as a
+#     product rule (W2e: per-round reach caps + per-round frequency budget,
+#     R1 3/3 · R2 5/2 · R3+ 15/5) and declined further validation. That rule,
+#     not the mean bar, is now the accepted definition of "bots draft
+#     plausibly".
+#
+# So this constant no longer means "the model matched the corpora". It means
+# "the operator accepted the shipped reach policy". `test_w2_16_calibration_gate`
+# still records the statistical verdict independently — see its docstring.
+# Revert by setting this back to False; nothing else needs to change.
+CPU_MODEL_VALIDATED = True
 CALIBRATION_ARTIFACT = "docs/plans/draft-extensions/mock-calibration-2026-08d.md"
 
 

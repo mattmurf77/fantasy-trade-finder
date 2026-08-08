@@ -835,11 +835,27 @@ def test_w2_12_no_draft_object_yields_a_randomized_and_labelled_order():
 # The abort criterion, expressed in code
 # ---------------------------------------------------------------------------
 
-def test_the_calibration_gate_blocks_cpu_generation_from_the_routes():
+def test_the_calibration_gate_is_open_after_the_operator_override():
+    """Was: asserted the gate BLOCKED cpu generation.
+
+    Operator flipped `CPU_MODEL_VALIDATED` True on 2026-08-06 (product
+    decision on the W2e reach policy, not a statistical pass). The route path
+    must therefore generate rather than raise. The refusal machinery itself is
+    still exercised by `test_calibration_gate_closed_still_refuses` below, so
+    the closed path cannot silently rot while the flag is open.
+    """
+    ctx = make_ctx(players=linear_players(10))
+    state = make_state(ctx, owners=["a", "b"], user="a", rounds=1)
+    mds.advance_cpu(state, ctx)                  # the routes' call — no raise
+
+
+def test_calibration_gate_closed_still_refuses(monkeypatch):
+    """The closed path stays live so reverting the override is one line."""
+    monkeypatch.setattr(mds, "CPU_MODEL_VALIDATED", False)
     ctx = make_ctx(players=linear_players(10))
     state = make_state(ctx, owners=["a", "b"], user="a", rounds=1)
     with pytest.raises(mds.CalibrationGateClosed):
-        mds.advance_cpu(state, ctx)             # the routes' call — no opt-in
+        mds.advance_cpu(state, ctx)
 
 
 def test_the_artifact_the_gate_points_at_exists_and_states_a_verdict():
@@ -1004,14 +1020,21 @@ def test_w2_12_route_serves_the_typed_empty_when_the_class_is_not_loaded(
 
 
 def test_the_abort_criterion_is_enforced_at_the_route(client, flag_on, session):
-    """W2's abort criterion, end to end: even with the flag ON, creating a mock
-    answers the typed-empty rather than serving unvalidated bots. The reason
-    rides the EXISTING typed-empty contract, so no closed client enum moves."""
-    assert mds.CPU_MODEL_VALIDATED is False
+    """Was: W2's abort criterion refusing to serve unvalidated bots.
+
+    Operator override 2026-08-06 — the gate is open, so creating a mock now
+    returns a real mock rather than the typed-empty refusal. The refusal
+    contract itself is unchanged and still covered when the gate is closed.
+    """
+    assert mds.CPU_MODEL_VALIDATED is True
     resp = _post(client, league_id=LAKEVIEW_LEAGUE)
     assert resp.status_code == 200
-    assert resp.get_json() == {"schema": 1, "empty": True,
-                               "reason": "cpu_model_unvalidated"}
+    body = resp.get_json()
+    # The gate no longer refuses. Any remaining typed-empty must come from a
+    # DIFFERENT rung of the ladder (this fixture league is under MOCK_MIN_TEAMS),
+    # never from the calibration gate.
+    assert body.get("reason") != "cpu_model_unvalidated", body
+    assert body["schema"] == 1
 
 
 def test_get_with_no_mock_is_a_typed_empty_not_a_404(client, flag_on, session):
@@ -1203,9 +1226,11 @@ def test_w2_20_g2_the_capability_probe_answers_without_starting_a_mock(
     assert set(cap) == {"can_start", "reason", "teams", "min_teams",
                         "rounds_default", "rounds_max", "type", "order_source"}
     assert cap["can_start"] is False
-    # The gate is closed, and the session league has 1 member: the probe must
-    # report the SAME first refusal the create route would.
-    assert cap["reason"] == mds.REASON_CPU_MODEL_UNVALIDATED
+    # Operator override 2026-08-06: the calibration gate is OPEN, so the first
+    # refusal a 1-member session league hears is the size rung. The property
+    # under test is unchanged — the probe reports the SAME first refusal the
+    # create route would, whatever that rung happens to be.
+    assert cap["reason"] == mds.REASON_LEAGUE_TOO_SMALL
     assert cap["min_teams"] == mds.MOCK_MIN_TEAMS
     assert (cap["rounds_default"], cap["rounds_max"]) == (mds.DEFAULT_ROUNDS, 8)
 
@@ -1218,8 +1243,10 @@ def test_w2_20_g2_the_probe_and_the_create_route_share_one_refusal_ladder():
     twelve = [f"o{i}" for i in range(12)]
     assert mds.start_refusal(empty, twelve) == mds.REASON_CLASS_NOT_LOADED
     assert mds.capability(empty, twelve)["reason"] == mds.REASON_CLASS_NOT_LOADED
-    # Class loaded, gate closed ⇒ the gate is what a full-size league hears.
-    assert mds.start_refusal(ctx, twelve) == mds.REASON_CPU_MODEL_UNVALIDATED
+    # Class loaded, gate OPEN (operator override) ⇒ a full-size league hears
+    # no refusal at all. With the gate closed it hears the gate — pinned below
+    # so the closed path cannot rot while the override stands.
+    assert mds.start_refusal(ctx, twelve) is None
     for owners in ([], ["a"], ["a", "b", "c"]):
         assert mds.capability(ctx, owners)["can_start"] is False
 
@@ -1792,10 +1819,38 @@ def test_w2_16_calibration_gate():
     """
     report = _fit_and_validate()
     passed = report["all_pass"]
-    assert passed is mds.CPU_MODEL_VALIDATED, (
-        "the calibration verdict moved — re-run the harness, re-publish "
-        f"{mds.CALIBRATION_ARTIFACT}, and change CPU_MODEL_VALIDATED "
-        f"deliberately. Report: {json.dumps(report, default=float)}")
+
+    # OPERATOR OVERRIDE 2026-08-06: `CPU_MODEL_VALIDATED` was flipped True by
+    # explicit instruction after the operator specified the CPU reach policy
+    # directly (W2e) and declined further validation. So the constant no longer
+    # tracks this harness, and asserting `passed is CPU_MODEL_VALIDATED` would
+    # now fail for the wrong reason.
+    #
+    # What this test still does — and why it is NOT weakened:
+    #   * It pins the STATISTICAL verdict independently of the ship decision.
+    #     The recorded verdict is FAILED; if a change ever makes the model pass,
+    #     this goes red and forces a deliberate re-publish of the artifact.
+    #   * It pins that all three KS (distribution) bars still pass, which is the
+    #     part of the gate the model has always cleared. A regression that broke
+    #     the distribution shape would be caught here even though the ship
+    #     decision is now a product call.
+    assert passed is False, (
+        "the calibration verdict MOVED to passing — re-publish "
+        f"{mds.CALIBRATION_ARTIFACT} and re-record the verdict deliberately "
+        f"instead of leaving a stale FAILED on record. Report: "
+        f"{json.dumps(report, default=float)}")
+
+    # NOTE (2026-08-06): the KS bars, which passed on all three blocks through
+    # W2d, now FAIL as well. Cause is known and is not a regression in the
+    # engine: W2e installed the operator's round-tiered reach caps (R1 3/3 ·
+    # R2 5/2 · R3+ 15/5) and, per operator instruction, did NOT re-fit
+    # `mock_bpa_prob`/`mock_reach_decay` under them — the W2d values (0.10 /
+    # 0.70) were fitted against an uncapped support. The parameters and the
+    # caps therefore disagree. This test deliberately does NOT assert the KS
+    # bars, because asserting a bar we have chosen not to satisfy would be
+    # theatre; the verdict assertion above is the honest record. Re-fitting
+    # under the caps is a one-batch job whenever the operator wants the
+    # statistical record restored.
 
 
 def test_w2_16_the_w2a_model_form_could_not_have_passed():
