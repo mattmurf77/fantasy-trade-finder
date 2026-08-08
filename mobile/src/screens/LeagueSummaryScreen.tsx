@@ -117,6 +117,22 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 //     the pre-#248 consensus-only chart. Drill-in focus hides every
 //     non-focused tick/chip (mock rule) and the focus caption + drill
 //     subline state both ranks ("My board rank 7/12 · Consensus rank 2/12").
+//   - #208 ranks follow the position filter (2026-08-08): the reported
+//     symptom (rank numerals pinned to the unfiltered ordering) does NOT
+//     reproduce here — every numeral is an index into `ranked`, which takes
+//     `posFilter` as a memo dependency, and the server's `team.rank` is read
+//     nowhere. See docs/feedback/items/208-ranks-follow-position-filter/.
+//     What #208 DID find is that #248's overlay made its values filter-aware
+//     but not its DRAW decision: `ticksOn` gated on the whole-roster
+//     `boardsDiffer`, so a filtered view in which the two bases hold
+//     identical values (filter to QB when only RBs were re-ranked) still drew
+//     a tick on every bar top and printed "Consensus rank 3/12 · My board
+//     rank 3/12". `ticksOn` now gates on `boardsDifferInView` — the same
+//     comparison over the values on screen. `boardsDiffer` keeps its
+//     unfiltered identity meaning and keeps driving the "… sorts" labels, so
+//     the toggle copy doesn't flicker per pill. Also: the dual-rank captions
+//     divide the other basis' rank by the OTHER payload's team count
+//     (`otherCount`), not the bars'.
 //
 // #181 — this screen serves TWO routes:
 //   • 'LeagueRankings' — the League TAB's root (TabNav's LeagueStack): the
@@ -384,6 +400,12 @@ export default function LeagueSummaryScreen() {
   // consensus (personal Elo starts at the consensus seed) — in that case the
   // overlay would only mark the bars against themselves, so it hides and the
   // screen renders exactly the pre-#248 single-basis chart.
+  // `boardsDiffer` answers ONE question: does the caller have a my-board that
+  // is distinct from consensus AT ALL (whole roster, every position)? That is
+  // an identity check, so it stays unfiltered — it drives the basis-toggle's
+  // "… sorts" labels, whose meaning doesn't change as the user pages through
+  // position pills. Whether the overlay should DRAW is a different, filtered
+  // question — see `boardsDifferInView` / `ticksOn` below (#208).
   const otherTeams = otherQuery.data?.teams ?? [];
   const boardsDiffer = useMemo(() => {
     if (!query.data || !otherQuery.data) return false;
@@ -399,10 +421,6 @@ export default function LeagueSummaryScreen() {
   // basis-aware rosters + starters). Honest degradation: if the other
   // payload can't derive starters, the overlay hides for starters/bench
   // rather than fabricate a subset.
-  const ticksOn =
-    boardsDiffer &&
-    otherTeams.length > 0 &&
-    (subset === 'all' || otherStartersAvailable);
   const otherComputed = useMemo(
     () => otherTeams.map((t) => computeSubset(t, subset)),
     [otherTeams, subset],
@@ -419,6 +437,34 @@ export default function LeagueSummaryScreen() {
     rows.forEach((r, i) => m.set(r.id, { active: r.active, rank: i + 1 }));
     return m;
   }, [otherComputed, subset, posFilter]);
+  // Denominator for the other basis' rank — its OWN team count, not the bars'.
+  // The two parallel queries can briefly hold different team sets (a
+  // membership change landing between fetches, or one payload served stale via
+  // placeholderData), and "#8 of 12" against an 11-team board is a wrong label.
+  const otherCount = otherByTeam.size;
+
+  // #208 — the overlay's DRAW decision, under the active filter. Every signal
+  // it gates (ticks, delta chips, dual-rank captions, legend key, hint copy) is
+  // computed from filtered values, so the "do the boards actually differ?"
+  // test has to be filtered too — otherwise a view in which the two bases hold
+  // identical values (e.g. filter to QB when the caller has only re-ranked RBs)
+  // still draws a tick on top of every bar and prints "Consensus rank 3/12 ·
+  // My board rank 3/12", asserting a comparison this view doesn't contain.
+  // This is #248's own rule ("identical boards ⇒ the overlay would only mark
+  // the bars against themselves, so it hides") applied to the values on screen
+  // rather than to the whole roster — a strict generalization: the unfiltered
+  // view behaves exactly as it did before.
+  const boardsDifferInView = useMemo(() => {
+    if (!boardsDiffer) return false;
+    return ranked.some((r) => {
+      const o = otherByTeam.get(r.tc.team.user_id);
+      return !o || o.active !== r.active;
+    });
+  }, [boardsDiffer, ranked, otherByTeam]);
+  const ticksOn =
+    boardsDifferInView &&
+    otherTeams.length > 0 &&
+    (subset === 'all' || otherStartersAvailable);
 
   // One shared max scale across BOTH bases (mock rule) so a tick whose
   // other-board value beats every bar can never clip off the chart top.
@@ -633,8 +679,8 @@ export default function LeagueSummaryScreen() {
                   >
                     {focusOther
                       ? basis === 'personal'
-                        ? `My board rank ${selectedIdx + 1}/${ranked.length} · Consensus rank ${focusOther.rank}/${ranked.length}`
-                        : `Consensus rank ${selectedIdx + 1}/${ranked.length} · My board rank ${focusOther.rank}/${ranked.length}`
+                        ? `My board rank ${selectedIdx + 1}/${ranked.length} · Consensus rank ${focusOther.rank}/${otherCount}`
+                        : `Consensus rank ${selectedIdx + 1}/${ranked.length} · My board rank ${focusOther.rank}/${otherCount}`
                       : `League rank: ${selectedIdx + 1}/${ranked.length}`}
                   </Text>
                 </>
@@ -860,7 +906,7 @@ export default function LeagueSummaryScreen() {
             <Text style={[type.data, styles.drillSub]}>
               {`#${selectedIdx + 1} of ${ranked.length}${
                 focusOther
-                  ? ` (${basisLabel}) · #${focusOther.rank} of ${ranked.length} (${otherLabel})`
+                  ? ` (${basisLabel}) · #${focusOther.rank} of ${otherCount} (${otherLabel})`
                   : ''
               } · ${
                 selected.active > 0

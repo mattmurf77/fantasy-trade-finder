@@ -98,7 +98,8 @@ export interface CalcEvaluation {
   gap: CalcGap | null;
   per_player: { player_id: string; side: 'give' | 'receive'; value: number }[];
   dropped_player_ids: string[];
-  /** Present only on an uneven two-sided read; see CalcEvener. */
+  /** Present on an uneven two-sided read; also on a one-sided Mode B read
+   *  when the caller opted into `one_sided_eveners` (#264). See CalcEvener. */
   eveners?: CalcEvener[];
   /** Present only when at least one adjustment moved a side's value
    *  (absent on old servers); see CalcAdjustment. */
@@ -266,6 +267,13 @@ export async function evaluateTradeInLeague(
   leagueId: string,
   opponentUserId: string,
   signal?: AbortSignal,
+  // #264 — opt into the server's one-sided evener build (same key
+  // evaluateForSwapSuggestions sends): with exactly one side filled, the
+  // response carries candidate assets for the EMPTY side from its owner's
+  // roster + owned picks, sized against the filled side's package value.
+  // Two-sided reads are unaffected (server branch is gated on
+  // `bool(give) != bool(recv)`); old servers ignore the key.
+  oneSidedEveners?: boolean,
 ): Promise<CalcEvaluationInLeague> {
   return apiRequest('/api/trade/evaluate', {
     method: 'POST',
@@ -276,6 +284,7 @@ export async function evaluateTradeInLeague(
       scoring_format: format,
       league_id: leagueId,
       opponent_user_id: opponentUserId,
+      ...(oneSidedEveners ? { one_sided_eveners: true } : {}),
     },
   });
 }

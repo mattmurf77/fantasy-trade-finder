@@ -7,6 +7,7 @@ import {
   ScrollView,
   Modal,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -37,6 +38,7 @@ import {
   type LeaguePreferences,
 } from '../api/league';
 import { getTradeValues } from '../api/calc';
+import { getLeagueRosters } from '../api/sleeper';
 
 // #246 — Trade DNA as a bottom sheet over the guided deck (approved mock
 // mockups/polish-lab-2026-08/acquire-landing-guided-first.html, frame B3).
@@ -66,9 +68,14 @@ const OUTLOOK_CARDS: {
   title: string;
   bias: string;
 }[] = [
-  { key: 'rebuilder', title: 'Rebuilding', bias: 'Leans young + picks' },
-  { key: 'contender', title: 'Contending', bias: 'Balanced moves' },
+  // #253 — CANONICAL DISPLAY ORDER: All-in → Contending → Rebuilding →
+  // Tanking (the win-now→future ladder a dynasty player reads down).
+  // Presentation only: the stored enum values are unchanged, and
+  // OutlookSheet + the web outlook overlay already list them this way.
+  // Do not reshuffle.
   { key: 'championship', title: 'All-in', bias: 'Win now, spend picks' },
+  { key: 'contender', title: 'Contending', bias: 'Balanced moves' },
+  { key: 'rebuilder', title: 'Rebuilding', bias: 'Leans young + picks' },
   { key: 'jets', title: 'Tanking', bias: 'Max youth, high picks' },
 ];
 
@@ -135,8 +142,12 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
   const queryClient = useQueryClient();
   const league = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
+  const userId = useSession((s) => s.user)?.user_id || '';
 
   const [untouchablesOpen, setUntouchablesOpen] = useState(false);
+  // #259 — the roster picker inside the untouchables layer.
+  const [rosterPickOpen, setRosterPickOpen] = useState(false);
+  const [rosterQuery, setRosterQuery] = useState('');
 
   // Drafts mirror the saved prefs until the user touches a control.
   const [draftOutlook, setDraftOutlook] = useState<NonNullable<Outlook> | null>(
@@ -198,6 +209,56 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
     },
   });
 
+  // ── #259 — add untouchables FROM YOUR ROSTER ─────────────────────────
+  // #173 shipped list + remove and left adding contextual ("hold a player
+  // on any trade card"), which cannot reach a player no trade idea ever
+  // offers. The picker below closes that hole. It draws on the SAME two
+  // sources already open here — the shared ['calc-values'] pool for
+  // names/values and the league rosters — and writes through the SAME
+  // `setAssetPref` lane the deck's lock toggle uses. No new endpoint.
+  //
+  // It renders as a THIRD layer inside this Modal rather than mounting
+  // PlayerPickerModal: that component renders its own <Modal>, and iOS
+  // will not present a sibling Modal over an open one (the constraint
+  // that put the untouchables layer in here in the first place).
+  const rostersQuery = useQuery({
+    queryKey: ['league-rosters', leagueId],
+    queryFn: () => getLeagueRosters(leagueId!),
+    enabled: !!leagueId && untouchablesOpen,
+    staleTime: 5 * 60_000,
+  });
+
+  const myRosterRows = useMemo(() => {
+    const ids =
+      (rostersQuery.data ?? []).find((r) => r.owner_id === userId)?.players ??
+      [];
+    const byId = new Map(
+      (untouchableNamesQuery.data?.players ?? []).map((p) => [p.id, p]),
+    );
+    const protectedIds = new Set(untouchableIds);
+    const q = rosterQuery.trim().toLowerCase();
+    return ids
+      .filter((id) => !protectedIds.has(id))
+      .map((id) => byId.get(id))
+      .filter((p): p is NonNullable<typeof p> => !!p)
+      .filter((p) => (q ? p.name.toLowerCase().includes(q) : true))
+      .sort((a, b) => b.value - a.value);
+  }, [
+    rostersQuery.data,
+    userId,
+    untouchableNamesQuery.data,
+    untouchableIds,
+    rosterQuery,
+  ]);
+
+  const addUntouchable = useMutation({
+    mutationFn: (playerId: string) =>
+      setAssetPref(leagueId!, playerId, 'untouchable'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['asset-prefs', leagueId] });
+    },
+  });
+
   // Seed the drafts from saved prefs while untouched (covers the sheet
   // opening before the prefs fetch lands). Once the user touches a
   // control the drafts are theirs until dismiss.
@@ -218,6 +279,8 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
       dnaTouched.current = false;
       setDnaError(null);
       setUntouchablesOpen(false);
+      setRosterPickOpen(false);
+      setRosterQuery('');
     }
   }, [visible]);
 
@@ -339,7 +402,13 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
       visible={visible}
       transparent
       animationType="slide"
-      onRequestClose={untouchablesOpen ? () => setUntouchablesOpen(false) : handleDone}
+      onRequestClose={
+        rosterPickOpen
+          ? () => setRosterPickOpen(false)
+          : untouchablesOpen
+            ? () => setUntouchablesOpen(false)
+            : handleDone
+      }
     >
       <Pressable
         style={styles.backdrop}
@@ -495,10 +564,24 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
               Untouchables
             </Text>
             <Text style={type.bodySm}>
-              Never offered from your roster in trade ideas. To add one, hold
-              a player you'd send on any trade card and pick "Mark
+              Never offered from your roster in trade ideas. Add one below,
+              or hold a player you'd send on any trade card and pick "Mark
               untouchable".
             </Text>
+            {/* #259 — pick straight from your own roster. #173 deliberately
+                shipped without this; the gap it left is that a player no
+                trade idea ever offers could not be protected at all. */}
+            <Button
+              variant="secondary"
+              compact
+              label="Add from your roster"
+              testID="untouchables.add-from-roster"
+              onPress={() => {
+                haptics.selection();
+                setRosterQuery('');
+                setRosterPickOpen(true);
+              }}
+            />
             {untouchableNamesQuery.isLoading ? (
               <ActivityIndicator
                 color={ice.base}
@@ -531,6 +614,119 @@ export default function TradeDnaSheet({ visible, onClose }: Props) {
                 {untouchableRows.length === 0 ? (
                   <Text style={styles.dnaEmpty}>
                     None yet — hold a player you'd send on any trade card.
+                  </Text>
+                ) : null}
+              </ScrollView>
+            )}
+          </View>
+        </>
+      ) : null}
+
+      {/* #259 — roster picker, layered over the untouchables layer inside
+          this same Modal (see the note by the queries above for why this
+          is not PlayerPickerModal). Rows are the user's OWN roster only —
+          untouchable is a promise about your players, so a leaguemate's
+          roster has no meaning here. Already-protected players are absent:
+          they are in the list one layer down. */}
+      {untouchablesOpen && rosterPickOpen ? (
+        <>
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => setRosterPickOpen(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close roster picker"
+          />
+          <View style={styles.sheet}>
+            <View style={styles.grabber} />
+            <View style={styles.sheetTop}>
+              <Text style={type.heading} accessibilityRole="header">
+                Protect a player
+              </Text>
+              <Pressable
+                testID="untouchables.roster-back"
+                accessibilityRole="button"
+                accessibilityLabel="Back to untouchables"
+                onPress={() => setRosterPickOpen(false)}
+                hitSlop={8}
+                style={{ marginLeft: 'auto' }}
+              >
+                {({ pressed }) => (
+                  <Text
+                    style={[styles.manageLink, pressed && { color: chalk.base }]}
+                  >
+                    Done
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+            <Text style={type.bodySm}>
+              Tap a player from your roster. Protected players are never
+              offered from your side of a trade idea.
+            </Text>
+            <TextInput
+              testID="untouchables.roster-search"
+              value={rosterQuery}
+              onChangeText={setRosterQuery}
+              placeholder="Search your roster"
+              placeholderTextColor={chalk.faint}
+              autoCorrect={false}
+              accessibilityLabel="Search your roster"
+              style={styles.rosterSearch}
+            />
+            {rostersQuery.isLoading || untouchableNamesQuery.isLoading ? (
+              <ActivityIndicator
+                color={ice.base}
+                style={{ marginTop: space.lg }}
+              />
+            ) : (
+              <ScrollView style={styles.pickerScroll}>
+                {myRosterRows.map((p) => (
+                  <Pressable
+                    key={p.id}
+                    testID={`untouchables.roster-row.${p.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Protect ${p.name}`}
+                    disabled={addUntouchable.isPending}
+                    onPress={() => {
+                      haptics.selection();
+                      addUntouchable.mutate(p.id);
+                    }}
+                    style={({ pressed }) => [
+                      styles.pickerRow,
+                      pressed && { backgroundColor: ink.ink3 },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.rosterDot,
+                        { backgroundColor: dnaPosColor(p.position) },
+                      ]}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.pickerName}>{p.name}</Text>
+                      <Text style={styles.dnaEmpty}>
+                        {p.position}
+                        {p.team ? ` · ${p.team}` : ''}
+                      </Text>
+                    </View>
+                    <Button
+                      variant="ghost"
+                      compact
+                      label="Protect"
+                      testID={`untouchables.roster-add.${p.id}`}
+                      disabled={addUntouchable.isPending}
+                      onPress={() => {
+                        haptics.selection();
+                        addUntouchable.mutate(p.id);
+                      }}
+                    />
+                  </Pressable>
+                ))}
+                {myRosterRows.length === 0 ? (
+                  <Text testID="untouchables.roster-empty" style={styles.dnaEmpty}>
+                    {rosterQuery.trim()
+                      ? 'No one on your roster matches that name.'
+                      : 'Nothing left to protect — every valued player on your roster is already an untouchable.'}
                   </Text>
                 ) : null}
               </ScrollView>
@@ -657,4 +853,16 @@ const styles = StyleSheet.create({
     borderBottomColor: ink.line,
   },
   pickerName: { ...type.title },
+  // #259 — roster picker layer.
+  rosterSearch: {
+    ...type.body,
+    color: chalk.base,
+    minHeight: 44,
+    paddingHorizontal: space.md,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.xs,
+    backgroundColor: ink.ink1,
+  },
+  rosterDot: { width: 6, height: 6, marginRight: space.sm },
 });

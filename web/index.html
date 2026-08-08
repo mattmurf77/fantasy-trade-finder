@@ -664,7 +664,8 @@
            carries a `lane`; toggled by _updateLaneFilterRow() -->
       <div class="lane-filter-row" id="lane-filter-row" style="display:none">
         <button class="lane-filter-btn active" data-lane="all"    onclick="setLaneFilter('all')">All</button>
-        <button class="lane-filter-btn"        data-lane="window" onclick="setLaneFilter('window')">Window moves</button>
+        <!-- #256: display label only — the `window` lane enum is unchanged -->
+        <button class="lane-filter-btn"        data-lane="window" onclick="setLaneFilter('window')">Team-fit moves</button>
         <button class="lane-filter-btn"        data-lane="value"  onclick="setLaneFilter('value')">Value moves</button>
       </div>
 

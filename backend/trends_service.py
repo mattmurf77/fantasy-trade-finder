@@ -31,6 +31,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .pick_values import GENERIC_PICK_ID_PREFIX
+
 
 # ---------------------------------------------------------------------------
 # 0. Rank derivation (shared helper)
@@ -94,6 +96,28 @@ def _pos_rank_map(
         for i, (pid, _) in enumerate(rows):
             out[pid] = i + 1
     return out
+
+
+def _is_pick_asset(player_id: str, meta: dict | None) -> bool:
+    """#261 — draft picks are excluded from the Risers/Fallers ROWS.
+
+    The canonical predicate is `trade_service.is_pick_asset`: owned-pick
+    pseudo-players carry position "PICK", and the universal pool's generic
+    picks carry a REAL position (so they mix into the trio tabs) but always
+    team "PICK".  That helper is getattr-based and this module receives
+    enrichment DICTS, and trends_service is deliberately dependency-free
+    (pure functions, no DB, no trade_service import) — so the same two
+    fields are applied here, plus the id-prefix arm `taste_service._is_pick`
+    also carries, which covers a pool pick with no enrichment row.
+
+    Ids only, never the label: generic rung names are a served string that
+    clients (and this predicate) must not parse — see
+    docs/cross-client-invariants.md.
+    """
+    m = meta or {}
+    return (m.get("position") == "PICK"
+            or m.get("team") == "PICK"
+            or str(player_id).startswith(GENERIC_PICK_ID_PREFIX))
 
 
 def _rank_delta(prev_rank: int | None, curr_rank: int | None) -> int | None:
@@ -618,6 +642,12 @@ def compute_risers_fallers(
     moves: list[dict[str, Any]] = []
     for pid, curr in (current_elo or {}).items():
         if pid not in earliest:
+            continue
+        # #261 — picks never occupy a Risers/Fallers row.  Filtered here, AFTER
+        # the rank maps above: picks stay in the rank denominator because they
+        # are real board assets everywhere else (Tiers, the pick ladder), so
+        # the ranks these rows report keep agreeing with every other surface.
+        if _is_pick_asset(pid, (players_by_id or {}).get(pid)):
             continue
         try:
             c = float(curr)
