@@ -13,8 +13,11 @@ Default: SQLite file alongside server.py — zero configuration required.
 import hashlib
 import hmac
 import json
+import logging
 import math
 import os
+import threading
+import time
 from datetime import datetime, timezone
 
 try:
@@ -33,6 +36,8 @@ from datetime import timedelta
 # tiny standalone module (no cycle: pick_values imports trade_service lazily,
 # and never imports database) so sync_draft_picks can price on the engine scale.
 from .pick_values import pick_pool_value
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Engine — SQLite by default, PostgreSQL if DATABASE_URL is set
@@ -271,6 +276,13 @@ leagues_table = Table("leagues", metadata,
     Column("draft_status",            String),  # 'drafted'|'not_drafted'|'unknown'
     Column("draft_status_confidence", String),  # 'high'|'medium'|'low'
     Column("draft_status_checked_at", String),  # ISO UTC of the last check
+    # ── draft-extensions W3 M-A (ADR-010) — pick-assignment NUMBERING ─────
+    # JSON {rounds:int, order_type:'linear'|'snake', order:[user_id, ...]}.
+    # OWNERSHIP is never stored here — that lives one row per slot in
+    # draft_picks. This holds only what the grid cannot express: the round-1
+    # pick sequence and the linear/snake shape, both of which change slot
+    # NUMBERING and never who owns a pick. NULL = never configured.
+    Column("pick_assignment_settings", Text),
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -734,7 +746,24 @@ draft_picks_table = Table("draft_picks", metadata,
     Column("is_traded",         Integer, default=0),        # 1 if ownership changed
     Column("pick_value",        Float),                     # legacy 0-100 round-tier scale (pick-share ratios)
     Column("pool_value",        Float),                     # #158: engine/calculator value scale (elo_to_value units)
-    Column("platform",          String),                    # #158: 'sleeper' | 'mfl' provenance (ESPN never writes rows)
+    # #158 introduced this as 'sleeper' | 'mfl' provenance and documented
+    # "ESPN never writes rows". draft-extensions W3 (ADR-010) REVERSES that:
+    # an ESPN league's picks can now be entered by its own members, so ESPN
+    # rows exist and carry platform='espn'. `platform` records where the
+    # LEAGUE lives; the new `source` column below records who asserted the
+    # ROW. They answer different questions and both are load-bearing — the
+    # two engine guards read `platform`, the containment reads `source`.
+    Column("platform",          String),                    # 'sleeper' | 'mfl' | 'espn' — the LEAGUE's provenance
+    # ── draft-extensions W3 (ADR-010) — user-asserted pick ownership ──────
+    # source: NULL or 'platform' = platform-written. EVERY pre-W3 row has
+    #   source IS NULL, and `load_draft_picks` DEFAULTS to platform-only, so
+    #   every pre-existing read site is byte-identical with no backfill.
+    #   THIS COLUMN IS THE CONTAINMENT.
+    Column("source",            String),
+    Column("assigned_by",       String),                    # FTF user_id of the LAST editor ('user' rows only)
+    # ISO-8601 UTC. ALSO the optimistic-concurrency token: a PUT carries the
+    # value it read and the UPDATE's WHERE compares it (assign_draft_pick).
+    Column("assigned_at",       String),
     Column("synced_at",         String),
     UniqueConstraint("pick_id", name="uq_draft_pick_id"),
 )
@@ -1855,6 +1884,15 @@ def _migrate_db() -> None:
         # #158 — owned draft picks: engine-scale value + platform provenance.
         ("draft_picks",        "pool_value",            "FLOAT"),
         ("draft_picks",        "platform",              "TEXT"),
+        # draft-extensions W3 (ADR-010) — user-asserted pick ownership.
+        # VARCHAR, not TEXT, to match the Column(..., String) declarations;
+        # `platform` above is the existing String/TEXT wart, not a precedent.
+        # NO BACKFILL: every existing row keeps source IS NULL, which the
+        # default read predicate treats as platform.
+        ("draft_picks",        "source",                "VARCHAR"),
+        ("draft_picks",        "assigned_by",           "VARCHAR"),
+        ("draft_picks",        "assigned_at",           "VARCHAR"),
+        ("leagues",            "pick_assignment_settings", "TEXT"),
         # #207 — rookie class year from Sleeper's metadata.rookie_year, and
         # the per-league rookie-draft verdict cache (backend/draft_status.py).
         ("players",            "rookie_year",           "VARCHAR"),
@@ -1991,6 +2029,15 @@ def _migrate_db() -> None:
     _trade_match_indexes = [
         ("ix_trade_matches_user_a_league", "trade_matches", "user_a_id, league_id"),
         ("ix_trade_matches_user_b_league", "trade_matches", "user_b_id, league_id"),
+        # ── draft-extensions W3 M-A (ADR-010) ─────────────────────────────
+        # `draft_picks` already exists in production, so metadata.create_all
+        # will NOT add an index to it — this needs the explicit idempotent
+        # form. EVERY read of this table filters `league_id` and there is no
+        # index on it today; the containment predicate adds `source`. A
+        # 192-slot grid per league turns each un-indexed scan into a real
+        # cost at seven read sites, so this is part of M-A, not a later
+        # optimization.
+        ("ix_draft_picks_league_source",  "draft_picks",   "league_id, source"),
     ]
     for idx_name, tbl, cols in _trade_match_indexes:
         try:
@@ -7335,6 +7382,171 @@ def compute_pick_value(
     return round(discounted, 2)
 
 
+# ---------------------------------------------------------------------------
+# draft-extensions W3 M-A — user-asserted pick ownership (ADR-010)
+# ---------------------------------------------------------------------------
+#
+# Three provenance columns on `draft_picks` (`source` / `assigned_by` /
+# `assigned_at`) let a league member assert who owns each slot of a league
+# whose platform has no readable draft object (ESPN, per the operator ruling
+# that ESPN has no rookie-draft concept at all).
+#
+# THE CONTAINMENT IS THE READ DEFAULT, not a table split: `load_draft_picks`
+# defaults to `source='platform'`, which selects exactly the rows it selected
+# before this wave, in the same order, for every league. A read site opts into
+# asserted rows one at a time, explicitly, and an AST test enumerates them.
+#
+# The safety property that makes assertion tolerable at all: price is a pure
+# server-side function of `(round, season - current_season, format)` via the
+# SHIPPED `pick_pool_value` / `compute_pick_value`, and every owner must be an
+# existing `league_members` row inside a fixed `rounds x teams x seasons`
+# grid. So a bad or malicious assignment can REDISTRIBUTE value; it can never
+# CREATE it. The only inflation lever is `rounds`, clamped server-side to
+# `draft_status.ROOKIE_MAX_ROUNDS`.
+
+PICK_SOURCE_PLATFORM = "platform"
+PICK_SOURCE_USER     = "user"
+PICK_SOURCE_ANY      = "any"
+
+ORDER_TYPE_LINEAR = "linear"
+ORDER_TYPE_SNAKE  = "snake"
+
+#: Contested/orphaned derivation is memoised per league and invalidated
+#: explicitly on every write, so a correction un-contests a slot at the next
+#: read rather than after a TTL. The TTL is only a cross-process backstop.
+#: Mirrors the `_COMMUNITY_ELO_CACHE` pattern already in this module.
+_CONTESTED_TTL_SECONDS = 60.0
+_CONTESTED_CACHE: dict[str, tuple[float, frozenset[str], frozenset[str]]] = {}
+_CONTESTED_LOCK = threading.Lock()
+
+
+def make_pick_id(league_id: str, season: int, round_: int,
+                 original_roster_id: str) -> str:
+    """THE `pick_id` format: ``{league}_{season}_{round}_{original_roster}``.
+
+    `round` is unpadded, so a `pick_id` is NOT lexicographically sortable —
+    never order by it. This constructor exists because the format was three
+    duplicated f-strings before W3 and the assignment store would have made a
+    fourth; every producer now goes through here (INV-8).
+    """
+    return f"{league_id}_{season}_{int(round_)}_{original_roster_id}"
+
+
+def _pick_source_predicate(source: str):
+    """SQLAlchemy predicate for the `source` containment, or None for 'any'."""
+    if source == PICK_SOURCE_ANY:
+        return None
+    if source == PICK_SOURCE_USER:
+        return draft_picks_table.c.source == PICK_SOURCE_USER
+    # 'platform' (the default) — NULL reads as platform, so this selects
+    # exactly the pre-W3 row set.
+    return or_(draft_picks_table.c.source.is_(None),
+               draft_picks_table.c.source == PICK_SOURCE_PLATFORM)
+
+
+def _invalidate_contested(league_id: str) -> None:
+    """Drop the memoised contested/orphaned sets for one league."""
+    with _CONTESTED_LOCK:
+        _CONTESTED_CACHE.pop(str(league_id), None)
+
+
+#: Public alias — the assignment routes invalidate AFTER writing the audit
+#: event (contested is derived from `user_events`, so invalidating before the
+#: event lands would re-memoise the stale answer).
+invalidate_pick_assignment_cache = _invalidate_contested
+
+
+def _derive_excluded(league_id: str) -> tuple[frozenset[str], frozenset[str]]:
+    """``(contested, orphaned)`` pick ids for one league.
+
+    **Contested** = a slot that at least two DISTINCT users assigned to at
+    least two DIFFERENT owners. Both conditions are required: two actors
+    agreeing on the same owner is not a disagreement, and one actor changing
+    their own mind twice is not one either. Derived from the
+    `pick_assignment_changed` audit trail — there is no contested column.
+
+    **Orphaned** = a `source='user'` row whose `owner_user_id` is not a
+    current `league_members` row (a SWID rotation on re-import, or a manager
+    who left). Surfaced as a re-assign row and excluded from pricing, NEVER
+    silently dropped: a dropped slot is value that vanishes with no
+    explanation.
+
+    Both sets are withheld from the priced union by ROW FILTERING. Nulling
+    `pool_value` instead is forbidden — `server._power_picks_by_owner`
+    re-derives a price when `pool_value` is NULL, so nulling would silently
+    re-price the very row the rule exists to withhold (INV-5).
+    """
+    lid = str(league_id)
+    contested: set[str] = set()
+    orphaned:  set[str] = set()
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(user_events_table.c.props).where(
+                    (user_events_table.c.event_type == "pick_assignment_changed")
+                    & (user_events_table.c.league_id == lid)
+                )
+            ).fetchall()
+            by_pick: dict[str, set[tuple[str, str]]] = {}
+            for r in rows:
+                try:
+                    p = json.loads(r.props or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                pid = p.get("pick_id")
+                if not pid:
+                    continue
+                by_pick.setdefault(str(pid), set()).add(
+                    (str(p.get("actor") or ""), str(p.get("new_owner") or "")))
+            contested = {
+                pid for pid, pairs in by_pick.items()
+                if len({a for a, _ in pairs}) >= 2 and len({o for _, o in pairs}) >= 2
+            }
+
+            members = {
+                str(r.user_id) for r in conn.execute(
+                    select(league_members_table.c.user_id).where(
+                        league_members_table.c.league_id == lid)
+                ).fetchall()
+            }
+            if members:
+                owned = conn.execute(
+                    select(draft_picks_table.c.pick_id,
+                           draft_picks_table.c.owner_user_id)
+                    .where((draft_picks_table.c.league_id == lid)
+                           & (draft_picks_table.c.source == PICK_SOURCE_USER))
+                ).fetchall()
+                orphaned = {str(r.pick_id) for r in owned
+                            if str(r.owner_user_id or "") not in members}
+    except Exception as e:                      # pragma: no cover - DB optional
+        # A derivation failure must NOT silently unprice a whole league.
+        log.warning("contested/orphan derivation failed for %s: %s", lid, e)
+        return frozenset(), frozenset()
+    return frozenset(contested), frozenset(orphaned)
+
+
+def _excluded_pick_ids(league_id: str) -> tuple[frozenset[str], frozenset[str]]:
+    lid = str(league_id)
+    with _CONTESTED_LOCK:
+        cached = _CONTESTED_CACHE.get(lid)
+        if cached and (time.time() - cached[0]) < _CONTESTED_TTL_SECONDS:
+            return cached[1], cached[2]
+    contested, orphaned = _derive_excluded(lid)
+    with _CONTESTED_LOCK:
+        _CONTESTED_CACHE[lid] = (time.time(), contested, orphaned)
+    return contested, orphaned
+
+
+def contested_pick_ids(league_id: str) -> frozenset[str]:
+    """Slots ≥2 distinct users assigned to ≥2 DIFFERENT owners."""
+    return _excluded_pick_ids(league_id)[0]
+
+
+def orphaned_pick_ids(league_id: str) -> frozenset[str]:
+    """Asserted slots whose owner is no longer a league member."""
+    return _excluded_pick_ids(league_id)[1]
+
+
 def sync_draft_picks(
     league_id: str,
     roster_ids: list[int],
@@ -7397,7 +7609,7 @@ def sync_draft_picks(
             if season in exclude:               # #228 — draft already held
                 continue
             for rnd in range(1, rounds + 1):
-                pick_id = f"{league_id}_{season}_{rnd}_{rid_str}"
+                pick_id = make_pick_id(league_id, season, rnd, rid_str)
                 picks[pick_id] = {
                     "pick_id":            pick_id,
                     "league_id":          league_id,
@@ -7429,7 +7641,7 @@ def sync_draft_picks(
         if season in exclude:                   # #228 — draft already held
             continue
 
-        pick_id = f"{league_id}_{season}_{rnd}_{orig_rid}"
+        pick_id = make_pick_id(league_id, season, rnd, orig_rid)
 
         new_user     = roster_id_to_user.get(new_rid, "")
         new_username = user_id_to_name.get(new_user, f"Roster {new_rid}")
@@ -7471,19 +7683,42 @@ def sync_draft_picks(
     return rows
 
 
-def replace_draft_picks(league_id: str, rows: list[dict]) -> None:
-    """Snapshot-replace every draft-pick row for one league.
+def replace_draft_picks(league_id: str, rows: list[dict],
+                        preserve_source: str | None = None) -> None:
+    """Snapshot-replace ONE PROVENANCE's draft-pick rows for one league.
 
-    Delete the league's existing rows, then bulk-insert `rows` fresh. Shared by
-    the Sleeper grid+overlay sync (`sync_draft_picks`) and the MFL normalization
-    path (`server._sync_mfl_owned_picks`) so both write through one code path.
-    Rows are expected to carry `synced_at`; callers that build rows outside
-    sync_draft_picks stamp it themselves.
+    Delete the league's existing rows of the caller's own provenance, then
+    bulk-insert `rows` fresh. Shared by the Sleeper grid+overlay sync
+    (`sync_draft_picks`), the MFL normalization path
+    (`server._sync_mfl_owned_picks`) and W3's assignment projection, so all
+    three write through one code path. Rows are expected to carry `synced_at`;
+    callers that build rows outside `sync_draft_picks` stamp it themselves.
+
+    `preserve_source` names the provenance THE CALLER OWNS. The DELETE is
+    scoped to exactly that provenance and never crosses it — the whole
+    invariant is "a writer only ever deletes rows it could have written"
+    (INV-2). The parameter name reads backwards on the default branch, so
+    read the two branches literally:
+
+      None (default) -> DELETE WHERE league_id = ? AND (source IS NULL
+                        OR source <> 'user')
+                        The historical behavior, NARROWED. Every platform
+                        caller keeps this and therefore can no longer destroy
+                        a league's asserted rows — including on a sync fired
+                        by a future platform writer nobody has written yet.
+      'user'         -> DELETE WHERE league_id = ? AND source = 'user'
+                        W3's assignment projection is the ONLY caller passing
+                        this, and it cannot touch a platform row.
     """
+    if preserve_source == PICK_SOURCE_USER:
+        scope = draft_picks_table.c.source == PICK_SOURCE_USER
+    else:
+        scope = or_(draft_picks_table.c.source.is_(None),
+                    draft_picks_table.c.source != PICK_SOURCE_USER)
     with engine.begin() as conn:
         conn.execute(
             delete(draft_picks_table).where(
-                draft_picks_table.c.league_id == league_id
+                (draft_picks_table.c.league_id == league_id) & scope
             )
         )
         if rows:
@@ -7495,15 +7730,36 @@ def replace_draft_picks(league_id: str, rows: list[dict]) -> None:
 def load_draft_picks(
     league_id: str,
     owner_user_id: str | None = None,
+    source: str = PICK_SOURCE_PLATFORM,
+    include_contested: bool = False,
 ) -> list[dict]:
     """
     Return draft picks for a league, optionally filtered to a single owner.
     Sorted by season ASC, round ASC, pick_value DESC.
+
+    `source` is THE containment (ADR-010). It defaults to platform-only, so
+    every pre-W3 call site is byte-identical until it explicitly opts in:
+
+      "platform"  ->  source IS NULL OR source = 'platform'   (DEFAULT)
+                      Every pre-W3 row has source IS NULL, so this selects
+                      exactly today's rows, in today's order.
+      "user"      ->  source = 'user'
+      "any"       ->  no source predicate
+
+    When the result CAN contain user rows ("user"/"any") and
+    `include_contested` is False, contested and orphaned slots are dropped —
+    see `_derive_excluded`. That exclusion is a ROW FILTER and must never be
+    implemented by nulling `pool_value`: `server._power_picks_by_owner`
+    re-derives a price from a NULL `pool_value`, so nulling would silently
+    re-price the very row the rule withholds (INV-5).
     """
+    predicate = _pick_source_predicate(source)
     with engine.connect() as conn:
         q = select(draft_picks_table).where(
             draft_picks_table.c.league_id == league_id
         )
+        if predicate is not None:
+            q = q.where(predicate)
         if owner_user_id is not None:
             q = q.where(draft_picks_table.c.owner_user_id == owner_user_id)
         q = q.order_by(
@@ -7512,7 +7768,243 @@ def load_draft_picks(
             draft_picks_table.c.pick_value.desc(),
         )
         rows = conn.execute(q).fetchall()
-    return [dict(r._mapping) for r in rows]
+    out = [dict(r._mapping) for r in rows]
+    if source != PICK_SOURCE_PLATFORM and not include_contested:
+        # In PYTHON, after the fetch: the exclusion sets are memoised and
+        # pushing them into SQL would need a dialect-divergent JSON extraction.
+        contested, orphaned = _excluded_pick_ids(league_id)
+        if contested or orphaned:
+            drop = contested | orphaned
+            out = [r for r in out
+                   if not (r.get("source") == PICK_SOURCE_USER
+                           and str(r.get("pick_id")) in drop)]
+    return out
+
+
+def seed_pick_grid(
+    league_id: str,
+    member_user_ids: list[str],
+    user_id_to_name: dict[str, str],
+    actor_user_id: str,
+    current_season: int,
+    rounds: int,
+    seasons_ahead: int = 3,
+    league_size: int | None = None,
+    scoring_format: str = "1qb_ppr",
+    platform: str = "espn",
+    reseed: bool = False,
+) -> dict:
+    """Write the PRISTINE grid: every team owns its own picks, every season.
+
+    Returns ``{"seeded", "reseeded_over", "carried", "skipped", "total"}``.
+    Idempotent:
+    re-running without `reseed` preserves every edited slot byte-for-byte
+    (D14). Never writes a user-supplied value — `pick_value` / `pool_value`
+    come only from the shipped `compute_pick_value` / `pick_pool_value`.
+
+    `original_roster_id` is an OPAQUE, LEAGUE-LOCAL slot label. `league_members`
+    has no `roster_id` column, so this is never resolved against a platform,
+    and it is STABLE: a member who already has slots keeps them, and a new
+    member takes the next free integer. (The LLD specified `index i =>
+    str(i+1)` off the passed member list; that silently re-points every
+    `pick_id`'s "original team" the moment the roster changes, so this
+    preserves the established mapping instead.)
+    """
+    from . import draft_status
+
+    # ── 0. CLAMP. The conservation bound's ONLY lever, and it is enforced
+    #    here rather than in the route so no caller can bypass it.
+    rounds = max(1, min(int(rounds), draft_status.ROOKIE_MAX_ROUNDS))
+    seasons_ahead = max(0, int(seasons_ahead))
+    member_user_ids = [str(u) for u in member_user_ids if str(u or "")]
+    if not member_user_ids:
+        return {"seeded": 0, "reseeded_over": 0, "carried": 0, "total": 0}
+    teams = int(league_size or len(member_user_ids))
+
+    # NOT source="any": the seeder must never read, and therefore never
+    # rewrite, a platform row.
+    existing_rows = load_draft_picks(league_id, source=PICK_SOURCE_USER,
+                                     include_contested=True)
+    existing = {str(r["pick_id"]): r for r in existing_rows}
+
+    # `pick_id`'s unique key has NO provenance dimension, so one slot cannot
+    # hold both a platform row and an asserted one. The platform wins — it is
+    # the authoritative reading — and the seeder SKIPS that slot rather than
+    # raising an IntegrityError. This is normally empty: assignment exists for
+    # leagues whose platform writes no pick rows at all.
+    taken_by_platform = {str(r["pick_id"]) for r in
+                         load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)}
+
+    # Stable slot labels — reuse what the grid already established.
+    slot_by_user: dict[str, str] = {}
+    used: set[str] = set()
+    for r in existing_rows:
+        ou  = str(r.get("original_user_id") or "")
+        rid = str(r.get("original_roster_id") or "")
+        if ou and rid and ou not in slot_by_user:
+            slot_by_user[ou] = rid
+            used.add(rid)
+    next_slot = 1
+    for uid in member_user_ids:
+        if uid in slot_by_user:
+            continue
+        while str(next_slot) in used:
+            next_slot += 1
+        slot_by_user[uid] = str(next_slot)
+        used.add(str(next_slot))
+
+    now = _now()
+    seasons = list(range(int(current_season), int(current_season) + seasons_ahead + 1))
+    rows: list[dict] = []
+    seeded = reseeded_over = skipped = 0
+    generated: set[str] = set()
+
+    for season in seasons:
+        years_out = season - int(current_season)
+        for uid in member_user_ids:
+            orig_rid = slot_by_user[uid]
+            for rnd in range(1, rounds + 1):
+                pick_id = make_pick_id(league_id, season, rnd, orig_rid)
+                if pick_id in taken_by_platform:
+                    skipped += 1
+                    continue
+                generated.add(pick_id)
+                prior = existing.get(pick_id)
+                if prior is not None and not reseed:
+                    rows.append(prior)          # PRESERVE the edit verbatim
+                    continue
+                if prior is not None:
+                    reseeded_over += 1
+                seeded += 1
+                rows.append({
+                    "pick_id":            pick_id,
+                    "league_id":          league_id,
+                    "season":             season,
+                    "round":              rnd,
+                    "owner_user_id":      uid,          # pristine: own your own
+                    "owner_username":     user_id_to_name.get(uid, f"Team {orig_rid}"),
+                    "original_roster_id": orig_rid,
+                    "original_user_id":   uid,
+                    "original_username":  user_id_to_name.get(uid, f"Team {orig_rid}"),
+                    "is_traded":          0,
+                    # ── No user-entered values, EVER. The shipped functions. ──
+                    "pick_value":  compute_pick_value(rnd, season, int(current_season), teams),
+                    "pool_value":  pick_pool_value(rnd, years_out, scoring_format),
+                    "platform":    platform,    # provenance of the LEAGUE
+                    "source":      PICK_SOURCE_USER,    # provenance of the ROW
+                    "assigned_by": actor_user_id,
+                    "assigned_at": now,
+                    "synced_at":   now,
+                })
+
+    # Slots whose ORIGINAL team has left the league still exist and may be
+    # owned by someone who is still here — carry them so nothing vanishes.
+    # Bounded to the grid's own (season, round) box, so shrinking `rounds` or
+    # the season horizon is an explicit user action rather than a silent drop.
+    carried = 0
+    season_set = set(seasons)
+    for pick_id, prior in existing.items():
+        if pick_id in generated:
+            continue
+        try:
+            if int(prior.get("season")) not in season_set:
+                continue
+            if not (1 <= int(prior.get("round") or 0) <= rounds):
+                continue
+        except (TypeError, ValueError):
+            continue
+        rows.append(prior)
+        carried += 1
+
+    replace_draft_picks(league_id, rows, preserve_source=PICK_SOURCE_USER)
+    _invalidate_contested(league_id)
+    return {"seeded": seeded, "reseeded_over": reseeded_over,
+            "carried": carried, "skipped": skipped, "total": len(rows)}
+
+
+def load_pick_assignment_settings(league_id: str) -> dict | None:
+    """The league's stored NUMBERING settings, or None when never configured.
+
+    ``{rounds:int, order_type:'linear'|'snake', order:[user_id, ...]}``.
+    Ownership is never stored here — see the column comment.
+    """
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(leagues_table.c.pick_assignment_settings)
+            .where(leagues_table.c.sleeper_league_id == str(league_id))
+            .limit(1)
+        ).fetchone()
+    if not row or not row.pick_assignment_settings:
+        return None
+    try:
+        parsed = json.loads(row.pick_assignment_settings)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def save_pick_assignment_settings(league_id: str, settings: dict) -> None:
+    """Persist the league's NUMBERING settings (rounds / order_type / order)."""
+    with engine.begin() as conn:
+        conn.execute(
+            update(leagues_table)
+            .where(leagues_table.c.sleeper_league_id == str(league_id))
+            .values(pick_assignment_settings=json.dumps(settings))
+        )
+
+
+def assign_draft_pick(league_id: str, pick_id: str, owner_user_id: str,
+                      owner_username: str, actor_user_id: str,
+                      if_assigned_at: str | None) -> tuple[str, dict | None]:
+    """Compare-and-swap ONE slot. Returns ``(outcome, row)``.
+
+    `outcome` is ``'ok'`` | ``'stale'`` | ``'not_found'``. On ``'stale'`` the
+    row returned is the CURRENT row, so the route can answer 409 with it in
+    one round trip and the client can say "Dana changed this 4 minutes ago —
+    keep theirs, or use yours?" without a second request.
+
+    The comparison lives in the UPDATE's WHERE clause, so it is atomic under
+    both dialects without a SELECT-then-UPDATE window. `IS NOT DISTINCT FROM`
+    is Postgres-only, so the NULL-token case is a separate portable predicate.
+
+    **Never writes a value column.** `pool_value` / `pick_value` are pure
+    functions of `(round, season)` and ownership changes neither, so an
+    assignment UPDATE touching them would be a bug. `seed_pick_grid` is the
+    only writer of those two.
+    """
+    lid, pid = str(league_id), str(pick_id)
+    with engine.begin() as conn:
+        def _read():
+            r = conn.execute(
+                select(draft_picks_table).where(
+                    (draft_picks_table.c.pick_id == pid)
+                    & (draft_picks_table.c.league_id == lid))
+            ).fetchone()
+            return dict(r._mapping) if r else None
+
+        row = _read()
+        if row is None:
+            return ("not_found", None)
+
+        token_pred = (draft_picks_table.c.assigned_at.is_(None)
+                      if if_assigned_at is None
+                      else draft_picks_table.c.assigned_at == if_assigned_at)
+        is_traded = int(str(owner_user_id) != str(row.get("original_user_id") or ""))
+        result = conn.execute(
+            update(draft_picks_table)
+            .where((draft_picks_table.c.pick_id == pid)
+                   & (draft_picks_table.c.league_id == lid)
+                   & token_pred)
+            .values(owner_user_id  = str(owner_user_id),
+                    owner_username = owner_username,
+                    is_traded      = is_traded,
+                    source         = PICK_SOURCE_USER,
+                    assigned_by    = str(actor_user_id),
+                    assigned_at    = _now())
+        )
+        if result.rowcount == 0:
+            return ("stale", _read())           # re-read INSIDE the txn
+        return ("ok", _read())
 
 
 # ---------------------------------------------------------------------------

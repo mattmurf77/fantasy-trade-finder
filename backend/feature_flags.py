@@ -444,6 +444,19 @@ FLAG_KEYS: tuple[str, ...] = (
     # create route answers the typed-empty `{"empty": true, "reason":
     # "cpu_model_unvalidated"}` rather than serving unvalidated bots.
     "draft.mock",
+    # draft-extensions W3 M-A/M-B (ADR-010) — ESPN pick assignment. Gates the
+    # three assignment routes (GET/PUT /api/league/pick-assignments,
+    # POST …/order) AND the ESPN branch of GET /api/draft/board.
+    # OFF (default) ⇒ all three routes 404 `feature_disabled` before any
+    # session work; `GET /api/draft/board` for an ESPN league returns the
+    # byte-identical `platform_unsupported` payload it returns today; the
+    # three new `draft_picks` provenance columns stay unwritten; and every
+    # existing read site is unchanged because `load_draft_picks` defaults to
+    # `source='platform'` (NULL reads as platform, so no backfill runs).
+    # This flag does NOT let asserted picks into trade math — that is the
+    # separate M-C kill switch, deliberately, so pick math can be turned off
+    # without destroying the rows a league typed in.
+    "picks.assign",
     # THE SEASONAL ON/OFF SWITCH FOR THE DRAFT TAB (operator decision,
     # 2026-08-06: "it should literally just be set to seasonal — a flag we
     # turn on and off to display the tab"). Client-only: no route reads it.

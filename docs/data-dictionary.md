@@ -74,6 +74,7 @@ per-`(league, user)` roster.
 | `draft_status` | str | #207 rookie-draft verdict for the league's CURRENT season: `'drafted'` / `'not_drafted'` / `'unknown'`. NULL = never checked. Written by `server._refresh_league_draft_status` (`backend/draft_status.py` decides); read by `/api/rankings` + `/api/trio` to year-tag the generic pick rungs. **Fail-safe: anything but `'drafted'` shows current-year picks** |
 | `draft_status_confidence` | str | `'high'` (platform-authoritative: Sleeper `complete`+`last_picked`, MFL `made==total`) / `'medium'` (roster heuristic, or a platform/roster conflict) / `'low'` (abstained). Recorded for diagnosis; the serialization path gates on the verdict only |
 | `draft_status_checked_at` | str | ISO UTC of the last check — stamped even for `'unknown'` so a persistently flaking league backs off. Drives the asymmetric cheap-skip TTLs in `server._DRAFT_STATUS_TTL_SECONDS` (drafted 12 h, not_drafted 3 h, unknown 1 h) |
+| `pick_assignment_settings` | text (JSON) | **W3 M-A (ADR-010)**, flag `picks.assign` — `{rounds:int, order_type:'linear'\|'snake', order:[user_id, …]}`. **NUMBERING ONLY.** Ownership is never stored here — it lives one row per slot in `draft_picks`. `order` is the round-1 pick sequence and `order_type` the shape; both change slot numbers and **never** who owns a pick, which is what makes the toggle safe to flip at any time. NULL = never configured (defaults: 4 rounds, linear, members sorted by `user_id`). Accessors: `load_pick_assignment_settings` / `save_pick_assignment_settings` |
 | `created_at`, `updated_at` | str | |
 
 ---
@@ -421,10 +422,29 @@ Dynasty pick assets across upcoming seasons. `pick_id = "{league}_{season}_{roun
 | `is_traded` | int | 1 if ownership changed |
 | `pick_value` | float | `compute_pick_value()` output at sync time, on the **0–100 round-tier scale** (mid-1st ≈ 67.5), NOT the 0–10000 player value space. Kept for **pick-share** ratios (`_user_pick_share`, outlook seeds). The LEGACY engine bridges it via `elo_to_value(1200 + 6·pick_value)` in `trade_service.dynasty_value`; the v2/v3 engine instead reads Elo maps primed with `1200 + 6·pick_value` per injected pick (`server._pick_asset_elos`, #185). |
 | `pool_value` | float | **#158** — pick value on the **engine/calculator scale** (`elo_to_value` units), = `pick_pool_value(round, years_out)` = the generic-ladder **Mid**-tier value of the round, year-discounted (0.85/yr) in value space. `years_out=0` equals the generic "Mid <round>" pool pick exactly. This is what the calculator + suggestions price on (distinct from the legacy `pick_value`). Shared ladder lives in `backend/pick_values.py`. |
-| `platform` | str | **#158** — provenance: `'sleeper'` or `'mfl'`. ESPN never writes rows (players-only). |
+| `platform` | str | **#158** — the **LEAGUE's** provenance: `'sleeper'` \| `'mfl'` \| `'espn'`. ⚠️ **This column's rule CHANGED in W3 (ADR-010).** It used to read "ESPN never writes rows (players-only)"; ESPN rows now exist, written by a league's own members. `platform` says where the league lives; `source` (below) says who asserted the row. They answer different questions and both are load-bearing — the two engine guards read `platform`, the containment reads `source`. |
+| `source` | str | **W3 M-A (ADR-010)** — the **ROW's** provenance. `NULL` or `'platform'` = platform-written; `'user'` = a league member asserted it. **Every pre-W3 row is NULL and NO BACKFILL RUNS.** |
+| `assigned_by` | str | W3 — FTF `user_id` of the last editor (`'user'` rows only). |
+| `assigned_at` | str | W3 — ISO-8601 UTC, and **also the optimistic-concurrency token**: `PUT /api/league/pick-assignments/<pick_id>` carries the value it read and the UPDATE's WHERE clause compares it. `NULL` on a never-assigned row. |
 | `synced_at` | str | |
 
 **Sync (revived #158):** `sync_draft_picks()` (Sleeper: pristine grid × traded-picks overlay) runs on the **session_init background daemon** per league; MFL picks normalize into the same table via `server._sync_mfl_owned_picks()` at link/import. Both gated on `picks.owned_sync` (default off). Delete+bulk-insert per league via `replace_draft_picks()`. `rounds` comes from Sleeper `settings.draft_rounds` (was hard-coded 3, which dropped 4th-round picks in 4-round leagues).
+
+### The containment rule (W3 M-A, ADR-010) — read this before adding a reader
+
+`load_draft_picks(league_id, owner_user_id=None, source='platform', include_contested=False)` **defaults to platform-only**, and `NULL` reads as platform. So every read site written before W3 returns byte-identical rows in byte-identical order, for every league and every provenance mix, with no backfill. **That default IS the containment**, not a table split.
+
+- `'platform'` (default) → `source IS NULL OR source = 'platform'`
+- `'user'` → `source = 'user'`
+- `'any'` → no source predicate
+
+When the result *can* contain user rows and `include_contested` is False, **contested** and **orphaned** slots are dropped by a **row filter**. Nulling `pool_value` instead is forbidden: `server._power_picks_by_owner` re-derives a price from a NULL `pool_value`, so nulling would silently re-price the very row the rule withholds.
+
+There are exactly **seven** read sites (`_roster_eveners`, `_user_pick_share`, `_run_trade_job`, `_trade_evaluate_impl`, `get_league_picks`, `_owned_pick_assets`, `_power_picks_by_owner`) and an AST test in `backend/tests/test_pick_assignment.py` enumerates them. An eighth, or an existing one gaining `source=`, **fails the test** — that is deliberate, not an obstacle to route around.
+
+`replace_draft_picks(league_id, rows, preserve_source=None)` scopes its DELETE to one provenance: a writer only ever deletes rows it could have written. Platform callers keep the default; only W3's assignment projection passes `'user'`.
+
+`pick_id` has exactly one constructor — `database.make_pick_id()`. Round is unpadded, so a `pick_id` is **not** lexicographically sortable. Its unique key has no provenance dimension, so one slot cannot hold both a platform row and an asserted one; the seeder skips such a slot (the platform wins).
 
 ---
 
