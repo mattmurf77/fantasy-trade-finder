@@ -10,11 +10,44 @@
 ---
 
 ## Table of Contents
+- [2026-08-08](#2026-08-08)
 - [2026-05-21](#2026-05-21)
 - [Local Conventions That Become Dependencies If Violated](#local-conventions-that-become-dependencies-if-violated)
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
 
 ---
+
+## 2026-08-08
+
+*Added during the living-memory revival pass, covering 2026-07-09 → 2026-08-06.*
+
+### Backend: zero new dependencies in a month of heavy feature work
+- **`requirements.txt` was not touched** across the whole window, despite adding Apple sign-in, an experiments engine, and a statistics layer. Two deliberate choices produced that:
+  - **Apple sign-in verifies JWKS by hand** rather than pulling an auth library (`920a638`).
+  - **`backend/analytics_stats.py` is scipy-free** — two-proportion z, Welch's t (p99-winsorized), CIs, Bonferroni, chi-square SRM, and a sample-size calculator, all hand-rolled and pinned by a `stats_golden.json` fixture (`877fc91`).
+- Treat a proposed backend dependency as needing a justification against this precedent.
+
+### Mobile: five additions, all via `expo install`
+| Package | Version | Added | Why |
+|---|---|---|---|
+| `patch-package` | `^8.0.1` | `eee9164` | Carries `patches/react-native-draggable-flatlist+4.0.3.patch` (drag anchored to touch point, FB-82). Runs via a `postinstall` script — **a fresh `npm ci` that skips postinstall silently loses the patch**. |
+| `expo-apple-authentication` | `~8.0.8` | `920a638` | Apple sign-in. Requires the native entitlement — see [GOTCHAS G-013](GOTCHAS.md). |
+| `@react-native-community/netinfo` | `11.4.1` | `3976b01` | Connectivity state. |
+| `expo-store-review` | `~9.0.9` | `3976b01` | `growth.rating_prompt`. |
+| `react-native-view-shot` | `4.0.3` | `fbd5561` | Share-trade-as-image. |
+- **`react-native-screens` is pinned at 4.16.0** and carries a live upstream bug (iOS 26 header back, react-native-screens#3294) worked around in app code — see [GOTCHAS G-021](GOTCHAS.md). Bumping it should include re-testing that workaround.
+- Any of these that ship native code make the next build a **full EAS build, not an OTA update**.
+
+### Infrastructure dependencies discovered the hard way
+- **Render blueprint (`render.yaml`) is not authoritative for dashboard-created services** — `envVars` in it never reach the process. Config that must survive a deploy goes in a committed file. See [GOTCHAS G-018](GOTCHAS.md).
+- **Render cron services are billable and need account approval**; a blueprint declaring one fails to sync (`1e50d3e`). The `value-snapshot-daily` cron was added and then removed for exactly this reason — the hourly tick's idempotent guard covers the cadence instead.
+- **A dashboard DB plan upgrade must be mirrored back into `render.yaml`** or sync fails with "cannot downgrade database from Basic-256mb to Free" (`1f7eeb3`).
+- **`.easignore` is load-bearing.** 71 agent worktrees (8.6 GB) pushed the EAS upload archive from 228 MB to 1.2 GB and the upload 400'd. Scope its globs narrowly — an earlier version matched `*.png`, stripped the app icon and splash, and failed the Bundle JavaScript phase.
+
+### New environment variables
+- **`EXPERIMENT_SALT_KEY`** — immutable once experiment assignments exist. See [GOTCHAS G-019](GOTCHAS.md).
+- **`FTF_TESTER_ALLOWLIST`** — superseded in practice by the committed `config/tester_allowlist.json`, which the engine unions with it.
+- **`SLEEPER_TOKEN_KEY`** — now also encrypts MFL credentials (`mfl_credentials`) and ESPN cookies (`espn_credentials`), not just Sleeper tokens. Its blast radius grew; losing it invalidates three platforms' stored credentials.
 
 ## 2026-05-21
 

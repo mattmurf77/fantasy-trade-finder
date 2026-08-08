@@ -29,6 +29,39 @@ Bias toward caution over speed; use judgment for trivial tasks.
 - `web/index.html` — single-page web app
 - `extension/manifest.json` — MV3 extension
 
+## Session memory (`living-memory/`) — read at start, write at end
+
+`living-memory/` is the cross-session state layer. `docs/` is reference (what the system *is*); living-memory is motion (what changed, what's next, what bit us). **If the two ever conflict, `docs/` wins — and update both.**
+
+**At session start, read these four** (2 minutes, no exceptions):
+
+| File | Why |
+|---|---|
+| [living-memory/HANDOFF.md](living-memory/HANDOFF.md) | Where the last session stopped, what's half-done, what's blocking |
+| [living-memory/NEXT.md](living-memory/NEXT.md) | The live priority queue |
+| [living-memory/CHANGELOG.md](living-memory/CHANGELOG.md) | Top 2–3 entries only — recent shipped work |
+| [living-memory/GOTCHAS.md](living-memory/GOTCHAS.md) | Skim before debugging anything weird |
+
+**At session end, write back.** A session that changed code and left living-memory untouched is an incomplete session:
+
+| If this happened… | Update… |
+|---|---|
+| You shipped, merged, or deployed anything | [CHANGELOG.md](living-memory/CHANGELOG.md) — new dated H2 at the top |
+| You are stopping with work in flight | [HANDOFF.md](living-memory/HANDOFF.md) — **overwrite**, don't accumulate |
+| Priorities moved, or you finished a queue item | [NEXT.md](living-memory/NEXT.md) — cap 7 active items |
+| You made a non-obvious design choice | [DECISIONS.md](living-memory/DECISIONS.md) — next ID `D-011` |
+| You lost >30 min to a quirk | [GOTCHAS.md](living-memory/GOTCHAS.md) — next ID `G-013` |
+| You abandoned an approach | [MISTAKES.md](living-memory/MISTAKES.md) — next ID `M-005` |
+| You hit something you can't resolve alone | [OPEN_QUESTIONS.md](living-memory/OPEN_QUESTIONS.md) — next ID `Q-016` |
+| You ran the suite or a manual QA pass | [TEST_LEDGER.md](living-memory/TEST_LEDGER.md) |
+| You added/bumped/removed a dependency | [DEPENDENCIES.md](living-memory/DEPENDENCIES.md) |
+
+Format is specified in [living-memory/FORMAT.md](living-memory/FORMAT.md) — every file needs the purpose blockquote, a TOC matching its H2s, and ISO dates. Audit compliance with the `living-memory-format-check` skill. Full read-at/write-at table in [living-memory/README.md](living-memory/README.md).
+
+**Long sessions:** don't bank the whole write-back for the end. After any merge, deploy, or hard-won debug, log it then — context runs out before sessions do.
+
+**Two hooks in `.claude/settings.json` back this up.** A `SessionStart` hook injects HANDOFF + NEXT into context automatically, so the read half happens whether or not anyone remembers. A `Stop` hook warns once per session if any code file is newer than every file in `living-memory/` — it stays silent when memory is current. Neither blocks; they nudge. Review or disable via `/hooks`.
+
 ## Reference docs (keep current)
 
 Anyone — human or Claude — making changes is expected to keep `docs/` in sync. Quick map:
@@ -49,6 +82,7 @@ See [docs/CLAUDE.md](docs/CLAUDE.md) for the full table of update triggers.
 
 ## Conventions
 
+- **Always branch from `origin/main`** (2026-08-08): every new piece of work — bug fixes, features, agent worktrees — starts from a freshly fetched `origin/main`, never from whatever branch this checkout happens to be sitting on. Multiple sessions run concurrently in this repo and the checked-out branch is often stale. Ship = merge/push to `main` (Render auto-deploys; EAS → TestFlight).
 - Read `context.md` for project orientation; `docs/` is the source of truth for details.
 - DB lives in `data/trade_finder.db` (the stale legacy root copy was archived to `data/archive/` on 2026-06-10).
 - `config/features.json` drives feature flags consumed by both backend and clients.

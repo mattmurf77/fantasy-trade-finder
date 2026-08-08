@@ -11,6 +11,7 @@
 ## Table of Contents
 - [2026-05-21](#2026-05-21)
 - [2026-07-04](#2026-07-04) — G-011 PlayerCard gesture-swallow, G-012 iOS version source
+- [2026-08-08](#2026-08-08) — G-013 through G-023, recorded retroactively
 - [Gotcha Template](#gotcha-template)
 
 ---
@@ -93,6 +94,78 @@
 - **Fix:** set the version in all three native spots + app.json for sanity: `Info.plist` `CFBundleShortVersionString`, both `MARKETING_VERSION` lines in `project.pbxproj`, and `app.json` `version`. Commit (ios/ is tracked). See commit `e291a09`.
 - **Prevention:** treat `ios/` (and `android/app/build.gradle` `versionName`) as the source of truth for version strings whenever a native dir is committed. NEXT.md #3 half-knew this ("app.json bumps don't apply") but attributed it to `appVersionSource: remote`; the real reason is the committed native project.
 - **History:** hit 2026-07-06 — build 20 auto-submitted as 1.0.0, cancelled mid-flight, version fixed, rebuilt as 1.3.0.
+
+---
+
+## 2026-08-08
+
+*Recorded retroactively during the living-memory revival pass, covering 2026-07-09 → 2026-08-06. Each entry is traced to the commit that fixed it.*
+
+### G-013 — the bare workflow ignores ALL of `app.json`'s iOS config, not just `version`
+- **Symptom:** an Expo config plugin or `ios.*` key appears correct in `app.json`, the build succeeds, and the capability is simply absent at runtime.
+- **Cause:** the same committed native `ios/` directory as [G-012](#g-012--ios-marketing-version-comes-from-native-ios-not-appjson) — but the blast radius is wider than the version string. Confirmed casualties: `com.apple.developer.applesignin` (**builds 40 and 41 shipped unsigned for Apple**, FB-131, `2b5e07a`); `com.apple.developer.associated-domains` (**every invite Universal Link opened the browser instead of the app**, #239, `c0e99ba`); marketing version again (**build 51 shipped as 1.10.0 after the app.json bump to 1.11.0**, `af798c4`).
+- **Fix:** edit the native project directly — `ios/DTFDynastyTradeFinder/*.entitlements`, `Info.plist`, `project.pbxproj` — and commit; `ios/` is tracked.
+- **Prevention:** when adding any Expo plugin that grants an iOS capability, verify it landed in the native entitlements file before building. Treat "the plugin is in app.json" as zero evidence.
+
+### G-014 — `league_id.isdigit()` is not a platform test
+- **Symptom:** first, ESPN/MFL/Fleaflicker leagues returned 404 from the Sleeper roster proxies and the trade-away picker came up empty. Later, and much worse, **an MFL league's `draft_picks` were wiped on every single app open**.
+- **Cause:** numeric league ids are not Sleeper-exclusive. Routes and the session-init daemon both branched on `league_id.isdigit()`, so a numeric MFL id (league 62846) was fed into the Sleeper grid sync, whose empty REPLACE deleted the rows.
+- **Fix:** `database.is_linked_platform_league()` reads the DB membership snapshot. Applied at both sites — `52be577` (routes) and `0106aba` (daemon).
+- **Prevention:** never infer platform from id shape. The link is recorded in the DB; ask it.
+
+### G-015 — an empty `roster_ids` grid silently wipes picks through a REPLACE-sync
+- **Symptom:** a league's owned draft picks vanish with no error anywhere.
+- **Cause:** `sync_draft_picks` is a REPLACE. Hand it an empty roster grid and it faithfully replaces everything with nothing. The only realistic producer of an empty grid is an **upstream Sleeper fetch that flaked** — so a transient network blip destroys durable data.
+- **Fix:** `2b8ecca` — `sync_draft_picks` no-ops on empty `roster_ids`, and the daemon step skips entirely when the rosters/meta read is unavailable.
+- **Prevention:** any REPLACE-style sync needs an explicit "the source said nothing" guard distinct from "the source said empty". This is the same class as the #200 clobber.
+
+### G-016 — a flag or targeting attribute can be registered and still be inert
+- **Symptom:** the flag is in `config/features.json`, or the targeting attribute is registered, and behavior never changes for anyone.
+- **Cause:** two separate versions of the same trap. (1) A key in `config/features.json` that isn't also in `feature_flags.FLAG_KEYS` is silently ignored (`bd3d8c5`). (2) A registered targeting attribute with **no resolver** matches nobody rather than erroring — `is_tester_allowlist` gated the entire onboarding_v2 rollout to zero users (`51ca4cb`).
+- **Fix:** add to `FLAG_KEYS`; implement the resolver.
+- **Prevention:** after registering either, assert one positive case actually resolves. Currently live: `outlook.odds` is in neither `LAUNCHED_FLAG_DEFAULTS` nor `features.json`, so `GET /api/league/outlook` is unreachable.
+
+### G-017 — paired client/server gates fail silently when only one is on
+- **Symptom:** analytics looked wired end-to-end; zero rows had ever landed.
+- **Cause:** the client emission gate was ON while `analytics.ingest` was OFF, so the server rejected every batch with disposition `disabled` — a success-shaped response. No error surfaced on either side.
+- **Fix:** `315fccc`. Clients had retained their queues, so history flushed on enable — the data wasn't lost, just invisible.
+- **Prevention:** for any two-sided gate, verify a row at the destination, not a 200 at the source.
+
+### G-018 — Render ignores `render.yaml` for dashboard-created services
+- **Symptom:** you add an env var to `render.yaml`, deploy succeeds, and the variable is not in the environment.
+- **Cause:** services created through the Render dashboard don't take `envVars` from the blueprint. `FTF_TESTER_ALLOWLIST` was added in `4404c60` and never reached the process; the fix-the-fix chain ran `4404c60` → `d86cbb7` (runbook) → `b689f28` (moved the allowlist to a git-committed `config/tester_allowlist.json`, unioned with env).
+- **Related Render traps:** new blueprint **cron services are billable and need account approval**, so blueprint sync fails (`1e50d3e`); and a DB plan upgraded in the dashboard must be mirrored in `render.yaml` or sync fails with "cannot downgrade database from Basic-256mb to Free" (`1f7eeb3`).
+- **Prevention:** config that must survive a deploy belongs in a committed file, not a blueprint env var.
+
+### G-019 — `EXPERIMENT_SALT_KEY` is immutable once experiments run, and boot-seeding hides that
+- **Symptom:** experiment assignments look wrong or unreproducible after the env var is finally set.
+- **Cause:** `_seed_experiment_layers` uses INSERT-OR-IGNORE at boot. A deploy that started before the key existed persists **dev-fallback salts forever**, and the later, correct env var is ignored because the rows already exist.
+- **Fix:** `POST /api/admin/experiments/reseed-layers` (`a55c19e`), guarded on zero assignments.
+- **Prevention:** changing the salt after real assignments exist rebuckets every user. Treat it as immutable; use the reseed route only before traffic.
+
+### G-020 — CocoaPods `EXConstants` breaks twice on a repo path containing spaces
+- **Symptom:** a locally built app silently talks to the PROD `apiBaseUrl` regardless of your dev config.
+- **Cause:** the "Generate app.config" build phase fails in two stages. The podspec's `bash -l -c` word-splits on the space; once quoted, `basename $PROJECT_DIR` yields "Fantasy" ≠ "Pods", so the phase **silently no-ops** and the app falls back to prod.
+- **Fix:** `920a638` replaces the build phase wholesale in `mobile/ios/Podfile`.
+- **Prevention:** this project's path has a space in it and always will. Use the no-space clone at `../ftf-test-clone` for local native builds — and note this failure is silent, so a "working" local build proves nothing about which backend it hit.
+
+### G-021 — iOS 26 native header back is dead when the previous screen hides its header
+- **Symptom:** the back chevron renders and does nothing.
+- **Cause:** upstream react-native-screens#3294; the app pins 4.16.0.
+- **Fix:** explicit JS `HeaderBack` with `headerBackVisible: false`. Rolled out to LeagueSummary / Profile / TestStages in `0eb1061`.
+- **Prevention:** don't rely on the native back button on any screen pushed from a header-less one.
+
+### G-022 — parallel-agent worktrees drift, duplicate, and blow up the EAS archive
+- **Symptom:** a wave of agent work merges cleanly but behaves oddly; or an EAS upload 400s.
+- **Cause:** several distinct problems, all from the same source. Worktree agents branch from an **older commit than branch HEAD** (merge-base `20548ff` vs HEAD `30492ac`). Disjoint source-file ownership holds, but agents independently edit the same **shared docs** (`docs/cross-client-invariants.md`, per-folder `CLAUDE.md`). Every worktree lacks `mobile/node_modules`, so each agent symlinks the main checkout's. And 71 worktrees (8.6 GB) pushed the EAS archive from 228 MB to **1.2 GB**, failing the upload.
+- **Fix:** `.easignore` (note: an earlier version globbed `*.png`, stripped the app icon and splash, and failed the Bundle JavaScript phase — scope it narrowly). Check `git merge-base` per branch and rebase before merging. Assign shared docs a single owner per wave.
+- **Prevention:** always branch from a freshly fetched `origin/main`, per the convention in [`../CLAUDE.md`](../CLAUDE.md).
+
+### G-023 — testers report against the shipped binary, not your branch
+- **Symptom:** you write a careful fix for a feedback item that was already fixed weeks ago.
+- **Cause:** TestFlight builds lag a long-lived unshipped branch by weeks. Items #208 and #262 were both already fixed in the repo when reported.
+- **Fix:** before writing any fix, ask whether it still reproduces on current code.
+- **Related:** `activeScreen` in a feedback report is a **route name, not a file** — grep the TabNav registrations before concluding a screen doesn't exist.
 
 ---
 

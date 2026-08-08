@@ -14,5 +14,14 @@ Reference docs for the project. **Treat these as part of the codebase — keep t
 | `coding-guidelines.md` | The team adopts a new behavioral rule worth codifying alongside the Karpathy four principles |
 | `adr/` | You make a non-obvious architectural choice |
 | `feedback/items/<id>-<slug>/` | You produce durable non-code output for a feedback item's fix (PRD, plan, status, QA findings) — see `feedback/items/README.md`; scratch goes to gitignored `feedback-workspace/<id>/` |
+| `references/<site>/<api-name>/` | You reverse-engineer or verify the shape of an **external** API FTF calls (Sleeper, ESPN, MFL, Anthropic, …) — see `references/README.md` (human) / `references/CLAUDE.md` (agent instructions) |
 
 If you can't tell whether a doc needs updating, scan the table above against your diff. If your change touches `backend/database.py`, the data dictionary is in scope; if it touches routes in `backend/server.py`, the API reference is in scope; etc.
+
+## Not the same thing as `living-memory/`
+
+`docs/` is **reference** — what the system is right now, written as if it had always been that way. [`../living-memory/`](../living-memory/) is **motion** — dated entries for what changed, what's next, what's still open, what bit us.
+
+A change usually touches both: the data dictionary gains the new column (reference), and `living-memory/CHANGELOG.md` gains a dated line saying it was added and why (motion). Don't paste changelog narrative into `docs/`, and don't restate reference material in living-memory — cross-link instead.
+
+**If the two conflict, `docs/` wins.** Fix the living-memory file, not the other way round. Session read/write triggers are in [`../CLAUDE.md`](../CLAUDE.md) §Session memory.
