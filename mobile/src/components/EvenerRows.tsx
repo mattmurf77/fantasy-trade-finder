@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import MemberEnteredMarker from './MemberEnteredMarker';
 import PositionChip from './PositionChip';
 import { Icon, TickLabel } from './chalkline';
 import type { CalcEvener } from '../api/calc';
@@ -10,6 +11,10 @@ interface Props {
   /** Section label, e.g. "Recommended to even it — add from your roster". */
   title: string;
   onAdd: (evener: CalcEvener) => void;
+  /** W3 M-C (D17) — the league whose assignment grid holds any asserted
+   *  pick recommended here. The In-league mount passes it; the open
+   *  calculator's generic-pick eveners have no league and no `source`. */
+  leagueId?: string | null;
 }
 
 // "Recommended to even it" rows (DynastyGM teardown 2026-07-26): the one-tap
@@ -20,7 +25,7 @@ interface Props {
 // evaluate re-run refreshes or clears these rows as the trade evens. Renders
 // nothing without candidates — honest empty state. Chalkline: ice = action
 // (the + affordance), transparent-bordered rows, no new hues.
-export default function EvenerRows({ eveners, title, onAdd }: Props) {
+export default function EvenerRows({ eveners, title, onAdd, leagueId }: Props) {
   if (eveners.length === 0) return null;
   return (
     <View style={styles.wrap}>
@@ -33,9 +38,23 @@ export default function EvenerRows({ eveners, title, onAdd }: Props) {
           style={styles.row}
         >
           <PositionChip position={e.position} size="sm" />
-          <Text style={styles.name} numberOfLines={1}>
-            {e.name}
-          </Text>
+          <View style={styles.body}>
+            <Text style={styles.name} numberOfLines={1}>
+              {e.name}
+            </Text>
+            {/* D17 — priced surface 3 of 5: the evener chip. This is the
+                sweetener FTF ACTIVELY recommends ("ask them to add their
+                2027 1st"), so it is the surface where an unmarked assertion
+                does the most damage (plan §6.4 S4). UNCONDITIONAL; the
+                marker self-gates on the flag and on `source === 'user'`. */}
+            <MemberEnteredMarker
+              source={e.source}
+              pickId={e.pick_id ?? e.id}
+              season={e.season}
+              leagueId={leagueId}
+              testID={`calc.evener.member-entered.${e.id}`}
+            />
+          </View>
           <Text style={[type.data, styles.value]}>
             {Math.round(e.value).toLocaleString()}
           </Text>
@@ -69,7 +88,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
     minHeight: 44,
   },
-  name: { ...type.bodySm, color: chalk.base, flex: 1 },
+  // The name column became a stack when the provenance marker joined it;
+  // with no marker it renders exactly as the single Text did.
+  body: { flex: 1, gap: space.xs },
+  name: { ...type.bodySm, color: chalk.base },
   value: { minWidth: 56, textAlign: 'right' },
   addBtn: {
     minWidth: 32,

@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { PickSource } from './pickAssignment';
 import type {
   ScoringFormat,
   ActivityEvent,
@@ -134,6 +135,13 @@ export interface OwnedPick {
   pool_value?: number | null;
   /** Display label, e.g. "2027 1st". */
   label: string;
+  /** draft-extensions W3 M-C (D17) — `draft_picks.source`. `'user'` means a
+   *  LEAGUEMATE asserted this ownership on the ESPN assignment grid and no
+   *  platform will ever confirm it, so every surface that renders this
+   *  pick's PRICE must carry `MemberEnteredMarker`. Absent / `'platform'`
+   *  is platform truth (every pre-W3 row reads as platform — no backfill
+   *  ran). Server-authoritative: the client never infers it. */
+  source?: PickSource | null;
 }
 export interface LeaguePicksResponse {
   my_picks: OwnedPick[];
@@ -533,7 +541,22 @@ export interface PowerRankedTeam {
   /** #14 FR1 — draft-capital group, priced via the generic pick ladder
    *  (pick_pool_value; year-discounted Mid tier). total_value INCLUDES this;
    *  positions_value is the positions-only sum. Absent on old servers. */
-  picks?: { count: number; value: number; items: Array<{ label: string; value: number }> };
+  picks?: {
+    count: number;
+    value: number;
+    /** draft-extensions W3 M-C (D17/S2): `pick_id`/`season`/`source` ride
+     *  each item so an ASSERTED pick can be marked and corrected from the
+     *  draft-capital group. All three are optional — a Sleeper/MFL payload
+     *  and any pre-M-C server omit them, and an item without `source ===
+     *  'user'` renders exactly as it does today. */
+    items: Array<{
+      label: string;
+      value: number;
+      pick_id?: string | null;
+      season?: number | null;
+      source?: PickSource | null;
+    }>;
+  };
   positions_value?: number;
   /** League Analyzer replication (2026-07-26) — the team's DERIVED
    *  value-optimal starting lineup: the league's starting-slot template

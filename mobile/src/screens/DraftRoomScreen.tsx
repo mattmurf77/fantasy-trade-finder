@@ -68,7 +68,7 @@
 // Flag off ⇒ no toggle, no query, no mock state at all: this file renders
 // byte-identically to what shipped.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -130,6 +130,7 @@ import {
   type MockDraftState,
 } from '../api/mockDraft';
 import { setAssetPref } from '../api/league';
+import { getPickAssignments, pickAssignmentSubline } from '../api/pickAssignment';
 import { track } from '../api/events';
 import { readErrorCopy } from '../utils/verification';
 import { haptics } from '../utils/haptics';
@@ -179,6 +180,13 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   // W2 — the `Real draft | Mock` switch. Off ⇒ no toggle, no query, and
   // every mock branch below is unreachable.
   const mockOn = useFlag('draft.mock');
+  // W3 M-A/M-B (operator, 2026-08-08). ESPN publishes no draft object, so
+  // this room's only path to a real board is a member typing the pick grid
+  // in. The shipped flow told the user to go do that on the League tab —
+  // directions to another tab to unblock the screen they are already on.
+  // With the flag on, the room OWNS the action: the notice's CTA pushes the
+  // assignment grid, and the League-tab section survives as a second entry.
+  const pickAssignOn = useFlag('picks.assign');
   const [mode, setMode] = useState<DraftMode>('real');
   const mockMode = mockOn && mode === 'mock';
   const [setupOpen, setSetupOpen] = useState(false);
@@ -218,6 +226,32 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   const onRefresh = useCallback(() => {
     query.refetch();
   }, [query]);
+
+  // ── The assignment grid's progress (operator, 2026-08-08) ─────────────
+  // Read ONLY for a board the grid itself produced (`order_confidence:
+  // 'assigned'` is emitted by the ESPN branch and by nothing else), and
+  // only with `picks.assign` on. Every other league — every Sleeper and MFL
+  // room, and an ESPN room before anyone assigns — issues no request and is
+  // byte-identical. Shares its key with the League tab and the grid screen,
+  // so a save there updates this line without a fetch.
+  const assignQuery = useQuery({
+    queryKey: ['pick-assignments', leagueId],
+    queryFn: () => getPickAssignments(leagueId as string),
+    enabled: !!leagueId && pickAssignOn && board?.order_confidence === 'assigned',
+    staleTime: 5 * 60_000,
+  });
+  const assignProgress = useMemo(() => {
+    const d = assignQuery.data;
+    if (!d?.seeded) return null;
+    const p = d.progress;
+    const partial = p.assigned < p.total;
+    return {
+      // ONE formatter behind the League tab's sub-line, the grid's progress
+      // line and this row, so the three cannot disagree.
+      line: pickAssignmentSubline(p, d.seeded),
+      action: partial ? 'Continue assigning' : 'Edit the draft picks',
+    };
+  }, [assignQuery.data]);
 
   // ── W2 mock entry ─────────────────────────────────────────────────────
   // Fetched ONLY while the Mock side is selected: with the flag on but the
@@ -341,6 +375,32 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   const [toast, setToast] = useState<
     { msg: string; tone?: 'success' | 'warn' } | null
   >(null);
+
+  // ── Assign the picks from HERE (operator, 2026-08-08) ─────────────────
+  // Pushed, not presented as a sheet: the grid is a full working surface
+  // (four season tabs, collapsible rounds, a drag-order setup step and two
+  // of its own sheets — the owner picker and the CAS-conflict sheet), and
+  // stacking sheets inside a sheet is the exact iOS constraint that forced
+  // TradeDnaSheet to nest its second layer inside one Modal. A push also
+  // gets the shipped `pick-assignment.back-btn` and the #151 iOS-26 header
+  // workaround for free, so back is guaranteed live.
+  //
+  // The room re-reads its board whenever it regains focus AFTER such a push
+  // (never on an ordinary focus — the room already polls under its own
+  // flag, and an unconditional refetch-on-focus would be a behaviour change
+  // for every league). The user who just typed a grid must not come back to
+  // the "not assigned" notice they left.
+  const cameFromAssignRef = useRef(false);
+  const goToAssignPicks = useCallback(() => {
+    cameFromAssignRef.current = true;
+    navigation?.navigate?.('PickAssignment', { leagueId });
+  }, [navigation, leagueId]);
+
+  useEffect(() => {
+    if (!isFocused || !cameFromAssignRef.current) return;
+    cameFromAssignRef.current = false;
+    queryClient.invalidateQueries({ queryKey: ['draft-board', leagueId] });
+  }, [isFocused, queryClient, leagueId]);
 
   const goToRookieRanks = useCallback(() => {
     // The bridge is two-way as of W1: RookieRanks gets a return route, so
@@ -578,7 +638,29 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
             board={board}
             showLastYear={showLastYear}
             onToggleLastYear={() => setShowLastYear((v) => !v)}
+            onAssignPicks={pickAssignOn ? goToAssignPicks : undefined}
           />
+        ) : null}
+
+        {/* The other half of the same operator note: once SOME picks are
+            assigned the room renders a real board, and a partly-typed grid
+            would otherwise be a silent dead end — a board missing rounds
+            with nothing on screen saying so or offering the fix. Renders
+            only for a league that actually has an assignment grid. */}
+        {assignProgress ? (
+          <Pressable
+            testID="draft-room.assign-progress"
+            onPress={goToAssignPicks}
+            accessibilityRole="button"
+            accessibilityLabel={`${assignProgress.line}. ${assignProgress.action}`}
+            style={({ pressed }) => [styles.assignRow, pressed && { backgroundColor: ink.ink3 }]}
+          >
+            <View style={styles.assignRowBody}>
+              <Text style={styles.assignRowLine}>{assignProgress.line}</Text>
+              <Text style={styles.linkText}>{assignProgress.action}</Text>
+            </View>
+            <Icon name="chevron-right" size={16} color={chalk.dim} />
+          </Pressable>
         ) : null}
 
         {board.state === 'unavailable' ? (
@@ -870,10 +952,15 @@ function Notice({
   board,
   showLastYear,
   onToggleLastYear,
+  onAssignPicks,
 }: {
   board: DraftBoard;
   showLastYear: boolean;
   onToggleLastYear: () => void;
+  /** W3 M-B/operator 2026-08-08 — set only for `picks_not_assigned`, and
+   *  only while `picks.assign` is on. Its presence IS what turns the notice
+   *  from a set of directions into the action itself. */
+  onAssignPicks?: () => void;
 }) {
   const code = board.notice?.code;
   // Copy lives here, not on the server: the server states the CONDITION,
@@ -889,11 +976,34 @@ function Notice({
             ? `The ${board.season} rookie class loads after the NFL draft (late April).`
             : code === 'mfl_reconnect'
               ? 'Reconnect MyFantasyLeague to refresh this draft.'
-              : (board.notice?.message ?? '');
+              : code === 'picks_not_assigned' && onAssignPicks
+                ? // ESPN hosts no rookie draft, so nobody has told FTF who
+                  // owns which pick yet. Operator, 2026-08-08: the shipped
+                  // server sentence sends the user to the League tab, and
+                  // sending someone to another tab to unblock the screen
+                  // they are already on is the wrong flow. So the copy
+                  // OFFERS the job (the button below does it here) instead
+                  // of giving directions, and — per M-B — it must read as
+                  // unconfigured, never as an error. If the CTA is NOT
+                  // available (a client whose flag cache is behind the
+                  // server's), the chain falls through to the server's own
+                  // sentence, which still names a working path — never a
+                  // dead end that describes a fix it cannot offer.
+                  "Nobody has set this league's draft picks yet. Set them here and the board fills in."
+                : (board.notice?.message ?? '');
   if (!copy) return null;
   return (
     <View testID={`draft-room.notice.${code}`} style={styles.notice}>
       <Text style={styles.noticeText}>{copy}</Text>
+      {code === 'picks_not_assigned' && onAssignPicks ? (
+        <Button
+          testID="draft-room.assign-picks"
+          label="Set the draft picks"
+          variant="primary"
+          onPress={onAssignPicks}
+          style={styles.noticeCta}
+        />
+      ) : null}
       {code === 'class_not_loaded' ? (
         <Pressable
           testID="draft-room.last-year-toggle"
@@ -1282,6 +1392,20 @@ const styles = StyleSheet.create({
   rankRookiesTitle: { ...type.label, color: ice.base },
   rankRookiesSub: { ...type.bodySm, color: chalk.faint },
 
+  noticeCta: { marginTop: space.sm, alignSelf: 'flex-start' },
+  assignRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    minHeight: 48,
+    paddingHorizontal: space.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: ink.line,
+    backgroundColor: ink.ink1,
+  },
+  assignRowBody: { flex: 1, gap: 2 },
+  assignRowLine: { ...type.bodySm, color: chalk.base },
   notice: {
     backgroundColor: ink.ink1,
     borderColor: ink.line,

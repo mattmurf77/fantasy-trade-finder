@@ -4,6 +4,7 @@
 // so calculator numbers always match the finder's.
 
 import { apiRequest } from './client';
+import type { PickSource } from './pickAssignment';
 import type { ScoringFormat, StarterImpactSlot } from '../shared/types';
 
 export interface CalcValueRow {
@@ -56,6 +57,16 @@ export interface CalcEvener {
   /** 2-piece combo row — `ids` are the pieces; the + button adds both. */
   is_package?: boolean;
   ids?: string[];
+  /** draft-extensions W3 M-C (D17): provenance for an owned-pick evener.
+   *  `source === 'user'` means a leaguemate asserted this pick's ownership
+   *  on the ESPN grid — the evener chip and the swap sheet must say so and
+   *  offer the correction. Absent on players, packages, platform-owned
+   *  picks and any pre-M-C server. `id` IS the `pick_id` for a single-pick
+   *  evener; `pick_id` is carried anyway so a package row could name the
+   *  asserted piece without the client parsing `<a>+<b>`. */
+  source?: PickSource | null;
+  pick_id?: string | null;
+  season?: number | null;
 }
 
 // Itemized value adjustments (DynastyDealer teardown 2026-07-26): why a

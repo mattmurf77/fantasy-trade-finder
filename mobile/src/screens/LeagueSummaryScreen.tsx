@@ -24,6 +24,7 @@ import {
 } from '../theme/chalkline';
 import { Badge, Icon, TickLabel } from '../components/chalkline';
 import FeedbackFAB from '../components/FeedbackFAB';
+import MemberEnteredMarker from '../components/MemberEnteredMarker';
 import PlayerCard from '../components/PlayerCard';
 import {
   getPowerRankings,
@@ -951,7 +952,22 @@ export default function LeagueSummaryScreen() {
                   </View>
                   {selected.tc.team.picks!.items.map((p, i) => (
                     <View key={`${p.label}-${i}`} style={styles.pickRow}>
-                      <Text style={type.title} numberOfLines={1}>{p.label}</Text>
+                      <View style={styles.pickRowBody}>
+                        <Text style={type.title} numberOfLines={1}>{p.label}</Text>
+                        {/* D17 — priced surface 5 of 5: the draft-capital
+                            group. These picks are summed into the team's
+                            total and into the league ranking, so a wrong
+                            assertion silently reorders the standings.
+                            UNCONDITIONAL; the marker self-gates on the flag
+                            and on `source === 'user'`. */}
+                        <MemberEnteredMarker
+                          source={p.source}
+                          pickId={p.pick_id}
+                          season={p.season}
+                          leagueId={leagueId}
+                          testID={`league-summary.member-entered.${p.pick_id ?? p.label}`}
+                        />
+                      </View>
                       <Text style={type.data}>{Math.round(p.value).toLocaleString('en-US')}</Text>
                     </View>
                   ))}
@@ -1698,6 +1714,9 @@ const styles = StyleSheet.create({
   },
   rankChipText: { ...type.data, fontSize: 11, lineHeight: 15 },
   rosterRow: { marginBottom: space.xs },
+  // The label column became a stack when the W3 M-C provenance marker
+  // joined it; with no marker it renders exactly as the single Text did.
+  pickRowBody: { flex: 1, gap: space.xs },
   pickRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

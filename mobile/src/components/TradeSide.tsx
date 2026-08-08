@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import MemberEnteredMarker from './MemberEnteredMarker';
 import PositionChip from './PositionChip';
 import { Button, Card, Icon, TickLabel } from './chalkline';
 import { CalcPlayer } from '../data/tradeCalcMock';
@@ -16,11 +17,15 @@ interface Props {
   onRemove: (id: string) => void;
   /** UI-test harness id for the Add button (registry: components/CLAUDE.md). */
   addTestID?: string;
+  /** W3 M-C (D17) — the league whose assignment grid holds any asserted
+   *  pick on this side. Only the In-league mount passes it; without it the
+   *  marker has no correction target and renders nothing. */
+  leagueId?: string | null;
 }
 
 // One side of a hand-built trade (You send / You receive) for the Trade
 // Calculator: selected players with their board values + an add button.
-export default function TradeSide({ title, teamName, players, valueOf, accent, onAdd, onRemove, addTestID }: Props) {
+export default function TradeSide({ title, teamName, players, valueOf, accent, onAdd, onRemove, addTestID, leagueId }: Props) {
   return (
     <Card>
       <View style={styles.inner}>
@@ -40,6 +45,18 @@ export default function TradeSide({ title, teamName, players, valueOf, accent, o
                 <Text style={type.bodySm}>
                   {p.pick ? 'Draft capital' : `${p.nflTeam} · ${p.age} yrs`}
                 </Text>
+                {/* D17 — priced surface 4 of 5: the calculator's pick rows.
+                    UNCONDITIONAL by design; the marker self-gates on the
+                    flag AND `source === 'user'`, so wrapping this in a
+                    ternary would only create a way for a priced assertion
+                    to render as platform truth. */}
+                <MemberEnteredMarker
+                  source={p.pickSource}
+                  pickId={p.id}
+                  season={p.pickSeason}
+                  leagueId={leagueId}
+                  testID={`calc.member-entered.${p.id}`}
+                />
               </View>
               <Text style={type.data}>{valueOf(p).toLocaleString()}</Text>
               <Pressable

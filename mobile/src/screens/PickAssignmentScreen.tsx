@@ -177,6 +177,10 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
   const leagueId = paramLeagueId ?? sessionLeagueId ?? null;
   /** M-C's one-action correction deep link lands here with the slot to fix. */
   const focusPickId: string | undefined = route?.params?.focusPickId;
+  /** …and the slot's season, so a link whose `pick_id` no longer exists (a
+   *  re-seed with fewer rounds) still lands on the right season tab rather
+   *  than silently on the current one. */
+  const focusSeason: number | undefined = route?.params?.season;
 
   const enabled = useFlag('picks.assign');
   const queryClient = useQueryClient();
@@ -264,9 +268,12 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
         const hit = data.seasons.find((s) => s.slots.some((sl) => sl.pick_id === focusPickId));
         if (hit) return hit.season;
       }
+      if (focusSeason != null && data.seasons.some((s) => s.season === focusSeason)) {
+        return focusSeason;
+      }
       return data.seasons[0].season;
     });
-  }, [data, focusPickId]);
+  }, [data, focusPickId, focusSeason]);
 
   // A correction link also opens the round its slot lives in — landing on
   // a collapsed accordion is landing on nothing.
