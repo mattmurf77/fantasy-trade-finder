@@ -68,7 +68,7 @@ The exclusion is a row filter, never a nulled `pool_value`. `server._power_picks
 
 ### 5. Two flags, deliberately
 
-`picks.assign` gates entry, storage and the ESPN Draft Room. `picks.assign_tradeable` (M-C, not yet built) gates whether asserted picks enter trade math. Trade math can therefore be killed **without destroying the rows a league typed in**.
+`picks.assign` gates entry, storage and the ESPN Draft Room. `picks.assign_tradeable` (M-C, **shipped dark 2026-08-08** — see [build-w3-mc.md](../plans/draft-extensions/build-w3-mc.md)) gates whether asserted picks enter trade math: all seven read sites, the one engine guard `_owned_picks_available`, `picks_supported` as a data test, and the `source` provenance field. Trade math can therefore be killed **without destroying the rows a league typed in**.
 
 ### 6. `original_roster_id` is a stable, opaque, league-local slot label
 

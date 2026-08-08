@@ -191,18 +191,21 @@ def _calls_named(tree: ast.AST, name: str):
     return out
 
 
-#: THE seven read sites, by SYMBOL (line numbers drift; symbols do not). None
-#: of them names `source=` in M-A, so all seven take the platform-only default
-#: and are byte-identical to the pre-W3 tree. Lighting them up is M-C's job,
-#: and doing it means editing this set deliberately — which is the point.
+#: THE seven read sites, by SYMBOL (line numbers drift; symbols do not).
+#: In M-A none of them named `source=`. **W3 M-C opted all seven in, together**
+#: (plan §6.4 + operator decision 4 — full engine parity), each passing
+#: `source=_pick_read_source()`, which is `'platform'` (the shipped default)
+#: with `picks.assign_tradeable` off and `'any'` with it on. Editing this set
+#: is how an eighth site gets DECIDED rather than silently added.
 _SEVEN_READ_SITES = frozenset({
     "_roster_eveners", "_user_pick_share", "_run_trade_job",
     "_trade_evaluate_impl", "get_league_picks", "_owned_pick_assets",
     "_power_picks_by_owner",
 })
 
-#: The ONLY places allowed to name `source=` on a `load_draft_picks` call.
-#: Every one of them is part of the assignment surface itself.
+#: The assignment surface's own reads. These name a LITERAL provenance
+#: (`PICK_SOURCE_USER`) rather than the flag-gated helper, because they are
+#: the screens on which assertions are seen and fixed.
 _SANCTIONED_SOURCE_CALLERS = frozenset({
     "seed_pick_grid",            # database.py — reads its own provenance only
     "_assignment_slots",         # server.py  — the assignment screen's payload
@@ -210,13 +213,20 @@ _SANCTIONED_SOURCE_CALLERS = frozenset({
     "pick_assignment_put_route", # server.py  — the prior-owner read for audit
 })
 
+#: Everything allowed to name `source=` at all: the seven engine read sites
+#: plus the assignment surface. Nothing else.
+_SANCTIONED_SOURCE_OPT_INS = _SEVEN_READ_SITES | _SANCTIONED_SOURCE_CALLERS
+
 
 def test_w3_02_ast_only_sanctioned_call_sites_name_source():
     """D12 — the AST enumeration. Copies the shipped `test_m3_07` pattern.
 
-    Two assertions, and the second is the one that catches a well-meaning
-    widening: a NEW `load_draft_picks` call site that opts into asserted rows
-    fails here rather than silently joining the priced union.
+    Three assertions, and each catches a different regression:
+      1. a NEW site opting into asserted rows (the silent widening);
+      2. one of the seven DROPPING its opt-in (asserted picks would vanish
+         from that surface while still pricing everywhere else);
+      3. any site left on the bare default, which after M-C means a read that
+         is invisible to the flag.
     """
     seen_default, seen_source = set(), set()
     for path in (SERVER_PATH, DATABASE_PATH):
@@ -224,16 +234,48 @@ def test_w3_02_ast_only_sanctioned_call_sites_name_source():
                                               "load_draft_picks"):
             (seen_source if "source" in kwargs else seen_default).add(enclosing)
 
-    assert seen_source <= _SANCTIONED_SOURCE_CALLERS, (
+    assert seen_source <= _SANCTIONED_SOURCE_OPT_INS, (
         "an unsanctioned call site opts into asserted picks: "
-        f"{sorted(seen_source - _SANCTIONED_SOURCE_CALLERS)}")
-    # Every site that does NOT name `source` is one of the seven known read
-    # sites (an eighth means the sanctioned set must be RE-DECIDED, not
-    # silently widened).
-    assert seen_default <= _SEVEN_READ_SITES, (
-        f"new load_draft_picks read site(s): {sorted(seen_default - _SEVEN_READ_SITES)}")
-    assert seen_default == _SEVEN_READ_SITES, (
-        f"a read site disappeared: {sorted(_SEVEN_READ_SITES - seen_default)}")
+        f"{sorted(seen_source - _SANCTIONED_SOURCE_OPT_INS)}")
+    assert _SANCTIONED_SOURCE_OPT_INS <= seen_source, (
+        "a sanctioned site stopped naming source=: "
+        f"{sorted(_SANCTIONED_SOURCE_OPT_INS - seen_source)}")
+    assert seen_default == frozenset(), (
+        "load_draft_picks call site(s) on the bare default after M-C — a read "
+        "the `picks.assign_tradeable` switch cannot reach: "
+        f"{sorted(seen_default)}")
+
+
+def test_w3_02d_the_seven_read_sites_go_through_the_ONE_flag_helper():
+    """M-C's opt-in is a helper call, never a literal.
+
+    `source=PICK_SOURCE_ANY` hard-coded at a read site would price asserted
+    picks with the kill switch OFF — the one failure the two-flag design
+    exists to prevent. Every one of the seven must pass
+    `_pick_read_source()`, and only the assignment surface may name a literal.
+    """
+    tree = ast.parse(SERVER_PATH.read_text())
+    parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+
+    def _enclosing(node):
+        cur = parents.get(node)
+        while cur is not None and not isinstance(cur, ast.FunctionDef):
+            cur = parents.get(cur)
+        return cur.name if cur is not None else "<module>"
+
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "load_draft_picks"):
+            continue
+        fn = _enclosing(node)
+        if fn not in _SEVEN_READ_SITES:
+            continue
+        kw = next(k for k in node.keywords if k.arg == "source")
+        assert (isinstance(kw.value, ast.Call)
+                and isinstance(kw.value.func, ast.Name)
+                and kw.value.func.id == "_pick_read_source"), (
+            f"{fn} passes a literal source= instead of _pick_read_source() — "
+            "that read would ignore the picks.assign_tradeable kill switch")
 
 
 def test_w3_02b_ast_no_unsanctioned_writer_reaches_the_store():

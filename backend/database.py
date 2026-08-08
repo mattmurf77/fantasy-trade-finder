@@ -7417,6 +7417,9 @@ ORDER_TYPE_SNAKE  = "snake"
 #: Mirrors the `_COMMUNITY_ELO_CACHE` pattern already in this module.
 _CONTESTED_TTL_SECONDS = 60.0
 _CONTESTED_CACHE: dict[str, tuple[float, frozenset[str], frozenset[str]]] = {}
+#: `has_assigned_picks` memo — the DATA half of W3 M-C's engine guard and of
+#: `picks_supported`. Same lock, same TTL, same invalidation hook.
+_ASSIGNED_CACHE: dict[str, tuple[float, bool]] = {}
 _CONTESTED_LOCK = threading.Lock()
 
 
@@ -7445,9 +7448,15 @@ def _pick_source_predicate(source: str):
 
 
 def _invalidate_contested(league_id: str) -> None:
-    """Drop the memoised contested/orphaned sets for one league."""
+    """Drop the memoised contested/orphaned sets for one league.
+
+    Also drops the `has_assigned_picks` memo, which W3 M-C's engine guard
+    reads on every trade job: an assignment must light a league up at the
+    next read, not after a TTL.
+    """
     with _CONTESTED_LOCK:
         _CONTESTED_CACHE.pop(str(league_id), None)
+        _ASSIGNED_CACHE.pop(str(league_id), None)
 
 
 #: Public alias — the assignment routes invalidate AFTER writing the audit
@@ -7545,6 +7554,45 @@ def contested_pick_ids(league_id: str) -> frozenset[str]:
 def orphaned_pick_ids(league_id: str) -> frozenset[str]:
     """Asserted slots whose owner is no longer a league member."""
     return _excluded_pick_ids(league_id)[1]
+
+
+def has_assigned_picks(league_id: str) -> bool:
+    """Does this league hold ANY `source='user'` row? (W3 M-C.)
+
+    THE data half of two decisions the plan words as "a data test, not a
+    platform test":
+
+      * the engine guard `server._owned_picks_available` — an ESPN league
+        with assignments qualifies for pick math, one without it does not;
+      * `picks_supported` on `/api/league/picks` — ESPN with nothing
+        assigned still honestly reports `false`.
+
+    Deliberately ignores contested/orphaned exclusion: a league whose only
+    asserted rows are contested still HAS assignments (the answer to "is this
+    configured at all"), and the exclusion is applied per-row by
+    `load_draft_picks`, which is where it belongs. Memoised for
+    `_CONTESTED_TTL_SECONDS` and invalidated on every assignment write.
+    """
+    lid = str(league_id)
+    with _CONTESTED_LOCK:
+        hit = _ASSIGNED_CACHE.get(lid)
+        if hit and (time.time() - hit[0]) < _CONTESTED_TTL_SECONDS:
+            return hit[1]
+    try:
+        with engine.connect() as conn:
+            found = conn.execute(
+                select(draft_picks_table.c.pick_id)
+                .where((draft_picks_table.c.league_id == lid)
+                       & (draft_picks_table.c.source == PICK_SOURCE_USER))
+                .limit(1)
+            ).first() is not None
+    except Exception as e:                      # pragma: no cover - DB optional
+        # Fail CLOSED: an unreadable store must not light up pick math.
+        log.warning("assigned-pick probe failed for %s: %s", lid, e)
+        return False
+    with _CONTESTED_LOCK:
+        _ASSIGNED_CACHE[lid] = (time.time(), found)
+    return found
 
 
 def sync_draft_picks(

@@ -126,7 +126,10 @@ from .database import (
     make_pick_id, seed_pick_grid, assign_draft_pick,
     contested_pick_ids, orphaned_pick_ids, invalidate_pick_assignment_cache,
     load_pick_assignment_settings, save_pick_assignment_settings,
-    PICK_SOURCE_USER, ORDER_TYPE_LINEAR, ORDER_TYPE_SNAKE,
+    # draft-extensions W3 M-C — trade-math activation
+    has_assigned_picks,
+    PICK_SOURCE_USER, PICK_SOURCE_PLATFORM, PICK_SOURCE_ANY,
+    ORDER_TYPE_LINEAR, ORDER_TYPE_SNAKE,
     create_notification, get_notifications, mark_notifications_read,
     # M5 Push additions — device tokens
     save_device_token, load_device_tokens_for_users,
@@ -960,7 +963,13 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
             "value":    round(seed_value(pid), 1),
             "is_pick":  False,
         })
-    for pk in load_draft_picks(league_id=league_id, owner_user_id=owner_user_id):
+    # W3 M-C (S4) — the highest-blast-radius site: a one-tap "add their 2027
+    # 1st" sweetener may name an ASSERTED pick when `picks.assign_tradeable`
+    # is on (operator decision 4, residual risk accepted knowingly). Every
+    # such row carries its provenance, and so does a combo containing one.
+    tradeable = _asserted_picks_tradeable()
+    for pk in load_draft_picks(league_id=league_id, owner_user_id=owner_user_id,
+                               source=_pick_read_source()):
         pid = str(pk["pick_id"])
         val = float(pk.get("pool_value") or 0.0)
         if pid in skip or val <= 0:
@@ -972,6 +981,7 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
             "team":     None,
             "value":    round(val, 1),
             "is_pick":  True,
+            **_pick_wire_source(pk, tradeable, with_season=True),
         })
 
     singles = sorted(
@@ -998,6 +1008,10 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
     out = singles
     if best_pair is not None:
         combined, a, b = best_pair
+        # A combo inherits the provenance of its pieces: if EITHER piece is a
+        # member-entered pick the whole row must say so, or the label the user
+        # sees on the single row silently disappears when it rides in a bundle.
+        _pkg_user = any(p.get("source") == PICK_SOURCE_USER for p in (a, b))
         out = out + [{
             "id":         f"{a['id']}+{b['id']}",
             "ids":        [a["id"], b["id"]],
@@ -1007,6 +1021,7 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
             "value":      round(combined, 1),
             "is_pick":    False,
             "is_package": True,
+            **({"source": PICK_SOURCE_USER} if (tradeable and _pkg_user) else {}),
         }]
     return out
 
@@ -4402,9 +4417,14 @@ def _first_session_board_refresh(
 
 def _user_pick_share(user_id: str, league_id: str) -> float:
     """The user's share of total draft-pick value in a league (0.0 when no
-    picks synced). Feeds the #8 outlook seed and #1's classifier."""
+    picks synced). Feeds the #8 outlook seed and #1's classifier.
+
+    W3 M-C (S2): reads asserted rows too when `picks.assign_tradeable` is on,
+    so an ESPN manager's own draft capital shapes their inferred contend /
+    rebuild window instead of reading as zero.
+    """
     try:
-        picks = load_draft_picks(league_id=league_id)
+        picks = load_draft_picks(league_id=league_id, source=_pick_read_source())
     except Exception:
         return 0.0
     grand = sum((pk.get("pick_value") or 0.0) for pk in picks)
@@ -4543,7 +4563,11 @@ def _run_trade_job(
                     mp = load_league_preference(user_id=m.user_id, league_id=league_id)
                     if mp and mp.get("team_outlook"):
                         opponent_outlooks[m.user_id] = mp["team_outlook"]
-                picks = load_draft_picks(league_id=league_id)
+                # W3 M-C (S3) — opponent pick shares include asserted rows
+                # behind `picks.assign_tradeable`, so an ESPN league's inferred
+                # opponent outlooks stop treating everyone as pickless.
+                picks = load_draft_picks(league_id=league_id,
+                                         source=_pick_read_source())
                 totals: dict[str, float] = {}
                 grand = 0.0
                 for pk in picks:
@@ -4587,9 +4611,7 @@ def _run_trade_job(
         # picks price at pool_value in ALL engine math. Gated on
         # trade.picks_in_pool; capped per team (picks_pool_cap) so package
         # enumeration stays bounded.
-        if (FLAGS.trade_picks_in_pool
-                and getattr(g_league, "platform", None) != "espn"
-                and league_id != "league_demo"):
+        if _owned_picks_available(league_id, g_league):
             try:
                 seed_map, g_user_roster, n_inj = _inject_owned_picks(
                     league_id      = league_id,
@@ -8122,12 +8144,22 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         # alongside the #215 stud-tax pin). `tier_ladder` (default, and the
         # only reachable mode while `trade.slot_pricing` is off) returns the
         # stored pool_value unchanged. The stored column is never written.
+        #
+        # W3 M-C (S1) — the read opts into asserted rows behind
+        # `picks.assign_tradeable`, and each priced pick entry carries its
+        # provenance + season so the client can badge it and deep-link the
+        # correction. Flag off ⇒ the platform-only default and no new keys.
         league_pick_vals: dict[str, float] = {}
+        league_pick_meta: dict[str, dict] = {}
+        _tradeable = _asserted_picks_tradeable()
         if league_id and league_id != "league_demo":
             try:
-                for _p in load_draft_picks(league_id=league_id):
+                for _p in load_draft_picks(league_id=league_id,
+                                           source=_pick_read_source()):
                     league_pick_vals[_p["pick_id"]] = priced_pool_value(
                         _p, scoring_format=fmt)
+                    league_pick_meta[_p["pick_id"]] = _pick_wire_source(
+                        _p, _tradeable, with_season=True)
             except Exception as _lp_err:
                 log.warning("evaluate: owned-pick load failed (continuing): %s", _lp_err)
 
@@ -8142,7 +8174,8 @@ def _trade_evaluate_impl(stud_tax_mode: str):
                    if p not in seed and p not in league_pick_vals]
 
         per_player = [
-            {"player_id": pid, "side": side, "value": round(seed_value(pid), 1)}
+            {"player_id": pid, "side": side, "value": round(seed_value(pid), 1),
+             **league_pick_meta.get(pid, {})}
             for side, ids in (("give", give), ("receive", recv))
             for pid in ids
         ]
@@ -8577,10 +8610,21 @@ def get_league_picks():
     platform = getattr(g_league, "platform", None) if g_league else None
     supported = platform != "espn"
     if not league_id or league_id == "league_demo":
+        # The demo / no-league early return keeps the PLATFORM test: there is
+        # no league to ask the data question about.
         return jsonify({"my_picks": [], "all_picks": [], "picks_supported": supported})
+    # W3 M-C (S1) — `picks_supported` becomes a DATA test, not a platform test
+    # (plan §6.1): an ESPN league with assignments supports picks; one with
+    # nothing assigned still honestly reports false. Tied to the SAME
+    # condition that decides whether the rows below are actually returned, so
+    # the label can never claim support for a payload that carries no picks.
+    tradeable = _asserted_picks_tradeable()
+    if not supported and tradeable:
+        supported = has_assigned_picks(league_id)
     try:
-        raw = load_draft_picks(league_id=league_id)
-        all_picks = [{**p, "label": _owned_pick_label(p)} for p in raw]
+        raw = load_draft_picks(league_id=league_id, source=_pick_read_source())
+        all_picks = [{**p, "label": _owned_pick_label(p),
+                      **_pick_wire_source(p, tradeable)} for p in raw]
         my_picks  = [p for p in all_picks if p.get("owner_user_id") == g_user_id]
         return jsonify({
             "my_picks": my_picks,
@@ -8606,6 +8650,106 @@ def _owned_pick_label(p: dict) -> str:
 # search_rank per round for injected pick pseudo-players — mirrors the generic
 # picks in build_universal_pool so owned picks slot alongside players sanely.
 _OWNED_PICK_SEARCH_RANK = {1: 10, 2: 50, 3: 100, 4: 200}
+
+
+# ---------------------------------------------------------------------------
+# draft-extensions W3 M-C — trade-math activation for asserted picks
+# (plan §6.4 + operator decision 4; lld §4.5; ADR-010)
+# ---------------------------------------------------------------------------
+#
+# M-A shipped the store with the containment being the READ DEFAULT:
+# `load_draft_picks` selects platform rows only unless a caller opts in. M-C
+# is that opt-in, at all seven read sites at once, behind ONE flag:
+#
+#   S1  get_league_picks · _trade_evaluate_impl
+#   S2  _power_picks_by_owner · _user_pick_share
+#   S3  _owned_pick_assets (→ _inject_owned_picks) · _run_trade_job's
+#       opponent pick shares
+#   S4  _roster_eveners
+#
+# S1→S4 is the BUILD SEQUENCE (each stage golden-diffed on its own), not a
+# set of release gates — operator decision 4 is full engine parity, so all
+# four land together behind `picks.assign_tradeable`.
+#
+# Everything below is a no-op with the flag off, by construction: the source
+# helper returns the shipped default and the provenance helpers are never
+# reached, which is what makes D10's byte-identity green.
+
+def _asserted_picks_tradeable() -> bool:
+    """THE M-C kill switch. Read live (not off the FLAGS snapshot) so the
+    operator can turn pick math off without a restart."""
+    return is_enabled("picks.assign_tradeable")
+
+
+def _pick_read_source() -> str:
+    """The `source=` every engine read site passes to `load_draft_picks`.
+
+    Flag off ⇒ `'platform'`, which is the parameter's own default and selects
+    exactly the pre-W3 row set (NULL reads as platform). Flag on ⇒ `'any'`,
+    the UNION of platform and asserted rows — at which point
+    `load_draft_picks` also applies the contested/orphaned ROW FILTER, which
+    is the only correct way to withhold a disputed slot (nulling `pool_value`
+    would be silently re-priced by `_power_picks_by_owner`).
+
+    League-independent on purpose: a league only holds asserted rows if
+    someone assigned them, so the union is empty everywhere else and the
+    per-league question ("may these price?") belongs to
+    `_owned_picks_available`, not to the loader.
+    """
+    return PICK_SOURCE_ANY if _asserted_picks_tradeable() else PICK_SOURCE_PLATFORM
+
+
+def _pick_provenance(p: dict) -> str:
+    """`'user' | 'platform'` for one `draft_picks` row (D17).
+
+    NULL reads as platform, exactly as the loader does — the wire enum has
+    two members and no null, so a client can switch on it exhaustively.
+    """
+    return (PICK_SOURCE_USER if p.get("source") == PICK_SOURCE_USER
+            else PICK_SOURCE_PLATFORM)
+
+
+def _pick_wire_source(p: dict, tradeable: bool,
+                      with_season: bool = False) -> dict:
+    """The provenance fields a priced pick entry carries (D17), or `{}`.
+
+    `tradeable` is resolved ONCE per request by the caller — flag reads copy
+    the flag map, and a 192-slot grid would do it 192 times. Empty with the
+    flag off, which is what keeps every payload byte-identical.
+
+    `with_season` is for payloads that do not already carry the pick's
+    season: the client's one-action correction deep link is
+    `{leagueId, season, focusPickId}`, so a badge without a season would be a
+    dead end.
+    """
+    if not tradeable:
+        return {}
+    out = {"source": _pick_provenance(p)}
+    if with_season:
+        out["season"] = int(p.get("season") or 0)
+    return out
+
+
+def _owned_picks_available(league_id: str, league) -> bool:
+    """May this league's owned picks enter ENGINE math?
+
+    Replaces two duplicated three-clause literals (the trade job's injection
+    guard and asset-ideas'). Factoring out only the platform clause would
+    have silently re-enabled picks for the demo league and with
+    `trade.picks_in_pool` off, so all three conjuncts are preserved verbatim
+    and this returns EXACTLY the old expression whenever the M-C flag is off.
+
+    The ESPN clause becomes a DATA test rather than a platform test (plan
+    §6.1): an ESPN league that has assignments qualifies; one without them
+    does not, and neither does any ESPN league while the flag is off.
+    """
+    if not FLAGS.trade_picks_in_pool:
+        return False
+    if league_id == "league_demo":
+        return False
+    if getattr(league, "platform", None) != "espn":
+        return True
+    return _asserted_picks_tradeable() and has_assigned_picks(league_id)
 
 
 def _picks_pool_cap() -> int:
@@ -8650,7 +8794,12 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     v2e = _trade_service_mod.value_to_elo
     by_owner: dict[str, list[dict]] = {}
     _priced: dict[str, float] = {}
-    for p in load_draft_picks(league_id=league_id):
+    # W3 M-C (S3) — asserted rows enter the SUGGESTION candidate pool behind
+    # `picks.assign_tradeable`. This is the site operator decision 4 overrode
+    # both lenses on: generated recommendations may name a pick a leaguemate
+    # asserted. The guard `_owned_picks_available` decides per league; this
+    # decides per row.
+    for p in load_draft_picks(league_id=league_id, source=_pick_read_source()):
         owner = p.get("owner_user_id")
         if owner:
             by_owner.setdefault(owner, []).append(p)
@@ -9328,11 +9477,10 @@ def asset_trade_ideas():
         except Exception as ap_err:
             log.warning("asset-ideas: asset prefs load failed: %s", ap_err)
 
-    # #170/#171/#185 — owned-pick injection, same guard as the generate job,
-    # so a pick can be the pinned asset, a sweetener or a downgrade piece.
-    if (FLAGS.trade_picks_in_pool
-            and getattr(g_league, "platform", None) != "espn"
-            and league_id != "league_demo"):
+    # #170/#171/#185 — owned-pick injection, THE SAME guard as the generate
+    # job (one helper since W3 M-C, so the two can no longer drift), so a pick
+    # can be the pinned asset, a sweetener or a downgrade piece.
+    if _owned_picks_available(league_id, g_league):
         try:
             seed_map, user_roster, _n = _inject_owned_picks(
                 league_id      = league_id,
@@ -18137,12 +18285,13 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
     if not league_id or league_id == "league_demo":
         return {}
     try:
-        rows = load_draft_picks(league_id=league_id)
+        rows = load_draft_picks(league_id=league_id, source=_pick_read_source())
     except Exception as e:
         log.warning("power-rankings pick load failed (continuing): %s", e)
         return {}
     seasons = [int(r["season"]) for r in rows if r.get("season") is not None]
     cur_season = min(seasons) if seasons else 0
+    tradeable = _asserted_picks_tradeable()
     out: dict[str, list[dict]] = {}
     for p in rows:
         owner = str(p.get("owner_user_id") or "")
@@ -18150,11 +18299,19 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
             continue
         val = p.get("pool_value")
         if val is None:
+            # NOTE (INV-5): this NULL branch is exactly why a contested slot is
+            # withheld by ROW FILTER and never by nulling `pool_value` — nulling
+            # would land here and silently re-derive the price the rule exists
+            # to withhold.
             years_out = max(0, int(p.get("season") or cur_season) - cur_season)
             val = pick_pool_value(int(p.get("round") or 4), years_out, fmt)
         out.setdefault(owner, []).append({
             "label": _owned_pick_label(p),
             "value": round(float(val), 1),
+            # W3 M-C (S2) — provenance + the deep-link coordinates. The items
+            # carried neither before, so `pick_id`/`season` ride the same flag.
+            **({"pick_id": str(p.get("pick_id") or "")} if tradeable else {}),
+            **_pick_wire_source(p, tradeable, with_season=True),
         })
     return out
 

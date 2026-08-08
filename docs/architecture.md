@@ -88,12 +88,22 @@ PUT  /api/league/pick-assignments/<id>    -> database.assign_draft_pick
                         v                                                v
    server._assignment_grid  -> dbs.assigned_board                the seven read sites
    (GET /api/draft/board, M-B, zero platform egress)             (load_draft_picks,
-                                                                  DEFAULT source='platform'
-                                                                  -> asserted rows are
-                                                                     INVISIBLE to all of
-                                                                     them until M-C's
-                                                                     picks.assign_tradeable
-                                                                     opts each one in)
+                                                                  source=_pick_read_source():
+                                                                   flag OFF -> 'platform',
+                                                                    asserted rows INVISIBLE
+                                                                    to every one of them;
+                                                                   flag ON  -> 'any', M-C's
+                                                                    full engine parity
+                                                                    (S1 picks+evaluate,
+                                                                     S2 power+outlook seed,
+                                                                     S3 suggestions+shares,
+                                                                     S4 eveners), each row
+                                                                    carrying source/season
+                                                                  one engine guard:
+                                                                   _owned_picks_available
+                                                                   (3 clauses: picks_in_pool,
+                                                                    not-demo, platform->data
+                                                                    test for ESPN)
 ```
 
 Three properties are structural rather than procedural, and each is pinned by a test in `backend/tests/test_pick_assignment.py`:
@@ -103,6 +113,8 @@ Three properties are structural rather than procedural, and each is pinned by a 
 3. **No user-entered values.** Every route refuses a value field at the edge; price is `pick_pool_value` / `compute_pick_value` of the pick's own coordinates. That is what makes the conservation bound hold — assignment can redistribute value, never create it.
 
 Contested and orphaned slots are withheld from priced reads by a **row filter** (memoised per league, invalidated on every write). Nulling `pool_value` is forbidden: `_power_picks_by_owner` re-derives a price from NULL.
+
+**M-C (flag `picks.assign_tradeable`, 2026-08-08 — [build-w3-mc.md](plans/draft-extensions/build-w3-mc.md))** opts all seven read sites in at once through one helper, `server._pick_read_source()`, and collapses the two duplicated **three-clause** engine literals into `server._owned_picks_available()` — whose ESPN clause is now a DATA test (`has_assigned_picks`) rather than a platform test. `picks_supported` follows the same rule. Every payload that prices a pick carries `source: "platform" | "user"` (+ `season`); the flag off restores the platform-only default and removes the fields, byte for byte.
 
 
 ## Components

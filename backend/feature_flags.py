@@ -457,6 +457,25 @@ FLAG_KEYS: tuple[str, ...] = (
     # separate M-C kill switch, deliberately, so pick math can be turned off
     # without destroying the rows a league typed in.
     "picks.assign",
+    # draft-extensions W3 M-C (ADR-010) — TRADE-MATH ACTIVATION for asserted
+    # picks. The second, deliberately separate switch: `picks.assign` owns
+    # entry/storage/the room, this one owns whether those rows PRICE. Killing
+    # it never destroys the 48-192 rows a league typed in.
+    # ON  ⇒ all SEVEN read sites read `source='any'` instead of the
+    #       platform-only default (S1 /api/league/picks + /api/trade/evaluate,
+    #       S2 _power_picks_by_owner + _user_pick_share, S3 _owned_pick_assets
+    #       /_inject_owned_picks + the trade job's opponent pick shares,
+    #       S4 _roster_eveners) — full engine parity, operator decision 4;
+    #       `_owned_picks_available` stops excluding ESPN leagues that have
+    #       assignments; `picks_supported` becomes a data test; and every
+    #       priced pick payload carries `source: "platform" | "user"`.
+    # OFF (default) ⇒ every one of those sites takes `load_draft_picks`'
+    #       platform-only default and every payload is byte-identical, so
+    #       asserted rows reach no trade math, no power rankings and no
+    #       suggestion. Contested/orphaned slots are withheld from the priced
+    #       union by ROW FILTER in either state (never by nulling pool_value —
+    #       `_power_picks_by_owner` re-derives a price from a NULL).
+    "picks.assign_tradeable",
     # THE SEASONAL ON/OFF SWITCH FOR THE DRAFT TAB (operator decision,
     # 2026-08-06: "it should literally just be set to seasonal — a flag we
     # turn on and off to display the tab"). Client-only: no route reads it.

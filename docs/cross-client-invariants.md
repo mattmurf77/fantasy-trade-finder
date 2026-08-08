@@ -315,6 +315,39 @@ Anchor values are position-uniform on purpose (uniform valuation across position
 
 ---
 
+## Asserted-pick provenance: the `source` enum and its ONE label (W3 M-C)
+
+Registered here **before** any client renders it, because three clients must not paraphrase it differently. Flag `picks.assign_tradeable` ([ADR-010](adr/adr-010-user-asserted-pick-ownership.md), plan §6.4 + operator decision 4).
+
+**The enum — CLOSED, exactly two members, never null:**
+
+| `source` | Meaning |
+|---|---|
+| `"platform"` | the pick's ownership came from the platform (Sleeper / MFL sync). **A NULL `draft_picks.source` column serializes as `"platform"`** — every pre-W3 row is NULL, so clients never see one. |
+| `"user"` | ownership was **asserted by a league member** through the pick-assignment grid. Never verified against a platform, because ESPN has no draft object to verify against — now or ever. |
+
+**The label — EXACT COPY, on every priced surface, no abbreviation and no rewording:**
+
+> **Member-entered — not verified with ESPN**
+
+Every place it appears carries a **one-action correction** that deep-links to the assignment screen with `{leagueId, season, focusPickId}` — which is why payloads that did not already carry them ship `season` (and `pick_id`, on power-rankings items) alongside `source`.
+
+**Where it rides** (flag on; **absent entirely** with the flag off, which is what keeps every payload byte-identical):
+
+| Payload | Entry |
+|---|---|
+| `GET /api/league/picks` | every row in `my_picks` / `all_picks` |
+| `POST /api/trade/evaluate` | every `per_player` entry whose id is a league pick (+ `season`). A player entry carries none — it is not a pick |
+| `POST /api/trade/evaluate` → `eveners[]` | every pick item (+ `season`); a 2-piece combo containing a member-entered pick carries `source: "user"` so the badge cannot vanish inside a bundle |
+| `GET /api/league/power-rankings` | every `picks.items[]` entry (+ `pick_id`, `season`) |
+
+**Rules for clients:**
+
+1. **Do not infer provenance from anything else** — not the league's platform, not the `pick_id` shape, not the absence of a `synced_at`. Read `source`.
+2. **Do not treat an asserted pick as a different KIND of asset.** It is priced by the identical shipped functions (`pick_pool_value` / `priced_pool_value`) because no user can ever enter a value. Only the label differs.
+3. **A contested or orphaned slot never appears on a priced payload at all** — it is withheld by a row filter server-side. Clients must not reconstruct it; the one place it is visible is `GET /api/league/pick-assignments`, the screen where it gets fixed.
+4. **`picks_supported` is a data test, not a platform test** (`platform != "espn" or the league has assigned rows`), so an ESPN league can now report `true`. Do not re-derive it from the platform string.
+
 ## Draft-pick slot values are DISPLAY ONLY — they are not the ladder
 
 **`order[].slot_value` on `GET /api/draft/board` is a second, independent pricing of draft picks, and nothing values an asset with it** (rookie-draft M6, flag `picks.slot_values`, default off).
