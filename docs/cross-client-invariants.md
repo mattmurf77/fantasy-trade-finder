@@ -196,6 +196,19 @@ Canonical set: `market` (retuned default — NULL/unknown stored values read as 
 
 **Dashed-ice tick = other-board marker (#248, 2026-08-05):** in any chart that draws bars from one value basis, a *dashed ice hairline* (ice `#56D9EC`, dashed, with an end-cap dot) overlaid on a bar marks where the **other** basis (consensus vs. the caller's board) places that entity on the *same* scale as the bars. It is a data encoding, not a decoration — do not reuse a dashed ice line over bars for anything else, and don't render the other-board marker in any other style. (The league-average line stays a dashed *chalk-dim* hairline — a different encoding, deliberately a different color.) First consumer: `mobile/src/screens/LeagueSummaryScreen.tsx` (`consTick`).
 
+**Same-view rule for the other-board marker (#208, 2026-08-08):** the marker and
+any rank-delta indicator derived from it must be computed under **exactly the
+filters the bars are drawn under** (subset, position selection, basis) — a
+filtered bar may never be shown beside an unfiltered tick — and the marker must
+**not render at all in a view where the two bases hold identical values**. Both
+halves matter: the first keeps the comparison honest, the second keeps the chart
+from asserting a comparison the current view doesn't contain (a tick drawn
+exactly on its own bar top, with a "rank 3/12 · rank 3/12" caption beside it).
+"Identical in this view", not "identical overall" — a caller who has re-ranked
+only RBs has two genuinely different boards, and the marker must still disappear
+when they filter to QB. Any rank printed for the other basis is denominated by
+**that basis' own entity count**, never the bars'.
+
 ---
 
 ## Progress gating thresholds
