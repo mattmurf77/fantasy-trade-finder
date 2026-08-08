@@ -9,6 +9,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { ink, chalk, ice, semantic, space, type } from '../theme/chalkline';
 import { Badge, Button, Icon } from '../components/chalkline';
 import { useSession } from '../state/useSession';
@@ -45,6 +46,9 @@ interface Props {
 // Show user's leagues → tap one → run sessionInit against it → done.
 // Matches the web app's selectLeague flow but without the overlay modals.
 export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpenEspnLink }: Props) {
+  // #266 — needed for the transition-settled auto-open below. Typed loose
+  // like the rest of the screens; only addListener('transitionEnd') is used.
+  const navigation = useNavigation<any>();
   const user = useSession((s) => s.user);
   const cached = useSession((s) => s.leagues);
   const setLeagues = useSession((s) => s.setLeagues);
@@ -65,9 +69,42 @@ export default function LeaguePickerScreen({ onLeaguePicked, onSignOut, autoOpen
   // #130 — Settings' ESPN CTA lands here with `espnLink: true`; open the
   // sheet once the flag confirms. Effect (not initial state) because the
   // flag store may hydrate after mount.
+  //
+  // #266 — the open is DEFERRED until the arrival transition has settled.
+  // The Settings path dismisses the Settings native modal and pushes this
+  // screen in the same tick (`account.settings_v2`'s coalesced
+  // goBack+navigate), so a synchronous mount-time setEspnOpen(true) asked
+  // iOS to present an RN <Modal> while that dismissal/push was still
+  // animating. The presentation wedges (the modal attaches to the
+  // dismissing controller and never appears), and because `espnOpen` is
+  // already true the footer "Link an ESPN league" button's setEspnOpen(true)
+  // is a state no-op — while the half-presented Modal host also blocks the
+  // sibling PlatformLinkSheet Modal from presenting (iOS won't stack
+  // sibling RN Modals), killing "Link an MFL league" too. Waiting for the
+  // screen's own transitionEnd presents against a settled hierarchy; the
+  // timeout is the fallback for arrivals that animate nothing (late flag
+  // hydration re-run, cold-start deep link), where opening is already safe.
   useEffect(() => {
-    if (autoOpenEspnLink && espnEnabled) setEspnOpen(true);
-  }, [autoOpenEspnLink, espnEnabled]);
+    if (!autoOpenEspnLink || !espnEnabled) return;
+    let opened = false;
+    const open = () => {
+      if (opened) return;
+      opened = true;
+      setEspnOpen(true);
+    };
+    const unsub = navigation.addListener(
+      'transitionEnd',
+      (e: { data?: { closing?: boolean } }) => {
+        if (e?.data?.closing) return; // leaving, not arriving
+        open();
+      },
+    );
+    const fallback = setTimeout(open, 800);
+    return () => {
+      unsub();
+      clearTimeout(fallback);
+    };
+  }, [autoOpenEspnLink, espnEnabled, navigation]);
 
   // Onboarding item 6 (F9): exactly one league → skip the picker (free step
   // removal). Once-only per mount; never when the user came here to link
