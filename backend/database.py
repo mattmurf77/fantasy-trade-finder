@@ -1960,6 +1960,9 @@ def _migrate_db() -> None:
     # Backfill: tag existing rows with '1qb_ppr' format since that was the only one
     _backfill_dual_format()
 
+    # #258 — entity-decode MFL names stored before #210's import-time cleaning
+    _backfill_mfl_name_entities()
+
     # ── Agent 1 additions — user_player_skips ─────────────────────────────
     # The table is created by metadata.create_all(); this block is for any
     # future additive ALTERs to that table. Kept idempotent like the rest.
@@ -2309,6 +2312,122 @@ def _backfill_dual_format() -> None:
                     print(f"[backfill] user {row.sleeper_user_id} update failed: {e}")
     except Exception as e:
         print(f"[backfill] users JSON rewrite failed: {e}")
+
+
+def _backfill_mfl_name_entities() -> None:
+    """#258 — entity-decode MFL display names stored before #210.
+
+    `mfl_service._clean_text` (#210, 2026-08-01) decodes HTML entities
+    ('&amp;', '&#201;', double-escaped forms) on every MFL ingest path —
+    parse_bundle (franchise + league names, player names via _flip_name) and
+    fetch_my_leagues (auth league list). But leagues linked BEFORE #210
+    stored the raw entity-bearing strings, and MFL leagues have no automatic
+    re-import, so every surface that reads the stored rows (trade deck
+    counterparty names, matches, power rankings, pick labels) kept serving
+    them. This is the "already-stored rows" fix: one idempotent pass over
+    the three places an MFL name persists —
+
+      1. league_members.username / display_name (the authoritative member
+         store; session_init and trade generation names flow from here),
+      2. leagues.name for platform='mfl',
+      3. the denormalized draft_picks.owner_username / original_username
+         snapshots (platform='mfl'), which _sync_mfl_owned_picks copies
+         from league_members and only rewrites on a link/refresh event.
+
+    Scoped strictly to MFL rows — Sleeper names are user-typed strings that
+    Sleeper itself renders verbatim, so decoding them could change intended
+    display. Uses the same _clean_text the import paths use (deferred import;
+    mfl_service has no import back into this module). A clean row set writes
+    nothing, so running on every startup is free. Chosen over read/serialize-
+    time decoding because the dirty copies live in three tables consumed by
+    many serializers — fixing the stored data once covers them all.
+    """
+    try:
+        from backend.mfl_service import _clean_text
+    except Exception as e:                          # pragma: no cover
+        print(f"[backfill] mfl name entities skipped (import): {e}")
+        return
+
+    def _cleaned(value):
+        """Decoded replacement, or None when no rewrite is needed."""
+        if not value:
+            return None
+        out = _clean_text(value)
+        return out if out and out != value else None
+
+    try:
+        with engine.begin() as conn:
+            lg_rows = conn.execute(
+                select(leagues_table.c.sleeper_league_id, leagues_table.c.name)
+                .where(leagues_table.c.platform == "mfl")
+            ).fetchall()
+            mfl_ids = [r.sleeper_league_id for r in lg_rows]
+            if not mfl_ids:
+                return
+
+            # 2. leagues.name
+            for r in lg_rows:
+                new_name = _cleaned(r.name)
+                if new_name is not None:
+                    conn.execute(
+                        update(leagues_table)
+                        .where(leagues_table.c.sleeper_league_id == r.sleeper_league_id)
+                        .values(name=new_name)
+                    )
+
+            # 1. league_members for those leagues
+            mem_rows = conn.execute(
+                select(
+                    league_members_table.c.league_id,
+                    league_members_table.c.user_id,
+                    league_members_table.c.username,
+                    league_members_table.c.display_name,
+                )
+                .where(league_members_table.c.league_id.in_(mfl_ids))
+            ).fetchall()
+            for m in mem_rows:
+                vals = {}
+                new_u = _cleaned(m.username)
+                new_d = _cleaned(m.display_name)
+                if new_u is not None:
+                    vals["username"] = new_u
+                if new_d is not None:
+                    vals["display_name"] = new_d
+                if vals:
+                    conn.execute(
+                        update(league_members_table)
+                        .where(
+                            (league_members_table.c.league_id == m.league_id)
+                            & (league_members_table.c.user_id == m.user_id)
+                        )
+                        .values(**vals)
+                    )
+
+            # 3. denormalized draft_picks username snapshots
+            pick_rows = conn.execute(
+                select(
+                    draft_picks_table.c.pick_id,
+                    draft_picks_table.c.owner_username,
+                    draft_picks_table.c.original_username,
+                )
+                .where(draft_picks_table.c.platform == "mfl")
+            ).fetchall()
+            for p in pick_rows:
+                vals = {}
+                new_o = _cleaned(p.owner_username)
+                new_g = _cleaned(p.original_username)
+                if new_o is not None:
+                    vals["owner_username"] = new_o
+                if new_g is not None:
+                    vals["original_username"] = new_g
+                if vals:
+                    conn.execute(
+                        update(draft_picks_table)
+                        .where(draft_picks_table.c.pick_id == p.pick_id)
+                        .values(**vals)
+                    )
+    except Exception as e:
+        print(f"[backfill] mfl name entities failed: {e}")
 
 
 EXPERIMENT_LAYERS = ("onboarding", "ranking", "trades_ui", "engine", "growth")
