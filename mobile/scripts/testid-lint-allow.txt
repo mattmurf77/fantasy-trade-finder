@@ -1,0 +1,22 @@
+# testid-lint allowlist — IDs the grep cross-check cannot verify because the
+# SOURCE constructs them dynamically (template literals), e.g.
+#   RookieScopeControl.tsx: testID={`${surface}.scope`}
+#   PlayerPickerModal.tsx:  testID={`calc.picker.row.${playerId}`}
+# Glob patterns, one per line. Add an entry ONLY when the source genuinely
+# templates the ID — a typo'd static ID must stay a lint failure.
+tab.*
+rankmenu.*
+rank-home.card.*
+trios.card.*
+trios.scope*
+tiers.scope*
+tiers.pos-tab.*
+quick-set.scope*
+leagues.row.*
+calc.mode-tab.*
+calc.picker.row.*
+calc.side-*
+rookie-ranks.filter.*
+feedback.severity.*
+draft-room.notice.*
+draft-room.undrafted-row*
