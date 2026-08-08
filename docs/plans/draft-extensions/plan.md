@@ -251,3 +251,44 @@ S-2 (optional) ──► M12 go/no-go (recommend: no)
    - **Staging survives as a BUILD SEQUENCE only, not as release gates:** implement and golden-diff S1 → S2 → S3 → S4 in that order within the wave so each site is verified independently, but all four land together behind `picks.assign_tradeable`.
    - The adoption / contested-rate / offline-integrity thresholds in §6.8 remain as **monitoring and rollback triggers**, not as ship gates.
    - Residual risk (§6.9 item 1) is **accepted knowingly by the operator**: a leaguemate's assignment can change what FTF recommends to you, including active "ask for their 2027 1st" sweeteners. Containment is unchanged — conservation bound, contested-⇒-unpriced, provenance label on every priced surface, one-action correction, and `picks.assign_tradeable` as a single kill switch that never destroys entered data.
+
+---
+
+## Operator decision — ESPN auto-derived draft order (2026-08-08). BINDING.
+
+**Context.** The shipped assignment flow (§6 / [build-w3-ma-mb.md](build-w3-ma-mb.md))
+asks a user to drag 12–14 teams into last season's finishing order by hand
+before the board exists at all. The live spike
+([espn-auto-draft-order-feasibility.md](espn-auto-draft-order-feasibility.md),
+real league 11896) established that ESPN's `mTeam` view carries final record,
+`playoffSeed` and `rankCalculatedFinal` for every team, and that
+`rankCalculatedFinal` is **exactly** the post-playoff finish for playoff teams
+(champion == 1). It also found a fork the research could not settle: for
+NON-playoff teams `rankCalculatedFinal` encodes ESPN's consolation-ladder
+result, which disagreed with inverse regular-season standings on **5 of 8**
+non-playoff teams in that league (§6d).
+
+**The ruling.**
+
+1. **Non-playoff teams order by INVERSE REGULAR-SEASON standings** — worst
+   record picks 1.01. **Not** `rankCalculatedFinal`, **not** the consolation
+   ladder. Most dynasty leagues treat bottom-bracket games as meaningless for
+   rookie picks: a 4-10 team should not pick 8th for winning the consolation
+   ladder, which is precisely what `rankCalculatedFinal` would have done to
+   Conor's Cuddle Muffins in 11896.
+2. **Playoff teams order by `rankCalculatedFinal`, reversed** — champion picks
+   last. This is the field the spike verified exactly right for that group.
+3. **`rankCalculatedFinal` is never a whole-league sort key.** For 11896 that
+   single simplification would move 5 of 14 slots.
+4. **The derived order is a DEFAULT PROPOSAL, never truth.** ESPN exposes no
+   traded-pick ledger (§6e, #158), so manual override stays mandatory. It
+   prefills the drag list, is fully editable, and nothing persists until the
+   user saves through the shipped `POST /api/league/pick-assignments/order`.
+5. **Refuse rather than guess.** Missing or partial standings — a first-season
+   league, a pre-season import, an expired-cookie read — produce *no*
+   suggestion. The client already orders manually; that is the fallback.
+
+**Scope note (build decisions, not operator rulings):** this needed no new
+route, no new table and no new flag — it changes a default inside the already
+flag-gated `picks.assign` flow. Delivery, the exact tiebreak chain and the
+refusal matrix: [build-espn-auto-order.md](build-espn-auto-order.md).

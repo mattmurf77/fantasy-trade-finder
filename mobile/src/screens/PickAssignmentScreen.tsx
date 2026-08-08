@@ -504,6 +504,10 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
       <SetupView
         seeded={data.seeded}
         settings={data.settings}
+        // The server sends these ONLY while the league has no stored order,
+        // so passing them straight through can never overwrite a saved one.
+        suggestedOrder={data.suggested_order}
+        suggestedOrderSeason={data.suggested_order_season}
         members={
           membersQuery.data?.members?.map((m) => ({
             user_id: m.user_id,
@@ -879,6 +883,8 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
 function SetupView({
   seeded,
   settings,
+  suggestedOrder,
+  suggestedOrderSeason,
   members,
   loadingMembers,
   saving,
@@ -889,6 +895,13 @@ function SetupView({
 }: {
   seeded: boolean;
   settings: PickAssignments['settings'];
+  /** ESPN-derived round-1 order. The server sends it ONLY while the league
+   *  has no stored order, so preferring it here can never overwrite one the
+   *  user already saved — and there is deliberately no "reset to the ESPN
+   *  order" affordance, because after the first save the server no longer
+   *  offers one. */
+  suggestedOrder?: string[];
+  suggestedOrderSeason?: number;
   members: TeamRef[];
   loadingMembers: boolean;
   saving: boolean;
@@ -901,21 +914,30 @@ function SetupView({
   const [orderType, setOrderType] = useState<PickOrderType>(settings.order_type || 'linear');
   const [order, setOrder] = useState<TeamRef[]>([]);
 
-  // Seed the drag list from the stored order when there is one, otherwise
-  // from the members list. Only fills an EMPTY list, so a drag in progress
-  // is never rewritten by a background refetch.
+  // The ESPN suggestion only counts if it actually covers this membership —
+  // a partially-resolvable order would silently mix a derived prefix with an
+  // alphabetical tail, which reads as a real answer and isn't one.
+  const prefilled =
+    !!suggestedOrder &&
+    suggestedOrder.length > 0 &&
+    members.length > 0 &&
+    suggestedOrder.length === members.length &&
+    suggestedOrder.every((id) => members.some((m) => m.user_id === id));
+
+  // Seed the drag list from the ESPN-derived order when the server offered
+  // one, else the stored order, else the members list. Only fills an EMPTY
+  // list, so a drag in progress is never rewritten by a background refetch.
   useEffect(() => {
     if (members.length === 0) return;
     setOrder((prev) => {
       if (prev.length > 0) return prev;
       const byId = new Map(members.map((m) => [m.user_id, m]));
-      const stored = (settings.order ?? [])
-        .map((id) => byId.get(id))
-        .filter((m): m is TeamRef => !!m);
-      const rest = members.filter((m) => !stored.some((s) => s.user_id === m.user_id));
-      return [...stored, ...rest];
+      const source = prefilled ? (suggestedOrder as string[]) : (settings.order ?? []);
+      const seeded_ = source.map((id) => byId.get(id)).filter((m): m is TeamRef => !!m);
+      const rest = members.filter((m) => !seeded_.some((s) => s.user_id === m.user_id));
+      return [...seeded_, ...rest];
     });
-  }, [members, settings.order]);
+  }, [members, settings.order, suggestedOrder, prefilled]);
 
   const renderItem = useCallback(
     ({ item, drag, isActive, getIndex }: RenderItemParams<TeamRef>) => {
@@ -1030,6 +1052,21 @@ function SetupView({
 
       <View style={styles.divider} />
       <TickLabel>Round 1 order</TickLabel>
+      {prefilled ? (
+        // Informational highlight, so a flare tick and NOT an action color
+        // (ADR-005) — the same vocabulary the deviation marker uses. It says
+        // where the order came from and that nothing is committed, because a
+        // prefilled list that looks authored is the failure mode here.
+        <View style={styles.derivedNote} testID="pick-assignment.espn-derived-note">
+          <View style={styles.derivedTick} />
+          <Text style={[styles.bodyDim, styles.derivedNoteText]}>
+            Filled in from your{suggestedOrderSeason ? ` ${suggestedOrderSeason}` : ' last'} ESPN
+            standings — playoff teams by where they finished, everyone else in reverse
+            regular-season order. Drag anything that&apos;s wrong; nothing is saved until you
+            confirm below.
+          </Text>
+        </View>
+      ) : null}
       <Text style={styles.bodyDim}>Hold a team to drag it. Later rounds follow this order.</Text>
     </View>
   );
@@ -1173,6 +1210,12 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.lg, gap: space.sm },
 
   bodyDim: { ...type.bodySm, color: chalk.dim },
+  // ESPN-derived-order note: flare tick + dim body, matching the deviation
+  // marker's informational-highlight vocabulary (ADR-005 — flare never means
+  // "act here"). `flex: 1` on the text so it wraps beside the tick.
+  derivedNote: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-start' },
+  derivedTick: { width: 3, alignSelf: 'stretch', backgroundColor: flare.base },
+  derivedNoteText: { flex: 1 },
   warnLine: { ...type.bodySm, color: semantic.warn },
 
   divider: { height: 1, backgroundColor: ink.line },

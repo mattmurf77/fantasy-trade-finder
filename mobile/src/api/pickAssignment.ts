@@ -120,6 +120,49 @@ export interface PickAssignments {
   progress: PickAssignmentProgress;
   /** False before the pristine grid has been written. */
   seeded: boolean;
+
+  // ── ESPN auto-derived round-1 order (draft-extensions, 2026-08-08) ────
+  // A DEFAULT for the setup step's drag list, not state the server adopted:
+  // `settings.order` is untouched and nothing is written until the user
+  // saves. All four keys arrive together or not at all.
+  //
+  // **Present ONLY while the league has no stored order of its own**, which
+  // is what makes "never overwrite a saved order" structural rather than a
+  // client rule — once someone saves, the server stops deriving (and stops
+  // reading ESPN) entirely. There is therefore no "reset to the ESPN order"
+  // affordance; re-deriving would need a server that still offers it.
+  //
+  // Absent whenever the derivation cannot be honest — a non-ESPN league, a
+  // league linked before its first season, an expired-cookie read, a
+  // membership change since the snapshot. Absent is the shipped behaviour:
+  // the user orders the list by hand, exactly as before.
+  /** League member ids in the derived round-1 pick order (index 0 = 1.01). */
+  suggested_order?: string[];
+  /** Only value today. Read as an OPEN set — a future platform may add one. */
+  suggested_order_source?: 'espn_standings' | (string & {});
+  /** The ESPN season the standings were read from — the caption says it. */
+  suggested_order_season?: number;
+  /** Per-team "why this pick", in the same order as `suggested_order`. */
+  suggested_order_detail?: SuggestedOrderEntry[];
+}
+
+/** One row of the derivation's reasoning. Carries NO value/price field and
+ *  none may be added — D13 governs this payload too. */
+export interface SuggestedOrderEntry {
+  user_id: string;
+  team_name: string;
+  /** 1-based pick number. */
+  pick: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  points_for: number;
+  /** ESPN's final regular-season seed. */
+  playoff_seed: number;
+  /** ESPN's post-playoff rank, 1 = champion. Only meaningful — and only
+   *  used to order — when `made_playoffs` is true. */
+  final_rank: number | null;
+  made_playoffs: boolean;
 }
 
 export interface AssignPickResult {

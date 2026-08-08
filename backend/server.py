@@ -10399,6 +10399,138 @@ def _assignment_slots(league_id: str, settings: dict) -> list[dict]:
     return out
 
 
+# ── ESPN auto-derived round-1 order (draft-extensions, 2026-08-08) ──────
+#
+# The shipped setup step asks a user to drag 12–14 teams into last season's
+# finishing order by hand. ESPN already knows that order, so this seeds it.
+#
+# THREE PROPERTIES MAKE THIS SAFE WITHOUT A FLAG OF ITS OWN:
+#   1. It is a DEFAULT for an already-shipped, already-gated flow
+#      (`picks.assign`) — it adds no route and no new state.
+#   2. It WRITES NOTHING. The user confirms or edits, and only the existing
+#      `POST .../order` persists anything.
+#   3. It is ABSENT whenever the derivation cannot be honest, and the client
+#      already handles ordering manually — that is today's behaviour.
+#
+# Egress is bounded by only deriving when the league has NO STORED ORDER:
+# once the user saves one, the key is never emitted again and no ESPN read
+# happens at all. The cache below covers repeat screen loads before that
+# first save.
+_SUGGESTED_ORDER_CACHE: dict[str, tuple[float, dict | None]] = {}
+_SUGGESTED_ORDER_TTL_SECONDS = 900          # 15 min, hits AND misses
+_SUGGESTED_ORDER_SOURCE = "espn_standings"
+
+
+def _espn_standings_read(league_id: str, row: dict):
+    """`(parsed league, season)` for the most recent COMPLETED ESPN season.
+
+    Tries the league's linked `espn_season` first, then exactly ONE season
+    back — a league linked pre-season carries a 0-0-0 grid for the current
+    year, and last season's standings are the ones a rookie draft orders
+    off. Reuses `espn_service.fetch_league` and the stored-cookie handling
+    the re-sync route already uses: same host, same auth, no new egress
+    pattern. Returns `(None, None)` on any failure — fail soft, always.
+    """
+    from . import espn_service as _espn
+    from .database import get_espn_credential
+
+    espn_s2 = swid = None
+    if (row.get("espn_auth") or "public") == "cookie":
+        cred = get_espn_credential(str(row.get("user_id") or ""))
+        if not cred:
+            return None, None
+        try:
+            espn_s2 = _sleeper_write.decrypt_token(cred["espn_s2_encrypted"])
+            swid = cred.get("swid")
+        except Exception:
+            return None, None
+
+    # No linked season ⇒ this row never came through the ESPN importer, so
+    # there is no season to read standings for and nothing to derive from.
+    # Deliberately NOT defaulted: guessing a season is how you'd read a
+    # stranger's league.
+    try:
+        linked = int(row.get("espn_season"))
+    except (TypeError, ValueError):
+        return None, None
+    for season in (linked, linked - 1):
+        try:
+            raw = _espn.fetch_league(str(league_id), season,
+                                     espn_s2=espn_s2, swid=swid)
+            league = _espn.parse_league(raw)
+        except Exception as e:                   # EspnError, network, parse…
+            log.info("suggested-order: ESPN read failed for %s/%s: %s",
+                     league_id, season, e)
+            continue
+        if _espn.derive_espn_draft_order(
+                league["teams"], league.get("playoff_team_count")) is not None:
+            return league, season
+    return None, None
+
+
+def _espn_suggested_order(league_id: str, member_ids: list[str]) -> dict | None:
+    """`{order, source, detail}` seeded from ESPN's final standings, or None.
+
+    `order` is FTF member `user_id`s in round-1 pick order, so it drops
+    straight into `settings.order`. The ESPN team → member mapping is the
+    SAME one the import writes (`_espn_member_id`, with the linking user's
+    own real id for their own team), and the result must be an exact
+    permutation of the league's current membership — anything else (a team
+    left, a re-link changed the binding) returns None rather than a
+    partially-right order.
+    """
+    from . import espn_service as _espn
+    from .database import get_espn_league
+
+    row = get_espn_league(str(league_id))
+    if not row:
+        return None                              # not an ESPN league at all
+
+    now = time.time()
+    hit = _SUGGESTED_ORDER_CACHE.get(str(league_id))
+    if hit and (now - hit[0]) < _SUGGESTED_ORDER_TTL_SECONDS:
+        cached = hit[1]
+    else:
+        cached = None
+        league, season = _espn_standings_read(str(league_id), row)
+        if league:
+            order_ids = _espn.derive_espn_draft_order(
+                league["teams"], league.get("playoff_team_count"))
+            if order_ids:
+                by_id = {t.team_id: t for t in league["teams"]}
+                my_team = row.get("espn_my_team_id")
+                importer = str(row.get("user_id") or "")
+                n_playoff = int(league.get("playoff_team_count") or 0)
+                order, detail = [], []
+                for pick, tid in enumerate(order_ids, start=1):
+                    t = by_id[tid]
+                    uid = (importer if (importer and tid == my_team)
+                           else _espn_member_id(str(league_id), t))
+                    order.append(uid)
+                    detail.append({
+                        "user_id":       uid,
+                        "team_name":     t.name,
+                        "pick":          pick,
+                        "wins":          t.wins,
+                        "losses":        t.losses,
+                        "ties":          t.ties,
+                        "points_for":    round(float(t.points_for), 2),
+                        "playoff_seed":  t.playoff_seed,
+                        "final_rank":    t.rank_calculated_final,
+                        "made_playoffs": t.playoff_seed <= n_playoff,
+                    })
+                cached = {"order": order, "source": _SUGGESTED_ORDER_SOURCE,
+                          "season": season, "detail": detail}
+        _SUGGESTED_ORDER_CACHE[str(league_id)] = (now, cached)
+
+    if not cached:
+        return None
+    # Membership must line up EXACTLY, or the order is not this league's.
+    if sorted(cached["order"]) != sorted(member_ids):
+        return None
+    return cached
+
+
 def _assignment_payload(league_id: str, settings: dict,
                         slots: list[dict], member_count: int) -> dict:
     seasons: dict[int, list[dict]] = {}
@@ -10510,8 +10642,27 @@ def pick_assignments_route():
 
     settings = _assignment_settings(league_id, member_ids)
     slots = _assignment_slots(league_id, settings)
-    return jsonify(_assignment_payload(league_id, settings, slots,
-                                       len(member_ids)))
+    payload = _assignment_payload(league_id, settings, slots, len(member_ids))
+
+    # ESPN auto-derived round-1 order — a DEFAULT for the setup step, only
+    # while the league has no stored order of its own. `_assignment_settings`
+    # always returns a fully-populated `order`, so "has the user chosen one?"
+    # is a question about the STORED blob, not about `settings`. Once an
+    # order is saved these keys never appear again and no ESPN read is made,
+    # which is also what guarantees a saved order can never be overwritten.
+    stored_order = (load_pick_assignment_settings(str(league_id)) or {}).get("order")
+    if not stored_order and member_ids:
+        try:
+            suggested = _espn_suggested_order(league_id, member_ids)
+        except Exception:                        # never break the board
+            log.exception("suggested-order: derivation failed for %s", league_id)
+            suggested = None
+        if suggested:
+            payload["suggested_order"] = suggested["order"]
+            payload["suggested_order_source"] = suggested["source"]
+            payload["suggested_order_season"] = suggested["season"]
+            payload["suggested_order_detail"] = suggested["detail"]
+    return jsonify(payload)
 
 
 @app.route("/api/league/pick-assignments/<pick_id>", methods=["PUT"])

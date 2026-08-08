@@ -152,6 +152,34 @@ class EspnTeam:
     owner_swid: str
     owner_display: str
     players: list[EspnPlayer] = field(default_factory=list)
+    # ── Standings (ADDITIVE, all default None) ──────────────────────────
+    # Read from the SAME `view=mTeam` response the roster import already
+    # fetches — live-verified 2026-08-08 against league 11896 that mTeam
+    # alone carries all three (docs/plans/draft-extensions/
+    # espn-auto-draft-order-feasibility.md §6b). No extra `view=` token, no
+    # extra request, and every pre-existing caller that ignores these
+    # fields sees an unchanged object.
+    wins: int | None = None
+    losses: int | None = None
+    ties: int | None = None
+    points_for: float | None = None
+    #: ESPN's final REGULAR-SEASON seed, 1..N, its own tiebreakers applied.
+    playoff_seed: int | None = None
+    #: ESPN's final POST-PLAYOFF rank, 1 = champion. Verified exact for
+    #: playoff teams; for non-playoff teams it reflects ESPN's consolation
+    #: ladder, which FTF deliberately does not use (see
+    #: `derive_espn_draft_order`).
+    rank_calculated_final: int | None = None
+
+
+def _int_or_none(v) -> int | None:
+    """`int(v)` for a real number, else None. `None`/''/non-numeric → None."""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def parse_league(raw: dict) -> dict:
@@ -176,6 +204,8 @@ def parse_league(raw: dict) -> dict:
                     position=ESPN_POSITION_BY_ID.get(p.get("defaultPositionId"), "?"),
                 )
             )
+        overall = (t.get("record") or {}).get("overall") or {}
+        pf = overall.get("pointsFor")
         teams.append(
             EspnTeam(
                 team_id=t.get("id"),
@@ -183,15 +213,134 @@ def parse_league(raw: dict) -> dict:
                 owner_swid=swid,
                 owner_display=display_by_swid.get(swid, ""),
                 players=players,
+                wins=_int_or_none(overall.get("wins")),
+                losses=_int_or_none(overall.get("losses")),
+                ties=_int_or_none(overall.get("ties")),
+                points_for=(float(pf) if isinstance(pf, (int, float))
+                            and not isinstance(pf, bool) else None),
+                playoff_seed=_int_or_none(t.get("playoffSeed")),
+                rank_calculated_final=_int_or_none(t.get("rankCalculatedFinal")),
             )
         )
+    settings = raw.get("settings") or {}
     return {
         "league_id": str(raw.get("id", "")),
-        "name": (raw.get("settings") or {}).get("name", ""),
+        "name": settings.get("name", ""),
         "season": raw.get("seasonId"),
-        "total_teams": (raw.get("settings") or {}).get("size") or len(teams),
+        "total_teams": settings.get("size") or len(teams),
         "teams": teams,
+        # Additive. `mSettings` is already requested; None when absent, which
+        # `derive_espn_draft_order` treats as "cannot tell who made the
+        # playoffs" and refuses to guess.
+        "playoff_team_count": _int_or_none(
+            (settings.get("scheduleSettings") or {}).get("playoffTeamCount")),
     }
+
+
+# ---------------------------------------------------------------------------
+# Derived rookie-draft order (draft-extensions, 2026-08-08)
+# ---------------------------------------------------------------------------
+
+def derive_espn_draft_order(teams, playoff_team_count) -> list[int] | None:
+    """Standard dynasty rookie-draft order from ESPN's own final standings.
+
+    Returns ESPN `team_id`s in PICK order — index 0 holds 1.01 — or `None`
+    when the inputs cannot support an honest answer. **It never guesses.**
+
+    ── The convention, as implemented ──────────────────────────────────────
+
+    1. **Non-playoff teams pick FIRST**, ordered by INVERSE regular-season
+       standings: worst record → 1.01. Sort key, ascending:
+
+         (win percentage, points_for, -playoff_seed, team_id)
+
+       i.e. worse record first; tie on record broken by FEWER points-for
+       picking earlier; still tied broken by ESPN's own final regular-season
+       seed (worse seed picks earlier), which is unique 1..N and therefore
+       makes the order total; `team_id` is a belt-and-braces final key so the
+       sort is deterministic even against a malformed payload.
+
+       Win percentage counts a tie as half a win — `(w + t/2) / games` — which
+       is how ESPN itself computes `record.overall.percentage`.
+
+    2. **Playoff teams pick LAST**, in REVERSE `rankCalculatedFinal` order, so
+       the champion (`rankCalculatedFinal == 1`) picks last. Ties broken by
+       `team_id` for determinism, though ESPN's final rank is unique in
+       practice.
+
+    3. "Made the playoffs" is `playoff_seed <= playoff_team_count`. ESPN
+       assigns a `playoffSeed` to EVERY team (it is the regular-season
+       standing, 1..N), so the bracket size is the only thing that separates
+       the two groups — which is why it is a required argument rather than
+       something inferred.
+
+    ── Why `rankCalculatedFinal` is used for ONE group only ────────────────
+
+    Operator decision, 2026-08-08 (`docs/plans/draft-extensions/plan.md`;
+    evidence in `espn-auto-draft-order-feasibility.md` §6c–d): the live probe
+    of league 11896 confirmed `rankCalculatedFinal` is EXACTLY the
+    post-playoff finish for the six playoff teams, but for the eight
+    non-playoff teams it encodes ESPN's consolation-ladder result, which
+    disagreed with inverse regular-season standings on 5 of 8. Most dynasty
+    leagues treat those bottom-bracket games as meaningless for rookie picks
+    — a 4-10 team should not pick 8th for winning the consolation ladder — so
+    FTF uses `rankCalculatedFinal` for the playoff group only and the
+    regular-season record for everyone else. It is never a whole-league sort
+    key.
+
+    ── Refusals (return `None`, never a fabricated order) ──────────────────
+
+    New leagues, pre-season imports and auth-degraded reads all land here:
+
+      • fewer than two teams, or no `playoff_team_count` in 1..len(teams)-1
+      • ANY team missing wins / losses / ties / points_for / playoff_seed
+      • duplicate or non-positive `playoff_seed` (standings unresolvable)
+      • every team at 0-0-0 (the season has not been played)
+      • ANY PLAYOFF team missing, non-positive, or duplicating
+        `rankCalculatedFinal` (ESPN leaves it 0 until the playoffs finish)
+
+    Note `rankCalculatedFinal` is required only of the playoff group, because
+    that is the only group whose order reads it.
+    """
+    teams = list(teams or [])
+    if len(teams) < 2:
+        return None
+
+    n_playoff = _int_or_none(playoff_team_count)
+    if n_playoff is None or not (1 <= n_playoff < len(teams)):
+        return None
+
+    for t in teams:
+        if None in (t.wins, t.losses, t.ties, t.points_for, t.playoff_seed):
+            return None
+        if t.playoff_seed < 1:
+            return None
+
+    seeds = [t.playoff_seed for t in teams]
+    if len(set(seeds)) != len(seeds):
+        return None
+
+    # A season nobody has played yet carries a full, well-formed 0-0-0 grid.
+    if all((t.wins + t.losses + t.ties) == 0 for t in teams):
+        return None
+
+    playoff = [t for t in teams if t.playoff_seed <= n_playoff]
+    non_playoff = [t for t in teams if t.playoff_seed > n_playoff]
+    if not playoff or not non_playoff:
+        return None
+
+    finals = [t.rank_calculated_final for t in playoff]
+    if any(r is None or r < 1 for r in finals) or len(set(finals)) != len(finals):
+        return None
+
+    def _win_pct(t) -> float:
+        games = t.wins + t.losses + t.ties
+        return ((t.wins + t.ties / 2.0) / games) if games else 0.0
+
+    non_playoff.sort(key=lambda t: (_win_pct(t), t.points_for,
+                                    -t.playoff_seed, t.team_id))
+    playoff.sort(key=lambda t: (-t.rank_calculated_final, t.team_id))
+    return [t.team_id for t in non_playoff + playoff]
 
 
 # ---------------------------------------------------------------------------

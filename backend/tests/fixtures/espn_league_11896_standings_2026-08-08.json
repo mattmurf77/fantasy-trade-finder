@@ -1,0 +1,238 @@
+{
+  "_provenance": "REAL, live-captured 2026-08-08 from ESPN's public v3 API: GET lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/2025/segments/0/leagues/11896?view=mTeam&view=mSettings (unauthenticated, public league). Same league the feasibility spike used - see docs/plans/draft-extensions/espn-auto-draft-order-feasibility.md section 6. Trimmed to the standings fields the draft-order derivation reads; every wins/losses/ties/pointsFor/playoffSeed/rankCalculatedFinal value below is verbatim from that response. Rosters/members/schedule omitted. The only SYNTHESIZED field is primaryOwner: real SWIDs identify real people, so they are replaced with stable placeholders.",
+  "id": 11896,
+  "seasonId": 2025,
+  "settings": {
+    "name": "Newton Dynasty League",
+    "size": 14,
+    "scheduleSettings": {
+      "playoffTeamCount": 6
+    }
+  },
+  "teams": [
+    {
+      "id": 14,
+      "name": "Stinky Fingers",
+      "primaryOwner": "{SWID-14}",
+      "playoffSeed": 1,
+      "rankCalculatedFinal": 3,
+      "record": {
+        "overall": {
+          "wins": 12,
+          "losses": 2,
+          "ties": 0,
+          "pointsFor": 2040.65,
+          "pointsAgainst": 1765.48
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "The Humongous Melonheads",
+      "primaryOwner": "{SWID-05}",
+      "playoffSeed": 2,
+      "rankCalculatedFinal": 4,
+      "record": {
+        "overall": {
+          "wins": 11,
+          "losses": 3,
+          "ties": 0,
+          "pointsFor": 2057.83,
+          "pointsAgainst": 1767.75
+        }
+      }
+    },
+    {
+      "id": 13,
+      "name": "Black Lives Matter",
+      "primaryOwner": "{SWID-13}",
+      "playoffSeed": 3,
+      "rankCalculatedFinal": 1,
+      "record": {
+        "overall": {
+          "wins": 10,
+          "losses": 4,
+          "ties": 0,
+          "pointsFor": 1984.11,
+          "pointsAgainst": 1810.58
+        }
+      }
+    },
+    {
+      "id": 6,
+      "name": "Bucky Charms",
+      "primaryOwner": "{SWID-06}",
+      "playoffSeed": 4,
+      "rankCalculatedFinal": 2,
+      "record": {
+        "overall": {
+          "wins": 9,
+          "losses": 5,
+          "ties": 0,
+          "pointsFor": 2126.3,
+          "pointsAgainst": 1936.18
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "Hail Mary Jane",
+      "primaryOwner": "{SWID-04}",
+      "playoffSeed": 5,
+      "rankCalculatedFinal": 5,
+      "record": {
+        "overall": {
+          "wins": 8,
+          "losses": 6,
+          "ties": 0,
+          "pointsFor": 2018.79,
+          "pointsAgainst": 1905.52
+        }
+      }
+    },
+    {
+      "id": 11,
+      "name": "Gandhi's Army",
+      "primaryOwner": "{SWID-11}",
+      "playoffSeed": 6,
+      "rankCalculatedFinal": 6,
+      "record": {
+        "overall": {
+          "wins": 8,
+          "losses": 6,
+          "ties": 0,
+          "pointsFor": 1818.8,
+          "pointsAgainst": 1802.82
+        }
+      }
+    },
+    {
+      "id": 7,
+      "name": "Kaleb's Team",
+      "primaryOwner": "{SWID-07}",
+      "playoffSeed": 7,
+      "rankCalculatedFinal": 8,
+      "record": {
+        "overall": {
+          "wins": 7,
+          "losses": 7,
+          "ties": 0,
+          "pointsFor": 1821.81,
+          "pointsAgainst": 1841.58
+        }
+      }
+    },
+    {
+      "id": 12,
+      "name": "Team VP",
+      "primaryOwner": "{SWID-12}",
+      "playoffSeed": 8,
+      "rankCalculatedFinal": 11,
+      "record": {
+        "overall": {
+          "wins": 7,
+          "losses": 7,
+          "ties": 0,
+          "pointsFor": 1764.51,
+          "pointsAgainst": 1887.58
+        }
+      }
+    },
+    {
+      "id": 1,
+      "name": "Egbukake",
+      "primaryOwner": "{SWID-01}",
+      "playoffSeed": 9,
+      "rankCalculatedFinal": 10,
+      "record": {
+        "overall": {
+          "wins": 6,
+          "losses": 8,
+          "ties": 0,
+          "pointsFor": 1792.92,
+          "pointsAgainst": 1829.35
+        }
+      }
+    },
+    {
+      "id": 8,
+      "name": "Sneaky  Fingers",
+      "primaryOwner": "{SWID-08}",
+      "playoffSeed": 10,
+      "rankCalculatedFinal": 9,
+      "record": {
+        "overall": {
+          "wins": 6,
+          "losses": 8,
+          "ties": 0,
+          "pointsFor": 1666.56,
+          "pointsAgainst": 1825.33
+        }
+      }
+    },
+    {
+      "id": 9,
+      "name": "Conor's Cuddle Muffins",
+      "primaryOwner": "{SWID-09}",
+      "playoffSeed": 11,
+      "rankCalculatedFinal": 7,
+      "record": {
+        "overall": {
+          "wins": 4,
+          "losses": 10,
+          "ties": 0,
+          "pointsFor": 1872.81,
+          "pointsAgainst": 1982.75
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "Barry McAulkener",
+      "primaryOwner": "{SWID-02}",
+      "playoffSeed": 12,
+      "rankCalculatedFinal": 12,
+      "record": {
+        "overall": {
+          "wins": 4,
+          "losses": 10,
+          "ties": 0,
+          "pointsFor": 1619.46,
+          "pointsAgainst": 1741.93
+        }
+      }
+    },
+    {
+      "id": 3,
+      "name": "Chubby Chasers",
+      "primaryOwner": "{SWID-03}",
+      "playoffSeed": 13,
+      "rankCalculatedFinal": 13,
+      "record": {
+        "overall": {
+          "wins": 4,
+          "losses": 10,
+          "ties": 0,
+          "pointsFor": 1608.39,
+          "pointsAgainst": 1767.83
+        }
+      }
+    },
+    {
+      "id": 10,
+      "name": "Tyler's unimpressive Team",
+      "primaryOwner": "{SWID-10}",
+      "playoffSeed": 14,
+      "rankCalculatedFinal": 14,
+      "record": {
+        "overall": {
+          "wins": 2,
+          "losses": 12,
+          "ties": 0,
+          "pointsFor": 1536.28,
+          "pointsAgainst": 1864.54
+        }
+      }
+    }
+  ]
+}
