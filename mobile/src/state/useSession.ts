@@ -419,19 +419,32 @@ export const useSession = create<SessionState>((set, get) => ({
     //    LeaguePickerScreen uses too.
     try {
       const lgs = await getLeagues(state.user.user_id);
+      // P-1 (draft-extensions W3 M-A) — MERGE, don't replace. `getLeagues`
+      // hits /api/sleeper/leagues/<user_id>, whose local-league append
+      // filters to NON-NUMERIC ids, and a platform-imported league carries
+      // its numeric platform-native id. So that response can never contain
+      // an ESPN/MFL/Fleaflicker row, and the wholesale replace this used to
+      // do silently dropped every one of them: connecting any Sleeper
+      // league mid-session wiped the linked-platform leagues from the
+      // cache. That is already why the ESPN re-sync button disappears, and
+      // the League tab's ESPN-gated sections (draft picks, the ESPN badge
+      // and re-sync row) would have inherited it. Carry the non-Sleeper
+      // rows forward; a fresh row for the same league_id still wins.
+      const prior = get().leagues ?? [];
+      const fresh = new Set(lgs.map((lg) => lg.league_id));
+      const carried = prior.filter(
+        (lg) => (lg.platform ?? 'sleeper') !== 'sleeper' && !fresh.has(lg.league_id),
+      );
+      const merged: LeagueSummary[] = [...lgs, ...carried];
       // Ensure the just-connected league is in the list. Sleeper returns
       // every NFL league the user is in, so this is usually a no-op, but
       // it guards against propagation delay.
-      const hasIt = lgs.some((lg) => lg.league_id === result.league_id);
-      const merged: LeagueSummary[] = hasIt
-        ? lgs
-        : [
-            ...lgs,
-            {
-              league_id: result.league_id,
-              name: result.league_name,
-            },
-          ];
+      if (!merged.some((lg) => lg.league_id === result.league_id)) {
+        merged.push({
+          league_id: result.league_id,
+          name: result.league_name,
+        });
+      }
       await get().setLeagues(merged);
     } catch {
       // Non-fatal — caller still gets ok=true; switcher may need a manual

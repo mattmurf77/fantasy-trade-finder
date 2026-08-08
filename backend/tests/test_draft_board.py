@@ -1309,3 +1309,235 @@ def test_board_prices_slot_values_in_the_sessions_active_format(
         assert seen["scoring"] == "1qb_ppr"
     finally:
         ff._flags_cache = saved
+
+
+# ---------------------------------------------------------------------------
+# draft-extensions W3 M-B — the ESPN Draft Room state (flag `picks.assign`)
+#
+# ESPN has no rookie-draft concept (operator ruling), so an ESPN dynasty
+# league's rookie draft necessarily runs OFF-PLATFORM: there is no draft
+# object to read, now or ever. The room is therefore built entirely from the
+# league's own assignment grid, with ZERO platform egress in every state.
+#
+#   T-W3-20  flag off  -> byte-identical to today's `platform_unsupported`
+#   T-W3-21  flag on, nothing assigned -> state stays `unavailable`,
+#            notice.code = picks_not_assigned    (no closed enum gains a member)
+#   T-W3-22  flag on, assignments present -> a real `upcoming` board
+#   T-W3-23  ZERO platform egress in all three states
+#   T-W3-24  the payload key set equals `_payload`'s exactly
+#   T-W3-25  the linear/snake toggle changes numbering, never ownership
+#   T-W3-26  `build_board` is unreachable for ESPN
+# ---------------------------------------------------------------------------
+
+ESPN_LEAGUE = "1099887766554433221"
+
+
+def _grid(rounds=2, teams=3, order_type="linear", traded=None):
+    traded = traded or {}
+    slots = []
+    for rnd in range(1, rounds + 1):
+        for slot in range(1, teams + 1):
+            owner = traded.get((rnd, slot), f"eu{slot}")
+            slots.append({
+                "round": rnd, "slot": slot,
+                "owner_user_id": owner, "owner_username": f"Team {owner}",
+                "original_user_id": f"eu{slot}",
+                "original_username": f"Team eu{slot}",
+                "is_traded": owner != f"eu{slot}",
+            })
+    return dbs.AssignmentGrid(rounds=rounds, teams=teams, order_type=order_type,
+                              slots=tuple(slots),
+                              newest_assigned_at="2026-08-08T00:00:00+00:00")
+
+
+class _NoEgressFetchers:
+    """Everything `assigned_board` may legitimately need, and nothing else.
+
+    Every platform method RAISES, which is what makes the zero-egress claim
+    structural rather than incidental.
+    """
+
+    def __init__(self, rookie_ids=None):
+        self._rookies = set(rookie_ids or ())
+
+    def rookie_ids(self, season):
+        return set(self._rookies)
+
+    def players(self, player_ids):
+        return {pid: {"full_name": f"Rookie {pid}", "position": "WR",
+                      "team": "ARI", "rookie_year": "2026", "search_rank": 1}
+                for pid in player_ids}
+
+    def _boom(self, *a, **k):
+        raise AssertionError("assigned_board reached a platform")
+
+    drafts = draft_detail = draft_picks = _boom
+    traded_picks = rosters = users = mfl_draft_results = _boom
+
+
+def _espn_req(**kw):
+    base = dict(league_id=ESPN_LEAGUE, platform="espn", season=2026,
+                user_id="eu1", consensus_elo={"r1": 1600.0})
+    base.update(kw)
+    return dbs.BoardRequest(**base)
+
+
+def test_w3_21_no_assignments_is_unavailable_with_the_new_notice_code():
+    out = dbs.assigned_board(_espn_req(), grid=dbs.AssignmentGrid(),
+                             fetchers=_NoEgressFetchers())
+    assert out["state"] == "unavailable"          # NOT a new enum member
+    assert out["kind"] == "unknown"
+    assert out["order_confidence"] == "unknown"
+    assert out["notice"]["code"] == "picks_not_assigned"
+    assert out["order"] == [] and out["picks"] == []
+    # Copy rule: an unconfigured state with a user-performable fix, never an
+    # error. Nothing in the message may read as breakage.
+    msg = out["notice"]["message"].lower()
+    assert "went wrong" not in msg and "error" not in msg
+    assert "assign" in msg
+
+
+def test_w3_22_assignments_present_render_a_real_upcoming_board():
+    out = dbs.assigned_board(_espn_req(), grid=_grid(),
+                             fetchers=_NoEgressFetchers({"r1"}))
+    assert out["state"] == "upcoming"
+    assert out["kind"] == "rookie"
+    assert out["order_confidence"] == "assigned"
+    assert out["platform"] == "espn"
+    assert out["rounds"] == 2 and out["teams"] == 3
+    assert len(out["order"]) == 6
+    # picks[] is ALWAYS empty here: an off-platform draft leaves no record we
+    # can read. Only W3 M-D's recorded_picks can ever populate it.
+    assert out["picks"] == []
+    assert out["undrafted"] and out["undrafted_suppressed"] is False
+    assert out["deep_link"] is None               # no ESPN draft room exists
+    assert out["stale"] is False                  # a grid is never "stale"
+
+
+def test_w3_22b_my_picks_is_sliced_from_the_grid():
+    out = dbs.assigned_board(_espn_req(user_id="eu2"), grid=_grid(),
+                             fetchers=_NoEgressFetchers())
+    assert {p["owner_user_id"] for p in out["my_picks"]} == {"eu2"}
+    assert len(out["my_picks"]) == 2               # one per round
+
+
+def test_w3_27_class_not_loaded_still_renders_the_order():
+    out = dbs.assigned_board(_espn_req(), grid=_grid(),
+                             fetchers=_NoEgressFetchers(set()))
+    assert out["undrafted"] == []
+    assert out["undrafted_suppressed"] is True
+    assert out["notice"]["code"] == "class_not_loaded"
+    assert len(out["order"]) == 6                 # the board still renders
+
+
+def test_w3_23_zero_platform_egress_in_every_state():
+    """The fetchers raise on every platform method, so any read is a failure."""
+    for grid in (dbs.AssignmentGrid(), _grid(), _grid(order_type="snake")):
+        dbs.assigned_board(_espn_req(), grid=grid,
+                           fetchers=_NoEgressFetchers({"r1"}))
+
+
+def test_w3_24_the_payload_key_set_matches_the_shipped_renderers():
+    """KD-9 — `assigned_board` may not invent a new key, and no closed client
+    enum gains a member."""
+    # A 12-team grid prices EXACTLY on DynastyProcess's 12-team slot curve, so
+    # it carries no `slot_value_approx` marker — the same rule Sleeper and MFL
+    # already follow.
+    assigned = dbs.assigned_board(_espn_req(), grid=_grid(teams=12),
+                                  fetchers=_NoEgressFetchers({"r1"}))
+    unavailable = dbs.assigned_board(_espn_req(), grid=dbs.AssignmentGrid(),
+                                     fetchers=_NoEgressFetchers())
+    reference = dbs.unsupported_board(_espn_req())
+    assert set(unavailable) == set(reference)
+    # `_payload` carries one key `_render_unavailable` does not (`type`, added
+    # by W2d so a client can prefill a mock's linear/snake toggle). The LLD's
+    # "both emit the same 18 keys" is stale as of that change.
+    assert set(assigned) - set(reference) == {"type"}
+    # …and a non-12-team ESPN grid gets the shipped approximation marker,
+    # never a silent one.
+    small = dbs.assigned_board(_espn_req(), grid=_grid(teams=3),
+                               fetchers=_NoEgressFetchers({"r1"}))
+    assert set(small) - set(assigned) <= {"slot_value_approx"}
+    assert assigned["schema"] == 1 == unavailable["schema"]
+    assert assigned["state"] in (dbs.UPCOMING, dbs.LIVE, dbs.COMPLETE,
+                                 dbs.UNAVAILABLE)
+    assert assigned["kind"] in (dbs.KIND_ROOKIE, dbs.KIND_STARTUP,
+                                dbs.KIND_UNKNOWN)
+    assert assigned["order_confidence"] in (dbs.ORDER_ASSIGNED, dbs.ORDER_UNSET,
+                                            dbs.ORDER_UNKNOWN)
+
+
+def test_w3_25_the_snake_toggle_changes_numbering_and_never_ownership():
+    linear = dbs.assigned_board(_espn_req(), grid=_grid(order_type="linear"),
+                                fetchers=_NoEgressFetchers())
+    snake = dbs.assigned_board(_espn_req(), grid=_grid(order_type="snake"),
+                               fetchers=_NoEgressFetchers())
+
+    def owners(b):
+        return [(o["round"], o["slot"], o["owner_user_id"]) for o in b["order"]]
+
+    assert owners(linear) == owners(snake)
+    # Round 2 reverses under snake and does not under linear.
+    def pick_no(b):
+        return [o["pick_no"] for o in b["order"]]
+
+    assert pick_no(linear) == [1, 2, 3, 4, 5, 6]
+    assert pick_no(snake) == [1, 2, 3, 6, 5, 4]
+    assert linear["type"] == "linear" and snake["type"] == "snake"
+
+
+def test_w3_20_and_26_route_flag_off_is_byte_identical_and_never_builds(
+        client, session, monkeypatch):
+    """T-W3-20 + T-W3-26 — with the flag off the ESPN branch does not exist,
+    and `build_board` is unreachable for ESPN in BOTH flag states (the branch
+    precedes it), so its golden diff is untouched."""
+    monkeypatch.setattr(server, "get_league_draft_context",
+                        lambda lid: {"platform": "espn", "season": 2026})
+    monkeypatch.setattr(server, "load_league_members", lambda lid: [])
+    monkeypatch.setattr(server, "_assignment_grid",
+                        lambda lid, season: dbs.AssignmentGrid())
+
+    def _never(*a, **k):
+        raise AssertionError("build_board reached for an ESPN league")
+
+    monkeypatch.setattr(dbs, "build_board", _never)
+
+    saved = _pin_flags(**{"draft.room": True})
+    try:
+        off = _get(client)
+        assert off.status_code == 200
+        off_body = off.get_json()
+        assert off_body["notice"]["code"] == "platform_unsupported"
+        assert off_body["state"] == "unavailable"
+
+        _pin_flags(**{"draft.room": True, "picks.assign": True})
+        on = _get(client).get_json()
+        assert on["notice"]["code"] == "picks_not_assigned"
+        # Everything else about the payload is unmoved — only the reason.
+        off_body.pop("notice"), on.pop("notice")
+        off_body.pop("as_of"), on.pop("as_of")
+        assert on == off_body
+    finally:
+        ff._flags_cache = saved
+
+
+def test_w3_22c_route_serves_a_real_board_when_the_grid_is_populated(
+        client, session, monkeypatch):
+    monkeypatch.setattr(server, "get_league_draft_context",
+                        lambda lid: {"platform": "espn", "season": 2026})
+    monkeypatch.setattr(server, "load_league_members",
+                        lambda lid: [{"user_id": "eu1", "player_ids": ["x1"]}])
+    monkeypatch.setattr(server, "_assignment_grid", lambda lid, season: _grid())
+    monkeypatch.setattr(dbs, "build_board", lambda *a, **k: pytest.fail(
+        "build_board reached for an ESPN league"))
+
+    saved = _pin_flags(**{"draft.room": True, "picks.assign": True})
+    try:
+        body = _get(client).get_json()
+        assert body["state"] == "upcoming"
+        assert body["platform"] == "espn"
+        assert body["order_confidence"] == "assigned"
+        assert body["picks"] == []
+        assert len(body["order"]) == 6
+    finally:
+        ff._flags_cache = saved

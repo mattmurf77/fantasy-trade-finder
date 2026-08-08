@@ -76,6 +76,12 @@ SCHEMA = 1
 # ── Closed enums (lld §2.1) ───────────────────────────────────────────────
 SLEEPER = "sleeper"
 MFL = "mfl"
+#: draft-extensions W3 M-B. NOT a member of any closed CLIENT enum — it is a
+#: `platform` value, which has always been open (the payload echoes whatever
+#: the route resolved). ESPN has no draft object now or ever, so this module
+#: never fetches for it: an ESPN board is built entirely from the assignment
+#: grid the route passes in.
+ESPN = "espn"
 
 UPCOMING = "upcoming"
 LIVE = "live"
@@ -114,6 +120,11 @@ NOTICE_STARTUP_DRAFT = "startup_draft"
 NOTICE_PLATFORM_UNSUPPORTED = "platform_unsupported"
 NOTICE_CLASS_NOT_LOADED = "class_not_loaded"
 NOTICE_MFL_RECONNECT = "mfl_reconnect"
+#: draft-extensions W3 M-B. `notice.code` is an OPEN set with a client-side
+#: message fallback, which is exactly why the new ESPN state rides here rather
+#: than adding a member to `state` / `kind` / `order_confidence` (all closed).
+#: The state stays `unavailable`; only the reason is new.
+NOTICE_PICKS_NOT_ASSIGNED = "picks_not_assigned"
 
 _NOTICE_MESSAGES = {
     NOTICE_ORDER_NOT_SET: "The draft order is not set yet — showing who owns each round.",
@@ -126,6 +137,13 @@ _NOTICE_MESSAGES = {
     NOTICE_PLATFORM_UNSUPPORTED: "Draft rooms aren't available for this platform yet.",
     NOTICE_CLASS_NOT_LOADED: "This rookie class has not loaded yet.",
     NOTICE_MFL_RECONNECT: "Reconnect MyFantasyLeague to refresh this draft.",
+    # This is an UNCONFIGURED STATE WITH A USER-PERFORMABLE FIX, not an error.
+    # The copy has to read that way — never "Something went wrong" — because
+    # nothing is broken: ESPN has no rookie draft to read, so the league's own
+    # members are the only possible source for who owns which pick.
+    NOTICE_PICKS_NOT_ASSIGNED:
+        "Nobody has set this league's draft picks yet. Assign them on the "
+        "League tab to see the board.",
 }
 
 # Sleeper's `status` vocabulary → our `state`. Treated as an OPEN set: an
@@ -1165,6 +1183,105 @@ def _payload(req: BoardRequest, platform: str, *, state: str, kind: str,
         # not 12-team. A 12-team board is exact and must carry no marker.
         payload["slot_value_approx"] = True
     return payload
+
+
+# ---------------------------------------------------------------------------
+# draft-extensions W3 M-B — the ESPN Draft Room, built from the assignment grid
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class AssignmentGrid:
+    """One season's asserted pick slots, resolved by the ROUTE.
+
+    Passed in rather than looked up, for the same reason every other input to
+    this module is: `test_m3_07` pins that this file never imports
+    `load_draft_picks`. `draft_picks` is truth for pre-draft OWNERSHIP; the
+    board is a rendering of it.
+
+    `slots` entries carry `round`, `slot` (1-based position in the round-1
+    pick order), `owner_user_id`, `owner_username`, `original_user_id`,
+    `original_username`, `is_traded`.
+    """
+
+    rounds: int = 0
+    teams: int = 0
+    order_type: str = TYPE_LINEAR
+    slots: tuple = ()
+    newest_assigned_at: str | None = None
+
+
+def assigned_board(req: BoardRequest, *, grid: AssignmentGrid,
+                   fetchers: Fetchers | None = None) -> dict:
+    """The ESPN room, built entirely from the assignment grid.
+
+    ZERO platform egress in every state — ESPN has no draft object, now or
+    ever (operator ruling: ESPN has no rookie-draft concept, so an ESPN
+    dynasty league's rookie draft necessarily runs off-platform). This
+    function therefore does NOT participate in `_cache` / `_inflight` / the
+    breaker / the budget: there is no upstream to protect, and a DB read is
+    cheaper than a cache lookup plus a staleness decision.
+
+    `build_board` is not modified and is unreachable for ESPN — the route
+    branches before it — so its golden diff is untouched.
+
+    `fetchers` is used ONLY for `rookie_ids` / `players`, the same two DB
+    reads `_undrafted` already needs. Pass a `PlatformFetchers` with no
+    `sleeper_get`, so a stray platform read RAISES instead of going live.
+    """
+    if not grid.slots:
+        # Nothing assigned. `state` stays `unavailable` — no closed enum gains
+        # a member; the whole new state rides `notice.code`.
+        return _render_unavailable(req, ESPN,
+                                   notice=_notice(NOTICE_PICKS_NOT_ASSIGNED))
+
+    teams = int(grid.teams or 0)
+    order_type = grid.order_type if grid.order_type in (TYPE_LINEAR, TYPE_SNAKE) \
+        else TYPE_LINEAR
+    order = []
+    for s in grid.slots:
+        round_no = int(s.get("round") or 0)
+        slot = s.get("slot")
+        slot = int(slot) if slot is not None else None
+        order.append({
+            "slot": slot,
+            "round": round_no,
+            # NUMBERING only. The linear/snake toggle never touches ownership
+            # — every owner_user_id below comes from the grid row itself.
+            "pick_no": (_pick_no(round_no, slot, teams, order_type, 0)
+                        if slot is not None and teams else None),
+            "owner_user_id": s.get("owner_user_id") or None,
+            "owner_username": s.get("owner_username") or None,
+            "original_user_id": s.get("original_user_id") or None,
+            "original_username": s.get("original_username") or None,
+            "is_traded": bool(s.get("is_traded")),
+        })
+    order = _cap_order(order)
+
+    # `picks[]` is ALWAYS empty in M-B: an off-platform draft leaves no record
+    # we can read. W3 M-D's `recorded_picks` is the only thing that can ever
+    # populate it, and it is a separate wave behind its own flag.
+    picks: list[dict] = []
+    undrafted, class_loaded = [], False
+    if fetchers is not None:
+        undrafted, class_loaded = _undrafted(
+            int(req.season), set(), set(req.rostered_ids or ()), req.basis,
+            req.board_elo, req.consensus_elo, fetchers)
+
+    # A grid is a fact in OUR database, not a cached remote read, so it is
+    # never "stale": a synthetic entry pins `_is_stale` to False.
+    entry = _Entry(fetched_at=_now_monotonic(),
+                   as_of=grid.newest_assigned_at or _now_iso(),
+                   state=UPCOMING)
+    return _payload(
+        req, ESPN, state=UPCOMING, kind=KIND_ROOKIE, season=int(req.season),
+        rounds=int(grid.rounds or 0) or None, teams=teams or None,
+        order=order, order_confidence=ORDER_ASSIGNED, picks=picks,
+        undrafted=undrafted, undrafted_suppressed=not class_loaded,
+        entry=entry,
+        notice=None if class_loaded else _notice(NOTICE_CLASS_NOT_LOADED),
+        # No platform CTA exists for ESPN: there is no draft room to link to.
+        deep_link=None, draft_type=order_type,
+    )
 
 
 def unsupported_board(req: BoardRequest) -> dict:

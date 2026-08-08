@@ -429,3 +429,30 @@ The Draft Room is the first surface in the app that fetches on a timer. `refetch
 **If the fan-in guarantee has to be restated:** the ≤3 req/min/draft ceiling is **per process**. The Render upgrade (plan O8) that makes live polling viable also allows multiple workers — at that point the real ceiling is `3 × worker_count` per draft, and the number in the plan needs restating rather than re-deriving.
 
 **Kill order, cheapest first:** flip `draft.live_poll` off (polling stops, manual Refresh survives, the room stays up) → flip `draft.room` off (the route 404s, the League tile reverts to the rookie-board sheet, nothing else in the app changes).
+
+## Pick-assignment recovery (draft-extensions W3 M-A, 2026-08-08)
+
+**Flag:** `picks.assign` (ships OFF). **Store:** `draft_picks` rows with `source='user'`. **Audit trail:** the `pick_assignment_changed` rows in `user_events` — there is no separate audit table, deliberately.
+
+**Kill switch.** Flip `picks.assign` off. The three routes 404, the ESPN Draft Room reverts to the byte-identical `platform_unsupported` payload, and **no data is lost** — the rows stay, and every existing read site was already taking `load_draft_picks`' platform-only default. There is nothing to roll back in the schema: all four columns are additive and nullable and nothing was backfilled.
+
+**A league's grid looks wrong / a slot was mis-assigned.** Every write emits `pick_assignment_changed` with `{pick_id, season, round, original_team, old_owner, new_owner, actor}`, so the full history of a slot is one query:
+
+```sql
+SELECT occurred_at, user_id, props
+FROM user_events
+WHERE event_type = 'pick_assignment_changed'
+  AND league_id = :league_id
+ORDER BY occurred_at;          -- covered by ix_user_events_type_occurred
+```
+
+To rebuild a league's grid from scratch, replay those rows in `occurred_at` order over a fresh pristine seed (`POST /api/league/pick-assignments/order` with `reseed: true`, then one `PUT` per slot). Nothing else is needed — the audit trail is complete by construction, which is why the event is server-fired and must never be added to `ALLOWED_CLIENT_EVENTS`.
+
+**A slot shows `contested: true`.** Two different members assigned it to two different owners. It is excluded from every priced payload until someone corrects it; correcting it (one more `PUT` agreeing with one of the two) does **not** clear the flag on its own, because the derivation reads the whole history. If the disagreement was resolved and the flag should clear, delete the losing `pick_assignment_changed` rows for that `pick_id` and call `database.invalidate_pick_assignment_cache(league_id)` — the memo is per-league with a 60 s TTL backstop, invalidated on every write.
+
+**A slot shows `orphaned: true`.** The owner id is no longer a `league_members` row — usually a SWID rotation on an ESPN re-import, occasionally a manager who left. The slot is excluded from pricing and surfaced as a re-assign row; fix it with a `PUT` naming a current member. **Never** delete the row: a dropped slot is value that vanishes with no explanation, and no platform will ever contradict the grid.
+
+**`PUT` returns 409 `stale_assignment`.** Working as designed — somebody else edited that slot since the client read it. The 409 body carries the whole current row, so the client re-reads nothing; retry with the `assigned_at` from `current`.
+
+**Monitoring triggers (not ship gates).** Per plan §6.8: <50% of started grids reaching 100% within 72 h ⇒ do not open M-C; >5% of slots contested within 7 days ⇒ stop widening. Both are measured off `pick_assignment_changed` and the `progress` block.
+

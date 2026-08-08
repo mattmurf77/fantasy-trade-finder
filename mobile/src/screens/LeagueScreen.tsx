@@ -45,6 +45,7 @@ import {
   getActivityFeed,
   getContrarianLeaderboard,
 } from '../api/league';
+import { getPickAssignments, pickAssignmentSubline } from '../api/pickAssignment';
 import { getProgress, getTiersStatus } from '../api/rankings';
 import { importEspnLeague } from '../api/espn';
 import { initLeagueSession } from '../api/auth';
@@ -99,6 +100,10 @@ export default function LeagueScreen() {
   // conditional on purpose: an unconditional swap would leave every user
   // with nothing in that slot the moment `draft.room` was flipped back off.
   const showDraftRoom = useFlag('draft.room');
+  // draft-extensions W3 M-A — the "Draft picks" section below Explore.
+  // Paired with the ESPN check below, because ESPN is the only platform
+  // whose rookie draft FTF cannot read.
+  const showPickAssignFlag = useFlag('picks.assign');
   const [rookieOpen, setRookieOpen] = useState(false);
   // (#181) The ux.retap_active_tab scroll-to-top registration moved to
   // LeagueSummaryScreen's tab-root variant — this screen is no longer the
@@ -117,6 +122,7 @@ export default function LeagueScreen() {
   const isEspn = cachedLeagues.some(
     (lg) => lg.league_id === leagueId && lg.platform === 'espn',
   );
+  const showPickAssign = showPickAssignFlag && isEspn;
   const [resyncing, setResyncing] = useState(false);
   const [resyncMsg, setResyncMsg] = useState<string | null>(null);
 
@@ -148,6 +154,18 @@ export default function LeagueScreen() {
     enabled:  !!leagueId,
     staleTime: 60_000,
     placeholderData: (prev) => prev,
+  });
+
+  // Draft picks (draft-extensions W3 M-A, flag `picks.assign`). The query
+  // shares its key with `PickAssignmentScreen`, so opening the screen from
+  // this row renders off a warm cache instead of a spinner — and a save
+  // made there updates this sub-line on the way back. `enabled` keeps the
+  // flag-off / non-ESPN page byte-identical: no request is issued at all.
+  const pickAssignQuery = useQuery({
+    queryKey: ['pick-assignments', leagueId],
+    queryFn:  () => getPickAssignments(leagueId!),
+    enabled:  !!leagueId && showPickAssignFlag && isEspn,
+    staleTime: 5 * 60_000,
   });
 
   const coverageQuery = useQuery({
@@ -540,6 +558,54 @@ export default function LeagueScreen() {
             />
           ) : null}
         </View>
+
+        {/* Draft picks — ESPN pick assignment (draft-extensions W3 M-A,
+            flag `picks.assign`, ships OFF). A DEDICATED section below
+            Explore, deliberately NOT a 4th Explore tile: that row is a
+            fold-budgeted 3-across grid whose third slot is already a
+            one-slot/two-occupant conditional, and a 4th tile would either
+            wrap it or contest a slot that already has two claimants. The
+            separate section also keeps assignment visibly "separate from
+            the draft feature", which is how the operator framed it.
+
+            ESPN only, because ESPN is the only platform with no rookie
+            draft to read — a Sleeper/MFL league already has this data and
+            an entry point here would invite a member to contradict it.
+            Sub-line reads the live state off `progress`. Flag off ⇒ no
+            section, no query, byte-identical page. */}
+        {showPickAssign ? (
+          <>
+            <View style={styles.divider} />
+            <TickLabel>Draft picks</TickLabel>
+            <Pressable
+              testID="league.draft-picks-row"
+              onPress={() => navigation.navigate('PickAssignment')}
+              accessibilityRole="button"
+              accessibilityLabel="Draft picks"
+              accessibilityHint="Set who owns each rookie pick"
+              style={({ pressed }) => [
+                styles.picksRow,
+                pressed && { backgroundColor: ink.ink3 },
+              ]}
+            >
+              <Icon name="flag" size={18} color={chalk.dim} />
+              <View style={styles.picksBody}>
+                <ChalkText scale="dense" style={styles.picksTitle} numberOfLines={1}>
+                  Draft picks
+                </ChalkText>
+                <ChalkText scale="dense" style={styles.picksSub} numberOfLines={1}>
+                  {pickAssignQuery.isLoading
+                    ? 'Checking…'
+                    : pickAssignmentSubline(
+                        pickAssignQuery.data?.progress,
+                        pickAssignQuery.data?.seeded,
+                      )}
+                </ChalkText>
+              </View>
+              <Icon name="chevron-right" size={16} color={chalk.faint} />
+            </Pressable>
+          </>
+        ) : null}
 
         {/* #243 — Market pulse strip (movers V3, frame D1; operator
             placement override: below Explore, not top-of-page). Self-
@@ -1064,6 +1130,24 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: ink.line,
   },
+
+  // draft-extensions W3 M-A — the "Draft picks" entry row. A full-width
+  // hairline row, not an ExploreTile: it carries a live state sub-line
+  // ("48 of 48 assigned · 3 traded") that will not fit a third of a row.
+  picksRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    minHeight: 44,
+    paddingHorizontal: space.sm,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.md,
+    backgroundColor: ink.ink1,
+  },
+  picksBody: { flex: 1, minWidth: 0 },
+  picksTitle: { ...type.body, color: chalk.base },
+  picksSub: { ...type.bodySm, color: chalk.dim },
 
   switchBtn: { marginTop: space.lg },
   espnNote: { color: chalk.dim, marginTop: space.sm },

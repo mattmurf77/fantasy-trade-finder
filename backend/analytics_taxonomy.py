@@ -106,6 +106,15 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # Engagement / misc
     "push_sent", "notif_pref_changed", "league_synced", "wrapped_viewed",
     "feedback_submitted", "asset_pref_added", "asset_pref_removed",
+    # draft-extensions W3 M-A (ADR-010) — the pick-assignment AUDIT TRAIL.
+    # `user_events` IS the audit trail for asserted pick ownership: it is what
+    # `database.contested_pick_ids` derives disagreement from, and what
+    # docs/runbook.md's recovery procedure reconstructs a league's grid from.
+    # It must therefore stay SERVER-FIRED and must NEVER appear in
+    # ALLOWED_CLIENT_EVENTS — a client-forgeable audit row is a forgeable
+    # audit trail, and the import-time disjointness assert below would raise
+    # (taking the app down at boot) if someone added it to both.
+    "pick_assignment_changed",
 })
 
 # ---------------------------------------------------------------------------

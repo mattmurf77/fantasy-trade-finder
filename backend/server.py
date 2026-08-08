@@ -37,6 +37,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from dataclasses import replace as _dc_replace
 from datetime import datetime, timedelta, timezone
 
 from flask import Flask, g, jsonify, make_response, request, send_from_directory
@@ -121,6 +122,11 @@ from .database import (
     create_mock_draft, load_mock_draft, load_current_mock_draft,
     update_mock_draft,
     sync_draft_picks, load_draft_picks, replace_draft_picks, compute_pick_value,
+    # draft-extensions W3 M-A — user-asserted pick ownership (ADR-010)
+    make_pick_id, seed_pick_grid, assign_draft_pick,
+    contested_pick_ids, orphaned_pick_ids, invalidate_pick_assignment_cache,
+    load_pick_assignment_settings, save_pick_assignment_settings,
+    PICK_SOURCE_USER, ORDER_TYPE_LINEAR, ORDER_TYPE_SNAKE,
     create_notification, get_notifications, mark_notifications_read,
     # M5 Push additions — device tokens
     save_device_token, load_device_tokens_for_users,
@@ -194,6 +200,7 @@ from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
 from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
 from . import trends_service as _trends_service_mod
+from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
 from .trade_service import TradeService, TradeCard, League, LeagueMember
 
@@ -8838,7 +8845,7 @@ def _sync_mfl_owned_picks(league_id: str) -> int:
         owner_uid = _fr_to_user(cur_fid)
         orig_uid  = _fr_to_user(orig_fid)
         rows.append({
-            "pick_id":            f"{league_id}_{yr}_{rnd}_{orig_fid}",
+            "pick_id":            make_pick_id(league_id, yr, rnd, orig_fid),
             "league_id":          league_id,
             "season":             yr,
             "round":              rnd,
@@ -10100,6 +10107,446 @@ def _mfl_board_binding(league_id: str, sess) -> dict | None:
         "cookie": _mfl_cookie_for(sess, str(sess.get("user_id") or "")),
     }
 
+
+# ---------------------------------------------------------------------------
+# draft-extensions W3 M-A — ESPN pick assignment (plan §6 REVISED, ADR-010)
+# ---------------------------------------------------------------------------
+#
+# A league whose platform has no readable draft object still has pick
+# ownership; ESPN just cannot tell us what it is (operator ruling: ESPN has no
+# rookie-draft concept, so an ESPN dynasty league's rookie draft necessarily
+# runs off-platform — there is no draft object to read, now or ever). These
+# three routes let the league's own members assert it.
+#
+# Two properties do the safety work, and both are structural rather than
+# procedural:
+#
+#   * NO USER-ENTERED VALUES, EVER. Price is a pure server-side function of
+#     (round, season - current_season, format) via the SHIPPED
+#     `pick_pool_value` / `compute_pick_value`. Every route rejects a body
+#     carrying any value field outright, so there is no path — not even a
+#     buggy one — from a request to a price.
+#   * THE CONSERVATION BOUND. Every owner must be an existing `league_members`
+#     row inside a fixed `rounds x teams x seasons` grid, and `rounds` is
+#     clamped server-side to `ROOKIE_MAX_ROUNDS`. So a bad or malicious
+#     assignment can REDISTRIBUTE value; it can never CREATE it.
+#
+# Asserted rows do NOT reach trade math under `picks.assign`: every existing
+# read site still calls `load_draft_picks` with its platform-only default.
+# Lighting them up is M-C's separate `picks.assign_tradeable` switch.
+
+#: Any of these appearing in an assignment request body is a 400. The route
+#: never reads a value from a client — this list exists so a well-meaning
+#: client that sends one gets a loud refusal instead of a silent ignore.
+_ASSIGNMENT_VALUE_FIELDS = (
+    "value", "pool_value", "pick_value", "elo", "price", "values",
+)
+
+_ASSIGNMENT_SEASONS_AHEAD = 3      # operator decision 3: current + 3
+_ASSIGNMENT_DEFAULT_ROUNDS = 4     # operator decision 2: default 4, user-settable
+
+#: The conservation bound's ONLY lever, and the reason `rounds` is clamped
+#: server-side rather than only in the UI. Sourced from the shipped constant
+#: (`backend/draft_status.py`) so it cannot drift from the draft-shape
+#: classifier. `seed_pick_grid` re-applies the same clamp, so a route that
+#: forgot this check could still not widen the bound.
+_ROOKIE_MAX_ROUNDS = _draft_status_mod.ROOKIE_MAX_ROUNDS
+
+
+def _assignment_value_denial():
+    """`400 values_not_accepted` when a body carries any value field."""
+    body = request.get_json(silent=True) or {}
+    if isinstance(body, dict) and any(k in body for k in _ASSIGNMENT_VALUE_FIELDS):
+        return jsonify({"error": "values_not_accepted"}), 400
+    return None
+
+
+def _assignment_members(league_id: str) -> tuple[list[str], dict[str, str]]:
+    """`(ordered member user_ids, {user_id: display name})` for a league.
+
+    Ordered deterministically by user_id so a never-configured league still
+    seeds the same grid twice.
+    """
+    try:
+        rows = load_league_members(str(league_id))
+    except Exception as e:                       # pragma: no cover - DB optional
+        log.warning("pick-assignment: member load failed for %s: %s", league_id, e)
+        return [], {}
+    names: dict[str, str] = {}
+    ids: list[str] = []
+    for m in rows:
+        uid = str(m.get("user_id") or "")
+        if not uid:
+            continue
+        ids.append(uid)
+        names[uid] = (m.get("username") or m.get("display_name") or f"Team {uid}")
+    ids.sort()
+    return ids, names
+
+
+def _assignment_settings(league_id: str, member_ids: list[str]) -> dict:
+    """Stored NUMBERING settings, defaulted and repaired against membership.
+
+    `order` is the round-1 pick sequence. It changes slot NUMBERING only and
+    never ownership, which is why re-ordering is safe at any time and can
+    never trigger a CAS conflict.
+    """
+    stored = load_pick_assignment_settings(str(league_id)) or {}
+    try:
+        rounds = int(stored.get("rounds") or _ASSIGNMENT_DEFAULT_ROUNDS)
+    except (TypeError, ValueError):
+        rounds = _ASSIGNMENT_DEFAULT_ROUNDS
+    rounds = max(1, min(rounds, _ROOKIE_MAX_ROUNDS))
+    order_type = stored.get("order_type")
+    if order_type not in (ORDER_TYPE_LINEAR, ORDER_TYPE_SNAKE):
+        order_type = ORDER_TYPE_LINEAR           # operator decision 1
+    order = [str(u) for u in (stored.get("order") or []) if str(u or "")]
+    known = set(member_ids)
+    order = [u for u in order if u in known]
+    order += [u for u in member_ids if u not in set(order)]
+    return {"rounds": rounds, "order_type": order_type, "order": order}
+
+
+def _assignment_slots(league_id: str, settings: dict) -> list[dict]:
+    """Every asserted slot for a league, annotated for the client.
+
+    `include_contested=True`: this surface is exactly where a contested or
+    orphaned slot must be VISIBLE — it is the screen on which someone fixes
+    it. The rows are still withheld from every priced payload, by the row
+    filter inside `load_draft_picks` (never by nulling `pool_value`, which
+    `_power_picks_by_owner` would silently re-derive).
+    """
+    rows = load_draft_picks(league_id=str(league_id), source=PICK_SOURCE_USER,
+                            include_contested=True)
+    if not rows:
+        return []
+    contested = contested_pick_ids(str(league_id))
+    orphaned  = orphaned_pick_ids(str(league_id))
+    slot_by_user = {u: i + 1 for i, u in enumerate(settings.get("order") or [])}
+    out = []
+    for r in rows:
+        orig_user = str(r.get("original_user_id") or "")
+        out.append({
+            "pick_id":            str(r.get("pick_id")),
+            "season":             int(r.get("season") or 0),
+            "round":              int(r.get("round") or 0),
+            "slot":               slot_by_user.get(orig_user),
+            "original_roster_id": str(r.get("original_roster_id") or ""),
+            "original_user_id":   orig_user or None,
+            "original_username":  r.get("original_username"),
+            "owner_user_id":      str(r.get("owner_user_id") or "") or None,
+            "owner_username":     r.get("owner_username"),
+            "is_traded":          bool(r.get("is_traded")),
+            "source":             r.get("source") or PICK_SOURCE_USER,
+            "assigned_by":        r.get("assigned_by"),
+            # ALSO the CAS token. `null` on a never-assigned row.
+            "assigned_at":        r.get("assigned_at"),
+            "contested":          str(r.get("pick_id")) in contested,
+            "orphaned":           str(r.get("pick_id")) in orphaned,
+        })
+    out.sort(key=lambda s: (s["season"], s["round"], s["slot"] or 0,
+                            s["original_roster_id"]))
+    return out
+
+
+def _assignment_payload(league_id: str, settings: dict,
+                        slots: list[dict], member_count: int) -> dict:
+    seasons: dict[int, list[dict]] = {}
+    for s in slots:
+        seasons.setdefault(s["season"], []).append(s)
+    total = (int(settings["rounds"]) * max(member_count, 0)
+             * (_ASSIGNMENT_SEASONS_AHEAD + 1))
+    return {
+        "league_id": str(league_id),
+        "settings":  settings,
+        "seasons":   [{"season": yr, "slots": seasons[yr]}
+                      for yr in sorted(seasons)],
+        "progress": {
+            "assigned":  len(slots),
+            "total":     total,
+            "traded":    sum(1 for s in slots if s["is_traded"]),
+            "contested": sum(1 for s in slots if s["contested"]),
+            "orphaned":  sum(1 for s in slots if s["orphaned"]),
+        },
+        "seeded": bool(slots),
+    }
+
+
+def _assignment_grid(league_id: str, season: int):
+    """The `AssignmentGrid` the ESPN Draft Room renders (M-B).
+
+    Built HERE, not in `draft_board_service`: that module never imports
+    `load_draft_picks` (pinned by `test_m3_07`), so every input it needs is
+    injected by the route.
+    """
+    from . import draft_board_service as dbs
+
+    member_ids, _names = _assignment_members(league_id)
+    settings = _assignment_settings(league_id, member_ids)
+    # The BOARD excludes contested/orphaned slots the same way the priced
+    # union does — an unresolved slot is an open question, not an owner.
+    rows = load_draft_picks(league_id=str(league_id), source=PICK_SOURCE_USER)
+    slot_by_user = {u: i + 1 for i, u in enumerate(settings["order"])}
+    slots, newest = [], None
+    for r in rows:
+        if int(r.get("season") or 0) != int(season):
+            continue
+        slots.append({
+            "round":             int(r.get("round") or 0),
+            "slot":              slot_by_user.get(str(r.get("original_user_id") or "")),
+            "owner_user_id":     r.get("owner_user_id"),
+            "owner_username":    r.get("owner_username"),
+            "original_user_id":  r.get("original_user_id"),
+            "original_username": r.get("original_username"),
+            "is_traded":         bool(r.get("is_traded")),
+        })
+        at = r.get("assigned_at")
+        if at and (newest is None or str(at) > newest):
+            newest = str(at)
+    slots.sort(key=lambda s: (s["round"], s["slot"] or 0))
+    return dbs.AssignmentGrid(
+        rounds=settings["rounds"], teams=len(settings["order"]),
+        order_type=settings["order_type"], slots=tuple(slots),
+        newest_assigned_at=newest)
+
+
+def _assignment_league(sess: dict, league_id: str):
+    """`(league_id, season)` or a Flask error tuple — the board route's rule."""
+    if not league_id:
+        return None, ({"error": "league_id is required"}, 400)
+    ctx = get_league_draft_context(league_id)
+    if ctx:
+        return str(league_id), int(ctx.get("season") or _CURRENT_SEASON)
+    g_league = sess.get("league")
+    if g_league and str(league_id) == str(g_league.league_id):
+        return str(league_id), _CURRENT_SEASON
+    return None, ({"error": "league_not_found"}, 404)
+
+
+@app.route("/api/league/pick-assignments", methods=["GET"])
+@_gate_unverified_read
+def pick_assignments_route():
+    """GET /api/league/pick-assignments?league_id=&season=
+
+    The whole grid: `settings` (rounds / order_type / order), `seasons[]`
+    (always current + 3, ascending), `progress` and `seeded`. 192 slots is
+    ~40 KB and one round-trip beats four, so this never paginates; the client
+    defaults to the current season and collapses the rest.
+
+    `slots[].assigned_at` is ALSO the optimistic-concurrency token the PUT
+    below carries back. It is `null` on a never-assigned row.
+
+    Errors: 404 feature_disabled (flag off, before ANY session work) ·
+    400 league_id is required · 404 league_not_found · 403 not_in_league ·
+    401/409 via the session helpers.
+    """
+    if not is_enabled("picks.assign"):
+        return jsonify({"error": "feature_disabled"}), 404
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_league = sess.get("league")
+    league_id = (request.args.get("league_id")
+                 or (g_league.league_id if g_league else ""))
+    league_id, season = _assignment_league(sess, str(league_id or ""))
+    if league_id is None:
+        payload, code = season
+        return jsonify(payload), code
+
+    member_ids, _names = _assignment_members(league_id)
+    actor = str(sess.get("user_id") or "")
+    if member_ids and actor not in member_ids:
+        return jsonify({"error": "not_in_league"}), 403
+
+    settings = _assignment_settings(league_id, member_ids)
+    slots = _assignment_slots(league_id, settings)
+    return jsonify(_assignment_payload(league_id, settings, slots,
+                                       len(member_ids)))
+
+
+@app.route("/api/league/pick-assignments/<pick_id>", methods=["PUT"])
+@_gate_unverified_write
+def pick_assignment_put_route(pick_id: str):
+    """PUT /api/league/pick-assignments/<pick_id>
+
+    Body `{league_id, owner_user_id, if_assigned_at}`. Per-SLOT last-writer-
+    wins with optimistic concurrency: the caller sends back the `assigned_at`
+    it read, and the comparison lives in the UPDATE's WHERE clause. A mismatch
+    is `409 stale_assignment` WITH the current row, so the client can render
+    "Dana changed this 4 minutes ago — keep theirs, or use yours?" without a
+    second request. Two users fixing two different slots never collide.
+
+    A body `user_id` is IGNORED — the actor is always the session user.
+
+    Errors: 404 feature_disabled · 400 league_id is required ·
+    404 league_not_found · 403 not_in_league · 400 owner_not_in_league ·
+    400 values_not_accepted · 404 pick_not_found · 409 stale_assignment.
+    """
+    if not is_enabled("picks.assign"):
+        return jsonify({"error": "feature_disabled"}), 404
+
+    denial = _assignment_value_denial()
+    if denial is not None:
+        return denial
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    body = request.get_json(silent=True) or {}
+    g_league = sess.get("league")
+    league_id = (body.get("league_id") or request.args.get("league_id")
+                 or (g_league.league_id if g_league else ""))
+    league_id, season = _assignment_league(sess, str(league_id or ""))
+    if league_id is None:
+        payload, code = season
+        return jsonify(payload), code
+
+    member_ids, names = _assignment_members(league_id)
+    actor = str(sess.get("user_id") or "")
+    if member_ids and actor not in member_ids:
+        return jsonify({"error": "not_in_league"}), 403
+
+    owner = str(body.get("owner_user_id") or "")
+    if not owner or owner not in set(member_ids):
+        return jsonify({"error": "owner_not_in_league"}), 400
+
+    token = body.get("if_assigned_at")
+    token = str(token) if token else None
+
+    prior = load_draft_picks(league_id=league_id, source=PICK_SOURCE_USER,
+                             include_contested=True)
+    prior_row = next((r for r in prior if str(r.get("pick_id")) == str(pick_id)), None)
+    prior_owner = str(prior_row.get("owner_user_id") or "") if prior_row else ""
+
+    outcome, row = assign_draft_pick(
+        league_id=league_id, pick_id=str(pick_id), owner_user_id=owner,
+        owner_username=names.get(owner, f"Team {owner}"), actor_user_id=actor,
+        if_assigned_at=token)
+
+    if outcome == "not_found":
+        return jsonify({"error": "pick_not_found"}), 404
+
+    settings = _assignment_settings(league_id, member_ids)
+    if outcome == "stale":
+        # The WHOLE current row, so the conflict UI needs no second read.
+        current = _assignment_slots(league_id, settings)
+        current = next((s for s in current if s["pick_id"] == str(pick_id)), None)
+        return jsonify({"error": "stale_assignment", "current": current}), 409
+
+    # The audit trail IS `user_events` — contested derivation reads it, and
+    # docs/runbook.md's recovery procedure reconstructs a grid from it. So the
+    # event is not optional instrumentation; any loss must be reconstructible.
+    record_event(actor, "pick_assignment_changed", league_id=league_id, props={
+        "pick_id":       str(pick_id),
+        "season":        int((row or {}).get("season") or 0),
+        "round":         int((row or {}).get("round") or 0),
+        "original_team": str((row or {}).get("original_roster_id") or ""),
+        "old_owner":     prior_owner,
+        "new_owner":     owner,
+        "actor":         actor,
+    })
+    invalidate_pick_assignment_cache(league_id)
+
+    slots = _assignment_slots(league_id, settings)
+    updated = next((s for s in slots if s["pick_id"] == str(pick_id)), None)
+    payload = _assignment_payload(league_id, settings, slots, len(member_ids))
+    return jsonify({"ok": True, "slot": updated,
+                    "progress": payload["progress"]})
+
+
+@app.route("/api/league/pick-assignments/order", methods=["POST"])
+@_gate_unverified_write
+def pick_assignments_order_route():
+    """POST /api/league/pick-assignments/order — the seeder + numbering setter.
+
+    Body `{league_id, rounds?, order_type?, order?, reseed?}`.
+
+    Seeds the PRISTINE grid — every team owns its own picks — for the current
+    season plus three (operator decision 3), which is what makes a ~192-slot
+    board tractable: a league with three trades leaves 189 slots untouched and
+    the three float into the client's "Traded picks" review. Re-running
+    without `reseed` preserves every edited slot verbatim.
+
+    `rounds` is USER-SETTABLE (operator decision 2), clamped server-side to
+    1..ROOKIE_MAX_ROUNDS. That clamp is the conservation bound's only lever,
+    so it is enforced in `seed_pick_grid` itself as well — a route that forgot
+    it could not widen the bound.
+
+    `order` / `order_type` change slot NUMBERING only and never ownership, so
+    the linear/snake toggle is safe at any time.
+
+    Errors: 404 feature_disabled · 400 league_id is required ·
+    404 league_not_found · 403 not_in_league · 400 values_not_accepted ·
+    400 rounds_out_of_range · 400 bad_order · 400 bad_order_type.
+    """
+    if not is_enabled("picks.assign"):
+        return jsonify({"error": "feature_disabled"}), 404
+
+    denial = _assignment_value_denial()
+    if denial is not None:
+        return denial
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    body = request.get_json(silent=True) or {}
+    g_league = sess.get("league")
+    league_id = (body.get("league_id") or (g_league.league_id if g_league else ""))
+    league_id, season = _assignment_league(sess, str(league_id or ""))
+    if league_id is None:
+        payload, code = season
+        return jsonify(payload), code
+
+    member_ids, names = _assignment_members(league_id)
+    actor = str(sess.get("user_id") or "")
+    if member_ids and actor not in member_ids:
+        return jsonify({"error": "not_in_league"}), 403
+    if not member_ids:
+        return jsonify({"error": "league_not_found"}), 404
+
+    settings = _assignment_settings(league_id, member_ids)
+
+    if "rounds" in body:
+        try:
+            rounds = int(body["rounds"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "rounds_out_of_range",
+                            "max": _ROOKIE_MAX_ROUNDS}), 400
+        if rounds < 1 or rounds > _ROOKIE_MAX_ROUNDS:
+            return jsonify({"error": "rounds_out_of_range",
+                            "max": _ROOKIE_MAX_ROUNDS}), 400
+        settings["rounds"] = rounds
+
+    if "order_type" in body:
+        order_type = str(body.get("order_type") or "")
+        if order_type not in (ORDER_TYPE_LINEAR, ORDER_TYPE_SNAKE):
+            return jsonify({"error": "bad_order_type"}), 400
+        settings["order_type"] = order_type
+
+    if "order" in body:
+        order = [str(u) for u in (body.get("order") or [])]
+        if sorted(order) != sorted(member_ids):
+            return jsonify({"error": "bad_order"}), 400
+        settings["order"] = order
+
+    save_pick_assignment_settings(league_id, settings)
+
+    result = seed_pick_grid(
+        league_id=league_id, member_user_ids=settings["order"],
+        user_id_to_name=names, actor_user_id=actor,
+        current_season=int(season), rounds=settings["rounds"],
+        seasons_ahead=_ASSIGNMENT_SEASONS_AHEAD,
+        scoring_format=_active_format(sess),
+        platform=str(getattr(g_league, "platform", None)
+                     or (get_league_draft_context(league_id) or {}).get("platform")
+                     or "espn").lower(),
+        reseed=bool(body.get("reseed")))
+
+    slots = _assignment_slots(league_id, settings)
+    payload = _assignment_payload(league_id, settings, slots, len(member_ids))
+    return jsonify({"ok": True, "seeded": result["seeded"],
+                    "reseeded_over": result["reseeded_over"],
+                    "settings": settings, "progress": payload["progress"]})
+
+
 @app.route("/api/draft/board")
 @_gate_unverified_read
 def draft_board_route():
@@ -10221,6 +10668,25 @@ def draft_board_route():
             rookie_ids_fn = _rookie_player_ids,
             mfl_opener    = _mfl_draft_opener(),
             mfl_cookie    = mfl_bind["cookie"])))
+
+    # draft-extensions W3 M-B — the ESPN room, built entirely from the
+    # assignment grid. `build_board` is NOT modified and is unreachable for
+    # ESPN because this branch precedes it, so its golden diff is untouched.
+    # Flag OFF ⇒ the `platform_unsupported` line below runs and the payload is
+    # byte-identical to today's. ZERO platform egress in every state: the
+    # fetchers carry no `sleeper_get`, so a stray platform read RAISES.
+    if platform == dbs.ESPN and is_enabled("picks.assign"):
+        rostered: list[str] = []
+        try:
+            for m in load_league_members(str(league_id)):
+                rostered.extend(str(p) for p in (m.get("player_ids") or []) if p)
+        except Exception as e:                   # never a 5xx (lld §2.1)
+            log.warning("draft-board: ESPN roster read failed for %s: %s",
+                        league_id, e)
+        req = _dc_replace(req, rostered_ids=rostered)
+        return jsonify(dbs.assigned_board(
+            req, grid=_assignment_grid(str(league_id), season),
+            fetchers=dbs.PlatformFetchers(rookie_ids_fn=_rookie_player_ids)))
 
     if platform != dbs.SLEEPER:
         return jsonify(dbs.unsupported_board(req))

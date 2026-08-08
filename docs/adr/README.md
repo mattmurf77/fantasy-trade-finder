@@ -42,3 +42,4 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 - [ADR-007 First-Party Analytics Platform + Layered Experimentation](adr-007-first-party-analytics-experimentation.md)
 - [ADR-008 Teardown Remediation Wave (2026-07)](adr-008-teardown-remediation-wave.md)
 - [ADR-009 Rookie Scope as a Post-Elo View Filter (and the Merged-Band Save)](adr-009-rookie-scope-view-filter.md)
+- [ADR-010 User-Asserted Pick Ownership is League-Scoped Truth in `draft_picks`](adr-010-user-asserted-pick-ownership.md)

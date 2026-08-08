@@ -114,6 +114,13 @@ const V2_SCREENS = {
   // path of its own — two paths for one screen is how a link starts
   // resolving differently depending on the season.
   DraftRoom: 'app/league/draft-room',
+  // draft-extensions W3 M-A — ESPN pick assignment. Registered on the ROOT
+  // stack only, so this is its one canonical path. Addressable while
+  // `picks.assign` is off (the flag gates the League tab's entry section,
+  // not the route) — a link then lands on the screen's honest unavailable
+  // state, which is the same rule DraftRoom follows. `focusPickId` rides
+  // as a query param from M-C's one-action correction links.
+  PickAssignment: 'app/league/pick-assignments',
   Main: {
     path: 'app',
     screens: {
