@@ -33,6 +33,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import { getBaseUrl, getClientHeaders, getDeviceId, getSessionToken } from './client';
 import { useFeatureFlags } from '../state/useFeatureFlags';
+// draft-extensions W3 M-D: uuidv4, the backoff ladder and the disposition-
+// parsing logic are shared with `recordedPicks.ts`'s offline queue (which
+// copies this module's contract verbatim) — extracted to `_queue.ts` so the
+// two cannot silently drift. Behavior here is unchanged; only the source of
+// these three pieces moved.
+import {
+  uuidv4 as _sharedUuidv4,
+  DEFAULT_BACKOFF_LADDER_MS,
+  nextBackoffStep,
+  parseQueueDisposition,
+} from './_queue';
 
 // Re-exported for API stability — the canonical mint now lives in client.ts
 // so events.ts and flags.ts share one device id without an import cycle.
@@ -50,8 +61,8 @@ const SESSION_IDLE_MS = 30 * 60_000;  // 30 min inactivity → new session_id
 const SEND_TIMEOUT_MS = 10_000;       // own AbortController; NOT client.ts retry
 
 // Backoff ladder (LLD §4.6): 30s → 2m → 10m cap, ±20% jitter, reset on a
-// consumed batch or on foreground.
-const BACKOFF_LADDER_MS = [30_000, 120_000, 600_000];
+// consumed batch or on foreground. Shared constant — see `_queue.ts`.
+const BACKOFF_LADDER_MS = DEFAULT_BACKOFF_LADDER_MS;
 
 // Funnel-critical event types drop LAST under queue pressure (LLD §4.6 —
 // mirrors backend/analytics_taxonomy.py FUNNEL_CRITICAL; keep in sync).
@@ -75,20 +86,8 @@ interface QueuedEvent {
 // counter) — NEVER Math.random for an idempotency key (LLD §4.6). The
 // fallback can only collide across devices, which is irrelevant to dedup and
 // astronomically unlikely given it is virtually never taken.
-let _idCounter = 0;
-function uuidv4(): string {
-  const cryptoObj = (globalThis as { crypto?: Crypto }).crypto;
-  if (cryptoObj?.getRandomValues) {
-    const b = new Uint8Array(16);
-    cryptoObj.getRandomValues(b);
-    b[6] = (b[6] & 0x0f) | 0x40;
-    b[8] = (b[8] & 0x3f) | 0x80;
-    const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
-    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
-  }
-  _idCounter = (_idCounter + 1) % 1_000_000;
-  return `loc-${Date.now().toString(36)}-${_idCounter.toString(36)}-${(_idCounter * 2654435761 >>> 0).toString(36)}`;
-}
+// Shared with `recordedPicks.ts` via `_queue.ts` — see its comment.
+const uuidv4 = _sharedUuidv4;
 
 // ── Module state ────────────────────────────────────────────────────────
 const APP_OPEN_TS = Date.now();
@@ -231,12 +230,9 @@ function resetBackoff(): void {
 }
 
 function applyBackoff(toMax = false): void {
-  backoffIndex = toMax
-    ? BACKOFF_LADDER_MS.length - 1
-    : Math.min(backoffIndex + 1, BACKOFF_LADDER_MS.length - 1);
-  const base = BACKOFF_LADDER_MS[backoffIndex];
-  const jitter = base * 0.2 * (Math.random() * 2 - 1);   // ±20% pacing only
-  nextAllowedFlushTs = Date.now() + base + jitter;
+  const step = nextBackoffStep(BACKOFF_LADDER_MS, backoffIndex, toMax);
+  backoffIndex = step.index;
+  nextAllowedFlushTs = Date.now() + step.delayMs;
 }
 
 // ── Flush ───────────────────────────────────────────────────────────────
@@ -275,10 +271,8 @@ async function flush(): Promise<void> {
   }
 }
 
-type SendResult =
-  | { kind: 'retry' }
-  | { kind: 'disabled' }
-  | { kind: 'consumed'; purgeAll: boolean; rejectedIndices: number[] };
+// Shared with `recordedPicks.ts` — see `_queue.ts`.
+type SendResult = import('./_queue').QueueDisposition;
 
 async function sendBatch(batch: QueuedEvent[]): Promise<SendResult> {
   try {
@@ -308,9 +302,12 @@ async function sendBatch(batch: QueuedEvent[]): Promise<SendResult> {
     } finally {
       clearTimeout(timer);
     }
-    if (res.status >= 500) return { kind: 'retry' };       // transient
+    // 5xx / non-OK short-circuit BEFORE parsing the body — preserved from
+    // the pre-extraction control flow so a malformed 5xx body is never even
+    // read. Everything past this point funnels through the shared
+    // disposition parser (`_queue.ts`), which `recordedPicks.ts` also calls.
+    if (res.status >= 500) return { kind: 'retry' };
     if (!res.ok) {
-      // Unexpected 4xx from an old server contract — drop rather than storm.
       return { kind: 'consumed', purgeAll: true, rejectedIndices: [] };
     }
     const body = await res.json().catch(() => null) as {
@@ -318,23 +315,7 @@ async function sendBatch(batch: QueuedEvent[]): Promise<SendResult> {
       rejected?: { index: number; reason: string }[];
       disposition?: string;
     } | null;
-    if (!body) return { kind: 'consumed', purgeAll: true, rejectedIndices: [] };
-    if (body.disposition === 'disabled') return { kind: 'disabled' };
-    if (typeof body.disposition === 'string'
-        && body.disposition.startsWith('batch_rejected')) {
-      return { kind: 'consumed', purgeAll: true, rejectedIndices: [] };
-    }
-    const accepted = body.accepted ?? 0;
-    const deduped = body.deduped ?? 0;
-    const rejected = body.rejected ?? [];
-    const sum = accepted + deduped + rejected.length;
-    // sum === N → whole batch resolved; sum < N → txn failure, requeue the
-    // non-rejected (LLD §2.1 purge rule).
-    return {
-      kind: 'consumed',
-      purgeAll: sum >= batch.length,
-      rejectedIndices: rejected.map((r) => r.index),
-    };
+    return parseQueueDisposition(res.status, res.ok, body, batch.length);
   } catch {
     return { kind: 'retry' };   // network error / timeout
   }

@@ -769,6 +769,42 @@ draft_picks_table = Table("draft_picks", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# recorded_picks — the live offline-draft feed (draft-extensions W3 M-D).
+#
+# An OFF-PLATFORM rookie draft has no platform object to read (operator
+# ruling: ESPN has no rookie-draft concept), so this is the only record that
+# a pick happened. It projects into GET /api/draft/board's picks[] and
+# NOWHERE else — it never writes draft_picks, never sets
+# leagues.draft_status*, and never marks a draft complete.
+#
+# `overall` is legitimate HERE and must NEVER leak onto a draft_picks row:
+# draft_picks' grain is (league, season, round, original_roster) and its
+# pick_id format cannot express a slot.
+#
+# Undo is non-destructive: voided_at is a nullable ISO string, IS NULL means
+# live, never a DELETE. A correction at an already-recorded `overall` UPDATEs
+# the row in place (voided_at back to NULL) — see record_draft_picks.
+# ---------------------------------------------------------------------------
+
+recorded_picks_table = Table("recorded_picks", metadata,
+    Column("id",              Integer, primary_key=True, autoincrement=True),
+    Column("league_id",       String,  nullable=False),
+    Column("season",          Integer, nullable=False),
+    Column("round",           Integer, nullable=False),
+    Column("slot",            Integer, nullable=False),
+    Column("overall",         Integer, nullable=False),   # 1-based, league-wide
+    Column("picking_team_id", String),                    # league_members.user_id on the clock
+    Column("player_id",       String,  nullable=False),   # OUR id space
+    Column("recorded_by",     String,  nullable=False),   # FTF user_id of the recorder
+    Column("event_id",        String),                    # client uuid — audit + rejection matching
+    Column("recorded_at",     String,  nullable=False),   # ISO UTC
+    Column("voided_at",       String),                    # IS NULL = live
+    # THE idempotency gate for the offline queue: (league_id, season, overall).
+    UniqueConstraint("league_id", "season", "overall", name="uq_recorded_pick_slot"),
+    Index("ix_recorded_picks_league_season", "league_id", "season"),
+)
+
+# ---------------------------------------------------------------------------
 # notifications_table — in-app notification inbox
 # ---------------------------------------------------------------------------
 #
@@ -8053,6 +8089,221 @@ def assign_draft_pick(league_id: str, pick_id: str, owner_user_id: str,
         if result.rowcount == 0:
             return ("stale", _read())           # re-read INSIDE the txn
         return ("ok", _read())
+
+
+# ---------------------------------------------------------------------------
+# draft-extensions W3 M-D — live offline pick recording (flag
+# `draft.manual_picks`). Writes ONLY `recorded_picks` — never `draft_picks`,
+# never `leagues.draft_status*` (INV-6 / D18, O9 survives).
+# ---------------------------------------------------------------------------
+
+def record_draft_picks(league_id: str, season: int, rows: list[dict],
+                       recorded_by: str) -> dict:
+    """Idempotent batch insert. Returns ``{'accepted', 'deduped', 'rejected'}``.
+
+    Idempotency key is ``(league_id, season, overall)`` — the offline queue's
+    idempotency contract, NOT `event_id` (two devices recording the same
+    physical pick will not share a uuid).
+
+    Per incoming row, against any existing row at the same
+    ``(league_id, season, overall)``:
+
+      no existing row              -> INSERT, accepted
+      existing, live, SAME player  -> deduped (a replayed queue item)
+      existing, live, DIFF player  -> UPDATE in place, accepted (a correction)
+      existing, VOIDED, any player -> UPDATE in place, accepted, voided_at
+                                       reset to NULL (a revival — the
+                                       "undo the undo" path; see database.py's
+                                       recorded_picks_table comment: undo is
+                                       non-destructive, so re-recording a
+                                       voided slot is how you reverse an undo)
+
+    Validated per row before it can ever reach a write: `round`/`slot`/
+    `overall` are positive ints, bounded against the league's stored
+    assignment-grid settings when one exists (`slot_out_of_range`);
+    `player_id` must resolve to a real player (`unknown_player`);
+    `picking_team_id`, when given, must be a current league member
+    (`not_in_league`). A batch never partially corrupts the table — every
+    row is independently validated/classified before any write executes.
+    """
+    lid = str(league_id)
+    season_i = int(season)
+    now = _now()
+
+    settings = load_pick_assignment_settings(lid) or {}
+    try:
+        grid_rounds = int(settings.get("rounds") or 0) or None
+    except (TypeError, ValueError):
+        grid_rounds = None
+    grid_order = [str(u) for u in (settings.get("order") or [])]
+    grid_teams = len(grid_order) or None
+
+    try:
+        member_ids = {str(m.get("user_id")) for m in load_league_members(lid)
+                      if m.get("user_id")}
+    except Exception as e:                       # pragma: no cover - DB optional
+        log.warning("record_draft_picks: member load failed for %s: %s", lid, e)
+        member_ids = set()
+
+    accepted = 0
+    deduped = 0
+    rejected: list[dict] = []
+    to_write: list[dict] = []
+    # Keyed by overall so a later item in the SAME batch that targets the
+    # same slot classifies against the item just staged, not stale DB state.
+    staged: dict[int, dict] = {}
+
+    with engine.begin() as conn:
+        existing = conn.execute(
+            select(recorded_picks_table).where(
+                (recorded_picks_table.c.league_id == lid)
+                & (recorded_picks_table.c.season == season_i))
+        ).fetchall()
+        by_overall = {int(r.overall): dict(r._mapping) for r in existing}
+
+        player_cache: dict[str, bool] = {}
+
+        for i, item in enumerate(rows or []):
+            if not isinstance(item, dict):
+                rejected.append({"index": i, "reason": "slot_out_of_range"})
+                continue
+            try:
+                overall = int(item.get("overall"))
+                round_ = int(item.get("round"))
+                slot = int(item.get("slot"))
+            except (TypeError, ValueError):
+                rejected.append({"index": i, "reason": "slot_out_of_range"})
+                continue
+            if overall < 1 or round_ < 1 or slot < 1:
+                rejected.append({"index": i, "reason": "slot_out_of_range"})
+                continue
+            if grid_rounds and round_ > grid_rounds:
+                rejected.append({"index": i, "reason": "slot_out_of_range"})
+                continue
+            if grid_teams and slot > grid_teams:
+                rejected.append({"index": i, "reason": "slot_out_of_range"})
+                continue
+
+            player_id = str(item.get("player_id") or "").strip()
+            if not player_id:
+                rejected.append({"index": i, "reason": "unknown_player"})
+                continue
+            if player_id not in player_cache:
+                player_cache[player_id] = bool(load_players_by_ids([player_id]))
+            if not player_cache[player_id]:
+                rejected.append({"index": i, "reason": "unknown_player"})
+                continue
+
+            team_id = item.get("picking_team_id")
+            team_id = str(team_id).strip() if team_id else None
+            if team_id and member_ids and team_id not in member_ids:
+                rejected.append({"index": i, "reason": "not_in_league"})
+                continue
+
+            event_id = str(item.get("event_id") or "").strip() or None
+
+            prior = staged.get(overall) or by_overall.get(overall)
+            if (prior is not None and not prior.get("voided_at")
+                    and str(prior.get("player_id")) == player_id):
+                deduped += 1
+                continue
+
+            accepted += 1
+            row = {
+                "league_id":       lid,
+                "season":          season_i,
+                "round":           round_,
+                "slot":            slot,
+                "overall":         overall,
+                "picking_team_id": team_id,
+                "player_id":       player_id,
+                "recorded_by":     str(recorded_by),
+                "event_id":        event_id,
+                "recorded_at":     now,
+                "voided_at":       None,
+            }
+            staged[overall] = row
+            to_write.append(row)
+
+        if to_write:
+            if DATABASE_URL.startswith("sqlite"):
+                conn.execute(text(
+                    "INSERT OR REPLACE INTO recorded_picks "
+                    "(league_id, season, round, slot, overall, picking_team_id, "
+                    " player_id, recorded_by, event_id, recorded_at, voided_at) "
+                    "VALUES (:league_id, :season, :round, :slot, :overall, "
+                    " :picking_team_id, :player_id, :recorded_by, :event_id, "
+                    " :recorded_at, :voided_at)"
+                ), to_write)
+            else:
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                stmt = pg_insert(recorded_picks_table).values(to_write)
+                stmt = stmt.on_conflict_do_update(
+                    constraint="uq_recorded_pick_slot",
+                    set_={
+                        "round":            stmt.excluded.round,
+                        "slot":             stmt.excluded.slot,
+                        "picking_team_id":  stmt.excluded.picking_team_id,
+                        "player_id":        stmt.excluded.player_id,
+                        "recorded_by":      stmt.excluded.recorded_by,
+                        "event_id":         stmt.excluded.event_id,
+                        "recorded_at":      stmt.excluded.recorded_at,
+                        "voided_at":        stmt.excluded.voided_at,
+                    },
+                )
+                conn.execute(stmt)
+
+    return {"accepted": accepted, "deduped": deduped, "rejected": rejected}
+
+
+def void_recorded_pick(league_id: str, season: int, overall: int,
+                       actor: str) -> dict | None:
+    """Non-destructive undo: ``SET voided_at = now()``. Never DELETEs.
+
+    Returns the voided row, or ``None`` when no live row exists at that
+    ``(league_id, season, overall)`` (already voided, or never recorded).
+    """
+    lid = str(league_id)
+    season_i = int(season)
+    overall_i = int(overall)
+    now = _now()
+    with engine.begin() as conn:
+        result = conn.execute(
+            update(recorded_picks_table)
+            .where((recorded_picks_table.c.league_id == lid)
+                   & (recorded_picks_table.c.season == season_i)
+                   & (recorded_picks_table.c.overall == overall_i)
+                   & (recorded_picks_table.c.voided_at.is_(None)))
+            .values(voided_at=now)
+        )
+        if result.rowcount == 0:
+            return None
+        row = conn.execute(
+            select(recorded_picks_table).where(
+                (recorded_picks_table.c.league_id == lid)
+                & (recorded_picks_table.c.season == season_i)
+                & (recorded_picks_table.c.overall == overall_i))
+        ).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def load_recorded_picks(league_id: str, season: int) -> list[dict]:
+    """Live rows only (``voided_at IS NULL``), ordered by ``overall``.
+
+    Mirrors the ``deck_suppressions.lifted_at`` ``.is_(None)`` convention
+    (database.py — active row predicate).
+    """
+    lid = str(league_id)
+    season_i = int(season)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(recorded_picks_table).where(
+                (recorded_picks_table.c.league_id == lid)
+                & (recorded_picks_table.c.season == season_i)
+                & (recorded_picks_table.c.voided_at.is_(None)))
+            .order_by(recorded_picks_table.c.overall)
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]
 
 
 # ---------------------------------------------------------------------------

@@ -476,6 +476,24 @@ FLAG_KEYS: tuple[str, ...] = (
     #       union by ROW FILTER in either state (never by nulling pool_value —
     #       `_power_picks_by_owner` re-derives a price from a NULL).
     "picks.assign_tradeable",
+    # draft-extensions W3 M-D (ADR-010) — LIVE OFFLINE PICK RECORDING. A
+    # THIRD, separate flag: `picks.assign` owns ownership entry/storage/the
+    # room, `picks.assign_tradeable` owns whether asserted rows PRICE, this
+    # one owns whether the app can record WHAT HAPPENED during a real
+    # off-platform draft. Storage is the new `recorded_picks` table — never
+    # `draft_picks`, never `leagues.draft_status*`.
+    # ON  ⇒ POST /api/league/recorded-picks (batch, idempotent on
+    #       (league_id, season, overall)) and its /void companion answer,
+    #       and GET /api/draft/board's ESPN branch projects live
+    #       `recorded_picks` rows into `picks[]` (subtracting them from
+    #       `undrafted[]`) through the SAME renderer every other platform
+    #       uses.
+    # OFF (default) ⇒ both routes 404 `feature_disabled` before any session
+    #       work, `recorded_picks` stays unwritten, and the ESPN board reads
+    #       zero rows from it regardless of what (if anything) the table
+    #       holds — so the board payload is byte-identical to the M-B/M-C
+    #       shape (`picks: []`, no drafted subtraction).
+    "draft.manual_picks",
     # THE SEASONAL ON/OFF SWITCH FOR THE DRAFT TAB (operator decision,
     # 2026-08-06: "it should literally just be set to seasonal — a flag we
     # turn on and off to display the tab"). Client-only: no route reads it.

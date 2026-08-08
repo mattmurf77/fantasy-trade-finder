@@ -187,6 +187,10 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   // With the flag on, the room OWNS the action: the notice's CTA pushes the
   // assignment grid, and the League-tab section survives as a second entry.
   const pickAssignOn = useFlag('picks.assign');
+  // W3 M-D (2026-08-08). Live offline pick recording — reachable once the
+  // league's picks are assigned, since that is what lets recording stay
+  // "confirm, not select" (the app already knows whose pick 1.03 is).
+  const manualPicksOn = useFlag('draft.manual_picks');
   const [mode, setMode] = useState<DraftMode>('real');
   const mockMode = mockOn && mode === 'mock';
   const [setupOpen, setSetupOpen] = useState(false);
@@ -396,10 +400,25 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
     navigation?.navigate?.('PickAssignment', { leagueId });
   }, [navigation, leagueId]);
 
+  // W3 M-D — same push-return-invalidate rule as the assignment push above:
+  // the room re-reads its board only after returning from a screen that can
+  // have changed it, never on an ordinary focus.
+  const cameFromRecordRef = useRef(false);
+  const goToRecordPicks = useCallback(() => {
+    cameFromRecordRef.current = true;
+    navigation?.navigate?.('RecordPicks', { leagueId });
+  }, [navigation, leagueId]);
+
   useEffect(() => {
-    if (!isFocused || !cameFromAssignRef.current) return;
-    cameFromAssignRef.current = false;
-    queryClient.invalidateQueries({ queryKey: ['draft-board', leagueId] });
+    if (!isFocused) return;
+    if (cameFromAssignRef.current) {
+      cameFromAssignRef.current = false;
+      queryClient.invalidateQueries({ queryKey: ['draft-board', leagueId] });
+    }
+    if (cameFromRecordRef.current) {
+      cameFromRecordRef.current = false;
+      queryClient.invalidateQueries({ queryKey: ['draft-board', leagueId] });
+    }
   }, [isFocused, queryClient, leagueId]);
 
   const goToRookieRanks = useCallback(() => {
@@ -658,6 +677,31 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
             <View style={styles.assignRowBody}>
               <Text style={styles.assignRowLine}>{assignProgress.line}</Text>
               <Text style={styles.linkText}>{assignProgress.action}</Text>
+            </View>
+            <Icon name="chevron-right" size={16} color={chalk.dim} />
+          </Pressable>
+        ) : null}
+
+        {/* W3 M-D — the actual draft is happening right now (or is about
+            to), and the app can already tell whose pick 1.03 is. Renders
+            once the grid is assigned, regardless of how much of it is
+            filled in — recording and assigning are independent progress
+            bars, and a partly-assigned grid still lets someone start
+            recording the slots that ARE owned. */}
+        {manualPicksOn && board.platform === 'espn'
+          && board.order_confidence === 'assigned' ? (
+          <Pressable
+            testID="draft-room.record-picks"
+            onPress={goToRecordPicks}
+            accessibilityRole="button"
+            accessibilityLabel="Record picks live"
+            style={({ pressed }) => [styles.assignRow, pressed && { backgroundColor: ink.ink3 }]}
+          >
+            <View style={styles.assignRowBody}>
+              <Text style={styles.assignRowLine}>
+                {board.picks.length} of {board.order.length} picks recorded
+              </Text>
+              <Text style={styles.linkText}>Record picks live</Text>
             </View>
             <Icon name="chevron-right" size={16} color={chalk.dim} />
           </Pressable>

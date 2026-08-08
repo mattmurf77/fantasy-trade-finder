@@ -456,3 +456,21 @@ To rebuild a league's grid from scratch, replay those rows in `occurred_at` orde
 
 **Monitoring triggers (not ship gates).** Per plan §6.8: <50% of started grids reaching 100% within 72 h ⇒ do not open M-C; >5% of slots contested within 7 days ⇒ stop widening. Both are measured off `pick_assignment_changed` and the `progress` block.
 
+## Pick-recording queue integrity (draft-extensions W3 M-D, 2026-08-08)
+
+**Flag:** `draft.manual_picks` (ships OFF). **Store:** the new `recorded_picks` table ([data-dictionary](data-dictionary.md#recorded_picks)) — never `draft_picks`, never `leagues.draft_status*`. **Idempotency key:** `(league_id, season, overall)`, not `event_id` — two devices recording the same physical pick will not share a uuid, so the server key has to be the slot, not the client's queue entry.
+
+**Zero-tolerance bar (plan §6.8).** Any duplicate or lost pick after an offline session reconnects is an idempotency bug, not a UX metric, and it takes recording off the allowlist — this is the one release gate in the wave that is not a monitoring threshold. `backend/tests/test_recorded_picks.py`'s replay tests assert a full batch survives being replayed **twice** with zero duplicate rows and a byte-identical board.
+
+**Kill switch.** Flip `draft.manual_picks` off. Both routes 404, and `GET /api/draft/board`'s ESPN branch stops reading `recorded_picks` entirely — the flag gates the read, not only the writes, so a row already recorded is never lost and never leaks into a flag-off board; it simply stops rendering until the flag flips back on. Nothing to roll back in the schema: `recorded_picks` is a brand-new additive table.
+
+**A pick was recorded for the wrong player.** Re-record the same `overall` with the correct `player_id` — `record_draft_picks` UPDATEs the row in place (a correction), never a second row.
+
+**A pick needs to be undone.** `POST /api/league/recorded-picks/void` sets `voided_at`; it is **never a DELETE**. Re-recording the same `(league_id, season, overall)` later reverses the undo (`voided_at` resets to `NULL`) — there is no separate "revive" endpoint.
+
+**A recorder tapped the wrong slot (off-by-one).** Recovery is **manual-cursor-only, no auto-shift** (the plan's binding decision, not a placeholder): tap the correct slot directly and record there. There is no "insert a skipped pick and shift everything after" mode — `overall` is the offline queue's idempotency key, and a shift operation would rewrite many rows' `overall` values, which is exactly the kind of write the idempotency contract cannot tolerate mid-replay.
+
+**The client queue dropped something (`MAX_QUEUE` overflow).** `mobile/src/api/recordedPicks.ts` mirrors `mobile/src/api/events.ts`'s `MAX_QUEUE = 500` FIFO-trim contract (extracted shared primitives live in `mobile/src/api/_queue.ts`). A 192-slot draft cannot legitimately overflow it — a trim event is a client bug, not normal operation, and blocks the release per the zero-tolerance bar above.
+
+**A recorded pick's team looks wrong even though the grid is right.** `recorded_picks.picking_team_id` is a **snapshot** taken at recording time, not a live join against the assignment grid (RC-7, plan §5.1) — the grid is truth for *ownership*, the recording is truth for *what happened*, and the two are deliberately not reconciled. If the grid was corrected after the pick was recorded, re-record the same `overall` (any `picking_team_id`, same or different `player_id`) to refresh the snapshot.
+

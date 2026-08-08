@@ -1210,8 +1210,45 @@ class AssignmentGrid:
     newest_assigned_at: str | None = None
 
 
+def _recorded_picks_projection(recorded: Sequence[dict], fetchers: Fetchers | None) -> list[dict]:
+    """``recorded_picks`` rows (already live-only, `voided_at IS NULL`) ->
+    the SAME `picks[]` shape every other platform renders (draft-extensions
+    W3 M-D).
+
+    `pick_no` is the recorded `overall` — the client derives `overall` from
+    THIS module's own `order[].pick_no` when it records (never a second
+    formula), so the two stay in lockstep by construction. Sourced by the
+    ROUTE (`database.load_recorded_picks`), never imported here directly —
+    the same injection discipline `AssignmentGrid` follows (I-7): this module
+    stays free of `database` imports for anything but the two lazy player/
+    rookie-id reads `_undrafted` already needs.
+    """
+    if not recorded:
+        return []
+    ids = [str(r.get("player_id") or "") for r in recorded if r.get("player_id")]
+    rows = fetchers.players(ids) if fetchers is not None and ids else {}
+    out = []
+    for r in recorded:
+        pid = str(r.get("player_id") or "")
+        meta = rows.get(pid) or {}
+        out.append({
+            "round": int(r.get("round") or 0),
+            "pick_no": int(r.get("overall") or 0),
+            "slot": _int_or_none(r.get("slot")),
+            "player_id": pid,
+            "name": meta.get("full_name") or meta.get("name") or "",
+            "position": str(meta.get("position") or "").upper(),
+            "team": meta.get("team") or None,
+            "picked_by_user_id": r.get("picking_team_id") or None,
+            "picked_at": r.get("recorded_at") or None,
+        })
+    out.sort(key=lambda x: x["pick_no"])
+    return out
+
+
 def assigned_board(req: BoardRequest, *, grid: AssignmentGrid,
-                   fetchers: Fetchers | None = None) -> dict:
+                   fetchers: Fetchers | None = None,
+                   recorded: Sequence[dict] = ()) -> dict:
     """The ESPN room, built entirely from the assignment grid.
 
     ZERO platform egress in every state — ESPN has no draft object, now or
@@ -1227,6 +1264,12 @@ def assigned_board(req: BoardRequest, *, grid: AssignmentGrid,
     `fetchers` is used ONLY for `rookie_ids` / `players`, the same two DB
     reads `_undrafted` already needs. Pass a `PlatformFetchers` with no
     `sleeper_get`, so a stray platform read RAISES instead of going live.
+
+    `recorded` (W3 M-D) is the league's live `recorded_picks` rows for this
+    season, read and passed in by the ROUTE — this module never imports
+    `load_recorded_picks` directly, mirroring the `AssignmentGrid` discipline.
+    Empty (the M-B default) renders exactly the M-B payload: `picks: []`,
+    every rookie undrafted.
     """
     if not grid.slots:
         # Nothing assigned. `state` stays `unavailable` — no closed enum gains
@@ -1257,14 +1300,14 @@ def assigned_board(req: BoardRequest, *, grid: AssignmentGrid,
         })
     order = _cap_order(order)
 
-    # `picks[]` is ALWAYS empty in M-B: an off-platform draft leaves no record
-    # we can read. W3 M-D's `recorded_picks` is the only thing that can ever
-    # populate it, and it is a separate wave behind its own flag.
-    picks: list[dict] = []
+    # `picks[]` is empty until W3 M-D's `recorded_picks` populates it — the
+    # only thing that ever can, behind its own `draft.manual_picks` flag.
+    picks = _recorded_picks_projection(recorded, fetchers)
+    drafted = {p["player_id"] for p in picks if p["player_id"]}
     undrafted, class_loaded = [], False
     if fetchers is not None:
         undrafted, class_loaded = _undrafted(
-            int(req.season), set(), set(req.rostered_ids or ()), req.basis,
+            int(req.season), drafted, set(req.rostered_ids or ()), req.basis,
             req.board_elo, req.consensus_elo, fetchers)
 
     # A grid is a fact in OUR database, not a cached remote read, so it is
@@ -1272,8 +1315,17 @@ def assigned_board(req: BoardRequest, *, grid: AssignmentGrid,
     entry = _Entry(fetched_at=_now_monotonic(),
                    as_of=grid.newest_assigned_at or _now_iso(),
                    state=UPCOMING)
+    # `state`: COMPLETE once every slot in the order has a landed pick, LIVE
+    # once at least one has, UPCOMING otherwise — the same shape `_classify`
+    # gives Sleeper, derived here because ESPN has no platform status field.
+    if order and picks and len(picks) >= len(order):
+        state = COMPLETE
+    elif picks:
+        state = LIVE
+    else:
+        state = UPCOMING
     return _payload(
-        req, ESPN, state=UPCOMING, kind=KIND_ROOKIE, season=int(req.season),
+        req, ESPN, state=state, kind=KIND_ROOKIE, season=int(req.season),
         rounds=int(grid.rounds or 0) or None, teams=teams or None,
         order=order, order_confidence=ORDER_ASSIGNED, picks=picks,
         undrafted=undrafted, undrafted_suppressed=not class_loaded,

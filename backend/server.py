@@ -130,6 +130,8 @@ from .database import (
     has_assigned_picks,
     PICK_SOURCE_USER, PICK_SOURCE_PLATFORM, PICK_SOURCE_ANY,
     ORDER_TYPE_LINEAR, ORDER_TYPE_SNAKE,
+    # draft-extensions W3 M-D — live offline pick recording
+    record_draft_picks, void_recorded_pick, load_recorded_picks,
     create_notification, get_notifications, mark_notifications_read,
     # M5 Push additions — device tokens
     save_device_token, load_device_tokens_for_users,
@@ -10695,6 +10697,138 @@ def pick_assignments_order_route():
                     "settings": settings, "progress": payload["progress"]})
 
 
+# ---------------------------------------------------------------------------
+# draft-extensions W3 M-D — live offline pick recording (flag
+# `draft.manual_picks`). Writes ONLY `recorded_picks`; NEVER `draft_picks`,
+# NEVER `leagues.draft_status*` (INV-6/D18, O9 survives). The store makes
+# recording "confirm, not select": `picking_team_id` is client-supplied
+# (defaulted, client-side, from the M-A assignment grid's owner for the
+# cursor's slot), editable only when the grid was wrong.
+# ---------------------------------------------------------------------------
+
+#: Mirrors mobile/src/api/events.ts's BATCH_MAX — the offline queue drains
+#: in batches of this size, so a larger request is a client bug, not a
+#: legitimate draft (no draft has more than a couple hundred picks total).
+_RECORDED_PICKS_BATCH_MAX = 50
+
+
+@app.route("/api/league/recorded-picks", methods=["POST"])
+@_gate_unverified_write
+def recorded_picks_route():
+    """POST /api/league/recorded-picks
+
+    Batch-shaped, because the client's offline queue drains in batches.
+    Body: `{league_id, season, picks: [{event_id, overall, round, slot,
+    picking_team_id, player_id, client_ts}]}`.
+
+    **Idempotency key is `(league_id, season, overall)`** — NOT `event_id`.
+    A replayed batch (the offline-queue retry path) produces `deduped`,
+    never a duplicate row and never a 4xx; two devices recording the same
+    physical pick dedupe the same way, since they will not share a uuid.
+    `event_id` is stored for audit / rejection-matching only.
+
+    `overall` NEVER reaches `draft_picks` — this route writes ONLY
+    `recorded_picks` (D18, pinned by test_recorded_picks.py).
+
+    Response — the SAME reconciliation shape `mobile/src/api/events.ts`
+    already parses: `{"accepted": N, "deduped": N, "rejected":
+    [{"index", "reason"}]}`, `reason` ∈ `slot_out_of_range | unknown_player
+    | not_in_league`.
+
+    Errors: 404 feature_disabled (flag off, before ANY session work) ·
+    400 league_id is required · 400 season is required ·
+    400 batch_too_large · 404 league_not_found · 403 not_in_league ·
+    401/409 via the session helpers.
+    """
+    if not is_enabled("draft.manual_picks"):
+        return jsonify({"error": "feature_disabled"}), 404
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    body = request.get_json(silent=True) or {}
+    g_league = sess.get("league")
+    league_id = (body.get("league_id") or (g_league.league_id if g_league else ""))
+    league_id, season = _assignment_league(sess, str(league_id or ""))
+    if league_id is None:
+        payload, code = season
+        return jsonify(payload), code
+    if body.get("season"):
+        try:
+            season = int(body["season"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "season is required"}), 400
+
+    member_ids, _names = _assignment_members(league_id)
+    actor = str(sess.get("user_id") or "")
+    if member_ids and actor not in member_ids:
+        return jsonify({"error": "not_in_league"}), 403
+
+    picks = body.get("picks")
+    if not isinstance(picks, list):
+        picks = []
+    if len(picks) > _RECORDED_PICKS_BATCH_MAX:
+        return jsonify({"error": "batch_too_large",
+                        "max": _RECORDED_PICKS_BATCH_MAX}), 400
+
+    result = record_draft_picks(league_id=league_id, season=int(season),
+                                rows=picks, recorded_by=actor)
+    return jsonify(result)
+
+
+@app.route("/api/league/recorded-picks/void", methods=["POST"])
+@_gate_unverified_write
+def recorded_pick_void_route():
+    """POST /api/league/recorded-picks/void
+
+    Body `{league_id, season, overall}`. Non-destructive undo: sets
+    `voided_at`, NEVER a DELETE. Re-recording the same `(league_id, season,
+    overall)` later revives it (`record_draft_picks` resets `voided_at` to
+    NULL) — that is how you reverse an undo. Returns the recomputed live
+    `recorded_picks` slice for the season so the client can update its
+    board state without a full re-fetch.
+
+    Errors: 404 feature_disabled · 400 league_id is required ·
+    404 league_not_found · 403 not_in_league · 400 overall is required ·
+    404 pick_not_found (nothing live at that slot) · 401/409 via the
+    session helpers.
+    """
+    if not is_enabled("draft.manual_picks"):
+        return jsonify({"error": "feature_disabled"}), 404
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    body = request.get_json(silent=True) or {}
+    g_league = sess.get("league")
+    league_id = (body.get("league_id") or (g_league.league_id if g_league else ""))
+    league_id, season = _assignment_league(sess, str(league_id or ""))
+    if league_id is None:
+        payload, code = season
+        return jsonify(payload), code
+    if body.get("season"):
+        try:
+            season = int(body["season"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "season is required"}), 400
+
+    member_ids, _names = _assignment_members(league_id)
+    actor = str(sess.get("user_id") or "")
+    if member_ids and actor not in member_ids:
+        return jsonify({"error": "not_in_league"}), 403
+
+    try:
+        overall = int(body.get("overall"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "overall is required"}), 400
+
+    row = void_recorded_pick(league_id=league_id, season=int(season),
+                             overall=overall, actor=actor)
+    if row is None:
+        return jsonify({"error": "pick_not_found"}), 404
+
+    return jsonify({"ok": True, "overall": overall,
+                    "picks": load_recorded_picks(league_id, int(season))})
+
+
 @app.route("/api/draft/board")
 @_gate_unverified_read
 def draft_board_route():
@@ -10832,9 +10966,22 @@ def draft_board_route():
             log.warning("draft-board: ESPN roster read failed for %s: %s",
                         league_id, e)
         req = _dc_replace(req, rostered_ids=rostered)
+        # draft-extensions W3 M-D — live offline pick recording. A SEPARATE
+        # flag from `picks.assign`: OFF ⇒ `recorded` stays () and the board
+        # is the byte-identical M-B/M-C payload (`picks: []`) regardless of
+        # what (if anything) sits in `recorded_picks` — the read itself is
+        # gated, not just the write routes, so flag-off is byte-identical.
+        recorded: list[dict] = []
+        if is_enabled("draft.manual_picks"):
+            try:
+                recorded = load_recorded_picks(str(league_id), int(season))
+            except Exception as e:                # never a 5xx (lld §2.1)
+                log.warning("draft-board: recorded-picks read failed for %s: %s",
+                            league_id, e)
         return jsonify(dbs.assigned_board(
             req, grid=_assignment_grid(str(league_id), season),
-            fetchers=dbs.PlatformFetchers(rookie_ids_fn=_rookie_player_ids)))
+            fetchers=dbs.PlatformFetchers(rookie_ids_fn=_rookie_player_ids),
+            recorded=recorded))
 
     if platform != dbs.SLEEPER:
         return jsonify(dbs.unsupported_board(req))

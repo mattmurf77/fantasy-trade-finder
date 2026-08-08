@@ -121,6 +121,12 @@ const V2_SCREENS = {
   // state, which is the same rule DraftRoom follows. `focusPickId` rides
   // as a query param from M-C's one-action correction links.
   PickAssignment: 'app/league/pick-assignments',
+  // draft-extensions W3 M-D — live offline pick recording. Registered on
+  // the ROOT stack only. Addressable while `draft.manual_picks` is off
+  // (the flag gates the Draft Room's entry CTA, not the route) — a link
+  // then lands on the screen's honest unavailable state, the same rule
+  // DraftRoom/PickAssignment follow.
+  RecordPicks: 'app/league/record-picks',
   Main: {
     path: 'app',
     screens: {

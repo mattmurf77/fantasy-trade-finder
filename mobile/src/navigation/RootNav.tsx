@@ -24,6 +24,7 @@ import FreeAgentsScreen from '../screens/FreeAgentsScreen';
 import DraftRoomScreen from '../screens/DraftRoomScreen';
 import MockDraftScreen from '../screens/MockDraftScreen';
 import PickAssignmentScreen from '../screens/PickAssignmentScreen';
+import RecordPicksScreen from '../screens/RecordPicksScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import AnalystGuide from '../components/AnalystGuide';
@@ -78,6 +79,10 @@ type AuthStack = {
   PickAssignment:
     | { leagueId?: string; season?: number; focusPickId?: string }
     | undefined;
+  // draft-extensions W3 M-D (flag `draft.manual_picks`) — live offline pick
+  // recording. Entered from the Draft Room once picks are assigned.
+  // `leagueId` is the same override rule as DraftRoom/PickAssignment.
+  RecordPicks: { leagueId?: string } | undefined;
   // Operator QA (flag testing.stage_users): synthetic adoption-stage users.
   TestStages: undefined;
 };
@@ -613,6 +618,34 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerLeft: () => (
               <HeaderBack
                 testID="pick-assignment.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
+          })}
+        />
+        {/* Record picks — live offline pick recording (draft-extensions
+            W3 M-D, flag `draft.manual_picks`). Registered unconditionally
+            for the same reason as PickAssignment/DraftRoom: the flag gates
+            the entry point, not the route. */}
+        <Stack.Screen
+          name="RecordPicks"
+          component={RecordPicksScreen}
+          options={({ navigation }) => ({
+            headerShown: true,
+            title: 'Record picks',
+            headerTitle: () => <HeaderTitle>Record picks</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+            // #151 pattern — see FreeAgents above (RNS#3294). Omitting this
+            // leaves back dead on iOS 26.
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="record-picks.back-btn"
                 onPress={() =>
                   navigation.canGoBack()
                     ? navigation.goBack()

@@ -450,6 +450,39 @@ There are exactly **seven** read sites (`_roster_eveners`, `_user_pick_share`, `
 
 ---
 
+## `recorded_picks`
+
+**W3 M-D (2026-08-08, flag `draft.manual_picks`, ADR-010)** — the live offline-draft feed. An off-platform rookie draft (the only shape ESPN's has, per the operator ruling that ESPN has no rookie-draft concept) leaves no platform object to read, so this table is the only record that a pick happened. It projects into `GET /api/draft/board`'s ESPN branch `picks[]` and **nowhere else** — it never writes `draft_picks`, never sets `leagues.draft_status*`, and never marks a draft complete.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `league_id` | str | |
+| `season`, `round`, `slot` | int | `slot` = 1-based position in `settings.order` (the M-A assignment grid's numbering), not a platform value |
+| `overall` | int | **1-based, league-wide pick number.** ⚠️ Legitimate **only here** — it must never leak onto a `draft_picks` row, whose grain is `(league, season, round, original_roster)` and whose `pick_id` format cannot express a slot. `backend/tests/test_recorded_picks.py`'s D18 tests pin this both structurally (AST — the write functions below never reference `draft_picks_table`) and behaviorally (a full recording batch leaves every `draft_picks` row byte-unchanged) |
+| `picking_team_id` | str | `league_members.user_id` on the clock. Client-supplied, **defaulted from the M-A assignment grid's owner for that slot** (recording is "confirm, not select") but editable when the grid was wrong. Nullable — orphaned/never-assigned slots may still be recorded with no team |
+| `player_id` | str, not null | OUR id space (the same space `players.player_id` and every other client-facing player id use) |
+| `recorded_by` | str, not null | FTF `user_id` of the recorder. **Any linked league member may record — no designated-recorder role** |
+| `event_id` | str | The client offline-queue's uuid (`mobile/src/api/_queue.ts`'s `uuidv4()`). Stored for audit and for matching a `rejected[i]` entry back to a queue item — **not** the uniqueness key, since two devices recording the same physical pick will not share a uuid |
+| `recorded_at` | str | ISO-8601 UTC, **server time** (`client_ts` in the request is untrusted and not stored) |
+| `voided_at` | str | Nullable. `IS NULL` = live. **Undo is non-destructive — never a DELETE.** Set by `POST /api/league/recorded-picks/void`; a later `record_draft_picks` call at the same slot resets it back to `NULL` (re-recording a voided pick is how you reverse an undo) |
+
+**Unique constraint `uq_recorded_pick_slot` on `(league_id, season, overall)`** — this triple is the offline-queue's idempotency key (plan §6.5), **not** `event_id`. A replayed batch (the client's retry-on-reconnect path) produces `deduped`, never a duplicate row. There is deliberately no partial unique index on `voided_at IS NULL`: a correction is an UPDATE in place, not a void-then-insert, so exactly one row exists per physical slot forever (dialect-portable across SQLite/Postgres, mirroring the reasoning `mock_drafts` already documents for its own one-active-row rule).
+
+**Write surface — exactly three functions, all in `backend/database.py`:**
+
+- `record_draft_picks(league_id, season, rows, recorded_by)` — idempotent batch. Per row: no existing row at `(league_id, season, overall)` → insert (`accepted`); existing live row, same `player_id` → `deduped`; existing live row, different `player_id` → UPDATE in place (`accepted`, a correction); existing **voided** row, any `player_id` → UPDATE in place (`accepted`, revives it). Validated before any write: `round`/`slot`/`overall` positive ints bounded against the league's stored `pick_assignment_settings` when one exists (`slot_out_of_range`); `player_id` must resolve via `load_players_by_ids` (`unknown_player`); a non-empty `picking_team_id` must be a current `league_members` row (`not_in_league`). A batch never partially corrupts the table — every row is independently classified before the write executes, and rejected rows never touch the DB.
+- `void_recorded_pick(league_id, season, overall, actor)` — `SET voided_at = now() WHERE … AND voided_at IS NULL`. Never a DELETE.
+- `load_recorded_picks(league_id, season)` — live rows only (`voided_at IS NULL`), ordered by `overall`. This is what the board route reads and passes into `draft_board_service.assigned_board(..., recorded=…)`.
+
+**Routes:** `POST /api/league/recorded-picks` (batch; response `{accepted, deduped, rejected:[{index, reason}]}` — the **same reconciliation shape** `mobile/src/api/events.ts` already parses) and `POST /api/league/recorded-picks/void`. Both gated on `draft.manual_picks`; flag off ⇒ 404 `feature_disabled` before any session work, and `GET /api/draft/board`'s ESPN branch does not even read the table — the flag gates the **read**, not just the writes, so a row left over from a flag that was flipped on and back off can never leak into a flag-off board (verified in `backend/tests/test_recorded_picks.py`).
+
+**Board wiring:** `draft_board_service._recorded_picks_projection()` maps live rows to the identical `picks[]` shape every other platform's board renders (`round`, `pick_no` = `overall`, `slot`, `player_id`, `name`, `position`, `team`, `picked_by_user_id`, `picked_at`). `assigned_board`'s `drafted` set (fed to `_undrafted`) is derived from this projection, so a recorded player disappears from `undrafted[]` through the same code path Sleeper/MFL boards use — **one renderer, no second source of truth**. `state` becomes `live` once ≥1 pick is recorded and `complete` once every `order[]` slot has one.
+
+**See also:** `docs/runbook.md` § Pick-recording queue integrity for the client offline-queue's zero-tolerance contract.
+
+---
+
 ## `notifications`
 
 In-app inbox. Types: `trade_match`, `trade_accepted`, `trade_declined`.

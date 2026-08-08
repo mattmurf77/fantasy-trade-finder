@@ -41,6 +41,7 @@ import { queryClient } from './src/state/queryClient';
 import { initSentry, wrap as sentryWrap } from './src/observability/sentry';
 import { getTierConfig } from './src/api/rankings';
 import { initAnalytics, track } from './src/api/events';
+import { initRecordedPicksQueue } from './src/api/recordedPicks';
 import { warmPlayerCache } from './src/api/sleeper';
 import { setTierConfigCache } from './src/utils/tierBands';
 import { handleDeepLink } from './src/utils/deepLinks';
@@ -120,6 +121,10 @@ function App() {
         // then record the cold open. Fired AFTER loadCachedFlags so the
         // analytics.client_events gate reads the hydrated flag map.
         initAnalytics();
+        // draft-extensions W3 M-D — restore the offline pick-recording
+        // queue the same way. Inert (an empty queue) unless a draft was
+        // being recorded when the app last closed.
+        initRecordedPicksQueue();
         track('app_opened', { launch_type: 'cold' });
         // Count this cold start (hydration already awaited above).
         patchOnboardingState({
