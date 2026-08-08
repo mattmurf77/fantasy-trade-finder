@@ -57,7 +57,7 @@
   "auth.enforce_verified_writes": false,
   "auth.email_capture": false,
   "espn.link": true,
-  "espn.webview_capture": false,
+  "espn.webview_capture": true,
   "mfl.link": true,
   "mfl.auth_link": true,
   "fleaflicker.link": false,

@@ -49,6 +49,10 @@ and replays `espn_s2`/`swid`.
   TestFlight build containing the native dep validates against a real private
   league (the friend's league 493554 is the live test case). Rollback lever:
   flip the flag — the sheet reverts to manual paste with no client update.
+  **Graduation superseded 2026-08-08:** operator ordered ship with the flag ON
+  at merge, ahead of TestFlight QA. Safe for existing clients (no pre-Phase-1b
+  binary reads the flag); the §3 QA checklist runs against the new build with
+  the feature already live, and the rollback lever stands.
 - New env vars / `model_config` keys: **none**
 
 ## 3. Test scope (mobile test platform)
@@ -109,7 +113,9 @@ and replays `espn_s2`/`swid`.
   `pod install` + a rebuilt dev client, which must run from the no-space clone
   (`../ftf-test-clone`); spaces in this repo path break `expo run:ios`.
 - Evidence: TEST_LEDGER entry + `qa/sim-runs/last-sim-run.json` after the run.
-- **Operator deviation:** if the rebuild+sim run is deferred past this session,
-  merge waits OR ships with the deviation recorded here and the flag OFF;
-  operator decides at review. The native dep also means the next EAS/TestFlight
-  build is the real validation gate regardless.
+- **Operator deviation (decided 2026-08-08):** operator ordered merge + push +
+  EAS/TestFlight build with the flag ON, without a local sim run — the tier-2
+  sim gate is waived in favor of the TestFlight build as the validation gate
+  (the sim run needed a rebuilt dev client from the no-space clone; the
+  TestFlight binary exercises the same native module). §3's TestFlight QA
+  checklist is the compensating control; rollback is the flag.

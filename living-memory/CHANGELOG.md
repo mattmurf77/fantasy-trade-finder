@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-08 (ESPN Connect WebView cookie capture — Phase 1b, flag ON)](#2026-08-08-espn-connect-webview-cookie-capture--phase-1b-flag-on)
 - [2026-08-08 (living-memory revival, session-memory contract wired into CLAUDE.md)](#2026-08-08-living-memory-revival-session-memory-contract-wired-into-claudemd)
 - [2026-08-06 (analytics dashboard rebuild, three client fixes from prod data)](#2026-08-06-analytics-dashboard-rebuild-three-client-fixes-from-prod-data)
 - [2026-08-05 (Acquire tab, stud-tax retune, rank-tab launch routing)](#2026-08-05-acquire-tab-stud-tax-retune-rank-tab-launch-routing)
@@ -38,6 +39,12 @@
 - [2026-05-21](#2026-05-21)
 - [Earlier (pre-changelog)](#earlier-pre-changelog)
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
+
+---
+
+## 2026-08-08 (ESPN Connect WebView cookie capture — Phase 1b, flag ON)
+
+- **Shipped `EspnConnectScreen` + `espn.webview_capture` (ON at operator order):** private-league ESPN linking no longer requires a manual cookie paste — the sheet's private section (auto-expanded on `espn_auth_required`) offers "Sign in to ESPN", an in-app WebView to ESPN's own login that captures `espn_s2`+`SWID` from the **native cookie store** (`@react-native-cookies/cookies`, new native dep — HttpOnly cookies are invisible to injected JS). Cookies are cleared on screen mount (fresh login every capture, kills the stale-cookie loop), delivered once via `state/espnConnectBus` to `EspnLinkSheet`, which auto-advances to the team preview. OTP-challenged Disney SSO logins get a presence-only detector (all frames) + native hint banner; nothing but the two cookies ever leaves the WebView. League-tab re-sync auth failures gained a "Sign in to ESPN" recovery button. Manual paste stays as fallback; flag off is byte-identical. Backend untouched (`POST /api/espn/link` already handled cookies). Independent review pass: security clean, 8 findings fixed pre-merge. Scope + TestFlight QA checklist: [`../docs/plans/espn-connect-webview/scope.md`](../docs/plans/espn-connect-webview/scope.md). Sim-gate tier-2 waived by operator (TestFlight build is the validation gate — native dep can't ship OTA). Trigger: a real user's private league (493554) failing to link.
 
 ---
 
