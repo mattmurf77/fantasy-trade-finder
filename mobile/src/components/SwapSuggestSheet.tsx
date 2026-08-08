@@ -9,6 +9,12 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import MemberEnteredMarker, {
+  MEMBER_ENTERED_COPY,
+  isMemberEntered,
+  openPickCorrection,
+  usePicksTradeable,
+} from './MemberEnteredMarker';
 import PositionChip from './PositionChip';
 import { Button, TickLabel } from './chalkline';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
@@ -52,6 +58,9 @@ interface Props {
   onPick: (evener: CalcEvener) => void;
   /** Escape hatch: open the classic full-roster swap sheet for this asset. */
   onBrowseRoster: () => void;
+  /** W3 M-C (D17) — the league whose assignment grid holds any asserted
+   *  pick offered here. Without it the marker has no correction target. */
+  leagueId?: string | null;
   onClose: () => void;
 }
 
@@ -63,9 +72,14 @@ export default function SwapSuggestSheet({
   error,
   onPick,
   onBrowseRoster,
+  leagueId,
   onClose,
 }: Props) {
   const reduceMotion = useReducedMotionSafe();
+  // See PlayerPickerModal: the option row is an accessible container, so the
+  // disclosure + correction ride the ROW's a11y contract as well as the
+  // marker's own. Sighted and VoiceOver users get the same two things.
+  const picksTradeable = usePicksTradeable();
   return (
     <Modal
       visible={visible}
@@ -112,7 +126,11 @@ export default function SwapSuggestSheet({
           ) : (
             <ScrollView style={styles.list}>
               <TickLabel>SUGGESTED REPLACEMENTS</TickLabel>
-              {suggestions.map((e) => (
+              {suggestions.map((e) => {
+                const pickId = e.pick_id ?? e.id;
+                const marked =
+                  picksTradeable && isMemberEntered(e.source) && !!pickId && !!leagueId;
+                return (
                 <Pressable
                   key={e.id}
                   testID={`trade-card.swap-option.${e.id}`}
@@ -120,18 +138,42 @@ export default function SwapSuggestSheet({
                   accessibilityRole="button"
                   accessibilityLabel={`Swap in ${e.name}${
                     replacing ? ` for ${replacing.name}` : ''
-                  }`}
+                  }${marked ? `. ${MEMBER_ENTERED_COPY}` : ''}`}
+                  accessibilityActions={
+                    marked ? [{ name: 'correct', label: 'Correct this pick' }] : undefined
+                  }
+                  onAccessibilityAction={
+                    marked
+                      ? (ev) => {
+                          if (ev.nativeEvent.actionName === 'correct') {
+                            openPickCorrection(leagueId as string, pickId, e.season);
+                          }
+                        }
+                      : undefined
+                  }
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                 >
                   <PositionChip position={e.position} size="sm" />
-                  <Text style={styles.rowName} numberOfLines={1}>
-                    {e.name}
-                  </Text>
+                  <View style={styles.rowBody}>
+                    <Text style={styles.rowName} numberOfLines={1}>
+                      {e.name}
+                    </Text>
+                    {/* D17 — priced surface 2 of 5: the swap-suggestions
+                        sheet. UNCONDITIONAL; the marker self-gates. */}
+                    <MemberEnteredMarker
+                      source={e.source}
+                      pickId={pickId}
+                      season={e.season}
+                      leagueId={leagueId}
+                      testID={`trade-card.swap-option.member-entered.${e.id}`}
+                    />
+                  </View>
                   <Text style={[type.data, styles.rowValue]}>
                     {Math.round(e.value).toLocaleString()}
                   </Text>
                 </Pressable>
-              ))}
+                );
+              })}
             </ScrollView>
           )}
 
@@ -202,7 +244,10 @@ const styles = StyleSheet.create({
     borderBottomColor: ink.line,
   },
   rowPressed: { backgroundColor: ink.ink3 },
-  rowName: { ...type.title, color: chalk.base, flex: 1 },
+  // The name column became a stack when the provenance marker joined it;
+  // with no marker it renders exactly as the single Text did.
+  rowBody: { flex: 1, gap: space.xs },
+  rowName: { ...type.title, color: chalk.base },
   rowValue: { minWidth: 56, textAlign: 'right' },
   browseBtn: { marginTop: space.sm },
 });

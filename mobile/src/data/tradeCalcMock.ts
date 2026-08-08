@@ -11,6 +11,7 @@
 // ships (docs/plans/manual-trade-calculator-plan.md), this module and the
 // client-side math in utils/tradeCalcMath.ts get replaced by that API.
 
+import type { PickSource } from '../api/pickAssignment';
 import type { Position } from '../shared/types';
 
 /** Tradable-asset position: the four player positions plus draft picks. */
@@ -28,6 +29,13 @@ export interface CalcPlayer {
    *  youth/vet board biases price them naturally (youth-lovers pay up,
    *  win-now owners fade) with zero extra valuation math. */
   pick?: true;
+  /** draft-extensions W3 M-C (D17) — provenance for an owned league pick,
+   *  copied verbatim off `GET /api/league/picks`. Only the In-league
+   *  calculator ever sets these (it is the only mount with a real league):
+   *  the demo board, the open calculator and the deck's target picker leave
+   *  them undefined, so `MemberEnteredMarker` renders nothing there. */
+  pickSource?: PickSource | null;
+  pickSeason?: number | null;
 }
 
 export interface CalcOwner {

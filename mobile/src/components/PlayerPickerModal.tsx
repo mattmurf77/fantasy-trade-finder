@@ -9,6 +9,12 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import MemberEnteredMarker, {
+  MEMBER_ENTERED_COPY,
+  isMemberEntered,
+  openPickCorrection,
+  usePicksTradeable,
+} from './MemberEnteredMarker';
 import PositionChip from './PositionChip';
 import { Badge, Button, TickLabel } from './chalkline';
 import { CalcPlayer, CalcPos } from '../data/tradeCalcMock';
@@ -49,6 +55,11 @@ interface Props {
   secondaryPrefix?: string;
   /** Optional arbitrage badge per row (e.g. TARGET / SELL HIGH). */
   badgeFor?: (p: CalcPlayer) => { label: string; color: string } | null;
+  /** W3 M-C (D17) — the league whose assignment grid holds any asserted
+   *  pick in this pool. Only the In-league calculator's two pickers pass
+   *  it; the deck's target picker and the demo calculator hold no league
+   *  picks at all, so the marker there has nothing to mark. */
+  leagueId?: string | null;
   onPick: (p: CalcPlayer) => void;
   onClose: () => void;
 }
@@ -66,11 +77,18 @@ export default function PlayerPickerModal({
   secondaryValue,
   secondaryPrefix = 'you',
   badgeFor,
+  leagueId,
   onPick,
   onClose,
 }: Props) {
   const [query, setQuery] = useState('');
   const [posFilter, setPosFilter] = useState<CalcPos | null>(null);
+  // W3 M-C (D17). The row Pressable is an accessible container, so on iOS
+  // it swallows the marker's own a11y node — the disclosure and the
+  // correction are therefore ALSO folded into the row's own contract
+  // (label + a custom action). Sighted users get the marker; VoiceOver
+  // users get the same sentence and the same one-action fix.
+  const picksTradeable = usePicksTradeable();
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -88,7 +106,10 @@ export default function PlayerPickerModal({
 
   // Shared row renderer — the suggested rows are the same row with their own
   // testID plus a flare NEED badge (informational highlight, not an action).
-  const renderRow = (item: CalcPlayer, testID: string, need = false) => (
+  const renderRow = (item: CalcPlayer, testID: string, need = false) => {
+    const marked =
+      picksTradeable && isMemberEntered(item.pickSource) && !!item.id && !!leagueId;
+    return (
     <Pressable
       testID={testID}
       accessibilityRole="button"
@@ -96,8 +117,20 @@ export default function PlayerPickerModal({
         item.pick ? 'draft capital' : `${item.nflTeam}, ${item.age} years`
       }, value ${ownerBoardValue(item).toLocaleString()}${
         need ? ', fills a roster need for the receiving team' : ''
-      }`}
+      }${marked ? `. ${MEMBER_ENTERED_COPY}` : ''}`}
       accessibilityHint="Adds this player to the trade"
+      accessibilityActions={
+        marked ? [{ name: 'correct', label: 'Correct this pick' }] : undefined
+      }
+      onAccessibilityAction={
+        marked
+          ? (e) => {
+              if (e.nativeEvent.actionName === 'correct') {
+                openPickCorrection(leagueId as string, item.id, item.pickSeason);
+              }
+            }
+          : undefined
+      }
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       onPress={() => onPick(item)}
     >
@@ -113,6 +146,17 @@ export default function PlayerPickerModal({
         <Text style={type.bodySm}>
           {item.pick ? 'Draft capital' : `${item.nflTeam} · ${item.age} yrs`}
         </Text>
+        {/* D17 — priced surface 1 of 5: the trade-away / acquire picker.
+            UNCONDITIONAL (the marker self-gates); the row already shows the
+            price this pick would add, so it must also show that the price
+            rests on a leaguemate's assertion. */}
+        <MemberEnteredMarker
+          source={item.pickSource}
+          pickId={item.id}
+          season={item.pickSeason}
+          leagueId={leagueId}
+          testID={`calc.picker.member-entered.${item.id}`}
+        />
       </View>
       <View style={styles.values}>
         <Text style={type.data}>{ownerBoardValue(item).toLocaleString()}</Text>
@@ -123,7 +167,8 @@ export default function PlayerPickerModal({
         ) : null}
       </View>
     </Pressable>
-  );
+    );
+  };
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>

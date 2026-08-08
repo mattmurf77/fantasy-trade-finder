@@ -30,7 +30,13 @@ export type NoticeCode =
   | 'startup_draft'
   | 'platform_unsupported'
   | 'class_not_loaded'
-  | 'mfl_reconnect';
+  | 'mfl_reconnect'
+  // draft-extensions W3 M-B (flag `picks.assign`) — an ESPN league whose
+  // pick ownership nobody has entered yet. `state` stays `unavailable`; this
+  // is the ONE new vocabulary item the wave adds, and it is an UNCONFIGURED
+  // state with a user-performable fix, never an error. Older binaries fall
+  // through to `notice.message` and behave correctly.
+  | 'picks_not_assigned';
 
 export interface DraftOrderSlot {
   /** null when the platform has not published an order (`order_confidence:

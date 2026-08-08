@@ -4488,6 +4488,7 @@ export default function TradesScreen({ navigation, route }: any) {
         loading={suggestQuery.isLoading}
         error={suggestQuery.isError}
         onPick={handleSuggestPick}
+        leagueId={leagueId}
         onBrowseRoster={() => {
           if (suggestTarget) {
             setSwapTarget(suggestTarget);

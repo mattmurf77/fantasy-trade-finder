@@ -52,6 +52,13 @@ export const PICK_ROUNDS_DEFAULT = 4;
  *  toggle is safe at any time and can never trigger a CAS conflict. */
 export type PickOrderType = 'linear' | 'snake';
 
+/** `draft_picks.source` — the provenance triple's discriminator. `'user'` is
+ *  a member-asserted row, `'platform'` (and, on every pre-W3 row, NULL) is
+ *  platform truth. ONE definition, imported by every payload that carries
+ *  provenance (`api/league.ts`, `api/calc.ts`) and by the W3 M-C marker, so
+ *  a client can never invent a third value or read the enum two ways. */
+export type PickSource = 'platform' | 'user';
+
 export interface PickAssignmentSettings {
   rounds: number;
   order_type: PickOrderType;
@@ -77,7 +84,7 @@ export interface PickSlot {
   /** `'user'` = a league member asserted this row. `'platform'`/null = the
    *  platform wrote it (impossible for ESPN today, but the field is the
    *  containment and the client reads it rather than assuming). */
-  source: 'user' | 'platform' | null;
+  source: PickSource | null;
   assigned_by: string | null;
   /** ISO-8601. ALSO the CAS token — pass it back verbatim on the PUT.
    *  `null` on a never-assigned row. */

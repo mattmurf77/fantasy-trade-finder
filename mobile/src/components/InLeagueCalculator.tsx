@@ -204,6 +204,11 @@ export default function InLeagueCalculator({
         nflTeam: 'PICK',
         age: 0,
         base: p.pool_value ?? 0,
+        // W3 M-C (D17) — provenance travels with the priced asset, so the
+        // calculator's rows and its two pickers can mark an asserted pick
+        // without a second lookup. Server-authoritative; never inferred.
+        pickSource: p.source ?? null,
+        pickSeason: p.season,
       };
     }
     return m;
@@ -636,6 +641,7 @@ export default function InLeagueCalculator({
         valueOf={(p) => board[p.id] ?? 0}
         accent={semantic.neg}
         addTestID="calc.league-give-add"
+        leagueId={leagueId}
         onAdd={() => setPicker('give')}
         onRemove={(id) => {
           haptics.warning();
@@ -656,6 +662,7 @@ export default function InLeagueCalculator({
         valueOf={(p) => board[p.id] ?? 0}
         accent={semantic.pos}
         addTestID="calc.league-receive-add"
+        leagueId={leagueId}
         onAdd={() => setPicker('receive')}
         onRemove={(id) => {
           haptics.warning();
@@ -677,6 +684,7 @@ export default function InLeagueCalculator({
               : `Recommended to even it — ask @${opponent?.username ?? 'them'} to add`
           }
           onAdd={addEvener}
+          leagueId={leagueId}
         />
       ) : null}
 
@@ -750,6 +758,7 @@ export default function InLeagueCalculator({
         suggested={pickerSuggestions}
         selectedIds={[...giveIds, ...receiveIds]}
         ownerBoardValue={(p: CalcPlayer) => board[p.id] ?? 0}
+        leagueId={leagueId}
         onPick={(p) => {
           haptics.selection();
           setGiveIds((ids) => [...ids, p.id]);
@@ -763,6 +772,7 @@ export default function InLeagueCalculator({
         suggested={pickerSuggestions}
         selectedIds={[...giveIds, ...receiveIds]}
         ownerBoardValue={(p: CalcPlayer) => board[p.id] ?? 0}
+        leagueId={leagueId}
         onPick={(p) => {
           haptics.selection();
           setReceiveIds((ids) => [...ids, p.id]);

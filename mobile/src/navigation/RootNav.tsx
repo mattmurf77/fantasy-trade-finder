@@ -72,8 +72,12 @@ type AuthStack = {
   // Entered from the League tab's "Draft picks" section. `leagueId` is the
   // same override rule as DraftRoom; `focusPickId` is M-C's one-action
   // correction path — a priced surface deep-links straight to the slot
-  // whose ownership the user wants to challenge.
-  PickAssignment: { leagueId?: string; focusPickId?: string } | undefined;
+  // whose ownership the user wants to challenge, and `season` lands the
+  // right season tab even when the payload no longer holds that pick_id
+  // (M-C ships `{leagueId, season, focusPickId}` as one triple).
+  PickAssignment:
+    | { leagueId?: string; season?: number; focusPickId?: string }
+    | undefined;
   // Operator QA (flag testing.stage_users): synthetic adoption-stage users.
   TestStages: undefined;
 };
