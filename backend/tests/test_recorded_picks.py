@@ -591,7 +591,7 @@ def test_empty_recorded_is_the_exact_m_b_payload():
 # The flag itself — 4-touch, lands OFF
 # ---------------------------------------------------------------------------
 
-def test_manual_picks_flag_is_registered_lands_off_and_is_mirrored():
+def test_manual_picks_flag_is_registered_and_mirrored():
     assert "draft.manual_picks" in ff.FLAG_KEYS
     assert ff.DEFAULT_FLAGS["draft.manual_picks"] is False
     features = json.loads((REPO / "config/features.json").read_text())
@@ -599,5 +599,9 @@ def test_manual_picks_flag_is_registered_lands_off_and_is_mirrored():
         (REPO / "backend/tests/fixtures/flags/release.json").read_text())
     assert "draft.manual_picks" in features
     assert "draft.manual_picks" in release
+    # The invariant that must always hold is the 4-touch MIRROR — if the two
+    # files disagree, `is_enabled` and the release fixture diverge. The shipped
+    # VALUE is an operator decision: flipped ON 2026-08-08 ("Turn it on and
+    # ship"). `DEFAULT_FLAGS` above still asserts the code-level default is
+    # False, so the kill switch remains one config edit away.
     assert features["draft.manual_picks"] == release["draft.manual_picks"]
-    assert features["draft.manual_picks"] is False
