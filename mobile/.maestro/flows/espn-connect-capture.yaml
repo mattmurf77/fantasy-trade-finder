@@ -1,0 +1,80 @@
+appId: com.fantasytradefinder.app
+# tc: T-ESPN-1B-01 (docs/plans/espn-connect-webview/scope.md §3)
+# profile: standard
+# flags: espn.link ON (release default), espn.webview_capture ON (override —
+#        release default is OFF; run with the flag forced on, e.g. sim-run.sh
+#        --flags). The in-WebView Disney SSO login + cookie landing are WAIVED
+#        (a live third-party page the hermetic harness can't drive); this flow
+#        covers the app-side chrome only: the flag-on entry appears, the
+#        connect screen mounts with its consent copy, back-out restores the
+#        sheet, and the manual-paste fallback is still present.
+tags: [espn, webview, flag-on]
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+- tapOn:
+    id: "signin.username-input"
+- inputText: "qa_standard"
+- tapOn:
+    id: "signin.continue-btn"
+# Land on the league list (LeaguePicker) — its footer carries the ESPN link
+# entry. Do NOT pick a league; the link-espn footer is on this screen.
+- extendedWaitUntil:
+    visible:
+      id: "leagues.link-espn"
+    timeout: 30000
+
+# Open the ESPN link sheet and reveal the private-league section.
+- tapOn:
+    id: "leagues.link-espn"
+- extendedWaitUntil:
+    visible:
+      id: "espn-link.input"
+    timeout: 10000
+- tapOn:
+    id: "espn-link.private-toggle"
+
+# Flag ON: the "Sign in to ESPN" WebView-capture entry is present ABOVE the
+# manual-paste fields, and the manual-paste fallback is still there.
+- extendedWaitUntil:
+    visible:
+      id: "espn-connect.sign-in"
+    timeout: 10000
+- assertVisible:
+    id: "espn-link.s2-input"
+- assertVisible:
+    id: "espn-link.swid-input"
+
+# Launch the connect WebView. The sheet hides its own Modal for the push;
+# the connect screen mounts with its chrome + consent copy.
+- tapOn:
+    id: "espn-connect.sign-in"
+- extendedWaitUntil:
+    visible:
+      id: "espn-connect.webview"
+    timeout: 15000
+- assertVisible:
+    id: "espn-connect.back-btn"
+- assertVisible:
+    text: "We never see your password"
+- takeScreenshot: espn-connect-mounted
+
+# Back out without capturing — the sheet's Modal restores and the manual-paste
+# fallback is still usable (capture path is additive, paste never removed).
+- tapOn:
+    id: "espn-connect.back-btn"
+- extendedWaitUntil:
+    visible:
+      id: "espn-link.input"
+    timeout: 10000
+- assertVisible:
+    id: "espn-link.s2-input"
+- assertVisible:
+    id: "espn-connect.sign-in"
+- takeScreenshot: espn-connect-backed-out

@@ -29,6 +29,7 @@
 - [D-018 — Unverified Sessions Keep the Short Expiry](#d-018--unverified-sessions-keep-the-short-expiry)
 - [D-019 — Prepare the Trade, Never Fabricate the Execute Path](#d-019--prepare-the-trade-never-fabricate-the-execute-path)
 - [D-020 — Analytics Omits Untrustworthy Data Rather Than Reporting It](#d-020--analytics-omits-untrustworthy-data-rather-than-reporting-it)
+- [D-021 — Capture ESPN's HttpOnly Cookie From the Native Store, Not Injected JS](#d-021--capture-espns-httponly-cookie-from-the-native-store-not-injected-js)
 - [Decision Template (for new entries)](#decision-template-for-new-entries)
 
 ---
@@ -195,6 +196,15 @@
 **Alternatives considered:** Report the wall-clock value (poisons every latency percentile); report a sentinel like -1 (someone will average it).
 **Consequences:** Latency analysis must filter on "ms present" — a real constraint on every query, recorded in [`CHANGELOG.md`](CHANGELOG.md) §Outstanding. Related: analytics Segments use a **closed grammar** (did / did_not / platform / min_events) so no user string reaches SQL.
 **Status:** Active.
+
+## D-021 — Capture ESPN's HttpOnly Cookie From the Native Store, Not Injected JS
+**Date:** 2026-08-08 (ESPN Connect WebView, Phase 1b — flag `espn.webview_capture`)
+**Context:** Private ESPN leagues need `espn_s2` + `SWID`. Phase 1 shipped a manual paste; Phase 1b adds an in-app WebView login (modeled on `SleeperConnectScreen`) so users don't have to hand-extract cookies. But `SleeperConnectScreen`'s technique — inject JS and poll `localStorage`/`document.cookie` — cannot work here: `espn_s2` is issued **HttpOnly**, so page JavaScript never sees it.
+**Decision:** Read the cookies from the **native cookie store** (WKHTTPCookieStore) via `@react-native-cookies/cookies` (`CookieManager.get`), polling `www.espn.com` + `fantasy.espn.com` and delivering once BOTH are present. Injected JS is limited to a MutationObserver that signals the Disney SSO **one-time-code step** so a native hint can render — it never reads the code, any field value, or any DOM content. The only data that leaves the WebView is the two cookie strings, handed to `POST /api/espn/link` (never to analytics — the events carry `saw_otp`, never a credential). OTP assist is **detect + hint only**.
+**Alternatives considered:** Injected-JS cookie poller like the Sleeper screen (blind to HttpOnly — the credential is literally unreadable); scrape the OTP to autofill it (needs reading the code — a credential we deliberately never touch, and iOS already autofills it from Mail/Messages); stay paste-only (the friction Phase 1b exists to remove).
+**Consequences:** Adds a native dependency (`@react-native-cookies/cookies`), so the flag can only be validated in a real build — it ships **OFF** and flips after a TestFlight build validates against a real private league (friend's league 493554). Manual paste stays as the fallback; flag off ⇒ the sheet is byte-identical. The pure extractor (`mobile/src/utils/espnCookies.ts` `pickEspnCookies`) is unit-tested; the in-WebView login leg is un-automatable and is covered by manual TestFlight QA. Establishes the mobile pattern for any future HttpOnly third-party credential capture (recorded in `LLD.md` §Specific patterns).
+**Status:** Active.
+**Related ADR:** — (rides the ESPN linking plan `docs/plans/espn-league-linking-plan-2026-07-11.md` §4 + scope `docs/plans/espn-connect-webview/scope.md`)
 
 ---
 

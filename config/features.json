@@ -57,6 +57,8 @@
   "auth.enforce_verified_writes": false,
   "auth.email_capture": false,
   "espn.link": true,
+  "_comment_espn_webview": "2026-08-08 ESPN league linking Phase 1b (docs/plans/espn-connect-webview/scope.md). espn.webview_capture gates the mobile 'Sign in to ESPN' in-app WebView cookie-capture path in EspnLinkSheet (captures espn_s2 + SWID from the native cookie store; manual paste stays the fallback). Requires espn.link ON to have any effect. Client-only gate: POST /api/espn/link already accepts the cookies, so no backend route reads it. Ships OFF — the flag flips after a TestFlight build carrying the @react-native-cookies/cookies native dependency validates against a real private league.",
+  "espn.webview_capture": false,
   "mfl.link": true,
   "mfl.auth_link": true,
   "fleaflicker.link": false,

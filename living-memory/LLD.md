@@ -146,6 +146,7 @@ Changes to any of these MUST update [`../docs/cross-client-invariants.md`](../do
 - **No magic numbers in service code.** Tunables go in `config/features.json` or `model_config` table. Document new keys in [`../docs/config-reference.md`](../docs/config-reference.md).
 - **Use the debug ring buffer.** Backend code logs to the in-memory ring buffer (200 entries, accessible via `GET /api/debug/log?n=100`). No persistent log files.
 - **DB calls via SQLAlchemy Core (not ORM).** Stays close to SQL; no migrations framework in use.
+- **Capturing HttpOnly third-party cookies on mobile: read the NATIVE cookie store, not injected JS** (ESPN Connect WebView, Phase 1b, flag `espn.webview_capture`). A WebView login can only hand back a credential the page sets as a readable cookie — but `espn_s2` is issued **HttpOnly**, so the WebView's `document.cookie` (and any injected `localStorage`/`cookie` poller, the pattern `SleeperConnectScreen` uses) never sees it. Read it from WKHTTPCookieStore via `@react-native-cookies/cookies` (`CookieManager.get(domain)`) instead. The pure extractor lives in `mobile/src/utils/espnCookies.ts` (`pickEspnCookies` — unit-tested in `mobile/tests/check-espn-cookies.js`); the screen is `EspnConnectScreen`. Injected JS on the login page is limited to a MutationObserver that signals the Disney SSO one-time-code STEP so a native hint can render — it never reads the code or any DOM value. The only data that leaves the WebView is the two cookie strings, and they go to `POST /api/espn/link`, never to analytics. See DECISIONS.md D-021.
 
 ---
 

@@ -18,6 +18,7 @@ import SettingsScreen from '../screens/SettingsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import FeedbackInboxScreen from '../screens/FeedbackInboxScreen';
 import SleeperConnectScreen from '../screens/SleeperConnectScreen';
+import EspnConnectScreen from '../screens/EspnConnectScreen';
 import TestStagesScreen from '../screens/TestStagesScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
@@ -52,6 +53,13 @@ type AuthStack = {
   Profile: { username: string };
   FeedbackInbox: undefined;
   SleeperConnect: undefined;
+  // ESPN league linking Phase 1b (flag `espn.webview_capture`) — in-app
+  // WebView that captures espn_s2 + SWID from the native cookie store for
+  // private ESPN leagues. Pushed from EspnLinkSheet's "Sign in to ESPN"
+  // path; delivers the cookies back to the sheet via espnConnectBus. No
+  // params — the sheet owns the returned data (it hides its own Modal for
+  // the push, since a native-stack screen lands behind an open RN Modal).
+  EspnConnect: undefined;
   // #142/#144 — League rankings (power rankings) + FA finder, entered from
   // the League tab's Explore rows.
   LeagueSummary: undefined;
@@ -689,6 +697,37 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
           }}
+        />
+        {/* ESPN Connect WebView — cookie capture for private ESPN leagues
+            (flag `espn.webview_capture`). Pushed (NOT modal) from
+            EspnLinkSheet, which hides its own RN Modal for the duration: a
+            modal presentation would land behind the sheet's Modal, and a
+            push lands on the navigator the hidden Modal reveals. Registered
+            unconditionally — the flag gates the entry button in the sheet,
+            not the route (same rule as the draft-surface pushes). */}
+        <Stack.Screen
+          name="EspnConnect"
+          component={EspnConnectScreen}
+          options={({ navigation }) => ({
+            headerShown: true,
+            title: 'Connect ESPN',
+            headerTitle: () => <HeaderTitle>Connect ESPN</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+            // #151 pattern — native back is dead on iOS 26 over headerShown:
+            // false (RNS#3294); mount our own JS back control.
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="espn-connect.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
+          })}
         />
       </Stack.Navigator>
       {/* The Analyst — guided-tour overlay (onboarding.guided_avatar).

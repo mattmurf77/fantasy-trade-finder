@@ -145,6 +145,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # Gates /api/espn/* routes + the mobile link affordance. Also the kill
     # switch if ESPN blocks reads or Apple objects (plan §4/§6).
     "espn.link",
+    # ESPN league linking Phase 1b — in-app WebView cookie capture. Gates the
+    # mobile "Sign in to ESPN" primary path in EspnLinkSheet (captures
+    # espn_s2 + SWID from the native cookie store; manual paste stays as the
+    # fallback). No backend routes: POST /api/espn/link already accepts the
+    # cookies. Requires `espn.link` on to have any effect. Default OFF until a
+    # TestFlight build with the native cookie dependency validates against a
+    # real private league (docs/plans/espn-connect-webview/scope.md).
+    "espn.webview_capture",
     # Multi-platform league linking Phase 1 — read-only import of MFL /
     # Fleaflicker leagues via their official public APIs
     # (docs/plans/multi-platform-linking-plan-2026-07-17.md). Each gates its

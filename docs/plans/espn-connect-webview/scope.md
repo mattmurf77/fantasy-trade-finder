@@ -1,0 +1,95 @@
+# Feature Scope — ESPN Connect WebView (cookie capture, Phase 1b)
+
+**Date:** 2026-08-08
+**Entry point:** direct ask (operator) — executes the deferred Phase 1b of
+`docs/plans/espn-league-linking-plan-2026-07-11.md` §4 Option 1
+**Builder:** Claude session (worktree `espn-webview-capture` off `origin/main` @ `cb6aacb`)
+**Operator sign-off on waivers:** yes — operator approved build 2026-08-08 with the
+Maestro in-WebView waiver and deferred sim-gate build surfaced (see §3, §5)
+
+---
+
+## What it is
+
+An in-app `EspnConnectScreen` (WebView to ESPN's own login, modeled on
+`SleeperConnectScreen.tsx`) that captures the `espn_s2` + `SWID` cookies from the
+**native cookie store** (`@react-native-cookies/cookies` over WKHTTPCookieStore —
+NOT injected-JS `document.cookie`, because `espn_s2` can be HttpOnly) and feeds
+them into the existing `EspnLinkSheet` private-league flow, replacing the manual
+paste as the primary path (paste stays as fallback). Includes an OTP-step assist:
+injected JS detects Disney SSO's one-time-code step and surfaces a native hint
+banner (iOS system autofill supplies the code itself; we never read the user's
+email or the code — nothing but the two cookies ever leaves the WebView).
+
+Backend: **zero changes** — `POST /api/espn/link` already accepts, Fernet-encrypts,
+and replays `espn_s2`/`swid`.
+
+## 1. Analytics scope
+
+- [x] **(a) New events specced** (names to be aligned by the builder with the live
+  taxonomy conventions before coding — check existing `track()` calls / taxonomy doc):
+
+  | Event | Properties | Fires when | Client |
+  |---|---|---|---|
+  | `espn_connect_opened` | `{source: 'link_sheet'}` | Connect screen mounts | mobile |
+  | `espn_connect_otp_step` | `{}` | OTP step detected in Disney SSO | mobile |
+  | `espn_connect_captured` | `{saw_otp: bool}` | Both cookies read from native store | mobile |
+  | `espn_connect_abandoned` | `{saw_otp: bool}` | Screen closed without capture | mobile |
+
+  → follow-through: taxonomy doc updated; nothing stored server-side beyond the
+  existing `user_events` ingestion (no data-dictionary change).
+
+## 2. Schema & flag scope
+
+- New/changed tables or columns: **none**
+- New/changed feature flags: **`espn.webview_capture`** — `config/features.json`
+  (default **false**) + `backend/feature_flags.py` `FLAG_KEYS` +
+  `docs/config-reference.md`. Requires `espn.link` also on to have any effect
+  (the sheet itself is gated by `espn.link`). Graduation: operator flips after a
+  TestFlight build containing the native dep validates against a real private
+  league (the friend's league 493554 is the live test case). Rollback lever:
+  flip the flag — the sheet reverts to manual paste with no client update.
+- New env vars / `model_config` keys: **none**
+
+## 3. Test scope (mobile test platform)
+
+- [x] **New flow:** `mobile/.maestro/` ESPN-connect flow — covers: open link sheet
+  (flag on), private toggle shows "Sign in to ESPN" entry, connect screen mounts
+  (chrome + consent copy asserted by testID), back out, manual-paste fallback
+  still present and functional.
+- [x] **WAIVED (partial):** the in-WebView portion (Disney SSO login, OTP entry,
+  cookie landing) cannot be driven by the hermetic Maestro harness — it is a live
+  third-party page and Maestro id-selectors can't reach WebView internals.
+  Covered instead by: unit-level cookie-extraction tests (mock CookieManager) and
+  a manual TestFlight QA pass against a real private league before flag flip.
+  **Operator informed pre-build.**
+- `testID`s added: `espn-connect.*` set + new sheet entry button (exact list in
+  the build; must pass `mobile/scripts/testid-lint.sh`)
+- Smoke-suite impact: none while flag is off; league-link smoke unaffected.
+- Backend: no pytest delta (no backend change); existing `espn.link` tests stand.
+
+## 4. Docs scope (MANDATORY — HLD / LLD / API)
+
+| Doc | Updated? | Section / reason n/a |
+|---|---|---|
+| `docs/api-reference.md` | n/a | no route added/renamed/changed |
+| `living-memory/LLD.md` | updated | mobile convention: native-cookie-store capture pattern for HttpOnly credentials |
+| `docs/architecture.md` | n/a | no backend module/data-flow change |
+| `living-memory/HLD.md` | n/a | no architecture shift (existing link flow, new capture device) |
+| `docs/cross-client-invariants.md` | n/a | no shared constants/enums/colors |
+| `docs/glossary.md` | n/a | no new domain term (ESPN linking terms already present) |
+| ADR or `DECISIONS.md` | updated | DECISIONS.md: native cookie store over injected JS (HttpOnly); OTP assist = detect + hint, never read the code |
+| `docs/config-reference.md` | updated | new flag `espn.webview_capture` |
+
+## 5. Ship gate declaration
+
+- **Simulator-gate tier:** the change is dark (flag default-OFF) but adds a
+  **native dependency**, which changes the binary for everyone. Declared tier:
+  **feature flow + smoke subset (tier 2)** — but the sim build requires
+  `pod install` + a rebuilt dev client, which must run from the no-space clone
+  (`../ftf-test-clone`); spaces in this repo path break `expo run:ios`.
+- Evidence: TEST_LEDGER entry + `qa/sim-runs/last-sim-run.json` after the run.
+- **Operator deviation:** if the rebuild+sim run is deferred past this session,
+  merge waits OR ships with the deviation recorded here and the flag OFF;
+  operator decides at review. The native dep also means the next EAS/TestFlight
+  build is the real validation gate regardless.

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,8 @@ import { ink, chalk, semantic, space, radii, type, shadowSheet, scrim } from '..
 import { Button, Icon } from './chalkline';
 import { useFlag } from '../state/useFeatureFlags';
 import { ApiError } from '../api/client';
+import { navigationRef } from '../navigation/RootNav';
+import { onEspnCookiesCaptured } from '../state/espnConnectBus';
 import {
   linkEspnLeague,
   isEspnPreview,
@@ -59,6 +61,16 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
   //   Keep editing / Discard confirm while there's anything to lose; the
   //   explicit Cancel button closes keeping the draft (resume on reopen).
   const guardOn = useFlag('ux.sheet_guard');
+  // Phase 1b (flag `espn.webview_capture`): the "Sign in to ESPN" WebView
+  // capture path. Off ⇒ the private-league section is manual-paste only,
+  // byte-identical to before. Requires the sheet itself (gated by
+  // `espn.link`) to be visible at all.
+  const webviewCapture = useFlag('espn.webview_capture');
+  // While the ESPN Connect WebView is pushed we HIDE this Modal: a
+  // native-stack push lands on the navigator behind an open RN Modal, so we
+  // reveal it by dropping our own Modal, then restore it when the cookies
+  // (or an abandon) come back through the bus.
+  const [hiddenForWebView, setHiddenForWebView] = useState(false);
   // Anything worth protecting: typed fields on step 1, or a fetched
   // preview mid-flow. The 'done' step has nothing to lose (import already
   // completed server-side).
@@ -77,7 +89,36 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
     setError(null);
     setPreview(null);
     setSummary(null);
+    setHiddenForWebView(false);
   }
+
+  // Launch the ESPN Connect WebView (flag-gated button). Hide our Modal for
+  // the push, then navigate. The bus subscription below restores the Modal
+  // with the captured cookies (or on abandon).
+  function launchWebViewCapture() {
+    setError(null);
+    setHiddenForWebView(true);
+    navigationRef.navigate('EspnConnect');
+  }
+
+  // Receive the captured cookies (or null on abandon) from EspnConnectScreen.
+  // Subscribing from the component body — NOT the Modal children — because a
+  // hidden Modal unmounts its children, which would drop the subscription
+  // exactly while the WebView is up. Auto-advances to the preview when a
+  // league ID is already entered, so capture continues the normal flow.
+  useEffect(() => {
+    const off = onEspnCookiesCaptured((pair) => {
+      setHiddenForWebView(false);
+      if (!pair) return;
+      setShowCookies(true);
+      setEspnS2(pair.espnS2);
+      setSwid(pair.swid);
+      if (parseEspnLeagueInput(input)) {
+        void fetchPreview({ espnS2: pair.espnS2, swid: pair.swid });
+      }
+    });
+    return off;
+  }, [input]);
 
   function close() {
     if (busy || busyTeamId !== null) return;
@@ -115,13 +156,17 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
     close();
   }
 
-  async function fetchPreview() {
+  // `override` lets the WebView-capture path pass freshly-delivered cookies
+  // without waiting for the espnS2/swid state to flush (setState is async).
+  async function fetchPreview(override?: { espnS2: string; swid: string }) {
     const leagueId = parseEspnLeagueInput(input);
     if (!leagueId) {
       setError('Enter a numeric ESPN league ID or a fantasy.espn.com league URL.');
       return;
     }
-    if (!!espnS2.trim() !== !!swid.trim()) {
+    const s2 = (override?.espnS2 ?? espnS2).trim();
+    const sw = (override?.swid ?? swid).trim();
+    if (!!s2 !== !!sw) {
       setError('Private leagues need both espn_s2 and SWID.');
       return;
     }
@@ -130,8 +175,8 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
     try {
       const res = await linkEspnLeague({
         espnLeagueId: leagueId,
-        espnS2: espnS2.trim() || undefined,
-        swid: swid.trim() || undefined,
+        espnS2: s2 || undefined,
+        swid: sw || undefined,
       });
       if (isEspnPreview(res)) {
         setPreview(res);
@@ -198,7 +243,12 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
   const report = step === 'done' ? summary?.report : preview?.report;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={requestClose}>
+    <Modal
+      visible={visible && !hiddenForWebView}
+      transparent
+      animationType="slide"
+      onRequestClose={requestClose}
+    >
       <Pressable
         style={styles.backdrop}
         onPress={requestClose}
@@ -247,6 +297,26 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
             </Pressable>
             {showCookies ? (
               <>
+                {/* Phase 1b (flag `espn.webview_capture`): the primary path —
+                    sign in to ESPN in-app and we capture the two cookies for
+                    you. Manual paste below stays as the fallback. Flag off ⇒
+                    this block is absent and the section is paste-only,
+                    byte-identical to before. */}
+                {webviewCapture ? (
+                  <>
+                    <Button
+                      testID="espn-connect.sign-in"
+                      label="Sign in to ESPN"
+                      onPress={launchWebViewCapture}
+                      disabled={busy}
+                    />
+                    <Text style={[type.bodySm, styles.cookieHint]}>
+                      We’ll open ESPN’s login and read the two cookies it
+                      issues (espn_s2 and SWID) — we never see your password.
+                      Prefer to paste them yourself? Do it below.
+                    </Text>
+                  </>
+                ) : null}
                 <Text style={[type.bodySm, styles.cookieHint]}>
                   From a logged-in espn.com session: the espn_s2 and SWID
                   cookies. They're stored encrypted and only used to read this
@@ -282,7 +352,7 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
             <Button
               testID="espn-link.continue"
               label={busy ? 'Fetching league…' : 'Continue'}
-              onPress={fetchPreview}
+              onPress={() => fetchPreview()}
               disabled={busy}
               style={styles.cta}
             />

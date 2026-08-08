@@ -139,3 +139,18 @@ Also built same date (server-fired, §S3 rollout order "server-fired first"): `r
 | `screen_left` | `screen`, `dwell_ms`, `reason` (`nav` \| `background`) | `RootNav` (nav-away + app-background) | Real dwell time incl. the truncated-last-screen case |
 
 Envelope addition: `user_events.country` — ISO-3166 alpha-2 from CDN geo header only (`CF-IPCountry` / `X-Country-Code`), never raw IP (FR-47 posture). NULL on bare Render; populates automatically if a CDN fronts the service. Device/app characteristic joins (`device_type`, `os_version`, `app_version`) were already stamped per row at ingest — no change needed.
+
+---
+
+## Addendum 2026-08-08 — ESPN Connect WebView (Phase 1b, flag `espn.webview_capture`)
+
+Four client-fired events (`POST /api/events`) for the in-app ESPN login → native-cookie-store capture flow (`EspnConnectScreen`; scope `docs/plans/espn-connect-webview/scope.md`). Registered in `backend/analytics_taxonomy.py` (`ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS`).
+
+| Event | Fires | Key props |
+|---|---|---|
+| `espn_connect_opened` | Connect screen mounts | `source` (`link_sheet`) |
+| `espn_connect_otp_step` | injected MutationObserver detects Disney SSO's one-time-code step | — |
+| `espn_connect_captured` | both `espn_s2` + `SWID` read from the native cookie store | `saw_otp` |
+| `espn_connect_abandoned` | screen left without a capture (header back / swipe) | `saw_otp` |
+
+> **No credential ever becomes a property.** The only data that leaves the WebView is the two cookie strings, and they go to `POST /api/espn/link`, never to analytics. `saw_otp` measures how often the emailed-code step gates the flow; the code value is never read (see DECISIONS.md D-021).

@@ -86,6 +86,16 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # intent/exposure signals the server cannot see.
     "draft_room_row_menu_opened", "draft_room_action_taken",
     "draft_room_coverage_nudge_shown", "draft_room_rank_rookies_tapped",
+    # ESPN Connect WebView cookie capture (Phase 1b, flag
+    # `espn.webview_capture`; scope docs/plans/espn-connect-webview/scope.md).
+    # Client-only intent/exposure signals for the in-app ESPN login →
+    # native-cookie-store capture flow. `espn_connect_captured` /
+    # `_abandoned` carry `saw_otp` so we can measure how often the Disney SSO
+    # one-time-code step gates the flow. The cookies themselves are NEVER an
+    # event property — nothing but the two credential strings leaves the
+    # WebView, and they go to POST /api/espn/link, not analytics.
+    "espn_connect_opened", "espn_connect_otp_step",
+    "espn_connect_captured", "espn_connect_abandoned",
 })
 
 # ---------------------------------------------------------------------------
@@ -226,6 +236,14 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                                   "valued"}),
     "draft_room_coverage_nudge_shown": frozenset({"unvalued_count", "window"}),
     "draft_room_rank_rookies_tapped":  frozenset({"state", "from"}),
+    # ESPN Connect WebView (Phase 1b) — `source` is the entry point
+    # ('link_sheet'); `saw_otp` records whether the Disney SSO one-time-code
+    # step appeared before the outcome. No cookie/credential prop exists or
+    # may be added.
+    "espn_connect_opened":    frozenset({"source"}),
+    "espn_connect_otp_step":  frozenset(),
+    "espn_connect_captured":  frozenset({"saw_otp"}),
+    "espn_connect_abandoned": frozenset({"saw_otp"}),
 }
 
 
