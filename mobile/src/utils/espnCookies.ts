@@ -53,6 +53,33 @@ export function pickEspnCookies(bags: (CookieBag | null | undefined)[]): EspnCoo
   return null;
 }
 
+// The two cookie names the capture flow owns. Used by the targeted clear —
+// never clearAll: the native store is app-wide (Sleeper's web session lives
+// there too).
+const ESPN_COOKIE_NAMES = ['espn_s2', 'SWID'] as const;
+
+/**
+ * Clear any existing ESPN auth cookies so every capture is a FRESH login.
+ * Without this, a stale pair left from a prior session/capture gets
+ * "captured" ~1s after mount — before the user can even see the login — and
+ * a server-expired espn_s2 loops the user through 403s with no in-flow
+ * escape. Clears both cookie names on both domains, in both native stores
+ * (WKHTTPCookieStore via useWebKit:true AND NSHTTPCookieStorage — the
+ * screen's sharedCookiesEnabled syncs between them, so a survivor in either
+ * would resurface). Failures are swallowed per name: a partial clear still
+ * beats no clear, and the poll only starts after this settles.
+ */
+export async function clearEspnCookies(): Promise<void> {
+  const clears: Promise<unknown>[] = [];
+  for (const domain of ESPN_COOKIE_DOMAINS) {
+    for (const name of ESPN_COOKIE_NAMES) {
+      clears.push(CookieManager.clearByName(domain, name, true).catch(() => {}));
+      clears.push(CookieManager.clearByName(domain, name, false).catch(() => {}));
+    }
+  }
+  await Promise.all(clears);
+}
+
 /**
  * Read the native cookie store for both ESPN domains and return the captured
  * pair, or null if either cookie is missing everywhere. Called on a poll and

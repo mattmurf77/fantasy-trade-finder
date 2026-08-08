@@ -21,6 +21,13 @@
 
 *Added during the living-memory revival pass, covering 2026-07-09 → 2026-08-06.*
 
+### Mobile: `@react-native-cookies/cookies` (ESPN Connect WebView, Phase 1b)
+| Package | Version | Added | Why |
+|---|---|---|---|
+| `@react-native-cookies/cookies` | `^6.2.1` | branch `espn-webview-capture` | Reads `espn_s2` + `SWID` from the NATIVE cookie store (WKHTTPCookieStore) in `EspnConnectScreen` — `espn_s2` is HttpOnly, so injected-JS `document.cookie` can never see it (DECISIONS [D-021](DECISIONS.md)). Used only via `mobile/src/utils/espnCookies.ts` (`readEspnCookies` / `clearEspnCookies`). |
+- **DEPRECATED UPSTREAM** — npm flags 6.2.1 as deprecated and names `@preeternal/react-native-cookie-manager` and `react-native-nitro-cookies` as successors. Kept anyway: it works, the API surface we use is two calls (`get`, `clearByName`), and it is fully wrapped in one utils module — a future migration touches only `espnCookies.ts` + this row. Revisit if a React Native upgrade breaks its native build.
+- **Native code** ⇒ the next build must be a **full EAS build, not an OTA update**, and the `espn.webview_capture` flag can only be validated in that binary.
+
 ### Backend: zero new dependencies in a month of heavy feature work
 - **`requirements.txt` was not touched** across the whole window, despite adding Apple sign-in, an experiments engine, and a statistics layer. Two deliberate choices produced that:
   - **Apple sign-in verifies JWKS by hand** rather than pulling an auth library (`920a638`).

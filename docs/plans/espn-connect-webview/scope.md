@@ -63,8 +63,28 @@ and replays `espn_s2`/`swid`.
   Covered instead by: unit-level cookie-extraction tests (mock CookieManager) and
   a manual TestFlight QA pass against a real private league before flag flip.
   **Operator informed pre-build.**
-- `testID`s added: `espn-connect.*` set + new sheet entry button (exact list in
-  the build; must pass `mobile/scripts/testid-lint.sh`)
+- `testID`s added: `espn-connect.sign-in` (sheet entry), `espn-connect.banner`,
+  `espn-connect.webview`, `espn-connect.back-btn`, `espn-connect.otp-hint`,
+  `league.espn-resync-signin` (League-tab re-sync recovery). **Lint note
+  (build amendment):** `mobile/scripts/testid-lint.sh` does not exist on this
+  branch — `mobile/scripts/` is gitignored (TEST_LEDGER 2026-08-08), so the
+  planned lint script never landed in-repo. Verification performed instead:
+  manual cross-check that every id referenced by the flow and registry
+  resolves in `mobile/src/` (all ids found). Creating a tracked lint script
+  is a separate task.
+- **TestFlight QA checklist (pre flag-flip, real private league 493554):**
+  1. WebView sign-in captures fresh cookies and the sheet auto-advances to
+     the team preview (fresh login every time — the screen clears stale ESPN
+     cookies on mount).
+  2. **OTP leg:** on an OTP-challenged Disney SSO login, verify the native
+     "ESPN emailed you a code" hint actually appears (the detector is
+     injected into all frames because SSO may render in an iframe — a
+     selector drift here is only observable live).
+  3. `espn_auth_required` recovery: a private league ID with no/expired
+     cookies auto-expands the sheet's private section with the sign-in
+     button; the League-tab re-sync failure shows the sign-in recovery
+     button. (Not hermetically testable — the seeded harness backend cannot
+     produce ESPN's live 403.)
 - Smoke-suite impact: none while flag is off; league-link smoke unaffected.
 - Backend: no pytest delta (no backend change); existing `espn.link` tests stand.
 

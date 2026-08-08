@@ -48,6 +48,7 @@ import {
 import { getPickAssignments, pickAssignmentSubline } from '../api/pickAssignment';
 import { getProgress, getTiersStatus } from '../api/rankings';
 import { importEspnLeague } from '../api/espn';
+import { ApiError } from '../api/client';
 import { initLeagueSession } from '../api/auth';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
@@ -125,11 +126,17 @@ export default function LeagueScreen() {
   const showPickAssign = showPickAssignFlag && isEspn;
   const [resyncing, setResyncing] = useState(false);
   const [resyncMsg, setResyncMsg] = useState<string | null>(null);
+  // ESPN Phase 1b: when re-sync fails because the stored cookies expired
+  // (403 espn_auth_required) and the WebView capture is live, offer the fix
+  // inline instead of a dead-end message (see button below).
+  const espnWebviewCapture = useFlag('espn.webview_capture');
+  const [resyncAuthFail, setResyncAuthFail] = useState(false);
 
   async function resyncEspn() {
     if (!leagueId || !user || resyncing) return;
     setResyncing(true);
     setResyncMsg(null);
+    setResyncAuthFail(false);
     try {
       const res = await importEspnLeague(leagueId);
       // Rebuild the server session so the refreshed rosters are live.
@@ -140,7 +147,16 @@ export default function LeagueScreen() {
       setResyncMsg(`Re-synced ${res.teams_imported} rosters from ESPN.`);
       refetchAll();
     } catch (e: any) {
-      setResyncMsg(e?.message || 'Re-sync failed — try again shortly.');
+      if (e instanceof ApiError && e.isEspnAuthRequired) {
+        setResyncAuthFail(true);
+        setResyncMsg(
+          espnWebviewCapture
+            ? 'ESPN needs you to sign in again to read this private league.'
+            : e?.message || 'Re-sync failed — try again shortly.',
+        );
+      } else {
+        setResyncMsg(e?.message || 'Re-sync failed — try again shortly.');
+      }
     } finally {
       setResyncing(false);
     }
@@ -734,6 +750,22 @@ export default function LeagueScreen() {
             />
             {resyncMsg ? (
               <Text style={[type.bodySm, styles.espnNote]}>{resyncMsg}</Text>
+            ) : null}
+            {/* ESPN Phase 1b (flag `espn.webview_capture`): expired-cookie
+                re-sync failure offers the fix inline — the Settings
+                `settings.link-espn` route: LeaguePicker with the ESPN sheet
+                auto-opened, where the private section carries the sign-in
+                path. Flag off keeps today's text-only failure. */}
+            {resyncAuthFail && espnWebviewCapture ? (
+              <Button
+                testID="league.espn-resync-signin"
+                label="Sign in to ESPN"
+                variant="primary"
+                onPress={() =>
+                  navigation.navigate('LeaguePicker', { espnLink: true })
+                }
+                style={styles.switchBtn}
+              />
             ) : null}
           </>
         ) : null}

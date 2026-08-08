@@ -61,8 +61,10 @@ tags: [espn, webview, flag-on]
     timeout: 15000
 - assertVisible:
     id: "espn-connect.back-btn"
+# Consent copy asserted by id (Maestro text selectors are full-match regexes,
+# so partial copy would never match; id-selectors-only per harness rules).
 - assertVisible:
-    text: "We never see your password"
+    id: "espn-connect.banner"
 - takeScreenshot: espn-connect-mounted
 
 # Back out without capturing — the sheet's Modal restores and the manual-paste

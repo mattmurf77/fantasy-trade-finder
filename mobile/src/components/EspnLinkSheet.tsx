@@ -193,6 +193,18 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
       // The central _onVerificationRequired listener still raises the banner.
       if (e instanceof ApiError && e.isVerificationRequired) {
         setError('Verify your account to link a league.');
+      } else if (e instanceof ApiError && e.isEspnAuthRequired) {
+        // Private league (or expired cookies): self-serve instead of a
+        // dead-end message — auto-expand the private section so the fix
+        // (sign-in button flag-on, paste fields flag-off) is on screen,
+        // and point the copy at it rather than echoing the backend's raw
+        // paste-centric message.
+        setShowCookies(true);
+        setError(
+          webviewCapture
+            ? "This league is private. Sign in to ESPN below and we'll fetch it."
+            : 'This league is private — paste your espn_s2 and SWID cookies below.',
+        );
       } else {
         setError(e?.message || "Couldn't reach ESPN — try again shortly.");
       }
@@ -221,6 +233,17 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
       // #126 R-7: same verification_required mapping as fetchPreview.
       if (e instanceof ApiError && e.isVerificationRequired) {
         setError('Verify your account to link a league.');
+      } else if (e instanceof ApiError && e.isEspnAuthRequired) {
+        // Cookies expired between preview and import (same 403 as
+        // fetchPreview). The cookie affordances live on the input step, so
+        // land there with the private section open and the fix on screen.
+        setStep('input');
+        setShowCookies(true);
+        setError(
+          webviewCapture
+            ? "This league is private. Sign in to ESPN below and we'll fetch it."
+            : 'This league is private — paste your espn_s2 and SWID cookies below.',
+        );
       } else {
         setError(e?.message || 'Import failed — try again.');
       }

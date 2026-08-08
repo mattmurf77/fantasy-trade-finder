@@ -187,6 +187,18 @@ export class ApiError extends Error {
       (this.body as any).error === 'verification_required'
     );
   }
+  /** ESPN private-league auth gate: the league is private (or the stored
+   *  cookies expired) and ESPN refused the read. The fix is always fresh
+   *  espn_s2 + SWID — sign in via EspnConnect (flag `espn.webview_capture`)
+   *  or paste them. Backend body: {"error": "espn_auth_required", ...}. */
+  get isEspnAuthRequired() {
+    return (
+      this.status === 403 &&
+      typeof this.body === 'object' &&
+      this.body !== null &&
+      (this.body as any).error === 'espn_auth_required'
+    );
+  }
 }
 
 // ── verification_required listener (account-auth P2.5) ─────────────────────

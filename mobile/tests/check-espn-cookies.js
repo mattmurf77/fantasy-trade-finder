@@ -36,13 +36,19 @@ const js = ts.transpileModule(source, {
 }).outputText;
 
 // CookieManager records calls so we can assert readEspnCookies() polls both
-// domains; the pure extractor needs no native access.
+// domains and clearEspnCookies() clears both names everywhere; the pure
+// extractor needs no native access.
 const cookieGetCalls = [];
+const cookieClearCalls = [];
 const cookieManagerStub = {
   default: {
     get: (url) => {
       cookieGetCalls.push(url);
       return Promise.resolve(null);
+    },
+    clearByName: (url, name, useWebKit) => {
+      cookieClearCalls.push({ url, name, useWebKit: !!useWebKit });
+      return Promise.resolve(true);
     },
   },
 };
@@ -60,7 +66,12 @@ new Function('module', 'exports', 'require', js)(
   },
 );
 
-const { pickEspnCookies, readEspnCookies, ESPN_COOKIE_DOMAINS } = moduleShim.exports;
+const {
+  pickEspnCookies,
+  readEspnCookies,
+  clearEspnCookies,
+  ESPN_COOKIE_DOMAINS,
+} = moduleShim.exports;
 
 let failures = 0;
 function check(name, actual, expected) {
@@ -133,6 +144,28 @@ check('all empty → null', pickEspnCookies([]), null);
     'polls both ESPN domains',
     cookieGetCalls.slice().sort(),
     [...ESPN_COOKIE_DOMAINS].sort(),
+  );
+
+  // ── clearEspnCookies: fresh-login guarantee ────────────────────────────
+  // Clears BOTH cookie names on BOTH domains in BOTH native stores
+  // (WKHTTPCookieStore + NSHTTPCookieStorage) — a stale espn_s2 surviving
+  // any of the 2×2×2 combinations is the insta-capture loop the screen's
+  // mount-time clear exists to prevent.
+  await clearEspnCookies();
+  check('clear call count (2 names × 2 domains × 2 stores)', cookieClearCalls.length, 8);
+  const combos = new Set(
+    cookieClearCalls.map((c) => `${c.url}|${c.name}|${c.useWebKit ? 'wk' : 'ns'}`),
+  );
+  const expected = [];
+  for (const d of ESPN_COOKIE_DOMAINS) {
+    for (const n of ['espn_s2', 'SWID']) {
+      expected.push(`${d}|${n}|wk`, `${d}|${n}|ns`);
+    }
+  }
+  check(
+    'clears every domain × name × store combo',
+    [...combos].sort(),
+    expected.sort(),
   );
 
   if (failures > 0) {

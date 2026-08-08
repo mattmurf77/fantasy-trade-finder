@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet, Linking } from 'react-native';
+import { View, Text, StyleSheet, Linking } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { useNavigation } from '@react-navigation/native';
 import { ink, chalk, ice, flare, space, radii, type } from '../theme/chalkline';
-import { readEspnCookies } from '../utils/espnCookies';
+import { clearEspnCookies, readEspnCookies } from '../utils/espnCookies';
 import { deliverEspnCookies } from '../state/espnConnectBus';
 import { track } from '../api/events';
 
@@ -21,18 +21,26 @@ import { track } from '../api/events';
 // step so we can raise a native hint. It NEVER reads or transmits the code,
 // any field value, or any DOM content; the only data that ever leaves this
 // screen is the two cookies, and they come from the native store, not JS.
+//
+// On mount we CLEAR any existing ESPN cookies from the native store BEFORE
+// the first poll (clearEspnCookies), so every capture is a fresh login. A
+// stale pair from a prior session would otherwise be "captured" ~1s after
+// mount — before the user can even see the login — and a server-expired
+// espn_s2 would loop the user through 403s with no in-flow escape.
 
-// The fantasy home reliably bounces an unauthenticated user through Disney
-// SSO login and lands back logged-in, dropping espn_s2/SWID on the espn.com
-// + fantasy.espn.com hosts we poll. (www.espn.com/login also works but can
-// land on a generic espn.com home; the fantasy host is where the cookies we
-// need are set.)
+// ESPN's login entry: bounces straight into Disney SSO and returns to a
+// logged-in state. Both cookies land on the `.espn.com` PARENT domain
+// (domain-wide), so the plain www login host is fine — fantasy.espn.com
+// inherits the same pair, and readEspnCookies polls both hosts anyway.
 const ESPN_LOGIN_URL = 'https://www.espn.com/login';
 
 // Injected once per page load (guarded). OTP-STEP DETECTION ONLY. A
 // MutationObserver watches for the Disney SSO one-time-code input; when it
 // appears we postMessage a bare presence signal. No field value, no code, no
-// DOM text ever crosses this boundary — see the screen header.
+// DOM text ever crosses this boundary — see the screen header. Injected into
+// ALL frames (injectedJavaScriptForMainFrameOnly={false} below) because
+// Disney SSO can render its form inside an iframe a main-frame-only script
+// would never see; a presence-only observer is safe to run in subframes.
 const INJECTED_OTP_DETECT = `
 (function () {
   if (window.__ftfEspnOtp) return;
@@ -62,27 +70,35 @@ true;
 
 export default function EspnConnectScreen() {
   const navigation = useNavigation<any>();
-  const [captured, setCaptured] = useState(false);
   const [otpHint, setOtpHint] = useState(false);
   // Refs so the poll loop and the unmount handler read live values without
   // re-subscribing. `capturedRef` is the post-once guard (mirrors the
-  // Sleeper screen's `capturedRef`).
+  // Sleeper screen's `capturedRef`); `unmountedRef` stops an in-flight
+  // cookie read from capturing AFTER the abandon path already ran (the user
+  // can back out mid-read); `storeClearedRef` holds all polling until the
+  // fresh-login clear settles.
   const capturedRef = useRef(false);
   const sawOtpRef = useRef(false);
+  const unmountedRef = useRef(false);
+  const storeClearedRef = useRef(false);
 
   // Deliver exactly once: read the native store, and if BOTH cookies are
-  // present hand them to the sheet through the bus and pop back.
+  // present hand them to the sheet through the bus and pop back. The guards
+  // are re-checked after the await — without that, backing out mid-read
+  // would fire espn_connect_abandoned + deliver(null) in cleanup and THEN
+  // this continuation would fire espn_connect_captured + deliver(pair).
   const tryCapture = useCallback(async () => {
-    if (capturedRef.current) return;
+    if (!storeClearedRef.current || capturedRef.current || unmountedRef.current) return;
     const pair = await readEspnCookies();
-    if (!pair || capturedRef.current) return;
+    if (!pair || capturedRef.current || unmountedRef.current) return;
     capturedRef.current = true;
-    setCaptured(true);
     track('espn_connect_captured', { saw_otp: sawOtpRef.current }, 'EspnConnect');
     deliverEspnCookies(pair);
-    // Brief success beat so the user sees the connected state before the
-    // sheet reappears underneath.
-    setTimeout(() => navigation.goBack(), 900);
+    // No success overlay: the sheet's Modal re-mounts ABOVE the whole nav
+    // stack the moment the bus delivers, so an overlay here could never be
+    // seen. The sheet reappearing with the cookies filled (and
+    // auto-advancing to the preview) IS the success feedback — just pop.
+    navigation.goBack();
   }, [navigation]);
 
   // espn_connect_opened on mount; espn_connect_abandoned if we leave without
@@ -90,6 +106,7 @@ export default function EspnConnectScreen() {
   useEffect(() => {
     track('espn_connect_opened', { source: 'link_sheet' }, 'EspnConnect');
     return () => {
+      unmountedRef.current = true;
       if (!capturedRef.current) {
         track('espn_connect_abandoned', { saw_otp: sawOtpRef.current }, 'EspnConnect');
         // Un-hide the sheet's Modal — it hid itself for the WebView push.
@@ -98,11 +115,25 @@ export default function EspnConnectScreen() {
     };
   }, []);
 
-  // Poll the native cookie store on an interval (login is an SPA/redirect
-  // dance, not a single load event we can hook) AND on nav-state changes.
+  // Fresh-login guarantee FIRST, then poll: clear any stale ESPN cookies,
+  // and only once that settles start the 1s poll (login is an SPA/redirect
+  // dance, not a single load event we can hook). Nav-state changes also
+  // call tryCapture, but it bails until storeClearedRef flips.
   useEffect(() => {
-    const id = setInterval(() => void tryCapture(), 1000);
-    return () => clearInterval(id);
+    let interval: ReturnType<typeof setInterval> | null = null;
+    (async () => {
+      try {
+        await clearEspnCookies();
+      } catch {
+        /* per-name failures are already swallowed inside; belt & braces */
+      }
+      storeClearedRef.current = true;
+      if (unmountedRef.current) return;
+      interval = setInterval(() => void tryCapture(), 1000);
+    })();
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [tryCapture]);
 
   const onMessage = useCallback((e: WebViewMessageEvent) => {
@@ -121,7 +152,7 @@ export default function EspnConnectScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={styles.banner}>
+      <View style={styles.banner} testID="espn-connect.banner">
         <Text style={type.bodySm}>
           Log in to ESPN below. We never see your password — once you’re in,
           we read the two cookies ESPN issues for your private league
@@ -154,6 +185,9 @@ export default function EspnConnectScreen() {
         testID="espn-connect.webview"
         source={{ uri: ESPN_LOGIN_URL }}
         injectedJavaScript={INJECTED_OTP_DETECT}
+        // OTP detector must reach a Disney SSO iframe too — presence-only
+        // signal, so all-frames injection is safe (see the script header).
+        injectedJavaScriptForMainFrameOnly={false}
         onMessage={onMessage}
         // Re-check the native store whenever the page navigates (login
         // redirect, SSO bounce) — cheaper than waiting for the next poll.
@@ -164,15 +198,6 @@ export default function EspnConnectScreen() {
         originWhitelist={['https://*']}
         style={styles.web}
       />
-
-      {captured ? (
-        <View style={styles.overlay} pointerEvents="auto" testID="espn-connect.done">
-          <Text style={[type.label, styles.overlayText]}>ESPN connected</Text>
-          <Text style={[type.bodySm, styles.overlaySub]}>
-            Bringing your league in…
-          </Text>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -189,8 +214,8 @@ const styles = StyleSheet.create({
   },
   // Tappable disclosure link — ice = action color (Chalkline).
   learnMore: { color: ice.base },
-  // Informational hint — flare is the informational-highlight accent (ADR-005),
-  // never used as an action here.
+  // Informational hint — flare is the informational-highlight accent
+  // (ADR-005), never used as an action here.
   otpHint: {
     marginTop: space.xs,
     padding: space.sm,
@@ -201,13 +226,4 @@ const styles = StyleSheet.create({
   },
   otpHintText: { color: chalk.base },
   web: { flex: 1, backgroundColor: ink.ink0 },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    gap: space.sm,
-  },
-  overlayText: { color: chalk.base },
-  overlaySub: { color: chalk.dim, textAlign: 'center', paddingHorizontal: space.xl },
 });
