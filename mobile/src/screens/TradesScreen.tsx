@@ -55,7 +55,9 @@ import HelpSheet, { InfoButton } from '../components/HelpSheet';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 import OutlookSheet from '../components/OutlookSheet';
 import TradeFinderModeBar from '../components/TradeFinderModeBar';
-import OutlookBiasReceipt from '../components/OutlookBiasReceipt';
+import OutlookBiasReceipt, {
+  outlookReceiptCovers,
+} from '../components/OutlookBiasReceipt';
 import TradeDnaSheet from '../components/TradeDnaSheet';
 import QueueChip from '../components/QueueChip';
 import SwapPlayerSheet from '../components/SwapPlayerSheet';
@@ -421,6 +423,7 @@ export default function TradesScreen({ navigation, route }: any) {
     [retapOn],
   );
   const outlookInlineOn = useFlag('ux.outlook_inline_default'); // S4 PRD-02
+  const outlookDirectionOn = useFlag('trade.outlook_direction'); // #231/#254
   const helpOn = useFlag('ux.help_surface');              // S4 PRD-01
   const shareLandingOn = useFlag('growth.share_landing'); // S7 PRD-01
 
@@ -607,6 +610,24 @@ export default function TradesScreen({ navigation, route }: any) {
     prefsQuery.data && !prefsQuery.data.team_outlook
       ? prefsQuery.data.inferred_outlook ?? null
       : null;
+
+  // #254/#255 — the outlook was stated twice on this screen: the #231
+  // minimized bar (OutlookBiasReceipt, mounted in finder modes) AND the
+  // controls card's own "Outlook · Edit" row, which predates it. The bar
+  // is the one that belongs — it names the BIAS, not just the label, and
+  // its Change reaches the full DNA editor (outlook + Chasing/Shopping +
+  // untouchables), which is a strict superset of OutlookSheet's outlook +
+  // acquire/trade-away plays. So the row renders only when the bar does
+  // NOT: no finder mode (classic flag-off home), the direction flag off,
+  // or a non-directional outlook. Predicate is the receipt's own, so the
+  // two can never both appear and can never both vanish.
+  const outlookReceiptShown =
+    !!finderMode &&
+    outlookReceiptCovers(
+      outlookDirectionOn,
+      prefsQuery.data?.team_outlook ?? null,
+      prefsQuery.data?.inferred_outlook ?? null,
+    );
 
   // One-tap confirm: persist the inferred outlook with empty position
   // arrays, then refetch prefs so the banner clears and the control card
@@ -3268,7 +3289,14 @@ export default function TradesScreen({ navigation, route }: any) {
               </Pressable>
             </View>
           ) : null}
-          {!firstRun && (
+          {/* #254/#255 — suppressed whenever the minimized outlook bar
+              (OutlookBiasReceipt, above the deck) is on screen: it states
+              the same outlook and its Change opens the superset editor.
+              Kept for the configurations where that bar renders nothing
+              (classic flag-off home, `trade.outlook_direction` off, or a
+              non-directional outlook) so no state loses its outlook
+              surface. */}
+          {!firstRun && !outlookReceiptShown && (
           <View style={styles.controlRow}>
             <View style={{ flex: 1 }}>
               <TickLabel>Outlook</TickLabel>
@@ -3342,15 +3370,23 @@ export default function TradesScreen({ navigation, route }: any) {
           </View>
           )}
 
-          {/* Phase-2 lane filter — Window moves / Value moves pills with an
-              implicit All state (tap the active pill to clear). Mirrors the
-              FB-47 direction-toggle construction; renders only when the
-              deck actually carries lanes. */}
+          {/* Phase-2 lane filter — Team-fit moves / Value moves pills with
+              an implicit All state (tap the active pill to clear). Mirrors
+              the FB-47 direction-toggle construction; renders only when the
+              deck actually carries lanes.
+              #256: the pill said "Window moves" — the engine's word for the
+              `window` lane, which nobody says out loud. "Team-fit moves" is
+              the display label everywhere (mobile pill, web filter button,
+              web card chip); the `window` / `value` ENUM is untouched (see
+              docs/cross-client-invariants.md). Deliberately not "Win-now
+              moves": the window lane is win-now for a contender and
+              youth+picks for a rebuilder, so that label would lie to half
+              the users. */}
           {!firstRun && deckHasLanes && (
             <View style={styles.targetDirRow}>
               {(
                 [
-                  ['window', 'Window moves'],
+                  ['window', 'Team-fit moves'],
                   ['value', 'Value moves'],
                 ] as const
               ).map(([lane, label]) => {
