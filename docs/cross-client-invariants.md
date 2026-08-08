@@ -161,7 +161,9 @@ Canonical set: `championship`, `contender`, `rebuilder`, `jets`, `not_sure`.
 
 Canonical set: `window`, `value` — the optional `lane` field on trade cards (flag `trade.lanes`; absent when the user has no declared/seeded window). `window` = the trade moves roster composition toward the user's contend/rebuild window; `value` = pure value play. Classified by `trade_service.classify_lane`; also logged in swipe `user_events` props for A/B joins.
 
-**Locations to update together:** `backend/trade_service.py` (`classify_lane`, `_LANE_SIGN`), `backend/server.py` (`trade_card_to_dict` + swipe event props), `mobile/src/shared/types.ts` + `mobile/src/screens/TradesScreen.tsx` (lane filter), `web/js/app.js` `renderTrades` (`lane-chip--window` / `lane-chip--value` chips).
+**Display labels (#256, 2026-08-08):** `window` renders as **"Team-fit moves"** (web card chip `TEAM-FIT MOVE`), `value` as **"Value moves"** (`VALUE MOVE`). "Window" was the engine's word and read as jargon to testers; the label is presentation-only and must stay in sync across clients — the enum values and the `lane-chip--window` / `lane-chip--value` class names are unchanged. Deliberately not "Win-now moves": the `window` lane is win-now for a contender and youth+picks for a rebuilder.
+
+**Locations to update together:** `backend/trade_service.py` (`classify_lane`, `_LANE_SIGN`), `backend/server.py` (`trade_card_to_dict` + swipe event props), `mobile/src/shared/types.ts` + `mobile/src/screens/TradesScreen.tsx` (lane filter), `web/index.html` (lane filter buttons), `web/js/app.js` `renderTrades` (`lane-chip--window` / `lane-chip--value` chips).
 
 ---
 

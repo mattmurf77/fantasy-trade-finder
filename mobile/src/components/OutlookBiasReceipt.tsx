@@ -28,12 +28,30 @@ import { getLeaguePreferences } from '../api/league';
 // receipt. Flare tick + border-free quiet bar per the mock (flare =
 // informational highlight, same family as the board-refresh note).
 
+// #253 — CANONICAL DISPLAY ORDER: All-in → Contending → Rebuilding →
+// Tanking. This is a lookup, not a rendered list, but it is kept in the
+// canonical order so the four outlooks read the same way in every file.
 const LEAN: Record<string, { lean: string; name: string }> = {
-  rebuilder: { lean: 'young + picks', name: 'Rebuilding' },
-  jets: { lean: 'max youth + picks', name: 'Tanking' },
   championship: { lean: 'vets + win-now', name: 'All-in' },
   contender: { lean: 'balanced', name: 'Contending' },
+  rebuilder: { lean: 'young + picks', name: 'Rebuilding' },
+  jets: { lean: 'max youth + picks', name: 'Tanking' },
 };
+
+// #254 — the receipt is THE outlook surface on the deck, but it can
+// legitimately render nothing (flag off, or the resolved outlook isn't
+// directional). TradesScreen suppresses its own duplicate outlook row
+// exactly when this returns true, so the two surfaces can never both
+// appear and can never both vanish. One table, two consumers.
+export function outlookReceiptCovers(
+  directionOn: boolean,
+  declared: string | null | undefined,
+  inferred: string | null | undefined,
+): boolean {
+  if (!directionOn) return false;
+  const resolved = declared ?? inferred ?? null;
+  return !!resolved && !!LEAN[resolved];
+}
 
 export default function OutlookBiasReceipt({ onChange }: { onChange: () => void }) {
   const league = useSession((s) => s.league);
@@ -49,9 +67,13 @@ export default function OutlookBiasReceipt({ onChange }: { onChange: () => void 
   });
 
   const declared = prefsQuery.data?.team_outlook ?? null;
-  const resolved = declared ?? prefsQuery.data?.inferred_outlook ?? null;
+  const inferred = prefsQuery.data?.inferred_outlook ?? null;
+  const resolved = declared ?? inferred ?? null;
   const entry = resolved ? LEAN[resolved] : undefined;
-  if (!directionOn || !entry) return null;
+  // Same predicate TradesScreen gates its duplicate row on (#254).
+  if (!outlookReceiptCovers(directionOn, declared, inferred) || !entry) {
+    return null;
+  }
 
   return (
     <View testID="trades.outlook-receipt" style={styles.receipt}>

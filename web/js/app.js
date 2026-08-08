@@ -3548,7 +3548,9 @@
         // value accumulation (ice/accent). Rendered only when backend
         // supplies `lane`.
         const laneChipHTML = card.lane === 'window'
-          ? `<span class="lane-chip lane-chip--window">WINDOW MOVE</span>`
+          // #256: display label only — the `window` lane enum and the
+          // `lane-chip--window` class name are unchanged.
+          ? `<span class="lane-chip lane-chip--window">TEAM-FIT MOVE</span>`
           : card.lane === 'value'
           ? `<span class="lane-chip lane-chip--value">VALUE MOVE</span>`
           : '';

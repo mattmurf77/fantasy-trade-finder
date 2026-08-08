@@ -22,6 +22,9 @@ interface Props {
 // outlook-overlay modal but simpler: one pick for outlook, optional
 // multi-pick for position prefs. Chalkline sheet construction: ink-2
 // surface, hairline border, sheet shadow, line-strong grabber, solid scrim.
+// #253 — CANONICAL DISPLAY ORDER: All-in → Contending → Rebuilding →
+// Tanking. This list already complied; the comment exists so it stays
+// that way. Presentation only — the stored enum values are unchanged.
 const OUTLOOKS: {
   key: NonNullable<Outlook>;
   title: string;
