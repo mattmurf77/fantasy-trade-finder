@@ -12,6 +12,7 @@ precedent (it came out of the same dual-agent process).
 | Feature | `hld-delta.md` | What changes in the architecture: components touched, data flow, decisions + alternatives rejected. Written as a **delta against `docs/architecture.md`**, not a rewrite. |
 | Feature | `lld-delta.md` | Exact interfaces: endpoint signatures (method, path, request/response JSON with field types and error shapes), DB schema changes, client state changes, function-level touch points with file paths. |
 | All | `prd.md` | Requirements (numbered R-1…), success criteria, out-of-scope, guardrails, **and the test plan** (below). |
+| All | `scope.md` | Copy of `docs/templates/feature-scope.md`, filled: analytics events (specced / covered / **written** waiver — silence is not a waiver), schema+flags, Maestro delta, the row-by-row docs table (api-reference / LLD / architecture / HLD / invariants / glossary / ADR), sim-gate tier. Waivers surface to the operator before build. Per CLAUDE.md §Conventions "Feature gates". |
 | All | `reconciliation-log.md` | Each review round: objections raised, resolution, anything orchestrator-arbitrated. |
 
 ### PRD test plan requirements

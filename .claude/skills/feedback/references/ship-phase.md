@@ -12,12 +12,20 @@ Runs once per batch, after every group is QA-green.
   code, TODOs, console.logs, accidental file drops (screenshots, scratch
   files), secrets.
 - Gates: `cd mobile && npx tsc --noEmit` clean; backend `pytest` green; web
-  pages load without console errors on the local server.
+  pages load without console errors on the local server. Push the release
+  branch and confirm **CI green** (`.github/workflows/ci.yml`: backend-tests,
+  mobile-typecheck, maestro-testid-lint) before presenting go/no-go.
+- **Sim-gate evidence fresh:** `qa/sim-runs/last-sim-run.json` records a pass
+  on an ancestor of the release SHA (Phase 3 writes it; `githooks/pre-push`
+  enforces it on the `main` push). Code changed after the last QA round →
+  back to Phase 3, not around it.
 - **Docs sync** per the CLAUDE.md table: routes → `docs/api-reference.md`,
   schema → `docs/data-dictionary.md`, config/flags → `docs/config-reference.md`,
   shared enums/colors → `docs/cross-client-invariants.md`, new terms →
-  `docs/glossary.md`, notable decisions → `docs/adr/`. Verify build agents did
-  these; fill gaps.
+  `docs/glossary.md`, notable decisions → `docs/adr/`. Convention shifts →
+  `living-memory/LLD.md`; architecture shifts → `docs/architecture.md` +
+  `living-memory/HLD.md`. Verify against each group's `scope.md` docs table —
+  every row must read "updated" or "n/a because"; fill gaps.
 - Version bump: `mobile/app.config.js` `version` (semver: features → minor,
   fix/polish-only batch → patch), matching the `mobile: bump version to X`
   commit convention.
