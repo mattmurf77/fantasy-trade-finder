@@ -290,7 +290,12 @@ export default function InLeagueCalculator({
   const evalQ = useQuery({
     queryKey: ['calc-eval-league', leagueId, opponentId, format, debGive.join('+'), debReceive.join('+')],
     queryFn: ({ signal }) =>
-      evaluateTradeInLeague(debGive, debReceive, format, leagueId, opponentId!, signal),
+      // #264 — one_sided_eveners: with only one side filled there is no gap
+      // to hang eveners on, so the server builds candidates for the EMPTY
+      // side instead (its owner's roster + owned picks, sized against the
+      // filled side). That's what makes the calculator offer trade options
+      // while a trade is still half-built. Two-sided reads are unchanged.
+      evaluateTradeInLeague(debGive, debReceive, format, leagueId, opponentId!, signal, true),
     enabled: !!opponentId && (debGive.length > 0 || debReceive.length > 0),
     staleTime: 60_000,
     placeholderData: (prev) => prev,
@@ -446,8 +451,23 @@ export default function InLeagueCalculator({
   // evaluate `eveners`). gap.add_to names the side that adds — 'give' =
   // your roster, 'receive' = theirs. Adding re-runs the debounced evaluate,
   // which refreshes or clears the rows as the trade evens.
+  //
+  // #264 — one-sided reads carry no gap, so the target side is derived from
+  // the RESPONSE (per_player side counts) rather than local state: the rows
+  // and the side they land on then always describe the same payload, even
+  // while a newer evaluate is in flight behind placeholderData.
+  const oneSidedAddTo: 'give' | 'receive' | null = (() => {
+    if (!ev || ev.gap?.add_to) return null;
+    const evGive = ev.per_player.filter((p) => p.side === 'give').length;
+    const evReceive = ev.per_player.length - evGive;
+    if (evGive > 0 && evReceive === 0) return 'receive'; // ask them for a return
+    if (evReceive > 0 && evGive === 0) return 'give'; //    what you'd have to send
+    return null;
+  })();
+  const evenerAddTo = ev?.gap?.add_to ?? oneSidedAddTo;
+
   const addEvener = (e: CalcEvener) => {
-    const addTo = ev?.gap?.add_to;
+    const addTo = evenerAddTo;
     if (!addTo) return;
     haptics.selection();
     const ids = e.ids ?? [e.id];
@@ -667,14 +687,25 @@ export default function InLeagueCalculator({
           hand-off): the "Recommended to even it" rows sit DIRECTLY under
           the trade window (the give/receive sides above), ABOVE the
           fairness summary — the fix is one tap away before the verdict
-          re-explains the gap. Pure reorder; same render condition. */}
-      {anySide && ev?.eveners && ev.eveners.length > 0 && ev.gap?.add_to ? (
+          re-explains the gap. Pure reorder; same render condition.
+          #264: ONE block covers both states — uneven two-sided (eveners) and
+          half-built one-sided (trade options for the empty side). A second
+          card would have re-stacked the screen (#205); the label carries the
+          difference instead. */}
+      {anySide && ev?.eveners && ev.eveners.length > 0 && evenerAddTo ? (
         <EvenerRows
           eveners={ev.eveners}
           title={
-            ev.gap.add_to === 'give'
-              ? 'Recommended to even it — add from your roster'
-              : `Recommended to even it — ask @${opponent?.username ?? 'them'} to add`
+            ev.gap?.add_to
+              ? evenerAddTo === 'give'
+                ? 'Recommended to even it — add from your roster'
+                : `Recommended to even it — ask @${opponent?.username ?? 'them'} to add`
+              : // #264 — half-built trade: these aren't evening anything, they
+                // are candidate assets worth about what the filled side is
+                // worth. Same rows, same slot, honest label.
+                evenerAddTo === 'give'
+                ? 'Trade options — from your roster'
+                : `Trade options — from @${opponent?.username ?? 'them'}'s roster`
           }
           onAdd={addEvener}
         />
