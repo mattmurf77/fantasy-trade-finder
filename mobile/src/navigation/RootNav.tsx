@@ -23,6 +23,7 @@ import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
 import DraftRoomScreen from '../screens/DraftRoomScreen';
 import MockDraftScreen from '../screens/MockDraftScreen';
+import PickAssignmentScreen from '../screens/PickAssignmentScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import AnalystGuide from '../components/AnalystGuide';
@@ -67,6 +68,12 @@ type AuthStack = {
   // for the entire time a pick can be made. Same `leagueId` override rule
   // as DraftRoom.
   MockDraft: { leagueId?: string } | undefined;
+  // draft-extensions W3 M-A (flag `picks.assign`) — ESPN pick assignment.
+  // Entered from the League tab's "Draft picks" section. `leagueId` is the
+  // same override rule as DraftRoom; `focusPickId` is M-C's one-action
+  // correction path — a priced surface deep-links straight to the slot
+  // whose ownership the user wants to challenge.
+  PickAssignment: { leagueId?: string; focusPickId?: string } | undefined;
   // Operator QA (flag testing.stage_users): synthetic adoption-stage users.
   TestStages: undefined;
 };
@@ -571,6 +578,37 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerLeft: () => (
               <HeaderBack
                 testID="mock-draft.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
+          })}
+        />
+        {/* Draft picks — ESPN pick assignment (draft-extensions W3 M-A,
+            flag `picks.assign`). Pushed from the League tab's "Draft picks"
+            section. Registered unconditionally for the same reason as
+            DraftRoom and MockDraft: the FLAG gates the entry, not the
+            route, so an in-flight push survives a flag revalidation and a
+            stale deep link lands on the screen's honest unavailable state
+            rather than a dead path. */}
+        <Stack.Screen
+          name="PickAssignment"
+          component={PickAssignmentScreen}
+          options={({ navigation }) => ({
+            headerShown: true,
+            title: 'Draft picks',
+            headerTitle: () => <HeaderTitle>Draft picks</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+            // #151 pattern — see FreeAgents above (RNS#3294). Omitting this
+            // leaves back dead on iOS 26.
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="pick-assignment.back-btn"
                 onPress={() =>
                   navigation.canGoBack()
                     ? navigation.goBack()
