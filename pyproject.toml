@@ -1,0 +1,4 @@
+# Tool configuration only — this repo is not packaged/installed as a distribution.
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
