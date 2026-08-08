@@ -703,8 +703,11 @@ def test_mc_12_flag_is_registered_lands_off_and_is_mirrored():
     features = json.loads((repo / "config/features.json").read_text())
     release = json.loads(
         (repo / "backend/tests/fixtures/flags/release.json").read_text())
-    assert features["picks.assign_tradeable"] is False
-    assert release["picks.assign_tradeable"] is False
+    # Operator flipped this ON 2026-08-06 ("Do 1 now. I don't like that
+    # decision" — assigned picks were visible but not pricing). The property
+    # that must hold is the 4-touch MIRROR, not a particular value: if the two
+    # files ever disagree, `is_enabled` and the release fixture diverge.
+    assert features["picks.assign_tradeable"] == release["picks.assign_tradeable"]
     # the two flags are SEPARATE on purpose: pick math dies without taking the
     # rows a league typed in with it
     assert features["picks.assign"] is True

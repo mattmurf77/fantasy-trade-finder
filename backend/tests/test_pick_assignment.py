@@ -318,14 +318,23 @@ def test_w3_02c_load_draft_picks_defaults_to_platform_only(mem_db):
     assert after == before, "an asserted row leaked into the default read"
 
 
-def test_w3_01_golden_byte_identity_on_every_read_site(mem_db):
+def test_w3_01_golden_byte_identity_on_every_read_site(mem_db, monkeypatch):
     """D10 / INV-1 — with a FULL asserted grid in the DB, every read site is
     byte-identical to the same build with no assertions at all.
+
+    NOTE (2026-08-06): `picks.assign_tradeable` is now ON in config (operator
+    flipped it), so this test forces it OFF explicitly rather than inheriting
+    the ambient value. The invariant under test is unchanged and is exactly the
+    kill-switch guarantee: with the flag off, asserted rows are invisible to
+    every read site. A golden-identity test that silently tracked the shipped
+    flag would stop testing anything the moment the flag flipped.
 
     The seven sites all take the platform-only default (pinned by the AST test
     above), so this exercises the default through four of them directly plus
     the shared loader they all funnel through.
     """
+    monkeypatch.setattr(server, "_pick_read_source",
+                        lambda: db.PICK_SOURCE_PLATFORM)
     db.replace_draft_picks(LEAGUE, _platform_rows())
 
     def _snapshot():
