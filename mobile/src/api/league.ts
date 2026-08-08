@@ -210,9 +210,13 @@ export interface LeagueMember {
   avatar: string | null;
   joined: boolean;
 }
-export async function getLeagueMembers(leagueId: string) {
+export async function getLeagueMembers(
+  leagueId: string,
+  opts?: { includeSelf?: boolean },
+) {
+  const includeSelf = opts?.includeSelf ? '&include_self=1' : '';
   return api.get<{ members: LeagueMember[] }>(
-    `/api/league/members?league_id=${encodeURIComponent(leagueId)}`,
+    `/api/league/members?league_id=${encodeURIComponent(leagueId)}${includeSelf}`,
   );
 }
 

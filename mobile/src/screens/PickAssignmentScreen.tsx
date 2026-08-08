@@ -212,8 +212,15 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
   // shipped source for that mapping, so the setup step reads it and the
   // grid does not.
   const membersQuery = useQuery({
-    queryKey: ['league-members', leagueId],
-    queryFn: () => getLeagueMembers(leagueId as string),
+    // Bug fix: this query feeds the round-1 draft-order setup list, which
+    // must include EVERY team — including the requesting user's own. The
+    // plain `/api/league/members` call (used elsewhere for the "Leaguemates"
+    // list) excludes the caller by design, which silently dropped the
+    // user's own team from `order` and made the server's `bad_order` check
+    // in POST /api/league/pick-assignments/order fail every time, blocking
+    // board creation entirely. `includeSelf` opts into the full roster.
+    queryKey: ['league-members', leagueId, 'includeSelf'],
+    queryFn: () => getLeagueMembers(leagueId as string, { includeSelf: true }),
     enabled: !!leagueId && enabled && (setupOpen || data?.seeded === false),
     staleTime: 10 * 60_000,
   });

@@ -815,3 +815,65 @@ def test_bad_order_and_bad_order_type_are_refused(client, flag_on, mem_db):
     assert r.status_code == 400 and r.get_json()["error"] == "bad_order"
     r = _seed(client, order_type="serpentine")
     assert r.status_code == 400 and r.get_json()["error"] == "bad_order_type"
+
+
+# ---------------------------------------------------------------------------
+# Regression: GET /api/league/members must not silently drop the caller's
+# own team from the pick-assignment setup roster.
+#
+# PickAssignmentScreen's setup step (mobile/src/screens/PickAssignmentScreen
+# .tsx) has no slots to read team names from before the board is first
+# seeded, so it falls back to GET /api/league/members for the id->name
+# mapping behind its round-1 drag-order list. That endpoint's DEFAULT
+# behavior (unchanged here) excludes the caller — it powers the "Leaguemates"
+# roster section, which is deliberately about everyone ELSE. Reusing it
+# as-is for pick assignment meant the requesting user's own team never
+# appeared in the draft-order list the client built, so the `order` posted
+# to POST /api/league/pick-assignments/order always mismatched the server's
+# full membership set and 400'd `bad_order` — draft picks could never be
+# created. The fix adds an opt-in `include_self=1` query param.
+# ---------------------------------------------------------------------------
+
+def test_league_members_excludes_caller_by_default(client, mem_db):
+    """Unchanged "Leaguemates" behavior — still excludes the caller (u1)."""
+    r = client.get(f"/api/league/members?league_id={LEAGUE}", headers=_hdr())
+    assert r.status_code == 200
+    ids = {m["user_id"] for m in r.get_json()["members"]}
+    assert ids == set(MEMBERS) - {ME}
+
+
+def test_league_members_include_self_returns_full_roster(client, mem_db):
+    """The fix: `include_self=1` returns every team, caller included — the
+    set the pick-assignment setup step actually needs."""
+    r = client.get(
+        f"/api/league/members?league_id={LEAGUE}&include_self=1", headers=_hdr())
+    assert r.status_code == 200
+    ids = {m["user_id"] for m in r.get_json()["members"]}
+    assert ids == set(MEMBERS)
+
+
+def test_order_built_from_caller_excluded_roster_is_rejected(client, flag_on, mem_db):
+    """Reproduces the reported bug end-to-end: an `order` built the OLD way
+    (from the caller-excluding members list) is missing the user's own team
+    and the seeder correctly refuses it — this is the `bad_order` failure
+    the operator saw as "draft picks can't be created"."""
+    members = client.get(
+        f"/api/league/members?league_id={LEAGUE}", headers=_hdr()
+    ).get_json()["members"]
+    order = [m["user_id"] for m in members]
+    assert ME not in order        # the bug: caller silently dropped
+    r = _seed(client, order=order)
+    assert r.status_code == 400 and r.get_json()["error"] == "bad_order"
+
+
+def test_order_built_from_include_self_roster_succeeds(client, flag_on, mem_db):
+    """With the fix, building `order` from the include_self roster covers
+    every team and the board seeds successfully."""
+    members = client.get(
+        f"/api/league/members?league_id={LEAGUE}&include_self=1", headers=_hdr()
+    ).get_json()["members"]
+    order = [m["user_id"] for m in members]
+    assert ME in order
+    r = _seed(client, order=order)
+    assert r.status_code == 200
+    assert r.get_json()["ok"] is True

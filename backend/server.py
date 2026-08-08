@@ -13023,6 +13023,13 @@ def league_members_route():
 
     Sort order: joined first (alphabetically by display_name), then
     not-joined (alphabetically by display_name).
+
+    `include_self=1` returns the caller's own row too. Default (omitted)
+    stays the "Leaguemates" behavior — the caller is excluded, since that
+    list is about everyone ELSE in the league. Callers that need the FULL
+    team roster (e.g. the pick-assignment setup step, which seeds a draft
+    order that must include every team) opt in with this flag rather than
+    silently dropping the requesting user's own team.
     """
     sess = _require_session()
     sess["last_active"] = time.time()
@@ -13031,6 +13038,7 @@ def league_members_route():
     league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
     if not league_id:
         return jsonify({"error": "league_id is required"}), 400
+    include_self = request.args.get("include_self") in ("1", "true")
 
     try:
         # Reuse existing per-member loader, then trim to the join-status
@@ -13039,7 +13047,7 @@ def league_members_route():
         # back-to-back League screen calls — see _league_members_cached.
         rows = _league_members_cached(
             league_id       = league_id,
-            exclude_user_id = g_user_id,
+            exclude_user_id = None if include_self else g_user_id,
         )
         members = [
             {
