@@ -213,12 +213,20 @@ export async function assignPick(args: {
   ownerUserId: string;
   ifAssignedAt: string | null;
 }) {
-  return api.put<AssignPickResult>('/api/league/pick-assignments', {
-    league_id: args.leagueId,
-    pick_id: args.pickId,
-    owner_user_id: args.ownerUserId,
-    if_assigned_at: args.ifAssignedAt,
-  });
+  // #268: the route is `PUT /api/league/pick-assignments/<pick_id>` — the
+  // slot id is a URL segment, not a body field. Every save 405ed until this
+  // matched, because a 405 has no `{error: <code>}` body for
+  // `pickAssignmentErrorCode`/`staleAssignment` to narrow, so the screen
+  // fell through to its generic "Couldn't save that pick" toast on every
+  // single attempt, not just the CAS-conflict path.
+  return api.put<AssignPickResult>(
+    `/api/league/pick-assignments/${encodeURIComponent(args.pickId)}`,
+    {
+      league_id: args.leagueId,
+      owner_user_id: args.ownerUserId,
+      if_assigned_at: args.ifAssignedAt,
+    },
+  );
 }
 
 /** The seeder AND the order/rounds setter — one route, because order is
