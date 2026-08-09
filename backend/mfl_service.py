@@ -430,20 +430,42 @@ def _as_list(value) -> list:
 
 _WS_RUN = re.compile(r"\s+")
 
+# #282 (reopens #258) — MFL lets owners style their franchise name with
+# inline HTML-ish markup ('<b>', '<font color = Green>...</font color>',
+# even malformed closing tags that carry the attribute like '</font
+# color>'). Confirmed on prod (league 62846): franchise f0001 was stored as
+# '<b><font color = Green>Eir</font color><font color = White>e
+# Reb</font color><font color = Orange>els</font color></b>' (→ 'Eire
+# Rebels') and f0012 as '<b><font color= Green>North London Rams</b>' (→
+# 'North London Rams', no closing </font>). Scoped to the handful of tags
+# MFL/HTML formatting actually uses so legitimate punctuation in a team
+# name (e.g. literal '<' or '>') is never touched.
+_MARKUP_TAG = re.compile(r"</?\s*(?:b|i|u|strong|em|font)\b[^>]*>", re.IGNORECASE)
+
 
 def _clean_text(value) -> str:
-    """Normalise an MFL-sourced display string (#210 — 'Éire Rebels' arriving
-    as '&#201;ire Rebels'). MFL serves names with HTML entities — numeric
-    (`&#201;`), named (`&amp;`), occasionally double-escaped
-    (`&amp;#201;`) — plus stray/non-breaking whitespace. Unescape until
-    stable (2 passes cover the double-escaped case) and collapse whitespace
-    runs to single spaces."""
+    """Normalise an MFL-sourced display string.
+
+    Two independent kinds of junk show up in MFL names:
+      1. HTML entities (#210 — 'Éire Rebels' arriving as '&#201;ire
+         Rebels'): numeric (`&#201;`), named (`&amp;`), occasionally
+         double-escaped (`&amp;#201;`).
+      2. Franchise name color/formatting markup (#282 — MFL owners can style
+         their franchise name; the raw string carries the markup, e.g.
+         '<font color = Green>...'), which itself arrives entity-encoded
+         ('&lt;font...') so it only becomes literal '<font...' after step 1.
+
+    Order matters: unescape entities until stable (2 passes cover the
+    double-escaped case) BEFORE stripping markup tags, then collapse
+    whitespace runs to single spaces.
+    """
     text = "" if value is None else str(value)
     for _ in range(2):
         unescaped = html.unescape(text)
         if unescaped == text:
             break
         text = unescaped
+    text = _MARKUP_TAG.sub("", text)
     return _WS_RUN.sub(" ", text).strip()
 
 

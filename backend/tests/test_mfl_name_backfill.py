@@ -1,4 +1,6 @@
 """#258 — MFL team names showing HTML entities on TradesHome.
+#282 (reopens #258) — the actual junk was franchise name color/formatting
+markup MFL owners can apply, not HTML entities.
 
 Root cause: #210 added `mfl_service._clean_text` so every MFL *ingest* path
 entity-decodes names — but leagues linked BEFORE #210 had already stored the
@@ -6,12 +8,18 @@ raw strings ('Fish &amp; Chips', '&#201;ire Rebels') in `league_members`,
 `leagues.name`, and the denormalized `draft_picks` username snapshots, and
 MFL leagues have no automatic re-import to refresh them. Every surface that
 reads the stored rows (trade deck counterparty names, matches, power
-rankings, pick labels) kept serving the entities.
+rankings, pick labels) kept serving the entities. #282: the operator
+confirmed entities weren't the real complaint — MFL lets owners style their
+franchise name, so the raw name string can carry markup like
+'<font color = Green>...'. #282 extended `_clean_text` to also strip that
+markup; because the backfill's `_cleaned()` helper compares `_clean_text`
+output against the stored value, the improved cleaner alone is enough to
+re-clean rows that only had markup (no entities) on the next boot.
 
 Fix under test: `database._backfill_mfl_name_entities()` — an idempotent
-startup pass (called from `_migrate_db`) that decodes the stored MFL rows in
-place, scoped strictly to platform='mfl' so Sleeper's user-typed names are
-never rewritten.
+startup pass (called from `_migrate_db`) that runs `mfl_service._clean_text`
+over the stored MFL rows in place, scoped strictly to platform='mfl' so
+Sleeper's user-typed names are never rewritten.
 """
 import json
 from unittest.mock import patch
@@ -65,6 +73,12 @@ def _seed(engine):
             {"league_id": MFL_LEAGUE, "user_id": f"mfl:{MFL_LEAGUE}.f0003",
              "username": "Plain Team", "display_name": "Plain Team",
              "roster_data": "[]"},
+            # #282 — real dirty row captured from prod league 62846
+            # (franchise f0012): color/formatting markup, no entities at all.
+            {"league_id": MFL_LEAGUE, "user_id": f"mfl:{MFL_LEAGUE}.f0012",
+             "username": "<b><font color= Green>North London Rams</b>",
+             "display_name": "<b><font color= Green>North London Rams</b>",
+             "roster_data": "[]"},
             {"league_id": SLEEPER_LEAGUE, "user_id": "u9",
              "username": "Sleeper &amp; Co", "display_name": "Sleeper &amp; Co",
              "roster_data": "[]"},
@@ -103,6 +117,10 @@ def test_backfill_decodes_stored_mfl_names(mem_engine):
     assert members["u1"]["display_name"] == "Éire Rebels"
     # clean rows untouched
     assert members[f"mfl:{MFL_LEAGUE}.f0003"]["username"] == "Plain Team"
+    # #282 — markup-only dirty row (no entities) also gets cleaned, because
+    # the improved _clean_text output differs from the stored value
+    assert members[f"mfl:{MFL_LEAGUE}.f0012"]["username"] == "North London Rams"
+    assert members[f"mfl:{MFL_LEAGUE}.f0012"]["display_name"] == "North London Rams"
 
     with mem_engine.connect() as conn:
         lg_name = conn.execute(
